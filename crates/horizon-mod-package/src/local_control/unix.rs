@@ -123,10 +123,20 @@ fn peer(stream: &Stream) -> io::Result<()> {
         }
         uid
     };
+    check_peer_uid(uid)
+}
+fn check_peer_uid(uid: u32) -> io::Result<()> {
     if uid != unsafe { libc::geteuid() } {
         return Err(io::ErrorKind::PermissionDenied.into());
     }
     Ok(())
+}
+#[test]
+fn foreign_peer_uid_is_refused() {
+    let foreign = unsafe { libc::geteuid() } ^ 1;
+    assert!(
+        matches!(check_peer_uid(foreign), Err(error) if error.kind() == io::ErrorKind::PermissionDenied)
+    );
 }
 impl Drop for Endpoint {
     fn drop(&mut self) {

@@ -68,17 +68,20 @@ impl Channel {
     ) -> io::Result<Self> {
         stream.set_nonblocking(true)?;
         let mut channel = Self { stream, deadline };
-        let mut hello = [0; 17];
-        hello[..16].copy_from_slice(&marker.key);
-        hello[16] = VERSION;
         if server {
-            let mut received = [0; 17];
-            channel.read_all(&mut received)?;
-            if !bool::from(received[..16].ct_eq(&marker.key)) || received[16] != VERSION {
+            let mut version = [0];
+            channel.read_all(&mut version)?;
+            if version[0] != VERSION {
+                return Err(io::ErrorKind::PermissionDenied.into());
+            }
+            let mut key = [0; 16];
+            channel.read_all(&mut key)?;
+            if !bool::from(key.ct_eq(&marker.key)) {
                 return Err(io::ErrorKind::PermissionDenied.into());
             }
         } else {
-            channel.write_all(&hello)?;
+            channel.write_all(&[VERSION])?;
+            channel.write_all(&marker.key)?;
         }
         Ok(channel)
     }

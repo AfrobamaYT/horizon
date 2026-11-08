@@ -1,5 +1,5 @@
 use super::*;
-use std::os::unix::ffi::OsStrExt;
+use std::os::{fd::AsRawFd, unix::ffi::OsStrExt};
 
 fn marker() -> (tempfile::TempDir, Marker) {
     let root = tempfile::tempdir().unwrap();
@@ -48,37 +48,34 @@ fn authenticated_typed_exchange_consumes_the_single_listener() {
 
 #[test]
 fn wrong_key_version_oversize_and_unknown_messages_close_the_connection() {
-    for case in ["key", "version", "size", "unknown", "eof"] {
+    for case in ["key", "key_tail", "version", "size", "unknown", "eof"] {
         let (_root, marker) = marker();
         let mut endpoint = Endpoint::bind(&marker).unwrap();
-        let other = marker.clone();
-        let client = std::thread::spawn(move || {
-            let mut stream = connect(&other, deadline()).unwrap();
-            let mut hello = other.key.to_vec();
-            hello.push(if case == "version" { 9 } else { VERSION });
-            if case == "key" {
-                hello[0] ^= 1;
-            }
-            stream.write_all(&hello).unwrap();
-            if case == "size" {
-                stream
-                    .write_all(&((LIMIT + 1) as u32).to_le_bytes())
-                    .unwrap();
-            }
-            if case == "unknown" {
-                let bytes = b"\"Unknown\"";
-                stream
-                    .write_all(&(bytes.len() as u32).to_le_bytes())
-                    .unwrap();
-                stream.write_all(bytes).unwrap();
-            }
-        });
+        let mut stream = connect(&marker, deadline()).unwrap();
+        let mut hello = vec![if case == "version" { 9 } else { VERSION }];
+        hello.extend_from_slice(&marker.key);
+        if matches!(case, "key" | "key_tail") {
+            hello[if case == "key" { 1 } else { 16 }] ^= 1;
+        }
+        stream.write_all(&hello).unwrap();
+        if case == "size" {
+            stream
+                .write_all(&((LIMIT + 1) as u32).to_le_bytes())
+                .unwrap();
+        }
+        if case == "unknown" {
+            let bytes = b"\"Unknown\"";
+            stream
+                .write_all(&(bytes.len() as u32).to_le_bytes())
+                .unwrap();
+            stream.write_all(bytes).unwrap();
+        }
+        stream.shutdown(std::net::Shutdown::Write).unwrap();
         let stream = endpoint.accept(deadline()).unwrap();
         let result = Channel::authenticate(stream, &marker, true, deadline());
-        if matches!(case, "key" | "version") {
-            assert_eq!(
-                result.err().map(|error| error.kind()),
-                Some(io::ErrorKind::PermissionDenied)
+        if matches!(case, "key" | "key_tail" | "version") {
+            assert!(
+                matches!(result, Err(error) if error.kind() == io::ErrorKind::PermissionDenied)
             );
         } else {
             let error = result.unwrap().receive::<Message>().err().unwrap();
@@ -89,12 +86,11 @@ fn wrong_key_version_oversize_and_unknown_messages_close_the_connection() {
             };
             assert_eq!(error.kind(), expected, "{case}");
         }
-        client.join().unwrap();
     }
 }
 
 #[test]
-fn first_instance_is_exclusive_and_endpoint_is_reclaimed() {
+fn first_instance_is_exclusive_and_drop_removes_its_endpoint() {
     let (_root, marker) = marker();
     let endpoint = Endpoint::bind(&marker).unwrap();
     assert!(
@@ -110,19 +106,16 @@ fn first_instance_is_exclusive_and_endpoint_is_reclaimed() {
 fn quiet_peer_times_out_and_a_second_connection_is_refused() {
     let (_root, marker) = marker();
     let mut endpoint = Endpoint::bind(&marker).unwrap();
-    let other = marker.clone();
-    let client = std::thread::spawn(move || {
-        let _stream = connect(&other, deadline()).unwrap();
+    let client = connect(&marker, deadline()).unwrap();
+    let closer = std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(750));
+        drop(client);
     });
     let stream = endpoint.accept(deadline()).unwrap();
-    {
-        use std::os::fd::AsRawFd;
-        assert_ne!(
-            unsafe { libc::fcntl(stream.as_raw_fd(), libc::F_GETFD) } & libc::FD_CLOEXEC,
-            0
-        );
-    }
+    assert_ne!(
+        unsafe { libc::fcntl(stream.as_raw_fd(), libc::F_GETFD) } & libc::FD_CLOEXEC,
+        0
+    );
     let short = Instant::now() + Duration::from_millis(20);
     assert!(connect(&marker, short).is_err());
     let result = Channel::authenticate(
@@ -132,7 +125,7 @@ fn quiet_peer_times_out_and_a_second_connection_is_refused() {
         Instant::now() + Duration::from_millis(20),
     );
     assert_eq!(result.err().unwrap().kind(), io::ErrorKind::TimedOut);
-    client.join().unwrap();
+    closer.join().unwrap();
 }
 
 #[test]
@@ -156,10 +149,7 @@ fn unsafe_parents_are_refused() {
 
 #[test]
 fn full_backlog_cannot_block_connect_past_its_deadline() {
-    use std::{
-        os::{fd::AsRawFd, unix::fs::DirBuilderExt},
-        sync::mpsc,
-    };
+    use std::{os::unix::fs::DirBuilderExt, sync::mpsc};
     let (_root, marker) = marker();
     std::fs::DirBuilder::new()
         .mode(0o700)
@@ -188,4 +178,39 @@ fn marker_rejects_unknown_versions() {
     let mut invalid = serde_json::to_value(&marker).unwrap();
     invalid["version"] = 17.into();
     assert!(serde_json::from_value::<Marker>(invalid).is_err());
+}
+
+#[test]
+fn unsupported_version_is_refused_without_waiting_for_key_bytes() {
+    let (_root, marker) = marker();
+    let (stream, mut silent) = std::os::unix::net::UnixStream::pair().unwrap();
+    silent.write_all(&[9]).unwrap();
+    let result = Channel::authenticate(stream, &marker, true, deadline());
+    assert!(matches!(result, Err(error) if error.kind() == io::ErrorKind::PermissionDenied));
+}
+
+#[test]
+fn public_endpoint_directory_is_refused() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_root, marker) = marker();
+    std::fs::create_dir(&marker.directory).unwrap();
+    std::fs::set_permissions(&marker.directory, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let _listener =
+        std::os::unix::net::UnixListener::bind(marker.directory.join("control")).unwrap();
+    assert!(
+        matches!(connect(&marker, deadline()), Err(error) if error.kind() == io::ErrorKind::PermissionDenied)
+    );
+}
+
+#[test]
+fn stale_non_socket_and_long_path_are_safe_errors() {
+    let (_root, marker) = marker();
+    std::fs::create_dir(&marker.directory).unwrap();
+    let sentinel = marker.directory.join("control");
+    std::fs::write(&sentinel, b"retain").unwrap();
+    assert!(Endpoint::bind(&marker).is_err());
+    assert_eq!(std::fs::read(&sentinel).unwrap(), b"retain");
+    let long = Marker::new(marker.directory.parent().unwrap().join("x".repeat(180))).unwrap();
+    assert!(Endpoint::bind(&long).is_err());
+    assert!(!long.directory.exists());
 }
