@@ -29,13 +29,15 @@ class PaperParityTests(unittest.TestCase):
             paper = row('ChunkLoadEvent', dict(world='minecraft:overworld', x=-2, z=4, new=True))
             horizon = row('chunk_load', dict(dimension='minecraft:overworld', chunk=[-2, 4], new=True))
             before = row('ChunkLoadEvent', dict(world='minecraft:overworld', x=99, z=99, new=True))
-            write('paper', [before, row('_join'), paper, paper, row('_quit'), before])
-            write('horizon', [row('_join'), horizon, row('_quit')])
+            warmup = row('chunk_load', dict(dimension='minecraft:overworld', chunk=[99, 99], new=True))
+            after = row('ChunkLoadEvent', dict(world='minecraft:overworld', x=100, z=100, new=True))
+            write('paper', [before, row('_join'), paper, paper, row('_quit'), after])
+            write('horizon', [row('_join'), warmup, horizon, row('_quit')])
             parity.lab.write_json(out / 'run.json', dict(complete=True, scenario={'hooks': ['chunk_load']}))
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(parity.report(out), 0)
                 horizon['fields']['new'] = False
-                write('horizon', [row('_join'), horizon, row('_quit')])
+                write('horizon', [row('_join'), warmup, horizon, row('_quit')])
                 self.assertEqual(parity.report(out), 1)
                 write('horizon', [row('_join'), row('_quit')])
                 self.assertEqual(parity.report(out), 1)

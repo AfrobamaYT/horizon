@@ -34,7 +34,7 @@ main = main.replace('/* MOD_ENTRIES */', f'{quote(manifest["id"])} => paper_trac
 main = main.replace('/* MOD_SLOTS */', '')
 main = main.replace('/* BUILT_MODS */', 'horizon_mod_package::runtime::BuiltMod {'
     f'id: {quote(manifest["id"])}, version: {quote(manifest["version"])}, '
-    'side: horizon_mod_package::Side::Both },')
+    f'side: horizon_mod_package::Side::{manifest.get("side", "client").title()} }},')
 (project / 'src/main.rs').write_text(main)
 target = Path(os.environ['CARGO_TARGET_DIR']) / 'release/horizon-native-mods' / manifest['id']
 shutil.copytree(fixture, target, dirs_exist_ok=True, ignore=shutil.ignore_patterns('__pycache__', 'target', 'Cargo.lock'))

@@ -2,6 +2,18 @@
 """Paper event / Horizon hook traces. Build the native trace engine before `run`.
 
 All generated data lives in .local/paper-parity. No CI or ledger updates.
+
+Radius finding (view/simulation distance 2, chunk-load-igxvxjrc): Paper loads
+radius 5; Horizon 4. Keep this mismatch, including FULL/border chunks.
+Vanilla 26.3 server-game.jar (javap -c -p): ChunkMap.setServerViewDistance
+passes 2 unchanged to DistanceManager.updatePlayerTickets; PlayerTicketTracker
+places level-31 PLAYER_LOADING tickets at distance <= 2. ChunkLevel.fullStatus
+includes level 33 as FULL, hence radius 4. Horizon lan_update_streaming uses
+view + 1, and streaming::Ranges finishes one more ring: also radius 4.
+Paper documents FULL as loaded border chunks: https://docs.papermc.io/paper/reference/commands/#chunkinfo
+Its global chunk-loading settings control sending/rates/concurrency, not a
+vanilla-radius switch; unload delay cannot grow the union of loaded chunks.
+See https://docs.papermc.io/paper/reference/global-configuration/#chunk-loading-advanced
 """
 import argparse
 import json
@@ -9,7 +21,6 @@ import os
 from pathlib import Path
 import re
 import shutil
-import subprocess
 import sys
 import tempfile
 import time
@@ -60,7 +71,7 @@ def trace(path, names, side, normalize):
     if len(joins) != 1 or len(quits) != 1 or quits[0] <= joins[0]:
         raise ValueError('missing or repeated join/quit markers')
     result = set()
-    for row in rows[joins[0] + 1:quits[0]]:
+    for row in rows[:quits[0]]:
         if row['name'] in names:
             if type(row['tick']) is not int or row['cancelled'] is not False:
                 raise ValueError('invalid tick or cancellation on listen hook')
@@ -159,25 +170,27 @@ def run(args):
             env = environment(directory)
             trace_path = out / f'{side}.jsonl'
             if side == 'paper':
-                for name in ('cache', 'libraries', 'versions'):
-                    lab.link_dir(lab.LOCAL / 'server-bench/paper-shared' / name, directory / name)
                 (directory / 'bukkit.yml').write_text('settings:\n  connection-throttle: -1\n')
+                # Spigot's speed check can pull the bot back as it rises from spawn (timing-dependent).
+                (directory / 'spigot.yml').write_text(
+                    'settings:\n  moved-too-quickly-multiplier: 1000.0\n  moved-wrongly-threshold: 1000.0\n')
                 (directory / 'plugins').mkdir()
                 shutil.copyfile(plugin, directory / 'plugins/paper-trace.jar')
                 command = [paper[0], f'-Dpaper.trace={trace_path}', *paper[1:]]
             else:
                 env['HORIZON_PAPER_TRACE'] = str(trace_path)
-                command = [args.engine, '--dedicated', '--nogui', '--game-dir', directory,
-                           '--resources', args.resources, '--world', 'world']
+                command = [args.engine, '--resources', args.resources, '--dedicated', '--nogui']
             server = bench.Server(command, directory, out / f'{side}.log', env)
             try:
                 server.wait_for(bench.DONE, 600)
                 for key, value in scenario['gamerules'].items():
                     server.console(f'gamerule {key} {str(value).lower()}')
+                # Ground-level spawn avoids Horizon's unloaded-column Y fallback (initial_spawn.rs:346).
+                # player_movement_check=false allows moves batched by slow ticks; still reject corrections.
                 for command in scenario['setup']:
                     server.console(command)
                 server.console('say PAPER_PARITY_SETUP_DONE')
-                server.wait_for('PAPER_PARITY_SETUP_DONE', 30)
+                server.wait_for('PAPER_PARITY_SETUP_DONE', 600)
                 bot = scenario['bot']
                 summary = out / f'{side}-bots.json'
                 oracle.run_logged([args.bots, '--server', f'127.0.0.1:{port}', '--bots', '1',
@@ -195,7 +208,7 @@ def run(args):
                 if len(spawn) != 1:
                     raise ValueError(f'{side}: missing spawn position')
                 spawns.append(spawn[0])
-                deadline = time.monotonic() + 30
+                deadline = time.monotonic() + 600
                 while not trace_path.exists() or '"_quit"' not in trace_path.read_text():
                     if time.monotonic() >= deadline:
                         raise ValueError(f'{side}: no quit marker (trace mod/plugin missing?)')

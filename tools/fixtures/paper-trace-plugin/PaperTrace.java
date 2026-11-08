@@ -6,7 +6,7 @@ import org.bukkit.event.player.*;
 import org.bukkit.event.world.ChunkLoadEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
-/** Public API observer; join/quit markers bound the comparison window. */
+/** Startup observer; quit ends the window, join validates the bot session. */
 public final class PaperTrace extends JavaPlugin implements Listener {
     private BufferedWriter output;
     @Override public void onEnable() {

@@ -1,11 +1,11 @@
 {
   "chunk_load": {
     "seed": 12345,
-    "gamerules": {"respawn_radius": 0, "do_mob_spawning": false, "random_tick_speed": 0},
-    "setup": ["setworldspawn 0 100 0"],
+    "gamerules": {"respawn_radius": 0, "spawn_mobs": false, "random_tick_speed": 0, "player_movement_check": false},
+    "setup": ["setworldspawn 0 -60 0"],
     "bot": {"behaviour": "explore", "speed": 4, "distance": 128, "height": 24},
     "duration": 90,
     "hooks": ["chunk_load"],
-    "tolerance": "set(dimension,x,z,new); ignore order and tick; join <= event < quit"
+    "tolerance": "set(dimension,x,z,new); ignore order and tick; server-start observation <= event < quit on both sides, including spawn warm-up before join; no spatial exclusions"
   }
 }

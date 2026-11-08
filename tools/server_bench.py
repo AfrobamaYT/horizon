@@ -336,9 +336,11 @@ def server_command(kind, directory, args):
         mojang = cache / f'mojang_{lock["minecraft"]["version"]}.jar'
         if not mojang.exists():
             shutil.copyfile(jars['server'].parent / 'server.jar', mojang)
-        for name in ('cache', 'libraries', 'versions'):
+        for name in ('libraries', 'versions'):
             (shared / name).mkdir(exist_ok=True)
-            lab.link_dir(shared / name, directory / name)
+        # Paperclip keeps cache/, libraries/ and versions/ under bundlerRepoDir: no folder links, which some
+        # network shares refuse.
+        java.append(f'-DbundlerRepoDir={shared}')
         # Paper refuses a second login from one address within 4 s (bukkit.yml's connection-throttle), and
         # every bot comes from the same one. Off, as on vanilla; Paper fills in the rest of the file.
         (directory / 'bukkit.yml').write_text('settings:\n  connection-throttle: -1\n')
