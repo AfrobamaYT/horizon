@@ -677,7 +677,35 @@ pub(super) fn level_shapes(
     // What the packs leave out is logged when the generator reads them.
     let (overrides, _) =
         horizon_client::datapack::worldgen_overrides(&enabled, |b| biomes.contains(b));
-    shapes_of(&overrides)
+    let shapes = shapes_of(&overrides);
+    set_level_sea_levels(&shapes, resources);
+    shapes
+}
+
+/// The sea levels of the levels the mods registered with the noise generator: the `sea_level` of
+/// the noise settings their stems name, which the game's spawning, weather and maps then use. A
+/// level of another generator, or whose noise settings are not in the game's resources, has its
+/// built-in level's.
+fn set_level_sea_levels(shapes: &horizon_client::chunk::LevelShapes, resources: &std::path::Path) {
+    use horizon_world::worldgen::overrides::{mod_dimensions, stem_sea_level};
+    let read = |id: &str| -> Option<serde_json::Value> {
+        let (namespace, path) = id.split_once(':').unwrap_or(("minecraft", id));
+        let file = resources.join(format!(
+            "data/{namespace}/worldgen/noise_settings/{path}.json"
+        ));
+        serde_json::from_slice(&std::fs::read(file).ok()?).ok()
+    };
+    let levels = shapes
+        .extra
+        .iter()
+        .filter_map(|level| {
+            let dimension = mod_dimensions().iter().find(|d| d.id == level.id)?;
+            let stem: serde_json::Value = serde_json::from_str(&dimension.stem).ok()?;
+            let sea = stem_sea_level(&stem, &read)?;
+            Some((horizon_core::LevelKey::parse(level.id).ok()?, sea))
+        })
+        .collect();
+    horizon_world::level::set_sea_levels(levels);
 }
 
 /// The levels' shapes the mods' and packs' worldgen entries give.

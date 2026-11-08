@@ -38,6 +38,7 @@ fn weather_flags((rain, thunder): (f32, f32)) -> (bool, bool) {
 /// A read-only view of one level's column for `Level.isRainingAt`, so a level parked
 /// while the server ticks another answers like the one in place.
 struct RainView<'a> {
+    sea_level: i32,
     world: &'a World,
     facts: &'a horizon_client::blocks::BlockFacts,
     biomes: &'a horizon_client::biome::Biomes,
@@ -48,6 +49,9 @@ struct RainView<'a> {
 }
 
 impl LevelAccess for RainView<'_> {
+    fn sea_level(&self) -> i32 {
+        self.sea_level
+    }
     fn block_state(&self, pos: BlockPos) -> BlockStateId {
         self.world.block(pos.x, pos.y, pos.z)
     }
@@ -185,18 +189,7 @@ impl Game<'_> {
         if matches!(key, LevelKey::OVERWORLD | LevelKey::NETHER | LevelKey::END) {
             return Some(horizon_world::level::vanilla_sea_level(key));
         }
-        let dimension = horizon_world::worldgen::overrides::mod_dimensions()
-            .iter()
-            .find(|dimension| dimension.id == level.dimension_id())?;
-        let stem: serde_json::Value = serde_json::from_str(&dimension.stem).ok()?;
-        let read = |id: &str| -> Option<serde_json::Value> {
-            let (namespace, path) = id.split_once(':').unwrap_or(("minecraft", id));
-            let file = self.options.resources.join(format!(
-                "data/{namespace}/worldgen/noise_settings/{path}.json"
-            ));
-            serde_json::from_slice(&std::fs::read(file).ok()?).ok()
-        };
-        horizon_world::worldgen::overrides::stem_sea_level(&stem, &read)
+        horizon_world::level::registered_sea_level(key)
     }
 
     /// The world's seed (`WorldOptions.seed`), as `/seed` shows it.
@@ -272,6 +265,7 @@ impl Game<'_> {
             return None;
         }
         let view = RainView {
+            sea_level: Dim::sea_level_of_id(level.dimension_id()),
             world,
             facts: self.res.facts(),
             biomes: world_biomes!(self),

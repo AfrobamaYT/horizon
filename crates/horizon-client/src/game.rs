@@ -742,6 +742,11 @@ struct InteractTarget {
 
 /// The client world as seen by the vanilla block-behaviour library.
 struct GameLevel<'w> {
+    /// The level's sea level (`Dim::sea_level`).
+    sea_level: i32,
+    /// The level's dimension type (`Game::dimension_type`): what block behaviour reads for water
+    /// that evaporates, fast lava, infiniburn and the rest, for a mod's level too.
+    dimension_facts: &'static horizon_world::dimension_type::DimensionFacts,
     gateway_servers: &'w mut horizon_client::fast_hash::FxHashMap<
         [i32; 3],
         horizon_client::block_entity_anim::EndGateway,
@@ -1012,6 +1017,12 @@ impl GameLevel<'_> {
     }
 }
 impl LevelAccess for GameLevel<'_> {
+    fn sea_level(&self) -> i32 {
+        self.sea_level
+    }
+    fn dimension_type(&self) -> &horizon_world::dimension_type::DimensionFacts {
+        self.dimension_facts
+    }
     fn within_world_border(&self, pos: BlockPos) -> bool {
         self.border
             .is_within_bounds(f64::from(pos.x), f64::from(pos.z), 0.0)
@@ -3493,6 +3504,15 @@ impl Dim {
             _ => Self::extra(id).unwrap_or(Self::Overworld),
         }
     }
+    /// `Level.getSeaLevel` of the level: the sea level its noise settings give a mod's level, else
+    /// the built-in level's.
+    fn sea_level(self) -> i32 {
+        Self::sea_level_of_id(self.id())
+    }
+    /// [`Self::sea_level`] of the level `id` names.
+    fn sea_level_of_id(id: &str) -> i32 {
+        horizon_core::LevelKey::parse(id).map_or(63, horizon_world::level::sea_level_of)
+    }
     /// The open world's dimension `id` past vanilla's three.
     fn extra(id: &str) -> Option<Self> {
         let extra = EXTRA_DIMS.read().unwrap();
@@ -5146,7 +5166,10 @@ impl Game<'_> {
             golem_chests.extend(self.chest_other_half(key));
         }
         let native_authoritative = self.native_authoritative();
+        let dimension_facts = self.dimension_type();
         let mut level = GameLevel {
+            sea_level: self.dim.sea_level(),
+            dimension_facts,
             command_block_transition: None,
             gateway_servers: &mut self.be_anims.gateway_servers,
             border: self.border.geometry(),
