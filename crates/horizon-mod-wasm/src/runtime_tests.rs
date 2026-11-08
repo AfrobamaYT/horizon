@@ -145,6 +145,36 @@ fn nested_handler_decodes_in_scope_and_remains_callable_after_return() {
 }
 
 #[test]
+fn imports_inherit_the_root_borrow_token_and_expire_with_the_call() {
+    let id = crate::boundary::import_id("StructureRandom", "next_long").unwrap();
+    let module = module(&format!(
+        "i32.const {id} i32.const 0 i32.const 0 i32.const 1024 i32.const 8 call $host drop i32.const {id} i32.const 0 i32.const 0 i32.const 1024 i32.const 8 call $host drop i64.const 4398046511112"
+    ));
+    let saved = Cell::new(None::<mod_api::wire::ScopeToken>);
+    let calls = Cell::new(0);
+    let mut random = Random(|| {
+        calls.set(calls.get() + 1);
+        if let Some(token) = saved.get() {
+            token.check().unwrap();
+        } else {
+            saved.set(Some(mod_api::wire::borrow_token().unwrap()));
+        }
+        7
+    });
+    let mut frame = Frame::default();
+    frame.set_structure_random_mut(&mut random);
+    assert_eq!(
+        module.call(CallClass::Hook, frame, 0, None, |_| {}, |r| r.take::<i64>()),
+        Some(7)
+    );
+    assert_eq!(calls.get(), 2);
+    assert!(matches!(
+        saved.get().unwrap().check(),
+        Err(mod_api::wire::ScopeError::Stale)
+    ));
+}
+
+#[test]
 fn guest_panic_text_is_logged_with_mod_id_and_no_reply() {
     struct Capture(Mutex<Vec<String>>);
     impl log::Log for Capture {
