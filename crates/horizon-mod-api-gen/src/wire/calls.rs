@@ -187,6 +187,7 @@ pub(super) fn guest(
     types: &Types<'_>,
     methods: &[Method],
     dropped: &[Method],
+    excused: &[(&'static str, String)],
     parts: &[(&'static str, String)],
 ) -> String {
     let mut out =
@@ -214,6 +215,10 @@ pub(super) fn guest(
         for m in dropped.iter().filter(|m| {
             !exports().contains(&m.owner) && m.via.as_deref().unwrap_or(m.owner) == owner
         }) {
+            // What the API keeps off wasm exists only on a native build of the guest.
+            if excused.iter().any(|(o, n)| *o == m.owner && *n == m.name) {
+                out.push_str("#[cfg(not(target_arch = \"wasm32\"))]\n");
+            }
             writeln!(
                 out,
                 "{} {{ crate::wire::guest::unsupported(\"{}::{}\") }}",

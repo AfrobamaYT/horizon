@@ -381,6 +381,11 @@ pub(super) fn surface<'a>(
             }
         }
     }
+    // A method the API keeps off wasm (`Not on wasm:`) is gated out of the trait on that target:
+    // no table holds it, and a native build of the guest answers that it is unavailable.
+    let (excused_methods, mut methods): (Vec<Method>, Vec<Method>) = methods
+        .into_iter()
+        .partition(|m| excused.iter().any(|(o, n)| *o == m.owner && *n == m.name));
     let skipped = emit::skipped(&types);
     let mut report = String::from("Skipped types:\n");
     for (def, skipped) in types.defs.iter().zip(&skipped) {
@@ -409,6 +414,8 @@ pub(super) fn surface<'a>(
     std::fs::create_dir_all(&target).map_err(|e| format!("creating wire report directory: {e}"))?;
     std::fs::write(target.join("wire-skipped.txt"), report)
         .map_err(|e| format!("writing wire report: {e}"))?;
+    let mut dropped = dropped;
+    dropped.extend(excused_methods);
     Ok(Surface {
         dropped,
         hooks,
@@ -552,6 +559,7 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Generated, Str
         &surface.types,
         &surface.methods,
         &surface.dropped,
+        &surface.excused,
         &surface.parts,
     );
     guest.push_str(&calls::hook_names(&surface.hooks));
@@ -680,6 +688,7 @@ mod tests {
                     &surface.types,
                     &surface.methods,
                     &surface.dropped,
+                    &surface.excused,
                     &surface.parts,
                 );
                 std::fs::write(root.join("target/guest_calls_sample.rs"), &code).unwrap();
