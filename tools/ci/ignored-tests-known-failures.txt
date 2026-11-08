@@ -63,7 +63,6 @@ horizon-client game::native_components::item_resource_property_tests::item_resou
 horizon-client game::transactions::tests::an_aborted_transaction_puts_back_what_it_and_its_committed_children_changed #2183
 horizon-client game::native_hooks::base::screen_open_tests::client_gui_state_matches_screen_init_hook #2184
 horizon-client game::options::resize_state_tests::viewport_resize_notifications_follow_each_player #2184
-horizon-client game::piston_push::order_tests::a_pushed_tnt_bounces_on_slime #2186
 horizon-client game::potions::tests::lifecycle_cloud_commands_and_parked_owners #2186
 
 # Deterministic CPU work at or over its 30 s deadline in the unoptimized shard (no deadlock); see the issue.
