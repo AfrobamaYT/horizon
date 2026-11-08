@@ -161,15 +161,7 @@ impl Game<'_> {
                 let uuid = self.uuid_for(id);
                 let i = self.boats.iter().position(|b| b.id == id)?;
                 let b = &self.boats[i];
-                let mut tag = entity_nbt::boat_to_nbt(
-                    &b.entity_type(),
-                    b.position,
-                    b.velocity,
-                    [b.yaw, b.pitch],
-                    uuid,
-                    self.persist.raw.get(&id),
-                    b.chest.then_some(&b.items[..]),
-                );
+                let mut tag = b.to_nbt(uuid, self.persist.raw.get(&id));
                 // AbstractBoat.addAdditionalSaveData: the live or pending leash.
                 self.write_boat_leash(&mut tag, i);
                 tag
@@ -248,6 +240,11 @@ impl Game<'_> {
                 let i = self.tnts.iter().position(|t| t.id == id)?;
                 self.tnt_nbt(i)
             }
+            Target::Cushion(id) => {
+                let uuid = self.uuid_for(id);
+                let c = self.cushions.iter().find(|c| c.id == id)?;
+                entity_nbt::cushion_to_nbt(c, uuid, self.persist.raw.get(&id))
+            }
             Target::Falling(id) => {
                 let f = self.falling.iter().find(|f| f.id == id)?.clone();
                 let (uuid, raw) = match &f.saved {
@@ -284,6 +281,7 @@ impl Game<'_> {
                         id,
                         kind: "minecraft:area_effect_cloud".into(),
                         item_transformation: None,
+                        knot_check: None,
                         position: horizon_core::geometry::Vec3::new(x, y, z),
                         yaw: 0.0,
                         pitch: 0.0,
@@ -394,10 +392,15 @@ impl Game<'_> {
                     if keep_liked_player {
                         slot.extra.tame = old.extra.tame;
                         slot.extra.owner = old.extra.owner;
+                        if let (Some(st), Some(was)) =
+                            (slot.extra.allay.as_mut(), old.extra.allay.as_ref())
+                        {
+                            st.liked_player_ttl = was.liked_player_ttl;
+                        }
                     }
-                    // Entity.load mutates the existing living entity; its damage
-                    // cooldown and previous-hit amount are not read from saved NBT.
-                    slot.invulnerable = old.invulnerable;
+                    // Entity.load mutates the existing living entity; its
+                    // previous-hit amount is not read from saved NBT (its hurt
+                    // immunity is, as `invulnerable_time`).
                     slot.last_hurt = old.last_hurt;
                     // Entity.load updates saved data on the existing entity;
                     // lastTradedPlayer is transient and survives a live NoAI edit.
@@ -501,7 +504,7 @@ impl Game<'_> {
             }
             Target::Boat(id) => {
                 // AbstractBoat.readAdditionalSaveData over Entity.load: the
-                // position, rotation, motion, NoGravity and a chest boat's items.
+                // position, rotation, motion, NoGravity, Fire and a chest boat's items.
                 let (position, velocity, yaw) =
                     entity_nbt::boat_from_nbt(&tag).ok_or_else(stale)?;
                 let uuid = self.uuid_for(id);
@@ -518,6 +521,7 @@ impl Game<'_> {
                     b.previous_yaw = yaw;
                     b.pitch = entity_nbt::rotation(&tag)[1];
                     b.no_gravity = entity_nbt::flag(&tag, "NoGravity");
+                    b.fire_ticks = crate::game::boats::saved_fire(&tag);
                     if b.chest {
                         b.items =
                             save::decode_items(tag.get("Items"), crate::game::boats::CHEST_SLOTS);
@@ -619,6 +623,7 @@ impl Game<'_> {
         | Target::Boat(id)
         | Target::Cart(id)
         | Target::Tnt(id)
+        | Target::Cushion(id)
         | Target::Other(id)
         | Target::Fangs(id) = t
         {
@@ -654,6 +659,7 @@ impl Game<'_> {
             // `tags_of` reads a primed TNT's compound; without this arm
             // `/tag` wrote nothing and still reported success.
             | Target::Tnt(id)
+            | Target::Cushion(id)
             | Target::Orb(id)
             | Target::Projectile(id)
             | Target::Crystal(id)
@@ -1208,6 +1214,13 @@ impl Game<'_> {
         let mut data = self.data_of(&target)?;
         let changed = data_cmd::modify(op, &mut data, &target_path, &sources)?;
         if changed == 0 {
+            // StorageDataAccessor.getData is the stored compound itself: an
+            // edit that changed it and still counted nothing (a wildcard set
+            // that clears an array, then rejects the value) stays. An entity's
+            // or a block's data is a copy.
+            if let DataRef::Storage(id) = &target {
+                self.score.storage.set_unsaved(id, data);
+            }
             return Err(err("commands.data.merge.failed", &[]));
         }
         self.set_data_of(&target, data)?;
@@ -1395,6 +1408,8 @@ impl Game<'_> {
             Some(Target::Other(id))
         } else if self.tnts.iter().any(|t| t.id == id) {
             Some(Target::Tnt(id))
+        } else if self.cushions.iter().any(|c| c.id == id) {
+            Some(Target::Cushion(id))
         } else if self.falling.iter().any(|f| f.id == id) {
             Some(Target::Falling(id))
         } else if self.rockets.iter().any(|r| r.id == id) {
@@ -1505,6 +1520,7 @@ mod tests {
             game.others.push(super::super::OtherEntity {
                 join: Default::default(),
                 item_transformation: None,
+                knot_check: None,
                 id: 12,
                 kind: "minecraft:block_display".into(),
                 position: Vec3::new(0.5, 64.0, 0.5),
@@ -2111,6 +2127,101 @@ mod modern_literal_tests {
         }
         assert_eq!(game.world.game_time, clock);
         assert!(differences.is_empty(), "{}", differences.join("\n"));
+    }
+}
+
+#[cfg(test)]
+mod bell_command_identity_tests {
+    use super::*;
+    use horizon_client::{chunk::Chunk, motion::PlayerMotion};
+    use horizon_core::{geometry::Vec3, position::ChunkPos};
+    use std::sync::Arc;
+    fn with_game(test: impl FnOnce(&mut Game<'_>)) {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.build_registries();
+            game.set_allow_commands(true);
+
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            game.block_ticks
+                .add_empty_chunk(ChunkPos::new(0, 0))
+                .unwrap();
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::new(2.5, 200.0, 2.5)).unwrap());
+            game.creative = true;
+            assert!(game.run_command("forceload add 0 0"));
+            assert!(game.run_command("tick freeze"));
+            assert!(game.run_command("fill 0 198 0 15 199 15 stone"));
+            test(game);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn placed_bell_is_a_real_stored_entity_with_command_metadata() {
+        with_game(|game| {
+            let clock = game.world.game_time;
+            assert!(game.run_command("setblock 8 200 4 chest[facing=north] strict"));
+            assert!(game.world.block_entities.contains_key(&(8, 200, 4)));
+            assert!(game.run_command("setblock 10 200 4 stone strict"));
+            assert!(game.block_entity_nbt([10, 200, 4]).is_none());
+            assert!(game.run_command(
+                "setblock 4 200 4 bell[facing=north,attachment=floor,powered=false] strict"
+            ));
+            assert!(game.run_command(
+                "execute if block 4 200 4 bell[facing=north,attachment=floor,powered=false]"
+            ));
+            assert!(game.world.chunks.contains_key(&(0, 0)));
+            let entity = game
+                .world
+                .block_entities
+                .get(&(4, 200, 4))
+                .expect("actual placed bell stored in collection");
+            assert_eq!(entity.id(), "minecraft:bell");
+            assert!(entity.fits("minecraft:bell"));
+            assert!(!entity.fits("minecraft:chest"));
+            for _ in 0..2 {
+                let tag = game.block_entity_nbt([4, 200, 4]).unwrap();
+                for (key, value) in [
+                    ("id", Tag::String("minecraft:bell".into())),
+                    ("x", Tag::Int(4)),
+                    ("y", Tag::Int(200)),
+                    ("z", Tag::Int(4)),
+                ] {
+                    assert_eq!(tag.get(key), Some(&value));
+                }
+                assert!(game.run_command(
+                    "execute if data block 4 200 4 {id:\"minecraft:bell\",x:4,y:200,z:4}"
+                ));
+            }
+            // No raw input: factory/model and the real common writer supply metadata.
+            let fresh = BlockEntity::for_block("minecraft:bell").unwrap();
+            let tag = save::block_entity_data((-3, 204, 11), &fresh, "minecraft:bell", None);
+            assert_eq!(tag.get("x"), Some(&Tag::Int(-3)));
+            assert_eq!(tag.get("y"), Some(&Tag::Int(204)));
+            assert_eq!(tag.get("z"), Some(&Tag::Int(11)));
+            let (pos, back) = save::decode_block_entity(&tag).unwrap();
+            assert_eq!(pos, (-3, 204, 11));
+            assert_eq!(back.id(), "minecraft:bell");
+            assert!(game.run_command(
+                "setblock 4 200 4 bell[facing=east,attachment=floor,powered=false] strict"
+            ));
+            assert_eq!(
+                game.world.block_entities.get(&(4, 200, 4)).unwrap().id(),
+                "minecraft:bell"
+            );
+            assert!(game.run_command("setblock 4 200 4 air strict"));
+            assert!(!game.world.block_entities.contains_key(&(4, 200, 4)));
+            assert!(game.world.block_entities.contains_key(&(8, 200, 4)));
+            assert!(game.run_command(
+                "setblock 4 200 4 bell[facing=south,attachment=floor,powered=false] strict"
+            ));
+            assert_eq!(
+                game.world.block_entities.get(&(4, 200, 4)).unwrap().id(),
+                "minecraft:bell"
+            );
+            assert_eq!(game.world.game_time, clock);
+        });
     }
 }
 

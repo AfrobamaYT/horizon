@@ -814,7 +814,8 @@ pub trait Hooks {
         side = "server",
         contract = "cancel",
         out = "claimed",
-        neoforge = "PlayerInteractEvent.EntityInteract"
+        neoforge = "PlayerInteractEvent.EntityInteract",
+        paper = "PlayerInteractEntityEvent"
     )]
     fn entity_interact();
     /// A player left-clicks the block `state` at `pos`, `face` the face hit
@@ -1011,7 +1012,12 @@ pub trait Hooks {
     /// save: an edit made here to one of them (a neighbour's block entity, say)
     /// is not in that copy, and is dropped with the chunk.
     /// Server-side.
-    #[hook(side = "server", contract = "listen", neoforge = "ChunkEvent.Load")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "ChunkEvent.Load",
+        paper = "ChunkLoadEvent"
+    )]
     fn chunk_load();
     /// Chunk `chunk` of `dimension` left the world (NeoForge's
     /// `ChunkEvent.Unload`), with a level that closes for being empty too. Don't
@@ -1593,13 +1599,15 @@ pub trait Hooks {
     )]
     fn use_animation();
     /// `Player.canEat` for the food `stack`, from `Consumable.canConsume`
-    /// when eating starts: `can_eat` arrives with vanilla's (creative,
-    /// `can_always_eat`, or hungry). Clear it to refuse the food, set it to
-    /// let a full player eat. Both sides (the client starts eating as the
+    /// when eating starts: `vanilla_can_eat` is vanilla's answer (creative,
+    /// `can_always_eat`, or hungry). Answer `Some(false)` to refuse the food,
+    /// `Some(true)` to let a full player eat; `can_eat` left `None` keeps
+    /// `vanilla_can_eat`. Both sides (the client starts eating as the
     /// server does), so answer from the stack and the player alone.
     #[hook(
         side = "both",
-        contract = "listen",
+        contract = "replace",
+        out = "can_eat",
         host = "read",
         neoforge = "none (vanilla Player.canEat; NeoForge adds no event or extension for it)"
     )]
@@ -3070,6 +3078,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
+        paper = "DragonEggFormEvent",
         cancellable = true,
         target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_dragon_egg_form"
     )]
@@ -3535,6 +3544,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
+        paper = "MoistureChangeEvent",
         cancellable = true,
         target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_moisture_change"
     )]
@@ -4257,6 +4267,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "PlayerSwitchHotbarSlotEvent.Pre",
+        paper = "PlayerItemHeldEvent",
         cancellable = true
     )]
     fn player_switch_hotbar_slot_pre();
@@ -4298,7 +4309,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's PlayerLevelChangeEvent)"
+        neoforge = "none (NeoForge has no such event; Bukkit's PlayerLevelChangeEvent)",
+        paper = "PlayerLevelChangeEvent"
     )]
     fn player_level_change();
     /// A server player selected a loom pattern, after the loom menu accepted the button. `pattern` is
@@ -4385,7 +4397,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's PlayerRecipeBookSettingsChange)"
+        neoforge = "none (NeoForge has no such event; Bukkit's PlayerRecipeBookSettingsChange)",
+        paper = "PlayerRecipeBookSettingsChangeEvent"
     )]
     fn player_recipe_book_settings_change();
     /// A recipe is about to be unlocked for a server player. Set `cancel` to keep it locked. The

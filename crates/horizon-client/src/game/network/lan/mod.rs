@@ -2032,10 +2032,10 @@ impl Game<'_> {
         let Some(host) = self.lan.as_ref() else {
             return;
         };
-        let Some(uuid) = host
+        let Some((uuid, name)) = host
             .hub
             .guest(conn)
-            .and_then(|g| self.records_uuid(host, g.uuid))
+            .and_then(|g| Some((self.records_uuid(host, g.uuid)?, g.name.clone())))
         else {
             return;
         };
@@ -2058,8 +2058,13 @@ impl Game<'_> {
                 g.advancements_loaded = true;
             });
         }
-        let mut stats =
-            super::stats::Stats::read(&super::stats::player_json(&self.world_root, "stats", uuid));
+        // PlayerList.getPlayerStats: locateStatsFile moves an old name-based file first.
+        let mut stats = super::stats::Stats::read(&super::stats::locate_player_json(
+            &self.world_root,
+            "stats",
+            uuid,
+            &name,
+        ));
         stats.mark_all_dirty();
         host.play.entry(conn).or_default().stats = stats;
     }
@@ -2248,6 +2253,8 @@ impl Game<'_> {
             e.on_ground = place.on_ground;
             e.velocity = place.velocity;
             e.needs_sync = m.needs_sync;
+            e.sync_position = m.sync_position;
+            e.stepped = true;
             (e.idle, e.bare) = (idle, bare);
             e.leash = leash;
             if bare {
@@ -2565,6 +2572,20 @@ impl Game<'_> {
                             continue;
                         }
                     }
+                    let host = self.lan.as_mut()?;
+                    // PlayerList.placeNewPlayer: the name the user cache knew,
+                    // before it learns this one, for a renamed player's join line.
+                    let mut renamed = None;
+                    if self.options.dedicated.is_some()
+                        && let Some((uuid, name)) =
+                            host.hub.guest(conn).map(|g| (g.uuid, g.name.clone()))
+                        && let Some(old) = super::dedicated::cached_user_by_id(uuid)
+                    {
+                        if !old.name.eq_ignore_ascii_case(&name) {
+                            renamed = Some(old.name.clone());
+                        }
+                        host.hub.former_names.insert(uuid, old.name);
+                    }
                     self.lan_guest_joined(conn, entities, spawn);
                     let host = self.lan.as_ref()?;
                     if self.options.dedicated.is_some()
@@ -2596,6 +2617,15 @@ impl Game<'_> {
                             super::dedicated::log(
                                 "INFO",
                                 &horizon_client::lan::arrivals::held_line(&g.name),
+                            );
+                        } else if let Some(old) = renamed {
+                            let line = Text::translate(
+                                "multiplayer.player.joined.renamed",
+                                &[Text::literal(g.name.clone()), Text::literal(old)],
+                            );
+                            super::dedicated::log(
+                                "INFO",
+                                &format!("System chat: {}", line.plain()),
                             );
                         } else {
                             super::dedicated::log(
@@ -3137,8 +3167,10 @@ impl Game<'_> {
             // Persist is swapped per level, so parked dimensions retain their marks.
             self.spend_forced_meta();
             // ServerEntity.sendChanges clears needsSync once it has looked.
+            // SteppedInterpolationTracker.updateTracking clears syncPosition.
             for m in &mut self.mobs {
                 m.needs_sync = false;
+                m.sync_position = false;
             }
             self.creatures
                 .projectiles

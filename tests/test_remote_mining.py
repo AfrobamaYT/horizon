@@ -93,7 +93,7 @@ impl Game {
     fn pick(&self) -> Option<Hit> { Some(self.hit) }
     fn held(&self) -> Option<&Stack> { None }
     // Player.blockActionRestricted: adventure without a can_break item.
-    fn remote_break_restricted(&self) -> bool { self.restricted }
+    fn remote_break_restricted(&self, _: [i32; 3]) -> bool { self.restricted }
     fn veto_mining_prediction(&self, _: [i32; 3], _: u8, _: bool, _: f32) -> bool {
         self.veto
     }

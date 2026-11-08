@@ -1551,6 +1551,10 @@ the hit, which doesn't tell every vanilla type apart yet:
 - A blast a mob caused (an end crystal a skeleton shot, a creeper's) is `minecraft:explosion` on the dragon, not
   `minecraft:player_explosion`
 
+A registered damage type Horizon keeps no kind of its own for keeps its id and its tags on a mob and the dragon: a
+datapack's `demo:heat` hurt through `ApplyEffectTickEvent::hurt` or `entity_hurt` reaches the hurt hooks as
+`demo:heat`.
+
 The causing and direct entities are 0 for now in these cases:
 
 - A player's direct entity outside a projectile hit, and `magic()` dealt during one (an ownerless wither
@@ -1677,9 +1681,18 @@ one, where vanilla gives the `by` one.
 `Hooks::component_types`, `blocks`, `items` and `standalone_models` take
 `&RegistrationContext` before their event; `Hooks::register` takes it after
 its `Registrar`. `context.mods()` returns a read-only `LoadedMods` view whose
-`ids()` lists startup code and selected content packages in dispatch order. These
-contexts are supplied by the engine and have no game `Host`, handle constructors
-or transactions. Declarations still go on each event or registrar.
+`ids()` lists startup code and selected content packages in dispatch order.
+`context.registry("minecraft:item")` lists a built-in registry's names in ID order and
+`context.setting(mod_id, key)` reads a loaded mod's setting, so a mod can validate the keys it
+declares before its Parts are finalized. Both read one view the engine captures before the first
+registration hook runs: every registration step sees the same registries (as `registries.json`
+lists them, without what mods declare during registration) and the settings on disk at that
+moment, whatever the dispatch order. A read fails with a `RegistrationReadError` rather than
+panicking: `InvalidRegistryName` for a name that is not a namespaced identifier,
+`UnknownRegistry`, `InvalidSettingKey` for an empty key or one naming a path, `UnknownMod` for a
+package that is not loaded, and `Unavailable` when the engine supplied no data. These contexts are
+supplied by the engine and have no game `Host`, handle constructors or transactions. Declarations
+still go on each event or registrar.
 
 - `native_component_types(context, types)` runs once before content loads. Append namespaced component IDs; duplicates, invalid IDs and the `minecraft` namespace stop startup. `native_component`, `native_set_component` and `native_remove_component` read, set and remove registered components, including item defaults. Values use NBT and must fit the network reader limits.
 

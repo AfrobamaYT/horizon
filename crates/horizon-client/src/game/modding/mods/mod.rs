@@ -154,15 +154,7 @@ pub(super) fn load_item_data(root: &Path, role: ExecutionRole) -> horizon_client
         mod_api::__private::ModPhase::World
     });
     let _reload = phase.reloading()?;
-    let mut registries: BTreeMap<_, _> = builtin_registries(root)?
-        .registries
-        .into_iter()
-        .map(|(name, ids)| (name, ids.names))
-        .collect();
-    if let Some(types) = registries.get_mut("minecraft:data_component_type") {
-        types.extend(horizon_protocol::item::custom::entries().map(|(_, name)| name.to_owned()));
-    }
-    let inputs = LoadInputs::new(registries, Game::mod_data_root());
+    let inputs = LoadInputs::new(builtin_registry_names(root)?, Game::mod_data_root());
     let inventory = horizon_mod_package::enabled::EnabledMods::read(root)?;
     let ids: Vec<_> = if role.is_logical_server() {
         inventory.server_ids().collect()
@@ -172,6 +164,33 @@ pub(super) fn load_item_data(root: &Path, role: ExecutionRole) -> horizon_client
     let context = LoadContext::new(role.data_load_origin(), Arc::new(inputs), ids);
 
     Ok(ItemData::load(root, context)?)
+}
+
+/// The built-in registries' names in ID order, with Horizon's own data components.
+fn builtin_registry_names(root: &Path) -> horizon_client::Result<BTreeMap<String, Vec<String>>> {
+    let mut registries: BTreeMap<_, _> = builtin_registries(root)?
+        .registries
+        .into_iter()
+        .map(|(name, ids)| (name, ids.names))
+        .collect();
+    if let Some(types) = registries.get_mut("minecraft:data_component_type") {
+        types.extend(horizon_protocol::item::custom::entries().map(|(_, name)| name.to_owned()));
+    }
+    Ok(registries)
+}
+
+/// Capture what registration reads (registries and settings) before the first registration
+/// hook runs, so every step sees the same values.
+pub(super) fn install_registration_data(root: &Path) -> horizon_client::Result<()> {
+    let packages = mod_api::__private::loaded_mods();
+    mod_api::__private::install_registration_data(mod_api::__private::RegistrationData::new(
+        builtin_registry_names(root)?,
+        horizon_world::native_load_context::capture_settings(
+            &Game::mod_data_root(),
+            packages.ids(),
+        ),
+    ));
+    Ok(())
 }
 
 fn builtin_registries(root: &Path) -> horizon_client::Result<horizon_protocol::registry::Builtin> {

@@ -19,8 +19,9 @@ use horizon_client::{
     mesher::Vertex,
     mobs::{Part, Species, Who, anim::Poses, riders},
     particles::{ParticleOptions, ParticleType},
+    random_source,
     scoreboard::pushable_by,
-    sound_engine::{CartSound, PlayResult, SoundEngine, SoundInstance, Sounds},
+    sound_engine::{CartSound, PlayResult, SoundInstance, Sounds},
 };
 use horizon_core::{
     geometry::{Aabb, Vec3, trig},
@@ -1972,7 +1973,7 @@ impl Game<'_> {
             .retain(|id| carts.iter().any(|c| c.id == *id));
         for cart in &carts {
             if !self.cart_sounds.contains(&cart.id) {
-                let instance = SoundInstance::minecart(cart, SoundEngine::unseeded());
+                let instance = SoundInstance::minecart(cart, random_source::create());
                 let (_, res) = self.audio.play_instance(instance, false);
                 if res != PlayResult::NotStarted {
                     self.cart_sounds.insert(cart.id);
@@ -1986,7 +1987,7 @@ impl Game<'_> {
             let mut started = true;
             for underwater in [true, false] {
                 let instance =
-                    SoundInstance::riding_minecart(cart, underwater, SoundEngine::unseeded());
+                    SoundInstance::riding_minecart(cart, underwater, random_source::create());
                 let (_, res) = self.audio.play_instance(instance, false);
                 if res == PlayResult::NotStarted {
                     started = false;
@@ -2063,6 +2064,9 @@ impl Game<'_> {
             return;
         }
         self.riding = None;
+        if self.dismount_in_portal(self.carts[i].position) {
+            return;
+        }
         let target = self.cart_player_dismount_target(i);
         if let Some(p) = self.player.as_mut() {
             p.position = target;
@@ -2439,6 +2443,30 @@ impl Game<'_> {
         }
         self.hurt_cart(i, damage, creative, false);
     }
+    /// `Containers.dropContents(level, entity, container)` at a cart's
+    /// position: each slot, an empty one too, from a spot in the cart's block
+    /// in pieces of 10 to 30 with the level random's scatter, no pickup delay.
+    fn scatter_cart_contents(&mut self, at: [f64; 3], items: &[Option<ItemStack>]) {
+        let cell = horizon_core::position::BlockPos::new(
+            at[0].floor() as i32,
+            at[1].floor() as i32,
+            at[2].floor() as i32,
+        );
+        for stack in items {
+            let count = stack.as_ref().map_or(0, |s| s.count);
+            let pieces =
+                horizon_world::level::removal::drop_item_stack(&mut self.world.random, cell, count);
+            if let Some(stack) = stack {
+                for piece in pieces {
+                    let piece_stack = ItemStack {
+                        count: piece.count,
+                        ..stack.clone()
+                    };
+                    self.spawn_item(piece_stack, piece.pos, piece.motion, 0);
+                }
+            }
+        }
+    }
     /// `VehicleEntity.hurtServer`: shake, add the damage, break past 40 (at
     /// once for creative players); TNT minecarts prime instead when moving
     /// or hurt by fire or an explosion (`damageSourceIgnitesTnt`).
@@ -2513,11 +2541,16 @@ impl Game<'_> {
                     .rules
                     .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS)
                 {
-                    for s in c.items.iter().flatten() {
-                        self.spawn_item(s.clone(), at, [0.0, 0.1, 0.0], 10);
-                    }
+                    // AbstractMinecartContainer.remove: dropContents.
+                    self.scatter_cart_contents(at, &c.items);
                     if !creative {
-                        self.spawn_item(ItemStack::new(c.kind.item(), 1), at, [0.0, 0.1, 0.0], 10);
+                        // `spawnAtLocation`: an ItemEntity's own motion.
+                        let motion = super::dispenser::new_item_motion();
+                        self.spawn_item(ItemStack::new(c.kind.item(), 1), at, motion, 10);
+                        // `chestVehicleDestroyed` drops the emptied container
+                        // again, which only draws each slot's spot.
+                        let empty = vec![None; c.items.len()];
+                        self.scatter_cart_contents(at, &empty);
                     }
                 }
             }
@@ -2715,6 +2748,7 @@ impl Game<'_> {
                 continue;
             }
             let entity_start = out.len();
+            self.mark_motion(entity_start, Self::MOTION_OBJECT | u64::from(c.id));
             // The per-entity jitter (offsetSeed) that keeps stacked carts from z-fighting.
             let seed = i64::from(c.id).wrapping_mul(493_286_711);
             let seed = seed
@@ -2824,6 +2858,7 @@ impl Game<'_> {
             skull: &|_| None,
             glyph: &|c| self.gui.atlas.glyph_cell(c),
             glyphs: self.gui.atlas.font.epoch(),
+            font: Some(&self.gui.atlas.font),
             dynamic_visible: None,
         };
         self.res
