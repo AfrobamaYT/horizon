@@ -58,6 +58,16 @@ Level: preview ([API stability](../../../api/stability.md)). Schema 1.
 Readers ignore fields they don't know, so an optional field can be added to schema 1. Renaming or removing a field, or
 changing what one means, makes schema 2.
 
+Each version may list `native_binaries`, an array of records with `build` (the
+exact game build ID), `target` (the canonical Rust target triple), and `file`.
+The file uses the index's existing name, URL, size, SHA-256 and minisign signature
+fields; the signature is required. Records live only in the registry, never in
+`horizon-mod.toml`. Duplicate build/target pairs are rejected. Lookup returns a
+typed absence when the exact pair is unavailable, so source preparation can
+handle it without selecting another build or architecture. These signatures are
+registry-produced metadata; binary trust acceptance belongs to the verifier
+([#804](https://github.com/arismoko/horizon/issues/804)), independently of project package keys.
+
 ## Before a file is installed
 
 `index::check_file` runs on the downloaded file, before it reaches the game folder:
@@ -185,7 +195,7 @@ Unknown keys in an entry are refused. Its CI runs `cargo-horizon-mod` (`crates/c
 | Command | What it does |
 | --- | --- |
 | `cargo horizon-mod internals sync` | Explicitly checks a native mod's library through the launcher against an isolated copy of its pinned game source, then replaces top-level `internals` with compiler-discovered paths, kinds and hashes. Handles globs and macros, removes unused declarations, preserves retained entries and prints additions/removals. Requires a trusted mod and `horizon-launcher` on `PATH` (or `HORIZON_LAUNCHER` set to its executable). Never runs automatically on build. |
-| `cargo horizon-mod internals add <path>…` | Adds each declared internal and its tool-written hash to top-level `internals` in the current mod's `horizon-mod.toml`. Reads the pinned prebuilt game's `internals.json` for native mods, or the newest prebuilt catalog for wasm mods (`HORIZON_MOD_INTERNALS_CATALOG` selects an absolute staged catalog path); unknown paths, shape-only entries and paths available only under a `cfg` are refused before the manifest is changed. Existing declarations are refreshed, not duplicated. |
+| `cargo horizon-mod internals add <path>…` | Adds each declared internal and its tool-written hash to top-level `internals` in the current mod's `horizon-mod.toml`. Reads the native mod's pinned prebuilt game's `internals.json`; unknown paths, shape-only entries and paths available only under a `cfg` are refused before the manifest is changed. Existing declarations are refreshed, not duplicated. |
 | `cargo horizon-mod update [--horizon <commit>]` | Moves the native game's pin and its mod API and internals dependencies' `rev` to the newest prebuilt release (or the exact commit given). For every declared internal, prints `missing`, `changed` (old signature → new signature), or `unchanged`, then refreshes the hashes still available. Missing or now-gated declarations keep their old hash and must be removed or replaced before building. |
 | `cargo horizon-mod check <file> [--json]` | A submission's checks: its kind's (above) and its signature with `--key` and `--signature`. It runs no mod's code: a native mod's source is read by the reviewers when it is listed. |
 | `cargo horizon-mod registry check <base> <head> --files <dir>` | `check` on each hosted file `head` lists and `base` doesn't: a pull request's new files. |
@@ -243,6 +253,7 @@ API line are its facts. A new kind gets its own check before it opens.
 
 ## Changelog
 
+- 2026-11-08: per-version `native_binaries` records index native mod files by exact game build and Rust target triple.
 - 2026-11-05: `projects[].stars` adds the GitHub source repository's star count without changing schema 1.
 - 2026-11-05: every listed project needs a description of 50 characters or more, 1 to 3 categories and an icon kept in the registry (`icons/<id>.png`); screenshots are kept in the registry too (`registry build` refuses https:// images in entries).
 - 2026-10-30: an entry names its GitHub repository (`repo`) and its versions are the repository's releases, read by the registry's CI; `file.url` may be a release asset of that repository. The index's schema is unchanged.
@@ -250,13 +261,3 @@ API line are its facts. A new kind gets its own check before it opens.
 - 2026-10-26: the launcher installs `shader` files into `shaderpacks/`; the sample index lists one (`glow`).
 - 2026-10-25: `shader` opens, checked by `horizon_shader_api::check`; its files are `.hshader`.
 - Schema 1 (2026-10-24): kinds `mod`, `modpack`, `resourcepack`, `shader`; `.hpack` format 1.
-
-Each version may list `native_binaries`, an array of records with `build` (the
-exact game build ID), `target` (the canonical Rust target triple), and `file`.
-The file uses the index's existing name, URL, size, SHA-256 and minisign signature
-fields; the signature is required. Records live only in the registry, never in
-`horizon-mod.toml`. Duplicate build/target pairs are rejected. Lookup returns a
-typed absence when the exact pair is unavailable, so source preparation can
-handle it without selecting another build or architecture. These signatures are
-registry-produced metadata; binary trust acceptance belongs to the verifier
-(#804), independently of project package keys.
