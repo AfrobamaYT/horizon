@@ -98,15 +98,17 @@ class ScaffoldTest(unittest.TestCase):
         self.assertTrue(values.endswith('\n\nfn tail() {}\n'))
         self.assertLess(values.index('mod a;'), values.index('mod dir;'))
 
-    def test_exhaustive_struct_is_built_by_literal_and_reads_must_be_optional(self):
+    def test_exhaustive_struct_is_built_by_literal(self):
         self.config.write_text(CONFIG.replace('fields = ["x: i32", "y: i32"]',
                                               'fields = ["x: i32", "y: i32"]\nexhaustive = "two ints"'))
         self.assertEqual(self.run_tool('--apply').returncode, 0)
         conv = (self.root / 'crates/horizon-client/src/game/modding/api_values/point.rs').read_text()
         self.assertIn('mod_api::Pt { x: self.x, y: self.y }', conv)
         self.assertNotIn('pub const fn new', (self.root / 'crates/horizon-mod-api/src/point.rs').read_text())
+
+    def test_handle_reads_must_be_optional(self):
         self.config.write_text(CONFIG.replace('ret = "Option<bool>"', 'ret = "bool"'))
-        self.assertIn('returns Option', self.run_tool('--apply').stderr)
+        self.assertIn('returns Option', self.run_tool('--dry-run').stderr)
 
     def test_second_apply_refuses(self):
         self.assertEqual(self.run_tool('--apply').returncode, 0)
