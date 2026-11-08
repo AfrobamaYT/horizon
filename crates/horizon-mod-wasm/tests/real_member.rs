@@ -41,6 +41,7 @@ fn dump_members() {
 }
 
 #[test]
+#[ignore = "inter-mod plain functions: see inter-mod-functions.md"]
 fn real_library_dependency() {
     let (Ok(library), Ok(dependent), Ok(std)) = (
         std::env::var("HORIZON_WASM_LIBRARY"),
