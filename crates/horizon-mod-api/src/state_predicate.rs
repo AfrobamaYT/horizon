@@ -2,7 +2,7 @@
 use crate::{BlockKey, BlockMetadata, BlockState, BlockStateError, StateConstraint, TagKey, Tags};
 
 /// A block or tag filter, with unspecified properties left as wildcards.
-/// Tag properties remain vague: an unknown or missing property never matches.
+/// An unknown or missing property on a tag member never matches.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 #[horizon_mod_api_macros::wasm(via = StatePredicateRecord)]
@@ -53,7 +53,7 @@ impl StatePredicate {
             constraints: constraints.to_vec(),
         })
     }
-    /// A tag filter; duplicate properties refuse, but vague properties and empty tags remain valid.
+    /// A tag filter; duplicate properties refuse, but arbitrary properties and empty tags remain valid.
     /// Membership is evaluated against authoritative tags at application, not frozen here.
     pub fn tag(
         metadata: &dyn BlockMetadata,

@@ -27,7 +27,9 @@ pub struct NativeBlockRun {
 #[derive(Clone, Debug, PartialEq, Default)]
 // exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeBlockEdit {
+    /// Complete states to write; properties are never parsed from command strings.
     pub palette: Vec<BlockState>,
+    /// Partial block or tag predicates; omitted properties are wildcards.
     pub filters: Vec<StatePredicate>,
     pub runs: Vec<NativeBlockRun>,
 }
@@ -77,6 +79,7 @@ pub struct NativeClock {
 #[derive(Clone, Debug, PartialEq, Default)]
 // exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeColumnBlocks {
+    /// Distinct complete states, including separate entries for different property combinations.
     pub palette: Vec<BlockState>,
     pub bases: Vec<Option<i32>>,
     pub blocks: Vec<u16>,
