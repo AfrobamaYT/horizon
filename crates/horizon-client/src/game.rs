@@ -7,7 +7,6 @@ use key_codes::{
 use loading_screen::{
     App, Loading, leave_fullscreen_after, missing_resources, run_event_loop, unclean_start_recovery,
 };
-use mod_api::__private::game::PartsLookup;
 use resource_load::{Progress, launch_world, load_resources, named_scope, synchronous_startup};
 
 /// The content tables the world plays with, as field-level borrows: the

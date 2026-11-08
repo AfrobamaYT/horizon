@@ -134,13 +134,8 @@ impl Game<'_> {
     pub(super) fn block_tag_sets(
         &self,
         items: &Items,
-    ) -> std::collections::HashMap<String, horizon_world::level::data::BlockSet> {
-        let registry = self.pack.assets.registry;
-        prepare_block_tags(items, |name| {
-            registry
-                .default_state(name)
-                .map(|state| self.res.behaviours().block(state))
-        })
+    ) -> std::collections::HashMap<String, std::collections::HashSet<BlockKey>> {
+        prepare_block_tags(items)
     }
 
     /// Whether the resolved block is in the world's merged block tag, on a client the tag its

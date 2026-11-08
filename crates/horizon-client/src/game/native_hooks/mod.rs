@@ -9,8 +9,8 @@
 /// Generated dispatch entry points, not hand-written hook implementations.
 mod fire;
 pub(in crate::game) use fire::{
-    BlockDropsCall, ConnectsToCall, EntityChangeBlockPreCall, ItemAfterVerticalCollisionCall,
-    UpdateShapeCall,
+    BlockDropsCall, BlockScreenEffectDrawCall, ConnectsToCall, EntityChangeBlockPreCall,
+    ItemAfterVerticalCollisionCall, UpdateShapeCall,
 };
 
 use super::native_data_maps::NativeDataMapType;
@@ -69,14 +69,14 @@ use mod_api::CommandSource;
 use mod_api::GameMode;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
-    self, Answered, BlockPlacement, BlockTintSources, ClientAudioOptions, ClientChatOptions,
-    ClientGraphicsOptions, ClientGuiOptions, ClientInputOptions, ClientMiningPrediction,
-    ClientModifiers, ClientReloadListeners, CommandInvocation, EnchantmentInfo, EntityRef,
-    GameRuleActor, InteractionAttempt, InteractionKey, LayerDefinition, LivingRef, NativeCamera,
-    NativeCommand, NativeDispensed, NativeHandRender, NativeKeyMapping, NativeLifecycleContext,
-    NativeNoteBlockChange, PathComputationType, Placement, PlayerRef, RecipeBookCategory, ScreenId,
-    ScreenOpening, ScreenshotImage, ServerReloadListeners, ServerTickPhase, TicketController,
-    ToolUse, WorldPhase,
+    self, Answered, BlockPlacement, BlockTintSources, CameraDrawContext, ClientAudioOptions,
+    ClientChatOptions, ClientGraphicsOptions, ClientGuiOptions, ClientInputOptions,
+    ClientMiningPrediction, ClientModifiers, ClientReloadListeners, CommandInvocation,
+    EnchantmentInfo, EntityRef, GameRuleActor, InteractionAttempt, InteractionKey, LayerDefinition,
+    LivingRef, NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeKeyMapping,
+    NativeLifecycleContext, NativeNoteBlockChange, PathComputationType, Placement, PlayerRef,
+    RecipeBookCategory, ScreenId, ScreenOpening, ScreenshotImage, ServerReloadListeners,
+    ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
     AttachmentStore, BonemealSource, ChunkRef, FluidStack, LevelRef, LogicalSide,

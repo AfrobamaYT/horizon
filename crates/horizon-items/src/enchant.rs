@@ -1162,6 +1162,35 @@ pub mod tests {
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let error = Enchantments::load(&root, &defaults).err().unwrap();
         assert!(error.to_string().contains("example:invalid"));
+        std::fs::remove_file(root.join("data/example/enchantment/invalid.json")).unwrap();
+        let files = vec![(
+            "enchantment/example:charge".to_owned(),
+            vec![serde_json::to_vec(&definition).unwrap()],
+        )];
+        let overlay = horizon_world::loot::PackOverlay {
+            files: &files,
+            ..horizon_world::loot::PackOverlay::NONE
+        };
+        let loaded = Enchantments::load_with(&root, &overlay, &defaults).unwrap();
+        assert_eq!(
+            loaded.get("example:charge").unwrap().native_post_attack[&1].get("amount"),
+            Some(&horizon_core::nbt::Tag::Byte(42))
+        );
+        let files = vec![(
+            "enchantment/example:invalid".to_owned(),
+            vec![serde_json::to_vec(&bad).unwrap()],
+        )];
+        let overlay = horizon_world::loot::PackOverlay {
+            files: &files,
+            ..horizon_world::loot::PackOverlay::NONE
+        };
+        assert!(
+            Enchantments::load_with(&root, &overlay, &defaults)
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("example:invalid")
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 
