@@ -3464,6 +3464,16 @@ impl Game<'_> {
         self.turn_remote_projectile(id, rotation);
     }
     fn remove_entity(&mut self, id: i32) {
+        // A client-only camera selection has no server spectating state to reset it.
+        // Use the camera-packet path to restore control and the player's post effect.
+        if let Some(player) = self
+            .remote
+            .as_ref()
+            .filter(|r| r.camera == Some(id))
+            .map(|r| r.entity_id)
+        {
+            self.remote_set_camera(player);
+        }
         self.audio.remove_sound_entity(id as u32);
         // Entity.setRemoved detaches every passenger, even when no empty
         // SetPassengers packet preceded the vehicle's removal. Otherwise
@@ -14192,7 +14202,7 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn client_camera_entity_is_the_player_without_a_server_camera() {
+    fn client_camera_entity_returns_to_player_after_removal() {
         use super::super::{
             Game, native_entity_refs::tests::with_client_game, native_lifecycle::NativeLifecycle,
         };
@@ -14236,19 +14246,19 @@ mod tests {
             );
             assert_eq!(local.position(game), Some([0.0; 3]));
 
-            let pig = game
+            let creeper = game
                 .remote
                 .as_ref()
                 .unwrap()
                 .builtin
                 .get("minecraft:entity_type")
                 .unwrap()
-                .id("minecraft:pig")
+                .id("minecraft:creeper")
                 .unwrap();
             game.handle_packet(C::AddEntity(play::AddEntity {
                 id: 31,
                 uuid: 9,
-                kind: pig,
+                kind: creeper,
                 position: [10.0, 64.0, 12.0],
                 velocity: [0.0; 3],
                 pitch: 0,
@@ -14257,9 +14267,14 @@ mod tests {
                 data: 0,
             }))
             .unwrap();
-            game.handle_packet(C::SetCamera(play::SetCamera { camera_id: 31 }))
-                .unwrap();
+            game.remote_set_camera(31);
+            assert!(!game.controls_camera());
+            assert!(game.hides_as_camera(31));
+            assert!(game.spectated_post_effect.is_some());
             let attached = camera(game).unwrap();
+            game.handle_packet(C::RemoveEntities(play::RemoveEntities { ids: vec![99] }))
+                .unwrap();
+            assert_eq!(camera(game), Some(attached));
             assert_eq!(attached.id(), 31);
             assert_eq!(attached.position(game), Some([10.0, 64.0, 12.0]));
             game.handle_packet(C::SetCamera(play::SetCamera { camera_id: 99 }))
@@ -14271,11 +14286,13 @@ mod tests {
             );
             game.handle_packet(C::RemoveEntities(play::RemoveEntities { ids: vec![31] }))
                 .unwrap();
-            assert_eq!(
-                camera(game).unwrap().position(game),
-                None,
-                "a removed target cannot be read"
+            assert_eq!(camera(game), Some(local));
+            assert!(
+                game.controls_camera(),
+                "movement input and position packets are enabled"
             );
+            assert!(!game.hides_as_camera(31));
+            assert!(game.spectated_post_effect.is_none());
             game.handle_packet(C::SetCamera(play::SetCamera { camera_id: 7 }))
                 .unwrap();
             assert_eq!(camera(game), Some(local));
