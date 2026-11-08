@@ -114,7 +114,25 @@ impl WasmMod {
             return None;
         }
         let bytes = unsafe { std::slice::from_raw_parts(at, len as usize) };
-        let bytes = if self.corrupt {
+        let mut forged;
+        let bytes = if matches!(APPEND_ATTACK.get(), 1 | 2) {
+            forged = bytes.to_vec();
+            let at = forged
+                .windows(4)
+                .position(|b| b == 0x7fc01234u32.to_le_bytes())
+                .unwrap();
+            if APPEND_ATTACK.get() == 1 {
+                forged[at..at + 4].copy_from_slice(&1.0f32.to_le_bytes());
+            } else {
+                let count = u32::from_le_bytes(forged[at - 8..at - 4].try_into().unwrap());
+                forged[at - 8..at - 4].copy_from_slice(&(count - 1).to_le_bytes());
+                forged.drain(at - 4..at + 4);
+            }
+            forged.as_slice()
+        } else {
+            bytes
+        };
+        let bytes = if self.corrupt || APPEND_ATTACK.get() == 3 {
             &bytes[..bytes.len().saturating_sub(1)]
         } else {
             bytes
@@ -147,12 +165,37 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             _: &mod_api::RegistrationContext,
         ) {
             REGISTERED_ITEM.set(Some(registrar.item_key("minecraft:stone")));
+            REGISTERED_EFFECT.set(Some(registrar.effect_key("minecraft:poison")));
             let kind = registrar.block_entity_type("counter").blocks(&[]).build();
             REGISTERED_KIND.set(Some(kind));
             registrar.block_entity_part(&kind, MachineBlock).unwrap();
         }
         fn subscribed(&self) -> &'static [Option<mod_api::HookId>] {
             &[]
+        }
+        fn item_tooltip(
+            &self,
+            _: &dyn mod_api::ClientHost,
+            event: &mut mod_api::ItemTooltipEvent<'_>,
+        ) {
+            let mask = u32::from(event.display.name_visible(false))
+                | (u32::from(event.display.name_visible(true)) << 1)
+                | (u32::from(event.display.shows("minecraft:banner_patterns")) << 2)
+                | (u32::from(event.display.shows("test:hidden")) << 3);
+            event
+                .lines
+                .push((mod_api::Text::literal("projection"), mask));
+        }
+        fn apply_effect_tick(
+            &self,
+            _: &dyn mod_api::Host,
+            event: &mut mod_api::ApplyEffectTickEvent<'_>,
+        ) {
+            event.heal(2.5);
+            event.hurt(mod_api::NativeEffectDamage::Wither, 3.);
+            event.eat(2, 0.25);
+            event.add_exhaustion(0.5);
+            event.keep = false;
         }
         fn mob_layer(&self, _: &dyn mod_api::ClientHost, event: &mut mod_api::MobLayerEvent<'_>) {
             assert_eq!(event.mob.kind, "test:mob");
@@ -298,6 +341,114 @@ fn wire_loopback_machine_tick_uses_checked_snapshot_writeback() {
     );
     assert_eq!(entity.data, vec![8]);
     assert_eq!(entity.revision().changes(), before);
+}
+#[test]
+fn wire_loopback_readonly_private_projection() {
+    use horizon_core::nbt::Tag;
+    struct Client;
+    impl mod_api::Host for Client {}
+    mod_api::impl_host_areas!(Client);
+    impl mod_api::ClientHost for Client {}
+    mod_api::impl_client_host_areas!(Client);
+    install_counter();
+    let module = WasmMod {
+        group: 0,
+        subscribed: &[],
+        corrupt: false,
+    };
+    let stack = mod_api::ItemStack::new(REGISTERED_ITEM.get().unwrap(), 1).unwrap();
+    let hidden = Tag::compound([(
+        "hidden_components",
+        Tag::List(vec![Tag::String("test:hidden".into())]),
+    )]);
+    let suppressed = Tag::compound([("hide_tooltip", Tag::Byte(1))]);
+    for (component, ominous_banner, expected) in [
+        (None, false, 15),
+        (None, true, 11),
+        (Some(&hidden), true, 7),
+        (Some(&suppressed), false, 2),
+    ] {
+        let display = mod_api::TooltipDisplay::__wire_from_fields(component, ominous_banner);
+        let mut lines = vec![(mod_api::Text::literal("prefix"), 99)];
+        module.item_tooltip(
+            &Client,
+            &mut mod_api::ItemTooltipEvent {
+                player: 1,
+                player_entity_id: 2,
+                stack: &stack,
+                display: &display,
+                advanced: false,
+                creative: false,
+                lines: &mut lines,
+            },
+        );
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].1, 99);
+        assert_eq!(lines[1].1, expected);
+    }
+}
+#[test]
+fn wire_loopback_checked_append_is_atomic_and_bit_exact() {
+    use mod_api::{EffectTickChange, NativeEffectDamage};
+    struct World;
+    impl mod_api::Host for World {}
+    mod_api::impl_host_areas!(World);
+    let mods = [mod_api::ModEntry::new(
+        "wire_test",
+        Box::new(WasmMod {
+            group: 0,
+            subscribed: &[Some(mod_api::HookId::ApplyEffectTick)],
+            corrupt: false,
+        }),
+    )];
+    mod_api::__private::install_parts(&mods, &mod_api::__private::part_tests::rule_schema())
+        .unwrap();
+    let holder = mod_api::LivingRef::new(mod_api::EntityRef::new(
+        mod_api::NativeWorldEpoch::new(1),
+        7,
+    ));
+    mod_api::testing::with_mods(Arc::from(mods), || {
+        for attack in [0, 1, 2, 3] {
+            APPEND_ATTACK.set(attack);
+            let mut changes = vec![EffectTickChange::Heal(f32::from_bits(0x7fc01234))];
+            let mut keep = true;
+            mod_api::dispatch_apply_effect_tick(
+                &World,
+                mod_api::__private::ApplyEffectTickCall {
+                    effect: REGISTERED_EFFECT.get().unwrap(),
+                    dimension: "test:world",
+                    entity: Some(7),
+                    amplifier: 0,
+                    holder,
+                    health: 10.,
+                    max_health: 20.,
+                    food: None,
+                    changes: &mut changes,
+                    keep: &mut keep,
+                },
+            );
+            assert!(matches!(changes[0], EffectTickChange::Heal(v) if v.to_bits() == 0x7fc01234));
+            if attack == 0 {
+                assert!(!keep);
+                assert_eq!(
+                    &changes[1..],
+                    &[
+                        EffectTickChange::Heal(2.5),
+                        EffectTickChange::Hurt(NativeEffectDamage::Wither, 3.),
+                        EffectTickChange::Eat(2, 0.25),
+                        EffectTickChange::AddExhaustion(0.5)
+                    ]
+                );
+            } else {
+                assert!(
+                    keep,
+                    "refused prefix must also refuse the public keep writeback"
+                );
+                assert_eq!(changes.len(), 1);
+            }
+        }
+        APPEND_ATTACK.set(0);
+    });
 }
 #[test]
 fn wire_loopback_optional_borrowed_render_record() {
@@ -486,6 +637,8 @@ fn wire_loopback_nested_tuple_reference_writes_back() {
 }
 thread_local! {
     static REGISTERED_ITEM:std::cell::Cell<Option<mod_api::ItemKey>> = const {std::cell::Cell::new(None)};
+    static REGISTERED_EFFECT:std::cell::Cell<Option<mod_api::EffectKey>> = const {std::cell::Cell::new(None)};
+    static APPEND_ATTACK:std::cell::Cell<u8> = const {std::cell::Cell::new(0)};
     static REGISTERED_KIND:std::cell::Cell<Option<mod_api::BlockEntityTypeKey>> = const {std::cell::Cell::new(None)};
 }
 fn install_counter() {
