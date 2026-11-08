@@ -500,10 +500,10 @@ mod stay_tests {
             };
             game.world.day_time = 13_000;
             game.tick_beehive(key);
-            assert_eq!((inside(&game), game.mobs.len()), (3, 0), "night");
+            assert_eq!((inside(game), game.mobs.len()), (3, 0), "night");
             game.world.day_time = 1_000;
             game.tick_beehive(key);
-            assert_eq!((inside(&game), game.mobs.len()), (0, 3), "day");
+            assert_eq!((inside(game), game.mobs.len()), (0, 3), "day");
         });
     }
 }

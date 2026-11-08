@@ -705,7 +705,7 @@ mod tests {
             for expected in [2, 1, 0] {
                 let mut before = game.world.random.clone();
                 game.tick_spawner(key).unwrap();
-                assert_eq!(delay(&game), expected);
+                assert_eq!(delay(game), expected);
                 assert_eq!(
                     game.world.random.next_long(),
                     before.next_long(),
@@ -715,7 +715,7 @@ mod tests {
             }
             let mut before = game.world.random.clone();
             game.tick_spawner(key).unwrap();
-            assert!((200..800).contains(&delay(&game)), "{}", delay(&game));
+            assert!((200..800).contains(&delay(game)), "{}", delay(game));
             assert_ne!(game.world.random.next_long(), before.next_long());
         });
     }

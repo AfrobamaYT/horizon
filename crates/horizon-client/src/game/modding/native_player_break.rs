@@ -126,12 +126,12 @@ mod tests {
                 (0, 0),
                 std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
             );
-            let uuid = with_player(&mut game, ItemStack::new("minecraft:diamond_pickaxe", 1));
+            let uuid = with_player(game, ItemStack::new("minecraft:diamond_pickaxe", 1));
             let pos = [6, 64, 4];
-            place(&mut game, pos, "minecraft:stone");
+            place(game, pos, "minecraft:stone");
             assert!(game.native_player_break_block(uuid, pos, false));
-            assert_eq!(block(&game, pos), "minecraft:air");
-            assert!(popped(&game, "minecraft:cobblestone"));
+            assert_eq!(block(game, pos), "minecraft:air");
+            assert!(popped(game, "minecraft:cobblestone"));
             assert_eq!(game.held().unwrap().damage, 1);
             assert_eq!(game.stats.get("mined", "minecraft:stone"), 1);
         });
@@ -149,17 +149,17 @@ mod tests {
             );
             let mut silk = ItemStack::new("minecraft:diamond_pickaxe", 1);
             silk.enchant("minecraft:silk_touch", 1);
-            let uuid = with_player(&mut game, silk);
+            let uuid = with_player(game, silk);
             let (stone, ore) = ([6, 64, 4], [7, 64, 4]);
-            place(&mut game, stone, "minecraft:stone");
+            place(game, stone, "minecraft:stone");
             assert!(game.native_player_break_block(uuid, stone, true));
-            assert_eq!(carried(&game, "minecraft:stone"), 1);
-            assert!(!popped(&game, "minecraft:stone"));
+            assert_eq!(carried(game, "minecraft:stone"), 1);
+            assert!(!popped(game, "minecraft:stone"));
 
             game.inventory[game.selected] = Some(ItemStack::new("minecraft:diamond_pickaxe", 1));
-            place(&mut game, ore, "minecraft:diamond_ore");
+            place(game, ore, "minecraft:diamond_ore");
             assert!(game.native_player_break_block(uuid, ore, true));
-            assert_eq!(carried(&game, "minecraft:diamond"), 1);
+            assert_eq!(carried(game, "minecraft:diamond"), 1);
             assert!(!game.orbs.is_empty(), "the ore's experience");
         });
     }
@@ -175,17 +175,17 @@ mod tests {
                 (0, 0),
                 std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
             );
-            let uuid = with_player(&mut game, ItemStack::new("minecraft:diamond_pickaxe", 1));
+            let uuid = with_player(game, ItemStack::new("minecraft:diamond_pickaxe", 1));
             let (stone, bedrock, air) = ([6, 64, 4], [7, 64, 4], [8, 64, 4]);
-            place(&mut game, stone, "minecraft:stone");
-            place(&mut game, bedrock, "minecraft:bedrock");
+            place(game, stone, "minecraft:stone");
+            place(game, bedrock, "minecraft:bedrock");
             assert!(!game.native_player_break_block(uuid, bedrock, false));
-            assert_eq!(block(&game, bedrock), "minecraft:bedrock");
+            assert_eq!(block(game, bedrock), "minecraft:bedrock");
             assert!(!game.native_player_break_block(uuid, air, false));
             assert!(!game.native_player_break_block(uuid ^ 1, stone, false));
             game.set_mode(GameMode::Adventure);
             assert!(!game.native_player_break_block(uuid, stone, false));
-            assert_eq!(block(&game, stone), "minecraft:stone");
+            assert_eq!(block(game, stone), "minecraft:stone");
             assert_eq!(game.held().unwrap().damage, 0, "nothing wore the pickaxe");
         });
     }
