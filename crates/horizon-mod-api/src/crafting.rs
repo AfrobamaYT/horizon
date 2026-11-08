@@ -34,7 +34,7 @@ pub struct Ingredient {
     /// The same items in `HolderSet` order (`display`).
     pub order: Vec<String>,
     /// A mod's own kind, for matching at craft time: the kind and its
-    /// NBT compound, as the load-time hook saw them (`native_ingredient_test`).
+    /// NBT compound, as the load-time hook saw them (`ingredient_test`).
     pub custom: Option<(String, horizon_core::nbt::Compound)>,
     /// NeoForge's shapes, with their children parsed: matching a concrete
     /// stack asks each child its own `test` (a mod's kind among them),
@@ -219,7 +219,8 @@ impl Ingredient {
 }
 /// A recipe in force (`RecipeManager.getAllRecipesFor`), whatever its type
 /// (vanilla's or a mod's own): its typed parts, and its file for whatever a
-/// mod's own type keeps there. Plain data.
+/// mod's own type keeps there. `json` is the data-pack file's JSON, read by a
+/// mod at reload; host parsing helpers accept JSON text. Plain data.
 ///
 /// A recipe the game could not parse (an ingredient it cannot read, no
 /// result) is not in force and is not listed.
