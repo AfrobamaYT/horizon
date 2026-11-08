@@ -229,7 +229,7 @@ pub(super) fn guest(
 }
 
 /// Whether `ty` names a type that borrows (`CubeFace<'_>`), which has no owned wire form.
-fn lifetime_def(types: &Types<'_>, ty: &Ty) -> bool {
+pub(super) fn lifetime_def(types: &Types<'_>, ty: &Ty) -> bool {
     match ty {
         Ty::Named(d) => types.defs[*d].lifetimes != 0,
         Ty::Ref(t, _)
@@ -246,7 +246,7 @@ fn lifetime_def(types: &Types<'_>, ty: &Ty) -> bool {
 
 /// A borrow inside a list, tuple or `Option` the generated code can't write as one value
 /// (`&[(&str, &str)]`).
-fn has_ref_in_data(ty: &Ty) -> bool {
+pub(super) fn has_ref_in_data(ty: &Ty) -> bool {
     fn inner(ty: &Ty) -> bool {
         match ty {
             Ty::Ref(..) | Ty::Str(Str::Borrowed) | Ty::List(_, List::Slice) => true,
