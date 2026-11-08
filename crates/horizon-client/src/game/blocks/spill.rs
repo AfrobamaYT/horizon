@@ -33,7 +33,7 @@ pub(super) struct Pending {
     pub(super) shulker: HashMap<[i32; 3], Vec<(u8, ItemStack)>>,
     pub(super) banner: HashMap<[i32; 3], Banner>,
     /// The block's item and the custom name.
-    pub(super) names: HashMap<[i32; 3], (String, String)>,
+    pub(super) names: HashMap<[i32; 3], (String, Tag)>,
     /// A decorated pot's sherds (back, left, right, front).
     pub(super) pot: HashMap<[i32; 3], [Option<ItemStack>; 4]>,
     /// A head's profile, note block sound and name, or a hive's bees: the
@@ -47,7 +47,7 @@ impl Pending {
         pos: [i32; 3],
         entity: &BlockEntity,
         block: &str,
-        name: Option<String>,
+        name: Option<Tag>,
     ) {
         if let BlockEntity::Banner(banner) = entity {
             self.banner.insert(pos, banner.clone());
@@ -111,8 +111,7 @@ impl Pending {
             .is_some_and(|(item, _)| **item == *stack.item)
             && let Some((_, name)) = self.names.remove(&pos)
         {
-            stack.data_mut().custom_name =
-                Some(horizon_core::nbt::Tag::String(name.as_str().into()));
+            stack.data_mut().custom_name = Some(name);
         }
         if self
             .copied
@@ -490,16 +489,28 @@ impl GameLevel<'_> {
             self.pending.record_saved(at, &tag);
         }
         let dynamic = self.pending.dynamic(at);
-        let tool = self.drop_tool.clone();
+        let machine = self
+            .drop_tool
+            .as_ref()
+            .is_some_and(|(target, _)| *target == key);
+        let tool = self
+            .drop_tool
+            .as_ref()
+            .filter(|_| machine)
+            .and_then(|(_, tool)| tool.clone());
         let roll = horizon_client::items::BlockLootRoll {
             held: tool.as_ref(),
             dynamic: &dynamic,
+            breaker: self.drop_breaker_at == Some(pos),
             ..Default::default()
         };
-        let drops = self.roll_block_loot(pos, state, self.drop_entity, roll);
+        let entity = self
+            .drop_entity
+            .filter(|_| self.drop_breaker_at == Some(pos));
+        let drops = self.roll_block_loot(pos, state, entity, roll);
         let dropped = self.block_dropped(pos, state, None, tool.as_ref(), drops, None);
         for item in dropped.items {
-            if let Some(kept) = self.drop_into.as_mut() {
+            if let Some(kept) = self.drop_into.as_mut().filter(|_| machine) {
                 kept.push(item.stack);
             } else {
                 self.spill.spawns.push(Spawn {
@@ -676,6 +687,11 @@ impl GameLevel<'_> {
         side_effects: bool,
     ) -> u8 {
         let key = (pos.x, pos.y, pos.z);
+        // A replacement is a new block entity, even at the same position.
+        // Headless servers cannot rely on renderer visibility to discard this state.
+        if &*self.facts.get(old).name == "minecraft:end_gateway" {
+            self.gateway_servers.remove(&[pos.x, pos.y, pos.z]);
+        }
         if self.remove_saved_entity(pos, old, side_effects) {
             return 0;
         }
@@ -1360,7 +1376,10 @@ mod crafter_drop_name_tests {
                     &*game.res.facts().get(game.world.block(x, 199, z)).name,
                     "minecraft:stone"
                 );
-                assert_eq!(game.world.block_names.get(&key).map(String::as_str), name);
+                assert_eq!(
+                    game.world.block_names.get(&key),
+                    name.map(|n| Tag::String(n.into())).as_ref()
+                );
                 let entity = game
                     .world
                     .block_entities

@@ -384,9 +384,13 @@ impl Game<'_> {
             g.vehicle.is_some(),
         );
         // Entity.checkInsideBlocks: the Nether portal blocks the box is in.
-        // `canUsePortal(false)` is false for a passenger: its vehicle goes
-        // through and carries it (`carry_riders_through_portals`).
-        if !riding && let Some(pos) = self.nether_portal_inside(at) {
+        // `LivingEntity.canUsePortal` (#943): not a passenger — its vehicle
+        // goes through and carries it (`carry_riders_through_portals`) — and
+        // not asleep.
+        if !riding
+            && !sleeping
+            && let Some(pos) = self.nether_portal_inside(at)
+        {
             self.portals.player.set_inside(pos, PLAYER_DELAY);
         }
         // `ServerPlayer.showEndCredits`: the player stays out of the world while the

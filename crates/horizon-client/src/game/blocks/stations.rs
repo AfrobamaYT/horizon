@@ -1645,8 +1645,8 @@ impl Game<'_> {
                 let named = self
                     .station
                     .as_ref()
-                    .and_then(|s| self.world.block_names.get(&(s.pos[0], s.pos[1], s.pos[2])));
-                Text::literal(named.cloned().unwrap_or(default)).resolve_legacy()
+                    .and_then(|s| self.block_name_plain((s.pos[0], s.pos[1], s.pos[2])));
+                Text::literal(named.unwrap_or(default)).resolve_legacy()
             });
             super::screen_info::name_container(|| title.plain());
             let tw = atlas.font.width_text(&title);
@@ -2828,7 +2828,7 @@ impl Game<'_> {
         })
     }
     /// Options.advancedItemTooltips (F3+H).
-    fn options_advanced_tooltips(&self) -> bool {
+    pub(super) fn options_advanced_tooltips(&self) -> bool {
         self.settings.file.bool("advancedItemTooltips")
     }
     /// `TooltipRenderUtil`: dark box with the purple border, first line spaced.

@@ -742,6 +742,10 @@ struct InteractTarget {
 
 /// The client world as seen by the vanilla block-behaviour library.
 struct GameLevel<'w> {
+    gateway_servers: &'w mut horizon_client::fast_hash::FxHashMap<
+        [i32; 3],
+        horizon_client::block_entity_anim::EndGateway,
+    >,
     border: &'w horizon_core::geometry::border::BorderGeometry,
     world: &'w mut World,
     command_block_transition: Option<command_blocks::CommandBlockTransition>,
@@ -829,14 +833,16 @@ struct GameLevel<'w> {
     debug: bool,
     native_sounds: &'w mut Vec<creatures::NativeSound>,
     native_particles: &'w mut Vec<lan_particles::QueuedParticle>,
-    /// The server sound-seed source (`Level.soundSeedGenerator`), when this
-    /// level's host is up: `native_play_sound` draws its seed there.
     sound_seeds: Option<&'w horizon_client::lan::hub::Hub>,
-    /// The tool a mod's machine breaks blocks with (`native_machine_destroy_block`):
-    /// `Block.dropResources` rolls the loot with it instead of with none.
-    drop_tool: Option<ItemStack>,
-    /// The entity `destroyBlock` names (`LootContextParams.THIS_ENTITY`).
     drop_entity: Option<mod_api::EntityRef>,
+    /// The block a mod's machine breaks and the tool it breaks it with
+    /// (`native_machine_destroy_block`): `Block.dropResources` rolls that
+    /// block's loot with the tool instead of with none. Neighbours that pop
+    /// off because of the break drop as with no tool, as in vanilla.
+    drop_tool: Option<((i32, i32, i32), Option<ItemStack>)>,
+    /// Only this destroyed block has an entity as its loot `this` parameter.
+    /// Neighbour/default/machine drops keep the no-entity context.
+    drop_breaker_at: Option<BlockPos>,
     /// Where `Block.dropResources` puts the drops instead of popping them,
     /// while a mod's machine breaks a block (`native_machine_destroy_block`).
     drop_into: Option<Vec<ItemStack>>,
@@ -1128,6 +1134,29 @@ impl LevelAccess for GameLevel<'_> {
             self.native_create_fluid_source(self.dimension, pos, state, &mut can_convert);
         }
         can_convert
+    }
+    fn mod_fluid_rules(
+        &self,
+        pos: BlockPos,
+        fluid: horizon_world::fluid::ModFluid,
+        registered: horizon_world::fluid::ModFluidRules,
+    ) -> horizon_world::fluid::ModFluidRules {
+        let mut rules = registered;
+        if self.native_authoritative {
+            self.native_fluid_rules(mod_api::__private::FluidRulesCall {
+                dimension: self.dimension,
+                pos,
+                fluid: &fluid.get().id,
+                tick_delay: &mut rules.tick_delay,
+                drop_off: &mut rules.drop_off,
+                slope_find_distance: &mut rules.slope_find_distance,
+                converts_to_source: &mut rules.converts_to_source,
+            });
+            rules.tick_delay = rules.tick_delay.max(1);
+            rules.drop_off = rules.drop_off.clamp(1, 7);
+            rules.slope_find_distance = rules.slope_find_distance.clamp(1, 4);
+        }
+        rules
     }
     fn allow_block_ignite(&self, pos: BlockPos, cause: &'static str) -> bool {
         let mut cancel = false;
@@ -2350,6 +2379,9 @@ struct Game<'a> {
     /// This world's frozen damage definitions and reloadable tag snapshot.
     pub(super) health_resources: horizon_client::health::HealthResources,
     damage_tag_generation: u64,
+    /// The registries native mods registered data map types for, as of the
+    /// server tables' last build: what `data_maps_updated` fires for.
+    data_map_registries: Vec<&'static str>,
     /// This game's resource packs (`reload_packs` replaces them).
     pack: PackResources,
     /// The title and menu bundle (GUI atlas, font and panorama).
@@ -2633,10 +2665,15 @@ struct Game<'a> {
     guardian_sounds: HashSet<u32>,
     dropped: horizon_client::join_seq::JoinList<ItemEntity>,
     next_entity: u32,
-    /// The last entity id the running server tick found before its levels
-    /// ticked: an item with a later one was added this tick and first ticks
-    /// on the next (`EntityTickList`). `u32::MAX` until a tick has run.
+    /// The last entity id when this level's entity pass began: an item with a
+    /// later one was added during that pass and first ticks on the next
+    /// (`EntityTickList`). `u32::MAX` until a tick has run.
     ticked_entities_through: u32,
+    /// The items `tick_blocks` dropped while applying the entities' block
+    /// contacts (a boat breaking a lily pad). Vanilla runs those in each
+    /// entity's own tick (`applyEffectsFromBlocks`), inside the entity pass,
+    /// so they too first tick on the next tick.
+    contact_drops: std::ops::Range<u32>,
     particles: horizon_client::particles::ParticleEngine,
     /// `ItemPickupParticle`s: taken items, orbs and arrows flying to their collector.
     pickups: pickups::Pickups,
@@ -2986,6 +3023,8 @@ struct Game<'a> {
     mod_container_viewers: HashMap<(&'static str, (i32, i32, i32)), u32>,
     /// Where item entities are, while the block entities tick (hoppers).
     item_columns: Option<machines::ItemColumns>,
+    /// Where the mobs are, while the block entities tick (potent sulfur gas).
+    pass_mobs: Option<potent_sulfur::PassMobs>,
     creative_screen: Creative,
     /// `CreativeModeInventoryScreen.ignoreTextInput`: the chat key opened the
     /// search tab, so the letter it carries is not typed into the box.
@@ -3085,6 +3124,9 @@ struct Game<'a> {
     /// Active packet replay session (game/studio.rs).
     pub(super) studio_replay: Option<horizon_client::studio::ReplayDriver>,
     pub(super) studio_freecam: horizon_client::studio::StudioFreecam,
+    pub(super) studio_timeline: horizon_client::studio::TimelineUi,
+    pub(super) studio_topbar: horizon_client::studio::TopBarUi,
+    pub(super) studio_rmb_down: bool,
     studio_camera_track_dirty: bool,
     /// Camera perspective to restore after leaving replay playback.
     studio_replay_previous_camera_type: Option<horizon_client::camera::CameraType>,
@@ -3143,6 +3185,8 @@ struct Game<'a> {
     /// `Minecraft.gpuUtilization`: the last timed frame's GPU time over its
     /// CPU time, in percent.
     gpu_utilization: f64,
+    /// GPU Culling's Auto mode: what it has decided from the frames' CPU and GPU times.
+    gpu_culling_auto: horizon_client::autotune::GpuCullingAuto,
     /// The mobs `mob_geometry` drew last frame (`lastEntityRenderStateCount`).
     rendered_mobs: std::cell::Cell<usize>,
     /// Whether a native mod requested background blur for this frame (`apply_screen_blur`).
@@ -4559,7 +4603,7 @@ impl Game<'_> {
                     item.position.x.floor() as i32,
                     item.position.z.floor() as i32,
                 );
-                if !(merging && id > self.ticked_entities_through) && ticking(x, z) {
+                if !(merging && self.joined_during_entity_pass(id)) && ticking(x, z) {
                     let kind = native_ticks::TickKind::Fixed("minecraft:item");
                     self.native_tick_pre_batch(&mut round, id, kind);
                 }
@@ -4597,6 +4641,11 @@ impl Game<'_> {
         let _ = horizon_client::block_contact::fall(&mut level, contact, distance, 0.0);
         lent.give_back(&mut self.world);
     }
+    /// An item that joined during this tick's entity pass: it first ticks on
+    /// the next one.
+    fn joined_during_entity_pass(&self, id: u32) -> bool {
+        id > self.ticked_entities_through || self.contact_drops.contains(&id)
+    }
     fn tick_dropped_items(&mut self, round: &mut native_ticks::TickRound) {
         let mut items = self.dropped.lift();
         // ServerLevel.tick: only entities in entity-ticking chunks tick.
@@ -4618,10 +4667,9 @@ impl Game<'_> {
                 continue;
             }
             let item = &mut items[i];
-            // `addFreshEntity`: an entity added this tick ticks from the next
-            // one (`EntityTickList`), so a drop's `Age` stays 0 for the tick
-            // function that looks for it.
-            if merging && item.id > self.ticked_entities_through {
+            // `addFreshEntity` during the entity pass: the item ticks from the
+            // next tick on (`EntityTickList`).
+            if merging && self.joined_during_entity_pass(item.id) {
                 continue;
             }
             if !ticking(
@@ -4993,6 +5041,7 @@ impl Game<'_> {
         let native_authoritative = self.native_authoritative();
         let mut level = GameLevel {
             command_block_transition: None,
+            gateway_servers: &mut self.be_anims.gateway_servers,
             border: self.border.geometry(),
             redstone_experiments: self
                 .level
@@ -5063,6 +5112,7 @@ impl Game<'_> {
             sound_seeds: self.lan.as_ref().map(|host| &host.hub),
             drop_tool: None,
             drop_entity: None,
+            drop_breaker_at: None,
             drop_into: None,
         };
         let result = f(self.res.behaviours(), &mut level, &mut self.block_ticks);
@@ -5434,6 +5484,7 @@ impl Game<'_> {
         // applyEffectsFromBlocks runs in their tick: a mob or item past the
         // simulation distance presses, burns and slows on nothing.
         let entity_ticking = self.entity_ticking_area();
+        let first_contact_drop = self.next_entity + 1;
         self.with_level(|b, level, ticks| {
             // LilyPadBlock.entityInside: a boat inside a lily pad breaks it.
             let mut boat_cells: Vec<BlockPos> = Vec::new();
@@ -5529,6 +5580,7 @@ impl Game<'_> {
             }
         });
         self.process_level_events()?;
+        self.contact_drops = first_contact_drop..self.next_entity + 1;
         laps.lap("tb_entity_inside");
         // ServerLevel.tick: a Debug world runs no scheduled block or fluid ticks, and
         // ServerChunkCache.tickChunks no random ticks.
@@ -8080,18 +8132,11 @@ impl Game<'_> {
         if running {
             self.advance_clock();
             // `MinecraftServer.tickChildren`: `commandFunctions` runs before
-            // any level ticks, so a tick function that polls for the drop a
-            // block just made still finds it with `Age: 0`
-            // (`EntityTickList.ensureActiveIsNotIterated` gives an entity
-            // added during the iteration its first tick on the next one).
-            // Vanilla's SavedData is loaded long before this point; the lazy
-            // scoreboard/storage read has to be done by then too, or a load
-            // tag writes over what it restores.
+            // any level ticks. Vanilla's SavedData is loaded long before this
+            // point; the lazy scoreboard/storage read has to be done by then
+            // too, or a load tag writes over what it restores.
             self.load_scoreboard();
             self.tick_functions();
-            // What the functions summoned ticks this tick, as it would in
-            // vanilla; what the levels add from here waits for the next.
-            self.ticked_entities_through = self.next_entity;
         }
         if self.use_delay > 0 {
             self.use_delay -= 1;
@@ -8139,6 +8184,12 @@ impl Game<'_> {
             // placed boat) joins before the entities tick.
             self.native_joins_flush(false, 0);
             self.lan_mark_synced();
+            // `EntityTickList.forEach`: what joined before the entity pass
+            // (function summons, dropped or dispensed items) ticks in it;
+            // what joins during it waits for the next tick
+            // (`ensureActiveIsNotIterated`). Primed TNT and falling blocks
+            // keep their own packet cutoff (`ordered.announced`, #10063).
+            self.ticked_entities_through = self.next_entity;
         }
         self.begin_ordered_ticks();
         if running {
@@ -8743,6 +8794,23 @@ impl Game<'_> {
             self.remote_hud(&mut batch);
             self.draw_sign_editor(&mut batch);
             self.draw_book(&mut batch);
+        }
+        if !self.ui.hide_gui
+            && self.screen == Screen::Playing
+            && (self.studio_replay.is_some() || self.studio_freecam.active)
+        {
+            self.studio_topbar.render(
+                &mut batch,
+                &self.gui.atlas,
+                self.cursor,
+                self.studio_freecam.locked_to_path,
+            );
+            self.studio_timeline.render(
+                &mut batch,
+                &self.gui.atlas,
+                self.cursor,
+                &self.studio_freecam,
+            );
         }
         if show_hud {
             self.draw_pad_guide(&mut batch, guide_from);
@@ -11545,12 +11613,16 @@ impl Game<'_> {
             self.read_raids();
         }
         self.native_tags_updated(mod_api::TagsUpdateCause::ServerDataLoad { reload: false });
+        self.announce_data_maps_updated(mod_api::DataMapsUpdateCause::ServerReload);
         self.sync_recipe_content();
         reset_world_progress(&mut self.adv, &mut self.stats);
         self.prefetch_advancement_tree(&stack);
         self.restore_player_state = true;
         self.rand_sequences = rand_sequences;
-        self.border = Default::default();
+        // ServerLevel.getWorldBorder: the level in place reads its own saved
+        // border when it is made, before any command (the parked levels read
+        // theirs in `open_level`).
+        self.border = self.load_border(dim);
         self.set_mode_id(level.mode());
         self.previous_mode = level.previous_game_mode.map(game_mode::mode_from_id);
         let mut inventory = self.load_saved_inventory(&level);
@@ -13431,11 +13503,12 @@ impl Game<'_> {
     fn hand_geometry(&mut self, alpha: f64) -> (Vec<Vertex>, Vec<(u32, i32)>) {
         let mut out = Vec::new();
         let mut runs = Vec::new();
-        // F1 hides both; a native HUD mode may keep the hands visible. A
-        // studio replay never draws them.
-        if self.studio_replay.is_some()
-            || self.studio_freecam.active
-            || !self.ui.hands_drawn(
+        // F1 hides both; a native HUD mode may keep the hands visible. The
+        // replay player's hands remain visible in first person; freecam has
+        // no player-view hand.
+        if !fov::studio_draws_hand(
+            self.studio_freecam.active,
+            self.ui.hands_drawn(
                 self.spectator(),
                 self.sleeping.is_some(),
                 self.camera_type.is_first_person(),
@@ -13443,8 +13516,8 @@ impl Game<'_> {
                     .as_ref()
                     .is_some_and(|p| !p.health.dead_or_dying()),
                 self.screen == Screen::Dead,
-            )
-        {
+            ),
+        ) {
             return (out, runs);
         }
         let a = alpha as f32;
@@ -14745,7 +14818,7 @@ impl Game<'_> {
         self.apply_requested_camera_type();
         let vanilla = self.camera_view(camera_alpha as f32);
         let view = vanilla.map(|view| {
-            if self.shows_panorama() {
+            if self.shows_panorama() || self.studio_freecam.active {
                 view
             } else {
                 self.native_camera_pose_now(camera_alpha as f32, view)
@@ -15000,12 +15073,13 @@ impl Game<'_> {
         } else {
             self.fov_degrees(camera_alpha as f32, camera.to_array())
         };
-        let bob = if title {
+        let camera_effects = fov::camera_effects_enabled(title, self.studio_freecam.active);
+        let bob = if !camera_effects {
             glam::Mat4::IDENTITY
         } else {
             self.bob_matrix(camera_alpha as f32)
         };
-        let spin = if title {
+        let spin = if !camera_effects {
             glam::Mat4::IDENTITY
         } else {
             self.spinning_matrix(camera_alpha as f32)
@@ -15871,8 +15945,6 @@ fn autosave_interval(rate: f32) -> i64 {
     i64::from((rate * 300.0) as i32).max(100)
 }
 
-/// winit's events for a window's game, with any loop: a headless client (#4951) has no
-/// winit loop and calls these from its own.
 /// clouds.png as filled cells (`CloudRenderer.prepare`: alpha 10 or more).
 fn load_clouds(root: &horizon_assets::resource_source::ResourceSource) -> (u32, u32, Vec<bool>) {
     root.read("assets/minecraft/textures/environment/clouds.png")
@@ -15982,6 +16054,7 @@ impl<'a> Game<'a> {
             motion: res.motion(),
             health_resources: res.motion().health.clone(),
             damage_tag_generation: 1,
+            data_map_registries: Vec::new(),
             pack,
             gui,
             instance_groups: Default::default(),
@@ -16149,6 +16222,7 @@ impl<'a> Game<'a> {
             dropped: Default::default(),
             next_entity: 0,
             ticked_entities_through: u32::MAX,
+            contact_drops: 0..0,
             particles,
             pickups: Default::default(),
             sign_edit: None,
@@ -16346,6 +16420,7 @@ impl<'a> Game<'a> {
             mod_screen: None,
             mod_container_viewers: HashMap::new(),
             item_columns: None,
+            pass_mobs: None,
             creative_screen: prepared.creative_screen,
             creative_ignore_text: false,
             control: None,
@@ -16400,6 +16475,9 @@ impl<'a> Game<'a> {
             remote: None,
             studio_replay: None,
             studio_freecam: Default::default(),
+            studio_timeline: Default::default(),
+            studio_topbar: Default::default(),
+            studio_rmb_down: false,
             studio_camera_track_dirty: false,
             studio_replay_previous_camera_type: None,
             studio_replay_standalone: false,
@@ -16432,6 +16510,7 @@ impl<'a> Game<'a> {
             debug_paint: Default::default(),
             debug_refresh: Default::default(),
             gpu_utilization: 0.0,
+            gpu_culling_auto: horizon_client::autotune::GpuCullingAuto::new(),
             rendered_mobs: Default::default(),
             screen_blur_requested: Default::default(),
             spawn_counts: HashMap::new(),
@@ -17146,6 +17225,7 @@ pub fn run_with(
         .select(&std::env::current_dir()?, &early_settings.mods.enabled);
     let mod_phase = mod_api::__private::PhaseOwner::new(mod_api::__private::ModPhase::Packages);
     api_values::install_packages(options.mods.native.packages(), &options.mods.selected);
+    mods::install_registration_data(&vanilla_root)?;
     mod_phase.advance(mod_api::__private::ModPhase::Registration)?;
     if let Err(refused) = crate::game::api_values::install_parts(mod_api::__private::mods()) {
         panic!("Mod parts refused:\n{}", refused.join("\n"));

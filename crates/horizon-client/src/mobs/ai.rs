@@ -729,6 +729,7 @@ pub fn tick(
     if m.alive() {
         super::spear_use::update_using_item(m, w, known_speed, events);
     }
+    super::sulfur_cube::adopt_body(m);
     let sleep_answer = m
         .extra
         .villager
@@ -1176,6 +1177,28 @@ fn axolotl_air_supply(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>) {
         }
     }
 }
+/// `Nautilus.baseTick`: `LivingEntity.baseTick` refills the air of this
+/// water breather, then, unless it has no AI, `Nautilus.handleAirSupply`
+/// takes it back out of water, where the nautilus dries out.
+fn nautilus_air_supply(m: &mut Mob, level: &mut crate::health::DamageLevel<'_>) {
+    const MAX_AIR: i32 = 300;
+    let before = m.air;
+    if m.alive() {
+        m.air = (m.air + 4).min(MAX_AIR);
+    }
+    if m.no_ai {
+        return;
+    }
+    if m.alive() && !m.fluids.in_water {
+        m.air = before - 1;
+        if m.air <= -20 {
+            m.air = 0;
+            m.damage(level, 2.0, Damage::of(DamageKind::DryOut));
+        }
+    } else {
+        m.air = MAX_AIR;
+    }
+}
 /// `Entity.isInWall` (minus the noPhysics early-out, which the caller applies):
 /// visit every cell covered by the thin eye box and ask whether a suffocating
 /// collision shape actually intersects it. Width multiplication is a float.
@@ -1311,7 +1334,9 @@ fn base_tick(
         // superclass Breath/drown path must still process its air.
         if m.species() == Species::Axolotl {
             axolotl_air_supply(m, w, level);
-        } else if m.kind.flags.needs_water && !(m.no_ai && m.species() == Species::Nautilus) {
+        } else if m.species() == Species::Nautilus {
+            nautilus_air_supply(m, level);
+        } else if m.kind.flags.needs_water {
             if !m.fluids.in_water {
                 m.air -= 1;
                 if m.air == -20 {
@@ -1435,7 +1460,7 @@ pub(super) fn in_powder_snow(m: &Mob, w: &MobWorld) -> bool {
 }
 /// `LivingEntity.canFreeze`: not a `#freeze_immune_entity_types` mob and no
 /// worn piece in `#freeze_immune_wearables`.
-fn can_freeze(m: &Mob, w: &MobWorld) -> bool {
+pub fn can_freeze(m: &Mob, w: &MobWorld) -> bool {
     if w.data
         .entity_has("minecraft:freeze_immune_entity_types", &m.kind.id)
     {
@@ -6293,5 +6318,133 @@ mod happy_ghast_ambient_tests {
             },
         );
         assert!(ran, "prepared-data callback did not run");
+    }
+}
+
+#[cfg(test)]
+mod hidden_speed_causal_tests {
+    use super::*;
+    use std::sync::Arc;
+    fn mob() -> Mob {
+        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        kind.id = "minecraft:pig".into();
+        kind.species = Species::Pig;
+        Mob::new(202, Arc::new(kind), Vec3::ZERO, 0.0)
+    }
+    #[test]
+    fn zero_active_never_promotes_and_infinite_fallback_counts_once() {
+        let mut m = mob();
+        m.add_effect("speed", 200, 0);
+        m.add_effect("speed", 0, 1);
+        assert_eq!(m.extra.effect_chains.len(), 1);
+        tick_effects(
+            &mut m,
+            crate::test_resources::server_loop_context(),
+            &mut crate::health::TestLevel::new(0).level(),
+            None,
+        );
+        assert!(m.extra.effects.is_empty() && m.extra.effect_chains.is_empty());
+        m.add_effect("speed", -1, 0);
+        m.add_effect("speed", 2, 1);
+        tick_effects(
+            &mut m,
+            crate::test_resources::server_loop_context(),
+            &mut crate::health::TestLevel::new(0).level(),
+            None,
+        );
+        assert_eq!(
+            m.extra
+                .effects
+                .iter()
+                .map(|e| (e.id, e.duration, e.amplifier))
+                .collect::<Vec<_>>(),
+            [("minecraft:speed", 1, 1)]
+        );
+        assert_eq!(m.extra.effect_chains[0].duration, -1);
+        tick_effects(
+            &mut m,
+            crate::test_resources::server_loop_context(),
+            &mut crate::health::TestLevel::new(0).level(),
+            None,
+        );
+        assert_eq!(
+            m.extra
+                .effects
+                .iter()
+                .map(|e| (e.id, e.duration, e.amplifier))
+                .collect::<Vec<_>>(),
+            [("minecraft:speed", -1, 0)]
+        );
+        tick_effects(
+            &mut m,
+            crate::test_resources::server_loop_context(),
+            &mut crate::health::TestLevel::new(0).level(),
+            None,
+        );
+        assert_eq!(
+            m.extra
+                .effects
+                .iter()
+                .map(|e| (e.id, e.duration, e.amplifier))
+                .collect::<Vec<_>>(),
+            [("minecraft:speed", -1, 0)]
+        );
+        assert!(m.extra.effect_chains.is_empty());
+    }
+    #[test]
+    fn native_cancellation_drops_the_whole_chain_before_promotion() {
+        struct Cancel(std::cell::Cell<usize>);
+        impl crate::mobs::ModEffectTicks for Cancel {
+            fn effect_expired(&self, _: u32, _: usize, _: i32, _: &mut bool) {}
+            fn tick_mod_effect(
+                &self,
+                _: &mut DamageLevel<'_>,
+                _: usize,
+                m: &mut Mob,
+                count: i32,
+                amp: i32,
+            ) -> bool {
+                let (id, mob) = (m.extra.effects[0].id, m.id);
+                assert_eq!((id, mob, amp), ("h202:cancel", 202, 1));
+                assert!(count == 1 || count == 17);
+                self.0.set(self.0.get() + 1);
+                false
+            }
+        }
+        for duration in [1, -1] {
+            let mut m = mob();
+            m.age = 17;
+            m.add_effect("h202:cancel", 200, 0);
+            if duration == -1 {
+                // A loaded subtree can accompany an infinite active instance.
+                m.extra.effects[0].duration = -1;
+                let h = crate::effects::EffectInstance {
+                    id: "h202:cancel",
+                    registry_index: Some(0),
+                    client_blend: (false, false),
+                    duration: 200,
+                    amplifier: 0,
+                    ambient: false,
+                    visible: true,
+                    show_icon: true,
+                    hidden: None,
+                };
+                m.extra.effects[0].amplifier = 1;
+                m.extra.effect_chains.push(h);
+            } else {
+                m.add_effect("h202:cancel", duration, 1);
+            }
+            // This fixture stands in for a registered mod effect at slot zero.
+            m.extra.effects[0].registry_index = Some(0);
+            let cancel = Cancel(std::cell::Cell::new(0));
+            tick_effects(
+                &mut m,
+                crate::test_resources::server_loop_context(),
+                &mut crate::health::TestLevel::new(0).level(),
+                Some(&cancel),
+            );
+            assert_eq!(cancel.0.get(), 1);
+            assert!(m.extra.effects.is_empty() && m.extra.effect_chains.is_empty());
+        }
     }
 }

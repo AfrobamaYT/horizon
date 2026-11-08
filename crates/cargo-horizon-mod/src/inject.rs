@@ -70,6 +70,9 @@ fn request(args: &[String]) -> Result<Request<'_>, String> {
 }
 
 pub fn run(args: &[String]) -> Result<(), String> {
+    if args.first().is_some_and(|command| command == "sync") {
+        return crate::inject_sync::run(&args[1..]);
+    }
     add(Path::new("."), args)
 }
 
