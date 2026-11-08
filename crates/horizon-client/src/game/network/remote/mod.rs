@@ -698,6 +698,9 @@ pub(super) struct Remote {
     listed: std::collections::HashSet<u128>,
     /// `ClientboundLoginPacket.onlineMode`: the player list shows heads.
     pub(super) online_mode: bool,
+    /// `ClientboundLoginPacket.levels`: the server's level keys, which
+    /// `ClientPacketListener.levels()` hands to command suggestions.
+    pub(super) levels: Vec<String>,
     /// Player entities in the level: entity id to profile UUID.
     level_players: HashMap<i32, u128>,
     /// The profile name each player entity was created with (`RemotePlayer.getGameProfile`): it outlives the
@@ -1221,6 +1224,7 @@ impl Game<'_> {
             published_skins: None,
             listed: Default::default(),
             online_mode: false,
+            levels: Vec::new(),
             level_players: HashMap::new(),
             level_player_names: HashMap::new(),
             level_player_textures: HashMap::new(),
@@ -1467,6 +1471,7 @@ impl Game<'_> {
             published_skins: None,
             listed: Default::default(),
             online_mode: false,
+            levels: Vec::new(),
             level_players: HashMap::new(),
             level_player_names: HashMap::new(),
             level_player_textures: HashMap::new(),
@@ -3818,6 +3823,7 @@ impl Game<'_> {
                     r.own_invisible = false;
                     r.own_on_fire = false;
                     r.online_mode = p.online_mode;
+                    r.levels.clone_from(&p.levels);
                     r.enforces_secure_chat = p.enforces_secure_chat;
                     r.entity_id = p.player_id;
                     r.local_entity_silent = false;
