@@ -1465,7 +1465,7 @@ pub(super) fn in_powder_snow(m: &Mob, w: &MobWorld) -> bool {
 }
 /// `LivingEntity.canFreeze`: not a `#freeze_immune_entity_types` mob and no
 /// worn piece in `#freeze_immune_wearables`.
-fn can_freeze(m: &Mob, w: &MobWorld) -> bool {
+pub fn can_freeze(m: &Mob, w: &MobWorld) -> bool {
     if w.data
         .entity_has("minecraft:freeze_immune_entity_types", &m.kind.id)
     {
@@ -3127,6 +3127,12 @@ pub(crate) fn tick_effects(
     // a totem adds its effects to it). An effect a tick appends ticks from
     // the next tick on.
     let first = m.extra.effects.len();
+    let old_boost_amp = m
+        .extra
+        .effects
+        .iter()
+        .find(|e| e.id == "minecraft:health_boost")
+        .map(|e| e.amplifier);
     let mut i = 0;
     while i < m.extra.effects.len() && i < first {
         let (effect, amp) = (m.extra.effects[i].id, m.extra.effects[i].amplifier);
@@ -3263,6 +3269,16 @@ pub(crate) fn tick_effects(
         m.needs_sync |= m.invisible != invisible;
         m.invisible = invisible;
         m.effects_dirty = false;
+    }
+
+    if old_boost_amp
+        != m.extra
+            .effects
+            .iter()
+            .find(|e| e.id == "minecraft:health_boost")
+            .map(|e| e.amplifier)
+    {
+        super::finalize::health_boost_changed(m);
     }
 }
 

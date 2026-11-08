@@ -2,12 +2,14 @@
 //! chunk-generation spawning (`NaturalSpawner`), mob events (attacks,
 //! breeding, conversions, drops), projectiles, player interactions
 //! (feeding, shearing, milking, spawn eggs, throwing) and rendering.
+#[cfg(test)]
+mod mob_dispatch_panic_tests;
 mod pufferfish_player;
 use super::api_values::{TryIntoApi, TryIntoEngine};
 
 use super::level_sounds::LevelSound;
 use super::{
-    Dim, Game, Hand, InteractTarget, dispenser, entity_culling::EntityCullDecision,
+    Dim, Game, Hand, InteractTarget, entity_culling::EntityCullDecision,
     native_mob_draw::NativePlayerRender, native_projectiles::Impact, view_vector,
 };
 use horizon_assets::item_model::DisplayContext;
@@ -64,6 +66,7 @@ pub(super) enum SpawnSite {
     /// Vanilla creates the mob without `finalizeSpawn` (a breeding, a block's or
     /// an item's mob): the game finalizes it as before, and no mod is told.
     Plain,
+    Raw,
 }
 
 /// What a spawn site does with a mob after `finalize_spawn` was heard.
@@ -169,6 +172,8 @@ pub(super) struct Creatures {
     /// The snapshot's buffer between ticks, empty: ~400 bytes a mob, so
     /// thousands of mobs would allocate and free megabytes every tick.
     seen_buf: Vec<Seen>,
+    /// Per-tick scratch retained between creature ticks.
+    event_buf: Vec<MobEvent>,
     /// The mobs whose own tick ran in the last `tick_creature_entities`:
     /// `ServerLevel.tick` ticks only the entities in entity-ticking range, so
     /// what the passes after the loop do for a mob's `aiStep`, goals or brain
@@ -537,6 +542,16 @@ impl Game<'_> {
         let mob = self.create_mob_reason(kind, at, persistent, site)?;
         self.insert_spawned_mob(mob)
     }
+    /// Create a mob of `kind` at a position without `finalizeSpawn`'s rolls,
+    /// matching vanilla `EntityType.create(level, reason)`.
+    pub(super) fn spawn_mob_raw(
+        &mut self,
+        kind: &str,
+        at: [f64; 3],
+        persistent: bool,
+    ) -> Option<u32> {
+        self.spawn_mob(kind, at, persistent, SpawnSite::Raw)
+    }
     /// `SummonCommand` and `SpawnEggItem`: vanilla spawns the mob, but it
     /// never calls `Mob.setPersistenceRequired` for it, so the mob is not
     /// persistent: the despawn rule holds it like any other mob, and only
@@ -580,6 +595,7 @@ impl Game<'_> {
         self.initialize_entity(mod_api::Holder::Entity(mob.id), &kind);
         mob.persistent = persistent;
         match site {
+            SpawnSite::Raw => return Some(mob),
             SpawnSite::Finalizing(reason) => match self.finalize_with(&mut mob, reason, None) {
                 Finalized::Cancelled => return None,
                 Finalized::Skipped => return Some(mob),
@@ -1388,7 +1404,8 @@ impl Game<'_> {
         let level_id = self.dim.id();
         let mut snapshot = std::mem::take(&mut self.creatures.seen_buf);
         snapshot.extend(self.mobs.iter().map(|m| seen(m, uuid)));
-        let mut events = Vec::new();
+        let mut events = std::mem::take(&mut self.creatures.event_buf);
+        events.clear();
         let mut mobs = self.mobs.lift();
         #[cfg(test)]
         super::entity::taken_pass_tests::after_take(self);
@@ -1436,6 +1453,7 @@ impl Game<'_> {
         // The level's random and attachments, lent to the mobs (brain behaviours draw from
         // the random, and a hit's damage hooks get both) and taken back after their ticks.
         let mut lent = horizon_client::health::LentLevel::take(&mut self.world);
+        let mut dispatch_panic = None;
         {
             let mut pushes = horizon_client::mobs::PendingPushes::default();
             let mut keep = Vec::with_capacity(mobs.len());
@@ -1512,13 +1530,24 @@ impl Game<'_> {
                     )
                     && let Some(epoch) = self.native_lifecycle.epoch()
                 {
-                    self.native_mob_despawn(
-                        self.dim.id(),
-                        mod_api::MobRef::new(mod_api::EntityRef::new(epoch, m.id)),
-                        &m.kind.id,
-                        [m.position.x, m.position.y, m.position.z],
-                        &mut m.despawn,
-                    );
+                    // The readonly listener runs while the mob and world views
+                    // are borrowed. Defer its unwind until those views end and
+                    // the normal owned-state restoration below has completed.
+                    if let Err(payload) =
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            self.native_mob_despawn(
+                                self.dim.id(),
+                                mod_api::MobRef::new(mod_api::EntityRef::new(epoch, m.id)),
+                                &m.kind.id,
+                                [m.position.x, m.position.y, m.position.z],
+                                &mut m.despawn,
+                            );
+                        }))
+                    {
+                        m.despawn = mod_api::NativeDespawn::default();
+                        dispatch_panic = Some(payload);
+                        break;
+                    }
                 }
                 // ServerLevel.tick: every loaded entity checks despawning, but
                 // only those in entity-ticking chunks (within the simulation
@@ -1694,10 +1723,12 @@ impl Game<'_> {
                 horizon_client::mobs::apply_brain_events(&mut mobs, &mut level, &mut events, from);
             }
             laps.lap("creature_loop");
-            let mut flags = keep.into_iter();
-            mobs.retain(|_| flags.next().unwrap_or(true));
-            for m in &mut mobs {
-                horizon_client::mobs::apply_mob_pushes(m, &mut pushes);
+            if dispatch_panic.is_none() {
+                let mut flags = keep.into_iter();
+                mobs.retain(|_| flags.next().unwrap_or(true));
+                for m in &mut mobs {
+                    horizon_client::mobs::apply_mob_pushes(m, &mut pushes);
+                }
             }
         }
         lent.give_back(&mut self.world);
@@ -1717,10 +1748,24 @@ impl Game<'_> {
         // as it is instead of being copied into a new one, every mob a tick.
         self.mobs
             .restore(mobs, horizon_client::join_seq::RestoreOrder::SpawnsFirst);
+        if dispatch_panic.is_some() {
+            // These death callbacks have not run, and the borrowed block writes
+            // must still invalidate paths on the next attempted pass.
+            for mob in &dead {
+                died.remove(&mob.id);
+            }
+            self.world
+                .path_writes
+                .get_or_insert_with(Vec::new)
+                .extend(path_writes);
+        }
         self.died = died;
         snapshot.clear();
         self.creatures.seen_buf = snapshot;
         self.creatures.ticked = ticked;
+        if let Some(payload) = dispatch_panic {
+            std::panic::resume_unwind(payload);
+        }
         self.native_tick_post_batch(round);
         // ... and entity event 60 goes out as it is: the poof.
         // 🤖 Agent: the split follows the poof, as `LivingEntity.tickDeath`
@@ -1754,7 +1799,9 @@ impl Game<'_> {
             let bounds = m.bounds();
             self.effects_on_death(&names, bounds, false, Some(m.id), Some(&mut m.random));
         }
-        self.handle_mob_events(events)?;
+        let event_result = self.handle_mob_events_reusable(&mut events);
+        self.creatures.event_buf = events;
+        event_result?;
         self.lan_guest_mob_events(guest_events);
         self.drain_entity_inside();
         laps.lap("creature_events");
@@ -1912,7 +1959,9 @@ impl Game<'_> {
                 _ => self.credit_kill(m),
             }
         }
-        self.score_entity_removed(m.id);
+        // The body keeps its scores until it is removed (`ServerLevel.
+        // EntityCallbacks.onDestroyed` → `Scoreboard.entityRemoved`, run by
+        // `score_destroyed_entities`): LivingEntity.die does not reset them.
         // Raider.die's hero and Villager.tellWitnessesThatIWasMurdered go to
         // the causing entity, not the credited player: a tame wolf's kill is
         // neither its owner's heroism nor a murder by them.
@@ -2338,7 +2387,7 @@ impl Game<'_> {
             source: hurt,
             recently_hit: player_killed,
         };
-        self.drop_death_items(&dying, stacks, 10, |_| dispenser::new_item_motion());
+        self.drop_death_items(&dying, stacks, 10, |_| None);
         if let Some(reward) = experience {
             let amount = self.living_experience_drop(m.id, &kind, player_uuid, reward);
             self.spawn_orbs(pos, amount as u32);
@@ -2352,12 +2401,19 @@ impl Game<'_> {
         dying: &DyingDrops<'_>,
         stacks: Vec<(ItemStack, [f64; 3])>,
         pickup_delay: u32,
-        mut velocity: impl FnMut(&mut Self) -> [f64; 3],
+        mut velocity: impl FnMut(&mut Self) -> Option<[f64; 3]>,
     ) {
         let Some(source) = &dying.source else {
             for (stack, position) in stacks {
-                let motion = velocity(self);
-                self.spawn_item(stack, position, motion, pickup_delay);
+                let random = super::spill::prepare_item_random(None);
+                let motion = velocity(self).unwrap_or(random.velocity);
+                self.add_item_entity_prepared(
+                    stack,
+                    position,
+                    Some(motion),
+                    pickup_delay,
+                    Some(random),
+                );
             }
             return;
         };
@@ -2365,11 +2421,15 @@ impl Game<'_> {
         // collects the drop, before the event sees the list.
         let mut drops: Vec<super::spill::BlockItemDrop> = stacks
             .into_iter()
-            .map(|(stack, position)| super::spill::BlockItemDrop {
-                stack,
-                position,
-                velocity: velocity(self),
-                pickup_delay,
+            .map(|(stack, position)| {
+                let random = super::spill::prepare_item_random(None);
+                super::spill::BlockItemDrop {
+                    random: Some(random),
+                    stack,
+                    position,
+                    velocity: velocity(self).unwrap_or(random.velocity),
+                    pickup_delay,
+                }
             })
             .filter(|drop| drop.stack.count > 0 && &*drop.stack.item != "minecraft:air")
             .collect();
@@ -2386,7 +2446,10 @@ impl Game<'_> {
                 drops: &mut snapshots,
                 cancel: &mut cancel,
             });
-            if let Ok(next) = snapshots.try_into_engine(self.items()) {
+            if let Ok(mut next) = snapshots.try_into_engine(self.items()) {
+                for (drop, original) in next.iter_mut().zip(&drops) {
+                    drop.random = original.random;
+                }
                 drops = next;
             } else {
                 cancel = false;
@@ -2397,7 +2460,13 @@ impl Game<'_> {
         }
         for drop in drops {
             if drop.stack.count > 0 && &*drop.stack.item != "minecraft:air" {
-                self.spawn_item(drop.stack, drop.position, drop.velocity, drop.pickup_delay);
+                self.add_item_entity_prepared(
+                    drop.stack,
+                    drop.position,
+                    Some(drop.velocity),
+                    drop.pickup_delay,
+                    drop.random,
+                );
             }
         }
     }
@@ -2565,7 +2634,7 @@ impl Game<'_> {
         for d in stacks {
             // The ItemEntity constructor's motion, from the entity's own
             // random (not the level's).
-            self.spawn_item(d, at, dispenser::new_item_motion(), 10);
+            self.spawn_item_own(d, at, 10);
         }
         dropped
     }
@@ -2680,10 +2749,13 @@ impl Game<'_> {
         self.native_living_destroy_block(id, kind, pos, state, &mut cancel);
         !cancel
     }
-    pub(super) fn handle_mob_events(&mut self, events: Vec<MobEvent>) -> Result<()> {
-        // The mobs whose `BreakBlock` the game applied in this batch, for `IfBroke`.
+    pub(super) fn handle_mob_events(&mut self, mut events: Vec<MobEvent>) -> Result<()> {
+        self.handle_mob_events_reusable(&mut events)
+    }
+
+    fn handle_mob_events_reusable(&mut self, events: &mut Vec<MobEvent>) -> Result<()> {
         let mut broke: Vec<u32> = Vec::new();
-        for e in events {
+        for e in events.drain(..) {
             match e {
                 MobEvent::BubbleColumnParticles { pos } => {
                     self.bubble_column_particles(BlockPos::new(pos[0], pos[1], pos[2]))
@@ -3321,9 +3393,13 @@ impl Game<'_> {
                         &kind,
                         at,
                         setup.persistent,
-                        SpawnSite::Finalizing(
-                            horizon_client::mobs::spawn_rules::Reason::MobSummoned,
-                        ),
+                        if setup.skip_finalize {
+                            SpawnSite::Raw
+                        } else {
+                            SpawnSite::Finalizing(
+                                horizon_client::mobs::spawn_rules::Reason::MobSummoned,
+                            )
+                        },
                     ) {
                         self.apply_setup(id, &setup);
                     }
@@ -3347,7 +3423,7 @@ impl Game<'_> {
                 }
                 MobEvent::DropStack { mob, stack, at } => {
                     self.native_entity_drop_item(mob, &stack.item, stack.count as i32, at);
-                    self.spawn_item(stack, at, dispenser::new_item_motion(), 10);
+                    self.spawn_item_own(stack, at, 10);
                 }
                 MobEvent::DropItem {
                     mob,
@@ -3356,7 +3432,11 @@ impl Game<'_> {
                     at,
                 } => {
                     self.native_entity_drop_item(mob, &item, count as i32, at);
-                    self.spawn_item(
+                    // The ItemEntity constructor's motion, from the entity's
+                    // own random (not the level's), so spawnAtLocation drops
+                    // (a fox's berries, a panda's held food, a goat's horn)
+                    // land apart.
+                    self.spawn_item_own(
                         ItemStack {
                             item,
                             count,
@@ -3364,11 +3444,6 @@ impl Game<'_> {
                             extra: None,
                         },
                         at,
-                        // The ItemEntity constructor's motion, from the entity's
-                        // own random (not the level's), so spawnAtLocation drops
-                        // (a fox's berries, a panda's held food, a goat's horn)
-                        // land apart.
-                        dispenser::new_item_motion(),
                         10,
                     );
                 }
@@ -3397,7 +3472,7 @@ impl Game<'_> {
                     for stack in stacks {
                         // The ItemEntity constructor's motion, from the
                         // entity's own random (not the level's).
-                        self.spawn_item(stack, at, dispenser::new_item_motion(), 10);
+                        self.spawn_item_own(stack, at, 10);
                     }
                 }
                 // `Level.setBlockAndUpdate`: neighbour and shape updates, so a crop
@@ -3566,6 +3641,27 @@ impl Game<'_> {
                         broke.push(mob);
                     }
                     let old = self.world.block(pos[0], pos[1], pos[2]);
+                    if drop
+                        && self
+                            .res
+                            .facts()
+                            .get(old)
+                            .name
+                            .starts_with("minecraft:infested_")
+                        && self
+                            .ui
+                            .rules
+                            .bool_at(horizon_client::gamerules::vanilla::BLOCK_DROPS)
+                    {
+                        let at = [
+                            f64::from(pos[0]) + 0.5,
+                            f64::from(pos[1]),
+                            f64::from(pos[2]) + 0.5,
+                        ];
+                        if let Some(id) = self.spawn_mob_raw("minecraft:silverfish", at, false) {
+                            self.mob_poof(id);
+                        }
+                    }
                     // Block.spawnDestroyParticles: fire breaks leave nothing.
                     if !self.res.facts().get(old).has_class("BaseFireBlock") {
                         self.level_event_at(2001, pos, old.0 as i32);
@@ -3959,7 +4055,7 @@ impl Game<'_> {
                 f64::from(pos[1]),
                 f64::from(pos[2]) + 0.3,
             ];
-            if let Some(id) = self.spawn_mob("minecraft:turtle", at, true, SpawnSite::Plain)
+            if let Some(id) = self.spawn_mob_raw("minecraft:turtle", at, true)
                 && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
             {
                 m.extra.age = -24000;
@@ -4228,7 +4324,7 @@ impl Game<'_> {
             &kind,
             [p.position.x, p.position.y, p.position.z],
             true,
-            SpawnSite::Plain,
+            SpawnSite::Raw,
         )?;
         'offspring: {
             let child = &mut child;
@@ -6175,8 +6271,7 @@ impl Game<'_> {
                         1
                     };
                     for _ in 0..n {
-                        if let Some(id) =
-                            self.spawn_mob("minecraft:chicken", atp, true, SpawnSite::Plain)
+                        if let Some(id) = self.spawn_mob_raw("minecraft:chicken", atp, true)
                             && let Some(c) = self.mobs.iter_mut().find(|m| m.id == id)
                         {
                             c.extra.age = -24000;
@@ -6254,12 +6349,7 @@ impl Game<'_> {
                         && let Some(pl) = self.player.as_ref()
                     {
                         let from = pl.position;
-                        self.spawn_mob(
-                            "minecraft:endermite",
-                            [from.x, from.y, from.z],
-                            false,
-                            SpawnSite::Plain,
-                        );
+                        self.spawn_mob_raw("minecraft:endermite", [from.x, from.y, from.z], false);
                     }
                     // ServerPlayer.teleport: removeVehicle before the placement.
                     self.stop_riding();
@@ -7568,26 +7658,32 @@ impl Game<'_> {
             for _ in 0..stack.count {
                 // `spawnAtLocation(stack, 1.0)`: an ItemEntity a block above
                 // the feet that starts with the constructor's own motion, and
-                // `setDefaultPickUpDelay`. Sheep.shear adds its spread on top.
-                let mut v = dispenser::new_item_motion();
+                // `setDefaultPickUpDelay`. Sheep.shear adds its spread on top;
+                // MushroomCow.shear builds the entity by hand instead, so its
+                // mushrooms keep the constructor's motion and no pickup delay.
+                let mut spread = [0.0; 3];
                 if wool {
-                    v[0] += (self.world.random.next_float() - self.world.random.next_float())
+                    spread[0] = (self.world.random.next_float() - self.world.random.next_float())
                         as f64
                         * 0.1;
-                    v[1] += self.world.random.next_float() as f64 * 0.05;
-                    v[2] += (self.world.random.next_float() - self.world.random.next_float())
+                    spread[1] = self.world.random.next_float() as f64 * 0.05;
+                    spread[2] = (self.world.random.next_float() - self.world.random.next_float())
                         as f64
                         * 0.1;
                 }
-                self.spawn_item(
+                self.spawn_item_own(
                     ItemStack {
                         count: 1,
                         ..stack.clone()
                     },
                     [feet[0], feet[1] + 1.0, feet[2]],
-                    v,
                     if wool { 10 } else { 0 },
                 );
+                if let Some(e) = self.just_spawned_item() {
+                    e.velocity = e
+                        .velocity
+                        .add_vector(Vec3::new(spread[0], spread[1], spread[2]));
+                }
             }
         }
         Ok(true)
@@ -7791,28 +7887,14 @@ impl Game<'_> {
         );
         let (species, variant, color) =
             (parent.species(), parent.extra.variant, parent.extra.color);
-        let mob_type = parent.kind.clone();
         let target = self.mob_entity(&self.mobs[index]);
-        let id = if species == Species::Piglin {
-            // SpawnEggItem.spawnOffspringFromSpawnEgg: a non-AgeableMob is
-            // constructed, then setBaby(true), without finalizeSpawn. Giving
-            // it adult spawn gear first leaves the baby holding a weapon.
-            self.next_entity += 1;
-            let id = self.next_entity;
-            self.mobs
-                .push(Mob::new(id, mob_type, Vec3::new(at[0], at[1], at[2]), 0.0));
-            id
-        } else {
-            let Some(id) = self.spawn_mob_spawned(&kind, at, SpawnSite::Plain) else {
-                return false;
-            };
-            id
+        // SpawnEggItem.spawnOffspringFromSpawnEgg: `type.create(level, SPAWN_ITEM_USE)`
+        // creates the baby without finalizeSpawn.
+        let Some(id) = self.spawn_mob_raw(&kind, at, false) else {
+            return false;
         };
         if let Some(child) = self.mobs.iter_mut().find(|m| m.id == id) {
             horizon_client::mobs::finalize::spawn_egg_offspring(child, species, variant, color);
-        }
-        if species == Species::Piglin {
-            self.native_mobs_joined(self.mobs.len() - 1, false);
         }
         // `Mob.checkAndHandleImportantInteractions` then calls
         // `onOffspringSpawnedFromEgg`: `Fox`'s makes the baby trust the player
@@ -8842,10 +8924,21 @@ pub(super) fn damage_type(kind: horizon_client::mobs::DamageKind, caused: bool) 
         K::WitherSkull => "minecraft:wither_skull",
     }
 }
-/// A Horizon item stack as a loot stack (id, count, damage, enchantments).
-/// The killer's gear: its enchantments are the ones gameplay sees, as
-/// `EnchantmentHelper.getEnchantmentLevel` reads them for Looting.
+/// A Horizon item stack as a loot stack (id, count, damage, enchantments,
+/// and its custom data as SNBT for `minecraft:custom_data` predicates).
 fn to_loot(stack: &ItemStack) -> horizon_world::loot::LootStack {
+    let components = stack
+        .custom_data()
+        .map(|data| {
+            let snbt =
+                horizon_world::snbt_text::to_snbt(&horizon_core::nbt::Tag::Compound(data.clone()));
+            (
+                "minecraft:custom_data".to_owned(),
+                serde_json::Value::String(snbt),
+            )
+        })
+        .into_iter()
+        .collect();
     horizon_world::loot::LootStack {
         item: stack.item.to_string(),
         count: stack.count as i32,
@@ -8861,7 +8954,7 @@ fn to_loot(stack: &ItemStack) -> horizon_world::loot::LootStack {
         ominous_amplifier: None,
         stew_effects: Vec::new(),
         names: Vec::new(),
-        components: Vec::new(),
+        components,
     }
 }
 /// A generated loot stack as a Horizon item stack.

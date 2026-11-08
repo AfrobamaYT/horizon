@@ -795,8 +795,13 @@ impl Dragon {
             if damage <= self.last_hurt {
                 return Hurt::Landed { full: false };
             }
-            container.record_reduction(Reduction::Invulnerability, self.last_hurt);
-            damage - self.last_hurt
+            container.reduce(
+                Reduction::Invulnerability,
+                damage,
+                self.last_hurt,
+                damage - self.last_hurt,
+                true,
+            )
         } else {
             damage
         };
@@ -4676,7 +4681,7 @@ impl Game<'_> {
                 self.finalize_spawn_at("minecraft:ender_dragon", at, reason, None)
                     .0
             }
-            SpawnSite::Plain => Finalized::Done,
+            SpawnSite::Plain | SpawnSite::Raw => Finalized::Done,
         };
         match finalized {
             Finalized::Cancelled => return None,

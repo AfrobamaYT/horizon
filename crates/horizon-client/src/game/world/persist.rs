@@ -569,6 +569,16 @@ impl Game<'_> {
         for (key, tags) in loaded {
             let count = tags.len();
             for mut tag in tags {
+                // A world older builds named by the offline profile names the player that
+                // way in its entities too: migrate them as they load, so the next save of
+                // the chunk keeps the account's UUID (`playerdata::migrate_owner`).
+                if let Some((old, new)) = self.owner_migration {
+                    entity_nbt::migrate_player_uuid(
+                        &mut tag,
+                        horizon_client::lan::playerdata::uuid_ints(old),
+                        horizon_client::lan::playerdata::uuid_ints(new),
+                    );
+                }
                 // PersistentEntitySectionManager.addEntity's `loaded`.
                 let from_disk = !take_fresh(&mut tag);
                 // An End gateway's traveller never left the level: nothing joins.
@@ -678,9 +688,14 @@ impl Game<'_> {
     /// A saved dropped item.
     pub(super) fn load_item(&mut self, tag: Tag, uuid: Option<[i32; 4]>) {
         self.next_entity += 1;
-        let bob = self.world.random.next_float() * std::f32::consts::PI * 2.0;
+        // `ItemEntity(EntityType, Level)` before the load: the item's own random
+        // makes its UUID (kept unless the tag has one) and bobOffs, not the level's.
+        // Its yaw, the next draw, is always replaced by the saved rotation.
+        let mut own = random_source::entity();
+        let fresh = horizon_client::save::insecure_uuid(&mut own);
+        let bob = own.next_float() * std::f32::consts::PI * 2.0;
         if let Some(mut e) = entity_nbt::item_entity_from_nbt(&tag, self.next_entity, bob) {
-            self.remember(e.id, uuid, tag);
+            self.remember(e.id, Some(uuid.unwrap_or(fresh)), tag);
             self.bind_saved_entity_attachments(e.id, &mut e.attachment_lifetime);
             self.dropped.push(e);
         }
@@ -894,6 +909,9 @@ impl Game<'_> {
                 velocity: entity_nbt::motion(&tag),
                 fuse,
                 on_ground: matches!(tag.get("OnGround"), Some(Tag::Byte(1))),
+                fall_distance: horizon_client::save::float(tag.get("fall_distance")).unwrap_or(0.0),
+                stuck: Vec3::ZERO,
+                in_water: false,
                 owner: None,
                 guest: None,
                 // PrimedTnt.readAdditionalSaveData: 4 by default,
@@ -1982,9 +2000,9 @@ impl Game<'_> {
         }
     }
     /// `ServerLevel.EntityCallbacks.onDestroyed` → `Scoreboard.entityRemoved`
-    /// for every kind of entity, not only the mobs `score_entity_removed`
-    /// covers as they die: an item picked up or killed, an expired cloud, a
-    /// discarded projectile leaves the board and its team. Unloaded and
+    /// for every kind of entity: a mob's body once it is removed, an item
+    /// picked up or killed, an expired cloud, a discarded projectile leaves
+    /// the board and its team. Unloaded and
     /// travelling entities leave `persist.uuids` first (`forget_entity`,
     /// `detach_entity`), so they keep their scores, as vanilla's do. Once a
     /// tick, so a command in the same tick still sees them; nothing to do
