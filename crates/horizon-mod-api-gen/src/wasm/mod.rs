@@ -23,6 +23,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "DrawContext",
     "BlockEntityDrawContext",
     "WorldDrawContext",
+    "CameraDrawContext",
     "LevelHost",
     "LevelRandomHost",
     "LevelTicksHost",
@@ -115,6 +116,7 @@ const EXPORTS: &[&str] = &[
     "BlockEntityPart",
     "ItemPart",
     "MenuPart",
+    "FluidPart",
     "ServerReloadListener",
     "ClientReloadListener",
     "BlockTintSource",
@@ -384,6 +386,7 @@ pub(super) const SUBSCRIBED: &[(&str, &str)] = &[
     ("BlockEntityPart", "block_entity_subscribed"),
     ("ItemPart", "item_subscribed"),
     ("MenuPart", "menu_subscribed"),
+    ("FluidPart", "fluid_subscribed"),
 ];
 
 /// One trait method as it crosses.
@@ -940,6 +943,23 @@ mod tests {
         });
         with_interface("hooks", |hooks, _| {
             assert!(hooks.functions.contains_key("submit-custom-geometry"));
+        });
+    }
+
+    #[test]
+    fn dimension_transition_screens_have_generated_wasm_bindings() {
+        with_interface("hooks", |hooks, unbound| {
+            for name in [
+                "register-dimension-transition-screen",
+                "dimension-transition-screen-draw",
+            ] {
+                assert!(hooks.functions.contains_key(name));
+            }
+            assert!(
+                !unbound
+                    .iter()
+                    .any(|name| name.contains("dimension_transition_screen"))
+            );
         });
     }
 

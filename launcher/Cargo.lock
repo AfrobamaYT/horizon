@@ -2844,6 +2844,8 @@ dependencies = [
 name = "horizon-mod-package"
 version = "0.1.0"
 dependencies = [
+ "cap-std",
+ "flate2",
  "horizon-core",
  "horizon-shader-api",
  "log",
@@ -2853,6 +2855,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tar",
  "toml 1.1.8+spec-1.1.0",
  "zip",
 ]
@@ -2863,6 +2866,7 @@ version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
+ "serde",
  "syn 2.0.119",
 ]
 
@@ -2980,6 +2984,8 @@ version = "0.1.0"
 name = "horizon-world"
 version = "0.1.0"
 dependencies = [
+ "cap-fs-ext",
+ "cap-std",
  "flate2",
  "horizon-assets",
  "horizon-core",
@@ -2988,6 +2994,7 @@ dependencies = [
  "log",
  "lz4_flex",
  "postcard",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",

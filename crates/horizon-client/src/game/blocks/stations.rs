@@ -33,6 +33,7 @@ use horizon_client::{
     enchant::Enchantments,
     hud::{HudBatch, rgba},
     items::ItemStack,
+    random_source,
     stations::{self, AnvilResult, EnchantOffers},
     text::Text,
 };
@@ -395,9 +396,7 @@ impl Station {
             beacon_levels: None,
             loom: Default::default(),
             cycling: Default::default(),
-            book: EnchantBook::new(LegacyRandom::new(
-                horizon_client::sound_engine::unique_seed(),
-            )),
+            book: EnchantBook::new(random_source::create()),
         }
     }
     pub(super) fn new_kind(kind: Kind, pos: [i32; 3]) -> Self {
@@ -768,7 +767,7 @@ impl Game<'_> {
                 let name = self.anvil_item_name(&s);
                 let hover = s.inputs[0]
                     .as_ref()
-                    .map(|i| stations::hover_name(&|id| self.pack.names.display_item(id), i))
+                    .map(|i| stations::hover_name(&self.pack.names, i))
                     .unwrap_or_default();
                 s.anvil = stations::anvil_result(
                     &data.enchantments,
@@ -1259,7 +1258,7 @@ impl Game<'_> {
             s.anvil_last = s.inputs[0].clone();
             s.name = s.inputs[0]
                 .as_ref()
-                .map(|i| stations::hover_name(&|id| self.pack.names.display_item(id), i))
+                .map(|i| stations::hover_name(&self.pack.names, i))
                 .unwrap_or_default();
             let name = s.name.clone();
             s.rename.set_value(&name);
@@ -1646,8 +1645,8 @@ impl Game<'_> {
                 let named = self
                     .station
                     .as_ref()
-                    .and_then(|s| self.world.block_names.get(&(s.pos[0], s.pos[1], s.pos[2])));
-                Text::literal(named.cloned().unwrap_or(default)).resolve_legacy()
+                    .and_then(|s| self.block_name_plain((s.pos[0], s.pos[1], s.pos[2])));
+                Text::literal(named.unwrap_or(default)).resolve_legacy()
             });
             super::screen_info::name_container(|| title.plain());
             let tw = atlas.font.width_text(&title);
@@ -2199,11 +2198,17 @@ impl Game<'_> {
             _ => u32::MAX,
         }
     }
-    /// `ItemStack.getHoverName`: the custom name, a written book's title, the
-    /// item name component, else the item's or potion's name.
+    /// `ItemStack.getHoverName`: the custom name, a potion's or tipped
+    /// arrow's contents, a written book's title, the item name component,
+    /// else the item's name.
     fn stack_hover_name(&self, stack: &ItemStack) -> String {
         if let Some(n) = stack.custom_name() {
             n.to_owned()
+        } else if let Some(key) = brewing::contents_name_key(stack) {
+            self.pack
+                .names
+                .display_get(&key)
+                .unwrap_or_else(|| self.pack.names.display_item(&stack.item))
         } else if let Some(title) = stack
             .data()
             .and_then(|d| d.written.as_ref())
@@ -2215,15 +2220,6 @@ impl Game<'_> {
             n
         } else if stack.data().is_some_and(|d| d.ominous_banner) {
             self.translate_with_fallback("block.minecraft.ominous_banner", "Ominous Banner")
-        } else if stack.data().and_then(|d| d.potion.as_ref()).is_some()
-            || stack.item.ends_with("potion")
-            || &*stack.item == "minecraft:tipped_arrow"
-        {
-            let key = brewing::potion_name_key(&stack.item, stack.potion());
-            self.pack
-                .names
-                .display_get(&key)
-                .unwrap_or_else(|| self.pack.names.display_item(&stack.item))
         } else if let Some(head) = horizon_client::item_tooltip::player_head_name(stack) {
             head.title(&|key| self.pack.names.display_get(key))
         } else {
@@ -2240,9 +2236,41 @@ impl Game<'_> {
         nested: bool,
         creative: bool,
     ) -> Vec<(horizon_client::text::Text, u32)> {
+        self.build_stack_tooltip_lines(
+            stack,
+            nested,
+            creative,
+            self.options_advanced_tooltips(),
+            true,
+        )
+    }
+
+    pub(in crate::game) fn item_resource_tooltip(
+        &self,
+        stack: &ItemStack,
+        advanced: bool,
+        creative: bool,
+    ) -> Option<Vec<mod_api::TooltipElement>> {
+        self.items().get(&stack.item)?;
+        Some(
+            self.build_stack_tooltip_lines(stack, false, creative, advanced, false)
+                .into_iter()
+                .map(|(text, color)| mod_api::TooltipElement::Text(text, color))
+                .collect(),
+        )
+    }
+
+    fn build_stack_tooltip_lines(
+        &self,
+        stack: &ItemStack,
+        nested: bool,
+        creative: bool,
+        advanced: bool,
+        mod_callbacks: bool,
+    ) -> Vec<(horizon_client::text::Text, u32)> {
         let e: &Enchantments = self.active_enchantment_definitions();
         let color = self.rarity_color(stack);
-        let advanced = !nested && self.options_advanced_tooltips();
+        let advanced = !nested && advanced;
         let display = mod_api::item_tooltip::TooltipDisplay::for_stack(stack);
         let mut lines = Vec::new();
         // `getTooltipLines`' own branch: a tooltip the stack doesn't hide.
@@ -2290,13 +2318,17 @@ impl Game<'_> {
         }
         // A mod item's own `Item.appendHoverText`, its parts' lines, before the components; a
         // tooltip the stack hides, and a crossbow's projectile, stay without them.
-        if !nested && !lines.is_empty() {
+        if mod_callbacks && !nested && !lines.is_empty() {
             let mut own = Vec::new();
             self.native_tooltip(stack, &mut own);
             lines.extend(own);
         }
         // The component details, marked for the placements of the registered appenders.
-        let appenders = mod_api::__private::tooltip_appenders();
+        let appenders = if mod_callbacks {
+            mod_api::__private::tooltip_appenders()
+        } else {
+            &[]
+        };
         let mut details = horizon_client::item_tooltip::DetailMarks::new(!appenders.is_empty());
         details.start("minecraft:tropical_fish/pattern", lines.len());
         // TropicalFish.Pattern.addToTooltip.
@@ -2393,7 +2425,9 @@ impl Game<'_> {
                     )
                 };
                 lines.push((line, u32::MAX));
-                for (text, c) in self.stack_tooltip_lines(projectile, true, false) {
+                for (text, c) in
+                    self.build_stack_tooltip_lines(projectile, true, false, false, mod_callbacks)
+                {
                     // `literal("  ").append(line).withStyle(GRAY)`: the line's
                     // own colours win over the gray.
                     let rgb = if c == u32::MAX {
@@ -2447,7 +2481,10 @@ impl Game<'_> {
         }
         details.start("minecraft:trim", lines.len());
         if display.shows("minecraft:trim")
-            && let Some((material, pattern)) = stack.data().and_then(|d| d.trim.clone())
+            && let Some((material, pattern)) = stack
+                .data()
+                .and_then(|d| d.trim.as_ref())
+                .and_then(horizon_client::item_data::trim::named)
         {
             push(
                 &mut lines,
@@ -2456,10 +2493,10 @@ impl Game<'_> {
                 rgba(170, 170, 170, 255),
             );
             let short = |s: &str| s.trim_start_matches("minecraft:").to_owned();
-            let p = translate(&format!("trim_pattern.minecraft.{}", short(&pattern)))
-                .unwrap_or_else(|| short(&pattern));
-            let m = translate(&format!("trim_material.minecraft.{}", short(&material)))
-                .unwrap_or_else(|| short(&material));
+            let p = translate(&format!("trim_pattern.minecraft.{}", short(pattern)))
+                .unwrap_or_else(|| short(pattern));
+            let m = translate(&format!("trim_material.minecraft.{}", short(material)))
+                .unwrap_or_else(|| short(material));
             push(&mut lines, format!(" {p}"), rgba(170, 170, 170, 255));
             push(&mut lines, format!(" {m}"), rgba(170, 170, 170, 255));
         }
@@ -2552,12 +2589,18 @@ impl Game<'_> {
                 self,
                 (!nested).then(|| (self.own_uuid(), self.own_entity_id())),
             );
+            let listener: &dyn horizon_client::item_tooltip::AttributeTooltipListener =
+                if mod_callbacks {
+                    &listener
+                } else {
+                    &horizon_client::item_tooltip::NoAttributeListener
+                };
             let (modifier_lines, added) = horizon_client::item_tooltip::attribute_tooltip(
                 stack,
                 &modifiers,
                 &context,
                 shown_modifiers,
-                &listener,
+                listener,
                 &translate,
             );
             for (text, c) in modifier_lines {
@@ -2633,6 +2676,26 @@ impl Game<'_> {
                     push(&mut lines, format!(" {desc2}"), rgba(85, 85, 255, 255));
                 }
             }
+        }
+        // AdventureModePredicate.addToTooltip under its header, for
+        // can_break and then can_place_on. A block tag's blocks are listed by
+        // id, as this side keeps tags unordered.
+        for (text, c) in horizon_client::item_tooltip::adventure_lines(
+            stack,
+            &display,
+            &|tag| {
+                let mut blocks: Vec<String> = self
+                    .items()
+                    .block_tags
+                    .get(tag)
+                    .map(|s| s.iter().cloned().collect())
+                    .unwrap_or_default();
+                blocks.sort();
+                blocks
+            },
+            &translate,
+        ) {
+            push(&mut lines, text, c);
         }
         details.end(lines.len());
         if display.shows("minecraft:damage")
@@ -2727,7 +2790,10 @@ impl Game<'_> {
             );
         }
         // ItemTooltipEvent, once the tooltip vanilla shows is complete.
-        if shown && let Ok(stack) = stack.try_into_api() {
+        if mod_callbacks
+            && shown
+            && let Ok(stack) = stack.try_into_api()
+        {
             self.native_item_tooltip(mod_api::__private::ItemTooltipCall {
                 player: self.own_uuid(),
                 player_entity_id: self.own_entity_id(),
@@ -2762,7 +2828,7 @@ impl Game<'_> {
         })
     }
     /// Options.advancedItemTooltips (F3+H).
-    fn options_advanced_tooltips(&self) -> bool {
+    pub(super) fn options_advanced_tooltips(&self) -> bool {
         self.settings.file.bool("advancedItemTooltips")
     }
     /// `TooltipRenderUtil`: dark box with the purple border, first line spaced.
@@ -3420,6 +3486,34 @@ mod tests {
             });
         });
     }
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn resource_tooltip_uses_inventory_lines_and_explicit_flags() {
+        use mod_api::{ItemResource, TooltipElement};
+
+        crate::game::native_entity_refs::tests::with_client_game(|game| {
+            let stack = super::ItemStack::new("minecraft:iron_sword", 1);
+            let resource = ItemResource::of(&crate::game::api_values::test_snapshot(&stack));
+            let inventory: Vec<_> = game
+                .stack_tooltip_lines(&stack, false, false)
+                .into_iter()
+                .map(|(text, color)| TooltipElement::Text(text, color))
+                .collect();
+            let advanced = game.options_advanced_tooltips();
+            assert!(resource.tooltip(game, advanced, false).unwrap() == inventory);
+            for advanced in [false, true] {
+                let lines = resource.tooltip(game, advanced, false).unwrap();
+                assert_eq!(
+                    lines.iter().any(|line| matches!(
+                        line,
+                        TooltipElement::Text(text, _) if text.plain() == "minecraft:iron_sword"
+                    )),
+                    advanced
+                );
+            }
+        });
+    }
+
     /// A stick's part adds its line where `Item.appendHoverText` does, after the name and before
     /// the advanced id line; `item_tooltip` (`ItemTooltipEvent`) then gets the whole tooltip, with
     /// its flags, and its changes are what shows. A stick whose tooltip is hidden asks neither.

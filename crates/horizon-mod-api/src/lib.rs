@@ -66,15 +66,16 @@ pub enum GameRuleError {
     Duplicate,
 }
 
-/// Why an entity type's attribute declaration was refused
-/// ([`Registrar::declare_entity_attributes`](EntityAttributesRegistrar::declare_entity_attributes)).
+/// Why an entity type's attribute declaration or addition was refused
+/// ([`Registrar::declare_entity_attributes`](EntityAttributesRegistrar::declare_entity_attributes),
+/// [`Registrar::modify_entity_attributes`](EntityAttributesRegistrar::modify_entity_attributes)).
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum EntityAttributeError {
-    /// The entity type's id is invalid, empty, or in a namespace the declaring
-    /// mod does not own.
+    /// The entity type's id is invalid or empty, or, for a declared set, in a
+    /// namespace the declaring mod does not own.
     InvalidId,
-    /// The set declares the same attribute twice.
+    /// The set names the same attribute twice.
     DuplicateAttribute,
     /// A base value is not finite.
     NotFinite,
@@ -303,6 +304,20 @@ impl<'a> ModBlockEntityView<'a> {
     /// Id.
     pub fn id(&self) -> &str {
         self.entity.id()
+    }
+    /// Replace the one-shot fields the block's next change sends clients; an empty compound
+    /// clears them. They go over what `block_entity_update_tag` gives (or alone, without
+    /// one) in the single packet every current viewer gets, and are gone. Call
+    /// `block_entity_sync` to send them: until a change reaches a viewer they wait, however
+    /// many chunks are sent, and they end with the block entity. They are for a one-shot
+    /// effect, not state: nothing saves, clones or compares them, and the revision stays.
+    /// A client merges them into its copy's `nbt` as any update field, where they stay until
+    /// sent again: a changing value, such as a counter, tells one effect from the next.
+    /// Fields that would take the packet past what a client reads (2 MiB of network NBT) are
+    /// dropped with a warning, and the change goes without them. A transaction that rolls the
+    /// block entity back also drops a batch queued before it.
+    pub fn set_client_update_fields(&mut self, fields: Compound) {
+        self.entity.client_update_fields = Some(fields);
     }
 }
 impl std::ops::Deref for ModBlockEntityView<'_> {
@@ -566,6 +581,29 @@ pub struct ClientChatOptions {
 pub struct ClientAudioOptions {
     /// Master volume, 0 to 1.
     pub master_volume: f32,
+}
+
+/// Borrowed humanoid inputs at arm-pose extraction, shared by players and mobs.
+/// Poses are in main/off-hand order, before listeners answer; item declarations
+/// are already included. Model-specific animation may subsequently adjust the arms.
+// exhaustive: the engine builds this read-only view
+pub struct HumanoidRenderState<'a> {
+    /// Stack held in the main hand; empty stacks are absent.
+    pub main_hand: Option<&'a ItemStack>,
+    /// Stack held in the off hand; empty stacks are absent.
+    pub off_hand: Option<&'a ItemStack>,
+    /// Whether the entity's main arm is its left arm.
+    pub main_arm_left: bool,
+    /// Hand currently using an item, absent when no item is in use.
+    pub use_hand: Option<Hand>,
+    /// Elapsed item-use ticks at extraction.
+    pub ticks_using_item: i32,
+    /// Animation of the item currently being used.
+    pub use_animation: UseAnimation,
+    /// Selected main-hand pose before any hook answers.
+    pub main_arm_pose: ArmPose,
+    /// Selected off-hand pose before any hook answers.
+    pub off_arm_pose: ArmPose,
 }
 
 /// Context and adjustable pose for a first-person hand render.
@@ -2238,6 +2276,26 @@ impl ProjectileRef {
     }
 }
 
+/// A cast fishing hook of the open world (vanilla's `FishingHook`), narrowed
+/// from an entity with `host.fishing_hook(entity)`. It does not narrow to a
+/// [`ProjectileRef`]: a hook's owner is always the player who cast it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
+pub struct FishingHookRef(EntityRef);
+
+impl FishingHookRef {
+    /// Create a handle for the game.
+    // hidden: a game-side helper, not part of the mod surface
+    #[doc(hidden)]
+    pub fn new(entity: EntityRef) -> Self {
+        Self(entity)
+    }
+    /// The same entity as an [`EntityRef`].
+    pub fn entity(self) -> EntityRef {
+        self.0
+    }
+}
+
 /// A villager or wandering trader (vanilla's `AbstractVillager`, a `Merchant`),
 /// narrowed from an entity with `host.merchant(entity)`. If a villager's saved
 /// profession is unresolved, offers read empty and merchant mutations are
@@ -2544,6 +2602,20 @@ impl std::hash::Hash for GlobalPos {
     }
 }
 
+/// A player's respawn point (`ServerPlayer.RespawnConfig`): the block they come back at, the
+/// way they face there and whether it is forced (`/spawnpoint`) rather than a bed or anchor that
+/// must still be there.
+#[derive(Clone, Debug, PartialEq)]
+// exhaustive: a mod builds it with a literal; the game reads and writes the same three values
+pub struct PlayerRespawnConfig {
+    /// The dimension and block.
+    pub position: GlobalPos,
+    /// The yaw in degrees (`Mth.wrapDegrees`, -180 to 180 when read).
+    pub yaw: f32,
+    /// Whether the point holds without its block (`/spawnpoint`).
+    pub forced: bool,
+}
+
 /// A level of the open world, by its dimension (`minecraft:the_nether`).
 /// `Host::level` makes one, and `entity.level(host)` gives an entity's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -2664,6 +2736,31 @@ impl ChunkRef {
 pub enum ChunkStatus {
     /// A full chunk in a level's live world.
     Full,
+}
+
+/// A chunk's ticket level (`ChunkLevel`), as the server holds it: how much of
+/// the level the chunk is kept alive for. Lower is more active. Horizon keeps
+/// no level for a chunk partway through generating, so past `FULL` a chunk is
+/// `Unloaded`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum ChunkTicketLevel {
+    /// A level `ChunkLevel` knows, `FULL_CHUNK_LEVEL` (33) or lower: 31 and
+    /// lower is entity ticking (`ENTITY_TICKING_LEVEL`), 32 is block ticking
+    /// (`BLOCK_TICKING_LEVEL`) and 33 is loaded without ticking.
+    Loaded(u8),
+    /// No ticket keeps the chunk loaded.
+    Unloaded,
+}
+
+impl ChunkTicketLevel {
+    /// The `ChunkLevel` number, or `None` for an unloaded chunk.
+    pub fn level(self) -> Option<u8> {
+        match self {
+            Self::Loaded(level) => Some(level),
+            Self::Unloaded => None,
+        }
+    }
 }
 
 /// A kind of light (`LightLayer`).
@@ -2868,6 +2965,46 @@ pub enum NativeSupportType {
     Rigid,
 }
 
+/// What made a `tags_updated` notice fire (`TagsUpdatedEvent`'s two subclasses).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TagsUpdateCause {
+    /// `TagsUpdatedEvent.ServerDataLoad`: a server built its data tables.
+    ServerDataLoad {
+        /// False on a world's first open, true after `/reload`.
+        reload: bool,
+    },
+    /// `TagsUpdatedEvent.ClientPacketReceived`: a client applied the tags its server sent.
+    ClientPacketReceived {
+        /// The server is the single player window's own.
+        integrated_server: bool,
+    },
+}
+
+impl TagsUpdateCause {
+    /// `TagsUpdatedEvent.shouldUpdateStaticData`: whether to update static data, which single
+    /// player's two threads share, so that there only the server side updates it.
+    pub fn should_update_static_data(self) -> bool {
+        !matches!(
+            self,
+            Self::ClientPacketReceived {
+                integrated_server: true
+            }
+        )
+    }
+}
+
+/// What made a `data_maps_updated` notice fire (`DataMapsUpdatedEvent.UpdateCause`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DataMapsUpdateCause {
+    /// `SERVER_RELOAD`: the server merged its data maps, on a world's first open or after
+    /// `/reload`.
+    ServerReload,
+    /// `CLIENT_SYNC`: a client applied the data maps its server sent.
+    ClientSync,
+}
+
 /// Why a mod removes an entity (`Entity.RemovalReason`): the two reasons
 /// that destroy it. The unloading and dimension-change reasons belong to the
 /// game.
@@ -2989,6 +3126,68 @@ pub enum NativeSpawnCheck {
     Fail,
 }
 
+/// Where a mod entity type stands to spawn (`SpawnPlacementType`):
+/// `SpawnPlacements.isSpawnPositionOk`'s first check.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NativeSpawnPlacementType {
+    /// `ON_GROUND`: a block that is valid to spawn on below, free room at the feet and the head.
+    OnGround,
+    /// `IN_WATER`: a water block, with no redstone conductor above.
+    InWater,
+    /// `IN_LAVA`: a lava block.
+    InLava,
+    /// `NO_RESTRICTIONS`: anywhere.
+    NoRestrictions,
+}
+
+/// How bright a spot a mod entity type needs to spawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NativeSpawnLight {
+    /// Any light level.
+    Any,
+    /// Dark enough for a monster (`Monster.isDarkEnoughToSpawn`: sky light, block light
+    /// and the dimension's monster light test, which draw from the level's random).
+    Dark,
+    /// Bright enough for an animal (`Animal.isBrightEnoughToSpawn`: light above 8).
+    Bright,
+}
+
+/// A mod entity type's spawn rule, declared with
+/// [`Registrar::declare_spawn_placement`](SpawnPlacementsRegistrar::declare_spawn_placement):
+/// the arguments of NeoForge's `RegisterSpawnPlacementsEvent.register` as data, so one
+/// rule serves native and wasm mods. Every field must hold for a spawn to pass; a trial
+/// spawner ignores `light`, as for vanilla types.
+#[derive(Clone, Debug, PartialEq)]
+// exhaustive: a mod builds it with a literal; the game reads it
+pub struct SpawnPlacementRule {
+    /// Where the type stands (`SpawnPlacementType`).
+    pub placement: NativeSpawnPlacementType,
+    /// The heightmap natural spawning and chunk generation find the surface with.
+    pub heightmap: NativeHeightmap,
+    /// A block tag (`minecraft:animals_spawnable_on`, no `#`) the block below must be in.
+    pub spawnable_on: Option<String>,
+    /// How bright the spot must be.
+    pub light: NativeSpawnLight,
+    /// A biome tag (no `#`) the spot's biome must be in.
+    pub biome_tag: Option<String>,
+}
+
+/// Why a spawn placement declaration was refused
+/// ([`Registrar::declare_spawn_placement`](SpawnPlacementsRegistrar::declare_spawn_placement)).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SpawnPlacementError {
+    /// The entity type's id is invalid, empty, or in a namespace the declaring
+    /// mod does not own.
+    InvalidId,
+    /// A tag is not a namespaced tag name (write it without `#`).
+    InvalidTag,
+    /// Another declaration already covers the entity type.
+    Duplicate,
+}
+
 /// What a mod answers a despawn check (`MobDespawnEvent.Result`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
@@ -3036,6 +3235,40 @@ pub struct NativeClipHit {
     pub inside: bool,
     /// Whether the hit is the world border.
     pub world_border: bool,
+}
+
+/// The world's respawn data (`LevelData.RespawnData`): where a player without a spawn point of
+/// their own appears, and facing which way. Horizon keeps it in the Overworld.
+#[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct RespawnData {
+    /// The spawn block.
+    pub pos: [i32; 3],
+    /// The yaw in degrees, -180 to 180 (`Mth.wrapDegrees`).
+    pub yaw: f32,
+    /// The pitch in degrees, -90 to 90.
+    pub pitch: f32,
+}
+
+/// A map's saved data (`MapItemSavedData`) as it stands: where it is, how far it reaches and
+/// its pixels. The markers (players, banners, frames) are not part of it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct MapState {
+    /// The centre block `[x, z]`.
+    pub center: [i32; 2],
+    /// A map pixel is `1 << scale` blocks, 0 to 4.
+    pub scale: u8,
+    /// The dimension it shows, `minecraft:overworld`.
+    pub dimension: String,
+    /// A locked map (a cartography table's glass pane) no longer reveals the world.
+    pub locked: bool,
+    /// Whether it shows its holders' markers.
+    pub tracking: bool,
+    /// Whether it shows them however far away they are.
+    pub unlimited: bool,
+    /// 128 by 128 map colour ids, row by row (`x + z * 128`).
+    pub colors: Vec<u8>,
 }
 
 /// One entity a level ray passes through (`LevelRef::ray_trace_entities`): what
@@ -3291,16 +3524,6 @@ pub struct NativePlayerExperience {
     pub total: i32,
 }
 
-/// Damage sources supported for a mod effect tick.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum NativeEffectDamage {
-    /// Poison's magic damage.
-    Magic,
-    /// The Wither effect's damage.
-    Wither,
-}
-
 /// A change requested by an effect tick, applied after its hooks return.
 // hidden: a game-side type, not part of the mod surface
 #[doc(hidden)]
@@ -3308,7 +3531,7 @@ pub enum NativeEffectDamage {
 #[non_exhaustive]
 pub enum EffectTickChange {
     Heal(f32),
-    Hurt(NativeEffectDamage, f32),
+    Hurt(String, f32),
     AddExhaustion(f32),
     Eat(i32, f32),
 }
@@ -3319,10 +3542,13 @@ impl ApplyEffectTickEvent<'_> {
         self.changes.push(EffectTickChange::Heal(amount));
     }
 
-    /// Queue damage with a supported source.
-    pub fn hurt(&mut self, damage_type: NativeEffectDamage, amount: f32) {
+    /// Queue damage of a registered damage type on the holder: a vanilla
+    /// one (`minecraft:magic`, `minecraft:wither`) or a datapack's
+    /// (`demo:heat`). It reaches the holder's hurt hooks with that type; an
+    /// unregistered type hurts nothing.
+    pub fn hurt(&mut self, damage_type: &str, amount: f32) {
         self.changes
-            .push(EffectTickChange::Hurt(damage_type, amount));
+            .push(EffectTickChange::Hurt(damage_type.to_owned(), amount));
     }
 
     /// Queue food exhaustion; a non-player holder ignores it.
@@ -4326,6 +4552,30 @@ pub enum InteractionKey {
     PickBlock,
 }
 
+/// What caused a client interaction mapping to act on this tick.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum InteractionAttempt {
+    /// A queued press of the mapping.
+    Press,
+    /// A repeat or continuation from a mapping that is still held.
+    Held,
+}
+
+/// A proposed window-side block mining operation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: the game fills all fields; mods only read the snapshot
+pub struct ClientMiningPrediction {
+    /// The targeted block.
+    pub pos: [i32; 3],
+    /// The outward unit normal of the hit face.
+    pub face: [i32; 3],
+    /// Whether this operation begins a break rather than advancing a retained target.
+    pub starting: bool,
+    /// The proposed resulting break fraction, from zero to one.
+    pub progress: f32,
+}
+
 /// The behaviour about to run in `UseItemOnBlockEvent`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -5238,6 +5488,46 @@ mod tests {
         assert!(!harvest);
         assert_eq!(speed, 2.0);
         assert!(!canceled);
+    }
+
+    #[test]
+    fn an_inventory_tick_reaches_only_the_parts_of_the_ticked_item() {
+        #[derive(Clone)]
+        struct Ticked(Arc<Mutex<Vec<(i32, bool)>>>);
+        #[mod_api::horizon_part]
+        impl ItemPart for Ticked {
+            fn inventory_tick(&self, _: &mut dyn ServerHost, event: &mut InventoryTickEvent<'_>) {
+                self.0.lock().unwrap().push((event.slot, event.selected));
+            }
+        }
+        struct Both(Ticked, Ticked);
+        #[mod_api::__subscriptions]
+        impl Hooks for Both {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+                let (stick, stone) = (r.item_key("minecraft:stick"), r.item_key("minecraft:stone"));
+                r.item_part(stick, self.0.clone());
+                r.item_part(stone, self.1.clone());
+            }
+        }
+        // Another test installs parts with tags: a dispatch must run on a game thread.
+        mark_game_thread();
+        let (sticks, stones) = (Ticked(Default::default()), Ticked(Default::default()));
+        let mods: Mods = vec![ModEntry::new(
+            "tickers",
+            Box::new(Both(sticks.clone(), stones.clone())),
+        )]
+        .into();
+        install(mods.clone());
+        install_parts(&mods, &crate::parts::tests::rule_schema()).unwrap();
+        let mut host = FakeHost::new();
+        let stone = crate::parts::tests::stack("minecraft:stone", 1, 0);
+        let diamond = crate::parts::tests::stack("minecraft:diamond", 1, 0);
+        dispatch_inventory_tick(&mut host, &stick(), 4, true);
+        dispatch_inventory_tick(&mut host, &stone, -106, false);
+        dispatch_inventory_tick(&mut host, &stick(), 100, false);
+        dispatch_inventory_tick(&mut host, &diamond, 0, false);
+        assert_eq!(*sticks.0.lock().unwrap(), [(4, true), (100, false)]);
+        assert_eq!(*stones.0.lock().unwrap(), [(-106, false)]);
     }
 
     #[test]

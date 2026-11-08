@@ -130,6 +130,30 @@ impl<'a, A: HealthAttributes, E: ServerDamageEnvironment<A>> ServerPlayerDamage<
     ) -> Result<(), ServerDamageError<EnvError<E>, A::Error>> {
         living_damage::actually_hurt_after_immunity_check(self, container, damage, true)
     }
+    pub(crate) fn apply_after_equipment(
+        &mut self,
+        container: &mut DamageContainer,
+        damage: f32,
+        bypass_armor: bool,
+    ) -> Result<(), ServerDamageError<EnvError<E>, A::Error>> {
+        use crate::damage_reduction::DamageReductionWorld;
+        let before = damage;
+        let damage = if bypass_armor {
+            damage
+        } else {
+            let armor = self.armor_value()? as f32;
+            let toughness = self.toughness_attribute()? as f32;
+            crate::combat_rules::after_armor(self, damage, armor, toughness)?
+        };
+        let damage = container.reduce(
+            crate::living_damage::Reduction::Armor,
+            before,
+            before - damage,
+            damage,
+            !bypass_armor,
+        );
+        living_damage::actually_hurt_after_armor(self, container, damage, true)
+    }
 }
 impl<A: HealthAttributes, E: ServerDamageEnvironment<A>> ArmorWorld
     for ServerPlayerDamage<'_, E, A>
@@ -229,6 +253,9 @@ impl<A: HealthAttributes, E: ServerDamageEnvironment<A>> DamageWorld
     }
     fn after_armor(&mut self, v: f32) -> Result<f32, Self::Error> {
         damage_reduction::after_armor(self, v)
+    }
+    fn bypasses_armor(&mut self) -> Result<bool, Self::Error> {
+        self.bypasses(Bypass::Armor)
     }
     fn after_magic(&mut self, v: f32) -> Result<MagicAbsorb, Self::Error> {
         damage_reduction::after_magic(self, v)

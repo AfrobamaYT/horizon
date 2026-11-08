@@ -105,6 +105,12 @@ pub trait BlockStatesBackend {
     #[access(Metadata)]
     fn block_state_has_block_entity(&self, state: BlockStateId) -> Option<bool>;
     /// Side: both.
+    /// `BlockState.getMapColor(level, pos)` for a state whose colour does not depend on where it
+    /// stands: its `MapColor.id`, 0 (`MapColor.NONE`) for no colour. Map items colour a column
+    /// by it (`MapItem.update`). None for an unknown state.
+    #[access(Metadata)]
+    fn block_state_map_color(&self, state: BlockStateId) -> Option<u8>;
+    /// Side: both.
     /// The states of `block` (`StateDefinition.getPossibleStates`), as the consecutive ids the
     /// registry numbers them with. None for an unknown block.
     #[access(Metadata)]
@@ -127,6 +133,11 @@ pub trait BlockStatesBackend {
     /// None means the owning host has no resolved registry.
     #[access(Metadata)]
     fn fluid_state_definition(&self, fluid: FluidKey) -> Option<FluidDefinition>;
+    /// Side: both.
+    /// A registered fluid's level-independent type properties.
+    /// None means the owning host has no resolved registry or `fluid` isn't in it.
+    #[access(Metadata)]
+    fn fluid_type_properties(&self, fluid: FluidKey) -> Option<FluidTypeProperties>;
     /// Side: both.
     /// Validate partial property constraints in input order with indexed errors.
     /// An unavailable or tank-only definition returns NoWorldState.

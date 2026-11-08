@@ -2,23 +2,21 @@
 use horizon_mod_package::{
     Manifest,
     index::native,
-    internals::{self, ListedInternal},
+    internals::{self, ListedInternal, cache_catalogs},
     manifest::MANIFEST,
 };
-use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
-    io::{Read, Write},
+    io::Write,
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
 };
 use toml_edit::{DocumentMut, Item, Value};
 
 const USAGE: &str =
     "usage: cargo horizon-mod internals sync [--repo <path>] | add <path>… [--kind <kind>]";
 const CATALOG: &str = "internals.json";
-const CATALOG_LIMIT: u64 = 64 << 20;
-const ARCHIVE_LIMIT: u64 = 4 << 30;
 
 pub fn run(args: &[String]) -> Result<(), String> {
     let Some((command, args)) = args.split_first() else {
@@ -224,14 +222,68 @@ fn sync(dir: &Path, repo: Option<&Path>) -> Result<(), String> {
     Ok(())
 }
 
-fn atomic_write(path: &Path, contents: String) -> Result<(), String> {
-    let temporary = path.with_extension("toml.sync");
-    fs::write(&temporary, contents)
+/// Manifest edits follow a user-managed symlink; slot publishing replaces its output link.
+pub(crate) fn atomic_write_manifest(path: &Path, contents: String) -> Result<(), String> {
+    let referent = fs::canonicalize(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    atomic_write(&referent, contents)
+}
+
+/// Attempts at an unused temporary name before `atomic_write` gives up.
+const TEMPORARY_ATTEMPTS: u64 = 16;
+
+/// Replaces `path` with `contents` through a temporary file in the same directory.
+///
+/// The temporary file is created with `create_new`, so a file or symlink planted at its name
+/// makes that name be skipped instead of followed. The rename replaces `path` itself, even
+/// when `path` is a symlink, and the existing file's permissions carry over.
+pub(crate) fn atomic_write(path: &Path, contents: String) -> Result<(), String> {
+    static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
+    let permissions = match fs::metadata(path) {
+        Ok(metadata) => Some(metadata.permissions()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    let first = NEXT_TEMPORARY.fetch_add(TEMPORARY_ATTEMPTS, Ordering::Relaxed);
+    let (temporary, mut file) =
+        create_temporary(path, first).map_err(|e| format!("{}: {e}", path.display()))?;
+    let written = file
+        .write_all(contents.as_bytes())
+        .and_then(|()| match permissions {
+            Some(permissions) => file.set_permissions(permissions),
+            None => Ok(()),
+        });
+    drop(file);
+    written
         .and_then(|()| fs::rename(&temporary, path))
         .map_err(|e| {
             let _ = fs::remove_file(&temporary);
             format!("{}: {e}", path.display())
         })
+}
+
+/// The `number`th candidate temporary name for `path`, in the same directory.
+fn temporary_path(path: &Path, number: u64) -> PathBuf {
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    path.with_file_name(format!(".{name}.{}.{number}.tmp", std::process::id()))
+}
+
+/// Creates the first unused temporary file among `TEMPORARY_ATTEMPTS` names counted from `first`.
+fn create_temporary(path: &Path, first: u64) -> std::io::Result<(PathBuf, fs::File)> {
+    for number in first..first + TEMPORARY_ATTEMPTS {
+        let temporary = temporary_path(path, number);
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+        {
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            created => return created.map(|file| (temporary, file)),
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "no unused temporary file name",
+    ))
 }
 
 fn replace(text: &str, entries: &[ListedInternal]) -> Result<(String, String), String> {
@@ -445,96 +497,132 @@ pub fn load(dir: &Path, revision: &str) -> Result<Vec<ListedInternal>, String> {
         })
         .ok_or_else(|| format!("{release}/SHA256SUMS: no checksum for {name}"))?;
     println!("Reading internals from the prebuilt game at {revision}");
-    cache_catalog(&cache, &name, get(&name)?.into_reader(), expected)
-}
-
-/// Verify the whole archive before trusting any catalog bytes; never unpack its other files.
-fn cache_catalog(
-    cache: &Path,
-    name: &str,
-    body: impl Read,
-    expected: &str,
-) -> Result<Vec<ListedInternal>, String> {
-    fs::create_dir_all(cache).map_err(|e| format!("{}: {e}", cache.display()))?;
-    let path = cache.join(CATALOG);
-    let archive = cache.join(format!("{name}.{}.partial", std::process::id()));
-    let result = (|| {
-        let mut body = body.take(ARCHIVE_LIMIT + 1);
-        let mut file = fs::File::create(&archive).map_err(|e| e.to_string())?;
-        let mut hash = Sha256::new();
-        let mut size = 0;
-        let mut buffer = [0; 65536];
-        loop {
-            let read = body.read(&mut buffer).map_err(|e| e.to_string())?;
-            if read == 0 {
-                break;
-            }
-            size += read as u64;
-            if size > ARCHIVE_LIMIT {
-                return Err(format!("{name}: prebuilt archive exceeds 4 GiB"));
-            }
-            hash.update(&buffer[..read]);
-            file.write_all(&buffer[..read]).map_err(|e| e.to_string())?;
-        }
-        drop(file);
-        if format!("{:x}", hash.finalize()) != expected {
-            return Err(format!(
-                "The prebuilt game {name} doesn't match its release's checksum. Try again."
-            ));
-        }
-        let file = fs::File::open(&archive).map_err(|e| e.to_string())?;
-        let text = catalog_from_archive(file)?;
-        let entries = serde_json::from_str(&text).map_err(|e| format!("{CATALOG}: {e}"))?;
-        let partial = path.with_extension(format!("json.{}.partial", std::process::id()));
-        fs::write(&partial, text).map_err(|e| format!("{}: {e}", partial.display()))?;
-        fs::rename(&partial, &path).map_err(|e| format!("{}: {e}", path.display()))?;
-        Ok(entries)
-    })();
-    let _ = fs::remove_file(&archive);
-    result
-}
-
-fn catalog_from_archive(reader: impl Read) -> Result<String, String> {
-    let reader = flate2::read::GzDecoder::new(reader).take(8 << 30);
-    let mut archive = tar::Archive::new(reader);
-    for entry in archive.entries().map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let path = entry.path().map_err(|e| e.to_string())?;
-        if path != Path::new(CATALOG) && path != Path::new("./internals.json") {
-            continue;
-        }
-        if !entry.header().entry_type().is_file() {
-            return Err(format!("{CATALOG}: not a file in the prebuilt archive"));
-        }
-        let mut text = String::new();
-        entry
-            .take(CATALOG_LIMIT + 1)
-            .read_to_string(&mut text)
-            .map_err(|e| e.to_string())?;
-        if text.len() as u64 > CATALOG_LIMIT {
-            return Err(format!("{CATALOG}: catalog exceeds 64 MiB"));
-        }
-        return Ok(text);
-    }
-    Err(format!("prebuilt archive has no {CATALOG}"))
+    fs::create_dir_all(&cache).map_err(|e| format!("{}: {e}", cache.display()))?;
+    let directory = cap_std::fs::Dir::open_ambient_dir(&cache, cap_std::ambient_authority())
+        .map_err(|e| format!("{}: {e}", cache.display()))?;
+    cache_catalogs(&directory, &name, get(&name)?.into_reader(), expected)
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn archive(path: &str, kind: tar::EntryType, contents: &str) -> Vec<u8> {
-        let gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
-        let mut archive = tar::Builder::new(gzip);
-        let mut header = tar::Header::new_gnu();
-        header.set_size(contents.len() as u64);
-        header.set_mode(0o644);
-        header.set_entry_type(kind);
-        header.set_cksum();
-        archive
-            .append_data(&mut header, path, contents.as_bytes())
-            .unwrap();
-        archive.into_inner().unwrap().finish().unwrap()
+    /// A fresh directory under the system temp dir, removed on drop (also when a test panics).
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(name: &str) -> Self {
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            let unique = format!(
+                "horizon-mod-atomic-{name}-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            );
+            let dir = std::env::temp_dir().join(unique);
+            // `create_dir` fails on an existing path, a symlink included.
+            fs::create_dir(&dir).unwrap();
+            Self(dir)
+        }
+    }
+
+    impl std::ops::Deref for Scratch {
+        type Target = Path;
+
+        fn deref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn atomic_write_replaces_contents_and_leaves_no_temporary_file() {
+        let dir = Scratch::new("replace");
+        let path = dir.join("horizon-mod.toml");
+        atomic_write(&path, "first".into()).unwrap();
+        atomic_write(&path, "second".into()).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "second");
+        assert_eq!(fs::read_dir(&*dir).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn atomic_write_ignores_files_planted_at_the_old_temporary_name() {
+        let dir = Scratch::new("planted");
+        let path = dir.join("horizon-mod.toml");
+        let planted = dir.join("horizon-mod.toml.sync");
+        fs::write(&planted, "planted").unwrap();
+        atomic_write(&path, "written".into()).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "written");
+        assert_eq!(fs::read_to_string(&planted).unwrap(), "planted");
+    }
+
+    #[test]
+    fn create_temporary_skips_names_that_already_exist() {
+        let dir = Scratch::new("skip");
+        let path = dir.join("horizon-mod.toml");
+        fs::write(temporary_path(&path, 7), "taken").unwrap();
+        let (temporary, file) = create_temporary(&path, 7).unwrap();
+        drop(file);
+        assert_eq!(temporary, temporary_path(&path, 8));
+        assert_eq!(
+            fs::read_to_string(temporary_path(&path, 7)).unwrap(),
+            "taken"
+        );
+    }
+
+    #[test]
+    fn create_temporary_gives_up_when_every_name_is_taken() {
+        let dir = Scratch::new("exhausted");
+        let path = dir.join("horizon-mod.toml");
+        for number in 0..TEMPORARY_ATTEMPTS {
+            fs::write(temporary_path(&path, number), "taken").unwrap();
+        }
+        let error = create_temporary(&path, 0).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+    }
+
+    #[test]
+    fn atomic_write_removes_its_temporary_file_when_the_rename_fails() {
+        let dir = Scratch::new("rename-fails");
+        let path = dir.join("horizon-mod.toml");
+        // A non-empty directory at `path` cannot be replaced by a file.
+        fs::create_dir(&path).unwrap();
+        fs::write(path.join("keep"), "keep").unwrap();
+        assert!(atomic_write(&path, "x".into()).is_err());
+        assert!(fs::read_dir(&*dir).unwrap().all(|entry| {
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".tmp")
+        }));
+        assert_eq!(fs::read_to_string(path.join("keep")).unwrap(), "keep");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_does_not_follow_symlinks_at_temporary_names() {
+        let dir = Scratch::new("symlink");
+        let path = dir.join("horizon-mod.toml");
+        let referent = dir.join("referent");
+        let dangling = dir.join("dangling");
+        fs::write(&referent, "keep").unwrap();
+        // The old fixed name, and a name `create_temporary` tries first.
+        std::os::unix::fs::symlink(&referent, dir.join("horizon-mod.toml.sync")).unwrap();
+        std::os::unix::fs::symlink(&referent, temporary_path(&path, 3)).unwrap();
+        std::os::unix::fs::symlink(&dangling, temporary_path(&path, 4)).unwrap();
+        let (temporary, file) = create_temporary(&path, 3).unwrap();
+        drop(file);
+        assert_eq!(temporary, temporary_path(&path, 5));
+        atomic_write(&path, "written".into()).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "written");
+        assert_eq!(fs::read_to_string(&referent).unwrap(), "keep");
+        assert!(!dangling.exists());
     }
 
     #[test]
@@ -577,49 +665,6 @@ mod tests {
         assert_eq!(manifest.internals.len(), 1);
         assert_eq!(manifest.internals[0].hash, "new");
         assert_eq!(manifest.internals[0].kind.as_deref(), Some("struct"));
-    }
-
-    #[test]
-    fn reads_only_the_root_catalog_from_the_prebuilt_archive() {
-        let catalog = include_str!("../tests/fixtures/internals-old.json");
-        let bytes = archive("./internals.json", tar::EntryType::Regular, catalog);
-        assert_eq!(catalog_from_archive(bytes.as_slice()).unwrap(), catalog);
-        let bytes = archive("deps/internals.json", tar::EntryType::Regular, catalog);
-        assert_eq!(
-            catalog_from_archive(bytes.as_slice()).unwrap_err(),
-            "prebuilt archive has no internals.json"
-        );
-        let bytes = archive("internals.json", tar::EntryType::Symlink, "");
-        assert!(
-            catalog_from_archive(bytes.as_slice())
-                .unwrap_err()
-                .contains("not a file")
-        );
-    }
-
-    #[test]
-    fn downloaded_catalog_is_cached_only_after_checksum_and_json_checks() {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../target/i3-d/tests")
-            .join(format!("archive-cache-{}", std::process::id()));
-        let catalog = include_str!("../tests/fixtures/internals-old.json");
-        let bytes = archive("./internals.json", tar::EntryType::Regular, catalog);
-        let error = cache_catalog(&dir, "game.tar.gz", bytes.as_slice(), "wrong").unwrap_err();
-        assert!(error.contains("doesn't match its release's checksum"));
-        assert!(!dir.join(CATALOG).exists());
-        assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
-
-        let invalid = archive("./internals.json", tar::EntryType::Regular, "not JSON");
-        let hash = format!("{:x}", Sha256::digest(&invalid));
-        assert!(cache_catalog(&dir, "game.tar.gz", invalid.as_slice(), &hash).is_err());
-        assert!(!dir.join(CATALOG).exists());
-
-        let hash = format!("{:x}", Sha256::digest(&bytes));
-        let entries = cache_catalog(&dir, "game.tar.gz", bytes.as_slice(), &hash).unwrap();
-        assert_eq!(entries[0].path, "horizon_client::game::Game");
-        assert_eq!(fs::read_to_string(dir.join(CATALOG)).unwrap(), catalog);
-        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
-        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

@@ -377,6 +377,8 @@ impl Game<'_> {
             self.dismount_cart(i);
         } else if let Some(c) = self.cushions.iter().find(|c| c.id == id).cloned() {
             self.get_up_from_cushion(&c);
+        } else if self.seat(id).is_some() {
+            self.get_off_seat();
         } else {
             self.dismount_mount();
         }
@@ -764,7 +766,7 @@ mod teleport_hook_tests {
                 let info = game.items().get(&consumed.item).unwrap().clone();
                 let consumable = consumed.consumable(Some(&info)).unwrap().clone();
                 game.finish_consuming(&info, &consumable, &consumed);
-                assert_eq!(*heard.lock().unwrap(), [snapshot.clone()]);
+                assert_eq!(heard.lock().unwrap().as_slice(), std::slice::from_ref(&snapshot));
                 assert_eq!(
                     game.held().unwrap().count,
                     6,

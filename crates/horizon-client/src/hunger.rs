@@ -192,6 +192,9 @@ impl FoodWorld for TickWorld<'_> {
             victim: self.victim,
             causing: 0,
             invulnerable: false,
+            permanently_invulnerable: false,
+            invulnerable_time: false,
+            creative_source: false,
             client_loaded: self.client_loaded,
             rules: self.rules,
             source: self
@@ -205,6 +208,7 @@ impl FoodWorld for TickWorld<'_> {
             sync_velocity: self.sync_velocity,
             game_time: self.game_time,
             status: Default::default(),
+            helmet: false,
             blocking: None,
             blocked: 0.0,
             shield_damage: 0,
@@ -215,6 +219,7 @@ impl FoodWorld for TickWorld<'_> {
             totem_off_hand: false,
             totem_fired: false,
             canceled: false,
+            dealt: 0.0,
         };
         if ServerPlayerCombat::new(self.attributes, self.data, food, self.ids, &mut environment)?
             .hurt(self.hurt, amount)?

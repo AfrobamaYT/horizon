@@ -196,6 +196,9 @@ pub struct ArrowState {
     pub was_eye_in_water: bool,
     pub first_tick: bool,
     pub has_been_shot: bool,
+    /// `Projectile.canBreak`: the decoded top-level projectile predicate,
+    /// independent of its pickup item and firing weapon.
+    pub can_break: Option<horizon_core::nbt::Tag>,
     /// `ThrownTrident.dealtDamage`: it has hit an entity (or sat in a block
     /// for over 4 ticks) and hits no more.
     pub dealt_damage: bool,
@@ -260,6 +263,7 @@ impl ArrowState {
             was_eye_in_water: false,
             first_tick: true,
             has_been_shot: false,
+            can_break: None,
             dealt_damage: false,
             removed: false,
             events: Vec::new(),
@@ -888,7 +892,7 @@ impl Ticker<'_, '_, '_, '_> {
         }
         let owner = targets
             .iter()
-            .find(|(who, _)| Some(*who) == self.p.owner)
+            .find(|(who, _)| Some(*who) == self.p.collision_owner())
             .map(|(_, b)| *b);
         let swept = bounds(self.p.position)
             .expand_towards(self.p.velocity)
@@ -938,7 +942,7 @@ impl Ticker<'_, '_, '_, '_> {
         // ThrownTrident.findHitEntity: none once it has dealt damage.
         let targets = if self.st.dealt_damage { &[] } else { targets };
         for (who, b) in targets {
-            if Some(*who) == self.p.owner && !self.p.left_owner || !b.intersects(area) {
+            if Some(*who) == self.p.collision_owner() && !self.p.left_owner || !b.intersects(area) {
                 continue;
             }
             // canHitEntity: not an entity a piercing arrow has gone through.
@@ -1340,7 +1344,8 @@ impl ArrowScene<'_, '_> {
                         effects.apply(Effect::ClearFreeze);
                         effects.apply(Effect::LavaIgnite);
                     }
-                    FluidKind::Empty => {}
+                    // A mod's fluid does nothing to an entity inside it.
+                    FluidKind::Empty | FluidKind::Mod(_) | FluidKind::ModFlowing(_) => {}
                 }
             }
         }
