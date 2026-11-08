@@ -1347,7 +1347,7 @@ pub struct Extra {
     /// a player model's arm pose and `isBlocking` follow it.
     pub use_animation: horizon_core::use_animation::UseAnimation,
     /// The `arm_pose` the items in the main and off hand declare, if any: the pose
-    /// a player model's arm takes holding it, in place of vanilla's.
+    /// a humanoid model's arm takes holding it, in place of vanilla's.
     pub held_arm_pose: [Option<horizon_core::arm_pose::ArmPose>; 2],
     pub fall_flying: bool,
     pub fall_fly_ticks: i32,
