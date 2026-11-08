@@ -88,7 +88,7 @@ pub struct ColorResolverRegistry {
 
 impl ColorResolvers for ColorResolverRegistry {
     fn register(&mut self, resolver: Arc<dyn BiomeColorResolver>) -> ColorResolver {
-        let index = self.resolvers.len() as u32;
+        let index = u32::try_from(self.resolvers.len()).expect("at most u32::MAX colour resolvers");
         self.resolvers.push(resolver);
         ColorResolver::Mod(ModColorResolver(index))
     }
