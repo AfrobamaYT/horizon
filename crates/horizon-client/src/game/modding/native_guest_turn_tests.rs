@@ -1072,11 +1072,11 @@ fn a_vetoed_drop_gives_the_stack_back() {
 struct PanicOnce(std::sync::Arc<std::sync::atomic::AtomicUsize>);
 
 #[mod_api::__subscriptions]
-impl Hooks for PanicOnce {
+impl mod_api::Hooks for PanicOnce {
     fn living_incoming_damage(
         &self,
-        _: &mut dyn LevelRandomHost,
-        _: &mut LivingIncomingDamageEvent<'_>,
+        _: &mut dyn mod_api::LevelRandomHost,
+        _: &mut mod_api::LivingIncomingDamageEvent<'_>,
     ) -> mod_api::Flow {
         if self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
             std::panic::panic_any(73129_u32);
