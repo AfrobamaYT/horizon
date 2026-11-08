@@ -2885,8 +2885,8 @@ struct Game<'a> {
     /// 3D skin layers: each player's outer layer as one slab per painted
     /// texel, built once per (skin, slim) (`mobs::skin_layers`).
     skin_3d: RefCell<skin_models::SkinModels>,
-    /// Atlas trim slots in use: (sprite name, slot), least recently drawn first.
-    trim_slots: Vec<(String, usize)>,
+    /// Runtime trim slots and the last completed preparation for this atlas.
+    trim_slots: horizon_client::trims::TrimSlots,
     cart_models: minecarts::CartModels,
     /// The boat the player rides.
     riding: Option<u32>,
@@ -11268,7 +11268,7 @@ impl Game<'_> {
         if self.remote.is_none() {
             self.read_raids();
         }
-        self.native_server_data_loaded(false);
+        self.native_tags_updated(mod_api::TagsUpdateCause::ServerDataLoad { reload: false });
         self.sync_recipe_content();
         reset_world_progress(&mut self.adv, &mut self.stats);
         self.prefetch_advancement_tree(&stack);
@@ -11656,13 +11656,70 @@ impl Game<'_> {
             }
         }
     }
+    /// Run equipment continuations with the acting player installed on the real host.
+    fn hurt_player_equipment(
+        &mut self,
+        source: horizon_world::damage_source::DamageTypeId,
+        amount: f32,
+        blocking: Option<horizon_client::health::Blocking>,
+        living_cause: bool,
+        causing: i32,
+        attack: &horizon_client::health::Attack,
+    ) -> horizon_client::Result<horizon_client::health::BlockOutcome> {
+        let rules = self.world.health_rules;
+        let helmet = self.armor[0]
+            .as_ref()
+            .is_some_and(|s| s.count > 0 && &*s.item != "minecraft:air");
+        let mut hit = self
+            .player
+            .as_mut()
+            .ok_or("missing damage target")?
+            .start_hurt(
+                crate::game::entity::damage_level_of!(self, attack),
+                &self.motion.health,
+                rules,
+                source,
+                amount,
+                blocking,
+                living_cause,
+                causing,
+                helmet,
+            )?;
+        if let Some(damage) = hit.helmet_damage() {
+            self.hurt_helmet(source, damage);
+            self.refresh_armor_protection();
+        }
+        let armor_damage = self
+            .player
+            .as_mut()
+            .ok_or("missing damage target")?
+            .select_equipment_hurt(
+                crate::game::entity::damage_level_of!(self, attack),
+                &self.motion.health,
+                rules,
+                &mut hit,
+            )?;
+        if let Some(damage) = armor_damage {
+            self.hurt_armor(source, damage);
+            self.refresh_armor_protection();
+        }
+        self.player
+            .as_mut()
+            .ok_or("missing damage target")?
+            .finish_hurt(
+                crate::game::entity::damage_level_of!(self, attack),
+                &self.motion.health,
+                rules,
+                hit,
+            )
+    }
     /// `Player.hurtArmor`: every armor slot wears.
     fn hurt_armor(&mut self, source: horizon_world::damage_source::DamageTypeId, damage: f32) {
-        self.hurt_equipment(source, damage, 0..4);
+        self.hurt_equipment(source, damage, &[3, 2, 1, 0]);
     }
     /// `Player.hurtHelmet`: the head slot alone wears.
     fn hurt_helmet(&mut self, source: horizon_world::damage_source::DamageTypeId, damage: f32) {
-        self.hurt_equipment(source, damage, 0..1);
+        self.hurt_equipment(source, damage, &[0]);
     }
     /// `LivingEntity.doHurtEquipment` of the `slots` of `armor`: each worn piece that
     /// wears when its wearer is hurt loses max(1, damage / 4) durability, except
@@ -11671,12 +11728,20 @@ impl Game<'_> {
         &mut self,
         source: horizon_world::damage_source::DamageTypeId,
         damage: f32,
-        slots: std::ops::Range<usize>,
+        slots: &[usize],
     ) {
         if damage <= 0.0 {
             return;
         }
-        let amount = ((damage / 4.0) as u32).max(1);
+        let amount = if damage.is_nan() {
+            0
+        } else {
+            (damage / 4.0).max(1.0) as i32
+        };
+        if amount <= 0 {
+            return;
+        }
+        let amount = amount as u32;
         let name = self
             .health_resources
             .damage
@@ -11687,8 +11752,6 @@ impl Game<'_> {
             .health_resources
             .damage
             .in_tag(source, "minecraft:is_fire");
-        let mut broke = false;
-        let mut broken_items = Vec::new();
         // The pieces that may wear (`doHurtEquipment`'s checks).
         let mut eligible: [Option<ItemStack>; 4] = std::array::from_fn(|i| {
             let stack = self.armor[i].clone().filter(|_| slots.contains(&i))?;
@@ -11753,36 +11816,24 @@ impl Game<'_> {
                 *amount = answered_wear(&entries, armor_slot(i), *amount);
             }
         }
-        let updates = std::array::from_fn::<_, 4, _>(|i| {
-            let stack = eligible[i].take()?;
-            // A mod may have put another stack in the slot: it is not worn by
-            // the piece that was decided on.
-            if amounts[i] == 0 || self.armor[i].as_ref() != Some(&stack) {
-                return None;
+        // Each break is applied before the next slot's hook and RNG draw.
+        for &index in slots {
+            let Some(before) = eligible[index].take() else {
+                continue;
+            };
+            if amounts[index] == 0 || self.armor[index].as_ref() != Some(&before) {
+                continue;
             }
             let (updated, broken) =
-                self.damage_stack(&stack, amounts[i].min(i32::MAX as u32) as i32, true);
-            Some((stack, updated, broken))
-        });
-        for (index, update) in updates.into_iter().enumerate() {
-            if let Some((before, updated, broken)) = update
-                && updated.as_ref() != Some(&before)
-                && self.armor[index].as_ref() == Some(&before)
-            {
+                self.damage_stack(&before, amounts[index].min(i32::MAX as u32) as i32, true);
+            if updated.as_ref() != Some(&before) && self.armor[index].as_ref() == Some(&before) {
                 self.armor[index] = updated;
                 if let Some(stack) = broken {
-                    broken_items.push((stack, index));
-                    broke = true;
+                    self.player_equipment_broke(armor_slot(index), &stack);
+                    self.award_stat("broken", &stack.item, 1);
+                    self.apply_equipment();
                 }
             }
-        }
-        if broke {
-            // LivingEntity.onEquippedItemBroken for each armour piece that broke.
-            for (stack, index) in &broken_items {
-                self.player_equipment_broke(armor_slot(*index), stack);
-                self.award_stat("broken", &stack.item, 1);
-            }
-            self.apply_equipment();
         }
     }
     /// Voxel traversal that also stops at fluid source blocks (bucket pick).
@@ -13383,6 +13434,7 @@ impl Game<'_> {
     pub(super) fn forget_atlas_slots(&mut self) {
         self.skin_slots.forget();
         self.maps.slots.forget();
+        self.trim_slots.forget();
         self.map_patches.clear();
         self.kept_block_entities.get_mut().clear();
         horizon_client::ui_theme::reset_atlas();
@@ -15909,7 +15961,7 @@ impl<'a> Game<'a> {
             skin_profiles: RefCell::new(horizon_client::skins::Resolver::new()),
             skin_slots: horizon_client::skins::SkinSlots::new(horizon_client::hud::SKIN_SLOTS),
             skin_3d: Default::default(),
-            trim_slots: Vec::new(),
+            trim_slots: Default::default(),
             cart_models: prepared.cart_models,
             riding: None,
             started_riding: Vec::new(),

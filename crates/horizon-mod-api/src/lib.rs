@@ -304,6 +304,20 @@ impl<'a> ModBlockEntityView<'a> {
     pub fn id(&self) -> &str {
         self.entity.id()
     }
+    /// Replace the one-shot fields the block's next change sends clients; an empty compound
+    /// clears them. They go over what `block_entity_update_tag` gives (or alone, without
+    /// one) in the single packet every current viewer gets, and are gone. Call
+    /// `block_entity_sync` to send them: until a change reaches a viewer they wait, however
+    /// many chunks are sent, and they end with the block entity. They are for a one-shot
+    /// effect, not state: nothing saves, clones or compares them, and the revision stays.
+    /// A client merges them into its copy's `nbt` as any update field, where they stay until
+    /// sent again: a changing value, such as a counter, tells one effect from the next.
+    /// Fields that would take the packet past what a client reads (2 MiB of network NBT) are
+    /// dropped with a warning, and the change goes without them. A transaction that rolls the
+    /// block entity back also drops a batch queued before it.
+    pub fn set_client_update_fields(&mut self, fields: Compound) {
+        self.entity.client_update_fields = Some(fields);
+    }
 }
 impl std::ops::Deref for ModBlockEntityView<'_> {
     type Target = crate::containers::ModBlockEntityFields;
@@ -2888,6 +2902,35 @@ pub enum NativeSupportType {
     Rigid,
 }
 
+/// What made a `tags_updated` notice fire (`TagsUpdatedEvent`'s two subclasses).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TagsUpdateCause {
+    /// `TagsUpdatedEvent.ServerDataLoad`: a server built its data tables.
+    ServerDataLoad {
+        /// False on a world's first open, true after `/reload`.
+        reload: bool,
+    },
+    /// `TagsUpdatedEvent.ClientPacketReceived`: a client applied the tags its server sent.
+    ClientPacketReceived {
+        /// The server is the single player window's own.
+        integrated_server: bool,
+    },
+}
+
+impl TagsUpdateCause {
+    /// `TagsUpdatedEvent.shouldUpdateStaticData`: whether to update static data, which single
+    /// player's two threads share, so that there only the server side updates it.
+    pub fn should_update_static_data(self) -> bool {
+        !matches!(
+            self,
+            Self::ClientPacketReceived {
+                integrated_server: true
+            }
+        )
+    }
+}
+
 /// Why a mod removes an entity (`Entity.RemovalReason`): the two reasons
 /// that destroy it. The unloading and dimension-change reasons belong to the
 /// game.
@@ -4378,6 +4421,30 @@ pub enum InteractionKey {
     Use,
     /// `key.pickItem`: only with a block or entity aimed at.
     PickBlock,
+}
+
+/// What caused a client interaction mapping to act on this tick.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum InteractionAttempt {
+    /// A queued press of the mapping.
+    Press,
+    /// A repeat or continuation from a mapping that is still held.
+    Held,
+}
+
+/// A proposed window-side block mining operation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: the game fills all fields; mods only read the snapshot
+pub struct ClientMiningPrediction {
+    /// The targeted block.
+    pub pos: [i32; 3],
+    /// The outward unit normal of the hit face.
+    pub face: [i32; 3],
+    /// Whether this operation begins a break rather than advancing a retained target.
+    pub starting: bool,
+    /// The proposed resulting break fraction, from zero to one.
+    pub progress: f32,
 }
 
 /// The behaviour about to run in `UseItemOnBlockEvent`.

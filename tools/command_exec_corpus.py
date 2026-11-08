@@ -932,6 +932,43 @@ def item_command_damage():
     return ops + setup('/kill @e[tag=item_hurt_actor]', '/scoreboard objectives remove item_hurt', '/tick unfreeze')
 
 
+def minecart_numeric_fields():
+    """AbstractMinecart / MinecartTNT / MinecartFurnace / MinecartHopper.readAdditionalSaveData read
+    their fields through ValueInput's numeric getters, which take any NumericTag: getIntOr
+    (fuse, DisplayOffset), getShortOr (Fuel: the low 16 bits), getDoubleOr (PushX, PushZ) and
+    getBooleanOr (FlippedRotation, HasTicked, Enabled: byteValue() != 0). Frozen, so nothing ticks."""
+    ops = setup('/forceload add 0 0 15 15', '/tick freeze')
+    ops += [{'op': 'settle'}]
+    cases = (
+        ('tnt_minecart', '{fuse:20L}', 'fuse'),
+        ('tnt_minecart', '{fuse:20.7f}', 'fuse'),
+        ('tnt_minecart', '{fuse:-2.5d}', 'fuse'),
+        ('tnt_minecart', '{fuse:4294967316L}', 'fuse'),
+        ('tnt_minecart', '{fuse:7b}', 'fuse'),
+        ('minecart', '{DisplayOffset:5L,DisplayState:{Name:"minecraft:stone"}}', 'DisplayOffset'),
+        ('minecart', '{DisplayOffset:3.9f,DisplayState:{Name:"minecraft:stone"}}', 'DisplayOffset'),
+        ('furnace_minecart', '{Fuel:70000}', 'Fuel'),
+        ('furnace_minecart', '{Fuel:300L}', 'Fuel'),
+        ('furnace_minecart', '{Fuel:2.5f}', 'Fuel'),
+        ('furnace_minecart', '{Fuel:100s,PushX:1,PushZ:0.5f}', 'PushX 1000'),
+        ('furnace_minecart', '{Fuel:100s,PushX:1,PushZ:0.5f}', 'PushZ 1000'),
+        ('hopper_minecart', '{Enabled:256}', 'Enabled'),
+        ('hopper_minecart', '{Enabled:0.5f}', 'Enabled'),
+        ('hopper_minecart', '{Enabled:2L}', 'Enabled'),
+        ('minecart', '{FlippedRotation:256}', 'FlippedRotation'),
+        ('minecart', '{FlippedRotation:1.5d}', 'FlippedRotation'),
+        ('minecart', '{HasTicked:2L}', 'HasTicked'),
+    )
+    for i, (kind, nbt, path) in enumerate(cases):
+        tag = f'cart_num_{i}'
+        extra = nbt[1:-1]
+        ops += setup(f'/summon {kind} {2 + (i % 6) * 2}.5 200 {2 + (i // 6) * 2}.5 '
+                     f'{{Tags:["{tag}"],NoGravity:1b,{extra}}}')
+        ops += [cmd(f'/data get entity @e[tag={tag},limit=1] {path}')]
+    return ops + setup(*[f'/kill @e[tag=cart_num_{i}]' for i in range(len(cases))],
+                       '/tick unfreeze', '/forceload remove 0 0 15 15')
+
+
 def enderman_command_damage():
     """DamageCommand -> Enderman.hurtServer: with no living entity behind the damage,
     random.nextInt(10) != 0 teleports the enderman then and there (teleport()), also when
@@ -5891,7 +5928,8 @@ ISOLATED_MACRO_TYPE = frozenset({'macro source type error'})
 ISOLATED_PICKUP_SAVE = frozenset({'mob saved pickup loot'})
 ISOLATED_ORB_UUID = frozenset({'orb saved UUID'})
 ISOLATED_STAND_FALL = frozenset({'stand saved fall distance'})
-ISOLATED_GROUPS = ISOLATED_REINFORCEMENTS | ISOLATED_RECIPES | ISOLATED_WOLF_ANGER | ISOLATED_FRAME_MAPS | ISOLATED_SPECTRAL_DURATION | ISOLATED_PICKUP_SAVE | ISOLATED_ORB_UUID | ISOLATED_STAND_FALL | ISOLATED_MAP_CRAFTING | ISOLATED_MACRO_TYPE | ISOLATED_ITEM_HEALTH
+ISOLATED_POTION_ICONS = frozenset({'potion custom effect icons'})
+ISOLATED_GROUPS = ISOLATED_REINFORCEMENTS | ISOLATED_RECIPES | ISOLATED_WOLF_ANGER | ISOLATED_FRAME_MAPS | ISOLATED_SPECTRAL_DURATION | ISOLATED_PICKUP_SAVE | ISOLATED_ORB_UUID | ISOLATED_STAND_FALL | ISOLATED_MAP_CRAFTING | ISOLATED_MACRO_TYPE | ISOLATED_ITEM_HEALTH | ISOLATED_POTION_ICONS
 
 
 def groups():
@@ -5911,6 +5949,10 @@ def groups():
         from .craft_map_take_corpus import cases as craft_map_takes
     except ImportError:
         from craft_map_take_corpus import cases as craft_map_takes
+    try:
+        from .potion_effect_icon_corpus import cases as potion_effect_icons
+    except ImportError:
+        from potion_effect_icon_corpus import cases as potion_effect_icons
     try:
         from .transmute_patch_corpus import cases as transmute_patches
     except ImportError:
@@ -5950,6 +5992,7 @@ def groups():
         ('spectral saved duration', spectral_saved_duration(cmd, setup)),
         ('item Health short load', item_health_load(cmd, setup)),
         ('macro source type error', macro_source_type_error()),
+        ('potion custom effect icons', potion_effect_icons(cmd, setup)),
         ('stand saved fall distance', stand_saved_fall()),
         ('orb saved UUID', orb_saved_uuid()),
         ('mob saved pickup loot', mob_saved_pickup_loot()),
@@ -6035,6 +6078,7 @@ def groups():
         ('mannequin pose anchors', mannequin_pose_anchors()),
         ('item command damage', item_command_damage()),
         ('dragon command damage', dragon_command_damage()),
+        ('minecart numeric fields', minecart_numeric_fields()),
         ('enderman command damage', enderman_command_damage()),
         ('SNBT trailing commas', snbt_trailing_commas()),
         ('execute', execute()),
