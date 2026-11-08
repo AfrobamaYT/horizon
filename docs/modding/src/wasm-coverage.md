@@ -706,6 +706,9 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `BackendMut::living_set_item_use_remaining` | crosses | Wire call |
 | `BackendMut::living_start_using_item` | crosses | Wire call |
 | `BackendMut::living_release_using_item` | crosses | Wire call |
+| `BackendMut::living_set_waypoint_style` | crosses | Wire call |
+| `BackendMut::living_set_waypoint_color` | crosses | Wire call |
+| `BackendMut::living_set_riptiding` | crosses | Wire call |
 | `BackendMut::menu_close_container` | crosses | Wire call |
 | `BackendMut::merchant_set_offer` | crosses | Wire call |
 | `BackendMut::merchant_add_offer` | crosses | Wire call |
