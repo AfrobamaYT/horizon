@@ -200,11 +200,11 @@ jobs:
           find crates/horizon-mod-api/src -name '*.rs' -print0 | xargs -0 rustup run stable rustfmt --edition 2024 --check --config skip_children=true
           find crates/horizon-client/src/game -name '*.rs' -print0 | xargs -0 rustup run stable rustfmt --edition 2024 --config skip_children=true --check
           rustup run stable rustfmt --edition 2024 --check crates/horizon-mod-api-gen/dispatch-tests/src/fixtures/*.rs
-          cargo +stable clippy $JOBS --workspace --all-targets -- -D warnings
+          cargo +stable clippy $JOBS --keep-going --workspace --all-targets -- -D warnings
       - name: Lint the server build without sound or controllers
         if: steps.rust.outputs.required != 'false'
         id: server-lint
-        run: cargo +stable clippy $JOBS -p horizon-client --all-targets --no-default-features -- -D warnings
+        run: cargo +stable clippy $JOBS --keep-going -p horizon-client --all-targets --no-default-features -- -D warnings
       - name: The mod API builds for wasm32
         if: steps.rust.outputs.required != 'false'
         run: cargo +stable check $JOBS -p horizon-mod-api --target wasm32-unknown-unknown --locked
