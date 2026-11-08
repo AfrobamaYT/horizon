@@ -6,8 +6,9 @@ For each engine type in the allow-list (api_scaffold.toml) it adds, never overwr
   * its re-export to src/exports/<topic>.rs;
   * for a handle with methods, a `<Name>Backend` host area to src/host/<topic>.rs;
   * both conversions to crates/horizon-client/src/game/modding/api_values/<topic>.rs.
-It refuses when the type or a conversion already exists, and never targets lib.rs. Wire impls are
-generated elsewhere (horizon-mod-api-gen) and are not written here.
+It refuses when the type or its `<Name>Backend` already exists in crates/horizon-mod-api/src, and never
+targets lib.rs. Conversions in the client crate are not checked. A handle also gets hand-written opaque
+`Wire` and `Fields` impls; other kinds get their `Wire` impls from horizon-mod-api-gen.
 
   api_scaffold.py --dry-run [--inventory points-inventory-runtime.json] [--report out.md]
   api_scaffold.py --apply
@@ -73,7 +74,7 @@ def handle_source(e, name):
             f'impl {name} {{\n    /// Create a handle for the game.\n'
             '    // hidden: a game-side helper, not part of the mod surface\n    #[doc(hidden)]\n'
             '    pub fn new(epoch: crate::NativeWorldEpoch, id: u64) -> Self {\n        Self { epoch, id }\n    }\n}\n\n'
-            # Opaque handles have no generated Wire impl (as `BossBarRef`), and the game reads them through `Fields`.
+            # Opaque handles get a hand-written Wire impl here (as `BossBarRef`), and the game reads them through `Fields`.
             f'impl crate::wire::Wire for {name} {{\n    const MIN: usize = 16;\n'
             '    fn put(&self, out: &mut crate::wire::Writer) {\n        out.put(&self.epoch);\n        out.put(&self.id);\n    }\n'
             '    fn take(input: &mut crate::wire::Reader<\'_>) -> Result<Self, crate::wire::WireError> {\n'
