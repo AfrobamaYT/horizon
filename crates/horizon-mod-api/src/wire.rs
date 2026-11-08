@@ -56,7 +56,12 @@ pub fn intern(value: &str) -> Result<&'static str, WireError> {
 }
 
 /// The deepest nesting of one value (a component of a component of…) a reader accepts.
-pub const MAX_DEPTH: u16 = 512;
+///
+/// It must not refuse anything its type accepts natively. The deepest such value is a `Tag`:
+/// vanilla allows 512 nested lists or compounds, with a leaf in the innermost, and a nested
+/// compound costs two levels here (the tag, then its map), so 2 × 512 + 1 for the leaf, with a
+/// little headroom for the value that carries the tag.
+pub const MAX_DEPTH: u16 = 1040;
 
 /// Why a buffer is not a value of the type it was read as.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
