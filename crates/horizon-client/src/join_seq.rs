@@ -1573,7 +1573,7 @@ mod tests {
         ));
         slot.discard();
         assert_eq!(slot_lookup(&mut table, &slot, 7), EntityLookup::Missing);
-        table.end_tick();
+        table.end_tick().unwrap();
     }
 
     #[test]
@@ -1605,7 +1605,7 @@ mod tests {
             EntityLookup::Found { value: 9, .. }
         ));
         assert!(changes(&journal).is_empty());
-        table.end_tick();
+        table.end_tick().unwrap();
     }
 
     #[test]
