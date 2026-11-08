@@ -407,7 +407,7 @@ mod tests {
 mod trade_start_tests {
     use super::*;
     use crate::mobs::world::{test_player, with_test_world};
-    use horizon_core::{geometry::Vec3, random::LegacyRandom};
+    use horizon_core::geometry::Vec3;
     use std::sync::Arc;
 
     /// `TradeWithPlayerGoal.canUse`: alive, dry, on the ground, not hurt
@@ -430,11 +430,11 @@ mod trade_start_tests {
                 m.ai.goals.add(1, TradeWithPlayer);
                 let mut world = w.clone();
                 world.player = Some(test_player(Vec3::new(0.5 + distance, 64.0, 0.5)));
-                let mut lr = LegacyRandom::new(0);
+                let mut fixture = crate::health::TestLevel::new(0);
                 let mut events = Vec::new();
                 let mut cx = Cx {
                     w: &world,
-                    lr: &mut lr,
+                    level: &mut fixture.level(),
                     events: &mut events,
                 };
                 let mut goals = std::mem::take(&mut m.ai.goals);

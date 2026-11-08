@@ -2487,7 +2487,6 @@ mod vehicle_damage_command_tests {
                     latency: Arc::new(AtomicI32::new(0)),
                     address: "127.0.0.1:25565".parse().unwrap(),
                     expected: false,
-                    configured: Default::default(),
                 },
                 conn as i32,
                 position,

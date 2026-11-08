@@ -2050,7 +2050,7 @@ mod universal_anger_tests {
 mod cat_tempt_tests {
     use super::*;
     use crate::mobs::world::{test_player, with_test_world};
-    use horizon_core::{geometry::Vec3, random::LegacyRandom};
+    use horizon_core::geometry::Vec3;
     use std::sync::Arc;
 
     /// `CatTemptGoal` overrides `canUse` with `!cat.isTame()`, and inherits
@@ -2072,11 +2072,11 @@ mod cat_tempt_tests {
                 4,
                 CatTempt(super::super::goals::Tempt::new(0.6, food, true), None),
             );
-            let mut lr = LegacyRandom::new(0);
+            let mut fixture = crate::health::TestLevel::new(0);
             let mut events = Vec::new();
             let mut cx = Cx {
                 w: &world,
-                lr: &mut lr,
+                level: &mut fixture.level(),
                 events: &mut events,
             };
             let mut goals = std::mem::take(&mut m.ai.goals);

@@ -1816,7 +1816,13 @@ pub(super) mod initial_history_tests {
 
     #[test]
     fn the_dynamic_lights_reach_the_pack_nearest_first() {
-        let hud = HudBatch::new([800, 450]);
+        let hud = HudBatch::new(
+            [800, 450],
+            crate::hud::GuiScale {
+                requested: 0,
+                unicode: false,
+            },
+        );
         let mut f = frame(&hud);
         let lights = [[1.0, 2.0, 3.0, 14.0], [-4.0, 0.5, 6.0, 7.0]];
         f.dynamic_lights = &lights;

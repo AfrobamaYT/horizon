@@ -1218,10 +1218,10 @@ mod tests {
                     i64::from(m.age),
                 ));
                 let mut events = Vec::new();
-                let mut lr = LegacyRandom::new(0);
+                let mut fixture = crate::health::TestLevel::new(0);
                 let mut cx = Cx {
                     w,
-                    lr: &mut lr,
+                    level: &mut fixture.level(),
                     events: &mut events,
                 };
                 let mut goals = std::mem::take(&mut m.ai.goals);

@@ -3457,13 +3457,14 @@ mod depleted_absorption_tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -3481,7 +3482,9 @@ mod depleted_absorption_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();
@@ -3512,8 +3515,8 @@ mod depleted_absorption_tests {
             .extra
             .effects
             .iter()
-            .find(|e| e.0 == "minecraft:absorption")
-            .map(|e| e.1)
+            .find(|e| e.id == "minecraft:absorption")
+            .map(|e| e.duration)
     }
 
     /// Expected values from the official 26.3 server:
@@ -3603,7 +3606,9 @@ mod depleted_absorption_tests {
                         absorption(game, i)
                     ));
                 }
-                let saved = game.entity_nbt(Target::Mob(game.mobs[i].id)).unwrap();
+                let saved = game
+                    .command_target_nbt(Target::Mob(game.mobs[i].id))
+                    .unwrap();
                 let listed = matches!(saved.get("active_effects"), Some(horizon_core::nbt::Tag::List(l)) if !l.is_empty());
                 if listed != expected.is_some() {
                     failures.push(format!("{name}: saved active_effects {listed}"));
@@ -3657,8 +3662,8 @@ mod depleted_absorption_tests {
                     .extra
                     .effects
                     .iter()
-                    .find(|e| e.0 == id)
-                    .map(|e| e.1)
+                    .find(|e| e.id == id)
+                    .map(|e| e.duration)
             };
             for (name, n, effects, hit) in cases {
                 let i = pig(game, n);

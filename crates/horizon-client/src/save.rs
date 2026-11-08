@@ -5755,12 +5755,26 @@ mod tests {
         };
         let root = PathBuf::from(root);
         let assets = Arc::new(crate::assets::Assets::load(&root).expect("assets"));
-        let biomes = Arc::new(Biomes::load(&root).expect("biomes"));
+        let biomes = Arc::new(
+            Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.clone(),
+            ))
+            .expect("biomes"),
+        );
+        let item_data = crate::test_resources::item_data(
+            &root,
+            horizon_world::native_load_context::DataLoadOrigin::ServerDataLoad,
+        )
+        .expect("item data");
         let inner = Arc::new(
             crate::vanillagen::VanillaTerrain::new(
-                &root.join("worldgen"),
-                assets.registry,
-                &biomes,
+                crate::vanillagen::TerrainResources {
+                    data: None,
+                    dir: &root.join("worldgen"),
+                    registry: assets.registry,
+                    biomes: &biomes,
+                    item_data: &item_data,
+                },
                 12345,
             )
             .unwrap(),

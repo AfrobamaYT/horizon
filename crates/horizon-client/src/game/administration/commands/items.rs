@@ -1784,9 +1784,14 @@ mod mob_equipment_command_tests {
             let functions = pack.join("data/wpenchant/function");
             std::fs::create_dir_all(&functions).unwrap();
             std::fs::write(functions.join("ready.mcfunction"), "return 1\n").unwrap();
-            game.reload_datapacks(false);
+            let features = game.level.enabled_features.clone();
+            let stack = game.reload_datapacks(false, &features).unwrap();
             assert!(game.fns.store.functions.contains_key("wpenchant:ready"));
-            game.reload_world_tables();
+            let root = game.options.resources.clone();
+            let prepared = game
+                .prepare_world_reload(&stack, &root, game.mods.data_switched)
+                .unwrap();
+            game.reload_world_tables(prepared);
             let raw_present = game
                 .pack_files()
                 .kind("enchantment")
@@ -1794,32 +1799,46 @@ mod mob_equipment_command_tests {
             assert!(
                 raw_present,
                 "pack function admitted, but enchantment raw file absent; actual catalog entry present={}",
-                game.enchantments().get("wpenchant:loaded").is_some()
+                game.stations()
+                    .enchantments
+                    .get("wpenchant:loaded")
+                    .is_some()
             );
             assert!(std::sync::Arc::ptr_eq(
                 &game.items().enchantments,
                 &game.stations().enchantments
             ));
-            assert!(game.enchantments().get("minecraft:mending").is_some());
-            assert!(game.enchantments().get("wpenchant:missing").is_none());
+            assert!(
+                game.stations()
+                    .enchantments
+                    .get("minecraft:mending")
+                    .is_some()
+            );
+            assert!(
+                game.stations()
+                    .enchantments
+                    .get("wpenchant:missing")
+                    .is_none()
+            );
             let entry = game
-                .enchantments()
+                .stations()
+                .enchantments
                 .get("wpenchant:loaded")
                 .expect("the active Game catalog must adopt the loaded world-pack definition");
             assert_eq!(entry.description, "World catalog loaded");
             assert_eq!(entry.max_level, 1);
-            assert!(game.enchantments().can_enchant(
+            assert!(game.stations().enchantments.can_enchant(
                 game.items(),
                 "wpenchant:loaded",
                 "minecraft:diamond_sword"
             ));
-            assert!(!game.enchantments().can_enchant(
+            assert!(!game.stations().enchantments.can_enchant(
                 game.items(),
                 "wpenchant:loaded",
                 "minecraft:stone"
             ));
             assert_eq!(
-                game.enchantments().modify_value_with(
+                game.stations().enchantments.modify_value_with(
                     "wpenchant:loaded",
                     1,
                     "minecraft:damage",

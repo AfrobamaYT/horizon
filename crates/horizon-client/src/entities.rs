@@ -3858,6 +3858,7 @@ mod slime_bounce_tests {
             states: Vec::new(),
             air: horizon_world::registry::BlockStateId(0),
             woods: Default::default(),
+            sign_texts: Default::default(),
         };
         item.tick_settle(
             &world,
@@ -3867,6 +3868,7 @@ mod slime_bounce_tests {
                 old_velocity: item.velocity,
                 movement: Some(item.velocity),
                 clipped_vertical: false,
+                landed: None,
             },
         );
         assert_eq!(item.velocity.x.to_bits(), 0x3fb9_1687_3333_3334);

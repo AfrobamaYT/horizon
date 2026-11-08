@@ -1314,16 +1314,13 @@ mod warden_owned_memory_tests {
     use crate::entity_nbt::{mob_from_nbt, mob_to_nbt};
     use crate::mobs::MobType;
     use crate::save::{doubles, put};
-    use horizon_world::{
-        nbt::{Compound, Tag},
-        registry::BlockRegistry,
-    };
+    use horizon_core::nbt::{Compound, Tag};
+    use horizon_world::registry::BlockRegistry;
     use std::{collections::HashMap, sync::Arc};
     fn string(s: &str) -> Tag {
         Tag::String(s.into())
     }
     use crate::mobs::{Species, world::with_built_test_world};
-    use horizon_core::random::LegacyRandom;
 
     fn types() -> HashMap<String, Arc<MobType>> {
         let mut kind = crate::mobs::sensor_scan_tests::kind();
@@ -1519,10 +1516,10 @@ mod warden_owned_memory_tests {
                 put(&mut raw, "Health", Tag::Float(500f32.to_bits()));
                 let mut m = mob_from_nbt(&raw, &types, 93, None).unwrap();
                 let loaded = slot_state(&m);
-                let mut random = LegacyRandom::new(0);
+                let mut fixture = crate::health::TestLevel::new(0);
                 let mut events = Vec::new();
                 for tick in 1..=5 {
-                    assert!(m.tick(w, &mut random, &mut events));
+                    assert!(m.tick(w, &mut fixture.level(), &mut events));
                     assert_eq!(m.age, tick as u32);
                     let expected = if no_ai {
                         [Some(2), Some(17)]

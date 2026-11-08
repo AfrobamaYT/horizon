@@ -135,7 +135,7 @@ fn no_pickup_without_an_empty_bucket_or_of_a_baby_or_primed_cube() {
         m.extra.age = -24000;
     }
     fn primed(m: &mut Mob) {
-        m.extra.body = Some("minecraft:tnt".into());
+        m.extra.set_body(Some("minecraft:tnt".into()));
         assert!(horizon_client::mobs::sulfur_cube::prime(m, false));
     }
     let cases: [(&str, fn(&mut Mob), &str); 3] = [
@@ -186,7 +186,7 @@ fn the_sulfur_bucket_carries_the_live_cube_s_age_lock_and_body() {
     let id = mob(&mut game, "minecraft:sulfur_cube", |m| {
         m.extra.age = 1200;
         m.extra.age_locked = true;
-        m.extra.body = Some("minecraft:oak_planks".into());
+        m.extra.set_body(Some("minecraft:oak_planks".into()));
         m.health = 3.0;
     });
     assert!(click(&mut game, id, 0, "minecraft:bucket", 1).0);

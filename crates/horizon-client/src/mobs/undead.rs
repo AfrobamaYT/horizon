@@ -1639,7 +1639,6 @@ mod wither_arrow_tests {
 mod trident_continue_tests {
     use super::*;
     use crate::mobs::world::{test_player, with_test_world};
-    use horizon_core::random::LegacyRandom;
     use std::sync::Arc;
 
     /// `DrownedTridentAttackGoal` overrides `canUse` with the trident test and
@@ -1666,11 +1665,11 @@ mod trident_continue_tests {
                     drowned_throw,
                 )),
             );
-            let mut lr = LegacyRandom::new(0);
+            let mut fixture = crate::health::TestLevel::new(0);
             let mut events = Vec::new();
             let mut cx = Cx {
                 w: &world,
-                lr: &mut lr,
+                level: &mut fixture.level(),
                 events: &mut events,
             };
             let mut goals = std::mem::take(&mut m.ai.goals);

@@ -4182,7 +4182,7 @@ texture=wide",
             r#"{"providers":[{"type":"bitmap","file":"minecraft:hud/sheet.png","ascent":7,"chars":["ab"]}]}"#,
         )
         .unwrap();
-        let atlas = HudAtlas::build(&root).unwrap();
+        let atlas = HudAtlas::build(&ResourceSource::directory(root.clone())).unwrap();
         let _ = fs::remove_dir_all(&root);
         let rect = atlas
             .sprites

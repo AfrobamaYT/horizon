@@ -2686,7 +2686,9 @@ mod tests {
 
     #[test]
     fn a_mods_muffle_fades_with_the_game_ticks_and_spares_its_exempt_sounds() {
-        let mut audio = Audio::silent(Path::new("/nonexistent/horizon-test-assets"));
+        let mut audio = Audio::silent(&ResourceSource::directory(
+            "/nonexistent/horizon-test-assets".into(),
+        ));
         audio.engine.registry.add_file(
             "minecraft",
             br#"{"ambient.cave":{"sounds":["ambient/cave/cave1"]}}"#,

@@ -4638,10 +4638,10 @@ mod bed_wake_tests {
                     occupied: true
                 }
             )));
-            let mut random = LegacyRandom::new(0);
+            let mut fixture = crate::health::TestLevel::new(0);
             let mut loaded_events = Vec::new();
             for n in 1..=2 {
-                assert!(loaded.tick(w, &mut random, &mut loaded_events));
+                assert!(loaded.tick(w, &mut fixture.level(), &mut loaded_events));
                 assert_eq!(loaded.age, n);
                 assert!(!loaded.first_tick);
                 assert_eq!(
@@ -4655,10 +4655,10 @@ mod bed_wake_tests {
                     super::super::villager::sleeping_pos(&loaded),
                     Some([0, 64, 0])
                 );
-                assert!(awake.tick(w, &mut random, &mut Vec::new()));
+                assert!(awake.tick(w, &mut fixture.level(), &mut Vec::new()));
                 assert_eq!(awake.position, Vec3::new(5.5, 64.0, 5.5));
                 assert!(!super::super::villager::sleeping(&awake));
-                assert!(normal.tick(w, &mut random, &mut normal_events));
+                assert!(normal.tick(w, &mut fixture.level(), &mut normal_events));
                 assert_eq!(normal.position, Vec3::new(0.5, 64.6875, 0.5));
                 assert_eq!(normal.velocity, Vec3::ZERO);
             }

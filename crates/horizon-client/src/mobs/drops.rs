@@ -898,6 +898,7 @@ mod death_loot_table_tests {
             loot: &loot,
             damage: None,
             player: None,
+            player_killed: false,
             luck: 0.0,
             vehicle: None,
             mob_drops: true,
@@ -940,6 +941,7 @@ mod death_loot_table_tests {
             loot: &loot,
             damage: None,
             player: Some(LootEntity::new("minecraft:player")),
+            player_killed: true,
             luck: 0.0,
             vehicle: None,
             mob_drops: true,
@@ -1072,7 +1074,8 @@ mod slot_tests {
             std::env::temp_dir().join(format!("horizon-guest-left-xp-{}", std::process::id()));
         std::fs::create_dir_all(root.join("data/minecraft/loot_table")).unwrap();
         std::fs::write(root.join("items.json"), "{}").unwrap();
-        let loot = LootData::load(&root, &PackOverlay::default()).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let loot = LootData::load(&root, &PackOverlay::default(), &defaults).unwrap();
         let death = |player_killed| Death {
             loot: &loot,
             damage: None,
@@ -1086,12 +1089,19 @@ mod slot_tests {
         let zombie = |helmet: bool| {
             let mut m = mob("minecraft:zombie", Species::Zombie);
             if helmet {
-                m.extra.head = Some("minecraft:iron_helmet".into());
+                m.extra.set_slot_id(
+                    horizon_items::equipment::HEAD,
+                    Some("minecraft:iron_helmet".into()),
+                );
                 m.extra.drop_chances = Some(Box::new([1.0; 8]));
             }
             m
         };
-        let orbs = |out: &[Drop]| out.iter().filter(|d| matches!(d, Drop::Orb(_))).count();
+        let orbs = |out: &[Drop]| {
+            out.iter()
+                .filter(|d| matches!(d, Drop::Experience(_)))
+                .count()
+        };
         let helmet = |out: &[Drop]| {
             out.iter().any(|d| match d {
                 Drop::Item(s) => s.item == "minecraft:iron_helmet",

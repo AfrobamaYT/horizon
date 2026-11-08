@@ -139,7 +139,9 @@ fn an_infested_endermans_silverfish_come_out_where_it_was_hurt() {
     let hurt = |seed| {
         let mut mob = enderman(&game, 600, at, seed);
         mob.add_effect("minecraft:infested", 200, 0);
+        let mut level = horizon_client::health::TestLevel::new(0);
         mob.damage(
+            &mut level.level(),
             1.0,
             horizon_client::mobs::Damage::of(horizon_client::mobs::DamageKind::Generic),
         );

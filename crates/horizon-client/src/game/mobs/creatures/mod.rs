@@ -12207,13 +12207,14 @@ mod loaded_arrow_shot_tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -12231,7 +12232,9 @@ mod loaded_arrow_shot_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();
@@ -12558,7 +12561,6 @@ mod loaded_arrow_shot_tests {
                     latency: Arc::new(AtomicI32::new(0)),
                     address: "127.0.0.1:25565".parse().unwrap(),
                     expected: false,
-                    configured: Default::default(),
                 },
                 2,
                 [6.5, 200.0, 6.5],
@@ -12568,16 +12570,14 @@ mod loaded_arrow_shot_tests {
             guest.placed = true;
             guest.loaded = true;
             guest.permission = 4;
-            let mut host = game.lan.take().unwrap();
-            host.hub.guests.push(guest);
+            game.lan.as_mut().unwrap().hub.guests.push(guest);
             let host_uuid = game.acting_player_uuid();
-            game.as_guest(&mut host,2,|g| {
+            game.as_guest(2,|g| {
                 assert_eq!(g.lan_acting,Some(2));
                 assert_eq!(g.acting_player_uuid(),[0,0,0,114]);
                 assert!(g.run_command("item replace entity @s weapon.mainhand with crossbow[charged_projectiles=[{id:\"minecraft:arrow\",count:1}]]"));
                 let bow=g.held().unwrap().clone();assert!(g.use_crossbow(&bow));
             }).unwrap();
-            game.lan = Some(host);
             assert_eq!(game.acting_player_uuid(), host_uuid);
             assert_eq!(game.lan_acting, None);
             let arrow = game.creatures.projectiles.pop().unwrap();

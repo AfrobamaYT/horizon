@@ -6169,6 +6169,8 @@ mod magic_absorb_tests {
     /// another kind of hit makes none.
     #[test]
     fn a_thorns_hit_sounds_where_the_mob_stands() {
+        let mut fixture = crate::health::TestLevel::new(0);
+        let level = &mut fixture.level();
         let thorns = Damage {
             kind: DamageKind::Thorns,
             attacker: Some(Who::Player),
@@ -6187,21 +6189,21 @@ mod magic_absorb_tests {
         let mut m = witch();
         m.position = Vec3::new(1.0, 2.0, 3.0);
         m.silent = true;
-        assert!(m.damage(4.0, thorns));
+        assert!(m.damage(level, 4.0, thorns));
         assert_eq!(
             sounds(&m),
             vec![("enchant.thorns.hit", [1.0, 2.0, 3.0], 1.0, 1.0)]
         );
         m.outbox.clear();
-        m.damage(8.0, thorns);
+        m.damage(level, 8.0, thorns);
         assert!(sounds(&m).is_empty(), "inside the hurt cooldown");
 
         let mut loud = witch();
-        assert!(loud.damage(4.0, thorns));
+        assert!(loud.damage(level, 4.0, thorns));
         let heard = sounds(&loud);
         assert_eq!(heard.last().map(|s| s.0), Some("enchant.thorns.hit"));
         let mut hit = witch();
-        assert!(hit.damage(4.0, Damage::player([4.0, 2.0, 3.0])));
+        assert!(hit.damage(level, 4.0, Damage::player([4.0, 2.0, 3.0])));
         assert_eq!(heard.len(), sounds(&hit).len() + 1, "{heard:?}");
         assert!(sounds(&hit).iter().all(|s| s.0 != "enchant.thorns.hit"));
     }

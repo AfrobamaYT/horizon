@@ -184,7 +184,13 @@ fn coverage_follows_hud_blends_discard_scissor_and_depth_without_changing_colour
         (Blend::EndPortal, rgba(255, 255, 255, 255), 0.0, 1, 255),
         (Blend::Vignette, rgba(102, 102, 102, 255), 0.0, 1, 102),
     ] {
-        let mut batch = HudBatch::new([4, 2]);
+        let mut batch = HudBatch::new(
+            [4, 2],
+            crate::hud::GuiScale {
+                requested: 1,
+                unicode: false,
+            },
+        );
         for _ in 0..count {
             quad(&mut batch, blend, color, 0.0, 0.25);
         }
@@ -203,7 +209,13 @@ fn coverage_follows_hud_blends_discard_scissor_and_depth_without_changing_colour
             ],
         );
     }
-    let mut batch = HudBatch::new([4, 2]);
+    let mut batch = HudBatch::new(
+        [4, 2],
+        crate::hud::GuiScale {
+            requested: 1,
+            unicode: false,
+        },
+    );
     for depth in [0.25, 0.75] {
         quad(
             &mut batch,
@@ -256,7 +268,13 @@ fn coverage_preserves_each_cit_blend_and_its_destination_alpha() {
         };
         gpu.hud
             .set_cit_glints(&gpu.device, &gpu.queue, Some(&textures));
-        let mut batch = HudBatch::new([4, 2]);
+        let mut batch = HudBatch::new(
+            [4, 2],
+            crate::hud::GuiScale {
+                requested: 1,
+                unicode: false,
+            },
+        );
         quad(
             &mut batch,
             Blend::CitGlint(0),
@@ -287,7 +305,13 @@ fn coverage_uses_pack_texts_final_alpha_and_discard() {
     };
     gpu.hud.set_text_shader(&gpu.device, Some(&program));
     assert!(gpu.hud.pack_text.is_some());
-    let mut batch = HudBatch::new([4, 2]);
+    let mut batch = HudBatch::new(
+        [4, 2],
+        crate::hud::GuiScale {
+            requested: 1,
+            unicode: false,
+        },
+    );
     for x in [0.0, 2.0, 0.0, 2.0] {
         quad(&mut batch, Blend::Alpha, rgba(255, 255, 255, 255), x, 0.25);
     }

@@ -2024,72 +2024,74 @@ mod pumpkin_equippable_use_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn h207_connected_use_item_adopts_actual_pumpkin_equippable_and_preserves_controls() {
-        let mut game = crate::game::native_machines::tests::server_game();
-        game.build_registries();
-        game.set_allow_commands(true);
-        game.block_ticks
-            .add_empty_chunk(ChunkPos::new(0, 0))
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.build_registries();
+            game.set_allow_commands(true);
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            game.block_ticks
+                .add_empty_chunk(ChunkPos::new(0, 0))
+                .unwrap();
+            assert!(game.run_command("fill 0 199 0 15 199 15 stone"));
+            assert!(game.world.loaded(8, 8));
+            game.lan_host(
+                crate::game::lan::LanSettings {
+                    port: 0,
+                    guest_commands: true,
+                    force_game_mode: false,
+                },
+                NetConfig {
+                    announce: false,
+                    ..NetConfig::loopback(0, "pumpkin-use-test".into(), 2)
+                },
+                HubConfig {
+                    default_game_mode: 0,
+                    guest_commands: true,
+                    force_game_mode: false,
+                    hardcore: false,
+                    view_distance: 2,
+                    simulation_distance: 2,
+                    dimension: "minecraft:overworld".into(),
+                    allow_flight: false,
+                    seed: 0,
+                    max_players: 2,
+                    integrated: false,
+                    levels: Default::default(),
+                },
+            )
             .unwrap();
-        assert!(game.run_command("fill 0 199 0 15 199 15 stone"));
-        assert!(game.world.loaded(8, 8));
-        game.lan_host(
-            crate::game::lan::LanSettings {
-                port: 0,
-                guest_commands: true,
-                force_game_mode: false,
-            },
-            NetConfig {
-                announce: false,
-                ..NetConfig::loopback(0, "pumpkin-use-test".into(), 2)
-            },
-            HubConfig {
-                default_game_mode: 0,
-                guest_commands: true,
-                force_game_mode: false,
-                hardcore: false,
-                view_distance: 2,
-                simulation_distance: 2,
-                dimension: "minecraft:overworld".into(),
-                allow_flight: false,
-                seed: 0,
-                max_players: 2,
-                integrated: false,
-                levels: Default::default(),
-            },
-        )
-        .unwrap();
-        let (tx, _rx) = mpsc::channel();
-        let mut guest = Guest::new(
-            Joined {
-                conn: 2,
-                uuid: 207,
-                name: "PumpkinGuest".into(),
-                properties: Vec::new(),
-                info: ClientInformation::new(2),
-                brand: "test".into(),
-                sender: PlayerSender::new(tx, Arc::default()),
-                latency: Arc::new(AtomicI32::new(0)),
-                address: "127.0.0.1:25565".parse().unwrap(),
-                expected: false,
-                configured: Default::default(),
-            },
-            2,
-            [8.5, 200.0, 8.5],
-            2,
-        );
-        guest.dimension = "minecraft:overworld".into();
-        guest.placed = true;
-        guest.loaded = true;
-        guest.selected = 0;
-        guest.permission = 2;
-        let mut host = game.lan.take().unwrap();
-        host.hub.guests.push(guest);
-        let clock = game.world.game_time;
-        let eq = "minecraft:equippable={slot:\"head\"}";
-        let marker = "minecraft:custom_data={h207:207}";
-        let helmet = "minecraft:diamond_helmet[minecraft:custom_data={old:1}]";
-        let mut failures = Vec::new();
-        for (i, (label, mode, component, count, old, changed)) in [
+            let (tx, _rx) = mpsc::channel();
+            let mut guest = Guest::new(
+                Joined {
+                    conn: 2,
+                    uuid: 207,
+                    name: "PumpkinGuest".into(),
+                    properties: Vec::new(),
+                    info: ClientInformation::new(2),
+                    brand: "test".into(),
+                    sender: PlayerSender::new(tx, Arc::default()),
+                    latency: Arc::new(AtomicI32::new(0)),
+                    address: "127.0.0.1:25565".parse().unwrap(),
+                    expected: false,
+                },
+                2,
+                [8.5, 200.0, 8.5],
+                2,
+            );
+            guest.dimension = "minecraft:overworld".into();
+            guest.placed = true;
+            guest.loaded = true;
+            guest.selected = 0;
+            guest.permission = 2;
+            game.lan.as_mut().unwrap().hub.guests.push(guest);
+            let clock = game.world.game_time;
+            let eq = "minecraft:equippable={slot:\"head\"}";
+            let marker = "minecraft:custom_data={h207:207}";
+            let helmet = "minecraft:diamond_helmet[minecraft:custom_data={old:1}]";
+            let mut failures = Vec::new();
+            for (i, (label, mode, component, count, old, changed)) in [
             ("empty", "survival", Some(eq), 3, None, true),
             ("swap", "survival", Some(eq), 1, Some(helmet), true),
             ("creative", "creative", Some(eq), 3, None, true),
@@ -2099,7 +2101,7 @@ mod pumpkin_equippable_use_tests {
             ("same", "survival", Some(eq), 3, Some("minecraft:carved_pumpkin[minecraft:equippable={slot:\"head\"},minecraft:custom_data={h207:207}]"), false),
         ].into_iter().enumerate() {
             let held = format!("minecraft:carved_pumpkin[{}{}{}]", component.unwrap_or(""), if component.is_some() { "," } else { "" }, marker);
-            let before = game.as_guest(&mut host, 2, |g| {
+            let before = game.as_guest(2, |g| {
                 assert_eq!(g.ui.registries.permission, 2);
                 assert!(g.run_command("clear @s") || g.inventory.iter().all(Option::is_none));
                 g.run_command("item replace entity @s armor.head with air");
@@ -2122,9 +2124,9 @@ mod pumpkin_equippable_use_tests {
                 (g.inventory.clone(), g.armor.clone(), hand)
             }).unwrap();
             let sequence = 207 + i as i32;
-            game.lan_guest_packet(&mut host, 2, Serverbound::UseItem(UseItem { hand: 0, yaw: 0.0, pitch: 0.0, sequence }));
-            assert!(host.hub.guest(2).unwrap().ack_up_to.get() >= sequence);
-            game.as_guest(&mut host, 2, |g| {
+            game.lan_guest_packet(2, Serverbound::UseItem(UseItem { hand: 0, yaw: 0.0, pitch: 0.0, sequence }));
+            assert!(game.lan.as_ref().unwrap().hub.guest(2).unwrap().ack_up_to.get() >= sequence);
+            game.as_guest(2, |g| {
                 let mut expected_inventory = before.0.clone();
                 let mut expected_armor = before.1.clone();
                 if changed {
@@ -2140,9 +2142,10 @@ mod pumpkin_equippable_use_tests {
                 assert_eq!(g.world.game_time, clock);
             }).unwrap();
         }
-        assert!(
-            failures.is_empty(),
-            "actual connected UseItem Equippable adoption failures: {failures:?}"
-        );
+            assert!(
+                failures.is_empty(),
+                "actual connected UseItem Equippable adoption failures: {failures:?}"
+            );
+        });
     }
 }
