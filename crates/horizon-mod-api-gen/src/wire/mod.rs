@@ -379,6 +379,9 @@ pub(super) fn surface<'a>(
             }
         }
     }
+    // A method the API keeps off wasm (`Not on wasm:`) is gated out of the trait on that target,
+    // so neither side's tables hold it.
+    methods.retain(|m| !excused.iter().any(|(o, n)| *o == m.owner && *n == m.name));
     let skipped = emit::skipped(&types);
     let mut report = String::from("Skipped types:\n");
     for (def, skipped) in types.defs.iter().zip(&skipped) {
