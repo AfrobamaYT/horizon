@@ -104,7 +104,6 @@ pub fn main_with(
             }
         }
     }
-    mod_points::__private::seal();
     let help = launch.is_information_request();
     logging::set_game_home(launch.context.home.clone());
     // The dedicated server logs in its own folder, as vanilla's does; the game in its home.

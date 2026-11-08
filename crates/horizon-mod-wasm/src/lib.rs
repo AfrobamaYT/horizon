@@ -3,6 +3,7 @@
 //! versions, one library copy shared by its dependents). Every refusal names its reason for the
 //! Mods page.
 pub mod link;
+mod points;
 mod runtime;
 #[allow(
     dead_code,
@@ -62,8 +63,12 @@ pub enum Refusal {
     Runtime(String),
     /// The mod was compiled against another generated boundary.
     Layout { built: u64, game: u64 },
+    /// The mod's generated point records differ from this game's.
+    PointLayout { built: u64, game: u64 },
     /// The game has no shared Rust standard library beside its executable.
     NoStd,
+    /// A running group trapped or exhausted a resource limit.
+    Stopped,
 }
 
 impl std::fmt::Display for Refusal {
@@ -88,7 +93,11 @@ impl std::fmt::Display for Refusal {
             Self::Package(why) => write!(f, "{why}"),
             Self::Runtime(why) => write!(f, "{why}"),
             Self::Layout { .. } => write!(f, "built for another version of the mod API"),
+            Self::PointLayout { .. } => {
+                write!(f, "built for another version of the mod points API")
+            }
             Self::NoStd => write!(f, "this game has no wasm standard library member"),
+            Self::Stopped => write!(f, "stopped after a trap or resource limit"),
         }
     }
 }
@@ -280,10 +289,29 @@ fn propagate_refusals(
 }
 
 static REFUSED: OnceLock<Vec<(String, Refusal)>> = OnceLock::new();
+static INITIALIZED_REFUSALS: OnceLock<Vec<(String, Refusal)>> = OnceLock::new();
 
 /// The wasm mods refused at startup, each with its reason, for the Mods page.
 pub fn refused() -> &'static [(String, Refusal)] {
-    REFUSED.get().map_or(&[], Vec::as_slice)
+    INITIALIZED_REFUSALS
+        .get()
+        .or_else(|| REFUSED.get())
+        .map_or(&[], Vec::as_slice)
+}
+
+/// The current startup refusal or live trap/limit status, for a Mods-page entry.
+pub fn refusal(id: &str) -> Option<Refusal> {
+    refused()
+        .iter()
+        .find(|(owner, _)| owner == id)
+        .map(|(_, why)| why.clone())
+        .or_else(|| {
+            MODULES
+                .get()?
+                .iter()
+                .find(|(manifest, _)| manifest.id == id)
+                .and_then(|(_, module)| module.is_stopped().then_some(Refusal::Stopped))
+        })
 }
 
 /// Loads the wasm mods the player turned on in `game_dir` (and every `dev` package), once at
@@ -329,7 +357,14 @@ pub fn load_installed(game_dir: &Path, dev: &[PathBuf]) -> Loaded {
     }
     let _ = REFUSED.set(refused.clone());
     loaded.refused = refused;
-    let _ = MODULES.set(loaded.modules.clone());
+    let _ = MODULES.set(
+        loaded
+            .manifests
+            .iter()
+            .cloned()
+            .zip(loaded.modules.iter().cloned())
+            .collect(),
+    );
     loaded
 }
 
@@ -342,24 +377,41 @@ pub struct Loaded {
     modules: Vec<WasmMod>,
 }
 
-static MODULES: OnceLock<Vec<WasmMod>> = OnceLock::new();
+static MODULES: OnceLock<Vec<(Manifest, WasmMod)>> = OnceLock::new();
 
 /// Supplies the complete native/content inventory after the game's dispatch order is installed,
 /// before registration. Constructors and subscription queries run before this, as on native.
 pub fn initialize(inventory: &[mod_api::PackageInfo]) {
-    initialize_modules(MODULES.get().map_or(&[], Vec::as_slice), inventory);
-}
-fn initialize_modules(modules: &[WasmMod], inventory: &[mod_api::PackageInfo]) {
-    for module in modules {
-        module.call(
-            CallClass::Load,
-            boundary::Frame::default(),
-            mod_api::wire::INIT,
-            None,
-            |w| w.put(inventory),
-            |_| Ok(()),
-        );
+    let mut refused = REFUSED.get().cloned().unwrap_or_default();
+    for (manifest, module) in MODULES.get().map_or(&[][..], Vec::as_slice) {
+        let result = if initialize_modules(std::slice::from_ref(module), inventory) {
+            points::listen(manifest, module)
+        } else {
+            Err("initialization failed".into())
+        };
+        if let Err(why) = result {
+            module.disable();
+            log::error!("wasm mod {} refused: {why}", manifest.id);
+            refused.push((manifest.id.clone(), Refusal::Runtime(why)));
+        }
     }
+    let _ = INITIALIZED_REFUSALS.set(refused);
+}
+fn initialize_modules(modules: &[WasmMod], inventory: &[mod_api::PackageInfo]) -> bool {
+    let mut succeeded = true;
+    for module in modules {
+        succeeded &= module
+            .call(
+                CallClass::Load,
+                boundary::Frame::default(),
+                mod_api::wire::INIT,
+                None,
+                |w| w.put(inventory),
+                |_| Ok(()),
+            )
+            .is_some();
+    }
+    succeeded
 }
 
 pub fn load(std_member: &[u8], packages: Vec<WasmPackage>) -> Loaded {

@@ -144,6 +144,30 @@ impl Writer {
     }
 }
 
+/// A mutable hook argument, erased without changing its wire representation.
+/// Replies are decoded completely before any field is assigned.
+pub trait Record {
+    /// Writes the argument into a hook call.
+    fn encode(&self, out: &mut Writer);
+    /// Applies one complete reply, refusing malformed or trailing bytes atomically.
+    fn apply(&mut self, bytes: &[u8]) -> Result<(), WireError>;
+}
+
+impl<T: Wire> Record for T {
+    fn encode(&self, out: &mut Writer) {
+        out.put(self);
+    }
+    fn apply(&mut self, bytes: &[u8]) -> Result<(), WireError> {
+        let mut input = Reader::new(bytes);
+        let value = input.take()?;
+        if !input.rest().is_empty() {
+            return Err(WireError::Trailing);
+        }
+        *self = value;
+        Ok(())
+    }
+}
+
 /// What can be written: every [`Wire`] value, and the borrowed forms a call passes
 /// (`&str`, `&[T]`, `Option<&T>`), which are written as the owned value they stand for.
 pub trait Put {

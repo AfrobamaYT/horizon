@@ -2200,6 +2200,7 @@ dependencies = [
  "horizon-mod-api",
  "horizon-mod-api-gen",
  "horizon-mod-package",
+ "horizon-mod-points",
  "log",
  "serde_json",
  "wasmparser 0.261.0",
