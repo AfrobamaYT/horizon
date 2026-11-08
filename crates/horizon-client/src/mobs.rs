@@ -7325,10 +7325,9 @@ mod hurt_cooldown_incoming_tests {
         let mut test_level = crate::health::TestLevel::new(0);
         let level = &mut test_level.level();
         let mut m = mob(Species::Pig);
-        m.extra.set_slot_id(
-            horizon_items::equipment::CHEST,
-            Some("minecraft:iron_chestplate".into()),
-        );
+        // This damage-boundary fixture supplies effective armor directly;
+        // equipment attributes are normally prepared by the equipment tick.
+        Arc::make_mut(&mut m.kind).armor = 6.0;
         let mut calls = 0;
         let mut breach = |f: f32, _: &mut LegacyRandom| {
             calls += 1;
