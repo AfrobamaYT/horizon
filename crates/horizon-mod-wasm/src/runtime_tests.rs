@@ -121,6 +121,23 @@ fn real_members_link_when_built() {
             .iter()
             .all(|name| crate::boundary::hook_id(name).is_some())
     );
+    let event: mod_api::ClientTickPostEvent = Reader::new(&[]).take().unwrap();
+    let tick = crate::boundary::export_id("Hooks", "client_tick_post").unwrap();
+    assert_eq!(
+        modules[0].call(
+            CallClass::Hook,
+            Frame::default(),
+            tick,
+            None,
+            |w| w.put(&event),
+            |r| {
+                r.take::<()>()?;
+                r.take::<mod_api::ClientTickPostEvent>()?;
+                Ok(())
+            }
+        ),
+        Some(())
+    );
 }
 
 #[test]
@@ -306,12 +323,25 @@ fn layout_mismatch_is_a_mods_page_refusal() {
 }
 #[test]
 fn point_record_layout_mismatch_is_refused() {
-    let bytes = wat::parse_str(format!(r#"(module (@custom "dylink.0" "\01\04\00\00\00\00")
+    let bytes = wat::parse_str(format!(
+        r#"(module (@custom "dylink.0" "\01\04\00\00\00\00")
         (func (export "horizon_layout") (result i64) i64.const {})
         (func (export "horizon_layout_ext") (result i64) i64.const {})
         (func (export "horizon_in") (param i32) (result i32) i32.const 0)
-        (func (export "horizon_hook") (param i32) (result i64) i64.const 0))"#, mod_api::wire::LAYOUT, mod_points::POINT_LAYOUT ^ 1)).unwrap();
-    let refusal = WasmMod::instantiate(&engine().unwrap(), &[Member { name: "points", module: &bytes }]).err().unwrap();
+        (func (export "horizon_hook") (param i32) (result i64) i64.const 0))"#,
+        mod_api::wire::LAYOUT,
+        mod_points::POINT_LAYOUT ^ 1
+    ))
+    .unwrap();
+    let refusal = WasmMod::instantiate(
+        &engine().unwrap(),
+        &[Member {
+            name: "points",
+            module: &bytes,
+        }],
+    )
+    .err()
+    .unwrap();
     assert!(matches!(refusal, Refusal::PointLayout { .. }));
 }
 
