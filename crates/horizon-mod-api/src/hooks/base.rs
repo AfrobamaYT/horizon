@@ -2311,6 +2311,7 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "ProjectileImpactEvent",
+        paper = "ProjectileHitEvent",
         cancellable = true
     )]
     fn projectile_impact(
@@ -2774,6 +2775,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no flight toggle event; Bukkit's PlayerToggleFlightEvent)",
+        paper = "PlayerToggleFlightEvent",
         cancellable = true
     )]
     fn player_toggle_flight();
@@ -4550,7 +4552,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no hopper event)"
+        neoforge = "none (NeoForge has no hopper event)",
+        paper = "PrepareHopperTransferEvent"
     )]
     fn prepare_hopper_transfer();
     /// A crafting-grid result was prepared for a server player; `pos` is the crafting table, or None for the inventory grid. Change `result` before it is sent.
@@ -4573,7 +4576,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "replace",
         out = "result",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        paper = "PrepareSmithingEvent"
     )]
     fn prepare_smithing();
     /// A server projectile was added to the level. `player` is set only for
