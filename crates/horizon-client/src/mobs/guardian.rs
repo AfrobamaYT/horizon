@@ -52,8 +52,7 @@ pub fn register(m: &mut Mob) {
     m.ai.targets.add(
         1,
         NearestTarget::player(true).when(|m, w| {
-            w.player
-                .as_ref()
+            w.selected_player()
                 .is_some_and(|p| p.position.distance_squared(m.position) > 9.0)
         }),
     );
@@ -129,11 +128,13 @@ impl Goal for GuardianAttack {
                 + if is_elder(m) { 2.0 } else { 0.0 };
             let from = [m.position.x, m.position.y, m.position.z];
             match who {
-                Who::Player => cx.events.push(MobEvent::DamagePlayer {
-                    amount: magic,
-                    from,
-                    kind: "minecraft:indirect_magic",
-                }),
+                Who::Player => cx
+                    .events
+                    .push(cx.w.route_player_event(MobEvent::DamagePlayer {
+                        amount: magic,
+                        from,
+                        kind: "minecraft:indirect_magic",
+                    })),
                 Who::Mob(id) => cx.events.push(MobEvent::AttackMob {
                     target: id,
                     amount: magic,
@@ -290,7 +291,7 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     // The eye follows the active target, else the player (the camera).
     let look = match m.target_info(w).filter(|_| m.extra.flag) {
         Some(t) => Some([t.position.x, t.eye_y, t.position.z]),
-        None => w.player.as_ref().map(|p| p.eye),
+        None => w.selected_player().map(|p| p.eye),
     };
     if let Some(look) = look {
         look_at(m, look);
@@ -309,11 +310,11 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     {
         let from = [m.position.x, m.position.y, m.position.z];
         match d.attacker {
-            Some(Who::Player) => events.push(MobEvent::DamagePlayer {
+            Some(Who::Player) => events.push(w.route_player_event(MobEvent::DamagePlayer {
                 amount: 2.0,
                 from,
                 kind: "minecraft:thorns",
-            }),
+            })),
             Some(Who::Mob(id)) => events.push(MobEvent::AttackMob {
                 target: id,
                 amount: 2.0,

@@ -519,6 +519,15 @@ impl super::LiveMobs for LiveOthers<'_> {
             .chain(self.vehicle)
             .find(|mob| mob.id == id)
     }
+
+    fn for_each(&self, visitor: &mut dyn FnMut(&Mob)) {
+        self.before
+            .iter()
+            .chain(self.between)
+            .chain(self.after)
+            .chain(self.vehicle)
+            .for_each(visitor);
+    }
 }
 
 /// Tick a passenger with Mob.getNavigation's recursive vehicle redirection.

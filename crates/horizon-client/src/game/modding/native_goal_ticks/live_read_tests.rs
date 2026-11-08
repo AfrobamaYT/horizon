@@ -7,6 +7,10 @@ impl mobs::LiveMobs for OneMob<'_> {
     fn find(&self, id: u32) -> Option<&Mob> {
         (self.0.id == id).then_some(self.0)
     }
+
+    fn for_each(&self, visitor: &mut dyn FnMut(&Mob)) {
+        visitor(self.0);
+    }
 }
 
 #[test]

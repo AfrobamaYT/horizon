@@ -139,11 +139,11 @@ impl Goal for LandOnOwnersShoulder {
             && is_owner(m, cx.w)
             && cx
                 .w
-                .player
-                .as_ref()
+                .selected_player()
                 .is_some_and(|p| m.bounds().intersects(p.bounds))
         {
-            cx.events.push(MobEvent::ParrotToShoulder { mob: m.id });
+            cx.events
+                .push(cx.w.route_player_event(MobEvent::ParrotToShoulder { mob: m.id }));
         }
     }
 }
@@ -182,7 +182,7 @@ fn owner_view<'a>(m: &Mob, w: &'a MobWorld) -> Option<&'a PlayerView> {
     if !m.extra.tame {
         return None;
     }
-    let p = w.player.as_ref()?;
+    let p = w.selected_player()?;
     (m.extra.owner == Some(p.uuid)).then_some(p)
 }
 /// The owner's position, eye height and spectator flag when tame.
@@ -193,8 +193,7 @@ fn owner(m: &Mob, w: &MobWorld) -> Option<(Vec3, f64, bool)> {
 /// Whether the player the mob sees is the one saved as its owner (with
 /// guests on, that player is whoever stands nearest).
 fn is_owner(m: &Mob, w: &MobWorld) -> bool {
-    w.player
-        .as_ref()
+    w.selected_player()
         .is_some_and(|p| owned_by(m.extra.owner, p.uuid))
 }
 /// Whether `uuid` is the saved owner. A host with no UUID yet owns what it
@@ -543,7 +542,7 @@ struct Beg {
 }
 impl Beg {
     fn interesting(&self, w: &MobWorld) -> bool {
-        let Some(p) = &w.player else {
+        let Some(p) = w.selected_player() else {
             return false;
         };
         let held = |i: &Option<std::sync::Arc<str>>| {
@@ -560,14 +559,12 @@ impl Goal for Beg {
         LOOK
     }
     fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        cx.w.player
-            .as_ref()
+        cx.w.selected_player()
             .is_some_and(|p| m.distance_sqr(p.position) <= 64.0)
             && self.interesting(cx.w)
     }
     fn can_continue(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        cx.w.player
-            .as_ref()
+        cx.w.selected_player()
             .is_some_and(|p| p.alive && m.distance_sqr(p.position) <= 64.0)
             && self.ticks > 0
             && self.interesting(cx.w)
@@ -580,7 +577,7 @@ impl Goal for Beg {
         m.extra.flag = false;
     }
     fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
-        if let Some(p) = &cx.w.player {
+        if let Some(p) = cx.w.selected_player() {
             let max = m.max_head_x_rot();
             m.look_at_speed([p.position.x, p.eye[1], p.position.z], 10.0, max);
         }
@@ -590,8 +587,7 @@ impl Goal for Beg {
 /// `NeutralMob.isValidPlayerTarget`: a player in survival or adventure, off
 /// peaceful.
 fn valid_player_target(w: &MobWorld) -> bool {
-    w.player
-        .as_ref()
+    w.selected_player()
         .is_some_and(|p| !p.creative && !p.spectator)
         && w.difficulty.id != 0
 }
@@ -637,8 +633,7 @@ pub(super) fn update_persistent_anger(m: &mut Mob, w: &MobWorld) {
     // Mob.getTarget: a player in creative or spectator mode is no target.
     let target = m.ai.target.filter(|t| {
         *t != Who::Player
-            || w.player
-                .as_ref()
+            || w.selected_player()
                 .is_some_and(|p| !p.creative && !p.spectator)
     });
     if let Some(target) = target {
@@ -658,8 +653,7 @@ pub(super) fn update_persistent_anger(m: &mut Mob, w: &MobWorld) {
     // player who is not here yet (a reloaded wolf ticks before the player
     // joins) keeps the anger.
     if angry_at == Some(Who::Player)
-        && w.player
-            .as_ref()
+        && w.selected_player()
             .is_some_and(|p| p.creative || p.spectator || w.difficulty.id == 0)
     {
         stop_being_angry_with_world(m, Some(w));
@@ -1095,7 +1089,7 @@ impl Goal for CatTempt {
             return false;
         }
         // CatTemptGoal.canScare: a selected player that is the tempter is not scared.
-        let picked = self.1.is_some() && self.1 == cx.w.player.as_ref().map(|p| p.uuid);
+        let picked = self.1.is_some() && self.1 == cx.w.selected_player().map(|p| p.uuid);
         let scare = self.0.can_scare;
         self.0.can_scare = scare && !picked;
         let go = self.0.can_continue(m, cx);
@@ -1126,7 +1120,7 @@ impl Goal for CatTempt {
         // CatTemptGoal.tick: pick the tempting player with a 1 in 600 chance a
         // tick while none is picked, else drop the pick with a 1 in 500 chance.
         if self.1.is_none() && m.random.next_int_bound(reduced(600)).unwrap_or(1) == 0 {
-            self.1 = cx.w.player.as_ref().map(|p| p.uuid);
+            self.1 = cx.w.selected_player().map(|p| p.uuid);
         } else if m.random.next_int_bound(reduced(500)).unwrap_or(1) == 0 {
             self.1 = None;
         }
@@ -1178,8 +1172,7 @@ impl CatRelaxOnOwner {
     /// The owner's sleeping state, when this cat may relax on them: the
     /// player it sees has to be its owner (`Cat.getOwner`).
     fn sleeping_owner<'w>(m: &Mob, w: &'w MobWorld) -> Option<&'w super::PlayerView> {
-        w.player
-            .as_ref()
+        w.selected_player()
             .filter(|p| m.extra.tame && !m.extra.sitting && p.sleeping && is_owner_of(m, p))
     }
 }
@@ -1243,8 +1236,7 @@ impl Goal for CatRelaxOnOwner {
             };
         if cx
             .w
-            .player
-            .as_ref()
+            .selected_player()
             .is_some_and(|p| is_owner_of(m, p) && p.sleep_timer >= 100)
             && m.random.next_float() < chance
         {
@@ -1255,7 +1247,7 @@ impl Goal for CatRelaxOnOwner {
         m.nav_stop();
     }
     fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
-        let (Some(p), Some(g)) = (cx.w.player.as_ref(), self.goal) else {
+        let (Some(p), Some(g)) = (cx.w.selected_player(), self.goal) else {
             return;
         };
         m.extra.flag2 = false;

@@ -186,7 +186,10 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld) {
         }
     }
     // A player in creative or spectator mode is forgiven at once.
-    if m.extra.flag2 && w.player.as_ref().is_some_and(|p| p.creative || p.spectator) {
+    if m.extra.flag2
+        && w.selected_player()
+            .is_some_and(|p| p.creative || p.spectator)
+    {
         stop_being_angry_with_world(m, Some(w));
     }
 }

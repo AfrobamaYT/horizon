@@ -1,6 +1,50 @@
 //! The borrowed mob-tick region; ownership and restoration stay in the caller.
 use super::*;
 
+/// Route each player event to the player selected when it was emitted.
+/// Untagged events retain the previous per-tick guest binding.
+fn route_player_events(
+    events: &mut Vec<MobEvent>,
+    from: usize,
+    seen_guest: Option<u32>,
+    guest_ids: &[(u32, u32)],
+    guest_events: &mut Vec<(u32, u32, MobEvent)>,
+    mob: u32,
+) {
+    let mut k = from;
+    while k < events.len() {
+        let (conn, tagged) = match &events[k] {
+            MobEvent::ForPlayer { conn, .. } => (*conn, true),
+            _ => (seen_guest, false),
+        };
+        if tagged {
+            let MobEvent::ForPlayer { event, .. } = events.remove(k) else {
+                unreachable!();
+            };
+            events.insert(k, *event);
+        }
+        // ShulkerBullet stores a target for later projectile ticks. Preserve
+        // the selected guest's entity ID instead of the host-player sentinel.
+        if let Some(conn) = conn
+            && let MobEvent::Projectile(p) = &mut events[k]
+            && let ProjectileKind::ShulkerBullet { target, .. } = &mut p.kind
+            && *target == Some(Who::Player)
+        {
+            *target = guest_ids
+                .iter()
+                .find(|g| g.0 == conn)
+                .map(|g| Who::Mob(g.1));
+        }
+        if let Some(conn) = conn
+            && super::super::lan_mobs::acts_on_player(&events[k])
+        {
+            guest_events.push((conn, mob, events.remove(k)));
+        } else {
+            k += 1;
+        }
+    }
+}
+
 /// Stack-only borrows of the caller's existing pass and bookkeeping.
 pub(super) struct BorrowedMobTick<'a, 'p, F> {
     pub(super) mobs: &'a mut horizon_client::join_seq::JoinList<Mob>,
@@ -229,6 +273,45 @@ impl Game<'_> {
                 None => base.player_identity,
                 Some(conn) => self.guest_identity(conn),
             };
+            // A listener can redirect to any real player in this level. Keep
+            // immutable views for this tick so changing selection never
+            // invalidates a view a goal already borrowed. No allocation is
+            // made when nobody listens for target changes.
+            let selection = if mod_api::__private::listened(mod_api::HookId::LivingChangeTarget) {
+                use horizon_client::mobs::player_selection::{PlayerSelection, TickPlayer};
+                let mut players = Vec::new();
+                if let (Some(view), Some((_, entity_id))) = (&active_player, active_identity) {
+                    players.push(TickPlayer {
+                        entity_id,
+                        connection: seen_guest,
+                        view: view.clone(),
+                    });
+                }
+                if seen_guest.is_some()
+                    && let (Some(view), Some((_, entity_id))) = (&base.player, base.player_identity)
+                {
+                    players.push(TickPlayer {
+                        entity_id,
+                        connection: None,
+                        view: view.clone(),
+                    });
+                }
+                for (index, (conn, view)) in guests.iter().enumerate() {
+                    if Some(index) == lent {
+                        continue;
+                    }
+                    if let Some((_, entity_id)) = self.guest_identity(*conn) {
+                        players.push(TickPlayer {
+                            entity_id,
+                            connection: Some(*conn),
+                            view: view.clone(),
+                        });
+                    }
+                }
+                PlayerSelection::new(players, active_identity.map(|(_, id)| id))
+            } else {
+                None
+            };
             let mut w = MobWorld {
                 others: snapshot,
                 others_grid: Some(&grid),
@@ -239,6 +322,7 @@ impl Game<'_> {
                 nearest_player,
                 player: active_player,
                 player_identity: active_identity,
+                player_selection: selection.as_ref(),
                 teams: std::sync::Arc::clone(&base.teams),
                 ..base
             };
@@ -272,6 +356,16 @@ impl Game<'_> {
                 super::super::tick_profile::add(level_id, &kind, started);
             }
             let m = &mut mobs[i];
+            if let Some(selection) = &selection
+                && selection.has_switched()
+                && let Some(player) = selection.selected()
+            {
+                if let Some(conn) = player.connection {
+                    bindings.insert(m.id, conn);
+                } else {
+                    bindings.remove(&m.id);
+                }
+            }
             m.despawn = mod_api::NativeDespawn::default();
             if credit_expiring && m.ai.last_hurt_by_player == 0 {
                 player_credit.remove(&m.id);
@@ -306,29 +400,7 @@ impl Game<'_> {
                 };
                 gone.push((m.id, m.position, width, height, split));
             }
-            if let Some(conn) = seen_guest {
-                // ShulkerBullet.finalTarget is the guest's entity: the
-                // bullet homes on it while the projectiles tick, where
-                // `Who::Player` is the host's own player.
-                if let Some(&(_, id)) = guest_ids.iter().find(|g| g.0 == conn) {
-                    for e in &mut events[from..] {
-                        if let MobEvent::Projectile(p) = e
-                            && let ProjectileKind::ShulkerBullet { target, .. } = &mut p.kind
-                            && *target == Some(Who::Player)
-                        {
-                            *target = Some(Who::Mob(id));
-                        }
-                    }
-                }
-                let mut k = from;
-                while k < events.len() {
-                    if super::super::lan_mobs::acts_on_player(&events[k]) {
-                        guest_events.push((conn, m.id, events.remove(k)));
-                    } else {
-                        k += 1;
-                    }
-                }
-            }
+            route_player_events(events, from, seen_guest, guest_ids, guest_events, m.id);
             // Killed during its own tick (drowning, burning, falling...).
             if !m.alive() && !m.removed && died.insert(m.id) {
                 dead.push(m.clone());
@@ -352,5 +424,46 @@ impl Game<'_> {
                 horizon_client::mobs::apply_mob_pushes(m, &mut pushes);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod player_routing_tests {
+    use super::*;
+
+    #[test]
+    fn player_events_keep_the_recipient_at_emission() {
+        let attack = |amount| MobEvent::AttackPlayer(amount, [0.0; 3]);
+        let mut events = vec![
+            attack(1.0), // Before the switch, the original guest.
+            MobEvent::ForPlayer {
+                conn: Some(2),
+                event: Box::new(attack(2.0)),
+            },
+            MobEvent::ForPlayer {
+                conn: None,
+                event: Box::new(attack(3.0)),
+            },
+            MobEvent::ForPlayer {
+                conn: Some(1),
+                event: Box::new(attack(4.0)),
+            },
+        ];
+        let mut guests = Vec::new();
+        route_player_events(&mut events, 0, Some(1), &[(1, 11), (2, 22)], &mut guests, 9);
+        let routed: Vec<_> = guests
+            .into_iter()
+            .map(|(conn, mob, event)| {
+                let MobEvent::AttackPlayer(amount, _) = event else {
+                    panic!("unexpected event")
+                };
+                (conn, mob, amount)
+            })
+            .collect();
+        assert_eq!(routed, [(1, 9, 1.0), (2, 9, 2.0), (1, 9, 4.0)]);
+        assert!(matches!(
+            events.as_slice(),
+            [MobEvent::AttackPlayer(3.0, _)]
+        ));
     }
 }

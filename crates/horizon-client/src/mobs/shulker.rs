@@ -74,7 +74,9 @@ pub fn register(m: &mut Mob) {
     m.ai.targets.add(
         2,
         NearestTarget::player(true).gate(peaceful_off).when(|m, w| {
-            let Some(p) = &w.player else { return false };
+            let Some(p) = w.selected_player() else {
+                return false;
+            };
             let d = p.position.subtract(m.position);
             let axis = match m.extra.variant3 {
                 0 | 1 => d.y,
@@ -518,7 +520,7 @@ fn on_peek_change(m: &Mob, w: &MobWorld, old: f32, new: f32, events: &mut Vec<Mo
     let Some((delta, area)) = peek_push(m, old, new) else {
         return;
     };
-    if let Some(p) = &w.player
+    if let Some(p) = w.selected_player()
         && p.alive
         && !p.spectator
         && p.bounds.intersects(area)
@@ -828,7 +830,8 @@ impl Goal for ShulkerAttack {
         let seed = m.random.next_long() as u64 | 1;
         let bullet =
             Projectile::shulker_bullet(&probe, bullet_origin(m), Who::Mob(m.id), who, axis, seed);
-        cx.events.push(MobEvent::Projectile(bullet));
+        cx.events
+            .push(cx.w.route_player_event(MobEvent::Projectile(bullet)));
         let pitch = (m.random.next_float() - m.random.next_float()) * 0.2 + 1.0;
         cx.events.push(MobEvent::Sound(
             "entity.shulker.shoot",

@@ -660,8 +660,7 @@ pub fn is_monster(s: Species) -> bool {
 /// being angry (`NeutralMob.updatePersistentAnger`).
 fn drop_invalid_player_target(m: &mut Mob, w: &MobWorld) {
     if m.ai.target == Some(Who::Player)
-        && w.player
-            .as_ref()
+        && w.selected_player()
             .is_some_and(|p| p.creative || p.spectator || w.difficulty.base == 0)
     {
         m.set_ai_target(w, None);
@@ -1936,7 +1935,7 @@ fn push_entities(
     // Each with whether it rides a vehicle (`Entity.isPassenger`) and
     // whether it shares this one's root vehicle (`isPassengerOfSameVehicle`).
     let mut targets: Vec<(Who, Vec3, bool, bool, bool)> = Vec::new();
-    if let Some(p) = &w.player
+    if let Some(p) = w.selected_player()
         // Entity.push: passengers of the same vehicle never push each other.
         && m.rider.is_none()
         && p.alive
@@ -1981,7 +1980,7 @@ fn push_entities(
         }
         // doPush calls the other living entity's push; sleeping vetoes both impulses.
         let sleeping = match who {
-            Who::Player => w.player.as_ref().is_some_and(|p| p.sleeping),
+            Who::Player => w.selected_player().is_some_and(|p| p.sleeping),
             Who::Mob(id) => w.seen(id).is_some_and(|o| o.sleeping),
         };
         if sleeping {
@@ -2008,11 +2007,11 @@ fn push_entities(
         za *= f64::from(0.05_f32);
         // A guest's server-side push never reaches its client (ServerPlayer
         // motion is synced only when hurt): its client pushes it itself.
-        if !vehicle && (who != Who::Player || w.player.as_ref().is_none_or(|p| !p.remote)) {
-            events.push(MobEvent::Push {
+        if !vehicle && (who != Who::Player || w.selected_player().is_none_or(|p| !p.remote)) {
+            events.push(w.route_player_event(MobEvent::Push {
                 target: who,
                 velocity: [-xa, 0.0, -za],
-            });
+            }));
         }
         if self_pushable {
             m.velocity = Vec3::new(m.velocity.x + xa, m.velocity.y, m.velocity.z + za);
@@ -3139,10 +3138,10 @@ pub fn do_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
     amount += super::gear::melee_bonus(m, target_species);
     let burn = super::gear::fire_aspect(m);
     if burn > 0 {
-        cx.events.push(MobEvent::Ignite {
+        cx.events.push(cx.w.route_player_event(MobEvent::Ignite {
             target: who,
             seconds: burn,
-        });
+        }));
     }
     // `Mob.doHurtTarget`: `causeExtraKnockback(target, getKnockback(...))`. `getKnockback` is the
     // `attack_knockback` attribute plus the Knockback enchantment, halved; the push goes along the
@@ -3152,21 +3151,21 @@ pub fn do_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
     if power > 0.0 {
         use horizon_core::geometry::trig::Mth;
         let to_rad = std::f32::consts::PI / 180.0;
-        cx.events.push(MobEvent::Knockback {
+        cx.events.push(cx.w.route_player_event(MobEvent::Knockback {
             target: who,
             power: f64::from(power),
             x: f64::from((m.yaw * to_rad).msin()),
             z: f64::from(-(m.yaw * to_rad).mcos()),
             source,
-        });
+        }));
         m.velocity = Vec3::new(m.velocity.x * 0.6, m.velocity.y, m.velocity.z * 0.6);
     }
     // Zombies set their target on fire while burning (Zombie.doHurtTarget).
     if m.fire_ticks > 0 && matches!(m.species(), Species::Zombie) && m.random.next_float() < 0.3 {
-        cx.events.push(MobEvent::Ignite {
+        cx.events.push(cx.w.route_player_event(MobEvent::Ignite {
             target: who,
             seconds: 2,
-        });
+        }));
     }
     // The effect picked above goes with the hit: it applies only when the
     // target takes damage (a shield-blocked hit gives none), for a mob as for
@@ -3184,7 +3183,7 @@ pub fn do_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
             _ => None,
         });
     match who {
-        Who::Player => cx.events.push(match effect {
+        Who::Player => cx.events.push(cx.w.route_player_event(match effect {
             Some((effect, ticks, amplifier)) => MobEvent::AttackPlayerWithEffect {
                 amount,
                 from,
@@ -3193,7 +3192,7 @@ pub fn do_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
                 amplifier,
             },
             None => MobEvent::AttackPlayer(amount, from),
-        }),
+        })),
         Who::Mob(id) => cx.events.push(match effect {
             Some((effect, ticks, amplifier)) => MobEvent::AttackMobWithEffect {
                 target: id,

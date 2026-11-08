@@ -216,8 +216,7 @@ pub fn register_ghast(m: &mut Mob) {
     m.ai.targets.add(
         1,
         NearestTarget::player(true).when(|m, w| {
-            w.player
-                .as_ref()
+            w.selected_player()
                 .is_some_and(|p| (p.position.y - m.position.y).abs() <= 4.0)
         }),
     );

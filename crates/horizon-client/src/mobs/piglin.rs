@@ -163,7 +163,9 @@ fn visible(m: &mut Mob, w: &MobWorld, who: Who) -> bool {
     let range = m.attrs.follow_range;
     match who {
         Who::Player => {
-            let Some(p) = &w.player else { return false };
+            let Some(p) = w.selected_player() else {
+                return false;
+            };
             if !p.alive || p.spectator {
                 return false;
             }
@@ -233,8 +235,7 @@ fn piglin_sense(m: &mut Mob, w: &MobWorld) {
         match who {
             Who::Player => {
                 if !loved
-                    && w.player
-                        .as_ref()
+                    && w.selected_player()
                         .is_some_and(|p| !p.spectator && holds_loved(w, p))
                     && visible(m, w, who)
                 {
@@ -1162,7 +1163,7 @@ fn hostile_to_player(m: &Mob, w: &MobWorld) -> bool {
         return false;
     }
     match m.species() {
-        Species::Piglin => m.extra.anger > 0 || w.player.as_ref().is_some_and(|p| !p.gold_armor),
+        Species::Piglin => m.extra.anger > 0 || w.selected_player().is_some_and(|p| !p.gold_armor),
         _ => true,
     }
 }
@@ -1578,7 +1579,7 @@ impl LookAtLoved {
             Activity::Ride => 64.0,
             _ => return None,
         };
-        let p = cx.w.player.as_ref()?;
+        let p = cx.w.selected_player()?;
         if !holds_loved(cx.w, p) || m.distance_sqr(p.position) > range_sqr {
             return None;
         }
@@ -1947,9 +1948,14 @@ fn throw_target(m: &mut Mob, who: Who, cx: &mut Cx) {
     let scale = power * f64::from(m.random.next_float() * 0.5 + 0.2);
     let push = away.normalize().scale(scale).rotate_y(angle);
     let up = power * f64::from(m.random.next_float()) * 0.5;
-    cx.events.push(MobEvent::Push {
+    let event = MobEvent::Push {
         target: who,
         velocity: [push.x, up, push.z],
+    };
+    cx.events.push(if who == Who::Player {
+        cx.w.route_player_event(event)
+    } else {
+        event
     });
 }
 /// `HoglinAi.onHitTarget`: an adult that hits a piglin while piglins
@@ -1988,7 +1994,9 @@ pub fn hoglin_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
     };
     let from = [m.position.x, m.position.y, m.position.z];
     match who {
-        Who::Player => cx.events.push(MobEvent::AttackPlayer(amount, from)),
+        Who::Player => cx
+            .events
+            .push(cx.w.route_player_event(MobEvent::AttackPlayer(amount, from))),
         Who::Mob(id) => cx.events.push(MobEvent::AttackMob {
             target: id,
             amount,

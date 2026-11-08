@@ -241,6 +241,7 @@ mod tests {
             data: &data,
             player: None,
             player_identity: None,
+            player_selection: None,
             controlling_player_movement: None,
             nearest_player: None,
             others: &[],

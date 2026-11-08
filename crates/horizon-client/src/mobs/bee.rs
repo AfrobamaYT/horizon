@@ -232,8 +232,7 @@ fn start_anger_timer(m: &mut Mob, w: &MobWorld) {
 /// Peaceful.
 fn valid_player_target(w: &MobWorld) -> bool {
     w.difficulty.id != 0
-        && w.player
-            .as_ref()
+        && w.selected_player()
             .is_some_and(|p| !p.creative && !p.spectator)
 }
 /// `NeutralMob.updatePersistentAnger(level, false)`.
@@ -364,11 +363,12 @@ pub fn sting(m: &mut Mob, who: Who, cx: &mut Cx) {
     };
     match who {
         Who::Player => {
-            cx.events.push(MobEvent::StingPlayer {
-                amount,
-                from,
-                poison_ticks: seconds * 20,
-            });
+            cx.events
+                .push(cx.w.route_player_event(MobEvent::StingPlayer {
+                    amount,
+                    from,
+                    poison_ticks: seconds * 20,
+                }));
         }
         Who::Mob(id) if seconds > 0 => cx.events.push(MobEvent::AttackMobWithEffect {
             target: id,

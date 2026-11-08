@@ -824,12 +824,11 @@ impl Mob {
     /// player (`LivingEntity.canAttack`, `TargetingConditions.test`: combat
     /// conditions fail when the difficulty is PEACEFUL).
     pub fn spares_players(&self, w: &MobWorld) -> bool {
-        (w.difficulty.base == 0 && w.player.is_some())
+        (w.difficulty.base == 0 && w.selected_player().is_some())
             || self.built_by_player()
             || (self.is_tamable_animal()
                 && self.extra.tame
-                && w.player
-                    .as_ref()
+                && w.selected_player()
                     .is_some_and(|p| super::tame::owned_by(self.extra.owner, p.uuid)))
     }
     /// `canAttack` of any target: the player rules above, and
@@ -955,7 +954,9 @@ impl Mob {
     /// TargetingConditions.forCombat().test for the player: alive, not
     /// creative, within range scaled by visibility, optionally visible.
     pub fn can_target_player(&mut self, w: &MobWorld, range: f64, check_sight: bool) -> bool {
-        let Some(p) = &w.player else { return false };
+        let Some(p) = w.selected_player() else {
+            return false;
+        };
         if self.spares_players(w) {
             return false;
         }
@@ -968,7 +969,9 @@ impl Mob {
     /// forCombat().ignoreInvisibilityTesting() for the player: the check for
     /// a target the mob already has, which ignores the visibility scaling.
     pub fn can_keep_target_player(&mut self, w: &MobWorld, range: f64) -> bool {
-        let Some(p) = &w.player else { return false };
+        let Some(p) = w.selected_player() else {
+            return false;
+        };
         if self.spares_players(w) {
             return false;
         }
@@ -996,7 +999,9 @@ impl Mob {
         check_sight: bool,
         scale: bool,
     ) -> bool {
-        let Some(p) = &w.player else { return false };
+        let Some(p) = w.selected_player() else {
+            return false;
+        };
         if !p.alive || p.spectator {
             return false;
         }
@@ -1402,8 +1407,7 @@ impl LookAtPlayer {
     fn look_target(&self, w: &MobWorld) -> Option<(Vec3, f64)> {
         match self.look_at? {
             Who::Player => w
-                .player
-                .as_ref()
+                .selected_player()
                 .filter(|p| p.alive)
                 .map(|p| (p.position, p.eye[1])),
             Who::Mob(id) => w
@@ -1619,7 +1623,7 @@ impl Goal for MeleeAttack {
         ];
         m.ai.home
             .is_none_or(|(center, radius)| within_home(center, radius, target_block))
-            && !(t.is_player && (t.creative || cx.w.player.as_ref().is_some_and(|p| p.spectator)))
+            && !(t.is_player && (t.creative || cx.w.selected_player().is_some_and(|p| p.spectator)))
     }
     fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
         let path = m.ai.pending_path.take();
@@ -2105,7 +2109,7 @@ impl Goal for HurtByTarget {
             // whether it is a pet at all.
             let tamable = m.is_tamable_animal();
             let owner = m.extra.tame.then_some(m.extra.owner).flatten();
-            let player = cx.w.player.as_ref().map(|p| p.uuid);
+            let player = cx.w.selected_player().map(|p| p.uuid);
             let ids: Vec<u32> =
                 cx.w.others
                     .iter()
@@ -2216,7 +2220,7 @@ impl AvoidEntity {
     fn avoid_target(&mut self, m: &mut Mob, cx: &mut Cx) -> Option<Vec3> {
         let max = f64::from(self.max_dist);
         if matches!(self.what, Avoid::Player) {
-            let wanted = cx.w.player.as_ref().is_none_or(|p| {
+            let wanted = cx.w.selected_player().is_none_or(|p| {
                 self.player_when.is_none_or(|f| f(m, p))
                     && (p.position.y - m.position.y).abs() <= max + 3.0
             });
@@ -2224,7 +2228,7 @@ impl AvoidEntity {
             if !wanted || !m.can_target_player(cx.w, max, true) {
                 return None;
             }
-            return cx.w.player.as_ref().map(|p| p.position);
+            return cx.w.selected_player().map(|p| p.position);
         }
         let Avoid::Species(list) = &self.what else {
             return None;
@@ -2299,8 +2303,7 @@ impl Goal for AvoidEntity {
     fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
         let from = match &self.what {
             Avoid::Player => {
-                cx.w.player
-                    .as_ref()
+                cx.w.selected_player()
                     .map(|p| p.position)
                     .unwrap_or(self.from)
             }
@@ -2351,7 +2354,9 @@ impl Goal for Tempt {
             self.calm_down -= 1;
             return false;
         }
-        let Some(p) = &cx.w.player else { return false };
+        let Some(p) = cx.w.selected_player() else {
+            return false;
+        };
         // Attributes.TEMPT_RANGE default 10.
         p.alive
             && (self.wants(&p.main_hand) || self.wants(&p.off_hand))
@@ -2359,7 +2364,7 @@ impl Goal for Tempt {
     }
     fn can_continue(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
         if self.can_scare
-            && let Some(p) = &cx.w.player
+            && let Some(p) = cx.w.selected_player()
         {
             if m.distance_sqr(p.position) < 36.0 {
                 let moved = (p.position.x - self.p[0]).powi(2)
@@ -2381,7 +2386,7 @@ impl Goal for Tempt {
         self.can_use(m, cx)
     }
     fn start(&mut self, _: &mut Mob, cx: &mut Cx) {
-        if let Some(p) = &cx.w.player {
+        if let Some(p) = cx.w.selected_player() {
             self.p = [p.position.x, p.position.y, p.position.z];
         }
     }
@@ -2390,7 +2395,9 @@ impl Goal for Tempt {
         self.calm_down = reduced(100);
     }
     fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
-        let Some(p) = cx.w.player.clone() else { return };
+        let Some(p) = cx.w.selected_player().cloned() else {
+            return;
+        };
         let (y, x) = (m.kind.max_head_y_rot + 20.0, m.max_head_x_rot());
         m.look_at_speed(p.eye, y, x);
         if m.distance_sqr(p.position) < self.stop_distance * self.stop_distance {

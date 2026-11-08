@@ -46,8 +46,7 @@ pub fn set_size(m: &mut Mob, size: i32) {
     }
 }
 fn can_attack(w: &MobWorld) -> bool {
-    w.player
-        .as_ref()
+    w.selected_player()
         .is_some_and(|p| p.alive && !p.creative && !p.spectator)
 }
 /// `Phantom.canAttack(level, player, TargetingConditions.DEFAULT)`: as above,
@@ -75,7 +74,7 @@ impl Goal for AttackPlayerTarget {
             return false;
         }
         self.next_scan = reduced(60);
-        let Some(p) = &cx.w.player else {
+        let Some(p) = cx.w.selected_player() else {
             return false;
         };
         let d = p.position;

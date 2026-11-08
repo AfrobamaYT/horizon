@@ -937,8 +937,7 @@ impl PandaLook {
     fn target(m: &Mob, cx: &Cx) -> Option<(Vec3, f64)> {
         match get(m)?.look_at? {
             Who::Player => {
-                cx.w.player
-                    .as_ref()
+                cx.w.selected_player()
                     .filter(|p| p.alive)
                     .map(|p| (p.position, p.eye[1]))
             }

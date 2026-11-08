@@ -1068,6 +1068,7 @@ impl Game<'_> {
             nearest_player: player.as_ref().filter(|p| !p.spectator).map(|p| p.position),
             player,
             player_identity: self.player_identity(),
+            player_selection: None,
             others,
             live_mobs: None,
             dragon: self.dragon_target(),
@@ -2509,9 +2510,46 @@ impl Game<'_> {
     }
 
     pub(super) fn handle_mob_events_reusable(&mut self, events: &mut Vec<MobEvent>) -> Result<()> {
+        self.handle_mob_events_with_actor(events, None)
+    }
+
+    /// `actor` is retained for player events nested under `IfBroke`, which
+    /// leave the mob tick before their conditional effects are evaluated.
+    fn handle_mob_events_with_actor(
+        &mut self,
+        events: &mut Vec<MobEvent>,
+        actor: Option<u32>,
+    ) -> Result<()> {
         let mut broke: Vec<u32> = Vec::new();
         for e in events.drain(..) {
             match e {
+                MobEvent::ForPlayer { conn, event } => {
+                    let mut event = *event;
+                    // Projectiles are spawned in the world rather than run
+                    // as a guest, but must retain the selected guest target.
+                    if let Some(conn) = conn
+                        && let MobEvent::Projectile(p) = &mut event
+                        && let ProjectileKind::ShulkerBullet { target, .. } = &mut p.kind
+                        && *target == Some(Who::Player)
+                    {
+                        *target = self.guest_identity(conn).map(|(_, id)| Who::Mob(id));
+                        self.handle_mob_events(vec![event])?;
+                    } else if let Some(conn) = conn {
+                        if let Some(mob) = actor {
+                            self.lan_guest_mob_events(vec![(conn, mob, event)]);
+                        } else {
+                            // No nested block-break actor is in scope. A
+                            // missing guest must not redirect to another player.
+                            if let Some(result) =
+                                self.as_guest(conn, |game| game.handle_mob_events(vec![event]))
+                            {
+                                result?;
+                            }
+                        }
+                    } else {
+                        self.handle_mob_events(vec![event])?;
+                    }
+                }
                 MobEvent::BubbleColumnParticles { pos } => {
                     self.bubble_column_particles(BlockPos::new(pos[0], pos[1], pos[2]))
                 }
@@ -3303,7 +3341,8 @@ impl Game<'_> {
                     } else {
                         otherwise
                     };
-                    self.handle_mob_events(follow)?;
+                    let mut follow = follow;
+                    self.handle_mob_events_with_actor(&mut follow, Some(mob))?;
                 }
                 MobEvent::Jump { mob } => {
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
@@ -11258,6 +11297,7 @@ mod pearl_tests {
             data: &data,
             player: None,
             player_identity: None,
+            player_selection: None,
             controlling_player_movement: None,
             nearest_player: None,
             others: &[],

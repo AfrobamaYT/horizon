@@ -409,8 +409,7 @@ fn closer_than(m: &Mob, p: Vec3, horizontal: f64, vertical: f64) -> bool {
 pub fn can_target(w: &MobWorld, who: Who) -> bool {
     match who {
         Who::Player => w
-            .player
-            .as_ref()
+            .selected_player()
             .is_some_and(|p| p.alive && !p.creative && !p.spectator),
         Who::Mob(id) => w
             .seen(id)
@@ -864,11 +863,16 @@ pub(super) fn tick_sonic_boom(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEve
         });
     }
     sound(m, "entity.warden.sonic_boom", 3.0, 1.0, events);
-    events.push(MobEvent::SonicBoom {
+    let event = MobEvent::SonicBoom {
         target,
         attacker: m.id,
         from: at(m),
         direction: normal,
+    };
+    events.push(if target == Who::Player {
+        w.route_player_event(event)
+    } else {
+        event
     });
 }
 /// `Warden.tick` off the window's client: the heart's clock, the tendril and

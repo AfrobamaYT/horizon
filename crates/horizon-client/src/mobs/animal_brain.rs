@@ -657,7 +657,9 @@ fn targetable(m: &mut Mob, w: &MobWorld, who: Who) -> bool {
         Who::Player => {
             // TargetingConditions.forNonCombat(): in range (scaled by the
             // player's visibility, at least 2) and in sight.
-            let Some(p) = &w.player else { return false };
+            let Some(p) = w.selected_player() else {
+                return false;
+            };
             if !p.alive || p.spectator {
                 return false;
             }
@@ -704,8 +706,7 @@ fn visible_contains(m: &mut Mob, w: &MobWorld, who: Who) -> bool {
 fn sense_players(m: &mut Mob, w: &MobWorld) {
     let range = m.attrs.follow_range;
     let near = w
-        .player
-        .as_ref()
+        .selected_player()
         .is_some_and(|p| !p.spectator && m.distance_sqr(p.position) < range * range);
     let players: Vec<Who> = if near { vec![Who::Player] } else { vec![] };
     let visible: Vec<Who> = players
@@ -763,7 +764,7 @@ fn sense_tempting(m: &mut Mob, w: &MobWorld) {
         item.as_deref()
             .is_some_and(|i| food.iter().any(|f| f.as_str() == i))
     };
-    let tempting = w.player.as_ref().is_some_and(|p| {
+    let tempting = w.selected_player().is_some_and(|p| {
         p.alive
             && !p.spectator
             && m.distance_sqr(p.position) <= range * range

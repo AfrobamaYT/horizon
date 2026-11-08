@@ -251,15 +251,15 @@ fn roar(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         let dd = (xd * xd + zd * zd).max(0.001);
         [xd / dd * 4.0, 0.2, zd / dd * 4.0]
     };
-    if let Some(p) = &w.player
+    if let Some(p) = w.selected_player()
         && p.alive
         && p.bounds.intersects(area)
     {
-        events.push(MobEvent::AttackPlayer(6.0, from));
-        events.push(MobEvent::Push {
+        events.push(w.route_player_event(MobEvent::AttackPlayer(6.0, from)));
+        events.push(w.route_player_event(MobEvent::Push {
             target: Who::Player,
             velocity: fling(p.position),
-        });
+        }));
     }
     for s in w.others_near(area) {
         if s.id == m.id || !s.alive || s.species == Species::Ravager || !s.bounds.intersects(area) {

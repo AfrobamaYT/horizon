@@ -245,7 +245,9 @@ impl Goal for DefendVillage {
         super::goals::TARGET
     }
     fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        let Some(p) = &cx.w.player else { return false };
+        let Some(p) = cx.w.selected_player() else {
+            return false;
+        };
         if !p.alive || p.creative || p.spectator || m.spares_players(cx.w) {
             return false;
         }
@@ -412,11 +414,12 @@ pub fn iron_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
     };
     let from = [m.position.x, m.position.y, m.position.z];
     // The hit, then the toss only if it landed (game/creatures.rs).
-    cx.events.push(MobEvent::IronGolemHit {
-        target: who,
-        amount,
-        source: super::Damage::mob(m.id, from),
-    });
+    cx.events
+        .push(cx.w.route_player_event(MobEvent::IronGolemHit {
+            target: who,
+            amount,
+            source: super::Damage::mob(m.id, from),
+        }));
     cx.events.push(MobEvent::Sound(
         "entity.iron_golem.attack",
         m.center(),

@@ -47,7 +47,9 @@ pub fn register(m: &mut Mob) {
 /// of the eyes, with line of sight, and no carved pumpkin. Last, as in NeoForge,
 /// a mod may keep the enderman calm (`EnderManAngerEvent`).
 pub fn stared_at(m: &Mob, w: &MobWorld) -> bool {
-    let Some(p) = &w.player else { return false };
+    let Some(p) = w.selected_player() else {
+        return false;
+    };
     if !p.alive || p.head.as_deref() == Some("minecraft:carved_pumpkin") {
         return false;
     }
@@ -306,14 +308,16 @@ impl Goal for FreezeWhenLookedAt {
         if m.ai.target != Some(Who::Player) {
             return false;
         }
-        let Some(p) = &cx.w.player else { return false };
+        let Some(p) = cx.w.selected_player() else {
+            return false;
+        };
         m.distance_sqr(p.position) <= 256.0 && stared_at(m, cx.w)
     }
     fn start(&mut self, m: &mut Mob, _: &mut Cx) {
         m.nav_stop();
     }
     fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
-        if let Some(p) = &cx.w.player {
+        if let Some(p) = cx.w.selected_player() {
             let at = [p.position.x, p.eye[1], p.position.z];
             m.look_at(at);
         }
@@ -333,7 +337,9 @@ impl Goal for LookForPlayer {
         TARGET
     }
     fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        let Some(p) = &cx.w.player else { return false };
+        let Some(p) = cx.w.selected_player() else {
+            return false;
+        };
         self.pending = p.alive
             && !p.creative
             && m.distance_sqr(p.position) <= m.attrs.follow_range.powi(2)
@@ -351,7 +357,7 @@ impl Goal for LookForPlayer {
         m.set_ai_target(cx.w, None);
     }
     fn can_continue(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        let Some(p) = cx.w.player.clone() else {
+        let Some(p) = cx.w.selected_player().cloned() else {
             return false;
         };
         if self.pending {
@@ -367,7 +373,9 @@ impl Goal for LookForPlayer {
             && m.distance_sqr(p.position) <= m.attrs.follow_range.powi(2)
     }
     fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
-        let Some(p) = cx.w.player.clone() else { return };
+        let Some(p) = cx.w.selected_player().cloned() else {
+            return;
+        };
         if self.pending {
             self.aggro -= 1;
             if self.aggro <= 0 {

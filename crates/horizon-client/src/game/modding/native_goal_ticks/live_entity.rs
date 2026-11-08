@@ -17,7 +17,11 @@ impl GoalCx<'_, '_> {
     }
 
     pub(super) fn r_entity_name(&self, entity: EntityRef) -> Option<String> {
-        Some(self.w.goal_host?.mob_name(self.entity_mob(entity)?))
+        Some(
+            self.w
+                .goal_host?
+                .mob_name(self.entity_mob(entity)?, self.m, self.w),
+        )
     }
 
     pub(super) fn r_entity_added_to_level(&self, entity: EntityRef) -> bool {
@@ -46,7 +50,7 @@ impl GoalCx<'_, '_> {
                 .mob_invulnerable_to_damage(self.entity_mob(entity)?, damage_type),
         )
     }
-    fn entity_mob(&self, entity: EntityRef) -> Option<&Mob> {
+    pub(super) fn entity_mob(&self, entity: EntityRef) -> Option<&Mob> {
         match self.resolve(entity)? {
             Resolved::Own => Some(self.m),
             Resolved::Live(mob) => Some(mob),

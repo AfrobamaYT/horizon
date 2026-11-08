@@ -67,6 +67,7 @@ pub mod part_goals;
 pub mod path;
 pub mod phantom;
 pub mod piglin;
+pub mod player_selection;
 pub mod polar_bear;
 pub mod rabbit;
 pub mod raider;
@@ -1923,6 +1924,12 @@ pub fn after_break(events: &mut Vec<MobEvent>, asks: bool, mob: u32, start: usiz
 /// Events a mob tick asks the game to act on.
 #[derive(Clone, Debug)]
 pub enum MobEvent {
+    /// A player-directed event remembers the player selected at emission.
+    /// `None` is the server's own player; `Some` is a guest connection.
+    ForPlayer {
+        conn: Option<u32>,
+        event: Box<MobEvent>,
+    },
     /// Squid.handleEntityEvent(19), resetting the remote tentacle cycle.
     SquidCycle {
         mob: u32,
@@ -2756,6 +2763,33 @@ pub enum MobEvent {
 }
 
 impl MobEvent {
+    /// Whether this event acts on the `Who::Player` seen by the mob.
+    pub fn targets_player(&self) -> bool {
+        match self {
+            Self::AttackPlayer(..)
+            | Self::CubeHurtPlayer { .. }
+            | Self::AttackPlayerWithEffect { .. }
+            | Self::StingPlayer { .. }
+            | Self::DamagePlayer { .. }
+            | Self::EffectPlayer { .. }
+            | Self::AxolotlSupportPlayer { .. }
+            | Self::ParrotToShoulder { .. } => true,
+            Self::SonicBoom { target, .. }
+            | Self::Push { target, .. }
+            | Self::Knockback { target, .. }
+            | Self::StabDismount { target }
+            | Self::Ignite { target, .. }
+            | Self::IronGolemHit { target, .. } => *target == Who::Player,
+            Self::Projectile(projectile) => matches!(
+                &projectile.kind,
+                crate::projectiles::ProjectileKind::ShulkerBullet {
+                    target: Some(Who::Player),
+                    ..
+                }
+            ),
+            _ => false,
+        }
+    }
     /// `level.playSound(null, m, sound, source, volume, pitch)` from where
     /// `m` stands.
     pub fn bound_sound(
@@ -3493,6 +3527,8 @@ pub fn breeding_experience(parent: &mut Mob, mob_drops: bool) -> Option<u32> {
 /// Read-only access to the live mobs outside the actor's current tick loan.
 pub trait LiveMobs {
     fn find(&self, id: u32) -> Option<&Mob>;
+    /// Visit each mob in the disjoint loan, without allocating a snapshot.
+    fn for_each(&self, visitor: &mut dyn FnMut(&Mob));
 }
 
 #[derive(Clone)]
@@ -3512,6 +3548,9 @@ pub struct MobWorld<'a> {
     pub suffocation: &'a horizon_world::suffocation::SuffocationRegistry<'a>,
     pub data: &'a MobData,
     pub player: Option<PlayerView>,
+    /// Switchable per-tick player views, present only when target listeners
+    /// can redirect a mob to a different real player.
+    pub player_selection: Option<&'a player_selection::PlayerSelection>,
     /// The uuid and entity id of the player whose view `player` is (#1077):
     /// captured once where the tick lends its player — the game's own, or the
     /// guest a server's mob sees — so a goal resolves that player without a
@@ -3651,6 +3690,59 @@ pub enum TargetChange {
     Keep,
 }
 impl MobWorld<'_> {
+    /// The currently selected player view. The ordinary tick uses `player`;
+    /// target-change callbacks can switch a scoped selection during a tick.
+    pub fn selected_player(&self) -> Option<&PlayerView> {
+        match self.player_selection {
+            Some(selection) => selection.selected().map(|player| &player.view),
+            None => self.player.as_ref(),
+        }
+    }
+
+    /// UUID and entity ID of the currently selected player, if any.
+    pub fn selected_player_identity(&self) -> Option<([i32; 4], u32)> {
+        match self.player_selection {
+            Some(selection) => selection
+                .selected()
+                .map(|player| (player.view.uuid, player.entity_id)),
+            None => self.player_identity,
+        }
+    }
+
+    /// Capture a player-directed event's recipient after a listener switches
+    /// the selected player. Before the first switch retain the plain event and
+    /// the existing allocation-free routing path.
+    pub fn route_player_event(&self, event: MobEvent) -> MobEvent {
+        if event.targets_player()
+            && let Some(selection) = self.player_selection
+            && selection.has_switched()
+            && let Some(player) = selection.selected()
+        {
+            return MobEvent::ForPlayer {
+                conn: player.connection,
+                event: Box::new(event),
+            };
+        }
+        event
+    }
+
+    /// Keep a mount's rider as the recipient even when a target-change hook
+    /// redirects the mount to a different player later in the same tick.
+    /// Before any switch the existing allocation-free routing is unchanged.
+    pub fn route_rider_event(&self, mount: u32, event: MobEvent) -> MobEvent {
+        if event.targets_player()
+            && let Some(selection) = self.player_selection
+            && selection.has_switched()
+            && let Some(rider) = selection.rider(mount).or_else(|| selection.initial())
+        {
+            return MobEvent::ForPlayer {
+                conn: rider.connection,
+                event: Box::new(event),
+            };
+        }
+        event
+    }
+
     /// Dispatch a proposed AI target change, validating a substituted target.
     pub fn change_target(
         &self,

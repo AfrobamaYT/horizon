@@ -313,4 +313,11 @@ impl GoalCx<'_, '_> {
         }
         self.r_living_last_attacker(living)
     }
+    pub(super) fn r_living_can_use_portal(&self, living: LivingRef) -> Option<bool> {
+        Some(
+            self.w
+                .goal_host?
+                .mob_can_use_portal(self.live_living_mob(living)?),
+        )
+    }
 }

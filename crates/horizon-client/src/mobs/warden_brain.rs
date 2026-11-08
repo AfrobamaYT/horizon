@@ -462,8 +462,7 @@ fn targetable(m: &mut Mob, w: &MobWorld, who: Who) -> bool {
 fn sense_players(m: &mut Mob, w: &MobWorld) {
     let range = m.attrs.follow_range;
     let near = w
-        .player
-        .as_ref()
+        .selected_player()
         .is_some_and(|p| !p.spectator && m.distance_sqr(p.position) < range * range);
     let players: Vec<Who> = if near { vec![Who::Player] } else { vec![] };
     let visible: Vec<Who> = players
@@ -495,7 +494,7 @@ fn sense_entities(m: &mut Mob, w: &MobWorld) {
             found.push((Who::Mob(o.id), m.distance_sqr(o.position)));
         }
     }
-    if let Some(p) = &w.player
+    if let Some(p) = w.selected_player()
         && p.alive
         && p.bounds.intersects(area)
     {
@@ -1030,7 +1029,7 @@ impl B {
                         !m.ai.nav.is_done()
                             && !reached(m, cx.w, &walk)
                             && !matches!(walk.target, Tracker::Entity(Who::Player, _)
-                                if cx.w.player.as_ref().is_some_and(|p| p.spectator))
+                                if cx.w.selected_player().is_some_and(|p| p.spectator))
                     });
                 if now > t.end || !still {
                     self.do_stop(m, cx);

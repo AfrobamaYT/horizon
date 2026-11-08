@@ -23,6 +23,22 @@ pub(super) const GOAL_VIEW_READS: &[&str] = &[
     "living_health",
     "living_max_health",
     "living_alive",
+    "merchant_offers",
+    "merchant_trading_player",
+    "merchant_profession",
+    "merchant_level",
+    "merchant_villager_type",
+    "merchant_xp",
+    "entity_dismount_location",
+    "entity_root_vehicle",
+    "entity_is_passenger_of_same_vehicle",
+    "entity_passengers",
+    "entity_is_vehicle",
+    "entity_indirect_passengers",
+    "entity_controlling_passenger",
+    "entity_on_block",
+    "entity_entities_team_damage_allowed",
+    "living_can_use_portal",
     "entity_tags",
     "entity_name",
     "entity_added_to_level",
@@ -124,6 +140,7 @@ const GOAL_VIEW_ENTITY_ARGS: &[&str] = &[
     "MobRef",
     "PlayerRef",
     "ItemEntityRef",
+    "MerchantRef",
 ];
 
 /// The `Host` methods that find entities (#1077): the goal view answers these
@@ -881,7 +898,7 @@ fn goal_view(
                 let name = pat.ident.to_string();
                 match ty.as_str() {
                     "EntityRef" => Some(name),
-                    "LivingRef" | "PlayerRef" | "MobRef" | "ItemEntityRef" => {
+                    "LivingRef" | "PlayerRef" | "MobRef" | "ItemEntityRef" | "MerchantRef" => {
                         Some(format!("{name}.entity()"))
                     }
                     _ => None,

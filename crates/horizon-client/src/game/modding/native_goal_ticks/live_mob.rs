@@ -62,7 +62,9 @@ impl GoalCx<'_, '_> {
     }
 
     pub(super) fn r_mob_target(&self, mob: MobRef) -> Option<LivingRef> {
-        self.w.goal_host?.mob_target(self.live_mob(mob)?, self.w)
+        self.w
+            .goal_host?
+            .mob_target(self.live_mob(mob)?, self.m, self.w)
     }
 
     pub(super) fn r_mob_is_aggressive(&self, mob: MobRef) -> Option<bool> {

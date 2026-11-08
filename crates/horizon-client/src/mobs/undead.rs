@@ -183,7 +183,9 @@ pub fn register(m: &mut Mob) {
 }
 /// Drowned.okTarget: at night, or when the target is in water.
 fn drowned_can_attack(_m: &Mob, w: &super::MobWorld) -> bool {
-    let Some(p) = &w.player else { return false };
+    let Some(p) = w.selected_player() else {
+        return false;
+    };
     !w.daylight || in_water_at(w, p.position)
 }
 /// The target's isInWater, from the water at its feet.
