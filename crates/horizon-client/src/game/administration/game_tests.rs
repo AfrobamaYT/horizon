@@ -1,3 +1,4 @@
+// game-module-cfg: always
 //! The game-test runner: `GameTestInfo`, `GameTestRunner`, `GameTestTicker`,
 //! `MultipleTestTracker`, `ReportGameListener`, `TestCommand.trackAndStartRunner`
 //! and the two test instance types (`BlockBasedTestInstance` and
@@ -930,7 +931,7 @@ impl Game<'_> {
         }
         let back = self.enter_command_level(dim)?;
         let result = f(self);
-        if let Err(e) = self.enter_level(None, back) {
+        if let Err(e) = self.enter_level(back) {
             log::error!("could not return to {}: {e}", back.id());
         }
         Some(result)

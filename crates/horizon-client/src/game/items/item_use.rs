@@ -134,9 +134,12 @@ impl Game<'_> {
             "minecraft:ender_eye" => 0,
             "minecraft:goat_horn" => self.native_item_instrument_duration(stack),
             _ => {
-                if let Some(consumable) = stack.consumable(info) {
+                if let Some(ticks) = patched_ticks {
+                    ticks
+                } else if let Some(consumable) = stack.consumable(info) {
                     consumable.ticks()
-                } else if stack.carries_component(info, "minecraft:blocks_attacks")
+                } else if patched_blocks
+                    || stack.carries_component(info, "minecraft:blocks_attacks")
                     || stack.carries_component(info, "minecraft:kinetic_weapon")
                 {
                     72_000

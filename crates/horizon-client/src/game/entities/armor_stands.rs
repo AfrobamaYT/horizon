@@ -1122,7 +1122,12 @@ impl Game<'_> {
             return false;
         };
         let tagged = |tag: &str| registry.in_tag(kind, tag);
-        if !self.ui.rules.bool("mob_griefing") && matches!(causing, Some(Target::Mob(_))) {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING)
+            && matches!(causing, Some(Target::Mob(_)))
+        {
             return false;
         }
         if tagged("minecraft:bypasses_invulnerability") {
@@ -1149,27 +1154,30 @@ impl Game<'_> {
             tagged("minecraft:ignites_armor_stands"),
             tagged("minecraft:burns_armor_stands"),
         );
+        let causing_id = causing
+            .and_then(|target| self.network_entity_id(target))
+            .unwrap_or(0) as u32;
         if explosion {
-            self.break_armor_stand_by_anything(i);
+            self.break_armor_stand_by_anything(i, damage_type, causing_id);
         } else if ignites {
             if self.armor_stands[i].fire_ticks > 0 {
-                self.cause_stand_damage(i, 0.15);
+                self.cause_stand_damage(i, 0.15, damage_type, causing_id);
             } else {
                 // igniteForSeconds(5.0f): at least 100 ticks.
                 let a = &mut self.armor_stands[i];
                 a.fire_ticks = a.fire_ticks.max(100);
             }
         } else if burns && self.armor_stands[i].health > 0.5 {
-            self.cause_stand_damage(i, 4.0);
+            self.cause_stand_damage(i, 4.0, damage_type, causing_id);
         }
         false
     }
     /// `ArmorStand.causeDamage`: the health less `amount`, broken by anything
     /// at 0.5 or less.
-    fn cause_stand_damage(&mut self, i: usize, amount: f32) {
+    fn cause_stand_damage(&mut self, i: usize, amount: f32, damage_type: &str, causing: u32) {
         let health = self.armor_stands[i].health - amount;
         if health <= 0.5 {
-            self.break_armor_stand_by_anything(i);
+            self.break_armor_stand_by_anything(i, damage_type, causing);
         } else {
             self.armor_stands[i].health = health;
         }

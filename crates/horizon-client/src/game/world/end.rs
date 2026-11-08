@@ -304,7 +304,7 @@ impl Game<'_> {
             (Some(e), Dim::Overworld) => &e[0],
             (Some(e), Dim::Nether) => &e[1],
             (Some(e), Dim::End) => &e[2],
-            (None, _) => self.dim_environment(),
+            (None, _) | (_, Dim::Extra(_)) => self.dim_environment(),
         }
     }
 

@@ -250,15 +250,17 @@ impl PackResources {
 /// The overworld's, Nether's and End's attribute stacks with the Polytone biome and dimension
 /// modifiers of the packs merged at `root` (#11486); `None` when no pack has any. The overlay
 /// root links the vanilla data the stacks start from.
-fn pack_environments(root: &std::path::Path) -> Option<Arc<[Environment; 3]>> {
-    let modifiers = horizon_client::environment::PackModifiers::read(root);
+fn pack_environments(
+    root: &horizon_assets::resource_source::ResourceRoot,
+) -> Option<Arc<[Environment; 3]>> {
+    let modifiers = horizon_client::environment::PackModifiers::read(root.source());
     if modifiers.is_empty() {
         return None;
     }
     let modifiers = modifiers.with_configs(horizon_client::packs::polytone_configs(
-        &horizon_client::packs::Source::Dir(root.to_path_buf()),
+        &horizon_client::packs::Source::Opened(root.source().clone()),
     ));
-    let load = |d: &str| Environment::load_dimension_with(root, d, &modifiers);
+    let load = |d: &str| Environment::load_dimension_with(root.data(), d, &modifiers);
     match (load("overworld"), load("the_nether"), load("the_end")) {
         (Ok(o), Ok(n), Ok(e)) => Some(Arc::new([o, n, e])),
         (o, n, e) => {

@@ -15181,16 +15181,11 @@ impl Game<'_> {
                 day_time: self.view_day_time(),
                 render_distance: self.streaming.radius,
                 sky_type: match self.dim {
-                    Dim::Overworld => 1,
+                    Dim::Overworld | Dim::Extra(_) => 1,
                     Dim::End => 2,
                     Dim::Nether => 0,
                 },
-                dimension: match self.dim {
-                    Dim::Overworld => "minecraft:overworld",
-                    Dim::Nether => "minecraft:the_nether",
-                    Dim::End => "minecraft:the_end",
-                }
-                .to_owned(),
+                dimension: self.dim.id().to_owned(),
                 player: self.player.as_ref().map_or(camera.to_array(), |p| {
                     [p.position.x, p.position.y, p.position.z]
                 }),

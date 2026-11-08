@@ -2850,14 +2850,14 @@ mod tests {
             ["lost_seeds"]
         );
         let carried = out.join("carry");
-        let package = horizon_mods::Package::read(&carried).unwrap();
-        let content = horizon_mods::Content::read(&carried, &package.manifest).unwrap();
+        let package = horizon_mod_package::Package::read(&carried).unwrap();
+        let content = horizon_mod_package::Content::read(&carried, &package.manifest).unwrap();
         let item = content
             .items
             .iter()
             .find(|i| i.id == "gem:cabbage_seeds")
             .unwrap();
-        assert_eq!(item.place_block.as_deref(), Some("gem:cabbages"));
+        assert_eq!(item.block.as_deref(), Some("gem:cabbages"));
         fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -10,7 +10,6 @@ use horizon_world::environment_system::{BiomeBlend, Builder, Conditions, System}
 use horizon_world::environment_timeline::Timeline;
 use serde_json::Value as Json;
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
 use std::sync::{Arc, RwLock};
 
 pub struct Environment {
@@ -75,53 +74,46 @@ pub struct PackModifiers {
     /// The packs' config values, for `config(id)` in expressions.
     configs: horizon_polytone::pack::Configs,
     /// The pack overlay root they were read from, where their colormaps are.
-    root: Option<std::path::PathBuf>,
+    root: Option<ResourceSource>,
     colormaps: ColormapCache,
 }
 
 impl PackModifiers {
     /// Every `assets/<namespace>/polytone/{biome,dimension}_modifiers/**.json` under a pack
     /// overlay root. A file that fails to parse is skipped with a warning.
-    pub fn read(pack_root: &Path) -> Self {
+    pub fn read(pack_root: &ResourceSource) -> Self {
         let mut out = Self {
-            root: Some(pack_root.to_path_buf()),
+            root: Some(pack_root.clone()),
             ..Self::default()
         };
-        let Ok(namespaces) = std::fs::read_dir(pack_root.join("assets")) else {
-            return out;
-        };
-        for namespace in namespaces.flatten() {
+        for namespace in pack_root.namespaces("assets") {
             for kind in ["biome_modifiers", "dimension_modifiers"] {
-                let mut stack = vec![namespace.path().join("polytone").join(kind)];
-                while let Some(dir) = stack.pop() {
-                    for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
-                        let path = entry.path();
-                        if path.is_dir() {
-                            stack.push(path);
-                            continue;
-                        }
-                        let Ok(relative) = path.strip_prefix(pack_root) else {
-                            continue;
-                        };
-                        let relative = relative.to_string_lossy();
-                        let implicit = horizon_polytone::implicit_id(&relative, kind);
-                        let json = match horizon_world::json_file::read::<Json>(&path) {
-                            Ok(json) => json,
-                            Err(e) => {
-                                log::warn!("{relative}: {e}");
-                                continue;
-                            }
-                        };
-                        let parsed = if kind == "biome_modifiers" {
-                            horizon_polytone::BiomeModifier::parse(&json, implicit.as_deref())
-                                .map(|m| m.map(|m| out.biomes.push(m)))
-                        } else {
-                            horizon_polytone::DimensionModifier::parse(&json, implicit.as_deref())
-                                .map(|m| m.map(|m| out.dimensions.push(m)))
-                        };
-                        if let Err(e) = parsed {
+                for relative in pack_root.list(&format!("assets/{namespace}/polytone/{kind}/")) {
+                    if !relative.ends_with(".json") {
+                        continue;
+                    }
+                    let implicit = horizon_polytone::implicit_id(&relative, kind);
+                    let json = match pack_root
+                        .read(&relative)
+                        .map_err(|e| e.to_string())
+                        .and_then(|bytes| {
+                            serde_json::from_slice::<Json>(&bytes).map_err(|e| e.to_string())
+                        }) {
+                        Ok(json) => json,
+                        Err(e) => {
                             log::warn!("{relative}: {e}");
+                            continue;
                         }
+                    };
+                    let parsed = if kind == "biome_modifiers" {
+                        horizon_polytone::BiomeModifier::parse(&json, implicit.as_deref())
+                            .map(|m| m.map(|m| out.biomes.push(m)))
+                    } else {
+                        horizon_polytone::DimensionModifier::parse(&json, implicit.as_deref())
+                            .map(|m| m.map(|m| out.dimensions.push(m)))
+                    };
+                    if let Err(e) = parsed {
+                        log::warn!("{relative}: {e}");
                     }
                 }
             }
@@ -280,20 +272,22 @@ impl Colormap {
     /// `assets/<namespace>/polytone/colormaps/<path>.png` and its optional `.json` (without
     /// one, the axes are the biome's temperature and downfall). The `biome_id` axis isn't
     /// supported yet.
-    fn load(pack_root: &Path, id: &str) -> Option<Self> {
+    fn load(pack_root: &ResourceSource, id: &str) -> Option<Self> {
         let (namespace, path) = id.split_once(':')?;
-        let base = pack_root.join(format!("assets/{namespace}/polytone/colormaps/{path}"));
-        let png = base.with_extension("png");
-        let (width, height, rgba) =
-            match crate::sprites::decode_rgba(&horizon_core::prepared_files::read(&png).ok()?) {
-                Ok(image) => image,
-                Err(e) => {
-                    log::warn!("colormap {id}: {e}");
-                    return None;
-                }
-            };
-        let json: Json =
-            horizon_world::json_file::read(&base.with_extension("json")).unwrap_or(Json::Null);
+        let base = format!("assets/{namespace}/polytone/colormaps/{path}");
+        let png = format!("{base}.png");
+        let (width, height, rgba) = match crate::sprites::decode_rgba(&pack_root.read(&png).ok()?) {
+            Ok(image) => image,
+            Err(e) => {
+                log::warn!("colormap {id}: {e}");
+                return None;
+            }
+        };
+        let json: Json = pack_root
+            .read(&format!("{base}.json"))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or(Json::Null);
         let axis = |key: &str, default: &str| -> Option<horizon_polytone::expr::Program> {
             let src = match &json[key] {
                 Json::String(s) => s.clone(),
@@ -344,7 +338,7 @@ struct Resolver {
     frame: Arc<RwLock<Frame>>,
     configs: Arc<horizon_polytone::pack::Configs>,
     /// Where the packs' colormaps are, and the ones loaded so far (`None`: missing).
-    pack_root: Option<std::path::PathBuf>,
+    pack_root: Option<ResourceSource>,
     colormaps: ColormapCache,
 }
 
@@ -451,7 +445,7 @@ impl Resolver {
     /// A colormap value: sampled whenever its layer applies, its colour the modifier's argument
     /// (`#rrggbb` on RGB attributes, `#aarrggbb` on ARGB ones).
     fn colormap(&self, attribute: &'static Attribute, op: &'static str, id: &str) -> Option<Entry> {
-        let root = self.pack_root.as_deref()?;
+        let root = self.pack_root.as_ref()?;
         let colormap = self
             .colormaps
             .lock()
@@ -884,11 +878,16 @@ mod tests {
         for (path, text) in pack {
             write(&format!("pack/{path}"), text);
         }
-        let modifiers = PackModifiers::read(&dir.join("pack")).with_configs(
-            crate::packs::polytone_configs(&crate::packs::Source::Dir(dir.join("pack"))),
-        );
-        let env =
-            Environment::load_dimension_with(&dir.join("world"), "overworld", &modifiers).unwrap();
+        let modifiers = PackModifiers::read(&ResourceSource::directory(dir.join("pack")))
+            .with_configs(crate::packs::polytone_configs(&crate::packs::Source::Dir(
+                dir.join("pack"),
+            )));
+        let env = Environment::load_dimension_with(
+            &ResourceSource::directory(dir.join("world")),
+            "overworld",
+            &modifiers,
+        )
+        .unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
         env
     }

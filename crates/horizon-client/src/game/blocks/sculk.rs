@@ -812,7 +812,7 @@ impl Game<'_> {
     /// event is heard. Only what the context already names is filled.
     fn with_vibration_uuids(&self, mut ctx: Context) -> Context {
         if ctx.source_uuid.is_none() {
-            ctx.source_uuid = self.vibration_uuid(ctx.source);
+            ctx.source_uuid = self.vibration_uuid(ctx.source.and_then(|source| source.actor()));
         }
         if ctx.owner_uuid.is_none() {
             ctx.owner_uuid = self.vibration_uuid(ctx.owner);
