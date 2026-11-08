@@ -20,6 +20,9 @@ mod resources;
 pub use resources::{
     ResourceCodec, ResourceScope, ScopeError, ScopeLease, ScopeToken, Unsupported, borrow_token,
 };
+#[path = "wire_patch.rs"]
+mod patch;
+pub use patch::{PatchCell, PatchFields, PatchInput, PatchSet, RecordPatch};
 
 /// The guest's start-up call: its input is the package list.
 pub const INIT: u32 = 0xFFFF_FF00;
@@ -404,6 +407,40 @@ impl<'a> Reader<'a> {
     pub fn take<T: Wire>(&mut self) -> Result<T, WireError> {
         T::take(self)
     }
+    /// Read one value from at most `max_bytes`, preserving the enclosing reader's depth and
+    /// leaving the following value untouched. No nested allocation can outrun this byte window.
+    pub fn bounded<T>(
+        &mut self,
+        max_bytes: usize,
+        read: impl FnOnce(&mut Self) -> Result<T, WireError>,
+    ) -> Result<T, WireError> {
+        let data = self.data;
+        let len = data.len().min(max_bytes);
+        let mut inner = Self {
+            data: &data[..len],
+            depth: self.depth,
+        };
+        let value = read(&mut inner);
+        self.data = &data[len - inner.data.len()..];
+        value
+    }
+    /// A normal Wire list, with its element cap checked before allocating storage. `read`
+    /// may impose a shared payload budget across its elements without a second list codec.
+    pub fn list_with<T: Wire>(
+        &mut self,
+        max_items: usize,
+        mut read: impl FnMut(&mut Self) -> Result<T, WireError>,
+    ) -> Result<Vec<T>, WireError> {
+        let len = self.take_len(T::MIN)?;
+        if len > max_items {
+            return Err(WireError::Length);
+        }
+        let mut items = Vec::with_capacity(len);
+        for _ in 0..len {
+            items.push(read(self)?);
+        }
+        Ok(items)
+    }
     pub fn take_resource<T: 'static>(&mut self) -> Result<T, WireError> {
         resources::load(self.take()?)
     }
@@ -675,12 +712,7 @@ impl<T: Wire> Wire for Vec<T> {
         }
     }
     fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
-        let len = input.take_len(T::MIN)?;
-        let mut items = Vec::with_capacity(len);
-        for _ in 0..len {
-            items.push(T::take(input)?);
-        }
-        Ok(items)
+        input.list_with(usize::MAX, T::take)
     }
 }
 
