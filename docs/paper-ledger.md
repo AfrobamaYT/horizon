@@ -951,3 +951,95 @@ Paper API 26.3 (`26.3.build.244-stable`), public Javadoc only; Horizon cited by 
 [paper-PlayerInteractAtEntityEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerInteractAtEntityEvent.html
 
 [paper-EntityLandEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/entity/EntityLandEvent.html
+
+## Event counterparts: client-only hooks (#1015)
+
+Paper and Bukkit plugins run on the server; the Paper API has no client events. Each hook below is
+declared `side = "client"`, so it has no Paper counterpart and gets no key. A plugin port that needs
+one of these moments has to move that logic into a client native mod.
+
+| Hook file | Client-only hooks (no Paper counterpart) |
+|---|---|
+| `add_attribute_tooltips.rs` | `add_attribute_tooltips` |
+| `add_client_reload_listeners.rs` | `add_client_reload_listeners` |
+| `base.rs` | `biome_colors`, `block_entity_render_bounding_box`, `block_entity_submit`, `block_highlight`, `camera_distance`, `camera_shake`, `client_level_load`, `client_level_unload`, `client_resources_reloaded`, `command`, `compute_fog_color`, `compute_fov`, `emissive`, `framerate_limit`, `gui_layer_post`, `gui_layer_pre`, `health_hud`, `input_key`, `interaction_key_mapping_triggered`, `item_bar`, `item_decorations`, `map_decorations`, `minimap`, `mob_layer`, `mob_submit`, `mouse_button_post`, `mouse_button_pre`, `mouse_scrolling`, `music`, `music_layers`, `net_from_server`, `panel_event`, `player_render_listened`, `player_submit`, `recipes_received`, `register_client_commands`, `render_fog`, `render_hand`, `render_needs`, `screen_char_typed_pre`, `screen_click`, `screen_draw`, `screen_key_pressed_pre`, `screen_key_released_pre`, `screen_mouse_button_pressed_pre`, `screen_mouse_button_released_pre`, `screen_mouse_dragged_pre`, `screen_mouse_scrolled_pre`, `screen_render_post`, `screen_tooltip`, `settings_click`, `shader_params`, `standalone_models`, `tooltip`, `tooltip_component`, `tooltip_component_draw`, `use_animation`, `visuals`, `world_drawn`, `zoom` |
+| `block_entity_view_distance.rs` | `block_entity_view_distance` |
+| `block_render_visibility.rs` | `block_render_visibility` |
+| `block_screen_effect_draw.rs` | `block_screen_effect_draw` |
+| `calculate_player_turn.rs` | `calculate_player_turn` |
+| `camera_pose.rs` | `camera_pose` |
+| `camera_type.rs` | `camera_type_cycle` |
+| `chat_suggestion_applied.rs` | `chat_suggestion_applied` |
+| `client_chat.rs` | `client_chat` |
+| `client_chat_received.rs` | `client_chat_received` |
+| `client_mining_predict.rs` | `client_mining_predict` |
+| `client_packet.rs` | `client_packet` |
+| `client_packet_send.rs` | `client_packet_send` |
+| `client_pause_change.rs` | `client_pause_change_post`, `client_pause_change_pre` |
+| `client_player_change_game_type.rs` | `client_player_change_game_type` |
+| `client_player_clone.rs` | `client_player_clone` |
+| `client_player_logging_in.rs` | `client_player_logging_in` |
+| `client_player_logging_out.rs` | `client_player_logging_out` |
+| `client_services.rs` | `client_disconnecting`, `menu_background` |
+| `client_setup.rs` | `client_setup` |
+| `client_stopped.rs` | `client_stopped` |
+| `client_stopping.rs` | `client_stopping` |
+| `client_tick_post.rs` | `client_tick_post` |
+| `client_tick_pre.rs` | `client_tick_pre` |
+| `compute_fov_modifier.rs` | `compute_fov_modifier` |
+| `customize_boss_event_progress.rs` | `customize_boss_event_progress` |
+| `customize_chat_overlay.rs` | `customize_chat_overlay` |
+| `debug_entry_lines.rs` | `debug_entry_lines` |
+| `debug_renderer_draw.rs` | `debug_renderer_draw` |
+| `entity_outline.rs` | `entity_outline` |
+| `flip_frame.rs` | `flip_frame` |
+| `gather_effect_screen_tooltips.rs` | `gather_effect_screen_tooltips` |
+| `gather_skipped_attribute_tooltips.rs` | `gather_skipped_attribute_tooltips` |
+| `get_arm_pose.rs` | `get_arm_pose` |
+| `gui_layer_draw.rs` | `gui_layer_draw` |
+| `gui_render_post.rs` | `gui_render_post` |
+| `hand_drawn.rs` | `hand_drawn` |
+| `item_model_property.rs` | `item_model_property` |
+| `item_model_range_property.rs` | `item_model_range_property` |
+| `item_model_select_property.rs` | `item_model_select_property` |
+| `item_tint_source.rs` | `item_tint_source` |
+| `item_tooltip.rs` | `item_tooltip` |
+| `key_mapping_pre.rs` | `key_mapping_pre` |
+| `left_click_empty.rs` | `left_click_empty` |
+| `model_layers.rs` | `layer_definitions` |
+| `movement_input.rs` | `movement_input` |
+| `player_heart_type.rs` | `player_heart_type` |
+| `register_block_tint_sources.rs` | `register_block_tint_sources` |
+| `register_debug_entries.rs` | `register_debug_entries` |
+| `register_debug_renderers.rs` | `register_debug_renderers` |
+| `register_gui_layers.rs` | `register_gui_layers` |
+| `register_item_tint_sources.rs` | `register_item_tint_sources` |
+| `register_range_select_item_model_property.rs` | `register_range_select_item_model_property` |
+| `register_runtime_sprites.rs` | `register_runtime_sprites` |
+| `render_arm.rs` | `render_arm` |
+| `render_frame_post.rs` | `render_frame_post` |
+| `render_frame_pre.rs` | `render_frame_pre` |
+| `render_gui_post.rs` | `render_gui_post` |
+| `render_gui_pre.rs` | `render_gui_pre` |
+| `render_item_in_frame.rs` | `render_item_in_frame` |
+| `render_level_stage.rs` | `render_level_stage` |
+| `render_name_tag.rs` | `render_name_tag` |
+| `render_tooltip_gather_components.rs` | `render_tooltip_gather_components` |
+| `render_tooltip_pre.rs` | `render_tooltip_pre` |
+| `render_tooltip_texture.rs` | `render_tooltip_texture` |
+| `right_click_empty.rs` | `right_click_empty` |
+| `screen_closing.rs` | `screen_closing` |
+| `screen_exclusion_areas.rs` | `screen_exclusion_areas` |
+| `screen_init_post.rs` | `screen_init_post` |
+| `screen_input_post.rs` | `screen_char_typed_post`, `screen_key_pressed_post`, `screen_key_released_post`, `screen_mouse_button_pressed_post`, `screen_mouse_button_released_post`, `screen_mouse_dragged_post`, `screen_mouse_scrolled_post` |
+| `screen_opening.rs` | `screen_opening` |
+| `screen_preedit_effects.rs` | `screen_preedit_post`, `screen_preedit_pre`, `screen_render_inventory_mob_effects` |
+| `screen_render_stages.rs` | `screen_render_background`, `screen_render_foreground`, `screen_render_pre` |
+| `screen_transparent_background.rs` | `screen_transparent_background` |
+| `screenshot.rs` | `screenshot` |
+| `sound_events.rs` | `play_sound_source`, `play_streaming_source`, `sound_engine_load` |
+| `submit_custom_geometry.rs` | `submit_custom_geometry` |
+| `texture_atlas_stitched.rs` | `texture_atlas_stitched` |
+| `tick_target_millis.rs` | `tick_target_millis` |
+| `toast_add.rs` | `toast_add` |
+| `window_resize.rs` | `window_resize` |
