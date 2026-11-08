@@ -42,8 +42,14 @@ pub struct Window {
     start: usize,
     rows: usize,
     depth: u16,
+    lease: Option<ValueToken>,
 }
 impl Window {
+    /// The value lease of the source serving this window, which callables built while reading
+    /// it share. `None` for a window not served by a source.
+    pub fn lease(self) -> Option<ValueToken> {
+        self.lease
+    }
     /// Make an owned-output builder using this already-validated window's resource limits.
     pub fn builder(self) -> Builder {
         Builder::limited(self)
@@ -83,6 +89,7 @@ impl TryFrom<RowWindow> for Window {
             start: usize::try_from(request.start).map_err(|_| RowError::Bounds)?,
             rows: request.rows as usize,
             depth: request.depth,
+            lease: None,
         })
     }
 }
@@ -145,7 +152,10 @@ impl RowPages for PageSource {
     fn window(&self, request: RowWindow) -> Result<Rows, RowError> {
         self.token.check()?;
         self.value.check()?;
-        let request = Window::try_from(request)?;
+        let request = Window {
+            lease: Some(self.value),
+            ..Window::try_from(request)?
+        };
         if request.rows() == 0 {
             return Ok(Vec::new());
         }
