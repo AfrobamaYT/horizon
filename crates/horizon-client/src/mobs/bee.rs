@@ -202,9 +202,17 @@ pub fn angry(m: &Mob, w: &MobWorld) -> bool {
 }
 /// `NeutralMob.stopBeingAngry`.
 pub fn stop_being_angry(m: &mut Mob) {
+    stop_being_angry_with_world(m, None);
+}
+
+fn stop_being_angry_with_world(m: &mut Mob, world: Option<&MobWorld>) {
     m.ai.last_hurt_by = None;
     m.ai.last_hurt_by_time = m.age as i32;
-    m.ai.target = None;
+    if let Some(world) = world {
+        m.set_ai_target(world, None);
+    } else {
+        m.ai.target = None;
+    }
     let b = st(m);
     b.angry_at = None;
     b.anger_end = -1;
@@ -224,8 +232,7 @@ fn start_anger_timer(m: &mut Mob, w: &MobWorld) {
 /// Peaceful.
 fn valid_player_target(w: &MobWorld) -> bool {
     w.difficulty.id != 0
-        && w.player
-            .as_ref()
+        && w.selected_player()
             .is_some_and(|p| !p.creative && !p.spectator)
 }
 /// `NeutralMob.updatePersistentAnger(level, false)`.
@@ -240,7 +247,7 @@ fn update_persistent_anger(m: &mut Mob, w: &MobWorld) {
         && dead_mob(p)
         && angry_at == Some(p)
     {
-        stop_being_angry(m);
+        stop_being_angry_with_world(m, Some(w));
         return;
     }
     if let Some(target) = m.ai.target
@@ -250,10 +257,10 @@ fn update_persistent_anger(m: &mut Mob, w: &MobWorld) {
         start_anger_timer(m, w);
     }
     if angry_at.is_some() && !angry(m, w) {
-        stop_being_angry(m);
+        stop_being_angry_with_world(m, Some(w));
     }
     if angry_at == Some(Who::Player) && !valid_player_target(w) {
-        stop_being_angry(m);
+        stop_being_angry_with_world(m, Some(w));
     }
 }
 /// `beeCanTarget`: angry and still armed.
@@ -356,11 +363,12 @@ pub fn sting(m: &mut Mob, who: Who, cx: &mut Cx) {
     };
     match who {
         Who::Player => {
-            cx.events.push(MobEvent::StingPlayer {
-                amount,
-                from,
-                poison_ticks: seconds * 20,
-            });
+            cx.events
+                .push(cx.w.route_player_event(MobEvent::StingPlayer {
+                    amount,
+                    from,
+                    poison_ticks: seconds * 20,
+                }));
         }
         Who::Mob(id) if seconds > 0 => cx.events.push(MobEvent::AttackMobWithEffect {
             target: id,
@@ -377,7 +385,7 @@ pub fn sting(m: &mut Mob, who: Who, cx: &mut Cx) {
         }),
     }
     set_has_stung(m, true);
-    stop_being_angry(m);
+    stop_being_angry_with_world(m, Some(cx.w));
     if !m.silent {
         cx.events
             .push(MobEvent::Sound("entity.bee.sting", from, 1.0, 1.0));

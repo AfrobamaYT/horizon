@@ -660,11 +660,10 @@ pub fn is_monster(s: Species) -> bool {
 /// being angry (`NeutralMob.updatePersistentAnger`).
 fn drop_invalid_player_target(m: &mut Mob, w: &MobWorld) {
     if m.ai.target == Some(Who::Player)
-        && w.player
-            .as_ref()
+        && w.selected_player()
             .is_some_and(|p| p.creative || p.spectator || w.difficulty.base == 0)
     {
-        m.ai.target = None;
+        m.set_ai_target(w, None);
         if matches!(m.species(), Species::ZombifiedPiglin | Species::IronGolem) {
             m.extra.anger = 0;
             m.ai.last_hurt_by = None;
@@ -2017,7 +2016,7 @@ fn push_entities(
     // Each with whether it rides a vehicle (`Entity.isPassenger`) and
     // whether it shares this one's root vehicle (`isPassengerOfSameVehicle`).
     let mut targets: Vec<(Who, Vec3, bool, bool, bool)> = Vec::new();
-    if let Some(p) = &w.player
+    if let Some(p) = w.selected_player()
         // Entity.push: passengers of the same vehicle never push each other.
         && m.rider.is_none()
         && p.alive
@@ -2058,11 +2057,11 @@ fn push_entities(
             && w.seen(id).is_some_and(super::golem::golem_prey)
             && m.random.next_int_bound(20).unwrap_or(1) == 0
         {
-            m.ai.target = Some(who);
+            m.set_ai_target(w, Some(who));
         }
         // doPush calls the other living entity's push; sleeping vetoes both impulses.
         let sleeping = match who {
-            Who::Player => w.player.as_ref().is_some_and(|p| p.sleeping),
+            Who::Player => w.selected_player().is_some_and(|p| p.sleeping),
             Who::Mob(id) => w.seen(id).is_some_and(|o| o.sleeping),
         };
         if sleeping {
@@ -2089,11 +2088,11 @@ fn push_entities(
         za *= f64::from(0.05_f32);
         // A guest's server-side push never reaches its client (ServerPlayer
         // motion is synced only when hurt): its client pushes it itself.
-        if !vehicle && (who != Who::Player || w.player.as_ref().is_none_or(|p| !p.remote)) {
-            events.push(MobEvent::Push {
+        if !vehicle && (who != Who::Player || w.selected_player().is_none_or(|p| !p.remote)) {
+            events.push(w.route_player_event(MobEvent::Push {
                 target: who,
                 velocity: [-xa, 0.0, -za],
-            });
+            }));
         }
         if self_pushable {
             m.velocity = Vec3::new(m.velocity.x + xa, m.velocity.y, m.velocity.z + za);
@@ -3220,10 +3219,10 @@ pub fn do_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
     amount += super::gear::melee_bonus(m, target_species);
     let burn = super::gear::fire_aspect(m);
     if burn > 0 {
-        cx.events.push(MobEvent::Ignite {
+        cx.events.push(cx.w.route_player_event(MobEvent::Ignite {
             target: who,
             seconds: burn,
-        });
+        }));
     }
     // `Mob.doHurtTarget`: `causeExtraKnockback(target, getKnockback(...))`. `getKnockback` is the
     // `attack_knockback` attribute plus the Knockback enchantment, halved; the push goes along the
@@ -3233,21 +3232,21 @@ pub fn do_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
     if power > 0.0 {
         use horizon_core::geometry::trig::Mth;
         let to_rad = std::f32::consts::PI / 180.0;
-        cx.events.push(MobEvent::Knockback {
+        cx.events.push(cx.w.route_player_event(MobEvent::Knockback {
             target: who,
             power: f64::from(power),
             x: f64::from((m.yaw * to_rad).msin()),
             z: f64::from(-(m.yaw * to_rad).mcos()),
             source,
-        });
+        }));
         m.velocity = Vec3::new(m.velocity.x * 0.6, m.velocity.y, m.velocity.z * 0.6);
     }
     // Zombies set their target on fire while burning (Zombie.doHurtTarget).
     if m.fire_ticks > 0 && matches!(m.species(), Species::Zombie) && m.random.next_float() < 0.3 {
-        cx.events.push(MobEvent::Ignite {
+        cx.events.push(cx.w.route_player_event(MobEvent::Ignite {
             target: who,
             seconds: 2,
-        });
+        }));
     }
     // The effect picked above goes with the hit: it applies only when the
     // target takes damage (a shield-blocked hit gives none), for a mob as for
@@ -3265,7 +3264,7 @@ pub fn do_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
             _ => None,
         });
     match who {
-        Who::Player => cx.events.push(match effect {
+        Who::Player => cx.events.push(cx.w.route_player_event(match effect {
             Some((effect, ticks, amplifier)) => MobEvent::AttackPlayerWithEffect {
                 amount,
                 from,
@@ -3274,7 +3273,7 @@ pub fn do_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
                 amplifier,
             },
             None => MobEvent::AttackPlayer(amount, from),
-        }),
+        })),
         Who::Mob(id) => cx.events.push(match effect {
             Some((effect, ticks, amplifier)) => MobEvent::AttackMobWithEffect {
                 target: id,
@@ -3341,6 +3340,29 @@ pub fn ate(m: &mut Mob, events: &mut Vec<MobEvent>) {
 }
 /// `NeutralMob.playerDied` for a mob that is neutral: the anger at the
 /// player who died ends. The caller checks `forgive_dead_players`.
+pub fn forgives_dead_player(m: &Mob) -> bool {
+    match m.species() {
+        Species::Bee => super::bee::get(m).and_then(|bee| bee.angry_at) == Some(Who::Player),
+        Species::PolarBear => m.extra.flag2,
+        Species::Enderman | Species::ZombifiedPiglin => m.ai.target == Some(Who::Player),
+        _ => m.extra.angry_at == Some(Who::Player),
+    }
+}
+
+/// Apply forgiveness after the caller has dispatched the target change. Anger
+/// bookkeeping still occurs if a listener cancels the target change.
+pub fn forgive_dead_player_with_change(m: &mut Mob, change: super::TargetChange) {
+    if !forgives_dead_player(m) {
+        return;
+    }
+    let previous = m.ai.target;
+    forgive_dead_player(m);
+    match change {
+        super::TargetChange::Keep => m.ai.target = previous,
+        super::TargetChange::Set(target) => m.set_target(target),
+    }
+}
+
 pub fn forgive_dead_player(m: &mut Mob) {
     match m.species() {
         Species::Bee => super::bee::forgive_dead_player(m),
@@ -5201,6 +5223,25 @@ mod forgiveness_tests {
         let mut t = (*crate::mobs::sensor_scan_tests::kind()).clone();
         t.species = species;
         Mob::new(1, Arc::new(t), Vec3::ZERO, 0.0)
+    }
+
+    #[test]
+    fn forgiveness_keeps_cancelled_target_but_ends_anger() {
+        let mut golem = mob(Species::IronGolem);
+        golem.extra.angry_at = Some(Who::Player);
+        golem.extra.anger = 300;
+        golem.ai.target = Some(Who::Player);
+        assert!(forgives_dead_player(&golem));
+        forgive_dead_player_with_change(&mut golem, super::super::TargetChange::Keep);
+        assert_eq!(golem.ai.target, Some(Who::Player));
+        assert_eq!(golem.extra.anger, 0);
+
+        golem.extra.angry_at = Some(Who::Player);
+        forgive_dead_player_with_change(
+            &mut golem,
+            super::super::TargetChange::Set(Some(Who::Mob(7))),
+        );
+        assert_eq!(golem.ai.target, Some(Who::Mob(7)));
     }
 
     #[test]

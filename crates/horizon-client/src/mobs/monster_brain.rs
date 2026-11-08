@@ -347,8 +347,7 @@ fn targetable(m: &mut Mob, w: &MobWorld, who: Who) -> bool {
 fn can_attack(m: &Mob, w: &MobWorld, who: Who) -> bool {
     match who {
         Who::Player => w
-            .player
-            .as_ref()
+            .selected_player()
             .is_some_and(|p| p.alive && !p.creative && !p.spectator),
         Who::Mob(id) => {
             let Some(s) = w.seen(id) else { return false };
@@ -410,8 +409,7 @@ fn visible_contains(m: &mut Mob, w: &MobWorld, who: Who) -> bool {
 fn sense_players(m: &mut Mob, w: &MobWorld) {
     let range = m.attrs.follow_range;
     let near = w
-        .player
-        .as_ref()
+        .selected_player()
         .is_some_and(|p| !p.spectator && m.distance_sqr(p.position) < range * range);
     let players: Vec<Who> = if near { vec![Who::Player] } else { vec![] };
     let visible: Vec<Who> = players
@@ -439,8 +437,7 @@ fn sense_breeze_attack(m: &mut Mob, w: &MobWorld) {
     let found = list.into_iter().find(|&who| {
         let shown = match who {
             Who::Player => w
-                .player
-                .as_ref()
+                .selected_player()
                 .is_some_and(|p| !p.creative && !p.spectator),
             Who::Mob(_) => true,
         };
@@ -646,6 +643,11 @@ impl B {
                 if !can_attack(m, cx.w, target) {
                     return false;
                 }
+                let super::TargetChange::Set(Some(target)) =
+                    cx.w.change_target(m, true, Some(target))
+                else {
+                    return false;
+                };
                 set_attack_target(m, Some(target));
                 mem(m).cant_reach_walk_target_since.clear();
                 *running = true;
@@ -683,7 +685,9 @@ impl B {
                     !reachable
                 };
                 if !can_attack(m, cx.w, target) || tired || !alive || stop_when {
-                    set_attack_target(m, None);
+                    if let super::TargetChange::Set(target) = cx.w.change_target(m, true, None) {
+                        set_attack_target(m, target);
+                    }
                 }
                 *running = true;
                 true
@@ -1153,7 +1157,7 @@ struct Quarry {
 fn quarry(w: &MobWorld, who: Who) -> Option<Quarry> {
     let t = w.target_info(who)?;
     let head_yaw = match who {
-        Who::Player => w.player.as_ref().map_or(0.0, |p| p.yaw),
+        Who::Player => w.selected_player().map_or(0.0, |p| p.yaw),
         Who::Mob(id) => w.seen(id).map_or(0.0, |s| s.yaw),
     };
     Some(Quarry {
@@ -1292,7 +1296,9 @@ fn long_jump_can_run(m: &mut Mob, cx: &mut Bx) -> bool {
     // outOfAggroRange: !target.closerThan(breeze, follow range)
     let follow = m.attrs.follow_range;
     if q.position.distance_squared(m.position) >= follow * follow {
-        set_attack_target(m, None);
+        if let super::TargetChange::Set(target) = cx.w.change_target(m, true, None) {
+            set_attack_target(m, target);
+        }
         return false;
     }
     // tooCloseForJump: (float) distance - 4 <= 0
@@ -1596,3 +1602,6 @@ pub fn describe(m: &Mob) -> Option<(String, String)> {
     out.sort();
     Some((acts.join("|"), out.join(" ")))
 }
+#[cfg(test)]
+#[path = "monster_brain/target_hook_tests.rs"]
+mod target_hook_tests;

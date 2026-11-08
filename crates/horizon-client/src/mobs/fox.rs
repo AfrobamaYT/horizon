@@ -59,8 +59,7 @@ pub fn awake_ambient(m: &mut Mob, w: &MobWorld) -> &'static str {
     if !bright && m.random.next_float() < 0.1 {
         let around = m.bounds().inflate(Vec3::new(16.0, 16.0, 16.0));
         let player_near = w
-            .player
-            .as_ref()
+            .selected_player()
             .is_some_and(|p| !p.spectator && p.bounds.intersects(around));
         if !player_near {
             return SCREECH;
@@ -607,7 +606,7 @@ fn alertable(m: &Mob, w: &MobWorld) -> bool {
         })
         .next()
         .is_some();
-    mob || w.player.as_ref().is_some_and(|p| {
+    mob || w.selected_player().is_some_and(|p| {
         p.alive
             && !p.creative
             && !p.spectator
@@ -1037,7 +1036,7 @@ impl Goal for Pounce {
             ) == "minecraft:snow"
         {
             m.head_pitch = 60.0;
-            m.ai.target = None;
+            m.set_ai_target(cx.w, None);
             set_flag(m, FACEPLANTED, true);
         }
     }

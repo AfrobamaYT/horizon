@@ -83,7 +83,7 @@ pub fn knot_state(pos: [i32; 3]) -> HolderState {
 pub fn holder_state(w: &MobWorld, holder: Holder) -> Option<HolderState> {
     match holder {
         Holder::Player => {
-            let p = w.player.as_ref()?;
+            let p = w.selected_player()?;
             let size = p.bounds.max_position().subtract(p.bounds.min_position());
             Some(HolderState {
                 position: p.position,
@@ -341,7 +341,7 @@ pub fn tick(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     // Leashable.tickLeash: a holder that cannot interact with the level (dead
     // or spectating, `Entity.canInteractWithLevel`) drops the lead.
     if holder == Holder::Player
-        && let Some(p) = w.player.as_ref()
+        && let Some(p) = w.selected_player()
         && m.extra.leash_player.is_none_or(|u| p.uuid == u)
         && (p.spectator || !p.alive)
     {
@@ -356,7 +356,7 @@ pub fn tick(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         holder != Holder::Player
             || m.extra
                 .leash_player
-                .is_none_or(|u| w.player.as_ref().is_some_and(|p| p.uuid == u))
+                .is_none_or(|u| w.selected_player().is_some_and(|p| p.uuid == u))
     });
     let Some(state) = state else {
         // The holder is gone: the lead drops.

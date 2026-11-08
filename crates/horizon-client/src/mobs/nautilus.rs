@@ -301,13 +301,16 @@ pub fn ai_step(
     if m.rider.is_some() {
         if m.extra.ints[1] == 0 || w.game_time % 40 == 0 {
             m.extra.ints[1] = 1;
-            events.push(MobEvent::EffectPlayer {
-                effect: "minecraft:breath_of_the_nautilus",
-                ticks: 60,
-                amplifier: 0,
-                // AbstractNautilus.applyEffects: ambient, visible, showIcon.
-                ambient: true,
-            });
+            events.push(w.route_rider_event(
+                m.id,
+                MobEvent::EffectPlayer {
+                    effect: "minecraft:breath_of_the_nautilus",
+                    ticks: 60,
+                    amplifier: 0,
+                    // AbstractNautilus.applyEffects: ambient, visible, showIcon.
+                    ambient: true,
+                },
+            ));
         }
     } else {
         m.extra.ints[1] = 0;
@@ -344,7 +347,11 @@ pub fn ai_step(
         m.extra.anger -= 1;
     }
     if m.ai.target.is_none() && m.alive() && !m.no_ai {
-        m.ai.target = find_target(m, w, level_random);
+        if let Some(target) = find_target(m, w, level_random)
+            && let super::TargetChange::Set(next) = w.change_target(m, true, Some(target))
+        {
+            m.ai.target = next;
+        }
     }
 }
 /// `MemorySlot.tick`: expire before decrementing a finite saved lifetime.
@@ -533,9 +540,11 @@ impl Goal for Charge {
             sound(m, name, cx.events);
         }
     }
-    fn stop(&mut self, m: &mut Mob, _: &mut Cx) {
+    fn stop(&mut self, m: &mut Mob, cx: &mut Cx) {
         m.extra.counter2 = TIME_BETWEEN_ATTACKS;
-        m.ai.target = None;
+        if let super::TargetChange::Set(target) = cx.w.change_target(m, true, None) {
+            m.ai.target = target;
+        }
     }
     fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
         let Some(who) = m.ai.target else { return };
@@ -551,7 +560,9 @@ impl Goal for Charge {
         let from = [m.position.x, m.position.y, m.position.z];
         let amount = m.attrs.attack_damage;
         cx.events.push(match who {
-            Who::Player => MobEvent::AttackPlayer(amount, from),
+            Who::Player => {
+                cx.w.route_player_event(MobEvent::AttackPlayer(amount, from))
+            }
             Who::Mob(id) => MobEvent::AttackMob {
                 target: id,
                 amount,
@@ -573,16 +584,23 @@ impl Goal for Charge {
             // from (sin(yaw), -cos(yaw)): its resistance, the halving of its own
             // motion, the lift on the ground and the knockback hook all apply.
             let yaw = f64::from(m.yaw * (std::f32::consts::PI / 180.0));
-            cx.events.push(MobEvent::Knockback {
+            let event = MobEvent::Knockback {
                 target: who,
                 power,
                 x: f64::from(horizon_core::geometry::trig::sin(yaw)),
                 z: -f64::from(horizon_core::geometry::trig::cos(yaw)),
                 source: super::Damage::mob(m.id, from),
+            };
+            cx.events.push(if who == Who::Player {
+                cx.w.route_player_event(event)
+            } else {
+                event
             });
             m.velocity = Vec3::new(m.velocity.x * 0.6, m.velocity.y, m.velocity.z * 0.6);
         }
-        m.ai.target = None;
+        if let super::TargetChange::Set(target) = cx.w.change_target(m, true, None) {
+            m.ai.target = target;
+        }
     }
 }
 /// The body texture: the baby's, the adult's, or the zombie's variant.

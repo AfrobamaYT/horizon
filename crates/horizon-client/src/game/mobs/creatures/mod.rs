@@ -1063,7 +1063,9 @@ impl Game<'_> {
             nearest_player: player.as_ref().filter(|p| !p.spectator).map(|p| p.position),
             player,
             player_identity: self.player_identity(),
+            player_selection: None,
             others,
+            live_mobs: None,
             dragon: self.dragon_target(),
             leash_boats: &self.leash_boats,
             others_grid: None,
@@ -1114,12 +1116,15 @@ impl Game<'_> {
                     mod_api::HookId::EndermanAnger,
                     mod_api::HookId::EntityMobGriefing,
                     mod_api::HookId::LivingVisibility,
+                    mod_api::HookId::LivingChangeTarget,
                 ]
                 .into_iter()
                 .any(mod_api::__private::listened))
             .then_some(self as &dyn horizon_client::mobs::MobHooks),
-            goal_host: (self.native_authoritative() && mod_api::__private::has_entity_parts())
-                .then_some(self as &dyn horizon_client::mobs::part_goals::GoalHost),
+            goal_host: (self.native_authoritative()
+                && (mod_api::__private::has_entity_parts()
+                    || mod_api::__private::listened(mod_api::HookId::LivingChangeTarget)))
+            .then_some(self as &dyn horizon_client::mobs::part_goals::GoalHost),
             asks_animal_tame: self.remote.is_none()
                 && mod_api::__private::listened(mod_api::HookId::AnimalTame),
             asks_living_destroy_block: self.remote.is_none()
@@ -2493,9 +2498,46 @@ impl Game<'_> {
     }
 
     pub(super) fn handle_mob_events_reusable(&mut self, events: &mut Vec<MobEvent>) -> Result<()> {
+        self.handle_mob_events_with_actor(events, None)
+    }
+
+    /// `actor` is retained for player events nested under `IfBroke`, which
+    /// leave the mob tick before their conditional effects are evaluated.
+    fn handle_mob_events_with_actor(
+        &mut self,
+        events: &mut Vec<MobEvent>,
+        actor: Option<u32>,
+    ) -> Result<()> {
         let mut broke: Vec<u32> = Vec::new();
         for e in events.drain(..) {
             match e {
+                MobEvent::ForPlayer { conn, event } => {
+                    let mut event = *event;
+                    // Projectiles are spawned in the world rather than run
+                    // as a guest, but must retain the selected guest target.
+                    if let Some(conn) = conn
+                        && let MobEvent::Projectile(p) = &mut event
+                        && let ProjectileKind::ShulkerBullet { target, .. } = &mut p.kind
+                        && *target == Some(Who::Player)
+                    {
+                        *target = self.guest_identity(conn).map(|(_, id)| Who::Mob(id));
+                        self.handle_mob_events(vec![event])?;
+                    } else if let Some(conn) = conn {
+                        if let Some(mob) = actor {
+                            self.lan_guest_mob_events(vec![(conn, mob, event)]);
+                        } else {
+                            // No nested block-break actor is in scope. A
+                            // missing guest must not redirect to another player.
+                            if let Some(result) =
+                                self.as_guest(conn, |game| game.handle_mob_events(vec![event]))
+                            {
+                                result?;
+                            }
+                        }
+                    } else {
+                        self.handle_mob_events(vec![event])?;
+                    }
+                }
                 MobEvent::BubbleColumnParticles { pos } => {
                     self.bubble_column_particles(BlockPos::new(pos[0], pos[1], pos[2]))
                 }
@@ -3074,16 +3116,26 @@ impl Game<'_> {
                     }
                 }
                 MobEvent::SetTarget { mob, target } => {
-                    if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
-                        m.ai.target = Some(target);
-                    }
+                    let player = self
+                        .lan
+                        .as_ref()
+                        .and_then(|host| host.mob_players.get(&mob).copied())
+                        .or(self.lan_acting);
+                    self.set_event_ai_target(mob, Some(target), player);
                 }
                 MobEvent::HuntHoglin { mob, target, ticks } => {
+                    let mut acquire = false;
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
                         m.extra.ints[0] = ticks;
-                        if m.ai.target.is_none() {
-                            m.ai.target = Some(Who::Mob(target));
-                        }
+                        acquire = m.ai.target.is_none();
+                    }
+                    if acquire {
+                        let player = self
+                            .lan
+                            .as_ref()
+                            .and_then(|host| host.mob_players.get(&mob).copied())
+                            .or(self.lan_acting);
+                        self.set_event_ai_target(mob, Some(Who::Mob(target)), player);
                     }
                 }
                 MobEvent::Projectile(p) => self.launch_mob_projectile(p),
@@ -3277,7 +3329,8 @@ impl Game<'_> {
                     } else {
                         otherwise
                     };
-                    self.handle_mob_events(follow)?;
+                    let mut follow = follow;
+                    self.handle_mob_events_with_actor(&mut follow, Some(mob))?;
                 }
                 MobEvent::Jump { mob } => {
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
@@ -3691,8 +3744,13 @@ impl Game<'_> {
                     target,
                     aggressive,
                 } => {
+                    let player = self
+                        .lan
+                        .as_ref()
+                        .and_then(|host| host.mob_players.get(&mob).copied())
+                        .or(self.lan_acting);
+                    self.set_event_ai_target(mob, Some(target), player);
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
-                        m.ai.target = Some(target);
                         m.ai.aggressive |= aggressive;
                     }
                 }
@@ -3927,9 +3985,33 @@ impl Game<'_> {
         let Some(host) = self.lan.as_ref() else {
             return;
         };
-        for m in self.mobs.iter_mut() {
-            if host.mob_players.get(&m.id).copied() == conn && m.bounds().intersects(area) {
-                horizon_client::mobs::ai::forgive_dead_player(m);
+        let ids: Vec<u32> = self
+            .mobs
+            .iter()
+            .filter(|m| {
+                host.mob_players.get(&m.id).copied() == conn
+                    && m.bounds().intersects(area)
+                    && horizon_client::mobs::ai::forgives_dead_player(m)
+            })
+            .map(|m| m.id)
+            .collect();
+        for id in ids {
+            let Some(epoch) = self.native_lifecycle.epoch() else {
+                if let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id) {
+                    horizon_client::mobs::ai::forgive_dead_player(mob);
+                }
+                continue;
+            };
+            let mob_ref = mod_api::MobRef::new(mod_api::EntityRef::new(epoch, id));
+            let change = self
+                .native_mob_target_event(mob_ref, None, false)
+                .and_then(|target| self.native_mob_bind_target(id, target))
+                .map_or(
+                    horizon_client::mobs::TargetChange::Keep,
+                    horizon_client::mobs::TargetChange::Set,
+                );
+            if let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id) {
+                horizon_client::mobs::ai::forgive_dead_player_with_change(mob, change);
             }
         }
     }
@@ -6837,6 +6919,7 @@ impl Game<'_> {
         let feet = [m.position.x, m.position.y, m.position.z];
         let mut handled = true;
         let mut ignited_creeper = false;
+        let mut clear_wolf_target = false;
         let mut drops: Vec<(String, u32)> = Vec::new();
         // The shearing table rolled, for the mods.
         let mut drops_table = String::new();
@@ -7026,7 +7109,7 @@ impl Game<'_> {
                 m.extra.sitting = !m.extra.sitting;
                 m.ai.jumping = false;
                 m.nav_stop();
-                m.ai.target = None;
+                clear_wolf_target = true;
                 self.world.modified.insert((
                     m.position.x.floor() as i32 >> 4,
                     m.position.z.floor() as i32 >> 4,
@@ -7047,7 +7130,7 @@ impl Game<'_> {
                     m.extra.owner = Some(acting);
                     m.persistent = true;
                     m.nav_stop();
-                    m.ai.target = None;
+                    clear_wolf_target = true;
                     m.extra.sitting = true;
                 }
                 // TamableAnimal.spawnTamingParticles (entity event 7 or 6).
@@ -7333,6 +7416,9 @@ impl Game<'_> {
         }
         if !handled {
             return Ok(false);
+        }
+        if clear_wolf_target {
+            self.set_event_ai_target(mob.0, None, self.lan_acting);
         }
         if ignited_creeper {
             self.native_creeper_ignite(
@@ -8924,6 +9010,16 @@ fn mob_effect_instance(
 }
 
 impl horizon_client::mobs::MobHooks for Game<'_> {
+    fn living_change_target(
+        &self,
+        mob: &mut Mob,
+        world: &MobWorld<'_>,
+        is_brain: bool,
+        target: Option<Who>,
+    ) -> horizon_client::mobs::TargetChange {
+        self.native_mob_change_target_in_tick(mob, world, is_brain, target)
+    }
+
     fn enderman_anger_suppressed(&self, enderman: u32, player: &PlayerView) -> bool {
         if !mod_api::__private::listened(mod_api::HookId::EndermanAnger) {
             return false;
@@ -11248,6 +11344,7 @@ mod pearl_tests {
         let lid_openers = std::collections::HashMap::new();
         let w = MobWorld {
             goal_host: None,
+            live_mobs: None,
             teams: Default::default(),
             loop_context: &crate::game::test_server_load()
                 .loop_context(horizon_world::native_load_context::LoopSide::Server, []),
@@ -11262,6 +11359,7 @@ mod pearl_tests {
             data: &data,
             player: None,
             player_identity: None,
+            player_selection: None,
             controlling_player_movement: None,
             nearest_player: None,
             others: &[],

@@ -227,6 +227,7 @@ mod tests {
         let lid_openers = std::collections::HashMap::new();
         let w = MobWorld {
             goal_host: None,
+            live_mobs: None,
             teams: Default::default(),
             loop_context: crate::test_resources::server_loop_context(),
             world: &world,
@@ -240,6 +241,7 @@ mod tests {
             data: &data,
             player: None,
             player_identity: None,
+            player_selection: None,
             controlling_player_movement: None,
             nearest_player: None,
             others: &[],
