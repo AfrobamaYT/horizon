@@ -3100,6 +3100,10 @@ impl Game<'_> {
                     mut arrow,
                 } => {
                     self.mob_bow_ammo(mob, &weapon, &mut arrow);
+                    if let Some(state) = arrow.arrow.as_mut() {
+                        state.fired_from_weapon = Some(weapon);
+                        arrow.bonus.damage = 0.0;
+                    }
                     self.launch_mob_projectile(arrow);
                 }
                 MobEvent::CrossbowShot { ammo, mut arrow } => {
@@ -5136,6 +5140,8 @@ impl Game<'_> {
             attacker: attacker_kind.as_deref(),
             direct_attacker: Some(if trident {
                 "minecraft:trident"
+            } else if shot.is_spectral_arrow() {
+                "minecraft:spectral_arrow"
             } else {
                 "minecraft:arrow"
             }),
@@ -5148,7 +5154,11 @@ impl Game<'_> {
         };
         let player = self.own_entity_id() as u32;
         let attacker = shot.owner.map(|owner| match owner {
-            Who::Player => player,
+            Who::Player => self
+                .combat
+                .enchantment_projectile_attacker
+                .or_else(|| self.player_attacker(shot.guest).map(|s| s.0))
+                .unwrap_or(player),
             Who::Mob(id) => id,
         });
         let victim = match who {
@@ -5157,6 +5167,10 @@ impl Game<'_> {
         };
         let victim = if (super::dragon::SPECIAL..super::dragon::CRYSTAL_IDS).contains(&victim) {
             self.dragon.as_ref().map_or(victim, |dragon| dragon.id)
+        } else if victim >= super::dragon::CRYSTAL_IDS {
+            self.crystals
+                .get((victim - super::dragon::CRYSTAL_IDS) as usize)
+                .map_or(victim, |crystal| crystal.id)
         } else {
             victim
         };
@@ -5592,7 +5606,15 @@ impl Game<'_> {
                 // AbstractArrow.onHitEntity: spent if the part or crystal took
                 // it, else turned back (a perched dragon sets it alight first).
                 let mut arrow = p.clone();
-                let amount = self.shot_damage(&mut arrow, None, Who::Mob(id));
+                let amount = self.shot_damage(
+                    &mut arrow,
+                    Some(if id >= super::dragon::CRYSTAL_IDS {
+                        "minecraft:end_crystal"
+                    } else {
+                        "minecraft:ender_dragon"
+                    }),
+                    Who::Mob(id),
+                );
                 let outcome = match self.hit_special(
                     id,
                     amount,
@@ -5650,7 +5672,8 @@ impl Game<'_> {
         {
             // AbstractArrow.onHitEntity on a minecart.
             let mut arrow = p.clone();
-            let amount = self.shot_damage(&mut arrow, None, Who::Mob(id));
+            let victim_type = self.carts[i].kind.id().to_owned();
+            let amount = self.shot_damage(&mut arrow, Some(&victim_type), Who::Mob(id));
             let burning = p.arrow.as_ref().is_some_and(|a| a.on_fire());
             let creative = p.owner == Some(Who::Player) && self.creative;
             self.arrow_hits_cart(i, amount, p.velocity, burning, creative);
@@ -5666,7 +5689,8 @@ impl Game<'_> {
             // AbstractArrow.onHitEntity on a boat: VehicleEntity.hurtServer
             // takes the arrow's damage, and the arrow is spent.
             let mut arrow = p.clone();
-            let amount = self.shot_damage(&mut arrow, None, Who::Mob(id));
+            let victim_type = self.boats[i].entity_type();
+            let amount = self.shot_damage(&mut arrow, Some(&victim_type), Who::Mob(id));
             let creative = p.owner == Some(Who::Player) && self.creative;
             self.hurt_boat(i, amount, creative);
             self.finish_arrow_hit(arrow, EntityHit::Hurt);

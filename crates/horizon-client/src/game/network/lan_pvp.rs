@@ -323,13 +323,21 @@ impl Game<'_> {
             at,
         };
         let shooter = self.player_attacker(p.guest);
+        let effect_attacker = shooter
+            .as_ref()
+            .map_or(self.own_entity_id() as u32, |s| s.0);
         let result = match victim {
             Victim::Guest(conn) => self.guest_hit_by(conn, |g| {
                 g.combat.refuse_player_hit = refused;
                 g.combat.projectile_attacker = shooter;
+                let saved_effect_attacker = g
+                    .combat
+                    .enchantment_projectile_attacker
+                    .replace(effect_attacker);
                 let r = g.projectile_hit(p, on_player);
                 g.combat.refuse_player_hit = false;
                 g.combat.projectile_attacker = None;
+                g.combat.enchantment_projectile_attacker = saved_effect_attacker;
                 r
             }),
         };
