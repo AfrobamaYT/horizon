@@ -713,8 +713,7 @@ pub trait Hooks {
         side = "server",
         contract = "cancel",
         out = "canceled",
-        neoforge = "ItemEntityPickupEvent.Pre",
-        paper = "EntityPickupItemEvent"
+        neoforge = "ItemEntityPickupEvent.Pre"
     )]
     fn item_picked_up();
     /// A player's hit landed on the mob `entity` of type `kind`
@@ -3386,7 +3385,6 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no direct equivalent; Bukkit's InventoryPickupItemEvent)",
-        paper = "InventoryPickupItemEvent",
         cancellable = true,
         target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_hopper_pickup_item"
     )]
