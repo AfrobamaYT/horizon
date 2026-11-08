@@ -174,7 +174,7 @@ fn build(
                 }
                 let name = decoder_name(path);
                 return Ok(ValueCodec {
-                    decode: quote!(#name(input)?),
+                    decode: quote!(crate::__horizon_points::#name(input)?),
                     encode: quote!(),
                 });
             }

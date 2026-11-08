@@ -55,11 +55,15 @@ pub type ManifestInternals = [InternalDeclaration];
 
 /// Module-owned precomputed policies. Dropping this releases its plan owners.
 pub struct EndpointPolicy {
-    plans: Vec<Option<Arc<Plan>>>,
+    plans: std::collections::HashMap<usize, Arc<Plan>>,
 }
 impl EndpointPolicy {
     /// Validate every declaration and build all point policies atomically.
-    pub fn build(catalog: &SchemaCatalog, internals: &ManifestInternals) -> Result<Self, String> {
+    pub fn build(
+        catalog: &SchemaCatalog,
+        internals: &ManifestInternals,
+        listened: &[usize],
+    ) -> Result<Self, String> {
         let mut grants = Vec::new();
         for declaration in internals {
             let matches: Vec<_> = catalog
@@ -103,8 +107,14 @@ impl EndpointPolicy {
                 },
             ));
         }
-        let mut plans = Vec::with_capacity(catalog.points.len());
-        for point in &catalog.points {
+        // Only listened points get a plan: a plan is sized by the whole graph.
+        let mut plans = std::collections::HashMap::new();
+        for &head in listened {
+            let point = catalog
+                .points
+                .iter()
+                .find(|point| point.head_call == head)
+                .ok_or("listener on an unknown point")?;
             let selected: Vec<_> = grants
                 .iter()
                 .filter_map(|(receiver, grant)| {
@@ -113,17 +123,20 @@ impl EndpointPolicy {
                 .collect();
             let mut roots = vec![point.head_call];
             roots.extend(point.tail_call);
-            plans.push(Some(Arc::new(Plan::build(
-                &catalog.layouts,
-                point.receiver,
-                &selected,
-                &roots,
-            )?)));
+            plans.insert(
+                head,
+                Arc::new(Plan::build(
+                    &catalog.layouts,
+                    point.receiver,
+                    &selected,
+                    &roots,
+                )?),
+            );
         }
         Ok(Self { plans })
     }
-    /// Return an owned plan for the callback's raw point index.
-    pub fn plan(&self, point_index: usize) -> Option<Arc<Plan>> {
-        self.plans.get(point_index).and_then(Clone::clone)
+    /// Return an owned plan for the point's head call layout, as named in its staged plan.
+    pub fn plan(&self, head_call: usize) -> Option<Arc<Plan>> {
+        self.plans.get(&head_call).cloned()
     }
 }

@@ -66,16 +66,16 @@ fn declaration(path: &str, hash: &str) -> InternalDeclaration {
 #[test]
 fn grants_are_per_module_validated_and_freed() {
     let c = catalog();
-    let empty = EndpointPolicy::build(&c, &[]).unwrap();
-    let granted = EndpointPolicy::build(&c, &[declaration("Game::visible", "abc")]).unwrap();
-    let a = empty.plan(0).unwrap();
-    let b = granted.plan(0).unwrap();
+    let empty = EndpointPolicy::build(&c, &[], &[3]).unwrap();
+    let granted = EndpointPolicy::build(&c, &[declaration("Game::visible", "abc")], &[3]).unwrap();
+    let a = empty.plan(3).unwrap();
+    let b = granted.plan(3).unwrap();
     assert!(!a.field(0, None, 0));
     assert!(b.field(0, None, 0));
     assert!(!b.field(0, None, 1));
     assert_ne!(a.key(0), b.key(0));
-    assert!(EndpointPolicy::build(&c, &[declaration("Game::secret", "def")]).is_err());
-    assert!(EndpointPolicy::build(&c, &[declaration("Game::missing", "abc")]).is_err());
+    assert!(EndpointPolicy::build(&c, &[declaration("Game::secret", "def")], &[3]).is_err());
+    assert!(EndpointPolicy::build(&c, &[declaration("Game::missing", "abc")], &[3]).is_err());
     let weak = Arc::downgrade(&b);
     drop(b);
     drop(granted);

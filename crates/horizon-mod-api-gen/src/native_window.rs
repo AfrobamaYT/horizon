@@ -74,7 +74,7 @@ fn generate_inner(
                 let id = graph.id(shape).ok_or("missing runtime schema")?;
                 let helper = quote::format_ident!("__horizon_node_{id}");
                 let _ = path;
-                return Ok(quote!(#helper(&(#place), #plan)));
+                return Ok(quote!(crate::__horizon_points::#helper(&(#place), &(#plan))));
             }
         }
         let identity = if runtime.is_some() {

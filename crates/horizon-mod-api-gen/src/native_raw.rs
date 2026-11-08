@@ -20,6 +20,8 @@ pub struct Frame {
 /// A native projection plan. Return frames contain only the native return listener's outcome;
 /// consumed by-value arguments are never read after the original function runs.
 pub struct Plan {
+    /// Registered call layout whose endpoint `exposure::Plan` the frames read through.
+    pub plan: Option<usize>,
     pub head: Frame,
     pub tail: Option<Frame>,
 }
@@ -191,7 +193,11 @@ fn build(
         )?),
         (None, _) => None,
     };
-    Ok(Plan { head, tail })
+    Ok(Plan {
+        plan: runtime.map(|(_, call)| call.head),
+        head,
+        tail,
+    })
 }
 
 impl Plan {
@@ -202,7 +208,8 @@ impl Plan {
             .tail
             .as_ref()
             .map(|Frame { roots, read, apply }| quote!(, #roots, { #read }, { #apply }));
-        quote!(#[horizon_raw_plan(#roots, { #read }, { #apply } #tail)])
+        let plan = self.plan.map(|plan| quote!(plan #plan,));
+        quote!(#[horizon_raw_plan(#plan #roots, { #read }, { #apply } #tail)])
     }
 }
 

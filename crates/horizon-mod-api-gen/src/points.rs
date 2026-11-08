@@ -687,6 +687,7 @@ pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
                 .map(|_| ())
             })
         });
+        let admitted = matches!(runtime, Some(Ok(())));
         let api = shape.api_items(&target);
         points.push(GamePoint {
             record_item: shape.record_item(&target).to_string(),
@@ -698,6 +699,7 @@ pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
             at_return: shape.has_return(),
             raw: shape.raw,
             snapshot: shape.snapshot_able(found.sig)
+                || admitted
                 || (shape.raw
                     && crate::native_raw::generate(&rule, &found.module, found.sig, &shape)
                         .is_ok()),

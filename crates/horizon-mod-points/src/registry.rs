@@ -65,8 +65,8 @@ pub trait Forward: Send + Sync {
 
 /// A raw hook endpoint; the record projects owned views during the ordinary marked call.
 pub trait RawForward: Send + Sync {
-    /// Returns the module-owned exposure plan for a raw point index, when registered.
-    fn plan(&self, _point_index: usize) -> Option<std::sync::Arc<crate::exposure::Plan>> {
+    /// Returns the module-owned exposure plan for a point's head call layout, when registered.
+    fn plan(&self, _head_call: usize) -> Option<std::sync::Arc<crate::exposure::Plan>> {
         None
     }
 

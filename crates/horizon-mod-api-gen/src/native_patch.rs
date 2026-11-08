@@ -138,7 +138,7 @@ fn emit(
         && graph.layouts[id].opaque.is_none()
     {
         let helper = quote::format_ident!("__horizon_patch_{id}");
-        return Ok(quote!(#helper(&mut (#place), __np_tree, __np_plan, &(#policy))?;));
+        return Ok(quote!(crate::__horizon_points::#helper(&mut (#place), __np_tree, __np_plan, &(#policy))?;));
     }
     let child = |s: &Shape, p| {
         emit(rule, s, p, exposure, runtime, depth + 1)

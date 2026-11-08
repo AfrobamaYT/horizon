@@ -3,6 +3,7 @@ fn main() {
         std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("../..");
     let out_dir = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
     horizon_mod_api_gen::generate_points(&root, &out_dir).expect("generating the points");
+    receiver_fixture(&out_dir);
     // Exercise the actual catalog signature and Rust body, not a handwritten nominal DTO.
     let source = root.join("crates/horizon-client/src/game/network/server_links.rs");
     println!("cargo:rerun-if-changed={}", source.display());
@@ -150,4 +151,82 @@ impl horizon_mod_api_gen::native_schema::Exposure for OnlyB {
     fn field(&self, _: &str, _: Option<u32>, field: u32) -> bool {
         field == 1
     }
+}
+
+/// A real catalog `&self` point on a stand-in receiver, generated through the whole-catalog
+/// graph, registration policy and once-per-source helpers.
+fn receiver_fixture(out_dir: &std::path::Path) {
+    use horizon_mod_api_gen::{
+        crossing::Rule, internals::Internal, native_patch, native_policy::Graph, native_raw,
+        native_window,
+    };
+    let entry = Internal {
+        path: "horizon_client::model::Loading".into(),
+        kind: "struct",
+        cfg: String::new(),
+        signature: "pub struct Loading { pub hidden: u32, pub size: [u32; 2] }".into(),
+        hash: String::new(),
+        shape_only: false,
+        opaque_reason: None,
+        refs: Default::default(),
+    };
+    let rule = Rule::new(&[entry]);
+    let module = "horizon_client::model";
+    let owner: syn::Type = syn::parse_str("Loading").unwrap();
+    let signature: syn::Signature = syn::parse_str("fn menu_size(&self) -> [u32; 2]").unwrap();
+    let attribute = quote::quote!(name = "game_startup_menu_loading_menu_size", raw);
+    let shape = point_shape::shape(attribute.clone(), &signature).unwrap();
+    let mut graph = Graph::default();
+    let call =
+        native_raw::register(&rule, module, Some(&owner), &signature, &shape, &mut graph).unwrap();
+    let plan = native_raw::generate_runtime(
+        &rule,
+        module,
+        Some(&owner),
+        &signature,
+        &shape,
+        &graph,
+        call,
+    )
+    .unwrap()
+    .attribute();
+    let receiver = graph.id(&rule.shape(module, None, &owner)).unwrap();
+    let layouts = graph.tokens();
+    let windows = native_window::helpers(&rule, &graph).unwrap();
+    let patches = native_patch::helpers(&rule, &graph).unwrap();
+    let (head, tail) = (
+        call.head,
+        call.tail
+            .map_or(quote::quote!(None), |t| quote::quote!(Some(#t))),
+    );
+    let raw_types = shape.raw_items(&signature, Some(&owner), None);
+    std::fs::write(
+        out_dir.join("native_raw_receiver.rs"),
+        quote::quote! {
+            pub mod __horizon_points { #windows #patches }
+            fn catalog() -> mod_points::endpoint_policy::SchemaCatalog {
+                use mod_points::endpoint_policy::{InternalField, PointSpec, SchemaCatalog};
+                SchemaCatalog {
+                    layouts: #layouts,
+                    points: vec![PointSpec { head_call: #head, tail_call: #tail, receiver: Some(#receiver) }],
+                    fields: ["hidden", "size"].map(|field| InternalField {
+                        path: format!("horizon_client::model::Loading::{field}"),
+                        kind: "field".into(),
+                        hash: field.into(),
+                        receiver: #receiver,
+                        field: field.into(),
+                    }).to_vec(),
+                }
+            }
+            const HEAD_CALL: usize = #head;
+            #raw_types
+            impl model::Loading {
+                #[horizon_mod_api_macros::point(#attribute)]
+                #plan
+                fn menu_size(&self) -> [u32; 2] { self.size }
+            }
+        }
+        .to_string(),
+    )
+    .unwrap();
 }
