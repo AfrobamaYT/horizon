@@ -124,6 +124,7 @@ const EXPORTS: &[&str] = &[
     "PlaceProvider",
     "TooltipAppender",
     "CriterionTest",
+    "RowPages",
 ];
 
 /// Every exported trait: [`EXPORTS`], then the handler traits `mod_api`'s capability keys name
@@ -137,7 +138,8 @@ pub(super) fn exports() -> &'static [&'static str] {
 /// another mod's provider): the mod calls one through the `held-<interface>` imports, by the
 /// index the game keeps it under.
 pub(super) fn held(owner: &str) -> bool {
-    owner == "PlaceProvider" || (exports().contains(&owner) && !EXPORTS.contains(&owner))
+    ["PlaceProvider", "RowPages"].contains(&owner)
+        || (exports().contains(&owner) && !EXPORTS.contains(&owner))
 }
 
 /// The contexts of the load phase: the catalog's registration and data-load contexts and a

@@ -65,12 +65,20 @@ Listeners register in the host's ordinary point list, with the same priority, de
 owner enable flag and stop behavior as native listeners. Mixins remain native-only.
 
 Raw listeners read an owned per-call snapshot, never engine addresses or Rust memory layouts.
-Rows identify a node, its parent, a declaration-order field/index, a generated type key and a
-plain Wire value. Reads cannot mutate the snapshot. Declared mutable raw-record fields, including
+Rows identify a node, its parent, a declaration-order field/index, a generated 64-bit type key
+and a plain Wire value. Reads cannot mutate the snapshot. Declared mutable raw-record fields, including
 by-value arguments which native raw records expose as `&mut`, use checked, atomic writeback.
 Rejected replies apply no argument or outcome writes. The initial generated readers cover free
 functions with primitive arguments and unit/primitive returns; engine receivers, nominal types,
 callbacks and borrowed returns need staged catalog readers and are refused until those exist.
+
+The shared `RowPages` resource interface returns owned windows, with a node, starting index,
+row count and child-depth bound. Native borrowed providers check their marked call's lifetime
+before every read and resolve movable elements afresh. Retaining or transferring a provider does
+not keep its native root alive: expired and wrong-thread reads are refused, while rows already
+returned remain owned and usable. This interface alone does not enable the missing nominal readers
+above. Sparse `wire::RecordPatch` records likewise carry only field ids and ordinary Wire values;
+the receiving schema validates every edit before committing any field.
 
 ## ABI reference
 
@@ -119,7 +127,8 @@ Wire values use little-endian numbers; lengths and collection counts are `u32`, 
 byte length followed by UTF-8 bytes, options have a byte tag (`0` or `1`), enums have a `u32`
 case followed by its fields, and records contain their fields in declaration order. Readers reject
 invalid tags, invalid UTF-8, trailing data, lengths that cannot fit in the remaining bytes, and
-nesting deeper than 512. Interned static strings are limited to 256 bytes and 4096 distinct
+nesting beyond the shared Wire budget of 1040 protocol levels (which accommodates vanilla's
+512 nested NBT lists or compounds). Interned static strings are limited to 256 bytes and 4096 distinct
 strings per process. Execution, memory and table limits are enforced separately by the loader.
 
 ## In the game
