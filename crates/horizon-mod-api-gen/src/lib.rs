@@ -604,6 +604,7 @@ pub mod crossing;
 mod dispatch;
 mod host_param;
 mod index;
+pub mod native_value;
 mod wire;
 pub use wire::generate as generate_wire;
 pub use wire::generate_host as generate_wire_host;

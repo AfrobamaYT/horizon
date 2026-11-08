@@ -1,5 +1,6 @@
 use mod_api::wire::{
-    MAX_DEPTH, PatchCell, PatchFields, Reader, Record, RecordPatch, WireError, Writer,
+    DecodedPatchCell, MAX_DEPTH, PatchCell, PatchFields, Reader, Record, RecordPatch, WireError,
+    Writer,
 };
 
 fn bytes(patch: &RecordPatch) -> Vec<u8> {
@@ -86,6 +87,51 @@ fn refused_values_preserve_the_patch_and_decode_limits_precede_materialization()
         Reader::decode::<RecordPatch>(out.bytes()),
         Err(WireError::Length)
     ));
+}
+
+#[test]
+fn native_decoder_plans_before_commit_and_rejects_trailing_data() {
+    #[derive(Debug, PartialEq)]
+    struct Native(u32, bool);
+    fn decode(input: &mut Reader<'_>) -> Result<Native, WireError> {
+        input.nested(|input| Ok(Native(input.take()?, input.take()?)))
+    }
+    let (mut first, mut native) = (7u32, Native(8, false));
+    let mut patch = RecordPatch::default();
+    patch.set(1, &99u32).unwrap();
+    patch.set(2, &(42u32, 2u8)).unwrap();
+    let mut fields = PatchFields::new(
+        (
+            PatchCell::new(1, &mut first),
+            (DecodedPatchCell::new(2, &mut native, decode), ()),
+        ),
+        3,
+    );
+    assert!(fields.apply(&bytes(&patch)).is_err());
+    drop(fields);
+    assert_eq!((first, &native), (7, &Native(8, false)));
+    patch.set(2, &(42u32, true, 0u8)).unwrap();
+    let mut fields = PatchFields::new(
+        (
+            PatchCell::new(1, &mut first),
+            (DecodedPatchCell::new(2, &mut native, decode), ()),
+        ),
+        3,
+    );
+    assert_eq!(fields.apply(&bytes(&patch)), Err(WireError::Trailing));
+    drop(fields);
+    assert_eq!((first, &native), (7, &Native(8, false)));
+    patch.set(2, &(42u32, true)).unwrap();
+    PatchFields::new(
+        (
+            PatchCell::new(1, &mut first),
+            (DecodedPatchCell::new(2, &mut native, decode), ()),
+        ),
+        3,
+    )
+    .apply(&bytes(&patch))
+    .unwrap();
+    assert_eq!((first, native), (99, Native(42, true)));
 }
 
 #[test]
