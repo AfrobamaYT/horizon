@@ -3096,7 +3096,7 @@ impl Game<'_> {
         out
     }
     /// Whether a native mod's block `name` has a ticking block entity.
-    pub(super) fn native_ticks(&self, name: &str) -> bool {
+    pub(in crate::game) fn native_ticks(&self, name: &str) -> bool {
         let mut ticks = false;
         self.native_block_entity_ticks(name, &mut ticks);
         ticks
