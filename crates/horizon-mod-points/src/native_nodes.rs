@@ -3,6 +3,7 @@ use crate::{locators::Step, native_read::NativeNode};
 use mod_api::{RowError, wire::Put};
 
 type Visitor<'a> = dyn FnMut(Step, u32, &dyn NativeNode) -> Result<(), RowError> + 'a;
+type Header<'a> = dyn FnMut(Option<&dyn Put>) -> Result<(), RowError> + 'a;
 
 /// A plain Wire leaf, with its generated canonical schema key.
 pub struct Scalar<'a, T: Put>(pub &'a T, pub u64);
@@ -10,10 +11,7 @@ impl<T: Put> NativeNode for Scalar<'_, T> {
     fn key(&self) -> u64 {
         self.1
     }
-    fn value(
-        &self,
-        f: &mut dyn FnMut(Option<&dyn Put>) -> Result<(), RowError>,
-    ) -> Result<(), RowError> {
+    fn value(&self, f: &mut Header<'_>) -> Result<(), RowError> {
         f(Some(self.0))
     }
     fn len(&self) -> u64 {
@@ -24,16 +22,37 @@ impl<T: Put> NativeNode for Scalar<'_, T> {
     }
 }
 
+/// A structural record whose child resolver is generated from its native layout.
+pub struct Record<F> {
+    pub key: u64,
+    pub count: u64,
+    pub visit: F,
+}
+impl<F> NativeNode for Record<F>
+where
+    F: Fn(u64, &mut Visitor<'_>) -> Result<(), RowError>,
+{
+    fn key(&self) -> u64 {
+        self.key
+    }
+    fn value(&self, f: &mut Header<'_>) -> Result<(), RowError> {
+        f(None)
+    }
+    fn len(&self) -> u64 {
+        self.count
+    }
+    fn child(&self, n: u64, f: &mut Visitor<'_>) -> Result<(), RowError> {
+        (self.visit)(n, f)
+    }
+}
+
 /// A borrowed UTF-16 view of a native UTF-8 string. Indexes are UTF-16 code units.
 pub struct Text<'a>(pub &'a str, pub u64, pub u64);
 impl NativeNode for Text<'_> {
     fn key(&self) -> u64 {
         self.1
     }
-    fn value(
-        &self,
-        f: &mut dyn FnMut(Option<&dyn Put>) -> Result<(), RowError>,
-    ) -> Result<(), RowError> {
+    fn value(&self, f: &mut Header<'_>) -> Result<(), RowError> {
         f(Some(&self.len()))
     }
     fn len(&self) -> u64 {
@@ -63,10 +82,7 @@ where
     fn key(&self) -> u64 {
         self.key
     }
-    fn value(
-        &self,
-        f: &mut dyn FnMut(Option<&dyn Put>) -> Result<(), RowError>,
-    ) -> Result<(), RowError> {
+    fn value(&self, f: &mut Header<'_>) -> Result<(), RowError> {
         f(Some(&self.len()))
     }
     fn len(&self) -> u64 {
