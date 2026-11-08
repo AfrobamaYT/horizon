@@ -624,10 +624,20 @@ mod tests {
             });
             game.options.dedicated = Some(Vec::new());
             let bounds = game.level_height(level).unwrap();
-            let parsed = game.block_state_id("minecraft:oak_slab[waterlogged=true]");
-            let default = game.block_state_default(mod_api::__private::part_tests::block_key(
-                "minecraft:oak_slab",
-            ));
+            use super::super::api_values::TryIntoApi;
+            let stone = stone.try_into_api().unwrap();
+            let slab = slab.try_into_api().unwrap();
+            let invalid = mod_api::BlockStateRecord::new(stone.block(), u16::MAX).into();
+            let parsed = game
+                .block_state_id("minecraft:oak_slab[waterlogged=true]")
+                .try_into_api()
+                .unwrap();
+            let default = game
+                .block_state_default(mod_api::__private::part_tests::block_key(
+                    "minecraft:oak_slab",
+                ))
+                .try_into_api()
+                .unwrap();
             game.with_level(|_, host, ticks| {
                 assert_eq!(
                     host.block_state_id("minecraft:oak_slab[waterlogged=true]"),
@@ -663,7 +673,7 @@ mod tests {
                         .unwrap()
                         .contains("waterlogged=true")
                 );
-                assert_eq!(host.state_string(BlockStateId(u32::MAX)), None);
+                assert_eq!(host.state_string(invalid), None);
                 assert_eq!((host.min_y(), host.height()), bounds);
                 assert_eq!(
                     host.block_in_tag(
@@ -721,7 +731,7 @@ mod tests {
 
                 assert_eq!(hit.state_string(stone).as_deref(), Some("minecraft:stone"));
                 assert!(hit.state_string(slab).unwrap().contains("waterlogged=true"));
-                assert_eq!(hit.state_string(BlockStateId(u32::MAX)), None);
+                assert_eq!(hit.state_string(invalid), None);
                 assert_eq!((hit.min_y(), hit.height()), bounds);
                 assert_eq!(
                     hit.block_in_tag(
