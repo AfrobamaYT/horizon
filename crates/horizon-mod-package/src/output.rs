@@ -98,7 +98,7 @@ fn notice(sink: &mut impl Write, dropped: &AtomicU64) {
 }
 
 fn drain(
-    mut reader: os_pipe::PipeReader,
+    mut reader: impl Read + Send + 'static,
     mut sink: impl Write + Send + 'static,
     name: &str,
 ) -> io::Result<Receiver<()>> {

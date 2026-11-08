@@ -39,5 +39,8 @@ prebuilt = ["dep:cap-std", "dep:flate2", "dep:tar"]
 # The mod registry's index (docs/modding/src/reference/registry-index.md): the launcher, the registry server and its CI.
 index = ["dep:minisign-verify", "dep:horizon-shader-api"]
 
+[dev-dependencies]
+tempfile = "3.27.0"
+
 [lints]
 workspace = true

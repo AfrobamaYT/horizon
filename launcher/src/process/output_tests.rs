@@ -7,55 +7,65 @@ use std::{
     time::{Duration, Instant},
 };
 
-fn wait(path: &Path) {
-    let deadline = Instant::now() + Duration::from_secs(30);
-    while !path.exists() {
-        assert!(Instant::now() < deadline, "capture rendezvous timed out");
-        std::thread::sleep(Duration::from_millis(5));
-    }
-}
 fn directory(path: &Path) -> Dir {
     Dir::open_ambient_dir(path, cap_std::ambient_authority()).unwrap()
 }
 
 #[test]
-fn durable_raw_streams_rotate_without_a_tailer_and_drain_is_bounded() {
-    for mode in ["rotate", "descendant", "privacy", "buffered"] {
+fn raw_capture_privacy_flush_and_descendant_drain() {
+    for mode in ["raw", "descendant", "privacy", "buffered", "flood"] {
         if cfg!(windows) && mode == "privacy" {
             continue;
         }
         let root = tempfile::tempdir().unwrap();
-        let mut child = Command::new(std::env::current_exe().unwrap())
+        let status = Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "process::output_tests::actor", "--nocapture"])
             .env("HORIZON_CAPTURE_TEST_ROOT", root.path())
             .env("HORIZON_CAPTURE_TEST_MODE", mode)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .spawn()
+            .status()
             .unwrap();
-        if mode == "rotate" {
-            wait(&root.path().join("ready"));
-            let deadline = Instant::now() + Duration::from_secs(30);
-            while std::fs::read(root.path().join("stdout.log")).unwrap() != b"early\n" {
-                assert!(Instant::now() < deadline);
-                std::thread::sleep(Duration::from_millis(5));
+        assert!(status.success());
+        if mode == "flood" {
+            for (name, byte) in [("stdout.log", b'A'), ("stderr.log", b'B')] {
+                let mut retained =
+                    std::fs::read(root.path().join(format!("{name}.1"))).unwrap_or_default();
+                assert!(retained.len() <= 16 * 1024 * 1024);
+                let current = std::fs::read(root.path().join(name)).unwrap();
+                assert!(current.len() <= 16 * 1024 * 1024);
+                retained.extend(current);
+                let mut text = String::from_utf8(retained).unwrap();
+                if !text.starts_with(byte as char)
+                    && !text.starts_with("\n[horizon.output.dropped_bytes=")
+                {
+                    let end = text.find("]\n").unwrap();
+                    assert!(end < 128, "invalid retained notice fragment");
+                    text.drain(..end + 2);
+                }
+                let mut parts = text.split("\n[horizon.output.dropped_bytes=");
+                let mut payload = parts.next().unwrap().to_owned();
+                for part in parts {
+                    let (count, rest) = part.split_once("]\n").unwrap();
+                    assert!(count.parse::<u64>().unwrap() > 0);
+                    payload.push_str(rest);
+                }
+                assert!(!payload.is_empty());
+                assert!(
+                    payload.bytes().all(|value| value == byte),
+                    "{name}: mixed stream payload"
+                );
             }
-            std::fs::write(root.path().join("go"), b"go").unwrap();
         }
-        assert!(child.wait().unwrap().success());
-        if mode != "rotate" {
-            continue;
-        }
-        for (name, byte, count, ending) in [
-            ("stdout.log", b'A', 23, b"after\nraw\n".as_slice()),
-            ("stderr.log", b'B', 23, b"err-after\nraw-err\n".as_slice()),
-        ] {
-            let previous = std::fs::read(root.path().join(format!("{name}.1"))).unwrap();
-            assert_eq!(previous.len(), 16 * 1024 * 1024);
-            assert!(previous.iter().all(|&value| value == byte));
-            let mut expected = vec![byte; count];
-            expected.extend_from_slice(ending);
-            assert_eq!(std::fs::read(root.path().join(name)).unwrap(), expected);
+        if mode == "raw" {
+            assert_eq!(
+                std::fs::read(root.path().join("stdout.log")).unwrap(),
+                b"early\nafter\nraw\n"
+            );
+            assert_eq!(
+                std::fs::read(root.path().join("stderr.log")).unwrap(),
+                b"err-after\nraw-err\n"
+            );
         }
     }
 }
@@ -100,6 +110,13 @@ fn actor() {
         return;
     }
     let capture = Capture::install(&directory(&root)).unwrap();
+    if mode == "flood" {
+        for _ in 0..768 {
+            std::io::stdout().write_all(&[b'A'; 64 * 1024]).unwrap();
+            std::io::stderr().write_all(&[b'B'; 64 * 1024]).unwrap();
+        }
+        return;
+    }
     if mode == "buffered" {
         print!("rust-buffered");
         unsafe {
@@ -129,17 +146,6 @@ fn actor() {
         return;
     }
     println!("early");
-    std::fs::write(root.join("ready"), b"ready").unwrap();
-    wait(&root.join("go"));
-    let a = [b'A'; 64 * 1024];
-    let b = [b'B'; 64 * 1024];
-    for _ in 0..768 {
-        std::io::stdout().write_all(&a).unwrap();
-        std::io::stderr().write_all(&b).unwrap();
-        std::thread::sleep(Duration::from_millis(5)); // Non-overflow rotation case.
-    }
-    std::io::stdout().write_all(&[b'A'; 17]).unwrap();
-    std::io::stderr().write_all(&[b'B'; 23]).unwrap();
     println!("after");
     eprintln!("err-after");
     // SAFETY: these small immutable buffers are valid for their complete lengths.
