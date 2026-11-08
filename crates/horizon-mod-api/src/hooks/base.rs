@@ -3831,8 +3831,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "cancel",
         out = "cancel",
-        neoforge = "PlayerEvent.PlayerChangeGameModeEvent",
-        paper = "PlayerGameModeChangeEvent"
+        neoforge = "PlayerEvent.PlayerChangeGameModeEvent"
     )]
     fn player_game_mode_changed();
     /// A server player inserted a book into a lectern, after the block entity and inventory changed.
@@ -4213,7 +4212,6 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event; Bukkit's PlayerEditBookEvent)",
-        paper = "PlayerEditBookEvent",
         cancellable = true
     )]
     fn player_edit_book();
@@ -4238,8 +4236,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)",
-        paper = "PlayerExpCooldownChangeEvent"
+        neoforge = "none (NeoForge has no such event)"
     )]
     fn player_exp_cooldown_change();
     /// A guest sent the server's current `PlayerInput` flags, after they were applied to the hub. The guest's state is swapped in. Server-side.
@@ -4258,7 +4255,6 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event; Paper's PlayerItemCooldownEvent)",
-        paper = "PlayerItemCooldownEvent",
         cancellable = true
     )]
     fn player_item_cooldown();
