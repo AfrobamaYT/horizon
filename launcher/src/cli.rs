@@ -778,8 +778,15 @@ enum Cmd {
         accept_eula: bool,
     },
     /// Show disposable storage by category as JSON. Builds must be idle
+    ///
+    /// Rust/Cargo/temp build-tool caches remain clearable. Game-accessible caches, installed-version
+    /// removal and automatic runtime eviction retain files while any launch path lacks enforceable
+    /// lifetime exclusion; an empty process scan is not authorization. Read-only reports stay available.
+    /// Private launch records and raw captures are collected together only after all participating owners
+    /// exit, under the exclusive permanent namespace gate. Registry housekeeping starts at 4,096 recognized
+    /// empty lock entries; the gate and unknown entries remain.
     Storage {
-        /// Clear build-files, prebuilt-games, spare-game-builds, rust-compiler, other-caches or all implemented rows
+        /// Request cleanup of build-files, prebuilt-games, spare-game-builds, rust-compiler, other-caches or all rows; game-accessible caches refuse cleanup without enforceable lifetime exclusion
         #[arg(long, value_parser = parse_storage_row)]
         clear: Option<ClearStorage>,
     },

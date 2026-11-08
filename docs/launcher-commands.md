@@ -105,8 +105,7 @@ Show disposable storage by category as JSON. Builds must be idle.
 
     horizon-launcher storage
 
-- `--clear`: Request cleanup of build-files, prebuilt-games, spare-game-builds, rust-compiler, other-caches or all rows. Rust/Cargo/temp build-tool caches remain clearable. Game-accessible caches refuse cleanup while any launch path lacks enforceable lifetime exclusion; an empty process scan is not authorization. Installed-version removal and automatic runtime eviction use the same conservative refusal. Read-only reports remain available.
-- Private launch records and their raw capture files are collected together only under the exclusive namespace gate after every participating owner exits. Registry housekeeping starts at 4,096 recognized empty lock entries; the permanent gate and unknown entries are retained.
+- `--clear`: Request cleanup of build-files, prebuilt-games, spare-game-builds, rust-compiler, other-caches or all rows; game-accessible caches refuse cleanup without enforceable lifetime exclusion
 
 MCP: `storage`.
 
