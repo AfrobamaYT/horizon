@@ -461,6 +461,18 @@ fn entity_queries_take_a_shared_host(read: &dyn Host, entity: EntityRef) {
     let _: Option<Vec<EntityRef>> = entity.parts(read);
 }
 
+/// Compile-only: an entity is sent to another dimension from a server host.
+#[allow(dead_code)]
+fn entity_travel_takes_a_server_host(server: &mut dyn ServerHost, entity: EntityRef) {
+    let _: bool = entity.teleport_to_level(server, "mymod:pocket", [8.5, 100.0, 8.5], None);
+    let _: bool = entity.teleport_to_level(
+        server,
+        "minecraft:the_nether",
+        [0.0, 64.0, 0.0],
+        Some([90.0, 0.0]),
+    );
+}
+
 /// Compile-only: the player rule reads on any host, and the writes on a server host.
 #[allow(dead_code)]
 fn player_rules_take_their_hosts(

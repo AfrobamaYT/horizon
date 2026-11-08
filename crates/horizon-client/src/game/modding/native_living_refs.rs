@@ -1826,7 +1826,8 @@ mod tests {
                             4.0,
                             None,
                             true,
-                            15
+                            15,
+                            false
                         )
                         .unwrap()
                         .hurt
