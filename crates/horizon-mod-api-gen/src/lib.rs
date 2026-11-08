@@ -606,8 +606,13 @@ mod host_param;
 mod index;
 /// Generate codecs for ordinary scoped native callable resources.
 pub mod native_callable;
+pub mod native_policy;
 /// Canonical identities for native row layouts.
 pub mod native_schema;
+
+// One implementation for registration in the native source and guest schema generation.
+#[path = "../../horizon-mod-points/src/exposure.rs"]
+pub mod exposure;
 pub mod native_value;
 /// Generated lazy native row projections.
 pub mod native_window;
