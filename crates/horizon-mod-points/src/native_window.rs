@@ -8,6 +8,18 @@ use crate::locators::{Locators, MAX_DEPTH, MAX_LOCATORS, MAX_WINDOW_BYTES, Step}
 use mod_api::wire::{Put, Writer};
 use mod_api::{Row, RowError, RowWindow};
 
+/// Stable 64-bit FNV-1a key for a canonical row schema identity.
+pub const fn key(name: &str) -> u64 {
+    let bytes = name.as_bytes();
+    let mut hash = 0xcbf29ce484222325u64;
+    let mut index = 0;
+    while index < bytes.len() {
+        hash = (hash ^ bytes[index] as u64).wrapping_mul(0x100000001b3);
+        index += 1;
+    }
+    hash
+}
+
 /// A bounded, all-or-error row window under construction.
 pub struct WindowBuilder<'a> {
     locators: &'a mut Locators,

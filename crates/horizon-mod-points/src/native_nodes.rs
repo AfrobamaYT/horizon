@@ -2,7 +2,8 @@
 use crate::{locators::Step, native_read::NativeNode};
 use mod_api::{RowError, wire::Put};
 
-type Visitor<'a> = dyn FnMut(Step, u32, &dyn NativeNode) -> Result<(), RowError> + 'a;
+/// Callback receiving a temporarily borrowed child projection.
+pub type Visitor<'a> = dyn FnMut(Step, u32, &dyn NativeNode) -> Result<(), RowError> + 'a;
 type Header<'a> = dyn FnMut(Option<&dyn Put>) -> Result<(), RowError> + 'a;
 
 /// A plain Wire leaf, with its generated canonical schema key.
@@ -129,6 +130,13 @@ pub struct Sequence<'a, T, F> {
     pub items: &'a [T],
     pub key: u64,
     pub wrap: F,
+}
+/// Constructs a sequence, inferring its element and callback types together.
+pub fn sequence<T, F>(items: &[T], key: u64, wrap: F) -> Sequence<'_, T, F>
+where
+    F: Fn(&T, &mut Visitor<'_>) -> Result<(), RowError>,
+{
+    Sequence { items, key, wrap }
 }
 impl<T, F> NativeNode for Sequence<'_, T, F>
 where
