@@ -1,5 +1,5 @@
 use cap_std::fs::Dir;
-use horizon_mod_package::output::{Capture, Tail};
+use horizon_mod_package::output::Capture;
 use std::{
     io::Write,
     path::{Path, PathBuf},
@@ -20,7 +20,10 @@ fn directory(path: &Path) -> Dir {
 
 #[test]
 fn durable_raw_streams_rotate_without_a_tailer_and_drain_is_bounded() {
-    for mode in ["rotate", "descendant"] {
+    for mode in ["rotate", "descendant", "privacy", "buffered"] {
+        if cfg!(windows) && mode == "privacy" {
+            continue;
+        }
         let root = tempfile::tempdir().unwrap();
         let mut child = Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "process::output_tests::actor", "--nocapture"])
@@ -32,19 +35,15 @@ fn durable_raw_streams_rotate_without_a_tailer_and_drain_is_bounded() {
             .unwrap();
         if mode == "rotate" {
             wait(&root.path().join("ready"));
-            let mut tail = Tail::new(directory(root.path()), "stdout.log");
-            let mut early = [0; 6];
             let deadline = Instant::now() + Duration::from_secs(30);
-            while tail.read(&mut early).unwrap() == 0 {
+            while std::fs::read(root.path().join("stdout.log")).unwrap() != b"early\n" {
                 assert!(Instant::now() < deadline);
                 std::thread::sleep(Duration::from_millis(5));
             }
-            assert_eq!(&early, b"early\n");
-            drop(tail);
             std::fs::write(root.path().join("go"), b"go").unwrap();
         }
         assert!(child.wait().unwrap().success());
-        if mode == "descendant" {
+        if mode != "rotate" {
             continue;
         }
         for (name, byte, count, ending) in [
@@ -62,33 +61,6 @@ fn durable_raw_streams_rotate_without_a_tailer_and_drain_is_bounded() {
 }
 
 #[test]
-fn tail_drains_retained_history_then_switches_without_pinning_files() {
-    let root = tempfile::tempdir().unwrap();
-    let current = root.path().join("stdout.log");
-    let previous = root.path().join("stdout.log.1");
-    std::fs::write(&current, b"old").unwrap();
-    let mut tail = Tail::new(directory(root.path()), "stdout.log");
-    let mut buffer = [0; 4];
-    assert_eq!(tail.read(&mut buffer[..1]).unwrap(), 1);
-    assert_eq!(buffer[0], b'o');
-    std::fs::rename(&current, &previous).unwrap();
-    std::fs::write(&current, b"new").unwrap();
-    assert_eq!(tail.read(&mut buffer).unwrap(), 2);
-    assert_eq!(&buffer[..2], b"ld");
-    assert_eq!(tail.read(&mut buffer).unwrap(), 3);
-    assert_eq!(&buffer[..3], b"new");
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        assert!(std::fs::File::options()
-            .read(true)
-            .share_mode(0)
-            .open(&current)
-            .is_ok());
-    }
-}
-
-#[test]
 fn actor() {
     let Some(mode) = std::env::var_os("HORIZON_CAPTURE_TEST_MODE") else {
         return;
@@ -98,7 +70,48 @@ fn actor() {
         return;
     }
     let root = PathBuf::from(std::env::var_os("HORIZON_CAPTURE_TEST_ROOT").unwrap());
+    #[cfg(unix)]
+    if mode == "privacy" {
+        use std::os::unix::fs::PermissionsExt;
+        let current = root.join("stdout.log");
+        std::fs::write(root.join("sibling"), b"keep").unwrap();
+        std::os::unix::fs::symlink("sibling", &current).unwrap();
+        assert!(Capture::install(&directory(&root)).is_err());
+        assert_eq!(std::fs::read(root.join("sibling")).unwrap(), b"keep");
+        std::fs::remove_file(&current).unwrap();
+        std::fs::write(&current, b"old").unwrap();
+        std::fs::write(root.join("stdout.log.1"), b"previous").unwrap();
+        for name in ["stdout.log", "stdout.log.1"] {
+            std::fs::set_permissions(root.join(name), std::fs::Permissions::from_mode(0o644))
+                .unwrap();
+        }
+        drop(Capture::install(&directory(&root)).unwrap());
+        assert_eq!(std::fs::read(&current).unwrap(), b"old");
+        for name in ["stdout.log", "stdout.log.1", "stderr.log"] {
+            assert_eq!(
+                std::fs::metadata(root.join(name))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+        return;
+    }
     let capture = Capture::install(&directory(&root)).unwrap();
+    if mode == "buffered" {
+        print!("rust-buffered");
+        unsafe {
+            libc::printf(c"c-buffered".as_ptr());
+        }
+        drop(capture);
+        assert_eq!(
+            std::fs::read(root.join("stdout.log")).unwrap(),
+            b"rust-bufferedc-buffered"
+        );
+        return;
+    }
     if mode == "descendant" {
         let mut descendant = Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "process::output_tests::actor", "--nocapture"])
@@ -123,6 +136,7 @@ fn actor() {
     for _ in 0..768 {
         std::io::stdout().write_all(&a).unwrap();
         std::io::stderr().write_all(&b).unwrap();
+        std::thread::sleep(Duration::from_millis(5)); // Non-overflow rotation case.
     }
     std::io::stdout().write_all(&[b'A'; 17]).unwrap();
     std::io::stderr().write_all(&[b'B'; 23]).unwrap();

@@ -114,6 +114,7 @@ winreg = "0.56"
 winresource = "0.1"
 
 [dev-dependencies]
+libc = "0.2"
 tempfile = "3"
 # Tokenize source strings for the translation completeness test, including multiline calls.
 syn = "2"
