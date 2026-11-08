@@ -16831,6 +16831,13 @@ fn load_world_rest(
                 ),
             }
         }
+        // #846: the types mods added attributes to take their grown rows the
+        // same way, so a new mob of the type spawns with them.
+        resource_load::take_modified_attribute_rows(
+            &mut types.types,
+            &resources.motion().attributes,
+            mod_api::__private::entity_attribute_modifications(),
+        );
         let mob_types: HashMap<_, _> = types
             .types
             .into_iter()
