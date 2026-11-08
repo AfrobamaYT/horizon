@@ -18,7 +18,7 @@ not load a level or allocate.
 
 ### Dimension type
 
-`host.level_dimension_type(level)` reads a level's dimension type (`Level.dimensionType()` and its
+`level.dimension_type(host)` reads a level's dimension type (`Level.dimensionType()` and its
 gameplay attributes) as a `LevelDimensionType`: the build range, `coordinate_scale`, `ambient_light`,
 `has_fixed_time`, `infiniburn`, the monster spawn light range, the sky and the gameplay switches. A
 level on a vanilla type returns that type's values, a registered dimension returns what its
