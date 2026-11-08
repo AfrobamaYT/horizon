@@ -3227,11 +3227,7 @@ mod tests {
         }]
         .into_iter()
         .collect();
-        assert!(
-            collect_dragon_breath(player_box, &mut non_dragon)
-                .is_none()
-                .is_some()
-        );
+        assert!(collect_dragon_breath(player_box, &mut non_dragon).is_none());
         assert_eq!(non_dragon[0].radius, 3.0);
 
         // Lingering potion cloud (`potion: Some(...)`).
@@ -3259,11 +3255,7 @@ mod tests {
         }]
         .into_iter()
         .collect();
-        assert!(
-            collect_dragon_breath(player_box, &mut lingering)
-                .is_none()
-                .is_some()
-        );
+        assert!(collect_dragon_breath(player_box, &mut lingering).is_none());
         assert_eq!(lingering[0].radius, 3.0);
 
         // Its last tick before the wait-shifted end still holds breath
@@ -3298,11 +3290,7 @@ mod tests {
         }]
         .into_iter()
         .collect();
-        assert!(
-            collect_dragon_breath(player_box, &mut expired)
-                .is_none()
-                .is_some()
-        );
+        assert!(collect_dragon_breath(player_box, &mut expired).is_none());
         assert_eq!(expired[0].radius, 5.0);
 
         // Out of horizontal reach: cloud at 10 blocks away with radius 1:
@@ -3320,11 +3308,7 @@ mod tests {
         }]
         .into_iter()
         .collect();
-        assert!(
-            collect_dragon_breath(player_box, &mut far)
-                .is_none()
-                .is_some()
-        );
+        assert!(collect_dragon_breath(player_box, &mut far).is_none());
         assert_eq!(far[0].radius, 1.0);
 
         // Out of vertical reach: cloud at Y=64.0 (Y bounds [64.0, 64.5]),
@@ -3343,11 +3327,7 @@ mod tests {
         }]
         .into_iter()
         .collect();
-        assert!(
-            collect_dragon_breath(high_player, &mut ground_cloud)
-                .is_none()
-                .is_some()
-        );
+        assert!(collect_dragon_breath(high_player, &mut ground_cloud).is_none());
         assert_eq!(ground_cloud[0].radius, 1.0);
     }
 
