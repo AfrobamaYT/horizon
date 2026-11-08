@@ -658,6 +658,7 @@ impl Shape {
             }
             ty
         };
+        let record_mut = record_mutability();
         let fields = raw_fields(sig);
         let names: Vec<_> = fields.iter().map(|field| &field.name).collect();
         let params: Vec<_> = (0..fields.len()).map(|i| format_ident!("T{i}")).collect();
@@ -678,7 +679,7 @@ impl Shape {
             RawOutcome::Cancel => (
                 quote! {
                     /// Set by a head listener: the function returns at once, skipping its body.
-                    pub cancel: &'r mut bool,
+                    pub cancel: &'r #record_mut bool,
                 },
                 quote!(),
                 quote!(),
@@ -690,7 +691,7 @@ impl Shape {
                         /// Set by a head listener: the function returns it at once, skipping its
                         /// body. A return listener finds the value returned here, and may change it
                         /// but not take it.
-                        pub result: &'r mut Option<R>,
+                        pub result: &'r #record_mut Option<R>,
                     },
                     quote!(R,),
                     quote!(#ty,),
@@ -725,7 +726,7 @@ impl Shape {
             #[doc = #doc]
             #[doc(hidden)]
             pub struct #record #generics {
-                #( pub #names: &'r mut #params, )*
+                #( pub #names: &'r #record_mut #params, )*
                 #outcome
             }
             #[doc = #listener_doc]
@@ -763,6 +764,12 @@ pub enum RawOutcome {
     None,
 }
 
+// Raw listeners may replace every argument (including by-value and shared-reference arguments)
+// and the outcome. Keep the emitted reference and the catalog flag on this one policy.
+fn record_mutability() -> Option<syn::token::Mut> {
+    Some(Default::default())
+}
+
 /// One field of a raw record: a parameter, by its binding, or `arg<i>` for a pattern.
 pub struct RawField {
     pub name: syn::Ident,
@@ -798,6 +805,9 @@ pub struct RawShape {
     pub receiver: RawReceiver,
     pub args: Vec<RawArg>,
     pub outcome: &'static str,
+    /// Mutability of the record's cancel/result field, absent when there is no outcome field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outcome_record_mutable: Option<bool>,
     pub return_ty: String,
     pub return_class: &'static str,
 }
@@ -815,6 +825,8 @@ pub struct RawArg {
     pub name: String,
     pub ty: String,
     pub write_back: bool,
+    /// Whether the native raw record permits replacement, independent of pointee write-back.
+    pub record_mutable: bool,
     pub class: &'static str,
 }
 
@@ -878,6 +890,7 @@ pub fn raw_shape(shape: &Shape, sig: &syn::Signature, owner: Option<&Type>) -> R
                 name: field.name.to_string(),
                 ty: spelling(&field.ty),
                 write_back: matches!(&field.ty, Type::Reference(r) if r.mutability.is_some()),
+                record_mutable: record_mutability().is_some(),
                 class: class(&field.ty),
             })
             .collect(),
@@ -886,6 +899,8 @@ pub fn raw_shape(shape: &Shape, sig: &syn::Signature, owner: Option<&Type>) -> R
             RawOutcome::Result(_) => "result",
             RawOutcome::None => "none",
         },
+        outcome_record_mutable: (!matches!(shape.raw_outcome(sig), RawOutcome::None))
+            .then(|| record_mutability().is_some()),
         return_ty: match &sig.output {
             syn::ReturnType::Default => "()".into(),
             syn::ReturnType::Type(_, ty) => spelling(ty),
@@ -901,6 +916,63 @@ pub fn raw_shape(shape: &Shape, sig: &syn::Signature, owner: Option<&Type>) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn record_mutability_matches_native_record() {
+        for sig in [
+            syn::parse_quote!(fn f(value: u8, shared: &u8, mutable: &mut u8)),
+            syn::parse_quote!(fn f(value: u8, shared: &u8, mutable: &mut u8) -> bool),
+            syn::parse_quote!(fn f(value: u8, shared: &u8, mutable: &mut u8) -> &u8),
+        ] {
+            let shape = shape(quote!(raw), &sig).unwrap();
+            let metadata = raw_shape(&shape, &sig, None);
+            let file: syn::File = syn::parse2(shape.raw_items(&sig, None, None)).unwrap();
+            let record = file
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    syn::Item::Struct(record) => Some(record),
+                    _ => None,
+                })
+                .unwrap();
+            let fields = record
+                .fields
+                .iter()
+                .map(|field| {
+                    let Type::Reference(reference) = &field.ty else {
+                        panic!("record field must borrow")
+                    };
+                    (
+                        field.ident.as_ref().unwrap().to_string(),
+                        reference.mutability.is_some(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let mut expected = metadata
+                .args
+                .iter()
+                .map(|arg| (arg.name.clone(), arg.record_mutable))
+                .collect::<Vec<_>>();
+            if metadata.outcome != "none" {
+                expected.push((
+                    metadata.outcome.into(),
+                    metadata.outcome_record_mutable.expect("outcome flag"),
+                ));
+            } else {
+                assert_eq!(metadata.outcome_record_mutable, None);
+            }
+            assert_eq!(fields, expected);
+            assert!(metadata.args.iter().all(|arg| arg.record_mutable));
+            assert_eq!(
+                metadata
+                    .args
+                    .iter()
+                    .map(|arg| arg.write_back)
+                    .collect::<Vec<_>>(),
+                [false, false, true]
+            );
+        }
+    }
 
     #[test]
     fn raw_shape_contract() {
