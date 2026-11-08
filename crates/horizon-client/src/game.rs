@@ -4730,22 +4730,30 @@ impl Game<'_> {
             return;
         }
         let mut lent = horizon_client::health::LentLevel::take(&mut self.world);
-        let mut level = horizon_client::health::DamageLevel::lent(
-            &self.world,
-            self.pack.assets.registry,
-            &mut lent,
-            Some(world_items!(self)),
-            Some(&self.pack.block_registries),
-            &self.damage_hooks,
-        );
-        let contact = horizon_client::block_contact::Contact {
-            entity: id as i32,
-            kind: "minecraft:item",
-            state,
-            position: on,
-        };
-        let _ = horizon_client::block_contact::fall(&mut level, contact, distance, 0.0);
+        // A native fall_on Part can unwind. Keep the persistent level carrier
+        // outside the callback's temporary views, and return its progressed state
+        // before propagating the original panic. This does not restore the item batch.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut level = horizon_client::health::DamageLevel::lent(
+                &self.world,
+                self.pack.assets.registry,
+                &mut lent,
+                Some(world_items!(self)),
+                Some(&self.pack.block_registries),
+                &self.damage_hooks,
+            );
+            let contact = horizon_client::block_contact::Contact {
+                entity: id as i32,
+                kind: "minecraft:item",
+                state,
+                position: on,
+            };
+            let _ = horizon_client::block_contact::fall(&mut level, contact, distance, 0.0);
+        }));
         lent.give_back(&mut self.world);
+        if let Err(payload) = result {
+            std::panic::resume_unwind(payload);
+        }
     }
     /// An item that joined during this tick's entity pass: it first ticks on
     /// the next one.

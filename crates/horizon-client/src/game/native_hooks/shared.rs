@@ -5246,6 +5246,117 @@ mod item_fall_on_tests {
         }
     }
 
+    static LOAN_VALUE: mod_api::AttachmentType<i32> = mod_api::AttachmentType {
+        namespace: "loan_test",
+        name: "progress",
+        default: || 0,
+        codec: None,
+        copy_on_death: false,
+        sync: false,
+    };
+
+    use horizon_core::random::RandomSource as _;
+
+    struct LoanPart(std::sync::Arc<()>);
+    #[mod_api::horizon_part]
+    impl BlockPart for LoanPart {
+        fn fall_on(&self, host: &mut dyn LevelRandomHost, event: &mut FallOnEvent<'_>) {
+            let mut random = host.random().expect("authoritative landing random");
+            assert_eq!(random.next_int(), 1553932502);
+            assert!(host.set_random(random));
+            LOAN_VALUE
+                .set(host.attachments(), mod_api::Holder::Level, 73)
+                .unwrap();
+            event.request(LandingWrite::DestroyBlock { drop: false });
+            std::panic::panic_any(self.0.clone());
+        }
+    }
+    struct LoanMod(std::sync::Arc<()>);
+    #[mod_api::__subscriptions]
+    impl Hooks for LoanMod {
+        fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+            let key = r.block_key("minecraft:stone");
+            r.block_part(key, LoanPart(self.0.clone()));
+        }
+    }
+
+    /// Only the inner production loan is exercised: the outer dropped-item pass
+    /// is deliberately not claimed to survive this unwind.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated mod registry"]
+    fn item_fall_on_returns_progressed_level_loan_after_part_panic() {
+        let payload = std::sync::Arc::new(());
+        let mods: mod_api::Mods = vec![ModEntry::new(
+            "loan_test",
+            Box::new(LoanMod(payload.clone())),
+        )]
+        .into();
+        crate::game::api_values::install_parts(&mods).unwrap();
+        let _ = horizon_client::block_contact::HOOKS.set(BLOCK_CONTACT_HOOKS);
+        with_mods(mods, || {
+            let mut loaded = 0;
+            for dimension in [crate::game::Dim::Overworld, crate::game::Dim::Nether] {
+                super::super::native_entity_refs::tests::with_game(|game| {
+                    let scratch = std::env::temp_dir()
+                        .join(format!("item-loan-{}-{dimension:?}", std::process::id()));
+                    game.world_root = scratch.clone();
+                    game.enter_level(dimension).unwrap();
+                    loaded += 1;
+                    let stone = game
+                        .pack
+                        .assets
+                        .registry
+                        .default_state("minecraft:stone")
+                        .unwrap();
+                    game.world
+                        .chunks
+                        .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+                    let pos = BlockPos::new(1, 64, 1);
+                    game.world.set(pos.x, pos.y, pos.z, stone).unwrap();
+                    game.world.random = horizon_core::random::LegacyRandom::new(12345);
+                    LOAN_VALUE
+                        .set(&mut game.world.attachments, mod_api::Holder::Level, 11)
+                        .unwrap();
+                    game.world.attachment_syncs.insert(mod_api::Holder::Level);
+                    let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        horizon_client::block_contact::in_level(Some(game.dim.id()), || {
+                            game.item_fall_on(42, pos, 5.0);
+                        });
+                    }))
+                    .expect_err("actual Part must panic");
+                    assert!(std::sync::Arc::ptr_eq(
+                        &payload,
+                        caught.downcast_ref::<std::sync::Arc<()>>().unwrap()
+                    ));
+                    assert_eq!(
+                        game.world.random.next_int(),
+                        -2090749135,
+                        "continue the progressed stream"
+                    );
+                    assert_eq!(
+                        LOAN_VALUE
+                            .get(&mut game.world.attachments, mod_api::Holder::Level)
+                            .unwrap(),
+                        73
+                    );
+                    assert!(
+                        game.world
+                            .attachment_syncs
+                            .contains(&mod_api::Holder::Level)
+                    );
+                    game.drain_entity_inside();
+                    assert_eq!(
+                        game.world.block(pos.x, pos.y, pos.z),
+                        stone,
+                        "aborted landing writes were not queued"
+                    );
+                    let _ = std::fs::remove_dir_all(scratch);
+                });
+            }
+            assert_eq!(loaded, 2, "both resource fixtures ran");
+        });
+    }
+
     /// A dropped item that falls onto a block with a `fall_on` part is told to it once, as
     /// `minecraft:item`, with the whole fall and no damage; the write the part asks for lands
     /// after the items' batch; and an item resting there lands no more.
