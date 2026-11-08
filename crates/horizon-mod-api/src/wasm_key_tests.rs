@@ -237,7 +237,7 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
     );
     assert_eq!(poison.id(&table), "minecraft:poison");
     assert!(
-        crate::registry_keys::block(BlockKey::from_slot(0).unwrap()).is_none(),
-        "slot validity does not require a world mapping"
+        crate::__private::block_definitions().is_none(),
+        "slot validity does not require published block definitions"
     );
 }
