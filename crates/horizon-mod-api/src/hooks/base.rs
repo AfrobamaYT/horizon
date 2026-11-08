@@ -3370,8 +3370,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's InventoryMoveItemEvent)",
-        paper = "HopperInventorySearchEvent"
+        neoforge = "none (NeoForge has no such event; Bukkit's InventoryMoveItemEvent)"
     )]
     fn hopper_inventory_search();
     /// A hopper at `pos` is about to pick up `count` of `item`. Set `cancel` to leave the dropped stack in the world. Server-side.
@@ -3421,7 +3420,6 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
-        paper = "InventoryOpenEvent",
         cancellable = true
     )]
     fn inventory_block_start();
@@ -3434,7 +3432,6 @@ requires a farmer at work and `mob_griefing` enabled."#]
         out = "cancel",
         host = "read",
         neoforge = "none (NeoForge has no such event; Bukkit's InventoryMoveItemEvent)",
-        paper = "InventoryMoveItemEvent",
         cancellable = true
     )]
     fn inventory_move_item();
@@ -3675,8 +3672,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         cancellable = true,
-        neoforge = "none (vanilla hanging entity breaking; NeoForge adds no event or extension for it); AttackEntityEvent fires for players only",
-        paper = "HangingBreakEvent"
+        neoforge = "none (vanilla hanging entity breaking; NeoForge adds no event or extension for it); AttackEntityEvent fires for players only"
     )]
     fn hanging_break();
     /// A server player places a hanging entity: an item frame
@@ -3695,8 +3691,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         cancellable = true,
-        neoforge = "none (vanilla HangingEntityItem.useOn; NeoForge adds no event or extension for it); PlayerInteractEvent.RightClickBlock fires before it",
-        paper = "HangingPlaceEvent"
+        neoforge = "none (vanilla HangingEntityItem.useOn; NeoForge adds no event or extension for it); PlayerInteractEvent.RightClickBlock fires before it"
     )]
     fn hanging_place();
     /// The item `item` of a server player is about to lose `amount` points of
@@ -3713,8 +3708,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "cancel",
         out = "cancel",
-        neoforge = "none (vanilla: ItemStack.hurtAndBreak; PlayerDestroyItemEvent is only the break)",
-        paper = "EntityDamageItemEvent"
+        neoforge = "none (vanilla: ItemStack.hurtAndBreak; PlayerDestroyItemEvent is only the break)"
     )]
     fn item_damaged();
     /// `player` (`name`) changed dimension (NeoForge's
