@@ -109,6 +109,7 @@ fn every_fresh_lease_and_retained_metadata_fd_survives_closed_stdio() {
             }
         }
         check(acquired._record.as_ref().unwrap().as_raw_fd());
+        check(acquired._capture.as_ref().unwrap().as_raw_fd());
         return;
     }
     for mask in 1..8 {

@@ -126,6 +126,7 @@ pub struct Entry {
 /// Independently opened tree and completion objects prevent identity reuse for this process.
 pub struct Acquired {
     _record: Option<File>,
+    _capture: Option<Dir>,
     _claims: Vec<Claim>,
     _snapshots: Vec<Snapshot>,
 }
@@ -159,6 +160,7 @@ impl Entry {
         self.check_image(&std::env::current_exe()?)?;
         Ok(Acquired {
             _record: None,
+            _capture: None,
             _claims: claims,
             _snapshots: snapshots,
         })
@@ -183,6 +185,7 @@ impl Entry {
 struct Request {
     entry: Entry,
     program: Program,
+    record: record::Reference,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -211,10 +214,7 @@ fn run(encoded: OsString, claims: &mut Option<Acquired>) -> io::Result<ExitStatu
     request.entry.recheck()?;
     drop(channel);
     let mut command = request.program.command()?;
-    command.env(
-        ENTRY,
-        serde_json::to_string(&request.entry).map_err(|_| io::ErrorKind::InvalidData)?,
-    );
+    command.env(ENTRY, request.record.encode()?);
     command.status()
 }
 /// Does nothing for ordinary startup. Private startup can never reach the normal game path.
@@ -234,8 +234,12 @@ fn lease_error(error: crate::runtime_leases::Error) -> io::Error {
         _ => io::ErrorKind::InvalidInput.into(),
     }
 }
+mod controller;
 #[cfg(test)]
 mod entry_tests;
 mod record;
+pub use controller::{Prepared, Started, capable, launch};
+mod game_entry;
+pub use game_entry::{acquire_entry, bootstrap};
 #[cfg(test)]
 mod tests;

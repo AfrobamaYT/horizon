@@ -11,11 +11,12 @@ struct Scene {
     request: Request,
     claims: Vec<Claim>,
     snapshots: Vec<Snapshot>,
+    _record: File,
 }
 fn deadline() -> Instant {
     Instant::now() + Duration::from_secs(3)
 }
-fn actor() -> PathBuf {
+pub(super) fn actor() -> PathBuf {
     std::env::current_exe()
         .unwrap()
         .parent()
@@ -78,12 +79,23 @@ impl Scene {
             directory: path.join("world"),
             raw_windows: None,
         };
+        let selection = crate::selection::ModSelectionContext {
+            game_dir: program.directory.clone(),
+            home: program.directory.clone(),
+            dev_mods: vec![],
+        };
+        let (record, file) = record::Reference::publish(&snapshots[1], &entry, &selection).unwrap();
         Self {
             _root: root,
             marker: Marker::new(path.join("endpoint")).unwrap(),
-            request: Request { entry, program },
+            request: Request {
+                entry,
+                program,
+                record,
+            },
             claims,
             snapshots,
+            _record: file,
         }
     }
     fn ready(&self) -> PathBuf {
@@ -129,6 +141,284 @@ fn ready(path: &Path) {
     while !path.is_file() {
         assert!(Instant::now() < end, "actor did not reach expected phase");
         std::thread::sleep(Duration::from_millis(5));
+    }
+}
+fn prepared(scene: &Scene) -> Prepared {
+    let selection = crate::selection::ModSelectionContext {
+        game_dir: scene.request.program.directory.clone(),
+        home: scene.request.program.directory.clone(),
+        dev_mods: vec![],
+    };
+    Prepared::new(
+        scene.request.entry.data.clone(),
+        scene
+            .request
+            .entry
+            .trees
+            .iter()
+            .map(|tree| (tree.path.clone(), tree.complete.is_some()))
+            .collect(),
+        scene.request.program.clone(),
+        &selection,
+    )
+    .unwrap()
+}
+#[cfg(windows)]
+#[test]
+fn windows_controller_quietly_declines_managed_mode_without_spawning() {
+    let scene = Scene::new(false);
+    let prepared = prepared(&scene);
+    let Started::Legacy(command) = launch(
+        Command::new("must-not-spawn"),
+        &scene.marker,
+        &prepared,
+        deadline(),
+    )
+    .unwrap() else {
+        panic!("Windows managed mode was armed")
+    };
+    assert_eq!(command.get_program(), &scene.request.program.executable);
+    assert_eq!(
+        command.get_args().collect::<Vec<_>>(),
+        scene
+            .request
+            .program
+            .arguments
+            .iter()
+            .map(OsString::as_os_str)
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        !scene
+            .request
+            .program
+            .directory
+            .parent()
+            .unwrap()
+            .join("endpoint")
+            .exists()
+    );
+    assert!(!scene.ready().exists());
+}
+#[cfg(unix)]
+#[test]
+fn controller_checks_capability_before_spawn_and_refuses_stale_or_wrong_ack() {
+    for mode in ["legacy", "wrong-ack", "stale-ack", "late"] {
+        let scene = Scene::new(false);
+        let prepared = prepared(&scene);
+        let image = if mode == "legacy" {
+            let image = scene.request.program.directory.join("legacy");
+            fs::write(&image, b"not executable, no runtime capability").unwrap();
+            image
+        } else {
+            scene.request.program.executable.clone().into()
+        };
+        let mut command = Command::new(image);
+        command
+            .env("HOLDER_TEST_MODE", mode)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let started = Instant::now();
+        let result = launch(
+            command,
+            &scene.marker,
+            &prepared,
+            started + Duration::from_secs(1),
+        );
+        if mode == "legacy" {
+            assert!(matches!(result, Ok(Started::Legacy(_))));
+            assert!(
+                !scene
+                    .request
+                    .program
+                    .directory
+                    .parent()
+                    .unwrap()
+                    .join("endpoint")
+                    .exists()
+            );
+        } else {
+            assert!(
+                matches!(result, Err(error) if error.kind() == if mode == "late" { io::ErrorKind::TimedOut } else { io::ErrorKind::InvalidData })
+            );
+            assert!(started.elapsed() < Duration::from_millis(2500));
+            assert!(!scene.ready().exists());
+        }
+    }
+}
+fn assert_record_owned(data: &Path, expected: bool) {
+    let record = fs::read_dir(data.join("run-records"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let directory = open_directory(&record).unwrap();
+    let registry = Registry::existing(data).unwrap();
+    assert_eq!(
+        matches!(
+            registry.lock(&directory, LockMode::Exclusive),
+            Err(crate::runtime_leases::Error::Busy)
+        ),
+        expected
+    );
+}
+fn released_record(data: &Path) {
+    let end = deadline();
+    loop {
+        let record = fs::read_dir(data.join("run-records"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let registry = Registry::existing(data).unwrap();
+        if registry
+            .lock(&open_directory(&record).unwrap(), LockMode::Exclusive)
+            .is_ok()
+        {
+            return;
+        }
+        assert!(Instant::now() < end, "game retained record after exit");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+#[cfg(unix)]
+#[test]
+fn committed_game_retains_independent_record_after_gui_process_exit() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().canonicalize().unwrap();
+    assert!(
+        Command::new(actor())
+            .env("HOLDER_TEST_MODE", "gui")
+            .env("HOLDER_TEST_ROOT", &path)
+            .status()
+            .unwrap()
+            .success()
+    );
+    ready(&path.join("ready"));
+    assert_record_owned(&path.join("data"), true);
+    fs::write(path.join("stop"), b"stop").unwrap();
+    released_record(&path.join("data"));
+}
+#[cfg(target_os = "linux")]
+#[test]
+fn independent_game_retains_record_after_holder_death_even_through_closefrom_wrapper() {
+    for mode in ["stdin", "closefrom"] {
+        let mut scene = Scene::new(false);
+        scene
+            .request
+            .program
+            .environment
+            .push(("HOLDER_TEST_MODE".into(), mode.into()));
+        let prepared = prepared(&scene);
+        let mut command = Command::new(&scene.request.program.executable);
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let Started::Holder { mut child, .. } =
+            launch(command, &scene.marker, &prepared, deadline()).unwrap()
+        else {
+            panic!("missing capability")
+        };
+        drop(prepared);
+        scene.release();
+        ready(&scene.ready());
+        let mut input = child.stdin.take().unwrap();
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert_record_owned(&scene.request.entry.data, true);
+        input.write_all(&[1]).unwrap();
+        drop(input);
+        released_record(&scene.request.entry.data);
+    }
+}
+#[cfg(target_os = "linux")]
+#[test]
+fn game_owned_record_capture_writes_after_both_supervisors_die() {
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::os::unix::fs::PermissionsExt;
+    for mask in 0..8 {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().canonicalize().unwrap();
+        let mut gui = Command::new(actor())
+            .env("HOLDER_TEST_MODE", "gui-capture")
+            .env("HOLDER_TEST_CLOSED_MASK", mask.to_string())
+            .env("HOLDER_TEST_ROOT", &path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        ready(&path.join("ready"));
+        ready(&path.join("holder-pid"));
+        let pid: i32 = fs::read_to_string(path.join("holder-pid"))
+            .unwrap()
+            .parse()
+            .unwrap();
+        // SAFETY: this controlled driver published its live holder; pidfd pins identity before GUI death.
+        let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) } as i32;
+        assert!(fd >= 0);
+        // SAFETY: successful pidfd_open returned a new exclusively owned descriptor.
+        let holder = unsafe { OwnedFd::from_raw_fd(fd) };
+        gui.kill().unwrap();
+        gui.wait().unwrap();
+        // SAFETY: owned pidfd targets only this controlled holder, even across PID reuse.
+        assert_eq!(
+            unsafe {
+                libc::syscall(
+                    libc::SYS_pidfd_send_signal,
+                    holder.as_raw_fd(),
+                    libc::SIGKILL,
+                    std::ptr::null::<libc::siginfo_t>(),
+                    0,
+                )
+            },
+            0
+        );
+        let data = path.join("data");
+        assert_record_owned(&data, true);
+        let record = fs::read_dir(data.join("run-records"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        assert_eq!(
+            fs::metadata(&record).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(record.join("launch.json"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        fs::write(path.join("emit"), b"emit").unwrap();
+        for name in ["stdout.log", "stderr.log"] {
+            let output = record.join(name);
+            let end = deadline();
+            while !fs::read_to_string(&output)
+                .unwrap_or_default()
+                .contains("after both supervisors died")
+            {
+                assert!(
+                    Instant::now() < end,
+                    "game-owned output stopped after supervisor death"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert_eq!(
+                fs::metadata(output).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        fs::write(path.join("stop"), b"stop").unwrap();
+        released_record(&data);
     }
 }
 #[test]

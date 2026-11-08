@@ -57,6 +57,8 @@ impl Reference {
             .write(true)
             .create_new(true)
             .follow(FollowSymlinks::No);
+        #[cfg(unix)]
+        cap_std::fs::OpenOptionsExt::mode(&mut options, 0o600);
         let mut file = File::from_std(crate::runtime_leases::retained(
             snapshot
                 .directory
@@ -118,6 +120,7 @@ impl Reference {
             return Err(io::ErrorKind::InvalidData.into());
         }
         acquired._record = Some(file);
+        acquired._capture = Some(snapshot.directory);
         Ok(acquired)
     }
 }

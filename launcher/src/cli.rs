@@ -3721,6 +3721,16 @@ mod tests {
             .parse()
             .unwrap();
         if role == "child" {
+            assert!(std::env::var_os(horizon_mod_package::holder::ENV).is_none());
+            assert!(std::env::var_os(horizon_mod_package::holder::ENTRY).is_none());
+            use std::io::IsTerminal;
+            let shape = format!(
+                "{}:{}:{}",
+                std::io::stdin().is_terminal(),
+                std::io::stdout().is_terminal(),
+                std::io::stderr().is_terminal()
+            );
+            assert_eq!(shape, std::env::var("HORIZON_CLI_STDIO_SHAPE").unwrap());
             #[cfg(unix)]
             if code == 143 {
                 unsafe {
@@ -3739,6 +3749,16 @@ mod tests {
                 "--nocapture",
             ])
             .env("HORIZON_CLI_STATUS_ROLE", "child");
+        use std::io::IsTerminal;
+        command.env(
+            "HORIZON_CLI_STDIO_SHAPE",
+            format!(
+                "{}:{}:{}",
+                std::io::stdin().is_terminal(),
+                std::io::stdout().is_terminal(),
+                std::io::stderr().is_terminal()
+            ),
+        );
         assert_eq!(attached(command).unwrap(), code);
         std::process::exit(code);
     }
