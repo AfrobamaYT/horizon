@@ -128,6 +128,8 @@ pub enum StackWriteError {
         /// The record-level normalization refusal.
         reason: StackError,
     },
+    /// A consume or death-protection component could not decode its opaque effect payload.
+    InvalidEffectPayload,
     /// A stack carries both maximum durability and a stack limit above one.
     StackableDamageable,
 }

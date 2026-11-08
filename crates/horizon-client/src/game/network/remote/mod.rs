@@ -2494,6 +2494,29 @@ impl Game<'_> {
         }
     }
     fn set_registries(&mut self, registries: Arc<Dynamic>) {
+        let entries: Vec<(&str, serde_json::Value)> = registries
+            .registries
+            .get("minecraft:enchantment")
+            .into_iter()
+            .flatten()
+            .filter_map(|(name, data)| {
+                Some((
+                    name.as_str(),
+                    horizon_client::scoreboard::tag_to_json(data.as_ref()?),
+                ))
+            })
+            .collect();
+        let enchantments = match self
+            .stations()
+            .enchantments
+            .with_entries(entries.iter().map(|(n, v)| (*n, v)))
+        {
+            Ok(table) => table.map(Arc::new),
+            Err(error) => {
+                log::warn!("Horizon: refused enchantment registry: {error}");
+                return;
+            }
+        };
         // The server's biomes the game lacks (a world data pack's) join the
         // game's table, from the data it sent: colours, meshing and the
         // chunk format all go through that table. The window's own server
@@ -2520,23 +2543,6 @@ impl Game<'_> {
                     .collect()
             })
             .unwrap_or_default();
-        let entries: Vec<(&str, serde_json::Value)> = registries
-            .registries
-            .get("minecraft:enchantment")
-            .into_iter()
-            .flatten()
-            .filter_map(|(name, data)| {
-                Some((
-                    name.as_str(),
-                    horizon_client::scoreboard::tag_to_json(data.as_ref()?),
-                ))
-            })
-            .collect();
-        let enchantments = self
-            .stations()
-            .enchantments
-            .with_entries(entries.iter().map(|(n, v)| (*n, v)))
-            .map(Arc::new);
         if let Some(r) = self.remote.as_mut() {
             r.enchantments = enchantments;
             let bits = ceil_log2(biomes.len());

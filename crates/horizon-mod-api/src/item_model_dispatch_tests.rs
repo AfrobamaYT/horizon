@@ -78,7 +78,7 @@ fn model_callbacks_receive_owned_counts_and_the_exact_runtime_selection() {
             dispatch_item_tint_source(
                 &NoClient,
                 "example:selected",
-                &serde_json::json!({}),
+                &crate::Tag::compound([] as [(&str, crate::Tag); 0]),
                 &stack,
                 selected,
                 &mut color,

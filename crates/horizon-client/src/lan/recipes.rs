@@ -408,7 +408,10 @@ mod content_tests {
     use horizon_client::crafting::ResolvedSources;
     use serde_json::json;
 
-    use horizon_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs};
+    use horizon_world::native_load_context::{
+        DataLoadOrigin as EngineDataLoadOrigin, LoadContext, LoadInputs,
+    };
+    use mod_api::DataLoadOrigin;
 
     struct AspectListener(std::sync::Arc<std::sync::Mutex<Vec<(DataLoadOrigin, String)>>>);
     #[mod_api::__subscriptions]
@@ -429,7 +432,7 @@ mod content_tests {
         }
     }
 
-    fn load(origin: DataLoadOrigin) -> LoadContext {
+    fn load(origin: EngineDataLoadOrigin) -> LoadContext {
         LoadContext::new(
             origin,
             std::sync::Arc::new(LoadInputs::new(Default::default(), Default::default())),
@@ -468,7 +471,8 @@ mod content_tests {
         let sources = || vec![("aspects_test".to_owned(), recipe.clone())];
         mod_api::testing::with_mods(mods.into(), || {
             let server_origin = DataLoadOrigin::ServerDataLoad;
-            let resolved = ResolvedSources::resolve(sources(), &load(server_origin));
+            let resolved =
+                ResolvedSources::resolve(sources(), &load(EngineDataLoadOrigin::ServerDataLoad));
             let once = heard.lock().unwrap().clone();
             assert_eq!(
                 once,
@@ -497,7 +501,8 @@ mod content_tests {
             assert!(!copy.to_string().contains("resolved_items"));
 
             heard.lock().unwrap().clear();
-            let client = ResolvedSources::resolve(sources(), &load(DataLoadOrigin::ClientPreload));
+            let client =
+                ResolvedSources::resolve(sources(), &load(EngineDataLoadOrigin::ClientPreload));
             assert!(
                 heard
                     .lock()
@@ -551,7 +556,7 @@ mod content_tests {
         )];
         mod_api::testing::with_mods(mods.into(), || {
             let resolved =
-                ResolvedSources::resolve(Vec::new(), &load(DataLoadOrigin::ServerDataLoad));
+                ResolvedSources::resolve(Vec::new(), &load(EngineDataLoadOrigin::ServerDataLoad));
             assert_eq!(*heard.lock().unwrap(), [DataLoadOrigin::ServerDataLoad]);
             let added = &resolved.property_additions;
             assert!(added.adds("furnace_input", "minecraft:emerald"));
@@ -608,7 +613,7 @@ mod content_tests {
         mod_api::testing::with_mods(mods.into(), || {
             let resolved = ResolvedSources::resolve(
                 vec![("slots".to_owned(), recipe.clone())],
-                &load(DataLoadOrigin::ServerDataLoad),
+                &load(EngineDataLoadOrigin::ServerDataLoad),
             );
             assert_eq!(heard.lock().unwrap().len(), slots.len() + 2);
             let file = &resolved.recipes[0].resolved;

@@ -51,7 +51,7 @@ pub mod tests {
         .into();
         crate::install(mods.clone());
         install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
-        let error = resolve_fluids(&[]).unwrap_err();
+        let error = resolve_fluids(&[], &[]).unwrap_err();
         assert_eq!(
             error,
             vec![crate::UnknownFluid {
@@ -59,7 +59,7 @@ pub mod tests {
                 id: "minecraft:water".to_owned()
             }]
         );
-        resolve_fluids(&["minecraft:water", "minecraft:lava"]).unwrap();
+        resolve_fluids(&["minecraft:water", "minecraft:lava"], &[]).unwrap();
         let chocolate = fluid_key("maker:chocolate").unwrap();
         assert_eq!(fluid_id(chocolate), Some("maker:chocolate"));
         for name in ["minecraft:water", "minecraft:lava", "maker:chocolate"] {
@@ -539,7 +539,7 @@ impl FluidsRegistrar for PartRegistrar {
 
     fn declare_fluid(&mut self, path: &str) -> crate::FluidKey {
         let id = format!("{}:{path}", self.mod_id);
-        if path.contains(':') || !horizon_mod_package::content::namespaced_id(&id) {
+        if path.contains(':') || crate::Identifier::parse_namespaced(&id).is_none() {
             self.refused.push(format!(
                 "mod {}: invalid fluid declaration {id:?}",
                 self.mod_id

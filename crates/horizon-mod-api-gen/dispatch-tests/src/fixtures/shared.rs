@@ -98,13 +98,9 @@ impl ServerHost for TestHost {}
 impl ClientHost for TestHost {}
 #[allow(dead_code)]
 mod generated {
-    mod horizon_mod_package {
-        pub mod content {
-            pub struct Block;
-            pub struct Item;
-        }
-    }
     pub(super) mod mod_api {
+        pub struct Block;
+        pub struct Item;
         pub(super) use super::super::ItemStack;
         include!(concat!(env!("OUT_DIR"), "/dispatch_fixtures_api.rs"));
     }

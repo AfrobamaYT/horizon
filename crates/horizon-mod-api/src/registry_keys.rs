@@ -194,7 +194,7 @@ impl std::fmt::Display for UnknownFluid {
 }
 
 /// Resolve fluid requests against the loaded behavior registry.
-pub fn resolve_fluids(ids: &[&str]) -> Result<(), Vec<UnknownFluid>> {
+pub fn resolve_fluids(ids: &[&str], world_fluids: &[&str]) -> Result<(), Vec<UnknownFluid>> {
     let requests = crate::parts::requested_keys();
     let mut names = requests.fluids.clone();
     let mut errors = Vec::new();
@@ -224,20 +224,20 @@ pub fn resolve_fluids(ids: &[&str]) -> Result<(), Vec<UnknownFluid>> {
                 .insert(path.encode_utf16().collect(), slot as u32);
         }
     }
-    names.world_fluids = horizon_world::fluid::FluidKind::ALL
+    names.world_fluids = world_fluids
         .iter()
-        .map(|kind| names.slots.get(kind.name()).copied())
+        .map(|name| names.slots.get(*name).copied())
         .collect();
     let _ = crate::parts::resolved_fluids().set(names);
     Ok(())
 }
 
 /// Resolve an engine fluid kind through the load-owned mapping.
-pub fn world_fluid_key(kind: horizon_world::fluid::FluidKind) -> Option<FluidKey> {
+pub fn world_fluid_key(index: usize) -> Option<FluidKey> {
     crate::parts::resolved_fluids()
         .get()?
         .world_fluids
-        .get(kind as usize)
+        .get(index)
         .copied()
         .flatten()
         .map(FluidKey)
@@ -328,15 +328,13 @@ pub fn resolve_effects<'a>(
     Ok(())
 }
 
-/// Resolve an effect operation by numeric slot, never by a fresh name scan.
-pub fn effect(key: EffectKey) -> Option<&'static horizon_client_core::potions::EffectDef> {
-    let index = crate::parts::resolved_effects().get()?.indices[key.0 as usize];
-    let vanilla = horizon_client_core::potions::EFFECTS;
-    if index < vanilla.len() {
-        Some(&vanilla[index])
-    } else {
-        Some(&horizon_client_core::potions::mod_effects()[index - vanilla.len()])
-    }
+/// Resolve an effect operation to its load-owned engine registry index.
+pub fn effect_index(key: EffectKey) -> Option<usize> {
+    crate::parts::resolved_effects()
+        .get()?
+        .indices
+        .get(key.0 as usize)
+        .copied()
 }
 
 /// Canonical diagnostic name, unavailable until the process effect registry is resolved.
@@ -503,5 +501,26 @@ mod hot_call_key_tests {
             assert_eq!(__private::item_key_id(ItemKey(u32::MAX)), None);
             assert_eq!(__private::block_key_id(BlockKey(u32::MAX)), None);
         });
+    }
+}
+
+#[cfg(test)]
+mod fluid_mapping_tests {
+    #[test]
+    fn world_fluid_order_is_supplied_by_engine_not_key_order() {
+        crate::parts::tests::install_parts_fixture(&[]).unwrap();
+        super::resolve_fluids(
+            &["minecraft:lava", "minecraft:empty", "minecraft:water"],
+            &["minecraft:empty", "minecraft:water", "minecraft:lava"],
+        )
+        .unwrap();
+        for (index, expected) in ["minecraft:empty", "minecraft:water", "minecraft:lava"]
+            .iter()
+            .enumerate()
+        {
+            let key = super::world_fluid_key(index).unwrap();
+            assert_eq!(super::fluid_id(key), Some(*expected));
+        }
+        assert!(super::world_fluid_key(3).is_none());
     }
 }

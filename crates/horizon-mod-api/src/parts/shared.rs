@@ -757,24 +757,17 @@ pub mod tests {
             registrar.block_key(&id);
         }
         super::install_registrar(registrar, schema).unwrap();
-        crate::registry_keys::resolve_effects(
-            horizon_client_core::potions::all_effects()
-                .map(|def| horizon_client_core::potions::namespaced(def.id)),
-            |id| horizon_client_core::potions::effect(id).map(|def| def.index),
+        crate::registry_keys::resolve_fluids(
+            &[
+                "minecraft:empty",
+                "minecraft:water",
+                "minecraft:flowing_water",
+                "minecraft:lava",
+                "minecraft:flowing_lava",
+            ],
+            &[],
         )
         .unwrap();
-        crate::registry_keys::resolve_fluids(&[
-            "minecraft:empty",
-            "minecraft:water",
-            "minecraft:flowing_water",
-            "minecraft:lava",
-            "minecraft:flowing_lava",
-        ])
-        .unwrap();
-        if let Some(types) = horizon_client_core::block_entity_types::current() {
-            crate::registry_keys::resolve_block_entity_types(types.names(), |id| types.key(id))
-                .unwrap();
-        }
     }
 
     /// A previously requested block in the game fixture. Unknown names are a fixture error.
@@ -795,10 +788,20 @@ pub mod tests {
 
     /// A registered effect exposed by the real load-owned mapping, also for unrequested vanilla entries.
     pub fn effect_key(id: &str) -> EffectKey {
-        let index = horizon_client_core::potions::effect(id)
-            .expect("fixture registered this effect")
-            .index;
-        crate::registry_keys::effect_key(index).expect("fixture resolved effect keys")
+        let canonical = if id.contains(':') {
+            id.to_owned()
+        } else {
+            format!("minecraft:{id}")
+        };
+        EffectKey(
+            *super::resolved_effects()
+                .get()
+                .expect("fixture resolved effects")
+                .names
+                .slots
+                .get(&canonical)
+                .expect("fixture registered this effect"),
+        )
     }
 
     #[cfg(test)]
@@ -848,12 +851,7 @@ pub mod tests {
             ["mod lookup requested unknown block absent:block"]
         );
         assert_eq!(
-            crate::registry_keys::resolve_effects(
-                horizon_client_core::potions::all_effects()
-                    .map(|def| horizon_client_core::potions::namespaced(def.id)),
-                |id| horizon_client_core::potions::effect(id).map(|def| def.index)
-            )
-            .unwrap_err(),
+            crate::registry_keys::resolve_effects(std::iter::empty(), |_| None).unwrap_err(),
             ["mod lookup requested unknown effect absent:effect"]
         );
     }
@@ -1061,11 +1059,7 @@ pub mod tests {
                 ["gauge", "connector", "press", "hoard"]
                     .into_iter()
                     .chain(CAPABILITY_TYPES.iter().copied())
-                    .map(|id| horizon_mod_package::content::Block {
-                        id: format!("test:{id}"),
-                        template: "minecraft:stone".into(),
-                        ..Default::default()
-                    }),
+                    .map(|id| mod_api::Block::new(format!("test:{id}"), "minecraft:stone")),
             );
         }
     }
@@ -1080,13 +1074,16 @@ pub mod tests {
         .into();
         crate::install(mods.clone());
         install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
-        crate::registry_keys::resolve_fluids(&[
-            "minecraft:water",
-            "minecraft:lava",
-            "minecraft:flowing_water",
-            "minecraft:flowing_lava",
-            "minecraft:empty",
-        ])
+        crate::registry_keys::resolve_fluids(
+            &[
+                "minecraft:water",
+                "minecraft:lava",
+                "minecraft:flowing_water",
+                "minecraft:flowing_lava",
+                "minecraft:empty",
+            ],
+            &[],
+        )
         .unwrap();
         crate::registry_keys::resolve_block_keys(
             [

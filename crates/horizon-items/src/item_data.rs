@@ -76,6 +76,7 @@ pub struct StackData {
     kinetic_weapon: Option<crate::kinetic_weapon::KineticComponent>,
     /// Saved consumable and its typed runtime value, replaced together.
     consumable: Option<Arc<ConsumableComponent>>,
+    death_protection: Option<Arc<Vec<crate::items::ConsumeEffect>>>,
     /// `minecraft:potion_contents.potion`.
     pub potion: Option<Arc<str>>,
     /// The rest of `minecraft:potion_contents` (`custom_color`, `custom_effects`,
@@ -132,9 +133,10 @@ struct ConsumableComponent {
     value: crate::items::ItemConsumable,
 }
 impl ConsumableComponent {
-    fn new(raw: Tag) -> Arc<Self> {
+    fn new(raw: Tag) -> Option<Arc<Self>> {
         let mut value =
-            crate::items::parse_consumable(&horizon_client_core::scoreboard::tag_to_json(&raw));
+            crate::items::parse_consumable(&horizon_client_core::scoreboard::tag_to_json(&raw))
+                .ok()?;
         value.seconds = raw
             .get("consume_seconds")
             .and_then(crate::properties::component_float)
@@ -143,7 +145,7 @@ impl ConsumableComponent {
             .get("has_consume_particles")
             .and_then(component_bool)
             .unwrap_or(true);
-        Arc::new(Self { raw, value })
+        Some(Arc::new(Self { raw, value }))
     }
 }
 /// The component patch a server sent for a stack, as the creative slot packet
@@ -296,14 +298,36 @@ impl StackData {
         }
     }
     /// Set (or with None remove) a preserved component.
+    /// This setter deliberately remains infallible. Invalid opaque effect payloads
+    /// refuse replacement without changing either the previous raw value or cache.
     pub fn set_other(&mut self, id: &str, value: Option<Tag>) {
+        if id == "minecraft:death_protection" {
+            let replacement = match value.as_ref() {
+                Some(raw) => match crate::items::parse_death_effects(
+                    &horizon_client_core::scoreboard::tag_to_json(raw),
+                ) {
+                    Ok(effects) => Some(Arc::new(effects)),
+                    Err(_) => return,
+                },
+                None => None,
+            };
+            self.death_protection = replacement;
+        }
+        if id == "minecraft:consumable" {
+            let replacement = match value {
+                Some(raw) => match ConsumableComponent::new(raw) {
+                    Some(component) => Some(component),
+                    None => return,
+                },
+                None => None,
+            };
+            self.other.retain(|(k, _)| k != id);
+            self.consumable = replacement;
+            return;
+        }
         self.other.retain(|(k, _)| k != id);
         if id == "minecraft:kinetic_weapon" {
             self.kinetic_weapon = value.map(crate::kinetic_weapon::KineticComponent::new);
-            return;
-        }
-        if id == "minecraft:consumable" {
-            self.consumable = value.map(ConsumableComponent::new);
             return;
         }
         if id == "minecraft:custom_name" {
@@ -440,6 +464,23 @@ impl ItemStack {
             return false;
         }
         info.is_some_and(|info| info.components.iter().any(|c| c == id))
+    }
+    /// Death protection effects retained at patch or prototype load.
+    pub fn death_protection<'a>(
+        &'a self,
+        info: Option<&'a ItemInfo>,
+    ) -> Option<&'a [crate::items::ConsumeEffect]> {
+        if let Some(data) = self.data() {
+            if let Some(value) = &data.death_protection {
+                return Some(value);
+            }
+            if data.other("!minecraft:death_protection").is_some()
+                || data.other("minecraft:death_protection").is_some()
+            {
+                return None;
+            }
+        }
+        info.and_then(|i| i.death_protection.as_deref())
     }
     /// Effective consumable, decoded when the patch/prototype is loaded, with no tick allocation.
     pub fn consumable<'a>(
@@ -1328,10 +1369,19 @@ pub fn decode_components(components: Option<&Tag>) -> (u32, Option<Box<StackData
             .map(collapsed_text),
         potion,
         potion_extra,
+        death_protection: c
+            .get("minecraft:death_protection")
+            .and_then(|raw| {
+                crate::items::parse_death_effects(&horizon_client_core::scoreboard::tag_to_json(
+                    raw,
+                ))
+                .ok()
+            })
+            .map(Arc::new),
         consumable: c
             .get("minecraft:consumable")
             .cloned()
-            .map(ConsumableComponent::new),
+            .and_then(ConsumableComponent::new),
         kinetic_weapon: c
             .get("minecraft:kinetic_weapon")
             .cloned()
@@ -2345,6 +2395,83 @@ mod tests {
 #[cfg(test)]
 mod carried_component_tests {
     use super::*;
+
+    #[test]
+    fn invalid_payload_replacements_leave_existing_component_unchanged() {
+        for (id, field) in [
+            ("minecraft:consumable", "on_consume_effects"),
+            ("minecraft:death_protection", "death_effects"),
+        ] {
+            let good = Tag::compound([(
+                field,
+                Tag::List(vec![Tag::compound([
+                    ("type", Tag::String("example:charge".into())),
+                    ("amount", Tag::Int(42)),
+                ])]),
+            )]);
+            let bad = Tag::compound([(
+                field,
+                Tag::List(vec![Tag::compound([
+                    ("type", Tag::String("example:charge".into())),
+                    ("amount", Tag::End),
+                ])]),
+            )]);
+            let mut data = StackData::default();
+            data.set_other(id, Some(good.clone()));
+            let consumable = data.consumable.clone();
+            let death = data.death_protection.clone();
+            data.set_other(id, Some(bad));
+            assert_eq!(data.other(id), Some(&good));
+            if let Some(before) = consumable {
+                assert!(Arc::ptr_eq(&before, data.consumable.as_ref().unwrap()));
+            }
+            if let Some(before) = death {
+                assert!(Arc::ptr_eq(
+                    &before,
+                    data.death_protection.as_ref().unwrap()
+                ));
+            }
+            data.set_other(id, None);
+            assert!(data.other(id).is_none());
+        }
+    }
+
+    #[test]
+    fn death_payload_is_decoded_once_and_replaced_with_component() {
+        use crate::items::ConsumeEffect;
+        let component = Tag::compound([(
+            "death_effects",
+            Tag::List(vec![Tag::compound([
+                ("type", Tag::String("example:charge".into())),
+                ("amount", Tag::Int(42)),
+            ])]),
+        )]);
+        let patch = Tag::compound([("minecraft:death_protection", component.clone())]);
+        let (_, extra) = decode_components(Some(&patch));
+        let mut stack = ItemStack::new("minecraft:stick", 1);
+        stack.extra = extra;
+        let copied = stack.clone();
+        let (ConsumeEffect::Native { data: a, .. }, ConsumeEffect::Native { data: b, .. }) = (
+            &stack.death_protection(None).unwrap()[0],
+            &copied.death_protection(None).unwrap()[0],
+        ) else {
+            panic!("native effect")
+        };
+        assert!(Arc::ptr_eq(a, b));
+        assert_eq!(a.get("amount"), Some(&Tag::Byte(42)));
+        assert_eq!(components_tag(0, stack.data()), Some(patch));
+        stack
+            .data_mut()
+            .set_other("minecraft:death_protection", Some(component));
+        assert!(matches!(
+            &stack.death_protection(None).unwrap()[0],
+            ConsumeEffect::Native { .. }
+        ));
+        stack
+            .data_mut()
+            .set_other("minecraft:death_protection", None);
+        assert!(stack.death_protection(None).is_none());
+    }
 
     #[test]
     fn damage_keeps_a_canonical_int_including_explicit_zero() {

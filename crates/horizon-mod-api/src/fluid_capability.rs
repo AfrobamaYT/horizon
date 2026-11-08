@@ -5,8 +5,8 @@ use super::{
     BlockSide, CapabilityKey, DataLoadContext, FluidIdentity, FluidKey, ItemCapabilityKey,
     ItemPlace, ItemResource, ItemStack, ResourceHandler, ServerHost, Transaction,
 };
+use crate::__private::ingredient_parser::WalkedIngredient;
 use crate::Components;
-use crate::crafting::WalkedIngredient;
 use std::{fmt, marker::PhantomData};
 
 /// An amount of one fluid, as NeoForge's `FluidStack`: its registered or unresolved
@@ -420,25 +420,28 @@ impl ResourceHandler<FluidResource> for GameBucket {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::phase::TestReader;
     use crate::{DataLoadOrigin, OwningLoad};
-    use horizon_world::native_load_context::{LoadContext, LoadInputs};
     use std::collections::HashMap;
     use std::sync::Arc;
 
-    /// The load the game's recipe pass builds: real engine context, with the
+    /// The load the game's recipe pass builds: API reader fixture, with the
     /// tags the game ships in `worldgen/fluid_tags.json` — water holds the
     /// flowing fluid too.
-    fn load() -> LoadContext {
+    fn load() -> TestReader {
         crate::__private::install(Default::default());
         crate::install_parts(&[], &crate::parts::tests::rule_schema(), |_| false).unwrap();
-        crate::registry_keys::resolve_fluids(&[
-            "minecraft:empty",
-            "minecraft:water",
-            "minecraft:flowing_water",
-            "minecraft:lava",
-            "minecraft:flowing_lava",
-            "minecraft:milk",
-        ])
+        crate::registry_keys::resolve_fluids(
+            &[
+                "minecraft:empty",
+                "minecraft:water",
+                "minecraft:flowing_water",
+                "minecraft:lava",
+                "minecraft:flowing_lava",
+                "minecraft:milk",
+            ],
+            &[],
+        )
         .unwrap();
         let mut tags = HashMap::new();
         tags.insert(
@@ -449,12 +452,22 @@ mod tests {
             ],
         );
         tags.insert("c:lava".to_owned(), vec!["minecraft:lava".to_owned()]);
-        let inputs = LoadInputs::new(Default::default(), Default::default()).with_fluid_tags(tags);
-        LoadContext::new(DataLoadOrigin::ServerDataLoad, Arc::new(inputs), [])
+        TestReader {
+            registries: Default::default(),
+            tags: tags
+                .into_iter()
+                .map(|(k, v)| (k, Arc::from(v)))
+                .collect::<Vec<_>>()
+                .into(),
+        }
     }
     fn parse(s: &str) -> Option<FluidIngredient> {
         let load = load();
-        FluidIngredient::from_json(&serde_json::from_str(s).unwrap(), &OwningLoad::new(&load)).ok()
+        FluidIngredient::from_json(
+            &serde_json::from_str(s).unwrap(),
+            &OwningLoad::new(DataLoadOrigin::ServerDataLoad, &load),
+        )
+        .ok()
     }
     fn stack(fluid: &str, amount: u32) -> FluidStack {
         FluidStack::new(crate::registry_keys::fluid_key(fluid).unwrap(), amount)
@@ -463,7 +476,7 @@ mod tests {
     #[test]
     fn every_expression_leaf_is_validated_before_set_operations() {
         let load = load();
-        let context = OwningLoad::new(&load);
+        let context = OwningLoad::new(DataLoadOrigin::ServerDataLoad, &load);
         for json in [
             r#"{"type":"neoforge:difference","base":"minecraft:water","subtracted":"absent:fluid"}"#,
             r#"{"type":"neoforge:intersection","children":[["minecraft:water","absent:fluid"],"minecraft:water"]}"#,
@@ -563,7 +576,7 @@ mod tests {
         let sized = |s: &str| {
             SizedFluidIngredient::from_json(
                 &serde_json::from_str(s).unwrap(),
-                &OwningLoad::new(&load),
+                &OwningLoad::new(DataLoadOrigin::ServerDataLoad, &load),
             )
         };
         let half = sized(r#"{"ingredient":"minecraft:water","amount":500}"#).unwrap();
@@ -588,20 +601,25 @@ mod tests {
     /// share its code without touching its answers.
     #[test]
     fn item_ingredients_still_parse_the_same() {
-        let items = horizon_items::items::Items::for_tests(HashMap::new());
+        let items = ();
         // Supply the resolved ids fixture, not a second JSON/NBT converter.
-        let parse = |v: &serde_json::Value, items: &horizon_items::items::Items| {
-            crate::Ingredient::parse(v, items, &|data| {
-                let ids = data.get("horizon:resolved_items")?.as_array()?;
-                let ids = ids
-                    .iter()
-                    .map(|v| horizon_core::nbt::Tag::String(v.as_str().unwrap().into()))
-                    .collect();
-                Some(horizon_core::nbt::Compound::from([(
-                    "horizon:resolved_items".into(),
-                    horizon_core::nbt::Tag::List(ids),
-                )]))
-            })
+        let parse = |v: &serde_json::Value, _items: &()| {
+            crate::__private::ingredient_parser::WalkedIngredient::walk(
+                v,
+                &HashMap::new(),
+                &crate::__private::ingredient_parser::resolved_items,
+                &|data| {
+                    let ids = data.get("horizon:resolved_items")?.as_array()?;
+                    let ids = ids
+                        .iter()
+                        .map(|v| horizon_core::nbt::Tag::String(v.as_str().unwrap().into()))
+                        .collect();
+                    Some(horizon_core::nbt::Compound::from([(
+                        "horizon:resolved_items".into(),
+                        horizon_core::nbt::Tag::List(ids),
+                    )]))
+                },
+            )
         };
         let json = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap();
         let stone = parse(&json(r#""minecraft:stone""#), &items).unwrap();

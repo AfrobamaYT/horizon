@@ -70,16 +70,19 @@ pub enum ConsumeEffect {
     /// it silently): the game hands it to `native_consume_effect`.
     Native {
         kind: String,
-        data: serde_json::Value,
+        data: Arc<horizon_core::nbt::Tag>,
     },
 }
 
 /// Typed consumable shared by item prototypes and stack component patches.
 pub type ItemConsumable = horizon_world::consumable::Consumable<String, ConsumeEffect>;
 
-/// Decode `Consumable.CODEC` defaults and ordered effects at the component boundary.
-pub(crate) fn parse_consumable(cons: &Value) -> ItemConsumable {
-    ItemConsumable {
+/// Decode `Consumable.CODEC` defaults and ordered effects at the load boundary.
+/// Opaque mod payloads are converted once to retained NBT; invalid payloads refuse admission.
+pub fn parse_consumable(
+    cons: &Value,
+) -> std::result::Result<ItemConsumable, horizon_core::json_nbt::JsonNbtError> {
+    Ok(ItemConsumable {
         seconds: cons["consume_seconds"].as_f64().map_or(1.6, |s| s as f32),
         animation: crate::use_animation::consumable_animation(cons),
         sound: cons["sound"]
@@ -91,9 +94,24 @@ pub(crate) fn parse_consumable(cons: &Value) -> ItemConsumable {
             .as_array()
             .into_iter()
             .flatten()
-            .filter_map(parse_consume_effect)
+            .map(|effect| {
+                if let Some(kind) = effect["type"].as_str().filter(|k| {
+                    k.contains(':') && !k.starts_with("minecraft:") && !k.starts_with(':')
+                }) {
+                    return horizon_core::json_nbt::json_to_tag(effect).map(|data| {
+                        Some(ConsumeEffect::Native {
+                            kind: kind.to_owned(),
+                            data: Arc::new(data),
+                        })
+                    });
+                }
+                Ok(parse_consume_effect(effect))
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()?
+            .into_iter()
+            .flatten()
             .collect(),
-    }
+    })
 }
 
 /// One `on_consume_effects` entry. A bare type name is minecraft's own, as
@@ -158,7 +176,7 @@ fn parse_consume_effect(effect: &serde_json::Value) -> Option<ConsumeEffect> {
             .map(|s| ConsumeEffect::PlaySound(s.to_string())),
         k if !k.starts_with("minecraft:") => Some(ConsumeEffect::Native {
             kind: k.to_owned(),
-            data: effect.clone(),
+            data: Arc::new(horizon_core::json_nbt::json_to_tag(effect).ok()?),
         }),
         _ => None,
     }
@@ -184,6 +202,8 @@ pub struct ItemInfo {
     pub can_always_eat: bool,
     /// `consumable`: its timing, sound, particles and `on_consume_effects`.
     pub consumable: Option<horizon_world::consumable::Consumable<String, ConsumeEffect>>,
+    /// Death protection effects decoded at definition load.
+    pub death_protection: Option<Vec<ConsumeEffect>>,
     /// Kinetic pose timing decoded once from the shared item prototype.
     pub kinetic_timing: Option<crate::kinetic_weapon::UseTiming>,
     /// `use_remainder`: what a finished use leaves (`UseRemainder`).
@@ -965,7 +985,16 @@ impl Items {
                         .get("minecraft:kinetic_weapon")
                         .and_then(crate::kinetic_weapon::UseTiming::from_json),
                     // Consumable.CODEC's defaults.
-                    consumable: c.get("minecraft:consumable").map(parse_consumable),
+                    death_protection: c
+                        .get("minecraft:death_protection")
+                        .map(parse_death_effects)
+                        .transpose()
+                        .map_err(|e| format!("{name}: {e}"))?,
+                    consumable: c
+                        .get("minecraft:consumable")
+                        .map(parse_consumable)
+                        .transpose()
+                        .map_err(|e| format!("{name}: {e}"))?,
                     use_remainder: c["minecraft:use_remainder"]["id"]
                         .as_str()
                         .map(str::to_owned),
@@ -1111,7 +1140,7 @@ impl Items {
             instruments: load_instruments(root, overlay),
             enchantments: Arc::new(crate::enchant::Enchantments::load_with(
                 root, overlay, defaults,
-            )),
+            )?),
         })
     }
     /// Use the server's loaded loot-table snapshot for item and block drops.
@@ -1171,7 +1200,7 @@ impl Items {
             instruments: HashMap::new(),
             enchantments: Arc::new(crate::enchant::Enchantments::load_with(
                 root, overlay, defaults,
-            )),
+            )?),
         })
     }
     /// An item table with only tags, for unit tests of item rules.
@@ -2523,14 +2552,10 @@ pub fn bucket_contents(
 /// `DeathProtection.CODEC`: the `death_effects` of a `minecraft:death_protection`
 /// component, in order (`applyEffects` runs each one). A missing or empty
 /// list, as in `death_protection={}`, has none.
-pub fn death_effects(component: &Value) -> Vec<ConsumeEffect> {
-    component
-        .get("death_effects")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(parse_consume_effect)
-        .collect()
+pub fn parse_death_effects(
+    component: &Value,
+) -> std::result::Result<Vec<ConsumeEffect>, horizon_core::json_nbt::JsonNbtError> {
+    parse_consumable(&serde_json::json!({"on_consume_effects": component.get("death_effects").cloned().unwrap_or_else(|| serde_json::json!([]))})).map(|value| value.effects)
 }
 
 #[cfg(test)]
@@ -2546,7 +2571,7 @@ mod death_effects_tests {
                 {"duration": 800, "id": "minecraft:fire_resistance", "show_icon": true}
             ]}
         ]});
-        let effects = death_effects(&totem);
+        let effects = parse_death_effects(&totem).unwrap();
         assert_eq!(effects.len(), 2);
         assert_eq!(effects[0], ConsumeEffect::ClearAllEffects);
         let ConsumeEffect::ApplyEffects {
@@ -2572,7 +2597,11 @@ mod death_effects_tests {
     }
     #[test]
     fn an_empty_component_has_no_effects() {
-        assert!(death_effects(&serde_json::json!({})).is_empty());
+        assert!(
+            parse_death_effects(&serde_json::json!({}))
+                .unwrap()
+                .is_empty()
+        );
     }
 }
 
@@ -2659,13 +2688,30 @@ mod consume_effect_tests {
     }
 
     #[test]
+    fn invalid_native_consume_payload_refuses_component() {
+        let bad =
+            serde_json::json!({"on_consume_effects": [{"type": "mymod:charge", "data": null}]});
+        assert!(parse_consumable(&bad).is_err());
+        let good =
+            serde_json::json!({"on_consume_effects": [{"type": "mymod:charge", "amount": 42}]});
+        let value = parse_consumable(&good).unwrap();
+        let copy = value.clone();
+        let (ConsumeEffect::Native { data: a, .. }, ConsumeEffect::Native { data: b, .. }) =
+            (&value.effects[0], &copy.effects[0])
+        else {
+            panic!("native payload")
+        };
+        assert!(Arc::ptr_eq(a, b));
+    }
+
+    #[test]
     fn a_mods_own_consume_effect_kind_is_kept() {
         let v = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap();
         // A mod's own kind: Native with its JSON.
         let native =
             parse_consume_effect(&v(r#"{"type":"mymod:energy_boost","amount":42}"#)).unwrap();
         assert!(matches!(&native, ConsumeEffect::Native { kind, data }
-            if kind == "mymod:energy_boost" && data["amount"] == 42));
+            if kind == "mymod:energy_boost" && data.get("amount") == Some(&horizon_core::nbt::Tag::Byte(42))));
         // A bare vanilla name and its namespaced form are the same kind.
         let bare = parse_consume_effect(&v(
             r#"{"type":"apply_effects","effects":[{"id":"minecraft:speed","duration":100}]}"#,
@@ -2739,10 +2785,11 @@ mod tests {
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         assert!(
             crate::enchant::Enchantments::load_with(&root, &off, &defaults)
+                .unwrap()
                 .list
                 .is_empty()
         );
-        let enchantments = crate::enchant::Enchantments::load_with(&root, &on, &defaults);
+        let enchantments = crate::enchant::Enchantments::load_with(&root, &on, &defaults).unwrap();
         assert_eq!(enchantments.list.len(), 1);
         assert_eq!(enchantments.list[0].max_level, 7);
         fs::remove_dir_all(root).unwrap();

@@ -1294,7 +1294,7 @@ pub trait Hooks {
     fn block_step_on();
     /// A consumable's effect of a mod's own kind: the item's `on_consume_effects`
     /// entry is of a type in a namespace of its own, and the loader kept it
-    /// for this call. The kind and the JSON the file wrote are here; the acting
+    /// for this call. The kind and the definition payload as a borrowed `Tag` are here; the acting
     /// player is the one consuming, and the game's own effects,
     /// sounds, teleports and drops are open. An unclaimed kind does
     /// nothing. This is the runtime `ConsumeEffect.apply` moment, not effect
@@ -1385,7 +1385,7 @@ pub trait Hooks {
     /// player's weapon hit: the entry says `enchanted` attacker and `affected`
     /// victim, its `requirements` passed, and its `effect` names a `type` in a
     /// namespace outside `minecraft:`. Told the enchantment id, the kind, the
-    /// `effect` JSON, the level and the mob's id (it may have just died). The
+    /// `effect` payload as a borrowed `Tag`, the level and the mob's id (it may have just died). The
     /// acting player is the one whose weapon carries the enchantment. Each
     /// such entry is told once a hit, and once for each mob a sweep lands on.
     /// A hit on a player, and an entry inside `minecraft:all_of`, aren't told
@@ -2507,7 +2507,7 @@ pub trait Hooks {
     fn living_breathe();
     /// Blocks this mod adds, declared in code rather than one file each
     /// (NeoForge's `DeferredRegister.Blocks` drained by `RegisterEvent`):
-    /// push a `horizon_mod_package::content::Block` per block, the same declaration
+    /// push a `mod_api::Block` per block, the same declaration
     /// a content mod's `data/<id>/horizon/block/<path>.json` holds (a
     /// vanilla `template`, `properties`, `state_properties`, `shapes`...),
     /// with its id in your mod's namespace. `item: true` gives it a block
@@ -2539,7 +2539,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     fn blocks();
     /// Items this mod adds, declared in code (NeoForge's
     /// `DeferredRegister.Items`), as `native_blocks` declares blocks: a
-    /// `horizon_mod_package::content::Item` per item, a content mod's
+    /// `mod_api::Item` per item, a content mod's
     /// `data/<id>/horizon/item/<path>.json` (a vanilla `template`,
     /// `max_stack_size`, `rarity`, `components`, `crafting_remainder`). A
     /// block's item comes with its block (`item: true`), not from here.
@@ -3405,7 +3405,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         out = "items",
         context = "data_load",
         version = 3,
-        target = "mod_api::crafting::native_ingredient",
+        target = "horizon_client_lib::crafting::native_hooks::native_ingredient",
         neoforge = "ICustomIngredient"
     )]
     fn ingredient();

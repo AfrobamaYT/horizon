@@ -65,19 +65,14 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
         |_| false,
     )
     .unwrap();
-    crate::registry_keys::resolve_effects(
-        horizon_client_core::potions::all_effects()
-            .map(|def| horizon_client_core::potions::namespaced(def.id)),
-        |id| horizon_client_core::potions::effect(id).map(|def| def.index),
-    )
+    let effects = ["minecraft:speed", "minecraft:poison"];
+    crate::registry_keys::resolve_effects(effects, |id| {
+        effects.iter().position(|name| *name == id)
+    })
     .unwrap();
-    {
-        let types = &horizon_client_core::block_entity_types::BlockEntityTypes::new(
-            Default::default(),
-            vec!["test:machine".into()],
-        );
-        crate::registry_keys::resolve_block_entity_types(types.names(), |id| types.key(id))
-    }
+    crate::registry_keys::resolve_block_entity_types(["test:machine"], |id| {
+        (id == "test:machine").then_some(0)
+    })
     .unwrap();
     struct Table(Cell<usize>);
     impl mod_api::prelude::KeysBackend for Table {
@@ -193,7 +188,7 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
                 .contains("unknown BlockKey slot")
         );
     }
-    let unknown_effect = horizon_client_core::potions::all_effects().count() as u32;
+    let unknown_effect = effects.len() as u32;
     for slot in [unknown_effect, u32::MAX] {
         assert!(
             Imports::effect_key_id(&mut state, slot)

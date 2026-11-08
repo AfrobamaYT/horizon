@@ -50,14 +50,7 @@ impl mod_api::prelude::BlockStatesBackend for Server {
             return Some(mod_api::FluidDefinition::TankOnly);
         }
         Some(mod_api::FluidDefinition::World {
-            default: mod_api::__private::engine_fluid_state(
-                key,
-                horizon_world::fluid::FluidState::new(
-                    horizon_world::fluid::FluidKind::Water,
-                    8,
-                    true,
-                ),
-            ),
+            default: mod_api::__private::fluid_state(key, 8, false, true),
             properties: vec![mod_api::StateProperty::new(
                 "falling".into(),
                 vec!["true".into(), "false".into()],
@@ -115,9 +108,11 @@ impl mod_api::prelude::TagsHost for Server {
         } else {
             horizon_world::fluid::FluidState::new(horizon_world::fluid::FluidKind::Water, 8, true)
         };
-        Some(mod_api::__private::engine_fluid_state(
-            mod_api::__private::world_fluid_key(engine.kind())?,
-            engine,
+        Some(mod_api::__private::fluid_state(
+            mod_api::__private::world_fluid_key(engine.kind() as usize)?,
+            engine.amount(),
+            engine.falling(),
+            engine.is_source(),
         ))
     }
 }
@@ -196,19 +191,28 @@ fn the_sample_mod_loads_subscribes_and_registers_its_part() {
         |id| horizon_client_core::potions::effect(id).map(|def| def.index),
     )
     .unwrap();
-    mod_api::__private::resolve_fluids(&["minecraft:empty", "minecraft:water", "minecraft:lava"])
-        .unwrap();
-    let load = horizon_world::native_load_context::LoadContext::new(
-        mod_api::DataLoadOrigin::ServerDataLoad,
-        std::sync::Arc::new(horizon_world::native_load_context::LoadInputs::new(
-            Default::default(),
-            Default::default(),
-        )),
-        [],
-    );
+    mod_api::__private::resolve_fluids(
+        &["minecraft:empty", "minecraft:water", "minecraft:lava"],
+        &horizon_world::fluid::FluidKind::ALL.map(|kind| kind.name()),
+    )
+    .unwrap();
+    struct EmptyLoad;
+    impl mod_api::LoadReader for EmptyLoad {
+        fn registry(&self, _: &str) -> Option<std::sync::Arc<[String]>> {
+            None
+        }
+        fn fluid_tags(&self) -> std::sync::Arc<[(String, std::sync::Arc<[String]>)]> {
+            std::sync::Arc::from([])
+        }
+        fn setting(&self, _: &str, _: &str) -> Option<String> {
+            None
+        }
+    }
+    let load = EmptyLoad;
+
     let mut table = mod_api::serde_json::json!({});
     entry.fields().hooks.loot_table_load(
-        &mod_api::OwningLoad::new(&load),
+        &mod_api::OwningLoad::new(mod_api::DataLoadOrigin::ServerDataLoad, &load),
         &mut mod_api::LootTableLoadEvent {
             id: "test:loot",
             table: &mut table,

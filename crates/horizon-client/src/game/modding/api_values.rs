@@ -22,7 +22,11 @@ pub(crate) fn block_jump_factor(
     let Ok(state) = state.try_into_api() else {
         return;
     };
-    mod_api::dispatch_block_jump_factor(&mod_api::OwningLoop::new(context), state, factor);
+    mod_api::dispatch_block_jump_factor(
+        &horizon_client_render::api_context::LoopReader(context).context(),
+        state,
+        factor,
+    );
 }
 pub(crate) fn block_speed_factor(
     context: &horizon_world::native_load_context::LoopContext,
@@ -35,7 +39,11 @@ pub(crate) fn block_speed_factor(
     let Ok(state) = state.try_into_api() else {
         return;
     };
-    mod_api::dispatch_block_speed_factor(&mod_api::OwningLoop::new(context), state, factor);
+    mod_api::dispatch_block_speed_factor(
+        &horizon_client_render::api_context::LoopReader(context).context(),
+        state,
+        factor,
+    );
 }
 
 /// Resolve the metadata default through the sole numeric reverse index, without allocation.
@@ -341,6 +349,9 @@ where
 }
 
 /// Validate a mod value against the game's registry before admitting it to engine state.
+#[path = "api_values/content_declarations.rs"]
+mod content_declarations;
+
 pub(crate) trait TryIntoEngine<Context: ?Sized = Items> {
     type Engine;
     type Error;
@@ -707,10 +718,13 @@ impl TryIntoEngine for mod_api::ItemResource {
 /// The write conversion below adds authoritative registry-dependent validation.
 pub(in crate::game) fn stack_value(value: &ApiStack) -> Result<EngineStack, StackWriteError> {
     let id = mod_api::__private::item_key_id(value.item()).ok_or(StackWriteError::UnknownItem)?;
-    Ok(encode_stack(value, id.into()))
+    encode_stack(value, id.into())
 }
 
-fn encode_stack(value: &ApiStack, item: std::sync::Arc<str>) -> EngineStack {
+fn encode_stack(
+    value: &ApiStack,
+    item: std::sync::Arc<str>,
+) -> Result<EngineStack, StackWriteError> {
     let mut patch = value.components().map(|patch| patch.as_nbt().clone());
     // Let the existing component codec preserve explicit zero versus prototype inheritance.
     if value.damage_component() == Some(0) {
@@ -720,12 +734,14 @@ fn encode_stack(value: &ApiStack, item: std::sync::Arc<str>) -> EngineStack {
     }
     let patch = patch.map(Tag::Compound);
     let (_, extra) = horizon_items::item_data::decode_components(patch.as_ref());
-    EngineStack {
+    let stack = EngineStack {
         item,
         count: value.count(),
         damage: value.damage(),
         extra,
-    }
+    };
+    content_declarations::validate_decoded_effects(patch.as_ref(), &stack)?;
+    Ok(stack)
 }
 
 impl TryIntoEngine for ApiStack {
@@ -739,7 +755,7 @@ impl TryIntoEngine for ApiStack {
             .items
             .get_key_value(id)
             .ok_or(StackWriteError::UnknownItem)?;
-        let stack = encode_stack(self, id.clone());
+        let stack = encode_stack(self, id.clone())?;
         let effective = |name: &str, default: u32| -> Result<u32, StackWriteError> {
             match stack.data().and_then(|data| data.other(name)) {
                 Some(Tag::Int(value)) => {
@@ -1047,7 +1063,9 @@ pub(crate) fn install_stack_hooks() {
                 return;
             }
             if let Ok(stack) = stack.try_into_api() {
-                mod_api::crafting::native_ingredient_test(context, kind, data, &stack, accept);
+                horizon_client::crafting::native_hooks::native_ingredient_test(
+                    context, kind, data, &stack, accept,
+                );
             }
         },
         enchantments: |stack, target, value| {
@@ -1133,7 +1151,8 @@ pub(crate) fn menu_slot_rules(
     let Ok(stack) = stack.try_into_api() else {
         return;
     };
-    let context = mod_api::OwningLoop::new(context);
+    let reader = horizon_client_render::api_context::LoopReader(context);
+    let context = reader.context();
     mod_api::dispatch_menu_slot_rules(&context, menu, slot, &stack, may_place, max_stack);
 }
 
@@ -1168,7 +1187,7 @@ pub(crate) fn stacked_on_other(
             cancellation_result,
         };
         mod_api::dispatch_item_stacked_on_other(
-            &mod_api::OwningLoop::new(context),
+            &horizon_client_render::api_context::LoopReader(context).context(),
             &mut api,
             &mut candidate_canceled,
         );
@@ -2891,6 +2910,15 @@ pub(in crate::game) fn register_game_keys(ids: impl IntoIterator<Item = String>)
             super::native_dimensions::valid_shape,
         )
     });
+    mod_api::__private::resolve_effects(
+        horizon_client_core::potions::all_effects()
+            .map(|def| horizon_client_core::potions::namespaced(def.id)),
+        |id| horizon_client_core::potions::effect(id).map(|def| def.index),
+    )
+    .unwrap();
+    if let Some(types) = horizon_client_core::block_entity_types::current() {
+        mod_api::__private::resolve_block_entity_types(types.names(), |id| types.key(id)).unwrap();
+    }
 }
 
 pub(in crate::game) fn game_rule_registry() -> horizon_client_core::gamerules::RuleRegistry {
@@ -2914,5 +2942,7 @@ mod loot_values;
 #[path = "api_values/particle_values.rs"]
 mod particle_values;
 pub(crate) use loot_values::{dispatch_loot_condition, dispatch_loot_function};
+#[path = "api_values/phase_values.rs"]
+mod phase_values;
 #[path = "api_values/small_values.rs"]
 mod small_values;

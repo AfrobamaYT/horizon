@@ -11,6 +11,7 @@ below. Additions require a reason, not a wildcard or a whole-file exemption.
 from __future__ import annotations
 
 import argparse
+import os
 from dataclasses import dataclass
 from pathlib import Path
 import re
@@ -36,37 +37,6 @@ LEAVES = {
 # Owner-approved JSON source-file parser exceptions, not arbitrary JSON carriers.
 JSON_FUNCTIONS = {"fluid_capability.rs": {"from_json"}}
 
-# Temporary integration exceptions explicitly requested by api-lead. Remove each
-# group when its adapter worker merges; never expand these to file exemptions.
-PENDING = {
-    ("phase.rs", "engine-type", "horizon_world::native_load_context::" + name):
-        "pending api-phase-adapters: move the owning adapter game-side"
-    for name in ("DataLoadOrigin", "LoopSide", "LoadContext", "LoopContext")
-}
-PENDING[("phase.rs", "engine-type", "horizon_mod_package::dependencies")] = (
-    "pending api-phase-adapters: API-owned dependency metadata")
-PENDING.update({
-    ("crafting.rs", "engine-type", path):
-        "pending api-crafting-boundary: move the parser and engine adapters game-side"
-    for path in ("horizon_world::native_load_context::LoadContext",
-                 "horizon_world::native_load_context::LoopContext", "horizon_items::items::Items")
-})
-PENDING.update({
-    ("crafting.rs", "json-signature", "serde_json::" + name):
-        "pending api-crafting-boundary: game-owned JSON file parser"
-    for name in ("Map", "Value")
-})
-PENDING.update({
-    ("registry_keys.rs", "engine-type", path):
-        "pending api-crafting-boundary: move engine registry adapters game-side"
-    for path in ("horizon_world::fluid::FluidKind", "horizon_client_core::potions::EffectDef")
-})
-PENDING.update({
-    ("Cargo.toml", "engine-dependency", name):
-        "pending adapter workers: remove dependency after moving all engine uses"
-    for name in ("horizon-world", "horizon-items", "horizon-client-core",
-                 "horizon-assets", "horizon-mod-package")
-})
 
 
 @dataclass(frozen=True)
@@ -91,6 +61,8 @@ def tokens(source: str) -> list[Token]:
     result = []
     i, line = 0, 1
     pattern = re.compile(r"[A-Za-z_][A-Za-z_0-9]*|::|->|[^\s]")
+    raw_string = re.compile(r'(?:b?r)(#*)"')
+    character = re.compile(r"'(?:\\.|[^'\\])'")
     while i < len(source):
         start = i
         if source.startswith("//", i):
@@ -105,10 +77,10 @@ def tokens(source: str) -> list[Token]:
                     depth, i = depth - 1, i + 2
                 else:
                     i += 1
-        elif match := re.match(r'(?:b?r)(#*)"', source[i:]):
-            end = source.find('"' + match[1], i + match.end())
+        elif match := raw_string.match(source, i):
+            end = source.find('"' + match[1], match.end())
             i = len(source) if end < 0 else end + 1 + len(match[1])
-        elif source[i] == '"' or (source[i] == "'" and re.match(r"'(?:\\.|[^'\\])'", source[i:])):
+        elif source[i] == '"' or (source[i] == "'" and character.match(source, i)):
             quote, i = source[i], i + 1
             while i < len(source):
                 if source[i] == "\\":
@@ -196,7 +168,7 @@ def source_findings(path: Path, source: str):
 
     findings = []
 
-    def inspect(segment, aliases, function=""):
+    def inspect(segment, aliases, function="", owner=""):
         for i, token in enumerate(segment):
             if i and segment[i - 1].value == "::":
                 continue
@@ -215,10 +187,16 @@ def source_findings(path: Path, source: str):
             if parts[0] == "serde_json":
                 allowed = path.name == "serde_json.rs" and path.parent.name == "exports"
                 allowed |= function in JSON_FUNCTIONS.get(path.name, set())
+                # Owner-approved: the recipe's data-pack file, read by a mod at reload.
+                # Name the exact field/constructor, never the whole crafting module.
+                if path.name == "crafting.rs" and owner == "Recipe":
+                    field = next((segment[k - 1].value for k in range(i - 1, 0, -1)
+                                  if segment[k].value == ":"), "")
+                    allowed |= function == "new" or (not function and field == "json")
                 if not allowed:
                     findings.append(Finding(str(path), token.line, "json-signature", "::".join(parts)))
 
-    def walk(start, end, trait=False, private=False, inherited=None):
+    def walk(start, end, trait=False, private=False, inherited=None, owner=""):
         aliases = dict(inherited or {})
         aliases.update(imports(start, end))
         i = start
@@ -258,20 +236,24 @@ def source_findings(path: Path, source: str):
             if not in_private:
                 if kind == "use" and public:
                     for imported, _ in use_paths([t.value for t in ts[i + 1:j]]):
+                        if "__private" in resolve(imported, aliases):
+                            findings.append(Finding(str(path), ts[i].line, "private-export", "::".join(imported)))
                         inspect([Token(v, ts[i].line) for v in _join_path(imported)], aliases)
                 elif public or kind == "type" or (kind == "fn" and path.parent.name == "hooks"):
-                    inspect(ts[i:j], aliases, name if kind == "fn" else "")
+                    inspect(ts[i:j], aliases, name if kind == "fn" else "", owner=owner)
                     if kind in {"struct", "enum", "union"} and body_end > j:
                         # Includes public record fields and enum payloads. Conservative
                         # for private fields: an engine-backed API wrapper is forbidden.
-                        inspect(ts[j + 1:body_end], aliases)
+                        inspect(ts[j + 1:body_end], aliases, owner=name)
                 if body_end > j and (kind in {"mod", "impl", "trait"} or path.parent.name == "hooks"):
-                    walk(j + 1, body_end, trait=kind == "trait", private=in_private, inherited=aliases)
+                    walk(j + 1, body_end, trait=kind == "trait", private=in_private,
+                         inherited=aliases, owner=name if kind == "impl" else owner)
             i = body_end + 1
             if i <= begin:
                 raise AssertionError("scanner made no progress")
 
-    walk(0, len(ts), private=path.name == "__private.rs")
+    walk(0, len(ts), private=(path.name == "__private.rs" and path.parent.name == "src")
+         or "__private" in path.parts)
     return sorted(set(findings), key=lambda f: (f.path, f.line, f.rule, f.detail))
 
 
@@ -302,6 +284,28 @@ def check(crate: Path):
     return findings
 
 
+def generated_findings(target: Path):
+    """Scan the freshest API build output, never a fixture crate or stale profile.
+
+    Source placeholders such as fn blocks() get their actual event field types
+    from generation. Checking only the catalog would miss those public types.
+    Cargo must run first; callers may not silently skip missing build output.
+    """
+    candidates = [p for p in target.rglob("mod_api_generated.rs")
+                  if re.fullmatch(r"horizon-mod-api-[0-9a-f]+", p.parent.parent.name)]
+    if not candidates:
+        return [Finding(str(target), 1, "missing-generated", "build horizon-mod-api before the full boundary audit")]
+    newest = max(candidates, key=lambda p: p.stat().st_mtime_ns)
+    findings = []
+    for name in ("mod_api_generated.rs", "mod_api_generated_host.rs"):
+        path = newest.parent / name
+        if not path.exists():
+            findings.append(Finding(str(path), 1, "missing-generated", name))
+        else:
+            findings.extend(source_findings(path, path.read_text()))
+    return findings
+
+
 NEGATIVE = '''
 use horizon_items::items::ItemStack as Borrowed;
 pub use horizon_world::fluid::FluidState as Innocent;
@@ -309,6 +313,7 @@ pub use horizon_client_core::text::*;
 pub fn stack() -> Borrowed { todo!() }
 pub fn json() -> serde_json::Value { todo!() }
 pub mod __private { pub use horizon_world::fluid::FluidState; }
+pub use crate::__private::FluidState as Public;
 '''
 
 
@@ -320,27 +325,25 @@ def negative_control():
         (crate / "Cargo.toml").write_text('[dependencies]\nrenamed = { package = "horizon-world", version = "1" }\n')
         (crate / "src/exports/probe.rs").write_text(NEGATIVE)
         found = check(crate)
-        required = {"engine-dependency", "engine-type", "json-signature"}
+        required = {"engine-dependency", "engine-type", "json-signature", "private-export"}
         return required <= {f.rule for f in found} and sum(f.rule == "engine-type" for f in found) == 3
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--crate", type=Path, default=ROOT / "crates/horizon-mod-api")
+    parser.add_argument("--source-only", action="store_true", help="early pre-build dependency/source gate only")
+    parser.add_argument("--generated-root", type=Path, default=Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")))
     args = parser.parse_args()
     if not negative_control():
         parser.error("negative control did not detect all forbidden boundary forms")
     findings = check(args.crate)
-    blocked = []
+    if not args.source_only:
+        findings.extend(generated_findings(args.generated_root))
     for finding in findings:
-        reason = PENDING.get((Path(finding.path).name, finding.rule, finding.detail))
-        if reason:
-            print(f"ALLOW {finding} ({reason})")
-        else:
-            blocked.append(finding)
-            print(finding)
-    print(f"API boundary: {len(blocked)} finding(s), {len(findings) - len(blocked)} pending; negative control passed")
-    return bool(blocked)
+        print(finding)
+    print(f"API boundary: {len(findings)} finding(s); negative control passed")
+    return bool(findings)
 
 
 if __name__ == "__main__":

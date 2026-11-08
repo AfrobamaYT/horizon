@@ -4053,13 +4053,10 @@ mod tests {
                     .build();
             }
             fn blocks(&self, _context: &mod_api::RegistrationContext, event: &mut BlocksEvent<'_>) {
-                event.blocks.extend([FIRST, SECOND, EMPTY, PLAIN].map(|id| {
-                    horizon_mod_package::content::Block {
-                        id: id.into(),
-                        template: "minecraft:white_banner".into(),
-                        ..Default::default()
-                    }
-                }));
+                event.blocks.extend(
+                    [FIRST, SECOND, EMPTY, PLAIN]
+                        .map(|id| mod_api::Block::new(id, "minecraft:white_banner")),
+                );
             }
         }
         let case = std::env::var(CHILD).unwrap();
@@ -5003,8 +5000,7 @@ mod tests {
 
     #[test]
     fn native_ingredient_stays_hookable() {
-        let source =
-            include_str!("../../../../horizon-mod-api/src/crafting.rs").replace("\r\n", "\n");
+        let source = include_str!("../../crafting/native_hooks.rs").replace("\r\n", "\n");
         let at = source.find("pub fn native_ingredient(").unwrap();
         let start = source[..at].rfind("///").unwrap();
         let body = &source[start..start + source[start..].find("\n}\n").unwrap()];

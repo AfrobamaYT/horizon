@@ -1762,7 +1762,7 @@ mod tests {
         .unwrap();
         std::fs::write(root.join("items.json"), "{}").unwrap();
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
-        let enchantments = crate::enchant::Enchantments::load(&root, &defaults);
+        let enchantments = crate::enchant::Enchantments::load(&root, &defaults).unwrap();
         std::fs::remove_dir_all(&root).unwrap();
         let translate = |key: &str| enchantments.translate(key).map(str::to_owned);
         let mut rocket = ItemStack::new("minecraft:firework_rocket", 1);
@@ -1846,7 +1846,7 @@ mod tests {
         .unwrap();
         std::fs::write(root.join("items.json"), "{}").unwrap();
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
-        let enchantments = crate::enchant::Enchantments::load(&root, &defaults);
+        let enchantments = crate::enchant::Enchantments::load(&root, &defaults).unwrap();
         std::fs::remove_dir_all(&root).unwrap();
         let lang = |key: &str| enchantments.translate(key).map(str::to_owned);
         let green = rgba(0, 170, 0, 255);
@@ -2018,7 +2018,7 @@ mod tests {
         );
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items = crate::items::Items::catalog(&root, &PackOverlay::NONE, &defaults).unwrap();
-        let enchantments = crate::enchant::Enchantments::load(&root, &defaults);
+        let enchantments = crate::enchant::Enchantments::load(&root, &defaults).unwrap();
         let translate = |key: &str| enchantments.translate(key).map(str::to_owned);
         for (item, expected) in [
             (

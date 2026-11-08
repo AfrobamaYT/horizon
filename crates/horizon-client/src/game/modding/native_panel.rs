@@ -768,7 +768,11 @@ mod tests {
             "recipe_pilot:pressed_fragment",
         ])
         .unwrap();
-        mod_api::__private::resolve_fluids(&["minecraft:water", "minecraft:lava"]).unwrap();
+        mod_api::__private::resolve_fluids(
+            &["minecraft:water", "minecraft:lava"],
+            &horizon_world::fluid::FluidKind::ALL.map(|kind| kind.name()),
+        )
+        .unwrap();
     }
     fn stack(item: &str) -> BrowserStack {
         BrowserStack {

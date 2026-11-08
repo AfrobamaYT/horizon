@@ -238,16 +238,14 @@ pub mod tests {
             |_| false,
         )
         .unwrap();
-        let types = |names: &[&str]| {
-            horizon_client_core::block_entity_types::BlockEntityTypes::new(
-                Default::default(),
-                names.iter().map(|s| (*s).to_owned()).collect(),
-            )
-        };
+        let types = |names: &[&str]| names.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
         assert_eq!(
             {
                 let types = &types(&["minecraft:chest"]);
-                crate::registry_keys::resolve_block_entity_types(types.names(), |id| types.key(id))
+                crate::registry_keys::resolve_block_entity_types(
+                    types.iter().map(String::as_str),
+                    |id| types.iter().position(|name| name == id),
+                )
             }
             .unwrap_err(),
             [
@@ -257,7 +255,10 @@ pub mod tests {
         );
         {
             let types = &types(&["minecraft:chest", "owner:press", "minecraft:furnace"]);
-            crate::registry_keys::resolve_block_entity_types(types.names(), |id| types.key(id))
+            crate::registry_keys::resolve_block_entity_types(
+                types.iter().map(String::as_str),
+                |id| types.iter().position(|name| name == id),
+            )
         }
         .unwrap();
         let keys = keys.lock().unwrap();
