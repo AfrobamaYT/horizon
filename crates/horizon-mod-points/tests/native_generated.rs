@@ -1,3 +1,6 @@
+// Generated fixtures exercise every shape, so the emitted code reborrows through references and
+// bounds-checks unsigned indexes against zero; neither is code a person reads.
+#![allow(clippy::borrow_deref_ref, unused_comparisons)]
 use mod_api::RowWindow;
 use mod_points::{
     locators::{Locators, Step},
