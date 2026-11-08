@@ -2459,7 +2459,7 @@ impl Game<'_> {
             };
         };
         let mut snapshot = Some(snapshot);
-        self.native_bonemeal(mod_api::__private::BonemealCall {
+        self.native_bonemeal(crate::game::native_hooks::fire::BonemealCall {
             dimension: self.dim.level(),
             player,
             player_entity_id,
