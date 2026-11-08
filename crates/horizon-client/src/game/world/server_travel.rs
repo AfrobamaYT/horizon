@@ -640,12 +640,11 @@ impl Game<'_> {
             host.hub
                 .change_level(i, at, yaw, None, true, PLAYER_DELAY, &ctx);
         }
-        if credits_respawn {
-            if let Some(host) = self.lan.as_mut() {
-                let g = &mut host.hub.guests[i];
+        if credits_respawn && let Some(host) = self.lan.as_mut() {
+            host.hub.guests.update(i, |g| {
                 g.load_timeout = horizon_client::lan::guest::CLIENT_LOADED_TIMEOUT;
                 g.loading = true;
-            }
+            });
         }
         self.bind_player_attachments(conn, false);
         self.as_guest(conn, |g| {

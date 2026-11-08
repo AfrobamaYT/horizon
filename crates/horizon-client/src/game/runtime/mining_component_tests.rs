@@ -30,7 +30,9 @@ fn mining_uses_admitted_stack_tools_and_actual_eye_immersion() {
         loaded.gui.unwrap(),
         options,
         settings,
-        Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(root.clone())),
+        Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            root.clone(),
+        )),
         None,
     )
     .unwrap();
