@@ -895,6 +895,26 @@ capabilities = ["registries"]
     }
 
     #[test]
+    fn wasm_internals_declarations_parse_with_and_without_kind_and_need_a_wasm_or_native_mod() {
+        let wasm = format!(
+            "[wasm]\nsha512='{}'\ntoolchain='t'\nbuilt_with='t'\n",
+            "a".repeat(128)
+        );
+        let injection = "[[inject]]\nid='fell'\nat='Game::break_block'\nkind='head'\nwith='fell'\naccess='internals'\nhash='h'\n";
+        let text = |internals: &str, tail: &str| format!("{EXAMPLE}{internals}{tail}");
+        let ok = Manifest::parse(&text(
+            "internals=[{path='Game::world',kind='field',hash='1'},{path='Game::tick',hash='2'}]\n",
+            &format!("{wasm}{injection}"),
+        ))
+        .unwrap();
+        assert_eq!(ok.internals[0].kind.as_deref(), Some("field"));
+        assert_eq!(ok.internals[1].kind, None);
+        // A wasm internals listener with nothing declared, and declarations with no code mod.
+        assert!(Manifest::parse(&text("", &format!("{wasm}{injection}"))).is_err());
+        assert!(Manifest::parse(&text("internals=[{path='Game::world',hash='1'}]\n", "")).is_err());
+    }
+
+    #[test]
     fn refuses_bad_ids_and_retired_manifests() {
         let bad_id = EXAMPLE.replace("ruby", "Ruby!");
         assert!(Manifest::parse(&bad_id).unwrap_err().contains("is not"));
