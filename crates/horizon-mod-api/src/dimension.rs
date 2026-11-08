@@ -172,38 +172,56 @@ impl DimensionSettings {
 }
 
 /// A level's dimension type as the game uses it (`Level.dimensionType()` and the gameplay attributes
-/// of its environment), as `host.level_dimension_type(level)` reads it: the fields of
+/// of its environment), as `level.dimension_type(host)` reads it: the fields of
 /// [`DimensionSettings`] that apply, plus the type's id.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
 pub struct LevelDimensionType {
     /// The dimension type's id (`minecraft:the_nether`, or a mod's or pack's).
     pub id: String,
+    /// The lowest buildable block Y.
     pub min_y: i32,
+    /// The build height in blocks.
     pub height: i32,
+    /// How far up portals and chorus fruit reach.
     pub logical_height: i32,
+    /// Whether the sky lights the level.
     pub has_skylight: bool,
+    /// Whether the level has a bedrock ceiling.
     pub has_ceiling: bool,
+    /// Whether the sky's time does not advance.
     pub has_fixed_time: bool,
+    /// Whether the level runs the End's dragon fight.
     pub has_ender_dragon_fight: bool,
+    /// What a portal divides this level's coordinates by.
     pub coordinate_scale: f64,
+    /// The light every block gets, 0 to 1.
     pub ambient_light: f32,
     /// The block tag whose blocks burn forever.
     pub infiniburn: String,
     /// The range monsters' spawn light is drawn from, when it is a constant or a uniform range.
     pub monster_spawn_light_level: Option<(i32, i32)>,
+    /// The block light above which monsters do not spawn.
     pub monster_spawn_block_light_limit: i32,
     /// `overworld`, `end` or `none`.
     pub skybox: String,
     /// `default` or `nether`.
     pub cardinal_light: String,
+    /// Whether water placed here boils away.
     pub water_evaporates: bool,
+    /// Whether lava flows at the Nether's speed.
     pub fast_lava: bool,
+    /// Whether respawn anchors can be used.
     pub respawn_anchor_works: bool,
+    /// Whether nether portals spawn zombified piglins.
     pub nether_portal_spawns_piglin: bool,
+    /// Whether piglins turn into zombified piglins here.
     pub piglins_zombify: bool,
+    /// Whether snow golems take damage here.
     pub snow_golem_melts: bool,
+    /// Whether a bad omen can start a raid here.
     pub can_start_raid: bool,
+    /// The sky light that daylight is measured against, 0 to 15.
     pub sky_light_level: f32,
 }
 
