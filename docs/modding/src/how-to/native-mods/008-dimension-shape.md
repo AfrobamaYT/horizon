@@ -54,7 +54,9 @@ the `cardinal_light` and the gameplay switches (`water_evaporates`, `fast_lava`,
 refuses a value out of range (a `coordinate_scale` of 0, an `ambient_light` above 1, an unknown
 `skybox`) at startup with a message naming the mod. The level opens, ticks, saves and closes as the
 Nether and the End do, in `dimensions/mymod/pocket/` of the world, and clients receive its
-dimension type when they join.
+dimension type when they join. A client of a server takes the whole type, not only the build
+range: the level's fluids, mobs, beds and time follow the type the server sent, as on the host,
+whether or not the client has the mod that registered the level.
 
 `sky_color`, `fog_color` (`#rrggbb`) and `cloud_height` set the sky overhead, the fog at the
 horizon and the clouds' height; left as None they are the Overworld's. They apply to the host's own
