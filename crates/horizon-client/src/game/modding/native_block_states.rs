@@ -8,9 +8,9 @@ use horizon_world::fluid::{FluidKind, FluidState as EngineFluidState};
 use horizon_world::level::{fluid_drip_particle, fluid_explosion_resistance, fluid_randomly_ticks};
 use horizon_world::registry::{BlockRegistry, BlockStateId};
 use mod_api::{
-    BlockEntityTypeKey, BlockKey, BlockSoundType, BlockStateRange, EffectKey, FluidDefinition,
-    FluidKey, FluidState, FluidStateError, FluidTypeProperties, ItemKey, StateConstraint,
-    StateMatchError, StateProperty,
+    BlockEntityTypeKey, BlockKey, BlockSoundType, BlockStateRange, EffectKey, EnchantmentKey,
+    EntityTypeKey, FluidDefinition, FluidKey, FluidState, FluidStateError, FluidTypeProperties,
+    ItemKey, MenuKey, StateConstraint, StateMatchError, StateProperty,
 };
 use std::sync::{Arc, Mutex};
 
@@ -160,6 +160,38 @@ impl Game<'_> {
         mod_api::__private::block_entity_type_name(key)
             .expect("invalid block entity type key slot")
             .to_owned()
+    }
+    /// Every block key in registry order, mod blocks after vanilla's.
+    pub(super) fn block_keys(&self) -> Vec<BlockKey> {
+        mod_api::__private::block_keys()
+    }
+    /// Every item key in registry order, mod items after vanilla's.
+    pub(super) fn item_keys(&self) -> Vec<ItemKey> {
+        mod_api::__private::item_keys()
+    }
+    /// Every entity-type key in registry order.
+    pub(super) fn entity_type_keys(&self) -> Vec<EntityTypeKey> {
+        mod_api::__private::entity_type_keys()
+    }
+    /// Every menu-type key in registry order.
+    pub(super) fn menu_keys(&self) -> Vec<MenuKey> {
+        mod_api::__private::menu_keys()
+    }
+    /// Every enchantment key in registry order.
+    pub(super) fn enchantment_keys(&self) -> Vec<EnchantmentKey> {
+        mod_api::__private::enchantment_keys()
+    }
+    /// The canonical entity type id retained by the load-owned slot.
+    pub(super) fn entity_type_key_id(&self, key: EntityTypeKey) -> String {
+        mod_api::__private::entity_type_key_id(key).expect("invalid entity type key slot")
+    }
+    /// The canonical menu type id retained by the load-owned slot.
+    pub(super) fn menu_key_id(&self, key: MenuKey) -> String {
+        mod_api::__private::menu_key_id(key).expect("invalid menu key slot")
+    }
+    /// The canonical enchantment id retained by the load-owned slot.
+    pub(super) fn enchantment_key_id(&self, key: EnchantmentKey) -> String {
+        mod_api::__private::enchantment_key_id(key).expect("invalid enchantment key slot")
     }
 
     /// The state `name` names, read as `/setblock` reads a block
@@ -495,6 +527,69 @@ mod tests {
                 host.item_block(mod_api::__private::item_key(CRATE).unwrap()),
                 mod_api::__private::block_key(CRATE)
             );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn host_key_iteration_matches_the_26_3_registries_in_registry_order() {
+        use mod_api::Host;
+        let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        // The content root publishes the built-in entity-type and menu orders, as startup does.
+        let root = super::super::mods::content_root(&base, &Default::default())
+            .unwrap()
+            .prepared()
+            .to_path_buf();
+        super::super::native_entity_refs::tests::with_game_at(root.clone(), |game| {
+            let host: &dyn Host = game;
+            let blocks = host.block_keys();
+            assert_eq!(blocks.len(), 1286);
+            assert_eq!(blocks[0].id(host), "minecraft:air");
+            assert_eq!(blocks.last().unwrap().id(host), "minecraft:firefly_bush");
+
+            let items = host.item_keys();
+            assert_eq!(items.len(), 1658);
+            assert_eq!(items[0].id(host), "minecraft:air");
+            assert_eq!(items.last().unwrap().id(host), "minecraft:ominous_bottle");
+
+            let entities = host.entity_type_keys();
+            assert_eq!(entities.len(), 161);
+            assert_eq!(entities[0].id(host), "minecraft:acacia_boat");
+            assert_eq!(
+                entities.last().unwrap().id(host),
+                "minecraft:fishing_bobber"
+            );
+
+            let menus = host.menu_keys();
+            assert_eq!(menus.len(), 25);
+            assert_eq!(menus[0].id(host), "minecraft:generic_9x1");
+            assert_eq!(menus.last().unwrap().id(host), "minecraft:stonecutter");
+
+            // Enchantments load with the item tables, which this harness stops short of;
+            // read them the way a world open does.
+            let items = horizon_client::items::Items::load(
+                &root,
+                game.pack.assets.registry,
+                game.res.facts(),
+                &horizon_world::loot::PackOverlay::NONE,
+                game.res.item_defaults(),
+            )
+            .unwrap();
+            mod_api::__private::resolve_enchantments(
+                items.enchantments.list.iter().map(|entry| &*entry.id),
+            )
+            .unwrap();
+            let enchantments = host.enchantment_keys();
+            assert_eq!(enchantments.len(), 43);
+            assert_eq!(enchantments[0].id(host), "minecraft:aqua_affinity");
+            assert_eq!(
+                enchantments.last().unwrap().id(host),
+                "minecraft:wind_burst"
+            );
+
+            // A second read is the same table in the same order.
+            assert_eq!(host.block_keys(), blocks);
+            assert_eq!(host.enchantment_keys(), enchantments);
         });
     }
 
