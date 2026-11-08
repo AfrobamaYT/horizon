@@ -175,6 +175,13 @@ impl<T: 'static> Group<T> {
         let mut func_slots: BTreeMap<String, u32> = BTreeMap::new();
         for (index, (layout, member)) in parsed.iter().zip(members).enumerate() {
             let mut imports = Vec::new();
+            let own_exports: BTreeMap<_, _> = layout
+                .module
+                .exports()
+                .map(|e| (e.name().to_owned(), e.ty()))
+                .collect();
+            let mut self_funcs = BTreeMap::new();
+            let mut self_data = Vec::new();
             for import in layout.module.imports() {
                 let (module, name) = (import.module(), import.name());
                 let unresolved = || LinkError::Unresolved {
@@ -220,8 +227,22 @@ impl<T: 'static> Group<T> {
                             )
                         }
                         ("GOT.mem", symbol, _) => {
-                            let Some((owner, Extern::Global(global))) = symbols.get(symbol) else {
-                                return Err(unresolved());
+                            let Some((owner, Extern::Global(global))) = symbols
+                                .get(symbol)
+                                .filter(|_| !layout.private_exports.contains(symbol))
+                            else {
+                                if !matches!(own_exports.get(symbol), Some(ExternType::Global(_))) {
+                                    return Err(unresolved());
+                                }
+                                let global = Global::new(
+                                    &mut store,
+                                    GlobalType::new(ValType::I32, Mutability::Var),
+                                    Val::I32(0),
+                                )
+                                .map_err(|e| load(e, member.name))?;
+                                self_data.push((symbol.to_owned(), global));
+                                imports.push(Extern::Global(global));
+                                continue;
                             };
                             let Val::I32(offset) = global.get(&mut store) else {
                                 return Err(unresolved());
@@ -237,8 +258,34 @@ impl<T: 'static> Group<T> {
                             )
                         }
                         ("GOT.func", symbol, _) => {
-                            let Some((_, Extern::Func(func))) = symbols.get(symbol) else {
-                                return Err(unresolved());
+                            let Some((_, Extern::Func(func))) = symbols
+                                .get(symbol)
+                                .filter(|_| !layout.private_exports.contains(symbol))
+                            else {
+                                if !matches!(own_exports.get(symbol), Some(ExternType::Func(_))) {
+                                    return Err(unresolved());
+                                }
+                                let slot = match self_funcs.get(symbol) {
+                                    Some(slot) => *slot,
+                                    None => {
+                                        let slot = table_slot as u32;
+                                        table_slot += 1;
+                                        if !layout.private_exports.contains(symbol) {
+                                            func_slots.insert(symbol.to_owned(), slot);
+                                        }
+                                        self_funcs.insert(symbol.to_owned(), slot);
+                                        slot
+                                    }
+                                };
+                                imports.push(Extern::Global(
+                                    Global::new(
+                                        &mut store,
+                                        GlobalType::new(ValType::I32, Mutability::Var),
+                                        Val::I32(slot as i32),
+                                    )
+                                    .map_err(|e| load(e, member.name))?,
+                                ));
+                                continue;
                             };
                             let slot = match func_slots.get(symbol) {
                                 Some(slot) => *slot,
@@ -276,12 +323,46 @@ impl<T: 'static> Group<T> {
                     why: format!("{e:#}"),
                 }
             })?;
+            // Shared members have no core start function. Resolve their self-references to
+            // actual exports before any relocation helper or constructor can execute.
+            for (name, slot) in self_funcs {
+                let func =
+                    instance
+                        .get_func(&mut store, &name)
+                        .ok_or_else(|| LinkError::Malformed {
+                            member: member.name.to_owned(),
+                            why: format!("self GOT.func {name} is not a function"),
+                        })?;
+                table
+                    .set(&mut store, u64::from(slot), func.into())
+                    .map_err(|e| load(e, member.name))?;
+            }
+            for (name, imported) in self_data {
+                let exported =
+                    instance
+                        .get_global(&mut store, &name)
+                        .ok_or_else(|| LinkError::Malformed {
+                            member: member.name.to_owned(),
+                            why: format!("self GOT.mem {name} is not a global"),
+                        })?;
+                let Val::I32(offset) = exported.get(&mut store) else {
+                    return Err(LinkError::Malformed {
+                        member: member.name.to_owned(),
+                        why: format!("self GOT.mem {name} is not i32"),
+                    });
+                };
+                let address = layout.memory_base as i64 + i64::from(offset);
+                imported
+                    .set(&mut store, Val::I32(address as i32))
+                    .map_err(|e| load(e, member.name))?;
+            }
             let exports: Vec<_> = instance
                 .exports(&mut store)
                 .map(|export| (export.name().to_owned(), export.into_extern()))
                 .collect();
             for (name, extern_) in exports {
-                if name.starts_with("__wasm_")
+                if layout.private_exports.contains(&name)
+                    || name.starts_with("__wasm_")
                     || matches!(
                         name.as_str(),
                         "horizon_layout" | "horizon_layout_ext" | "horizon_in" | "horizon_hook"
@@ -307,7 +388,11 @@ impl<T: 'static> Group<T> {
             members: instances,
             memory,
         };
-        for hook in ["__wasm_apply_data_relocs", "__wasm_call_ctors"] {
+        for hook in [
+            "__wasm_start",
+            "__wasm_apply_data_relocs",
+            "__wasm_call_ctors",
+        ] {
             for index in 0..group.members.len() {
                 let name = group.members[index].0.clone();
                 if let Some(func) = group.members[index].1.get_func(&mut group.store, hook) {
@@ -355,6 +440,7 @@ struct Layout {
     module: Module,
     info: wasmparser::MemInfo,
     got_funcs: u64,
+    private_exports: std::collections::BTreeSet<String>,
     memory_base: u64,
     table_base: u64,
 }
@@ -367,9 +453,14 @@ impl Layout {
         };
         let mut info = None;
         let mut seen = false;
+        let mut private_exports = None;
         for payload in Parser::new(0).parse_all(member.module) {
             let payload = payload.map_err(|e| malformed(e.to_string()))?;
             match &payload {
+                Payload::StartSection { .. } => return Err(malformed(
+                    "shared members run constructors after relocation, not a core start function"
+                        .into(),
+                )),
                 Payload::MemorySection(section) if section.count() != 0 => {
                     return Err(malformed(
                         "a shared member must import the group memory".into(),
@@ -381,6 +472,17 @@ impl Layout {
                     ));
                 }
                 _ => {}
+            }
+            if let Payload::CustomSection(section) = &payload
+                && section.name() == "horizon.private"
+            {
+                if private_exports.is_some() {
+                    return Err(malformed("duplicate horizon.private section".into()));
+                }
+                private_exports = Some(
+                    serde_json::from_slice::<std::collections::BTreeSet<String>>(section.data())
+                        .map_err(|e| malformed(format!("private exports: {e}")))?,
+                );
             }
             if let Payload::CustomSection(section) = payload
                 && section.name() == "dylink.0"
@@ -413,6 +515,7 @@ impl Layout {
             module,
             info,
             got_funcs,
+            private_exports: private_exports.unwrap_or_default(),
             memory_base: 0,
             table_base: 0,
         })

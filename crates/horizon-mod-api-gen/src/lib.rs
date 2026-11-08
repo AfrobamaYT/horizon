@@ -614,6 +614,7 @@ pub use wire::generate_host as generate_wire_host;
 pub mod internals;
 pub mod internals_table;
 pub mod internals_view;
+pub mod native_fields;
 pub mod notes;
 pub mod points;
 pub mod sites;

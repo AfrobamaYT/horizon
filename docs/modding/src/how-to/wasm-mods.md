@@ -48,7 +48,27 @@ copies that catalog beside the std member.
 ## Dependencies
 
 `[dependencies]` work as for native mods. List the library mod in `horizon-mod.toml` and its
-crate in `Cargo.toml`; build the library with `--wasm` first. The game links a mod with its
+crate in `Cargo.toml`. The tool stages the resolved mod packages into one Cargo workspace:
+each library's single compiler unit produces both its rlib and its position-independent member,
+and dependents use that exact rlib through Cargo's ordinary dependency edges. Cargo still owns
+feature resolution, build scripts and non-mod dependencies. Registration generation is scoped to
+each package, not to the mod from which the command was launched.
+
+Ordinary Rust calls such as `my_library::function()`, statics, generics and owned Rust types need
+no generated interface or export annotations. Members export their public definitions without
+symbol interposition: duplicate definitions are refused, rather than overriding another mod.
+Each member records its compiler, target, settings,
+rlib digest and dependency artifact identities in `horizon.build` metadata covered by its module
+hash. Mod crate disambiguators use the mod ID, version and resolved Cargo features rather than
+the temporary workspace path. A shared crate disambiguator alone is not an ABI guarantee:
+the loader checks the exact dependency build recorded in `[wasm.linked]`, including when the
+library and its consumers were built separately. Changing a library's source, toolchain,
+features or settings requires rebuilding its consumers.
+
+The build packages every member of the resolved group into the invoking project's
+`target/horizon-mod/` directory. A consumer build does not replace another project's previously
+packaged `.hmod`. To include additional local roots in the same Cargo invocation, repeat
+`--with path/to/another/mod`. The game links a mod with its
 dependencies at load, one copy of each library shared by every mod that uses it, and refuses a
 mod whose library is missing or another build than the one it was linked against, naming it on
 the Mods page. An optional dependency is built in with the Cargo feature of its id, so its crate's
@@ -87,6 +107,15 @@ The loader provides one linear memory, function table and standard-library membe
 plus the `env` base globals and the `GOT.mem` and `GOT.func` relocations used by the members.
 The loader supplies linker globals such as `GOT.mem.__heap_base` and `GOT.mem.__data_end`;
 member constructors run after linking. Groups do not share memory with one another.
+
+The build step moves a core start function to the explicit `__wasm_start` export. The loader
+instantiates members, fills self-referencing GOT entries from their actual exports, then runs
+`__wasm_start`, data relocations and constructors in that order. A raw core start is refused:
+it would execute before its own addresses could be relocated. `horizon.private` metadata lists
+compiler implementation exports that remain local to a member (for example an upstream inline
+method emitted in several members). Their original symbols can resolve that member's own GOT,
+but are not published as library definitions. This is symbol visibility metadata, not function
+glue or another Rust interface.
 
 Pointers and lengths below are wasm32 `u32` values. The game provides these imports in the
 `horizon` module:

@@ -890,6 +890,28 @@ fn disable_during_native_import_defers_resource_drop_until_call_returns() {
 }
 
 #[test]
+fn calling_module_borrow_is_cleared_after_success_and_trap() {
+    for (body, expected) in [("i64.const 0", Some(())), ("unreachable", None)] {
+        let module = module(body);
+        assert_eq!(
+            module.call(
+                CallClass::Hook,
+                Frame::default(),
+                0,
+                None,
+                |_| {},
+                |r| r.take::<()>()
+            ),
+            expected
+        );
+        let group = module.running.group.lock().unwrap();
+        assert_eq!(group.store.data().depth, 0);
+        assert!(group.store.data().cx.frames.is_empty());
+        assert!(group.store.data().cx.module.is_null());
+    }
+}
+
+#[test]
 fn native_panic_stops_group_before_held_resources_drop() {
     let id = crate::boundary::import_id("StructureRandom", "next_long").unwrap();
     let module = module(&format!(
@@ -905,6 +927,14 @@ fn native_panic_stops_group_before_held_resources_drop() {
     assert!(result.is_err());
     assert!(dropped.load(Ordering::Relaxed));
     assert_eq!(call(&module), None);
+    let group = module
+        .running
+        .group
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    assert_eq!(group.store.data().depth, 0);
+    assert!(group.store.data().cx.frames.is_empty());
+    assert!(group.store.data().cx.module.is_null());
 }
 
 #[test]
@@ -1089,6 +1119,117 @@ fn returned_builtin_proxy_does_not_keep_its_group_alive() {
         0,
         "an unavailable proxy did not take the call-refused path"
     );
+}
+
+fn row_window_guest() -> WasmMod {
+    let window = crate::boundary::import_id("RowPages", "window").unwrap();
+    module(&format!(
+        r#"
+        local.get 0 i32.eqz if
+          i32.const 0 local.get 1 i64.load i64.store
+        end
+        i32.const 8 i32.const 0 i32.store
+        i32.const 12 i64.const 0 i64.store
+        i32.const 20 i32.const 1 i32.store
+        i32.const 24 i32.const 0 i32.store16
+        i64.const 8796093022208
+        i32.const {window} i32.const 0 i32.const 26 i32.const 2048 i32.const 512 call $host
+        i64.extend_i32_u i64.or
+    "#
+    ))
+}
+
+#[test]
+fn ordinary_row_pages_import_checks_its_native_root_and_returns_owned_rows() {
+    use mod_points::snapshot::{Builder, PageSource, Snapshot, Window, key, with_root};
+    fn read(root: &u32, _: Window, rows: &mut Builder) -> Result<(), mod_api::RowError> {
+        rows.value(None, 0, const { key("u32") }, root)?;
+        Ok(())
+    }
+    let module = row_window_guest();
+    let root = Box::new(42u32);
+    let owned = with_root(&*root, |value| {
+        module
+            .call(
+                CallClass::Hook,
+                Frame::default(),
+                0,
+                None,
+                |out| {
+                    // SAFETY: the box's address stays valid throughout this marked call. Constructing
+                    // during encoding captures its root, not an earlier call or import's lexical scope.
+                    let pages = unsafe { PageSource::new(&value, read) }.unwrap();
+                    out.put(&pages);
+                },
+                |input| input.take::<Result<Vec<mod_api::Row>, mod_api::RowError>>(),
+            )
+            .unwrap()
+            .unwrap()
+    });
+    drop(root);
+    assert_eq!(Snapshot::new(&owned).read::<u32>(0), Ok(42));
+    // The guest retained the ordinary resource id, but it cannot retain the native borrow.
+    let refused = module
+        .call(
+            CallClass::Hook,
+            Frame::default(),
+            1,
+            None,
+            |_| {},
+            |input| input.take::<Result<Vec<mod_api::Row>, mod_api::RowError>>(),
+        )
+        .unwrap();
+    assert!(matches!(refused, Err(mod_api::RowError::Stale)));
+    assert!(!module.is_stopped());
+}
+
+#[test]
+fn row_pages_refuses_an_encoded_temporary_dropped_before_the_first_window_fetch() {
+    use mod_points::snapshot::{Builder, PageSource, Window, key, with_root};
+    struct Encoded<'a> {
+        root: Box<u32>,
+        dropped: &'a std::cell::Cell<bool>,
+    }
+    impl Drop for Encoded<'_> {
+        fn drop(&mut self) {
+            self.dropped.set(true);
+        }
+    }
+    impl mod_api::wire::Put for Encoded<'_> {
+        fn put_to(&self, out: &mut mod_api::wire::Writer) {
+            // SAFETY: this reader is a pure projection, with no guard destruction or host
+            // mutation. The value guard, not the call marker, bounds this temporary's borrow.
+            with_root(&*self.root, |value| {
+                let pages = unsafe {
+                    PageSource::new(&value, |root, _: Window, rows: &mut Builder| {
+                        rows.value(None, 0, const { key("u32") }, root)?;
+                        Ok(())
+                    })
+                }
+                .unwrap();
+                out.put(&pages);
+            });
+        }
+    }
+    let module = row_window_guest();
+    let dropped = std::cell::Cell::new(false);
+    let temporary = Encoded {
+        root: Box::new(17u32),
+        dropped: &dropped,
+    };
+    let refused = module
+        .call(
+            CallClass::Hook,
+            Frame::default(),
+            0,
+            None,
+            move |out| out.put(&temporary),
+            |input| input.take::<Result<Vec<mod_api::Row>, mod_api::RowError>>(),
+        )
+        .unwrap();
+    assert!(dropped.get());
+    assert!(matches!(refused, Err(mod_api::RowError::Stale)));
+    assert!(!module.is_stopped());
 }
 
 #[test]
