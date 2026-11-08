@@ -120,10 +120,9 @@ clone each typed value. Repeated snapshots interleaved with writes can therefore
 cost more, and keeping many batches retains their old values. There is no idle
 index sweep when no attachment or residency change occurs.
 
-At the generated component boundary the whole owned batch transfers once, not
-one host call per row. Borrowed traversal still uses that owned batch. An erased
+An erased
 decoded value can only be read where its Rust type identity matches. A different
-native type or another component group's type produces `TypeMismatch`; a failed
+native or wasm type produces `TypeMismatch`; a failed
 decoded downcast does not fall back to saved decoding. Share attachment type
 identity through the normal dependency model rather than redeclaring a different
 type with the same key.
