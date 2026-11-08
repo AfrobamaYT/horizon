@@ -276,7 +276,7 @@ fn generate_inner(
                     arms.push(quote!(#ordinal => __horizon_visit(mod_points::locators::Step::Field(#field), #field, &#child),));
                 }
                 let count = parts.len() as u64;
-                quote!(mod_points::native_nodes::Record { key: #key, count: #count, visit: move |__horizon_index, __horizon_visit: &mut mod_points::native_nodes::Visitor<'_>| match __horizon_index { #(#arms)* #[allow(unused_comparisons)] _ if __horizon_index < #count => Ok(()), _ => Err(mod_api::RowError::Bounds) } })
+                quote!(mod_points::native_nodes::Record { key: #key, count: #count, visit: move |__horizon_index, __horizon_visit: &mut mod_points::native_nodes::Visitor<'_>| match __horizon_index { #(#arms)* _ if __horizon_index < #count => Ok(()), _ => Err(mod_api::RowError::Bounds) } })
             }
             Shape::Named(path, _) => {
                 let named = rule
@@ -335,7 +335,7 @@ fn generate_inner(
                         let count = local;
                         let variant_key = format!("{identity};variant({tag})");
                         let variant_key_expr = auxiliary(&format!("variant({tag})"), &variant_key)?;
-                        variants.push(quote!(#path::#name { #(#bindings,)* .. } => __horizon_visit(mod_points::locators::Step::Variant(#tag), #tag, &mod_points::native_nodes::Record { key: #variant_key_expr, count: #count, visit: move |__horizon_index, __horizon_visit: &mut mod_points::native_nodes::Visitor<'_>| match __horizon_index { #(#arms)* #[allow(unused_comparisons)] _ if __horizon_index < #count => Ok(()), _ => Err(mod_api::RowError::Bounds) } }),));
+                        variants.push(quote!(#path::#name { #(#bindings,)* .. } => __horizon_visit(mod_points::locators::Step::Variant(#tag), #tag, &mod_points::native_nodes::Record { key: #variant_key_expr, count: #count, visit: move |__horizon_index, __horizon_visit: &mut mod_points::native_nodes::Visitor<'_>| match __horizon_index { #(#arms)* _ if __horizon_index < #count => Ok(()), _ => Err(mod_api::RowError::Bounds) } }),));
                     }
                     let tags = item.variants.iter().enumerate().map(|(i, v)| {
                         let name = &v.ident;
@@ -343,7 +343,7 @@ fn generate_inner(
                         quote!(#path::#name { .. } => #i,)
                     });
                     return Ok(capture(
-                        quote!({ let __horizon_tag = match &(#place) { #(#tags)* #[allow(unreachable_patterns)] _ => u32::MAX }; mod_points::native_nodes::Variant { key: #key, tag: __horizon_tag, visit: move |__horizon_visit: &mut mod_points::native_nodes::Visitor<'_>| match &(#place) { #(#variants)* #[allow(unreachable_patterns)] _ => Err(mod_api::RowError::Unsupported) } } }),
+                        quote!({ let __horizon_tag = match &(#place) { #(#tags)* _ => u32::MAX }; mod_points::native_nodes::Variant { key: #key, tag: __horizon_tag, visit: move |__horizon_visit: &mut mod_points::native_nodes::Visitor<'_>| match &(#place) { #(#variants)* _ => Err(mod_api::RowError::Unsupported) } } }),
                     ));
                 }
                 let mut arms = Vec::new();
@@ -380,7 +380,7 @@ fn generate_inner(
                     arms.push(quote!(#ordinal if #guard => __horizon_visit(mod_points::locators::Step::Field(#field_id), #field_id, &#child),));
                 }
                 let count = declared;
-                quote!(mod_points::native_nodes::Record { key: #key, count: #count, visit: move |__horizon_index, __horizon_visit: &mut mod_points::native_nodes::Visitor<'_>| match __horizon_index { #(#arms)* #[allow(unused_comparisons)] _ if __horizon_index < #count => Ok(()), _ => Err(mod_api::RowError::Bounds) } })
+                quote!(mod_points::native_nodes::Record { key: #key, count: #count, visit: move |__horizon_index, __horizon_visit: &mut mod_points::native_nodes::Visitor<'_>| match __horizon_index { #(#arms)* _ if __horizon_index < #count => Ok(()), _ => Err(mod_api::RowError::Bounds) } })
             }
             _ => {
                 return Err(format!(
