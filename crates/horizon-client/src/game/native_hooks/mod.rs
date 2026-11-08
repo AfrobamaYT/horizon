@@ -8,6 +8,7 @@
 
 /// Generated dispatch entry points, not hand-written hook implementations.
 mod fire;
+pub(in crate::game) use fire::ItemAfterVerticalCollisionCall;
 
 use super::native_data_maps::NativeDataMapType;
 use super::{

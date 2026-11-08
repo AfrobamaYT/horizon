@@ -68,6 +68,65 @@ pub(crate) fn prepare(registry: &BlockRegistry) -> Result<Arc<Index>, String> {
 mod tests {
     use super::*;
     #[test]
+    fn numeric_block_index_routes_only_subscribed_blocks() {
+        struct Part;
+        #[mod_api::horizon_part]
+        impl mod_api::BlockPart for Part {
+            fn analog_output(
+                &self,
+                _: &dyn mod_api::LevelHost,
+                event: &mut mod_api::AnalogOutputEvent,
+            ) {
+                event.output += 1;
+            }
+        }
+        struct Listener;
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for Listener {
+            fn register(
+                &self,
+                registrar: &mut dyn mod_api::Registrar,
+                _: &mod_api::RegistrationContext,
+            ) {
+                let key = registrar.block_key("minecraft:stone");
+                registrar.block_part(key, Part);
+            }
+        }
+        mod_api::__private::part_tests::install_parts_fixture(&[mod_api::ModEntry::new(
+            "routing",
+            Box::new(Listener),
+        )])
+        .unwrap();
+        let facts = r#"{"defaults":{"minecraft:stone":0,"minecraft:dirt":1},"states":[["s",false,false,"","minecraft:stone"],["d",false,false,"","minecraft:dirt"]]}"#;
+        let registry = BlockRegistry::from_facts_json(facts.as_bytes()).unwrap();
+        super::super::resolve_block_definitions(&registry).unwrap();
+        mod_api::__private::resolve_parts(
+            &Default::default(),
+            &Default::default(),
+            mod_api::__private::KnownIds {
+                block: &|_| true,
+                item: &|_| false,
+            },
+        )
+        .unwrap();
+        assert!(block_listens(
+            mod_api::HookId::AnalogOutput,
+            BlockStateId(0)
+        ));
+        let start = std::time::Instant::now();
+        for _ in 0..1_000 {
+            assert!(!block_listens(
+                mod_api::HookId::AnalogOutput,
+                std::hint::black_box(BlockStateId(1))
+            ));
+        }
+        println!(
+            "actual Index and Parts: 1000 unrelated-block guards in {} ns",
+            start.elapsed().as_nanos()
+        );
+    }
+
+    #[test]
     fn numeric_block_index_prepared_token_activates_only_on_fresh_owner() {
         mod_api::__private::part_tests::install_parts_fixture(&[]).unwrap();
         let facts = r#"{"defaults":{"minecraft:air":0,"minecraft:stone":1},"states":[["a",true,false,"","minecraft:air"],["s",false,false,"","minecraft:stone"]]}"#;

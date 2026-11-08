@@ -6,6 +6,50 @@ use horizon_items::items::{ItemStack as EngineStack, Items};
 use mod_api::item_stack::{ItemStack as ApiStack, StackWriteError};
 #[path = "api_values/block_state.rs"]
 pub(in crate::game) mod block_state;
+
+pub(crate) fn block_jump_factor(
+    context: &horizon_world::native_load_context::LoopContext,
+    state: horizon_world::registry::BlockStateId,
+    factor: &mut f32,
+) {
+    if !block_state::block_listens(mod_api::HookId::BlockJumpFactor, state) {
+        return;
+    }
+    let Ok(state) = state.try_into_api() else {
+        return;
+    };
+    mod_api::dispatch_block_jump_factor(&mod_api::OwningLoop::new(context), state, factor);
+}
+pub(crate) fn block_speed_factor(
+    context: &horizon_world::native_load_context::LoopContext,
+    state: horizon_world::registry::BlockStateId,
+    factor: &mut f32,
+) {
+    if !block_state::block_listens(mod_api::HookId::BlockSpeedFactor, state) {
+        return;
+    }
+    let Ok(state) = state.try_into_api() else {
+        return;
+    };
+    mod_api::dispatch_block_speed_factor(&mod_api::OwningLoop::new(context), state, factor);
+}
+
+/// Resolve the metadata default through the sole numeric reverse index, without allocation.
+pub(crate) fn default_state(
+    block: mod_api::BlockKey,
+) -> Option<horizon_world::registry::BlockStateId> {
+    use mod_api::BlockMetadata;
+    let metadata = mod_api::__private::block_definitions()?;
+    let value = mod_api::BlockState::from(metadata.of(block, &[]).ok()?);
+    block_state::current().ok()?.to_engine(value).ok()
+}
+
+pub(crate) fn behavior_block(
+    block: mod_api::BlockKey,
+    behaviours: &horizon_world::level::Behaviours,
+) -> Option<horizon_world::level::states::BlockId> {
+    Some(behaviours.block(default_state(block)?))
+}
 pub(in crate::game) use super::native_worldgen::prepare as prepare_block_states;
 pub(in crate::game) use block_state::install as install_block_states;
 #[path = "api_values/landing_write.rs"]

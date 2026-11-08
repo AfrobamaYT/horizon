@@ -229,7 +229,7 @@ impl mod_api::LevelHost for super::GameLevel<'_> {
         super::native_block_states::parse(self.block_registries, self.registry, name)
     }
     fn block_state_default(&self, block: mod_api::BlockKey) -> Option<BlockStateId> {
-        Some(mod_api::__private::resolved_block(block)?.default)
+        super::api_values::default_state(block)
     }
     fn block_state(&self, pos: [i32; 3]) -> BlockStateId {
         horizon_world::level::LevelAccess::block_state(self, BlockPos::new(pos[0], pos[1], pos[2]))
@@ -345,7 +345,7 @@ impl mod_api::LevelHost for super::native_hooks::HitLevel<'_> {
     }
     fn block_state_default(&self, block: mod_api::BlockKey) -> Option<BlockStateId> {
         self.0.block_registries()?;
-        Some(mod_api::__private::resolved_block(block)?.default)
+        super::api_values::default_state(block)
     }
     fn block_in_tag(&self, block: mod_api::BlockKey, tag: &str) -> Option<bool> {
         self.0.tags()?;

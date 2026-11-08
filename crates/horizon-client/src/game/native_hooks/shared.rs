@@ -1565,22 +1565,22 @@ pub(super) const BLOCK_CONTACT_HOOKS: horizon_client::block_contact::Hooks =
         },
         any_inside: || mod_api::__private::has_scoped_hook(mod_api::HookId::EntityInside),
         inside_listens: |state| {
-            super::super::api_values::block_state::block_listens(
+            crate::game::api_values::block_state::block_listens(
                 mod_api::HookId::EntityInside,
                 state,
             )
         },
         pass_listens: |state| {
-            super::super::api_values::block_state::block_listens(
+            crate::game::api_values::block_state::block_listens(
                 mod_api::HookId::MinecartPass,
                 state,
             )
         },
         fall_listens: |state| {
-            super::super::api_values::block_state::block_listens(mod_api::HookId::FallOn, state)
+            crate::game::api_values::block_state::block_listens(mod_api::HookId::FallOn, state)
         },
         bounce_listens: |state| {
-            super::super::api_values::block_state::block_listens(mod_api::HookId::BounceOn, state)
+            crate::game::api_values::block_state::block_listens(mod_api::HookId::BounceOn, state)
         },
         fall_on: |dimension, level, c, distance, damage, writes| {
             HitLevel(level.reborrow()).native_fall_on(
@@ -1914,11 +1914,10 @@ impl GameLevel<'_> {
         block: BlockKey,
         delay: i32,
     ) -> bool {
-        let Some(resolved) = mod_api::__private::resolved_block(block) else {
+        let Some(block) = crate::game::api_values::behavior_block(block, self.behaviours) else {
             return false;
         };
         let at = BlockPos::new(pos[0], pos[1], pos[2]);
-        let block = resolved.block;
         let time = self.game_time();
         ticks.schedule_block(time, at, block, delay, TickPriority::Normal)
             != ScheduleResult::MissingChunk

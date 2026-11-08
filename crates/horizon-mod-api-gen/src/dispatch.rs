@@ -167,6 +167,33 @@ pub(super) fn emit<'a>(
         if ticks {
             args.retain(|(name, _)| name != "ticks");
         }
+        // Engine-inferred state types become owned API values at the checked crossing.
+        // Explicit catalog declarations remain authoritative.
+        let inferred_types: Vec<Type> = args
+            .iter()
+            .map(|(_, ty)| {
+                let mut ty = (*ty).clone();
+                if declared.is_empty() {
+                    use syn::visit_mut::VisitMut;
+                    struct ApiState;
+                    impl VisitMut for ApiState {
+                        fn visit_type_path_mut(&mut self, ty: &mut syn::TypePath) {
+                            if ty.path.segments.len() == 1 && ty.path.is_ident("BlockStateId") {
+                                ty.path = syn::parse_quote!(BlockState);
+                            }
+                            syn::visit_mut::visit_type_path_mut(self, ty);
+                        }
+                    }
+                    ApiState.visit_type_mut(&mut ty);
+                }
+                ty
+            })
+            .collect();
+        args = args
+            .into_iter()
+            .zip(&inferred_types)
+            .map(|((name, _), ty)| (name, ty))
+            .collect();
         let carried = args.clone();
         let mut used: HashSet<_> = args.iter().map(|(name, _)| name.clone()).collect();
         let mod_item = fresh_name("mod_hook", &mut used);
@@ -251,7 +278,21 @@ pub(super) fn emit<'a>(
                     "BlockState" => {
                         format!("{table}(|| super::registry_keys::block_id({key}.block()))")
                     }
-                    "BlockStateId" if table == "block" => format!("block_state({key})"),
+                    "BlockStateId" if table == "block" => {
+                        let Some((level, _)) = host.as_ref().filter(|_| is_level) else {
+                            return Err(format!("{name} has no level to name {key}'s block"));
+                        };
+                        let state_name = if hook.side == Side::Both {
+                            format!(
+                                "match &{level} {{ LevelSide::Server({level}) | LevelSide::Client({level}) => {level}.state_block({key}), }}"
+                            )
+                        } else {
+                            format!("{level}.state_block({key})")
+                        };
+                        format!(
+                            "block_key(({state_name}).and_then(super::registry_keys::block_key))"
+                        )
+                    }
                     "BlockStateId" => {
                         let Some((level, _)) = host.as_ref().filter(|_| is_level) else {
                             return Err(format!("{name} has no level to name {key}'s block"));

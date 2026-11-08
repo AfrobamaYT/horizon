@@ -25,22 +25,21 @@ pub(super) enum NativeBlockReadError {
 
 thread_local! {
     // Like the key-to-state mapping, this snapshot belongs to the thread resolving the world.
-    static BLOCK_TAGS: std::cell::RefCell<std::collections::HashMap<String, horizon_world::level::data::BlockSet>> = Default::default();
+    static BLOCK_TAGS: std::cell::RefCell<std::collections::HashMap<String, std::collections::HashSet<BlockKey>>> = Default::default();
 }
 
 /// Bind the world's merged tags alongside its block mappings, including the resource-only case.
 /// Never cache on Items: its string tables also serve tools and client network snapshots.
 pub(super) fn prepare_block_tags(
     items: &Items,
-    mut resolve: impl FnMut(&str) -> Option<horizon_world::level::states::BlockId>,
-) -> std::collections::HashMap<String, horizon_world::level::data::BlockSet> {
+) -> std::collections::HashMap<String, std::collections::HashSet<BlockKey>> {
     items
         .block_tags
         .iter()
         .map(|(tag, members)| {
-            let mut set = horizon_world::level::data::BlockSet::default();
+            let mut set = std::collections::HashSet::<BlockKey>::default();
             for name in members {
-                if let Some(block) = resolve(name) {
+                if let Some(block) = mod_api::__private::block_key(name) {
                     set.insert(block);
                 }
             }
@@ -50,21 +49,21 @@ pub(super) fn prepare_block_tags(
 }
 
 pub(super) fn install_block_tags(
-    tags: std::collections::HashMap<String, horizon_world::level::data::BlockSet>,
+    tags: std::collections::HashMap<String, std::collections::HashSet<BlockKey>>,
 ) {
     BLOCK_TAGS.with(|snapshot| *snapshot.borrow_mut() = tags);
 }
 
-/// One numeric key mapping, one tag-name lookup and one bit test; no block name lookup.
+/// One availability check, one tag-name lookup and one API key membership test.
 /// An unavailable owning-thread mapping is not a missing tag.
 pub(super) fn block_in_tag(block: BlockKey, tag: &str) -> Option<bool> {
-    let block = mod_api::__private::resolved_block(block)?.block;
+    super::api_values::default_state(block)?;
     let tag = horizon_client::command::args::normalized(tag);
     Some(BLOCK_TAGS.with(|snapshot| {
         snapshot
             .borrow()
             .get(tag.as_ref())
-            .is_some_and(|set| set.contains(block))
+            .is_some_and(|set| set.contains(&block))
     }))
 }
 
@@ -314,9 +313,8 @@ mod tests {
     }
 
     #[test]
-    fn numeric_block_tags_rebind_the_merged_snapshot_without_changing_keys() {
-        use horizon_world::level::states::BlockId;
-        use mod_api::__private::{ResolvedBlock, part_tests, resolve_blocks};
+    fn api_block_tags_rebind_the_merged_snapshot_without_changing_keys() {
+        use mod_api::__private::part_tests;
         mod_api::__private::install(Default::default());
         crate::game::api_values::register_game_keys([
             "minecraft:stone".into(),
@@ -332,21 +330,14 @@ mod tests {
             "minecraft:base_stone_overworld".into(),
             ["minecraft:stone".into()].into(),
         );
-        for (stone_index, machine_index) in [(2, 71), (96, 5)] {
-            let resolve = |name: &str| match name {
-                "minecraft:stone" => Some(BlockId(stone_index)),
-                "test:machine" => Some(BlockId(machine_index)),
-                _ => None,
-            };
-            resolve_blocks(|name| {
-                Some(ResolvedBlock {
-                    block: resolve(name)?,
-                    default: BlockStateId(0),
-                    states: horizon_world::registry::BlockStateRange::new(BlockStateId(0), 1),
-                })
-            })
-            .unwrap();
-            install_block_tags(prepare_block_tags(&items, resolve));
+        for facts in [
+            r#"{"defaults":{"minecraft:stone":0,"test:machine":1},"states":[["s",false,false,"","minecraft:stone"],["m",false,false,"","test:machine"]]}"#,
+            r#"{"defaults":{"minecraft:stone":1,"test:machine":0},"states":[["m",false,false,"","test:machine"],["s",false,false,"","minecraft:stone"]]}"#,
+        ] {
+            // Build reordered numeric registries from the same API definitions.
+            let registry = BlockRegistry::from_facts_json(facts.as_bytes()).unwrap();
+            crate::game::api_values::resolve_block_definitions(&registry).unwrap();
+            install_block_tags(prepare_block_tags(&items));
             assert_eq!(block_in_tag(machine, "test:machines"), Some(true));
             assert_eq!(block_in_tag(stone, "test:machines"), Some(false));
             assert_eq!(block_in_tag(stone, "base_stone_overworld"), Some(true));
@@ -361,11 +352,7 @@ mod tests {
         items
             .block_tags
             .insert("test:machines".into(), ["minecraft:stone".into()].into());
-        install_block_tags(prepare_block_tags(&items, |name| match name {
-            "minecraft:stone" => Some(BlockId(96)),
-            "test:machine" => Some(BlockId(5)),
-            _ => None,
-        }));
+        install_block_tags(prepare_block_tags(&items));
         assert_eq!(block_in_tag(machine, "test:machines"), Some(false));
         assert_eq!(block_in_tag(stone, "test:machines"), Some(true));
         // Valid key, no owning world: never answer false using another thread's tags.

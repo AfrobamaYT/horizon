@@ -57,6 +57,13 @@ impl SignalAccess for ReadLevel<'_, '_> {
             .map(|s| s.status == horizon_client::block_entity_anim::ShulkerStatus::Closed)
     }
     fn adjust_signal_source(&self, state: BlockStateId, vanilla: bool) -> bool {
+        if !super::api_values::block_state::block_listens(mod_api::HookId::IsSignalSource, state) {
+            return vanilla;
+        }
+        use super::api_values::TryIntoApi;
+        let Ok(state) = state.try_into_api() else {
+            return vanilla;
+        };
         let mut source = vanilla;
         mod_api::dispatch_is_signal_source(self, state, &mut source);
         source
@@ -71,6 +78,16 @@ impl SignalAccess for ReadLevel<'_, '_> {
         direction: Direction,
         vanilla: bool,
     ) -> bool {
+        if !super::api_values::block_state::block_listens(
+            mod_api::HookId::ShouldCheckWeakPower,
+            state,
+        ) {
+            return vanilla;
+        }
+        use super::api_values::TryIntoApi;
+        let Ok(state) = state.try_into_api() else {
+            return vanilla;
+        };
         let mut check = vanilla;
         mod_api::dispatch_should_check_weak_power(
             self,
@@ -92,6 +109,16 @@ impl SignalAccess for ReadLevel<'_, '_> {
         direction: Option<Direction>,
         vanilla: bool,
     ) -> bool {
+        if !super::api_values::block_state::block_listens(
+            mod_api::HookId::ShouldRedstoneWireConnectTo,
+            state,
+        ) {
+            return vanilla;
+        }
+        use super::api_values::TryIntoApi;
+        let Ok(state) = state.try_into_api() else {
+            return vanilla;
+        };
         let mut connected = vanilla;
         mod_api::dispatch_should_redstone_wire_connect_to(
             self,
@@ -111,6 +138,13 @@ impl SignalAccess for ReadLevel<'_, '_> {
         direct: bool,
         vanilla: i32,
     ) -> i32 {
+        if !super::api_values::block_state::block_listens(mod_api::HookId::BlockSignal, state) {
+            return vanilla;
+        }
+        use super::api_values::TryIntoApi;
+        let Ok(state) = state.try_into_api() else {
+            return vanilla;
+        };
         adjust_signal(direction, vanilla, |face, signal| {
             mod_api::dispatch_block_signal(
                 self,
