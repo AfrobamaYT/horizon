@@ -62,6 +62,7 @@ fn biome_source(settings: &DimensionSettings) -> Value {
             json!({"type": "minecraft:multi_noise", "preset": settings.biome_preset})
         }
         BiomeSourceKind::End => json!({"type": "minecraft:the_end"}),
+        _ => unreachable!("unknown API biome source"),
     }
 }
 
