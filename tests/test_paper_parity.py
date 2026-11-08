@@ -7,9 +7,12 @@ import sys
 import tempfile
 import unittest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-import paper_parity as parity
-from check_public_tree import prohibited
+from unittest.mock import patch
+
+# Appended, not prepended: tools/ has its own test_*.py, and unittest discovery must keep finding tests/' copies.
+with patch.object(sys, 'path', [*sys.path, str(Path(__file__).resolve().parents[1] / 'tools')]):
+    import paper_parity as parity
+    from check_public_tree import prohibited
 
 
 class PaperParityTests(unittest.TestCase):
