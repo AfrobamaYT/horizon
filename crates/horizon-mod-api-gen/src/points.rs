@@ -1090,7 +1090,6 @@ mod tests {
         let proof = serde_json::json!({
             "existing_fields": existing,
             "records": records(&points, &sources),
-            "wire_shapes": points.iter().map(|p| &p.wire_shape).collect::<Vec<_>>(),
         });
         let before_records = records(&points, &sources);
         let before_json = serde_json::to_vec(&existing).unwrap();
