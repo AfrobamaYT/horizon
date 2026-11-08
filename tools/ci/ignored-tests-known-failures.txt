@@ -85,9 +85,7 @@ horizon-client game::lan::tests::datapack_damage_lazy_wire_load_caches_after_all
 horizon-client game::lan::world_spawn_sync_tests::setworldspawn_reaches_guests_in_other_dimensions_and_keeps_compass_overrides #2181
 horizon-client game::lan_actions::crack_feedback_tests::crack_packets_follow_start_clock_and_strict_observer_radius #2181
 horizon-client game::remote::level_sound_tests::packets_ask_client_level_before_playback_not_ui #2181
-horizon-client game::native_block_entity_item_tests::internal_slots_preserve_automation_limits_and_nested_transactions #2182
 horizon-client game::native_hooks::tests::declared_types_create_tick_and_reload_through_game #2182
-horizon-client game::native_live_holder_tests::data_slot_sizing_after_creation_and_load_joins_the_existing_journal #2182
 horizon-client game::stateful_block_entity_tests::stateful_creation_uses_actual_state_and_preserves_existing_entity #2182
 horizon-client game::native_components::item_resource_property_tests::effective_resource_properties_match_vanilla #2183
 horizon-client game::native_components::item_resource_property_tests::item_resource_changed_defaults_and_consumption #2183
