@@ -139,6 +139,33 @@ pub(super) fn types(types: &Types<'_>) -> String {
                 .join(",");
             writeln!(out, "#[doc(hidden)] pub fn __wire_record_{def_id}<'a>({args}) -> {}<'a> {{ {} {{ {names} }} }}", def.rust, def.rust).unwrap();
         }
+        if def.append.is_some() || def.projection.is_some() {
+            let put = def
+                .borrow_fields()
+                .unwrap()
+                .iter()
+                .map(|f| super::host::put(&f.ty, &format!("self.{}", f.rust)))
+                .collect::<Vec<_>>()
+                .join("");
+            let path = &def.rust;
+            writeln!(out, "impl crate::wire::Put for {path}<'_> {{ fn put_to(&self,w:&mut crate::wire::Writer) {{ {put} }} }}").unwrap();
+        }
+        if let Some(append) = &def.append {
+            let element = super::calls::rust_ty(types, &append.element, false);
+            let field = &append.fields[append.field].rust;
+            let equal = super::append::equal(types, &append.element, "a", "b").unwrap();
+            let path = &def.rust;
+            writeln!(out, "impl {path}<'_> {{
+                    #[doc(hidden)] pub fn __wire_changes(&self) -> &Vec<{element}> {{ self.{field} }}
+                    #[doc(hidden)] pub fn __wire_checked(&self, mut snapshot:Vec<{element}>) -> Result<crate::wire::Append<{element}>,crate::wire::WireError> {{
+                        let prefix = snapshot.get(..self.{field}.len()).ok_or(crate::wire::WireError::Invalid(\"deleted append prefix\"))?;
+                        if !self.{field}.iter().zip(prefix).all(|(a,b)| {equal}) {{ return Err(crate::wire::WireError::Invalid(\"changed append prefix\")); }}
+                        drop(snapshot.drain(..self.{field}.len()));
+                        Ok(crate::wire::Append::new(snapshot))
+                    }}
+                    #[doc(hidden)] pub fn __wire_apply(&mut self, delta:crate::wire::Append<{element}>) {{ self.{field}.extend(delta.into_vec()); }}
+                }}").unwrap();
+        }
         if let Some(view) = &def.view {
             let path = def.rust.split('<').next().unwrap();
             let snapshot = super::calls::rust_ty(types, &view.snapshot, false);

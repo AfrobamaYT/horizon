@@ -7,10 +7,19 @@ use horizon_core::nbt::Tag;
 /// builds a hover tooltip.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct TooltipDisplay<'a> {
-    pub(crate) component: Option<std::borrow::Cow<'a, Tag>>,
+    pub(crate) component: Option<&'a Tag>,
     pub(crate) ominous_banner: bool,
 }
 impl<'a> TooltipDisplay<'a> {
+    /// Reconstruct the read-only projection transported by the mod boundary.
+    #[doc(hidden)]
+    pub fn __wire_from_fields(component: Option<&'a Tag>, ominous_banner: bool) -> Self {
+        Self {
+            component,
+            ominous_banner,
+        }
+    }
+
     /// Read tooltip visibility from an owned API stack's effective component patch.
     /// The game supplies this stack only after the tooltip subscription guard.
     pub fn for_stack(stack: &'a ItemStack) -> Self {
@@ -34,14 +43,14 @@ impl<'a> TooltipDisplay<'a> {
     /// the vanilla banner default when the engine stores that default implicitly.
     pub fn from_component(component: Option<&'a Tag>, ominous_banner: bool) -> Self {
         Self {
-            component: component.map(std::borrow::Cow::Borrowed),
+            component,
             ominous_banner,
         }
     }
 
     fn hides_tooltip(&self) -> bool {
         matches!(
-            self.component.as_deref().and_then(|display| display.get("hide_tooltip")),
+            self.component.and_then(|display| display.get("hide_tooltip")),
             Some(Tag::Byte(value)) if *value != 0
         )
     }
@@ -68,7 +77,6 @@ impl<'a> TooltipDisplay<'a> {
         }
         let Some(Tag::List(hidden)) = self
             .component
-            .as_deref()
             .and_then(|display| display.get("hidden_components"))
         else {
             return true;
@@ -76,24 +84,6 @@ impl<'a> TooltipDisplay<'a> {
         !hidden.iter().any(|tag| {
             matches!(tag, Tag::String(id) if id.0.iter().copied().eq(component.encode_utf16()))
         })
-    }
-}
-
-/// Owned transport form; native rendering continues to borrow the component.
-impl From<&TooltipDisplay<'_>> for (Option<Tag>, bool) {
-    fn from(display: &TooltipDisplay<'_>) -> Self {
-        (
-            display.component.as_deref().cloned(),
-            display.ominous_banner,
-        )
-    }
-}
-impl From<(Option<Tag>, bool)> for TooltipDisplay<'_> {
-    fn from((component, ominous_banner): (Option<Tag>, bool)) -> Self {
-        Self {
-            component: component.map(std::borrow::Cow::Owned),
-            ominous_banner,
-        }
     }
 }
 

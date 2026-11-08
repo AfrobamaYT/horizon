@@ -336,6 +336,17 @@ impl<T: FieldSet> Record for Fields<T> {
     }
 }
 
+/// A checked append-only delta. Only the API's type-owned validation can create it.
+#[doc(hidden)]
+pub struct Append<T>(Vec<T>);
+impl<T> Append<T> {
+    pub(crate) fn new(values: Vec<T>) -> Self {
+        Self(values)
+    }
+    pub(crate) fn into_vec(self) -> Vec<T> {
+        self.0
+    }
+}
 /// What can be written: every [`Wire`] value, and the borrowed forms a call passes
 /// (`&str`, `&[T]`, `Option<&T>`), which are written as the owned value they stand for.
 pub trait Put {
