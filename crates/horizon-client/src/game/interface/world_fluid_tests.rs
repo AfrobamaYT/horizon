@@ -26,13 +26,9 @@ struct Oily;
 #[mod_api::__subscriptions]
 impl Hooks for Oily {
     fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-        r.declare_world_fluid(
-            "oil",
-            WorldFluid {
-                drop_off: 2,
-                ..WorldFluid::default()
-            },
-        );
+        let mut fluid = WorldFluid::default();
+        fluid.drop_off = 2;
+        r.declare_world_fluid("oil", fluid);
         r.fluid_part("oily:oil", Thick);
     }
 }
