@@ -3,9 +3,9 @@
 
 ### Block-state facts
 
-A `BlockStateId` is a registry value, not a live object, so the facts about one that need no world are a small
+A `BlockState` is an API-owned value pairing a `BlockKey` with a block-local canonical ordinal, not a numeric engine state ID or a live object. Facts that need no world are a small
 read-only service on any host, both sides: `host.block_states()` (import `HostBlockStates`). Each reads the game's own
-tables. Fact queries and matching allocate nothing; `definition` copies the property data for the caller:
+tables through checked crossings. Fact queries and matching allocate nothing; `definition` copies the property data for the caller. Property operations on `BlockState` borrow explicit immutable block metadata; `block()` and `ordinal()` need no host:
 
 | Method | Vanilla |
 |---|---|
@@ -13,13 +13,13 @@ tables. Fact queries and matching allocate nothing; `definition` copies the prop
 | `destroy_speed(state) -> Option<f32>` | `BlockBehaviour.Properties.destroyTime` (`getDestroySpeed`): stone 1.5, -1 unbreakable |
 | `sound(state) -> Option<BlockSoundType>` | `BlockState.getSoundType()`: volume, pitch and the break, step, place, hit and fall events |
 | `has_block_entity(state) -> Option<bool>` | `BlockState.hasBlockEntity()` |
-| `states_of(block) -> Option<BlockStateRange>` | `StateDefinition.getPossibleStates`, as the block's consecutive ids |
+| `states_of(block) -> Option<BlockStateRange>` | `StateDefinition.getPossibleStates`, as owned values in canonical local-ordinal order |
 | `definition(block)` | Property names and legal serialized values |
 | `matches(state, block, constraints)` | Partial property match with typed invalid-property and invalid-value errors |
 
 Use `StateConstraint` for each partial constraint; `StateMatchError` identifies an invalid property or value by index. `StateProperty` describes a property's legal values. These types are shared by state-definition services.
 
-None for an unknown state or block, and on a host with no game behind it (a mod's test double).
+`None` for an unknown state or block, including an invalid local ordinal, and on a host with no game behind it (a mod's test double). The ordinal order is defined by the complete canonical property constraints, not by the engine's numeric enumeration.
 
 ### Fluid-state facts
 
