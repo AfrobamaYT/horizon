@@ -4270,6 +4270,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "PlayerSwitchHotbarSlotEvent.Pre",
+        paper = "PlayerItemHeldEvent",
         cancellable = true
     )]
     fn player_switch_hotbar_slot_pre();
