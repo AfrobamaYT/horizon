@@ -364,6 +364,19 @@ impl Layout {
         let mut seen = false;
         for payload in Parser::new(0).parse_all(member.module) {
             let payload = payload.map_err(|e| malformed(e.to_string()))?;
+            match &payload {
+                Payload::MemorySection(section) if section.count() != 0 => {
+                    return Err(malformed(
+                        "a shared member must import the group memory".into(),
+                    ));
+                }
+                Payload::TableSection(section) if section.count() != 0 => {
+                    return Err(malformed(
+                        "a shared member must import the group table".into(),
+                    ));
+                }
+                _ => {}
+            }
             if let Payload::CustomSection(section) = payload
                 && section.name() == "dylink.0"
             {

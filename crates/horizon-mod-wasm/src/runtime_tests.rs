@@ -5,6 +5,7 @@ fn guest(layout: u64, body: &str) -> Vec<u8> {
         r#"(module
       (@custom "dylink.0" "\01\04\00\00\00\00")
       (import "env" "memory" (memory 1))
+      (import "env" "__indirect_function_table" (table 1 funcref))
       (import "horizon" "host" (func $host (param i32 i32 i32 i32 i32) (result i32)))
       (import "horizon" "host_reply" (func $reply (param i32)))
       (func (export "horizon_layout") (result i64) i64.const {layout})
@@ -59,6 +60,41 @@ fn trap_and_deadline_stop_the_group() {
     assert!(started.elapsed() < Duration::from_secs(5));
     assert!(module.running.poisoned.load(Ordering::Relaxed));
 }
+#[test]
+fn a_member_cannot_bypass_group_limits_with_private_memories() {
+    let bytes =
+        wat::parse_str(r#"(module (@custom "dylink.0" "\01\04\00\00\00\00") (memory 1))"#).unwrap();
+    let refusal = WasmMod::instantiate(
+        &engine().unwrap(),
+        &[Member {
+            name: "private",
+            module: &bytes,
+        }],
+    )
+    .err()
+    .unwrap();
+    assert!(refusal.to_string().contains("must import the group memory"));
+}
+
+#[test]
+fn loader_initializes_and_installs_a_wasm_entry() {
+    use mod_api::__private::game::Fields;
+    let std = wat::parse_str(
+        r#"(module (@custom "dylink.0" "\01\04\00\00\00\00") (import "env" "memory" (memory 1)))"#,
+    )
+    .unwrap();
+    let module = guest(
+        mod_api::wire::LAYOUT,
+        "local.get 0 i32.const -256 i32.eq if (result i64) i64.const 0 else i64.const 17592186044420 end",
+    );
+    let manifest = horizon_mod_package::manifest::Manifest::parse(&format!("id = 'roundtrip'\nname = 'Roundtrip'\nversion = '1.0.0'\napi = '0.2'\n[wasm]\nsha512 = '{}'\ntoolchain = 'test'\nbuilt_with = 'test'\n", "a".repeat(128))).unwrap();
+    let loaded = crate::load(&std, vec![crate::WasmPackage { manifest, module }]);
+    assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
+    assert_eq!(loaded.mods.len(), 1);
+    assert_eq!(loaded.mods[0].fields().id, "roundtrip");
+    assert_eq!(loaded.manifests[0].id, "roundtrip");
+}
+
 #[test]
 fn invalid_import_input_is_a_trap_not_a_host_panic() {
     let module = module(
@@ -156,6 +192,7 @@ fn import_reply_retry_survives_a_nested_callback() {
         else
           i32.const {id} i32.const 0 i32.const 0 i32.const 0 i32.const 0 call $host
           i32.const 8 i32.ne if unreachable end
+          i32.const 0 i64.load i64.const 0 i64.ne if unreachable end
           i32.const 1024 call $reply
           i64.const 4398046511112
         end"#
@@ -170,10 +207,37 @@ fn import_reply_retry_survives_a_nested_callback() {
 }
 
 #[test]
+fn dropping_a_handler_releases_its_id_on_the_next_call() {
+    let module = module(
+        r#"
+        local.get 0 i32.const -255 i32.eq
+        if (result i64)
+          local.get 1 i32.load i32.const 1 i32.ne if unreachable end
+          local.get 1 i64.load offset=4 i64.const 123 i64.ne if unreachable end
+          i32.const 1024 i32.const 1 i32.store
+          i64.const 0
+        else
+          i64.const 4398046511108
+        end"#,
+    );
+    assert_eq!(call(&module), Some(0));
+    drop(WasmHandler {
+        module: module.clone(),
+        index: Id(123),
+    });
+    assert_eq!(call(&module), Some(1));
+    assert!(!module.running.poisoned.load(Ordering::Relaxed));
+}
+
+#[test]
 fn memory_growth_limit_traps_and_poison_is_shared_by_proxies() {
     let module = module("i32.const 4096 memory.grow drop i64.const 0");
     let other = module.clone();
     assert_eq!(call(&module), None);
     assert!(other.running.poisoned.load(Ordering::Relaxed));
     assert_eq!(call(&other), None);
+    let module =
+        super::runtime_tests::module("ref.null func i32.const 1048576 table.grow drop i64.const 0");
+    assert_eq!(call(&module), None);
+    assert!(module.running.poisoned.load(Ordering::Relaxed));
 }
