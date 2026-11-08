@@ -286,6 +286,15 @@ pub fn resource_scope() -> crate::wire::ResourceScope {
 /// the high half, the length in the low. A refused call answers `u32::MAX` as the length and
 /// its reason, as a string, at the pointer.
 pub fn run(id: u32) -> (*const u8, u32) {
+    static HOOK: std::sync::Once = std::sync::Once::new();
+    // A trap says nothing about why: the game gets the panic's text first.
+    HOOK.call_once(|| {
+        std::panic::set_hook(Box::new(|info| {
+            let mut args = begin();
+            args.put_str(&info.to_string());
+            host(crate::wire::HOST_LOG, args);
+        }));
+    });
     let _resources = resource_scope();
     let _ = hooks();
     let (input, depth, mut reply) = RUNTIME.with(|rt| {
