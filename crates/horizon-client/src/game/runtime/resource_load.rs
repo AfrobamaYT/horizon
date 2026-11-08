@@ -390,7 +390,17 @@ pub(super) fn with_mod_attributes(
                         id: declared.id.clone(),
                         definition: declared.definition,
                         syncable: declared.syncable,
-                        sentiment: declared.sentiment,
+                        sentiment: match declared.sentiment {
+                            mod_api::Sentiment::Positive => {
+                                horizon_world::attributes::Sentiment::Positive
+                            }
+                            mod_api::Sentiment::Negative => {
+                                horizon_world::attributes::Sentiment::Negative
+                            }
+                            mod_api::Sentiment::Neutral => {
+                                horizon_world::attributes::Sentiment::Neutral
+                            }
+                        },
                     },
                 )
                 .collect::<Vec<_>>(),

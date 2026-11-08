@@ -1,6 +1,6 @@
 use super::*;
+use crate::Sentiment;
 use horizon_world::attributes::Definition;
-pub use horizon_world::attributes::Sentiment;
 
 /// An attribute type a mod declares, as the game reads it when it grows the
 /// attribute catalog (`Catalog::with_attributes`, #812).
@@ -34,6 +34,8 @@ pub trait AttributesRegistrar {
     /// that colors its tooltip lines (`Attribute.setSentiment`, POSITIVE by
     /// default; the translation key is `attribute.name.<ns>.<path>`).
     ///
+    /// Only both-side packages may declare attributes; other sides refuse because
+    /// declarations assign network registry IDs.
     /// The declarations join the attribute catalog once, at load, appended
     /// after every vanilla attribute **sorted by declaring mod id, then by
     /// attribute id** — the order is the network id's, so every side running
@@ -69,6 +71,12 @@ impl AttributesRegistrar for PartRegistrar {
         sentiment: Sentiment,
     ) -> Result<(), crate::AttributeRegistrationError> {
         let result = (|| {
+            if crate::phase::LoadedMods::new()
+                .get(self.mod_id)
+                .is_some_and(|package| package.side() != crate::Side::Both)
+            {
+                return Err(crate::AttributeRegistrationError::WrongSide);
+            }
             let (namespace, name) = path.split_once(':').unwrap_or((self.mod_id, path));
             if namespace.is_empty() || name.is_empty() || namespace != self.mod_id {
                 return Err(crate::AttributeRegistrationError::InvalidId);
@@ -113,7 +121,6 @@ impl AttributesRegistrar for PartRegistrar {
 mod tests {
     use super::*;
     use crate::AttributeRegistrationError;
-    pub use horizon_world::attributes::Sentiment;
 
     /// `RangedAttribute`'s own checks and the registration's: an id outside
     /// the mod's namespace (a vanilla attribute's included), a duplicate
@@ -187,6 +194,20 @@ mod tests {
                 .iter()
                 .all(|refusal| refusal.contains("mod mymod"))
         );
+    }
+
+    #[test]
+    fn attribute_sentiment_wire_round_trip() {
+        use crate::wire::{Reader, Wire, Writer};
+        for sentiment in [Sentiment::Positive, Sentiment::Negative, Sentiment::Neutral] {
+            let mut writer = Writer::new();
+            sentiment.put(&mut writer);
+            let bytes = writer.into_bytes();
+            assert_eq!(
+                Sentiment::take(&mut Reader::new(&bytes)).unwrap(),
+                sentiment
+            );
+        }
     }
 
     fn positive() -> Sentiment {

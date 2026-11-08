@@ -491,7 +491,10 @@ only for attributes the template has; one it lacks stops the content root's buil
 ```
 
 A code mod can also register an attribute type of its own with `Registrar::declare_attribute(path, default,
-min, max, syncable, sentiment)` (vanilla's `RangedAttribute` in the attribute registry): the id lands in the
+min, max, syncable, sentiment)` (vanilla's `RangedAttribute` in the attribute registry). Only both-side
+packages may declare attributes; client-only and server-only packages refuse with `WrongSide` so extra
+client mods cannot shift packet IDs. `mod_api::Sentiment` is `Positive`, `Negative`, or `Neutral`.
+The id lands in the
 mod's namespace, the bounds and default follow `RangedAttribute`'s own checks, `syncable` decides whether the
 value syncs to clients, and `sentiment` (POSITIVE by default) colors the attribute's tooltip lines. The declared
 attributes append after the vanilla ones in the attribute catalog — sorted by declaring mod id, then attribute
