@@ -131,6 +131,10 @@ mod transport {
         fn host_reply(out_ptr: *mut u8);
     }
 
+    pub(super) fn try_call(id: u32, input: &[u8], out: &mut Vec<u8>) -> bool {
+        call(id, input, out);
+        true
+    }
     pub(super) fn call(id: u32, input: &[u8], out: &mut Vec<u8>) {
         let cap = out.capacity();
         // SAFETY: the game writes at most `cap` bytes at `out`'s spare capacity, which it owns;
@@ -167,11 +171,19 @@ mod transport {
         TRANSPORT.with(|t| *t.borrow_mut() = transport);
     }
 
-    pub(super) fn call(id: u32, input: &[u8], out: &mut Vec<u8>) {
+    pub(super) fn try_call(id: u32, input: &[u8], out: &mut Vec<u8>) -> bool {
         let transport = TRANSPORT
-            .with(|t| t.borrow().clone())
-            .expect("no transport to the game is set");
+            .try_with(|t| t.try_borrow().ok().and_then(|t| t.clone()))
+            .ok()
+            .flatten();
+        let Some(transport) = transport else {
+            return false;
+        };
         out.extend_from_slice(&transport(id, input));
+        true
+    }
+    pub(super) fn call(id: u32, input: &[u8], out: &mut Vec<u8>) {
+        assert!(try_call(id, input, out), "no transport to the game is set");
     }
 }
 
@@ -304,10 +316,15 @@ pub fn run(id: u32) -> (*const u8, u32) {
     static HOOK: std::sync::Once = std::sync::Once::new();
     // A trap says nothing about why: the game gets the panic's text first.
     HOOK.call_once(|| {
-        std::panic::set_hook(Box::new(|info| {
-            let mut args = begin();
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            // A panic can originate while the pool is borrowed, or outside a guest
+            // call in a native harness. Logging must not borrow it or require a transport.
+            let mut args = Writer::new();
             args.put_str(&info.to_string());
-            host(crate::wire::HOST_LOG, args);
+            if !transport::try_call(crate::wire::HOST_LOG, args.bytes(), &mut Vec::new()) {
+                previous(info);
+            }
         }));
     });
     let _resources = resource_scope();
@@ -362,6 +379,76 @@ fn release(ids: Vec<Id>) {
     for id in ids {
         let views = HANDLERS.with(|h| h.borrow_mut().remove(id));
         drop(views);
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn guest_pool_bounds_returned_leases_and_discards_large_buffers() {
+        let mut runtime = Runtime::default();
+        let leases: Vec<_> = (0..100).map(|_| Vec::with_capacity(32)).collect();
+        for buffer in leases {
+            runtime.recycle(buffer);
+        }
+        assert_eq!(runtime.spare.len(), 64);
+        let mut runtime = Runtime::default();
+        runtime.recycle(Vec::with_capacity(1024 * 1024 + 1));
+        assert!(runtime.spare.is_empty());
+    }
+
+    #[test]
+    fn guest_pool_returns_nested_import_arguments_and_replies() {
+        set_transport(Some(std::rc::Rc::new(|id, bytes| {
+            if id == 0 {
+                assert_eq!(Reader::decode::<u32>(bytes).unwrap(), 5);
+                let mut arguments = begin();
+                arguments.put(&37u32);
+                assert_eq!(host(1, arguments).take::<u32>().unwrap(), 99);
+            } else {
+                assert_eq!(Reader::decode::<u32>(bytes).unwrap(), 37);
+            }
+            99u32.to_le_bytes().to_vec()
+        })));
+        let mut arguments = begin();
+        arguments.put(&5u32);
+        let reply = host(0, arguments);
+        assert_eq!(reply.take::<u32>().unwrap(), 99);
+        // The nested arguments and reply, plus outer arguments, have returned. The
+        // outer answer still belongs to Reply and cannot be leased by another call.
+        RUNTIME.with(|rt| assert_eq!(rt.borrow().spare.len(), 3));
+        drop(reply);
+        RUNTIME.with(|rt| assert_eq!(rt.borrow().spare.len(), 4));
+        set_transport(None);
+    }
+
+    #[test]
+    fn guest_pool_does_not_cache_large_import_arguments_or_answers() {
+        set_transport(Some(std::rc::Rc::new(|_, bytes| {
+            assert!(bytes.len() > 1024 * 1024);
+            vec![7]
+        })));
+        let mut arguments = begin();
+        arguments.put_str(&"x".repeat(1024 * 1024 + 1));
+        let reply = host(0, arguments);
+        assert_eq!(reply.0, [7]);
+        RUNTIME.with(|rt| assert!(rt.borrow().spare.is_empty()));
+        drop(reply);
+        RUNTIME.with(|rt| assert_eq!(rt.borrow().spare.len(), 1));
+        set_transport(Some(std::rc::Rc::new(|_, _| vec![7; 1024 * 1024 + 1])));
+        let mut arguments = begin();
+        arguments.put(&5u32);
+        let reply = host(0, arguments);
+        assert_eq!(reply.0.len(), 1024 * 1024 + 1);
+        drop(reply);
+        RUNTIME.with(|rt| {
+            let runtime = rt.borrow();
+            assert_eq!(runtime.spare.len(), 1);
+            assert!(runtime.spare[0].capacity() <= 1024 * 1024);
+        });
+        set_transport(None);
     }
 }
 
