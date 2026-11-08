@@ -5,6 +5,8 @@ use horizon_mod_wasm::{WasmPackage, load};
 use mod_api::{Host, ModBlockEntity, ModEntry, ServerHost};
 use std::time::Instant;
 
+// Only the block entity parts are measured; the point listeners are tested elsewhere.
+#[allow(unused)]
 #[path = "fixture/src/lib.rs"]
 mod fixture;
 

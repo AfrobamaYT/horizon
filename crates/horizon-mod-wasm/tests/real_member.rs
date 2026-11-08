@@ -103,6 +103,9 @@ fn real_member() {
     );
     // The real point's expansion: its `&mut` place copied in and out of the wasm listener's
     // record, its by-value message changed, and its cancel skipping the body.
+    // The guest built `shutdown::on_shutdown`, the source `native_listener` registers natively.
+    let _: mod_points::listeners::GameServerLifecycleRememberShutdownListener =
+        shutdown::on_shutdown;
     for (before, message, after) in shutdown::CASES {
         let mut failure = before.map(String::from);
         remember_shutdown(&mut failure, message.into());
