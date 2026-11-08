@@ -42,6 +42,10 @@ pub(crate) struct State {
     depth: usize,
     group: usize,
 }
+// SAFETY: frames contain borrowed native objects only while the group mutex is held.
+// They are pushed and popped synchronously on that thread; callbacks borrow the same
+// locked store through a thread-local loan. Between threads the frame stack is empty.
+unsafe impl Send for State {}
 impl Default for State {
     fn default() -> Self {
         Self {
@@ -95,6 +99,13 @@ pub struct WasmMod {
 pub struct WasmHandler {
     pub index: Id,
     pub module: WasmMod,
+}
+impl std::fmt::Debug for WasmHandler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WasmHandler")
+            .field("index", &self.index)
+            .finish_non_exhaustive()
+    }
 }
 impl WasmHandler {
     pub fn subscriptions(&self, owner: &'static str, export_id: u32) -> &'static [Option<HookId>] {
@@ -201,6 +212,9 @@ fn host(
         .checked_add(len as usize)
         .ok_or_else(|| wasmtime::Error::msg("input range overflow"))?;
     let depth = caller.data().depth;
+    if depth == 0 {
+        return Err(wasmtime::Error::msg("host import outside a call"));
+    }
     let mut input = std::mem::take(&mut caller.data_mut().imports[depth]);
     input.clear();
     input.extend_from_slice(
@@ -222,16 +236,19 @@ fn host(
     let result = if id == mod_api::wire::HOST_RELEASE {
         let mut reader = Reader::new(&input);
         let id = reader.take::<Id>()?;
+        if !reader.rest().is_empty() {
+            return Err(WireError::Trailing.into());
+        }
         unsafe { &mut *cx }
             .held
             .remove(id)
             .map(|_| ())
-            .map_err(|e| wasmtime::Error::msg(e.to_string()))
+            .map_err(|e| wasmtime::Error::msg(format!("{e:?}")))
     } else {
         // SAFETY: Cx is boxed and stable; serve must release its frame borrows before
         // invoking native code that can synchronously reenter the guest.
         unsafe { serve(id, cx, &input, &mut reply) }
-            .map_err(|e| wasmtime::Error::msg(e.to_string()))
+            .map_err(|e| wasmtime::Error::msg(format!("{e:?}")))
     };
     drop(loan);
     caller.data_mut().imports[depth] = input;
@@ -249,6 +266,9 @@ fn host_reply(mut caller: Caller<'_, State>, ptr: u32) -> wasmtime::Result<()> {
         .memory
         .ok_or_else(|| wasmtime::Error::msg("no group memory"))?;
     let depth = state.depth;
+    if depth == 0 {
+        return Err(wasmtime::Error::msg("host reply outside a call"));
+    }
     let reply = std::mem::take(&mut caller.data_mut().replies[depth]);
     let result = memory.write(&mut caller, ptr as usize, reply.bytes());
     caller.data_mut().replies[depth] = reply;
