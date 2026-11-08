@@ -566,6 +566,27 @@ pub trait EntitiesBackendMut {
         rotation: Option<[f32; 2]>,
     ) -> bool;
     /// Side: server.
+    /// Sends the entity to `pos` in the level `dimension` (`minecraft:the_nether`,
+    /// or a level a mod registered), as `/execute in <dimension> run tp` does
+    /// (`Entity.teleportTo(ServerLevel, ..)`): `pos` is in that level's own
+    /// coordinates (nothing scales it by `coordinate_scale`), a level nobody has
+    /// entered opens first, and a vehicle takes its passengers along. A player
+    /// arrives after the current tick, and `player_teleported` and
+    /// `player_changed_dimension` report the move. In the entity's own level
+    /// it is `entity_teleport_to`. False for what `entity_teleport_to` refuses,
+    /// a dimension that isn't registered, and kinds that cannot change level
+    /// (all but a player, a mob, a boat or a minecart). A fake player stays
+    /// where it is, and the call is still true. Nothing builds ground at the
+    /// destination.
+    #[access(WorldOnly)]
+    fn entity_teleport_to_level(
+        &mut self,
+        entity: EntityRef,
+        dimension: &str,
+        pos: [f64; 3],
+        rotation: Option<[f32; 2]>,
+    ) -> bool;
+    /// Side: server.
     /// Turns the entity to `yaw` and `pitch` in degrees (`Entity.setYRot`,
     /// `setXRot`): the pitch wraps and is clamped to -90..90. False for kinds
     /// whose rotation Horizon does not fully store, or an unavailable player.
