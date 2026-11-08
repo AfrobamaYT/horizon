@@ -793,6 +793,10 @@ fn total_weight(list: &[SpawnEntry]) -> i64 {
     list.iter().map(|e| i64::from(e.weight)).sum()
 }
 
+fn has_weight(list: &[SpawnEntry]) -> bool {
+    total_weight(list) > 0
+}
+
 /// `WeightedList.getRandom`.
 pub fn weighted_pick(list: &[SpawnEntry], random: &mut impl RandomSource) -> Option<SpawnEntry> {
     let total = total_weight(list);
@@ -1476,7 +1480,7 @@ pub fn spawn_mobs_for_chunk_generation<L: NaturalLevel, R: RandomSource, Q: Rand
         .and_then(|b| b.get("creature"))
         .cloned()
         .unwrap_or_default();
-    if total_weight(&mobs) == 0 {
+    if !has_weight(&mobs) {
         return;
     }
     let probability = l.creature_probability(sx, sy, sz);
@@ -1614,7 +1618,16 @@ mod tests {
             total_weight(&[entry.clone(), entry.clone(), entry]),
             3 * i64::from(i32::MAX)
         );
-        assert_eq!(total_weight(&[]), 0);
+        assert!(has_weight(&[
+            entry_for_test(),
+            entry_for_test(),
+            entry_for_test()
+        ]));
+        assert!(has_weight(&[entry_for_test(), entry_for_test()]));
+        assert!(!has_weight(&[]));
+        let mut zero = entry_for_test();
+        zero.weight = 0;
+        assert!(!has_weight(&[zero]));
         let mut random = horizon_core::random::LegacyRandom::new(42);
         assert!(
             weighted_pick(
@@ -1623,6 +1636,40 @@ mod tests {
             )
             .is_some()
         );
+    }
+
+    #[test]
+    fn in_range_picks_match_old_draw() {
+        for weights in [[1, 1, 1], [1, 3, 7], [5, 0, 2]] {
+            let list: Vec<_> = weights
+                .into_iter()
+                .enumerate()
+                .map(|(i, weight)| {
+                    let mut entry = entry_for_test();
+                    entry.entity = i.to_string();
+                    entry.weight = weight;
+                    entry
+                })
+                .collect();
+            for seed in 0..16 {
+                let mut actual = horizon_core::random::LegacyRandom::new(seed);
+                let mut old = horizon_core::random::LegacyRandom::new(seed);
+                let total: i64 = list.iter().map(|e| i64::from(e.weight)).sum();
+                let mut selection = i64::from(old.next_int_bound(total as i32).unwrap());
+                let expected = list
+                    .iter()
+                    .find(|e| {
+                        selection -= i64::from(e.weight);
+                        selection < 0
+                    })
+                    .unwrap();
+                assert_eq!(
+                    weighted_pick(&list, &mut actual).unwrap().entity,
+                    expected.entity
+                );
+                assert_eq!(actual.next_long(), old.next_long());
+            }
+        }
     }
 
     fn entry_for_test() -> SpawnEntry {
