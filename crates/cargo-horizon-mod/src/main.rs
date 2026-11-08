@@ -317,9 +317,12 @@ fn build() -> Result<PathBuf, String> {
 }
 
 fn build_in(root: &Path) -> Result<PathBuf, String> {
+    pack_into(root, &root.join("target/horizon-mod"))
+}
+
+fn pack_into(root: &Path, dir: &Path) -> Result<PathBuf, String> {
     let package = Package::read(root)?;
     let bytes = Package::pack_directory(root)?;
-    let dir = root.join("target/horizon-mod");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join(format!("{}.hmod", package.manifest.id));
     // Write then rename, so a running game never reads half a file.

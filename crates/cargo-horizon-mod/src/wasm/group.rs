@@ -2,8 +2,6 @@
 use super::*;
 use std::collections::BTreeMap;
 
-const FLAGS: &str = "-Crelocation-model=pic -Zshare-generics=n -Zdefault-visibility=hidden --cfg=horizon_shared_artifacts";
-
 struct Member {
     root: PathBuf,
     stage: PathBuf,
@@ -394,7 +392,7 @@ pub(super) fn build(
             toml_edit::value(["rlib", "cdylib"].into_iter().collect::<toml_edit::Array>());
         std::fs::write(path, cargo.to_string()).map_err(|e| e.to_string())?;
         let (registrations, points) = (&member.registrations, &member.points);
-        configs.insert(member.package.clone(), serde_json::json!({"id":member.manifest["id"].as_str(), "version":member.manifest["version"].as_str(), "source":member.root, "stage":member.stage, "registrations":registrations,"points":points,"provided":crates.iter().filter(|c| **c != member.krate).map(String::as_str).collect::<Vec<_>>().join(",")}));
+        configs.insert(member.package.clone(), serde_json::json!({"id":member.manifest["id"].as_str(), "version":member.manifest["version"].as_str(), "stage":member.stage, "registrations":registrations,"points":points,"provided":crates.iter().filter(|c| **c != member.krate).map(String::as_str).collect::<Vec<_>>().join(",")}));
         if let Some(deps) = member
             .manifest
             .get("dependencies")
@@ -459,39 +457,11 @@ pub(super) fn build(
     );
     workspace["workspace"]["resolver"] = toml_edit::value("3");
     std::fs::write(stage.join("Cargo.toml"), workspace.to_string()).map_err(|e| e.to_string())?;
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let mut command = pinned("cargo");
-    command
-        .args([
-            "build",
-            "--workspace",
-            "--lib",
-            "--target",
-            TARGET,
-            "--profile",
-            PROFILE,
-            "-Zbuild-std=std,panic_abort",
-        ])
-        .args([
-            "--config",
-            &format!("profile.{PROFILE}.inherits=\"release\""),
-        ])
-        .args(["--config", &format!("profile.{PROFILE}.panic=\"abort\"")])
-        .args(["--config", &format!("profile.{PROFILE}.codegen-units=1")])
-        .current_dir(&stage)
-        .env("CARGO_TARGET_DIR", &target)
-        .env("RUSTC_BOOTSTRAP", "1")
-        .env("HORIZON_STD_ARTIFACTS", target.join("std-artifacts"))
-        .env("CARGO_INCREMENTAL", "0")
-        .env("RUSTFLAGS", FLAGS)
-        .env("RUSTC_WRAPPER", &exe)
-        .env(
-            "HORIZON_GROUP_WRAPPER",
-            serde_json::to_string(&configs).map_err(|e| e.to_string())?,
-        )
-        .env("CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER", &exe)
-        .env(LINK_ENV, "member")
-        .env(LLD_ENV, &toolchain.lld);
+    let mut command = cargo_command("build", "member", &stage, &target, &toolchain)?;
+    command.arg("--workspace").env(
+        "HORIZON_GROUP_WRAPPER",
+        serde_json::to_string(&configs).map_err(|e| e.to_string())?,
+    );
     if !features.is_empty() {
         command.args(["--features", &features.join(",")]);
     }
@@ -563,7 +533,7 @@ pub(super) fn build(
             .map_err(|e| e.to_string())?;
     }
     for member in &members {
-        crate::build_in(&member.root)?;
+        crate::pack_into(&member.root, &target)?;
     }
     Ok(())
 }
@@ -638,6 +608,11 @@ pub fn rustc(mut args: Vec<String>) -> Result<(), String> {
             config["id"].as_str().ok_or("no id")?,
             config["version"].as_str().ok_or("no version")?,
             sha512_of(features.join(",").as_bytes())
+        ));
+        let stage = Path::new(config["stage"].as_str().ok_or("no stage")?);
+        args.push(format!(
+            "--remap-path-prefix={}=/horizon/group",
+            stage.parent().ok_or("no workspace directory")?.display()
         ));
         args.push(format!(
             "--remap-path-prefix={}=/horizon/mod/{}",

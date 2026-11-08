@@ -23,6 +23,7 @@ const LLD_ENV: &str = "HORIZON_MOD_LLD";
 /// The library mods' crate names, comma-separated, that a member leaves out.
 const PROVIDED_ENV: &str = "HORIZON_MOD_PROVIDED";
 const PROFILE: &str = "horizon-wasm";
+const FLAGS: &str = "-Crelocation-model=pic -Zshare-generics=n -Zdefault-visibility=hidden --cfg=horizon_shared_artifacts";
 
 /// Guest boundary exports, kept even though they originate in an rlib dependency.
 const GUEST_EXPORTS: &[&str] = &["horizon_layout", "horizon_in", "horizon_hook"];
@@ -131,25 +132,20 @@ fn toolchain() -> Result<Toolchain, String> {
     })
 }
 
-/// Builds the crate at `root` as a group member and gives its module.
-fn cargo_member(
+/// The shared compiler policy for both mod members and the game's standard library.
+fn cargo_command(
+    action: &str,
+    role: &str,
     root: &Path,
     target_dir: &Path,
     toolchain: &Toolchain,
-    role: &str,
-    provided: &[String],
-    features: &[String],
-    registrations: &str,
-    point_names: &str,
-) -> Result<Vec<u8>, String> {
+) -> Result<Command, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let mut command = pinned("cargo");
-    command.args(["rustc", "--lib", "--crate-type", "cdylib"]);
-    if !features.is_empty() {
-        command.args(["--features", &features.join(",")]);
-    }
     command
         .args([
+            action,
+            "--lib",
             "--target",
             TARGET,
             "--profile",
@@ -161,53 +157,19 @@ fn cargo_member(
             &format!("profile.{PROFILE}.inherits=\"release\""),
         ])
         .args(["--config", &format!("profile.{PROFILE}.panic=\"abort\"")])
-        // One unit per crate: about 14% faster mod logic for a slower mod build. LTO isn't
-        // possible, as each crate's symbols must stay visible to the group's linker.
         .args(["--config", &format!("profile.{PROFILE}.codegen-units=1")])
         .current_dir(root)
         .env("CARGO_TARGET_DIR", target_dir)
+        .env("CARGO_INCREMENTAL", "0")
         .env("RUSTC_WRAPPER", &exe)
         .env("HORIZON_GROUP_WRAPPER", "{}")
         .env("HORIZON_STD_ARTIFACTS", target_dir.join("std-artifacts"))
         .env("RUSTC_BOOTSTRAP", "1")
-        // Every crate's symbols stay inside its member, but the member's own crate's, which its
-        // dependents link against (`-- -Zdefault-visibility=interposable` below): a member exports
-        // its own API, and the linker drops whatever only another crate's exports reached.
-        .env(
-            "RUSTFLAGS",
-            "-Crelocation-model=pic -Zshare-generics=n -Zdefault-visibility=hidden --cfg=horizon_shared_artifacts",
-        )
-        .env("HORIZON_GUEST_REGISTRATIONS", registrations)
-        .env("HORIZON_POINT_NAMES", point_names)
+        .env("RUSTFLAGS", FLAGS)
         .env("CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER", &exe)
         .env(LINK_ENV, role)
-        .env(LLD_ENV, &toolchain.lld)
-        .env(PROVIDED_ENV, provided.join(","));
-    command.args([
-        "--",
-        "-Zdefault-visibility=interposable",
-        &format!(
-            "--cfg=horizon_guest_registration=\"{}\"",
-            sha512_of(registrations.as_bytes())
-        ),
-    ]);
-    let status = command.status().map_err(|e| format!("cargo: {e}"))?;
-    if !status.success() {
-        return Err("cargo build failed".into());
-    }
-    let metadata: Value = serde_json::from_str(&output({
-        let mut c = pinned("cargo");
-        c.args(["metadata", "--format-version", "1", "--no-deps"]);
-        c.current_dir(root);
-        c
-    })?)
-    .map_err(|e| e.to_string())?;
-    let lib = lib_name(&metadata["packages"][0]).ok_or("the crate has no [lib]")?;
-    let path = target_dir
-        .join(TARGET)
-        .join(PROFILE)
-        .join(format!("{lib}.wasm"));
-    std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))
+        .env(LLD_ENV, &toolchain.lld);
+    Ok(command)
 }
 
 fn lib_name(package: &Value) -> Option<String> {
@@ -234,7 +196,23 @@ fn std_member(target_dir: &Path, toolchain: &Toolchain) -> Result<Vec<u8>, Strin
         "// The group's one std: linked whole and exported.\n",
     )
     .map_err(|e| e.to_string())?;
-    cargo_member(&dir, target_dir, toolchain, "std", &[], &[], "", "[]")
+    let mut command = cargo_command("rustc", "std", &dir, target_dir, toolchain)?;
+    command.args([
+        "--crate-type",
+        "cdylib",
+        "--",
+        "-Zdefault-visibility=interposable",
+    ]);
+    if !command.status().map_err(|e| e.to_string())?.success() {
+        return Err("Cargo std build failed".into());
+    }
+    std::fs::read(
+        target_dir
+            .join(TARGET)
+            .join(PROFILE)
+            .join("horizon_wasm_std.wasm"),
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// `wasm-std <out>`: the std member the game ships beside its executable.
@@ -315,6 +293,14 @@ pub fn build(root: &Path, catalog: Option<&Path>, additional: &[PathBuf]) -> Res
     group::build(root, catalog, additional)
 }
 
+/// rustc emits a synthetic allocator-shim object for every final root. Its compiler-private
+/// symbols are local implementation details, not another copy of the library API.
+fn member_export(name: &str) -> bool {
+    name != "__horizon_mod_hooks"
+        && !rustc_demangle::try_demangle(name)
+            .is_ok_and(|symbol| format!("{symbol:#}").starts_with("__rustc::"))
+}
+
 /// The link step, run by cargo as the linker: rust-lld linking a shared module, then rustc's
 /// own metadata sections dropped.
 pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
@@ -362,9 +348,9 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
                 "--no-whole-archive".to_owned(),
             ]);
         } else if role == "member"
-            && krate.as_deref().is_some_and(|k| {
-                (std && k != "compiler_builtins") || provided.iter().any(|p| p == k)
-            })
+            && krate
+                .as_deref()
+                .is_some_and(|k| std || provided.iter().any(|p| p == k))
         {
             continue;
         } else if role == "std" && arg == "--gc-sections" {
@@ -417,7 +403,7 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
             let mut section = wasm_encoder::ExportSection::new();
             for export in reader.clone() {
                 let export = export.map_err(|e| e.to_string())?;
-                if export.name != "__horizon_mod_hooks" {
+                if member_export(export.name) {
                     let kind = wasm_encoder::ExportKind::try_from(export.kind)
                         .map_err(|e| format!("{e:?}"))?;
                     section.export(export.name, kind, export.index);
@@ -465,4 +451,20 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
         }
     }
     std::fs::write(&output, module.finish()).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod export_tests {
+    use super::member_export;
+    #[test]
+    fn compiler_allocator_shims_are_private_but_library_symbols_are_public() {
+        assert!(!member_export(
+            "_RNvCs5fGHjzWXRav_7___rustc35___rust_no_alloc_shim_is_unstable_v2"
+        ));
+        assert!(!member_export("__horizon_mod_hooks"));
+        assert!(member_export(
+            "_RNvCs5Y1sYENNevt_10shared_lib12shared_value"
+        ));
+        assert!(member_export("horizon_hook"));
+    }
 }

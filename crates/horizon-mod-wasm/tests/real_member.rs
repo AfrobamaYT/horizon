@@ -78,10 +78,9 @@ fn real_library_dependency() {
         .collect();
     // Another valid library member, but not the build these dependents compiled against.
     replaced[0].module.extend_from_slice(&[0, 2, 1, b'x']);
-    let mut manifest = serde_json::to_value(&replaced[0].manifest).unwrap();
-    manifest["wasm"]["sha512"] =
-        horizon_mod_package::manifest::sha512_of(&replaced[0].module).into();
-    replaced[0].manifest = serde_json::from_value(manifest).unwrap();
+    let mut manifest = serde_json::to_value(replaced[0].manifest.wasm.as_ref().unwrap()).unwrap();
+    manifest["sha512"] = horizon_mod_package::manifest::sha512_of(&replaced[0].module).into();
+    replaced[0].manifest.wasm = Some(serde_json::from_value(manifest).unwrap());
     let refused = load(&std::fs::read(&std).unwrap(), replaced);
     assert!(refused.refused.iter().any(|(_, r)| matches!(r, horizon_mod_wasm::Refusal::LinkedAgainst { dependency } if dependency == "wasm_test_library")));
     let loaded = load(&std::fs::read(std).unwrap(), packages);

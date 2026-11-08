@@ -57,11 +57,16 @@ each package, not to the mod from which the command was launched.
 Ordinary Rust calls such as `my_library::function()`, statics, generics and owned Rust types need
 no generated interface or export annotations. Each member records its compiler, target, settings,
 rlib digest and dependency artifact identities in `horizon.build` metadata covered by its module
-hash. A shared crate disambiguator alone is not an ABI guarantee: the loader checks the exact
-dependency build recorded in `[wasm.linked]`.
+hash. Mod crate disambiguators use the mod ID, version and resolved Cargo features rather than
+the temporary workspace path. A shared crate disambiguator alone is not an ABI guarantee:
+the loader checks the exact dependency build recorded in `[wasm.linked]`, including when the
+library and its consumers were built separately. Changing a library's source, toolchain,
+features or settings requires rebuilding its consumers.
 
-The build packages every member of the resolved group. To include additional local roots in the
-same Cargo invocation, repeat `--with path/to/another/mod`. The game links a mod with its
+The build packages every member of the resolved group into the invoking project's
+`target/horizon-mod/` directory. A consumer build does not replace another project's previously
+packaged `.hmod`. To include additional local roots in the same Cargo invocation, repeat
+`--with path/to/another/mod`. The game links a mod with its
 dependencies at load, one copy of each library shared by every mod that uses it, and refuses a
 mod whose library is missing or another build than the one it was linked against, naming it on
 the Mods page. An optional dependency is built in with the Cargo feature of its id, so its crate's
