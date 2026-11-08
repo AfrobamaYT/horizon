@@ -155,6 +155,14 @@ impl mod_api::BlockEntityPart for MachineBlock {
     fn block_entity_subscribed(&self) -> &'static [Option<mod_api::HookId>] {
         &[]
     }
+    fn block_entity(
+        &self,
+        level: mod_api::LevelSide<'_>,
+        event: &mut mod_api::BlockEntityEvent<'_>,
+    ) -> Option<mod_api::Compound> {
+        assert_eq!(event.block, "test:machine");
+        matches!(level, mod_api::LevelSide::Server(_)).then(mod_api::Compound::new)
+    }
     fn block_entity_tick(
         &self,
         _: &mut dyn mod_api::ServerHost,
@@ -207,6 +215,33 @@ fn wire_loopback_machine_tick_uses_checked_snapshot_writeback() {
     );
     assert_eq!(entity.data, vec![8]);
     assert_eq!(entity.revision().changes(), before);
+}
+#[test]
+fn wire_loopback_tagged_frame_enum_preserves_side() {
+    use mod_api::BlockEntityPart;
+    let index = guest::add_handler(vec![guest::view::<dyn mod_api::BlockEntityPart>(Arc::new(
+        MachineBlock,
+    ))]);
+    let proxy = WasmHandler {
+        index,
+        module: WasmMod {
+            subscribed: &[],
+            corrupt: false,
+        },
+    };
+    let mut event = mod_api::BlockEntityEvent {
+        block: "test:machine",
+    };
+    assert!(
+        proxy
+            .block_entity(mod_api::LevelSide::Server(&guest::Guest), &mut event)
+            .is_some()
+    );
+    assert!(
+        proxy
+            .block_entity(mod_api::LevelSide::Client(&guest::Guest), &mut event)
+            .is_none()
+    );
 }
 #[test]
 fn wire_loopback_owned_box_handlers_inside_result_and_vec() {

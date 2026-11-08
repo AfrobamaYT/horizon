@@ -151,6 +151,31 @@ fn event_input(
     setup: &mut String,
     put: &mut String,
 ) {
+    if let Some(cases) = frame_cases(types, def) {
+        let tag = format!("tag_{}", expr.replace('.', "_"));
+        write!(setup, "let {tag}=match &mut {expr} {{").unwrap();
+        for (i, case) in cases.iter().enumerate() {
+            let super::ty::Payload::Tuple(v) = &case.payload else {
+                unreachable!()
+            };
+            let Ty::Dyn(name, m) = &v[0] else {
+                unreachable!()
+            };
+            write!(
+                setup,
+                "{}::{}(h) => {{ frame.set_{}{}(&{}**h); {i}u32 }},",
+                types.defs[def].rust,
+                case.rust,
+                snake(name),
+                if *m { "_mut" } else { "" },
+                if *m { "mut " } else { "" }
+            )
+            .unwrap();
+        }
+        setup.push_str("};");
+        write!(put, "w.put(&{tag});").unwrap();
+        return;
+    }
     let Kind::Record(fields) = &types.defs[def].kind else {
         return;
     };
@@ -417,12 +442,13 @@ pub(super) fn generate(surface: &mut super::Surface<'_>) -> Result<String, Strin
                             )
                             .unwrap();
                         }
+                        Ty::Named(d) if types.defs[*d].lifetimes != 0 => {
+                            write!(setup, "let mut p{i}=p{i};").unwrap();
+                            event_input(types, *d, &format!("p{i}"), &mut setup, &mut put);
+                        }
                         Ty::Ref(inner, mutable) if matches!(&**inner, Ty::Named(d) if types.defs[*d].lifetimes != 0) =>
                         {
                             let Ty::Named(d) = &**inner else {
-                                unreachable!()
-                            };
-                            let Kind::Record(_) = &types.defs[*d].kind else {
                                 unreachable!()
                             };
                             event_input(types, *d, &format!("p{i}"), &mut setup, &mut put);
