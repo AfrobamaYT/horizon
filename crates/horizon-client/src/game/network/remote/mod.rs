@@ -10454,7 +10454,7 @@ impl Game<'_> {
             self.own_attribute("minecraft:attack_damage")
                 .map_or(1.0, |v| v as f32)
         };
-        let magic = scale * (self.enchanted_damage(target, damage) - damage);
+        let magic = scale * (self.enchanted_damage(target, damage, None) - damage);
         if damage <= 0.0 && magic <= 0.0 {
             return;
         }
