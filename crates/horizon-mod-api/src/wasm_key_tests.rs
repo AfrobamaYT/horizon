@@ -193,7 +193,10 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
         Imports::effect_key(&mut state, "minecraft:poison".to_owned()).unwrap(),
         Some(poison.0)
     );
-    assert_eq!(Imports::block_key(&mut state, "missing:block".to_owned()).unwrap(), None);
+    assert_eq!(
+        Imports::block_key(&mut state, "missing:block".to_owned()).unwrap(),
+        None
+    );
     assert_eq!(
         Imports::effect_key(&mut state, "missing:effect".to_owned()).unwrap(),
         None

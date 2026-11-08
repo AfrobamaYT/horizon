@@ -1378,7 +1378,8 @@ impl Game<'_> {
         kind: &str,
         effect: &str,
     ) -> bool {
-        let key = brewing::effect(effect).and_then(|def| mod_api::__private::effect_key_by_index(def.index));
+        let key = brewing::effect(effect)
+            .and_then(|def| mod_api::__private::effect_key_by_index(def.index));
         self.can_be_affected_resolved(entity, kind, effect, key)
     }
 
@@ -1491,8 +1492,8 @@ impl Game<'_> {
         amplifier: i32,
         new: bool,
     ) {
-        if let Some(effect) =
-            brewing::effect(effect).and_then(|def| mod_api::__private::effect_key_by_index(def.index))
+        if let Some(effect) = brewing::effect(effect)
+            .and_then(|def| mod_api::__private::effect_key_by_index(def.index))
         {
             self.mod_effect_added_resolved(effect, entity, amplifier, new);
         }
