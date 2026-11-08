@@ -904,3 +904,13 @@ A key is added only where moment, server side, information and result all agree;
 [paper-AsyncChatEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/AsyncChatEvent.html
 [paper-BlockRedstoneEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/BlockRedstoneEvent.html
 [paper-GenericGameEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/world/GenericGameEvent.html
+## Event counterparts: experience orb targeting (#1015)
+
+Paper API 26.3 (paper-api `26.3.build.244-stable`), public Javadoc; Horizon cited by function name; scope = the hook below.
+The comparison is made against the Paper event's documented moment, side, exposed information and result behaviour.
+
+| Horizon hook | Paper event / status | Evidence and porting boundary |
+|---|---|---|
+| `xp_orb_targeting` | **Gap:** none (nearest [`ExperienceOrbMergeEvent`][paper-ExperienceOrbMergeEvent]) | Paper's nearest event fires when two experience orbs are about to merge, not when an orb chooses which player to follow on each tick. It exposes the two orbs rather than the orb, scan distance and selected player, so it cannot carry this hook's decision. No key. |
+
+[paper-ExperienceOrbMergeEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/entity/ExperienceOrbMergeEvent.html
