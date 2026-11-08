@@ -210,6 +210,8 @@ pub struct ItemInfo {
     pub equip_slot: Option<String>,
     /// `equippable.asset_id`: the equipment asset drawn when worn.
     pub equip_asset: Option<String>,
+    /// Texture overlaid when worn in first person.
+    pub equip_camera_overlay: Option<String>,
     /// All `attribute_modifiers`.
     pub modifiers: Vec<crate::item_data::ModifierRow>,
     /// `blocks_attacks` (shields).
@@ -1052,6 +1054,9 @@ impl Items {
                             .unwrap_or(1) as u32
                     }),
                     equip_asset: c["minecraft:equippable"]["asset_id"]
+                        .as_str()
+                        .map(str::to_owned),
+                    equip_camera_overlay: c["minecraft:equippable"]["camera_overlay"]
                         .as_str()
                         .map(str::to_owned),
                     equip_slot: c["minecraft:equippable"]["slot"]
@@ -2665,6 +2670,14 @@ pub fn bucket_contents(
 ) -> Option<(horizon_world::level::BucketContent, &str, Option<&str>)> {
     use horizon_world::{fluid::FluidKind, level::BucketContent as C};
     Some(match item {
+        _ if !item.starts_with("minecraft:") => {
+            let fluid = horizon_world::fluid::mod_fluid_of_bucket(item)?;
+            (
+                C::Fluid(FluidKind::Mod(fluid)),
+                "minecraft:item.bucket.empty",
+                None,
+            )
+        }
         "minecraft:water_bucket" => (
             C::Fluid(FluidKind::Water),
             "minecraft:item.bucket.empty",

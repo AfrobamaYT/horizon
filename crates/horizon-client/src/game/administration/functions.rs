@@ -1236,7 +1236,7 @@ impl Game<'_> {
             view.scores = scores;
             view
         });
-        Ok(self.conditions_hold(&json, view.as_ref(), source.pos))
+        Ok(self.command_conditions_hold(&json, view.as_ref(), source.pos))
     }
 }
 
