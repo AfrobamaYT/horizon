@@ -24,31 +24,6 @@ const LLD_ENV: &str = "HORIZON_MOD_LLD";
 const PROVIDED_ENV: &str = "HORIZON_MOD_PROVIDED";
 const PROFILE: &str = "horizon-wasm";
 
-/// The crates of std, linked whole into the std member and left out of every other member.
-const STD_CRATES: &[&str] = &[
-    "std",
-    "alloc",
-    "core",
-    "panic_abort",
-    "dlmalloc",
-    "cfg_if",
-    "rustc_demangle",
-    "std_detect",
-    "hashbrown",
-    "rustc_std_workspace_alloc",
-    "rustc_std_workspace_core",
-    "miniz_oxide",
-    "adler2",
-    "unwind",
-    "libc",
-    "addr2line",
-    "gimli",
-    "object",
-    "memchr",
-    "compiler_builtins",
-    "panic_unwind",
-];
-
 /// Guest boundary exports, kept even though they originate in an rlib dependency.
 const GUEST_EXPORTS: &[&str] = &["horizon_layout", "horizon_in", "horizon_hook"];
 
@@ -359,6 +334,9 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
                 .to_owned(),
         )
     };
+    let std_artifacts = PathBuf::from(
+        std::env::var_os("HORIZON_STD_ARTIFACTS").ok_or("HORIZON_STD_ARTIFACTS unset")?,
+    );
     let mut args = args
         .into_iter()
         .flat_map(|arg| match arg.strip_prefix('@') {
@@ -371,13 +349,9 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
     let mut output = None;
     while let Some(arg) = args.next() {
         let krate = crate_of(&arg);
-        let std = if let Some(directory) = std::env::var_os("HORIZON_STD_ARTIFACTS") {
-            Path::new(&arg)
-                .file_name()
-                .is_some_and(|name| PathBuf::from(directory).join(name).is_file())
-        } else {
-            krate.as_deref().is_some_and(|k| STD_CRATES.contains(&k))
-        };
+        let std = Path::new(&arg)
+            .file_name()
+            .is_some_and(|name| std_artifacts.join(name).is_file());
         if arg == "-o" {
             output = args.next();
             out.extend(["-o".to_owned(), output.clone().unwrap_or_default()]);

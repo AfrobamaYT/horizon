@@ -59,6 +59,114 @@ fn paths(
     Ok(())
 }
 
+fn inherit_dependencies(
+    table: &mut dyn toml_edit::TableLike,
+    workspace: &toml_edit::DocumentMut,
+    base: &Path,
+) -> Result<(), String> {
+    for (key, item) in table.iter_mut() {
+        let Some(child) = item.as_table_like_mut() else {
+            continue;
+        };
+        if ["dependencies", "build-dependencies", "dev-dependencies"].contains(&key.get()) {
+            for (name, value) in child.iter_mut() {
+                if value
+                    .as_table_like()
+                    .and_then(|v| v.get("workspace"))
+                    .and_then(|v| v.as_bool())
+                    != Some(true)
+                {
+                    continue;
+                }
+                let mut inherited = workspace
+                    .get("workspace")
+                    .and_then(|v| v.get("dependencies"))
+                    .and_then(|v| v.get(name.get()))
+                    .ok_or(format!("workspace dependency {name} missing"))?
+                    .clone();
+                if let Some(version) = inherited.as_str().map(str::to_owned) {
+                    inherited = toml_edit::Item::Value(toml_edit::Value::InlineTable(
+                        toml_edit::InlineTable::new(),
+                    ));
+                    inherited["version"] = toml_edit::value(version);
+                }
+                let dep = inherited
+                    .as_table_like_mut()
+                    .ok_or("workspace dependency is not a table")?;
+                if let Some(path) = dep.get("path").and_then(|v| v.as_str()) {
+                    dep.insert(
+                        "path",
+                        toml_edit::value(base.join(path).to_string_lossy().as_ref()),
+                    );
+                }
+                for (key, setting) in value
+                    .as_table_like()
+                    .ok_or("inherited dependency is not a table")?
+                    .iter()
+                {
+                    if key == "workspace" {
+                        continue;
+                    }
+                    if key == "features" {
+                        let mut features = dep
+                            .get("features")
+                            .and_then(|v| v.as_array())
+                            .cloned()
+                            .unwrap_or_default();
+                        for feature in setting
+                            .as_array()
+                            .ok_or("dependency features are not an array")?
+                            .iter()
+                        {
+                            features.push(feature.clone());
+                        }
+                        dep.insert(key, toml_edit::value(features));
+                    } else {
+                        dep.insert(key, setting.clone());
+                    }
+                }
+                *value = inherited;
+            }
+        } else {
+            inherit_dependencies(child, workspace, base)?;
+        }
+    }
+    Ok(())
+}
+
+// Registry and git mod dependencies must point at the same staged units as path mods.
+fn mod_dependencies(
+    table: &mut dyn toml_edit::TableLike,
+    dependencies: &BTreeMap<String, PathBuf>,
+) {
+    for (key, item) in table.iter_mut() {
+        if ["dependencies", "build-dependencies", "dev-dependencies"].contains(&key.get()) {
+            if let Some(deps) = item.as_table_like_mut() {
+                for (name, dependency) in deps.iter_mut() {
+                    if let Some(path) = dependencies.get(&name.get().replace('-', "_")) {
+                        if let Some(version) = dependency.as_str().map(str::to_owned) {
+                            *dependency = toml_edit::Item::Value(toml_edit::Value::InlineTable(
+                                toml_edit::InlineTable::new(),
+                            ));
+                            dependency["version"] = toml_edit::value(version);
+                        }
+                        if let Some(dep) = dependency.as_table_like_mut() {
+                            for source in
+                                ["git", "branch", "rev", "tag", "registry", "registry-index"]
+                            {
+                                dep.remove(source);
+                            }
+                            dep.insert("path", toml_edit::value(path.to_string_lossy().as_ref()));
+                        }
+                    }
+                }
+            }
+        } else if let Some(child) = item.as_table_like_mut() {
+            mod_dependencies(child, dependencies);
+        }
+    }
+}
+
 pub(super) fn build(
     root: &Path,
     catalog: Option<&Path>,
@@ -93,6 +201,9 @@ pub(super) fn build(
         )
         .parent()
         .ok_or("no package directory")?;
+        if members.iter().any(|m: &Member| m.root == source) {
+            continue;
+        }
         let Ok(text) = std::fs::read_to_string(source.join(MANIFEST)) else {
             continue;
         };
@@ -174,6 +285,12 @@ pub(super) fn build(
         .map(|m| (m.root.clone(), m.stage.clone()))
         .collect();
     let crates: Vec<_> = members.iter().map(|m| m.krate.clone()).collect();
+    if stage.exists() {
+        std::fs::remove_dir_all(&stage).map_err(|e| e.to_string())?;
+    }
+    for member in &members {
+        std::fs::create_dir_all(&member.stage).map_err(|e| e.to_string())?;
+    }
     let mut configs = serde_json::Map::new();
     let mut features = Vec::new();
     for member in &members {
@@ -221,41 +338,56 @@ pub(super) fn build(
             }
             package.remove("workspace");
         }
-        for section in ["dependencies", "build-dependencies", "dev-dependencies"] {
-            if let Some(deps) = cargo.get_mut(section).and_then(|v| v.as_table_like_mut()) {
-                for (key, value) in deps.iter_mut() {
-                    if value
-                        .as_table_like()
-                        .and_then(|v| v.get("workspace"))
-                        .and_then(|v| v.as_bool())
-                        == Some(true)
+        inherit_dependencies(cargo.as_table_mut(), &ws, workspace)?;
+        if cargo
+            .get("lints")
+            .and_then(|v| v.get("workspace"))
+            .and_then(|v| v.as_bool())
+            == Some(true)
+        {
+            cargo["lints"] = ws
+                .get("workspace")
+                .and_then(|v| v.get("lints"))
+                .ok_or("workspace lints missing")?
+                .clone();
+        }
+        let package = member_metadata["packages"]
+            .as_array()
+            .and_then(|packages| {
+                packages.iter().find(|p| {
+                    p["manifest_path"]
+                        .as_str()
+                        .is_some_and(|p| Path::new(p).parent() == Some(member.root.as_path()))
+                })
+            })
+            .ok_or("missing package")?;
+        let mut mod_paths = BTreeMap::new();
+        if let Some(node) = member_metadata["resolve"]["nodes"]
+            .as_array()
+            .and_then(|nodes| nodes.iter().find(|n| n["id"] == package["id"]))
+        {
+            for dependency in node["deps"].as_array().into_iter().flatten() {
+                if let Some(package) = member_metadata["packages"]
+                    .as_array()
+                    .and_then(|packages| packages.iter().find(|p| p["id"] == dependency["pkg"]))
+                {
+                    if let Some(path) = package["manifest_path"]
+                        .as_str()
+                        .and_then(|p| Path::new(p).parent())
+                        .and_then(|p| staged.get(p))
                     {
-                        let mut inherited = ws["workspace"]["dependencies"]
-                            .get(key.get())
-                            .ok_or(format!("workspace dependency {key} missing"))?
-                            .clone();
-                        if let Some(dep) = inherited.as_table_like_mut() {
-                            if let Some(path) = dep.get("path").and_then(|v| v.as_str()) {
-                                dep.insert(
-                                    "path",
-                                    toml_edit::value(
-                                        workspace.join(path).to_string_lossy().as_ref(),
-                                    ),
-                                );
-                            }
-                            for (k, v) in
-                                value.as_table_like().ok_or("dependency not table")?.iter()
-                            {
-                                if k != "workspace" {
-                                    dep.insert(k, v.clone());
-                                }
-                            }
-                        }
-                        *value = inherited;
+                        mod_paths.insert(
+                            dependency["name"]
+                                .as_str()
+                                .ok_or("dependency has no name")?
+                                .to_owned(),
+                            path.clone(),
+                        );
                     }
                 }
             }
         }
+        mod_dependencies(cargo.as_table_mut(), &mod_paths);
         cargo.remove("workspace");
         paths(cargo.as_table_mut(), &member.root, &staged)?;
         cargo["lib"]["crate-type"] =
@@ -290,6 +422,35 @@ pub(super) fn build(
         std::fs::copy(lock, stage.join("Cargo.lock")).map_err(|e| e.to_string())?;
     }
     let mut workspace = toml_edit::DocumentMut::new();
+    for metadata in &metadatas {
+        let directory = Path::new(
+            metadata["workspace_root"]
+                .as_str()
+                .ok_or("no workspace root")?,
+        );
+        let original: toml_edit::DocumentMut =
+            std::fs::read_to_string(directory.join("Cargo.toml"))
+                .map_err(|e| e.to_string())?
+                .parse()
+                .map_err(|e| format!("workspace: {e}"))?;
+        for key in ["patch", "replace"] {
+            if let Some(item) = original.get(key) {
+                let mut relocated = toml_edit::Table::new();
+                relocated.insert(key, item.clone());
+                paths(&mut relocated, directory, &staged)?;
+                let item = relocated.remove(key).ok_or("missing relocated override")?;
+                if workspace
+                    .get(key)
+                    .is_some_and(|previous| previous.to_string() != item.to_string())
+                {
+                    return Err(format!(
+                        "group workspaces have incompatible [{key}] dependency overrides"
+                    ));
+                }
+                workspace[key] = item;
+            }
+        }
+    }
     workspace["workspace"]["members"] = toml_edit::value(
         members
             .iter()
@@ -498,5 +659,74 @@ pub fn rustc(mut args: Vec<String>) -> Result<(), String> {
         Ok(())
     } else {
         Err("rustc failed".into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn staged_paths_keep_aliases_features_and_target_dependencies() {
+        let root = std::env::temp_dir().join(format!("horizon-group-paths-{}", std::process::id()));
+        let library = root.join("library");
+        let ordinary = root.join("ordinary");
+        std::fs::create_dir_all(&library).unwrap();
+        std::fs::create_dir_all(&ordinary).unwrap();
+        let source = format!(
+            r#"
+[dependencies]
+renamed = {{ package = "library-package", path = "library", features = ["special"], optional = true }}
+registry_mod = "^1.2"
+git_mod = {{ package = "another-library", git = "https://invalid.test/library", rev = "abc", features = ["extra"] }}
+[target.'cfg(target_arch = "wasm32")'.build-dependencies]
+ordinary = {{ path = "ordinary", default-features = false }}
+"#
+        );
+        let mut manifest: toml_edit::DocumentMut = source.parse().unwrap();
+        let relocated = root.join("staged/library");
+        let staged = BTreeMap::from([(library.canonicalize().unwrap(), relocated.clone())]);
+        paths(manifest.as_table_mut(), &root, &staged).unwrap();
+        let dependency = &manifest["dependencies"]["renamed"];
+        assert_eq!(dependency["path"].as_str(), relocated.to_str());
+        assert_eq!(dependency["package"].as_str(), Some("library-package"));
+        assert_eq!(
+            dependency["features"]
+                .as_array()
+                .unwrap()
+                .get(0)
+                .unwrap()
+                .as_str(),
+            Some("special")
+        );
+        assert_eq!(dependency["optional"].as_bool(), Some(true));
+        let ordinary =
+            &manifest["target"]["cfg(target_arch = \"wasm32\")"]["build-dependencies"]["ordinary"];
+        assert_eq!(ordinary["path"].as_str(), root.join("ordinary").to_str());
+        assert_eq!(ordinary["default-features"].as_bool(), Some(false));
+        mod_dependencies(
+            manifest.as_table_mut(),
+            &BTreeMap::from([
+                ("registry_mod".into(), relocated.clone()),
+                ("git_mod".into(), relocated.clone()),
+            ]),
+        );
+        assert_eq!(
+            manifest["dependencies"]["registry_mod"]["path"].as_str(),
+            relocated.to_str()
+        );
+        assert_eq!(
+            manifest["dependencies"]["registry_mod"]["version"].as_str(),
+            Some("^1.2")
+        );
+        let git = &manifest["dependencies"]["git_mod"];
+        assert!(git.get("git").is_none());
+        assert!(git.get("rev").is_none());
+        assert_eq!(git["package"].as_str(), Some("another-library"));
+        assert_eq!(
+            git["features"].as_array().unwrap().get(0).unwrap().as_str(),
+            Some("extra")
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
