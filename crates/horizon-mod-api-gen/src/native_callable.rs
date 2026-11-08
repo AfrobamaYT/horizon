@@ -102,9 +102,11 @@ pub fn invocation(
     let (inputs, output) = signature(ty).ok_or("not a callback")?;
     let mut shapes = Vec::new();
     let mut lend = Vec::new();
+    let mut owned_types = Vec::new();
     for (index, input) in inputs.iter().enumerate() {
         let (owned, by_reference) = argument(input)?;
         shapes.push(rule.shape(module, owner, &owned));
+        owned_types.push(owned);
         let member = syn::Index::from(index);
         lend.push(if by_reference {
             quote!(&__arguments.#member)
@@ -120,7 +122,7 @@ pub fn invocation(
     let encode = result.encode;
     Ok(quote! {
         let mut __reader = mod_api::wire::Reader::new(__bytes);
-        let __arguments = { let input = &mut __reader; #decode };
+        let __arguments: (#(#owned_types,)*) = { let input = &mut __reader; #decode };
         if !__reader.rest().is_empty() {
             return Err(mod_api::wire::WireError::Trailing.into());
         }
@@ -132,4 +134,47 @@ pub fn invocation(
         }
         Ok(__writer.into_bytes())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reason(ty: &str) -> Result<(), String> {
+        let rule = Rule::new(&[crate::internals::Internal {
+            path: "horizon_client::BlockPos".into(),
+            kind: "struct",
+            signature: "pub struct BlockPos { pub x: i32, pub y: i32, pub z: i32 }".into(),
+            cfg: String::new(),
+            hash: String::new(),
+            shape_only: false,
+            opaque_reason: None,
+            refs: Default::default(),
+        }]);
+        invocation(
+            &rule,
+            "horizon_client",
+            None,
+            &syn::parse_str(ty).unwrap(),
+            quote!(callee),
+        )
+        .map(|_| ())
+    }
+
+    #[test]
+    fn catalog_callbacks_project_or_name_their_gap() {
+        for ty in [
+            "&'s dyn Fn(BlockPos) -> bool",
+            "&dyn Fn(&str) -> bool",
+            "&dyn Fn(&str) -> Option<String>",
+            "&mut dyn FnMut(u32, &str)",
+        ] {
+            assert_eq!(reason(ty), Ok(()), "{ty}");
+        }
+        let gap = |ty| reason(ty).unwrap_err();
+        assert!(gap("fn(&mut Self, PlayerRef)").contains("mutable reference"));
+        assert!(gap("&mut dyn FnMut(UiResources, &std::path::Path)").contains("argument tuple"));
+        assert!(gap("&dyn Fn(&str) -> Option<Json>").contains("result"));
+        assert!(!is_callback(&syn::parse_str("&dyn EventLoopCtl").unwrap()));
+    }
 }

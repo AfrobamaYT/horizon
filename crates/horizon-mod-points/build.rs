@@ -390,10 +390,10 @@ fn receiver_fixture(out_dir: &std::path::Path) {
             module: "horizon_client::test_environments",
             owner: None,
             impl_path: "",
-            signature: "fn parse(pos: BlockPos, load: &dyn Fn(&str) -> Option<u32>, wanted: &dyn Fn(&str) -> bool, rain: &dyn Fn(BlockPos) -> bool, emit: &mut dyn FnMut(u32) -> u32, publish: &mut dyn FnMut(u32, &std::path::Path)) -> Option<u32>",
+            signature: "fn parse(depth: u32, load: &dyn Fn(&str) -> Option<u32>, wanted: &dyn Fn(&str) -> bool, rain: &dyn Fn(BlockPos) -> bool, emit: &mut dyn FnMut(u32) -> u32, publish: &mut dyn FnMut(u32, &std::path::Path)) -> Option<u32>",
             name: "game_test_environments_parse",
             fields: &[],
-            body: "{ let n = load(\"minecraft:overworld\")?; let w = wanted(\"w\") as u32; let r = rain(pos) as u32; let e = emit(n); publish(1, std::path::Path::new(\"p\")); Some(n + w * 1000 + r * 10000 + e * 100000) }",
+            body: "{ let n = load(\"minecraft:overworld\")?; let w = wanted(\"w\") as u32; let r = rain(BlockPos { x: depth as i32, y: 64, z: -3 }) as u32; let e = emit(n); publish(1, std::path::Path::new(\"p\")); Some(n + w * 1000 + r * 10000 + e * 100000) }",
         },
     );
 }

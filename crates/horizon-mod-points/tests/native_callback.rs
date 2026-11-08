@@ -157,14 +157,7 @@ fn callback_arguments_cross_as_callables_within_the_call_lease() {
     };
     let mut published = 0;
     let mut publish = |n: u32, _: &std::path::Path| published += n;
-    let result = parse(
-        BlockPos { x: 1, y: 64, z: -3 },
-        &load,
-        &wanted,
-        &rain,
-        &mut emit,
-        &mut publish,
-    );
+    let result = parse(1, &load, &wanted, &rain, &mut emit, &mut publish);
     // The listener's invocations ran the real closures: `emit` accumulated 5 + 5, then the
     // native body added its own call with 100.
     assert_eq!(total.load(Ordering::Relaxed), 110);
