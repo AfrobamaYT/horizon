@@ -6559,9 +6559,9 @@ mod trader_llama_no_ai_tests {
                     for elapsed in 1..=steps {
                         let mut expected_random = mob.random.clone();
                         expected_random.next_int_bound(1000).unwrap(); // Existing Mob.baseTick ambient draw only.
-                        let mut level_random = LegacyRandom::new(0);
+                        let mut test_level = crate::health::TestLevel::new(0);
                         let mut events = Vec::new();
-                        tick(&mut mob, w, &mut level_random, &mut events);
+                        tick(&mut mob, w, &mut test_level.level(), &mut events);
                         assert_eq!(mob.age, elapsed as u32, "actual tick reached");
                         assert_eq!(
                             mob.health, health,
@@ -6589,7 +6589,12 @@ mod trader_llama_no_ai_tests {
                 normal.no_ai = false;
                 normal.health = normal.attrs.max_health;
                 let mut events = Vec::new();
-                tick(&mut normal, w, &mut LegacyRandom::new(0), &mut events);
+                tick(
+                    &mut normal,
+                    w,
+                    &mut crate::health::TestLevel::new(0).level(),
+                    &mut events,
+                );
                 assert_eq!(normal.extra.ints[0], 4);
             },
         );

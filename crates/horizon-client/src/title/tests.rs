@@ -1200,7 +1200,13 @@ fn draw_hovered(
 ) -> (Option<String>, Vec<crate::hud::HudVertex>) {
     crate::widgets::end_frame(*frame);
     let _ = crate::widgets::take_last_narration();
-    let mut batch = HudBatch::new([480, 262]);
+    let mut batch = HudBatch::new(
+        [480, 262],
+        crate::hud::GuiScale {
+            requested: 1,
+            unicode: false,
+        },
+    );
     let english = crate::lang::Language::load(&[&TooltipStrings], "en_us");
     crate::lang::scoped(english, || title.draw(atlas, &mut batch, mouse, true));
     crate::widgets::end_frame(*frame + 1);
@@ -1224,7 +1230,11 @@ fn button_middle(title: &Title, id: u8) -> (f32, f32) {
 #[test]
 fn icon_buttons_show_their_tooltip_while_hovered() {
     let f = Fixture::new();
-    let atlas = crate::hud::HudAtlas::build(Path::new("/nonexistent/horizon-test-assets")).unwrap();
+    let atlas =
+        crate::hud::HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+            Path::new("/nonexistent/horizon-test-assets"),
+        ))
+        .unwrap();
     crate::widgets::set_narrating(true);
     let mut frame = 12_067_000;
     let (none, plain) = draw_hovered(&f.title, &atlas, (0.0, 0.0), &mut frame);
@@ -1266,7 +1276,11 @@ fn icon_buttons_show_their_tooltip_while_hovered() {
 fn onboarding_common_buttons_show_their_tooltip_while_hovered() {
     let mut f = Fixture::new();
     f.title.start_onboarding();
-    let atlas = crate::hud::HudAtlas::build(Path::new("/nonexistent/horizon-test-assets")).unwrap();
+    let atlas =
+        crate::hud::HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+            Path::new("/nonexistent/horizon-test-assets"),
+        ))
+        .unwrap();
     crate::widgets::set_narrating(true);
     let mut frame = 12_067_100;
     // The first frame also wraps the message the buttons are laid out under.

@@ -1577,6 +1577,7 @@ pub(super) mod initial_history_tests {
                     [0xc2c7fff7, 0x3de4376e, o],
                     [o, 0x42c7ffff, o],
                 ],
+                false,
             ),
             (
                 30.0,
@@ -1602,6 +1603,7 @@ pub(super) mod initial_history_tests {
                     [0xc2c79f54, 0x3fcb7a25, 0x40bdd8c7],
                     [o, 0x428d6bdc, 0x428d6bde],
                 ],
+                false,
             ),
             (
                 30.0,
@@ -1614,6 +1616,7 @@ pub(super) mod initial_history_tests {
                     [0x42bbe677, 0xc1885947, 0xc1edb4fc],
                     [o, 0x42ad347e, 0xc247fffe],
                 ],
+                false,
             ),
         ];
         for (tilt, yaw, pitch, sun, moon, [sun_at, moon_at, up], day) in cases {

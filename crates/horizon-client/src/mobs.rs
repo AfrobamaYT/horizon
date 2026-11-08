@@ -7305,50 +7305,78 @@ mod hurt_cooldown_incoming_tests {
 
     #[test]
     fn full_resistance_keeps_the_incoming_amounts_and_takes_a_stronger_hit() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let mut m = mob(Species::Pig);
-        m.extra.effects.push(("minecraft:resistance", 600, 4));
-        assert!(m.damage(1.0, Damage::of(DamageKind::Generic)));
+        m.extra
+            .effects
+            .push(StoredEffect::new("minecraft:resistance", 600, 4));
+        assert!(m.damage(level, 1.0, Damage::of(DamageKind::Generic)));
         assert_eq!((m.health, m.invulnerable, m.last_hurt), (40.0, 20, 1.0));
-        assert!(!m.damage(1.0, Damage::of(DamageKind::Generic)));
-        assert!(m.damage(2.0, Damage::of(DamageKind::Generic)));
+        assert!(!m.damage(level, 1.0, Damage::of(DamageKind::Generic)));
+        assert!(m.damage(level, 2.0, Damage::of(DamageKind::Generic)));
         assert_eq!((m.health, m.invulnerable, m.last_hurt), (40.0, 20, 2.0));
-        assert!(!m.damage(1.5, Damage::of(DamageKind::Generic)));
+        assert!(!m.damage(level, 1.5, Damage::of(DamageKind::Generic)));
         assert_eq!(m.last_hurt, 2.0);
     }
 
     #[test]
     fn the_armor_effectiveness_callback_runs_only_for_accepted_hits() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let mut m = mob(Species::Pig);
-        m.extra.chest = Some("minecraft:iron_chestplate".into());
+        m.extra.set_slot_id(
+            horizon_items::equipment::CHEST,
+            Some("minecraft:iron_chestplate".into()),
+        );
         let mut calls = 0;
-        let mut breach = |f: f32| {
+        let mut breach = |f: f32, _: &mut LegacyRandom| {
             calls += 1;
             f
         };
-        assert!(m.damage_with(4.0, Damage::of(DamageKind::Cactus), Some(&mut breach)));
-        assert!(!m.damage_with(4.0, Damage::of(DamageKind::Cactus), Some(&mut breach)));
-        assert!(m.damage_with(8.0, Damage::of(DamageKind::Cactus), Some(&mut breach)));
+        assert!(m.damage_with(
+            level,
+            4.0,
+            Damage::of(DamageKind::Cactus),
+            Some(&mut breach)
+        ));
+        assert!(!m.damage_with(
+            level,
+            4.0,
+            Damage::of(DamageKind::Cactus),
+            Some(&mut breach)
+        ));
+        assert!(m.damage_with(
+            level,
+            8.0,
+            Damage::of(DamageKind::Cactus),
+            Some(&mut breach)
+        ));
         assert_eq!(calls, 2);
         assert_eq!(m.last_hurt, 8.0);
     }
 
     #[test]
     fn absorption_soaks_the_accepted_difference() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let mut m = mob(Species::Pig);
         m.absorption = 1.5;
-        assert!(m.damage(1.0, Damage::of(DamageKind::Generic)));
+        assert!(m.damage(level, 1.0, Damage::of(DamageKind::Generic)));
         assert_eq!((m.health, m.absorption), (40.0, 0.5));
         // 3 after 1: the difference 2, the last 0.5 absorption first.
-        assert!(m.damage(3.0, Damage::of(DamageKind::Generic)));
+        assert!(m.damage(level, 3.0, Damage::of(DamageKind::Generic)));
         assert_eq!((m.health, m.absorption, m.last_hurt), (38.5, 0.0, 3.0));
     }
 
     #[test]
     fn a_horse_armor_wears_by_the_accepted_difference() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
         let mut m = mob(Species::Horse);
-        m.extra.body = Some("minecraft:iron_horse_armor".into());
-        assert!(m.damage(4.0, Damage::of(DamageKind::Cactus)));
-        assert!(m.damage(8.0, Damage::of(DamageKind::Cactus)));
+        m.extra.set_body(Some("minecraft:iron_horse_armor".into()));
+        assert!(m.damage(level, 4.0, Damage::of(DamageKind::Cactus)));
+        assert!(m.damage(level, 8.0, Damage::of(DamageKind::Cactus)));
         let worn: Vec<f32> = m
             .outbox
             .iter()
