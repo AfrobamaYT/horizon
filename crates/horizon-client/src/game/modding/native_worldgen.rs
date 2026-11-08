@@ -130,6 +130,58 @@ mod tests {
         .unwrap();
     }
     #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn fresh_game_lifetimes_keep_worker_and_generator_snapshots_separate() {
+        use crate::game::native_entity_refs::tests::with_game;
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let mut first = None;
+        with_game(|game| {
+            let registry = game.pack.assets.registry;
+            let index = prepare(registry).unwrap();
+            let metadata = WorkerResources::get(registry).unwrap().metadata;
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let state = index.to_api(stone).unwrap();
+            let data = horizon_client::vanillagen::shared_data(&root, registry).unwrap();
+            assert!(std::ptr::eq(data.registry(), registry));
+            first = Some((registry, index, metadata, stone, state, data));
+        });
+        let (old_registry, old_index, old_metadata, stone, state, old_data) = first.unwrap();
+        with_game(|game| {
+            let registry = game.pack.assets.registry;
+            assert!(!std::ptr::eq(old_registry, registry));
+            assert_eq!(
+                prepare(old_registry).err().unwrap(),
+                "worker block registry belongs to a different metadata snapshot"
+            );
+            let index = prepare(registry).unwrap();
+            assert!(!Arc::ptr_eq(&old_index, &index));
+            let metadata = WorkerResources::get(registry).unwrap().metadata;
+            assert!(!std::ptr::eq(old_metadata, metadata));
+            // Repeated queries within a lifetime share the retained index and generator data.
+            assert!(Arc::ptr_eq(&index, &prepare(registry).unwrap()));
+            let data = horizon_client::vanillagen::shared_data(&root, registry).unwrap();
+            assert!(!Arc::ptr_eq(&old_data, &data));
+            assert!(std::ptr::eq(data.registry(), registry));
+            assert!(Arc::ptr_eq(
+                &data,
+                &horizon_client::vanillagen::shared_data(&root, registry).unwrap()
+            ));
+            assert!(std::ptr::eq(old_data.registry(), old_registry));
+            // A worker with no owning-thread TLS still reads the original immutable snapshot.
+            std::thread::spawn(move || {
+                let worker = WorkerResources::get(old_registry).unwrap();
+                assert!(Arc::ptr_eq(&worker.index, &old_index));
+                assert!(std::ptr::eq(worker.metadata, old_metadata));
+                assert_eq!(worker.index.to_api(stone), Ok(state));
+                assert_eq!(worker.index.to_engine(state), Ok(stone));
+                assert_eq!(worker.metadata.name(state.block()), Ok("minecraft:stone"));
+            })
+            .join()
+            .unwrap();
+        });
+    }
+
+    #[test]
     fn racing_owners_cannot_install_an_index_for_different_metadata() {
         let registry = Arc::new(BlockRegistry::from_facts_json(br#"{"defaults":{"minecraft:air":0,"minecraft:stone":1},"states":[["a",true,false,"","minecraft:air"],["s",false,false,"","minecraft:stone"]]}"#.as_slice()).unwrap());
         let barrier = Arc::new(std::sync::Barrier::new(2));
