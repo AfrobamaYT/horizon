@@ -70,7 +70,7 @@ fn real_member() {
     loaded
         .initialize(&[info])
         .expect("guest initialization and point registration");
-    mod_points::seal();
+    mod_points::__private::seal();
     let mut args = mod_points::TickArgs::__new();
     mod_points::dispatch::tick(mod_api::HostSide::Server(&mut Quiet), &mut args);
     assert!(
