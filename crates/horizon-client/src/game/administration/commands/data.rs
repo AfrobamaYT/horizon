@@ -368,7 +368,7 @@ impl Game<'_> {
                 if let Some(k) = kind {
                     set_key(&mut tag, "id", Tag::String(k.as_str().into()));
                 }
-                let new = entity_nbt::mob_from_nbt(
+                let mut new = entity_nbt::mob_from_nbt(
                     &tag,
                     self.res.mob_types(),
                     id,
@@ -387,8 +387,10 @@ impl Game<'_> {
                             tag.get("Brain").and_then(|brain| brain.get("memories")),
                             Some(Tag::Compound(_))
                         );
+                    // Runtime identity and lifetime stay on the resident owner.
+                    new.join = slot.join;
+                    let old = horizon_client::join_seq::store_back(slot, new);
                     // Runtime-only state (AI, animation) carries over.
-                    let old = std::mem::replace(slot, new);
                     if keep_liked_player {
                         slot.extra.tame = old.extra.tame;
                         slot.extra.owner = old.extra.owner;
@@ -445,11 +447,11 @@ impl Game<'_> {
                 }
             }
             Target::Item(id) => {
-                let new = entity_nbt::item_entity_from_nbt(&tag, id, 0.0).ok_or_else(stale)?;
+                let mut new = entity_nbt::item_entity_from_nbt(&tag, id, 0.0).ok_or_else(stale)?;
                 if let Some(slot) = self.dropped.iter_mut().find(|e| e.id == id) {
-                    let bob = slot.bob_offset;
-                    *slot = new;
-                    slot.bob_offset = bob;
+                    new.join = slot.join;
+                    new.bob_offset = slot.bob_offset;
+                    horizon_client::join_seq::store_back(slot, new);
                 }
             }
             Target::Fangs(id) => {
@@ -470,7 +472,8 @@ impl Game<'_> {
                 if let Some(slot) = self.armor_stands.iter_mut().find(|a| a.id == id) {
                     // Entity.load keeps the existing entity's firstTick state.
                     new.first_tick = slot.first_tick;
-                    *slot = new;
+                    new.join = slot.join;
+                    horizon_client::join_seq::store_back(slot, new);
                 }
             }
             Target::Frame(id) => {
@@ -480,6 +483,7 @@ impl Game<'_> {
                     // Entity.load cannot change the runtime type; saveWithoutId
                     // deliberately omitted the decoder's type discriminator.
                     new.glow = old.glow;
+                    new.join = old.join;
                     // ItemFrame.readAdditionalSaveData: ItemStack.matches includes
                     // count, item and components, before adopting the new stack.
                     if old.item.as_ref().is_some_and(|a| {
@@ -492,7 +496,7 @@ impl Game<'_> {
                     }
                     let item = new.item.take();
                     new.set_item(item);
-                    self.item_frames[i] = new;
+                    horizon_client::join_seq::store_back(&mut self.item_frames[i], new);
                 }
             }
             Target::Boat(id) => {
@@ -1873,6 +1877,9 @@ mod saved_tag_tests;
 
 #[cfg(test)]
 mod mod_block_entity_tests;
+
+#[cfg(test)]
+mod residency_tests;
 
 #[cfg(test)]
 mod arrow_owner_tests {

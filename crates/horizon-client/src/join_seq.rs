@@ -638,14 +638,16 @@ fn checked_edit<T: horizon_mod_runtime::attachments::HasAttachmentLifetime, R>(
     result
 }
 
-/// Carry lifetime authority from a stored owner into its unbound tick clone.
+/// Carry lifetime authority from a stored owner into its unbound replacement.
+/// Return the previous state with an unbound slot, so a decoder replacement
+/// can retain runtime-only state without retiring the resident owner.
 pub fn store_back<T: horizon_mod_runtime::attachments::HasAttachmentLifetime>(
     old: &mut T,
     mut new: T,
-) {
+) -> T {
     debug_assert!(!new.attachment_lifetime().is_bound());
     std::mem::swap(old.attachment_lifetime(), new.attachment_lifetime());
-    *old = new;
+    std::mem::replace(old, new)
 }
 
 impl<T, const DIRECT: bool> Deref for JoinList<T, DIRECT> {
