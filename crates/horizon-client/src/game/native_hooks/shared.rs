@@ -5307,7 +5307,7 @@ mod item_fall_on_tests {
             LOAN_VALUE
                 .set(host.attachments(), mod_api::Holder::Level, 73)
                 .unwrap();
-            event.request(LandingWrite::DestroyBlock { drop: false });
+            event.request(mod_api::LandingWrite::DestroyBlock { drop: false });
             std::panic::panic_any(self.0.clone());
         }
     }
