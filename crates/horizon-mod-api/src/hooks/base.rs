@@ -3738,8 +3738,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "PlayerEvent.PlayerChangedDimensionEvent",
-        paper = "PlayerChangedWorldEvent"
+        neoforge = "PlayerEvent.PlayerChangedDimensionEvent"
     )]
     fn player_changed_dimension();
     /// A player's data was copied to their new player (NeoForge's
