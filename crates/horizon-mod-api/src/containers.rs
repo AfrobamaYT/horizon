@@ -282,6 +282,29 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_preserves_negative_zero_writes() {
+        for (positive, negative) in [
+            (
+                Tag::Float(0.0f32.to_bits()),
+                Tag::Float((-0.0f32).to_bits()),
+            ),
+            (
+                Tag::Double(0.0f64.to_bits()),
+                Tag::Double((-0.0f64).to_bits()),
+            ),
+        ] {
+            let mut entity = ModBlockEntity::default();
+            entity.nbt.insert("value".into(), positive);
+            let before = entity.revision();
+            let mut snapshot = ModBlockEntitySnapshot::from(&entity);
+            snapshot.fields.nbt.insert("value".into(), negative.clone());
+            entity.apply_snapshot(snapshot);
+            assert_eq!(entity.nbt.get(&"value".into()), Some(&negative));
+            assert_ne!(entity.revision(), before);
+        }
+    }
+
+    #[test]
     fn returned_snapshot_changes_only_fields_and_keeps_native_revision_bookkeeping() {
         let mut entity = ModBlockEntity::new("test:machine".into(), Default::default());
         let revision = entity.revision();
