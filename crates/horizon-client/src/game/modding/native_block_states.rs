@@ -564,13 +564,22 @@ mod tests {
 
 #[cfg(test)]
 mod facts_tests {
-    use mod_api::{BlockStateId, HostBlockStates};
+    use crate::game::api_values::TryIntoApi;
+    use mod_api::{BlockStateRecord, HostBlockStates};
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn block_state_facts_read_vanillas_tables_through_the_host() {
         super::super::native_entity_refs::tests::with_game(|game| {
-            let state = |name: &str| game.pack.assets.registry.default_state(name).unwrap();
+            let state = |name: &str| {
+                game.pack
+                    .assets
+                    .registry
+                    .default_state(name)
+                    .unwrap()
+                    .try_into_api()
+                    .unwrap()
+            };
             let (stone, obsidian, bedrock) = (
                 state("minecraft:stone"),
                 state("minecraft:obsidian"),
@@ -605,8 +614,7 @@ mod facts_tests {
                 ))
                 .unwrap();
             assert_eq!(range.len(), 80);
-            use crate::game::api_values::TryIntoApi;
-            assert!(range.contains(stairs.try_into_api().unwrap()));
+            assert!(range.contains(stairs));
             let key = mod_api::__private::part_tests::block_key("minecraft:oak_stairs");
             assert!(range.iter().all(|state| state.block() == key));
             assert_eq!(
@@ -620,12 +628,12 @@ mod facts_tests {
                 facts
                     .states_of(mod_api::__private::part_tests::block_key("minecraft:stone"))
                     .map(|r| (r.first(), r.len())),
-                Some((stone.try_into_api().unwrap(), 1))
+                Some((stone, 1))
             );
-            // Unknown state ids: None.
-
-            assert_eq!(facts.destroy_speed(BlockStateId(u32::MAX)), None);
-            assert_eq!(facts.sound(BlockStateId(u32::MAX)), None);
+            // A forged local ordinal refuses at the generated Game crossing.
+            let invalid = BlockStateRecord::new(stone.block(), u16::MAX).into();
+            assert_eq!(facts.destroy_speed(invalid), None);
+            assert_eq!(facts.sound(invalid), None);
         });
     }
 }

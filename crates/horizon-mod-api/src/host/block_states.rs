@@ -112,21 +112,21 @@ pub trait BlockStatesBackend {
     /// `BlockState.canBeReplaced()`: whether placing a block where this state stands
     /// replaces it (air, grass, water, snow layers). None for an unknown state.
     #[access(Metadata)]
-    fn block_state_replaceable(&self, state: BlockStateId) -> Option<bool>;
+    fn block_state_replaceable(&self, state: BlockState) -> Option<bool>;
     /// Side: both.
     /// `BlockBehaviour.Properties.destroyTime`, as `BlockState.getDestroySpeed` reads it:
     /// stone 1.5, obsidian 50, bedrock -1 (it can't be broken). None for an unknown state.
     #[access(Metadata)]
-    fn block_state_destroy_speed(&self, state: BlockStateId) -> Option<f32>;
+    fn block_state_destroy_speed(&self, state: BlockState) -> Option<f32>;
     /// Side: both.
     /// `BlockState.getSoundType()`: its volume, pitch and the sound events for breaking,
     /// stepping on, placing, hitting and falling on it. None for an unknown state.
     #[access(Metadata)]
-    fn block_state_sound(&self, state: BlockStateId) -> Option<BlockSoundType>;
+    fn block_state_sound(&self, state: BlockState) -> Option<BlockSoundType>;
     /// Side: both.
     /// `BlockState.hasBlockEntity()`. None for an unknown state.
     #[access(Metadata)]
-    fn block_state_has_block_entity(&self, state: BlockStateId) -> Option<bool>;
+    fn block_state_has_block_entity(&self, state: BlockState) -> Option<bool>;
     /// Side: both.
     /// The states of `block` (`StateDefinition.getPossibleStates`) in immutable local ordinal
     /// order, independent of world numeric IDs. None for unavailable metadata or an unknown block.
@@ -141,7 +141,7 @@ pub trait BlockStatesBackend {
     #[access(Metadata)]
     fn block_state_matches(
         &self,
-        state: BlockStateId,
+        state: BlockState,
         block: BlockKey,
         constraints: &[StateConstraint],
     ) -> Option<Result<bool, StateMatchError>>;
