@@ -17,6 +17,10 @@ include!(concat!(env!("OUT_DIR"), "/points_generated.rs"));
 
 mod registry;
 pub mod snapshot;
+
+/// Source-local paths for checked native row readers.
+#[doc(hidden)]
+pub mod locators;
 #[cfg(target_arch = "wasm32")]
 pub use guest::register;
 #[cfg(not(target_arch = "wasm32"))]
