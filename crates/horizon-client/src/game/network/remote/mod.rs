@@ -698,6 +698,9 @@ pub(super) struct Remote {
     listed: std::collections::HashSet<u128>,
     /// `ClientboundLoginPacket.onlineMode`: the player list shows heads.
     pub(super) online_mode: bool,
+    /// `ClientboundLoginPacket.levels`: the server's level keys, which
+    /// `ClientPacketListener.levels()` hands to command suggestions.
+    pub(super) levels: Vec<String>,
     /// Player entities in the level: entity id to profile UUID.
     level_players: HashMap<i32, u128>,
     /// The profile name each player entity was created with (`RemotePlayer.getGameProfile`): it outlives the
@@ -1221,6 +1224,7 @@ impl Game<'_> {
             published_skins: None,
             listed: Default::default(),
             online_mode: false,
+            levels: Vec::new(),
             level_players: HashMap::new(),
             level_player_names: HashMap::new(),
             level_player_textures: HashMap::new(),
@@ -1467,6 +1471,7 @@ impl Game<'_> {
             published_skins: None,
             listed: Default::default(),
             online_mode: false,
+            levels: Vec::new(),
             level_players: HashMap::new(),
             level_player_names: HashMap::new(),
             level_player_textures: HashMap::new(),
@@ -3818,6 +3823,7 @@ impl Game<'_> {
                     r.own_invisible = false;
                     r.own_on_fire = false;
                     r.online_mode = p.online_mode;
+                    r.levels.clone_from(&p.levels);
                     r.enforces_secure_chat = p.enforces_secure_chat;
                     r.entity_id = p.player_id;
                     r.local_entity_silent = false;
@@ -7366,22 +7372,43 @@ impl Game<'_> {
             guardian::look_at(&mut self.mobs[i], look);
         }
     }
-    /// Each player model's held arm poses (`held_arm_poses`), once the tick has set its hands.
-    fn tick_remote_arm_poses(&mut self) {
+    /// Humanoid held arm poses, once the tick has set equipment and use state.
+    pub(in crate::game) fn tick_remote_arm_poses(&mut self) {
         for i in 0..self.mobs.len() {
             let m = &self.mobs[i];
-            if &*m.kind.id != "minecraft:player" {
+            if !horizon_client::mobs::anim::extracts_humanoid(m) {
                 continue;
             }
-            let poses = self.held_arm_poses(
-                m.id,
-                [
-                    horizon_items::equipment::MAINHAND,
-                    horizon_items::equipment::OFFHAND,
-                ]
-                .map(|slot| m.extra.slot_stack(slot)),
-            );
+            // Extraction also runs while the world is frozen: derive the use
+            // animation from the current equipment rather than last tick's state.
+            if &*m.kind.id != "minecraft:player" {
+                let slot = if m.extra.using_off_hand {
+                    horizon_items::equipment::OFFHAND
+                } else {
+                    horizon_items::equipment::MAINHAND
+                };
+                let animation = (m.extra.using_item > 0)
+                    .then(|| m.extra.slot_stack(slot))
+                    .flatten()
+                    .map_or_else(Default::default, |stack| self.item_use_animation(stack));
+                self.mobs[i].extra.use_animation = animation;
+            }
+            let m = &self.mobs[i];
+            let poses = self.held_arm_poses(m.id, m);
+            let charge_duration = (&*m.kind.id != "minecraft:player").then(|| {
+                let using_slot = if m.extra.using_off_hand {
+                    horizon_items::equipment::OFFHAND
+                } else {
+                    horizon_items::equipment::MAINHAND
+                };
+                m.extra
+                    .slot_stack(using_slot)
+                    .map_or(25, |stack| Self::charge_ticks(stack).max(1)) as i32
+            });
             self.mobs[i].extra.held_arm_pose = poses;
+            if let Some(duration) = charge_duration {
+                self.mobs[i].extra.ints[5] = duration;
+            }
         }
     }
     fn tick_remote_entities(&mut self, running: bool) {

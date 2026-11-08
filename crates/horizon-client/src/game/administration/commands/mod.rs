@@ -1953,6 +1953,25 @@ impl Game<'_> {
         }
     }
 
+    /// A mod sends `t` to `pos` in `level` (`Entity.teleportTo(ServerLevel, ..)`):
+    /// as `/tp` into another level does, or in its own level when that is
+    /// `level`. False for a kind that only moves within its level (items,
+    /// orbs, projectiles, ...), a player who is not a server guest, or a
+    /// transfer the game could not make. A fake player stays, and the call is true.
+    pub(in crate::game) fn teleport_to_level(
+        &mut self,
+        t: Target,
+        level: super::Dim,
+        pos: [f64; 3],
+        rotation: Option<[f32; 2]>,
+    ) -> bool {
+        if self.target_level(t) == level {
+            self.teleport_to(t, pos, rotation, true);
+            return true;
+        }
+        self.teleport_across(t, level, pos, rotation, true)
+            .unwrap_or(false)
+    }
     /// A server's player teleported into another level than theirs
     /// (ServerPlayer.teleport): queued to move after the command. False
     /// when `t` is not a player in another level.
@@ -1984,6 +2003,14 @@ impl Game<'_> {
         // A fake player stays in its level. True: the teleport is taken, so no
         // same-level teleport stands in for it.
         if Some(conn) == self.lan_acting && self.fake_blocks(mod_api::FakeEffect::ChangeDimension) {
+            return Ok(true);
+        }
+        // A canceled travel keeps the player where they are.
+        if !self.server_player_travel_allowed(
+            conn,
+            level,
+            super::server_travel::TravelCause::Teleport,
+        ) {
             return Ok(true);
         }
         self.level_teleports
@@ -5134,6 +5161,39 @@ mod fake_travel_tests {
             // A real player's goes on the queue as before.
             assert!(matches!(to_nether(game, real), Some(Ok(true))));
             assert_eq!(game.level_teleports.len(), 1);
+        });
+    }
+
+    /// A mod's `teleport_to_level`: a player to another level goes on the queue; to their own
+    /// level, nothing is queued; what cannot change level is refused.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mod_sends_a_player_to_another_level_and_not_an_item() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            super::super::bossbars::audience_tests::add_real_and_fake(game);
+            let conn = game
+                .lan
+                .as_ref()
+                .unwrap()
+                .hub
+                .guests
+                .iter()
+                .find(|g| g.uuid == 1)
+                .unwrap()
+                .conn;
+            let sent = |game: &mut super::super::Game<'_>, level| {
+                game.as_guest(conn, |g| {
+                    g.teleport_to_level(Target::Player, level, [0.0, 64.0, 0.0], None)
+                })
+            };
+            assert_eq!(sent(game, Dim::Nether), Some(true));
+            assert_eq!(game.level_teleports.len(), 1);
+            // Their own level: the same-level teleport, nothing queued.
+            let home = game.target_level(Target::Guest(conn));
+            assert_eq!(sent(game, home), Some(true));
+            assert_eq!(game.level_teleports.len(), 1);
+            // An item only moves within its level.
+            assert!(!game.teleport_to_level(Target::Item(9_999), Dim::Nether, [0.0; 3], None));
         });
     }
 }
