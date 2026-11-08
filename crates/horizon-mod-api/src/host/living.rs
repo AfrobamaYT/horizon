@@ -24,19 +24,22 @@ pub trait LivingBackend {
     /// namespaced as the registry has it, the ticks left (-1 infinite), the
     /// amplifier and the flags. The effect is a registration-slot key resolved at load.
     /// None when it has the effect not, before effect resolution, or for an armor
-    /// stand, the dragon, a stale handle or a client.
+    /// stand, the dragon or a stale handle; on a client, for any entity but the
+    /// local player, whose copy of what the server sent it is read.
     #[access(WorldOnly)]
     fn living_effect(&self, living: LivingRef, effect: EffectKey) -> Option<NativeActiveEffect>;
     /// Side: both.
     /// The entity's active effects (`LivingEntity.getActiveEffects`), in the
     /// order their store keeps them, in `Some` even when it has none. None
-    /// for an armor stand, the dragon, a stale handle or a client.
+    /// for an armor stand, the dragon or a stale handle; on a client, for any
+    /// entity but the local player (its copy of what the server sent it).
     #[access(WorldOnly)]
     fn living_effects(&self, living: LivingRef) -> Option<Vec<NativeActiveEffect>>;
-    /// Side: server.
+    /// Side: both.
     /// Whether the entity has `effect` (`LivingEntity.hasEffect`), using its resolved key.
-    /// False before effect resolution, for an armor stand, the dragon,
-    /// a stale handle or a client.
+    /// False before effect resolution, for an armor stand, the dragon or a stale handle;
+    /// on a client, for any entity but the local player, whose copy of what the server
+    /// sent it is read.
     #[access(WorldOnly)]
     fn living_potion_affected(&self, living: LivingRef, effect: EffectKey) -> bool;
     /// Side: both.
