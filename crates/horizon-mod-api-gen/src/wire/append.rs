@@ -142,14 +142,29 @@ pub(super) fn detect(
                 return Ok(None);
             }
             for (argument, expected) in value.args.iter().zip(payload) {
-                let Expr::Path(argument) = argument else {
-                    return Ok(None);
+                // Owning a borrowed string preserves its value exactly; no other
+                // transformation is admitted by the append-only proof.
+                let (argument, owned_string) = match argument {
+                    Expr::Path(path) => (path, false),
+                    Expr::MethodCall(call) if call.method == "to_owned" && call.args.is_empty() => {
+                        let Expr::Path(path) = &*call.receiver else {
+                            return Ok(None);
+                        };
+                        (path, true)
+                    }
+                    _ => return Ok(None),
                 };
                 let Some(parameter)=method.sig.inputs.iter().find_map(|p|match p {
                     syn::FnArg::Typed(p) if matches!(&*p.pat,syn::Pat::Ident(i) if argument.path.is_ident(&i.ident))=>Some(p),
                     _=>None,
                 }) else {return Ok(None)};
-                if types.ty(module, &parameter.ty, &[])? != *expected {
+                let actual = types.ty(module, &parameter.ty, &[])?;
+                if if owned_string {
+                    actual != Ty::Str(super::ty::Str::Borrowed)
+                        || *expected != Ty::Str(super::ty::Str::Owned)
+                } else {
+                    actual != *expected
+                } {
                     return Ok(None);
                 }
             }
@@ -288,7 +303,7 @@ mod tests {
                 }).map(|at| (module, at))
             }).unwrap();
             let original = types.index.modules[module].items[at].clone();
-            for mutation in 0..3 {
+            for mutation in 0..5 {
                 let mut changed = original.clone();
                 let syn::Item::Impl(i) = &mut changed else {
                     unreachable!()
@@ -297,7 +312,11 @@ mod tests {
                     .items
                     .iter_mut()
                     .find_map(|item| match item {
-                        syn::ImplItem::Fn(f) if f.sig.ident == "heal" => Some(f),
+                        syn::ImplItem::Fn(f)
+                            if f.sig.ident == if mutation < 3 { "heal" } else { "hurt" } =>
+                        {
+                            Some(f)
+                        }
                         _ => None,
                     })
                     .unwrap();
@@ -311,6 +330,19 @@ mod tests {
                     2 => {
                         method.block = syn::parse_quote!({
                             self.changes.clear();
+                        })
+                    }
+                    3 => {
+                        method.block = syn::parse_quote!({
+                            self.changes
+                                .push(EffectTickChange::Hurt(damage_type.to_uppercase(), amount));
+                        })
+                    }
+                    4 => {
+                        method.block = syn::parse_quote!({
+                            self.changes.reverse();
+                            self.changes
+                                .push(EffectTickChange::Hurt(damage_type.to_owned(), amount));
                         })
                     }
                     _ => unreachable!(),

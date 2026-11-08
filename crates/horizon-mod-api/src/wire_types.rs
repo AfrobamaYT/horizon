@@ -310,6 +310,17 @@ impl Wire for crate::BlockStateRange {
     }
 }
 
+/// An NBT key: UTF-16 units, in the bytes of a `Vec<u16>` but written and read in one pass.
+impl Wire for horizon_core::nbt::JavaString {
+    const MIN: usize = <Vec<u16> as Wire>::MIN;
+    fn put(&self, out: &mut Writer) {
+        out.put_u16s(&self.0);
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        input.nested(|input| input.take_u16s().map(Self))
+    }
+}
+
 impl Wire for crate::Components {
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
@@ -1094,6 +1105,66 @@ impl Wire for crate::ClientReloadContext {
     }
     fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
         Ok(Self::new(input.take()?))
+    }
+}
+
+#[cfg(test)]
+mod java_string_tests {
+    use super::*;
+    use horizon_core::nbt::JavaString;
+
+    fn units() -> Vec<Vec<u16>> {
+        vec![
+            vec![],
+            vec![0],
+            vec![0xD800],
+            vec![0xDC00, 0x0041, 0xFFFF, 0x1234],
+            (0..=1000u16).map(|n| n.wrapping_mul(97)).collect(),
+        ]
+    }
+
+    /// The bytes are those of a `Vec<u16>`, so the host's reader and writer need no change.
+    #[test]
+    fn a_key_is_the_bytes_of_its_units_both_ways() {
+        for units in units() {
+            let mut expected = Writer::new();
+            expected.put(&units);
+            let mut got = Writer::new();
+            got.put(&JavaString(units.clone()));
+            assert_eq!(got.bytes(), expected.bytes());
+            let key: JavaString = Reader::decode(expected.bytes()).unwrap();
+            assert_eq!(key.0, units);
+            assert_eq!(Reader::decode::<Vec<u16>>(got.bytes()).unwrap(), units);
+            for end in 0..expected.bytes().len() {
+                let cut = &expected.bytes()[..end];
+                assert_eq!(
+                    Reader::decode::<JavaString>(cut).map(|k| k.0),
+                    Reader::decode::<Vec<u16>>(cut)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_key_longer_than_its_bytes_or_the_limit_is_refused_before_it_grows() {
+        let mut huge = Writer::new();
+        huge.put(&u32::MAX);
+        assert_eq!(
+            Reader::decode::<JavaString>(huge.bytes()).map(|k| k.0),
+            Reader::decode::<Vec<u16>>(huge.bytes())
+        );
+        let key = JavaString(vec![7; 10]);
+        for limit in 0..30 {
+            let (mut a, mut b) = (Writer::new(), Writer::new());
+            a.limit(limit);
+            b.limit(limit);
+            a.put(&key);
+            b.put(&key.0);
+            assert_eq!(a.error(), b.error(), "limit {limit}");
+            if a.error().is_none() {
+                assert_eq!(a.bytes(), b.bytes());
+            }
+        }
     }
 }
 

@@ -1,5 +1,5 @@
 use objc2::{
-    rc::{Retained, autoreleasepool},
+    rc::{autoreleasepool, Retained},
     runtime::ProtocolObject,
 };
 use objc2_foundation::{NSRange, NSString, NSUInteger};
@@ -14,9 +14,8 @@ use objc2_metal::{
 };
 
 use super::{
-    TimestampQuerySupport,
     adapter::{self, MAX_BUFFERS},
-    conv,
+    conv, TimestampQuerySupport,
 };
 use crate::CommandEncoder as _;
 use alloc::{
