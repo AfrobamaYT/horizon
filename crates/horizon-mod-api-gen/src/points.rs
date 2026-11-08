@@ -36,6 +36,9 @@ pub struct GamePoint {
     pub at_return: bool,
     /// Whether it has a raw form: listeners with the receiver and every parameter by its own type.
     pub raw: bool,
+    /// Full raw listener contract, including engine-typed parameters.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_shape: Option<point_shape::RawShape>,
     /// Its raw listeners' function type, by path: a mod's raw listener has this type.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub listener: Option<String>,
@@ -655,6 +658,9 @@ pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
             ],
             at_return: shape.has_return(),
             raw: shape.raw,
+            raw_shape: shape
+                .raw
+                .then(|| point_shape::raw_shape(&shape, found.sig, found.owner.map(|(ty, _)| ty))),
             listener: shape
                 .raw
                 .then(|| format!("{}::{}", found.module, shape.raw_listener())),
@@ -1014,6 +1020,37 @@ pub(crate) fn records(points: &[GamePoint], sources: &[source::Point]) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn raw_point_inventory() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let points = game_points(&root).unwrap();
+        let mut inventory = Vec::new();
+        for point in &points {
+            assert_eq!(point.raw_shape.is_some(), point.raw, "{}", point.target);
+            for at_return in [false, true] {
+                if at_return && !point.at_return && !point.raw {
+                    continue;
+                }
+                inventory.push(serde_json::json!({
+                    "name": if at_return { format!("{}_return", point.name) } else { point.name.clone() },
+                    "target": point.target,
+                    "api": !at_return || point.at_return,
+                    "raw_shape": point.raw_shape,
+                    "raw_status": if point.raw { "snapshot generator needed" } else { "no raw place" },
+                }));
+            }
+        }
+        if let Ok(path) = std::env::var("POINT_INVENTORY") {
+            fs::write(path, serde_json::to_vec_pretty(&inventory).unwrap()).unwrap();
+        }
+        println!(
+            "{} functions; {} places; {} raw functions",
+            points.len(),
+            inventory.len(),
+            points.iter().filter(|point| point.raw).count()
+        );
+    }
 
     fn point(attribute: &str, method: &str) -> Result<point_shape::Shape, String> {
         let method: syn::ImplItemFn = syn::parse_str(method).map_err(|e| e.to_string())?;
