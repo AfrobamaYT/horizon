@@ -20,8 +20,8 @@ use horizon_core::{
 };
 use horizon_world::block_collision::BlockCollisionRegistry;
 mod options;
-pub use options::ParticleOptions;
 use mod_api::ParticleProvider;
+pub use options::ParticleOptions;
 use std::{
     array,
     collections::{BTreeMap, HashMap, HashSet},
