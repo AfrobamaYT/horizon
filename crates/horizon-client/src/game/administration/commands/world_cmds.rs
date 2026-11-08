@@ -3,7 +3,7 @@
 use super::{Arg, Context, Game, R, Target, err, wrap_degrees};
 use crate::game::living_attributes::AttributeWrite;
 use horizon_client::{
-    mobs::{Damage, DamageKind, MobEvent, Who, finalize},
+    mobs::{Damage, DamageKind, MobEvent, NamedDamage, Who, finalize},
     scoreboard_cmd::{Holder, Tracker},
     settings::SOUND_SOURCES,
     text::Text,
@@ -12,6 +12,7 @@ use horizon_core::nbt::Tag;
 use horizon_core::random::RandomSource;
 use horizon_protocol::packets::play::{self, Clientbound as C};
 use horizon_world::attribute_map::ValueKind;
+use horizon_world::damage_source::Catalog as DamageCatalog;
 
 /// Queue bookkeeping for synchronous command damage, preserving prior requests
 /// and unrelated events. The existing game policy handles each extracted request.
@@ -124,8 +125,10 @@ impl Game<'_> {
     // ---- /damage ----------------------------------------------------------------
 
     /// The `DamageKind` of a damage type id, for the sources the engine's own
-    /// hurt paths take (`DamageCommand`'s and `EntityRef::hurt`'s).
-    pub(in crate::game) fn damage_kind(ty: &str) -> DamageKind {
+    /// hurt paths take (`DamageCommand`'s, `EntityRef::hurt`'s and a mod
+    /// effect's). A type the engine has no kind of its own for keeps its
+    /// registry id and tags as a `DamageKind::Named`.
+    pub(in crate::game) fn damage_kind(catalog: &DamageCatalog, ty: &str) -> DamageKind {
         match ty.trim_start_matches("minecraft:") {
             "player_attack" => DamageKind::PlayerAttack,
             "mace_smash" => DamageKind::MaceSmash,
@@ -166,7 +169,8 @@ impl Game<'_> {
             "sulfur_cube_hot" => DamageKind::SulfurCubeHot,
             "wind_charge" => DamageKind::WindCharge,
             "wither" => DamageKind::Wither,
-            _ => DamageKind::Generic,
+            "generic" => DamageKind::Generic,
+            _ => NamedDamage::registered(catalog, ty).map_or(DamageKind::Generic, DamageKind::Named),
         }
     }
     /// `DamageCommand.damage`: apply its source and report an accepted hit.
@@ -303,7 +307,7 @@ impl Game<'_> {
                     _ => None,
                 };
                 let damage = Damage {
-                    kind: Self::damage_kind(ty),
+                    kind: Self::damage_kind(&self.motion.health.damage, ty),
                     attacker,
                     from,
                     attacker_species,
@@ -337,7 +341,7 @@ impl Game<'_> {
                 id,
                 amount,
                 ty,
-                Self::damage_kind(ty),
+                Self::damage_kind(&self.motion.health.damage, ty),
                 (
                     by,
                     cause.or(by),
@@ -345,7 +349,12 @@ impl Game<'_> {
                 ),
             ),
             Target::Crystal(id) => {
-                self.command_damage_crystal(id, ty, Self::damage_kind(ty), cause.or(by))
+                self.command_damage_crystal(
+                    id,
+                    ty,
+                    Self::damage_kind(&self.motion.health.damage, ty),
+                    cause.or(by),
+                )
             }
             _ => false,
         }

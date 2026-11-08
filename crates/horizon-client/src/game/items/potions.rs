@@ -19,7 +19,7 @@ use horizon_client::{
     hud_layout, hud_overlays, inventory_effects,
     items::ItemStack,
     mesher::Vertex,
-    mobs::{Damage, DamageKind, Mob, Who},
+    mobs::{Damage, DamageKind, Mob, NamedDamage, Who},
     particles::{ParticleOptions, ParticleType},
     projectiles::{Projectile, ProjectileKind},
     text::Text,
@@ -1126,15 +1126,19 @@ impl Game<'_> {
                         max_health,
                         food,
                     );
-                    actions.extend(changes.into_iter().map(|change| match change {
-                        EffectTickChange::Heal(amount) => EffectAction::Heal(amount),
-                        EffectTickChange::Hurt(source, amount) => EffectAction::Hurt(
-                            super::creatures::damage_type(source.into(), false),
-                            amount,
-                        ),
-                        EffectTickChange::AddExhaustion(amount) => EffectAction::Exhaust(amount),
+                    let registry = &self.motion.health.damage;
+                    actions.extend(changes.into_iter().filter_map(|change| match change {
+                        EffectTickChange::Heal(amount) => Some(EffectAction::Heal(amount)),
+                        // An unregistered damage type hurts nothing.
+                        EffectTickChange::Hurt(source, amount) => {
+                            NamedDamage::registered(registry, &source)
+                                .map(|damage| EffectAction::Hurt(damage.name, amount))
+                        }
+                        EffectTickChange::AddExhaustion(amount) => {
+                            Some(EffectAction::Exhaust(amount))
+                        }
                         EffectTickChange::Eat(nutrition, saturation) => {
-                            EffectAction::Eat(nutrition, saturation)
+                            Some(EffectAction::Eat(nutrition, saturation))
                         }
                         _ => unreachable!("EffectTickChange: unhandled variant"),
                     }));
@@ -2567,8 +2571,13 @@ impl horizon_client::mobs::ModEffectTicks for Game<'_> {
         for change in changes {
             match change {
                 EffectTickChange::Heal(amount) => mob.heal(&self.loop_context, amount),
+                // An unregistered damage type hurts nothing.
                 EffectTickChange::Hurt(source, amount) => {
-                    mob.damage(level, amount, Damage::of(source.into()));
+                    let registry = &self.motion.health.damage;
+                    if registry.id(&source).is_some() {
+                        let kind = Self::damage_kind(registry, &source);
+                        mob.damage(level, amount, Damage::of(kind));
+                    }
                 }
                 _ => {}
             }
@@ -2747,10 +2756,10 @@ mod tests {
                         event.eat(4, 0.5);
                         event.add_exhaustion(1.5);
                     }
-                    1 => event.hurt(NativeEffectDamage::Magic, 3.0),
-                    3 if event.health > 1.0 => event.hurt(NativeEffectDamage::Magic, 1.0),
+                    1 => event.hurt("minecraft:magic", 3.0),
+                    3 if event.health > 1.0 => event.hurt("minecraft:magic", 1.0),
                     3 => {}
-                    _ => event.hurt(NativeEffectDamage::Wither, 100.0),
+                    _ => event.hurt("minecraft:wither", 100.0),
                 }
             }
         }
@@ -2859,18 +2868,43 @@ mod tests {
         });
     }
 
+    /// A mod effect's damage type keeps its registry id and tags whether it is
+    /// vanilla's or a datapack's, and one the registry lacks is refused.
     #[test]
     fn effect_damage_sources_retain_their_ids() {
-        use mod_api::NativeEffectDamage;
-        for (source, expected) in [
-            (NativeEffectDamage::Magic, "minecraft:magic"),
-            (NativeEffectDamage::Wither, "minecraft:wither"),
+        let type_json = |id: &str| {
+            serde_json::json!({
+                "id": id, "message_id": "m", "exhaustion": "00000000",
+                "scaling": "never", "effects": "hurt", "death_message_type": "default"
+            })
+        };
+        let catalog = horizon_world::damage_source::Catalog::from_json(
+            &serde_json::json!({
+                "data_version": horizon_world::DATA_VERSION,
+                "types": [type_json("minecraft:magic"), type_json("demo:scorch")],
+            }),
+            &serde_json::json!({
+                "minecraft:is_fire": "{\"values\":[\"demo:scorch\"]}",
+                "minecraft:bypasses_armor": "{\"values\":[\"demo:scorch\",\"minecraft:magic\"]}",
+            }),
+        )
+        .unwrap();
+        for (id, tags) in [
+            ("minecraft:magic", NamedDamage::BYPASSES_ARMOR),
+            (
+                "demo:scorch",
+                NamedDamage::IS_FIRE | NamedDamage::BYPASSES_ARMOR,
+            ),
         ] {
+            let named = NamedDamage::registered(&catalog, id).unwrap();
+            assert_eq!((named.name, named.tags), (id, tags));
+            let kind = Game::damage_kind(&catalog, id);
             assert_eq!(
-                super::super::creatures::source_damage_type(Damage::of(source.into())),
-                expected
+                super::super::creatures::source_damage_type(Damage::of(kind)),
+                id
             );
         }
+        assert_eq!(NamedDamage::registered(&catalog, "demo:missing"), None);
     }
 
     /// `WitherBoss.canBeAffected` refuses only the wither effect: its `addEffect`

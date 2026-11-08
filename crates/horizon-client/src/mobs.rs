@@ -805,21 +805,12 @@ impl MobTypes {
     }
 }
 pub use horizon_client_core::who::Who;
-impl From<mod_api::NativeEffectDamage> for DamageKind {
-    fn from(damage: mod_api::NativeEffectDamage) -> Self {
-        match damage {
-            mod_api::NativeEffectDamage::Magic => Self::Magic,
-            mod_api::NativeEffectDamage::Wither => Self::Wither,
-            _ => unreachable!("NativeEffectDamage: unhandled variant"),
-        }
-    }
-}
-
 /// A native damage type's registry name and the tags consumed by mob combat.
 ///
-/// Native code supplies a static name (no interning or leaked runtime strings)
-/// and flags matching its data-pack damage tags. Register the same name/data for
-/// player damage, death messages and loot predicates. Unset tags are false.
+/// Native code supplies a static name and flags matching its data-pack damage
+/// tags; `NamedDamage::registered` builds both from a damage registry entry,
+/// interning its name. Register the same name/data for player damage, death
+/// messages and loot predicates. Unset tags are false.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NamedDamage {
     pub name: &'static str,
@@ -838,8 +829,54 @@ impl NamedDamage {
     pub const IS_FALL: u32 = 1 << 9;
     pub const BYPASSES_ENCHANTMENTS: u32 = 1 << 10;
 
+    /// Each flag with the damage tag it stands for.
+    const TAG_FLAGS: [(u32, &'static str); 11] = [
+        (Self::IS_FIRE, "minecraft:is_fire"),
+        (Self::BYPASSES_ARMOR, "minecraft:bypasses_armor"),
+        (Self::NO_KNOCKBACK, "minecraft:no_knockback"),
+        (
+            Self::BYPASSES_INVULNERABILITY,
+            "minecraft:bypasses_invulnerability",
+        ),
+        (Self::BYPASSES_EFFECTS, "minecraft:bypasses_effects"),
+        (Self::BYPASSES_RESISTANCE, "minecraft:bypasses_resistance"),
+        (Self::PANIC_CAUSES, "minecraft:panic_causes"),
+        (Self::IS_PROJECTILE, "minecraft:is_projectile"),
+        (Self::IS_EXPLOSION, "minecraft:is_explosion"),
+        (Self::IS_FALL, "minecraft:is_fall"),
+        (
+            Self::BYPASSES_ENCHANTMENTS,
+            "minecraft:bypasses_enchantments",
+        ),
+    ];
+
     pub const fn new(name: &'static str, tags: u32) -> Self {
         Self { name, tags }
+    }
+
+    /// The registered damage type `name` with the tags `catalog` gives it,
+    /// or None when the registry has no such type. The name is interned: the
+    /// registries hold a handful of ids, so one copy of each is kept for the
+    /// rest of the run.
+    pub fn registered(catalog: &horizon_world::damage_source::Catalog, name: &str) -> Option<Self> {
+        use std::{collections::HashSet, sync::Mutex};
+        static NAMES: Mutex<Option<HashSet<&'static str>>> = Mutex::new(None);
+        let id = catalog.id(name)?;
+        let mut names = NAMES.lock().unwrap_or_else(|e| e.into_inner());
+        let names = names.get_or_insert_with(HashSet::new);
+        let name = match names.get(name) {
+            Some(&found) => found,
+            None => {
+                let leaked: &'static str = Box::leak(name.to_owned().into_boxed_str());
+                names.insert(leaked);
+                leaked
+            }
+        };
+        let tags = Self::TAG_FLAGS
+            .iter()
+            .filter(|(_, tag)| catalog.in_tag(id, tag))
+            .fold(0, |tags, (flag, _)| tags | flag);
+        Some(Self { name, tags })
     }
     pub const fn has(self, tag: u32) -> bool {
         self.tags & tag != 0
