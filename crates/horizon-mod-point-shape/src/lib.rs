@@ -461,9 +461,11 @@ impl Shape {
             impl #lifetime ::mod_api::wire::Wire for #record #lifetime {
                 const MIN: usize = 0;
                 fn put(&self, out: &mut ::mod_api::wire::Writer) {
+                    let _ = &out;
                     #(#wire_puts)*
                 }
                 fn take(input: &mut ::mod_api::wire::Reader<'_>) -> Result<Self, ::mod_api::wire::WireError> {
+                    let _ = &input;
                     Ok(Self { #(#wire_names: #wire_reads,)* })
                 }
             }
