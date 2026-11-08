@@ -5008,20 +5008,22 @@ impl Game<'_> {
             );
         }
         for (owner, guest, at) in shoot_events {
-            if let Some(conn) = guest.filter(|conn| self.lan_acting != Some(*conn)) {
-                let dispatched = self
-                    .as_guest(conn, |g| {
-                        g.projectile_event("minecraft:projectile_shoot", owner, at);
-                    })
-                    .is_some();
-                // An owner who left cannot resolve to the host. The event
-                // still occurs, with no resolved owner (Projectile.getOwner).
-                if !dispatched {
-                    self.projectile_event("minecraft:projectile_shoot", None, at);
+            self.with_projectile_dispatch(&mut projectiles, |game| {
+                if let Some(conn) = guest.filter(|conn| game.lan_acting != Some(*conn)) {
+                    let dispatched = game
+                        .as_guest(conn, |g| {
+                            g.projectile_event("minecraft:projectile_shoot", owner, at);
+                        })
+                        .is_some();
+                    // An owner who left cannot resolve to the host. The event
+                    // still occurs, with no resolved owner (Projectile.getOwner).
+                    if !dispatched {
+                        game.projectile_event("minecraft:projectile_shoot", None, at);
+                    }
+                } else {
+                    game.projectile_event("minecraft:projectile_shoot", owner, at);
                 }
-            } else {
-                self.projectile_event("minecraft:projectile_shoot", owner, at);
-            }
+            });
         }
         self.smoke_trails(trails);
         for pos in bubble_tops {
