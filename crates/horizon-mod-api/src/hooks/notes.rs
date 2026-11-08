@@ -1233,7 +1233,7 @@ names the level it means by its `dimension` (`minecraft:overworld`), as `native_
 It names the level it means by its `dimension` (`minecraft:overworld`), as `native_set_block` does.
 
 - `native_edit_blocks(dimension, edit)` makes many blocks at once: `NativeBlockEdit` holds a `palette` of block states and
-  a list of `filters` (block predicates, `#minecraft:logs`), both written as commands write them, and `runs`, each
+  a list of typed `StatePredicate` filters (exact blocks or tags), and `runs`, each
   `height` blocks up column (`x`, `z`) from `y`, set to palette entry `block`, only where filter `only` passes the block
   there. With `surface` (`NativeHeightmap`: `WorldSurface`, `MotionBlocking`, `MotionBlockingNoLeaves` or `OceanFloor`),
   `y` counts from that height of the column, read once a column before anything changes. Runs are made in order, each
@@ -1244,7 +1244,7 @@ It names the level it means by its `dimension` (`minecraft:overworld`), as `nati
   the one `native_set_block` would give it (a mod block's own, included).
 - It answers the number of blocks changed. Runs in chunks that aren't loaded, and the parts of runs outside the level's
   height, are left out. It answers `Err`, changing nothing, on a client, for another dimension, a palette entry or filter
-  that doesn't read or carries NBT (`chest{...}`: refused, set states only), a run naming a palette entry or filter past
+  or predicate that fails validation (NBT is not representable), a run naming a palette entry or filter past
   the end, or more than 65536 filters.
 
 ### Column reads
@@ -1260,7 +1260,7 @@ pieces.
   loaded; at most 65,536 columns a call.
 - `native_read_columns(dimension, columns, heightmap, (below, above))` reads, for each column, the blocks from `below`
   under its height to `above` - 1 over it, bottom first: `NativeColumnBlocks` holds the heights (`bases`), the block
-  names seen (`palette`), the blocks as indexes into it, a column after another, and three biome tints a column (grass,
+  complete `BlockState` values seen (`palette`), the blocks as indexes into it, and three biome tints a column (grass,
   foliage and water, at the column's top). Blocks outside the level's height, and every block of a column not loaded,
   read as air (its tints as 0). `below + above` must be 1 to the level's height, and the read at most 1,048,576 blocks.
   The tints are the biome's own at the column's top, not blended over the biome blend radius as the game draws them, so
