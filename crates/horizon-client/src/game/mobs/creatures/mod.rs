@@ -5111,10 +5111,9 @@ impl Game<'_> {
         who: Who,
     ) -> f32 {
         let trident = matches!(shot.kind, ProjectileKind::Trident);
-        let base = if trident {
-            8.0
-        } else {
-            shot.arrow_damage() + shot.bonus.damage
+        let base = match shot.kind {
+            ProjectileKind::Arrow { base_damage, .. } => base_damage as f32,
+            _ => 8.0,
         };
         let weapon = shot.arrow.as_ref().and_then(|a| {
             if trident {
@@ -5124,7 +5123,11 @@ impl Game<'_> {
             }
         });
         let Some(weapon) = weapon else {
-            return base;
+            return if trident {
+                base
+            } else {
+                shot.arrow_damage() + shot.bonus.damage
+            };
         };
         let attacker_kind = match shot.owner {
             Some(Who::Player) => Some("minecraft:player".to_owned()),
@@ -5174,7 +5177,13 @@ impl Game<'_> {
         } else {
             victim
         };
-        self.evaluate_weapon_damage(&weapon, attacker.map(|id| (id, victim)), ctx, base)
+        let enchanted =
+            self.evaluate_weapon_damage(&weapon, attacker.map(|id| (id, victim)), ctx, base);
+        if trident {
+            enchanted
+        } else {
+            shot.arrow_damage_with_base(f64::from(enchanted)) + shot.bonus.damage
+        }
     }
     /// A projectile's hurt of `amount` on the boat or minecart `id`
     /// (`VehicleEntity.hurtServer`): even 0 shakes it (`Snowball`, `ThrownEgg`,

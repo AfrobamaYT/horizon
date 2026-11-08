@@ -188,6 +188,7 @@ mod tests {
                         Some(horizon_client::mobs::Who::Player),
                     );
                     let mut weapon = ItemStack::new("minecraft:trident", 1);
+                    weapon.damage = 11;
                     weapon.data_mut().enchantments = vec![("damage_test:force".into(), 2)];
                     trident.arrow.as_mut().unwrap().pickup_item = weapon;
                     assert_eq!(
@@ -207,8 +208,9 @@ mod tests {
                         Vec3::ZERO,
                         Some(horizon_client::mobs::Who::Player),
                     );
-                    arrow.velocity = Vec3::new(1.0, 0.0, 0.0);
+                    arrow.velocity = Vec3::new(3.0, 0.0, 0.0);
                     let mut bow = ItemStack::new("minecraft:bow", 1);
+                    bow.damage = 11;
                     bow.data_mut().enchantments = vec![("damage_test:force".into(), 2)];
                     arrow.arrow.as_mut().unwrap().fired_from_weapon = Some(bow);
                     assert_eq!(
@@ -217,8 +219,25 @@ mod tests {
                             Some("minecraft:iron_golem"),
                             horizon_client::mobs::Who::Mob(21)
                         ),
-                        10.0
+                        30.0
                     );
+                    if let horizon_client::projectiles::ProjectileKind::Arrow { critical, .. } =
+                        &mut arrow.kind
+                    {
+                        *critical = true;
+                    }
+                    arrow.random.0 = horizon_core::random::LegacyRandom::new(42);
+                    assert_eq!(
+                        game.shot_damage(
+                            &mut arrow,
+                            Some("minecraft:iron_golem"),
+                            horizon_client::mobs::Who::Mob(21)
+                        ),
+                        39.0
+                    );
+                    // java.util.Random(42): nextInt(17) = 9, then nextInt() = 234785527.
+                    use horizon_core::random::RandomSource;
+                    assert_eq!(arrow.random.0.next_int(), 234785527);
                     assert_eq!(
                         *reads.lock().unwrap(),
                         [
@@ -228,6 +247,8 @@ mod tests {
                             (7, 21, "minecraft:stick".into(), 2, 6.0),
                             (7, 21, "minecraft:trident".into(), 2, 10.0),
                             (7, 21, "minecraft:trident".into(), 2, 20.0),
+                            (7, 21, "minecraft:bow".into(), 2, 4.0),
+                            (7, 21, "minecraft:bow".into(), 2, 8.0),
                             (7, 21, "minecraft:bow".into(), 2, 4.0),
                             (7, 21, "minecraft:bow".into(), 2, 8.0),
                         ]
