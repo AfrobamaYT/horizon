@@ -43,9 +43,10 @@ fn main() {
         quote!(policy),
     )
     .unwrap();
+    let helpers = native_patch::helpers(&rule, &graph).unwrap();
     let runtime = quote! {
         fn policy() -> mod_points::exposure::Plan { mod_points::exposure::Plan::build(&#layouts, Some(#root), &[mod_points::exposure::Grant { case: None, ordinal: 1 }], &[]).unwrap() }
-        fn plan_game<'a>(value: &'a mut model::Game, tree: &mod_points::native_patch::PatchTree<'_>, plan: &mut mod_api::wire::PatchPlan<'a>, policy: &mod_points::exposure::Plan) -> Result<(), mod_api::wire::WireError> { #body Ok(()) }
+        fn plan_game<'a>(value: &'a mut model::Game, tree: &mod_points::native_patch::PatchTree<'_>, plan: &mut mod_api::wire::PatchPlan<'a>, policy: &mod_points::exposure::Plan) -> Result<(), mod_api::wire::WireError> { #helpers #body Ok(()) }
     };
     let mut funcs = Vec::new();
     for (name, ty, writable) in [
@@ -79,13 +80,14 @@ fn main() {
             quote!(policy),
         )
         .unwrap();
+        let helpers = native_patch::helpers(&rule, &graph).unwrap();
         let native_ty = match name.to_string().as_str() {
             "plan_data" | "plan_readonly" => quote!(model::Data),
             "plan_opaque" => quote!(model::Opaque),
             "plan_ref_data" => quote!(&mut model::Data),
             _ => quote!(#ty),
         };
-        funcs.push(quote!(fn #name<'a>(value: &'a mut #native_ty, tree: &mod_points::native_patch::PatchTree<'_>, plan: &mut mod_api::wire::PatchPlan<'a>) -> Result<(), mod_api::wire::WireError> { let policy = mod_points::exposure::Plan::build(&#layouts, None, &[], &[#root]).unwrap(); #body Ok(()) }));
+        funcs.push(quote!(fn #name<'a>(value: &'a mut #native_ty, tree: &mod_points::native_patch::PatchTree<'_>, plan: &mut mod_api::wire::PatchPlan<'a>) -> Result<(), mod_api::wire::WireError> { let policy = mod_points::exposure::Plan::build(&#layouts, None, &[], &[#root]).unwrap(); #helpers #body Ok(()) }));
     }
     fs::write(
         PathBuf::from(std::env::var_os("OUT_DIR").unwrap()).join("patch.rs"),

@@ -421,6 +421,8 @@ pub struct Rule {
     /// Import facts in each lexical module. Conflicting conditional imports stay unresolved.
     refs: HashMap<String, BTreeMap<String, Option<String>>>,
     memo: std::cell::RefCell<HashMap<String, Crossing>>,
+    /// Whether a named layout has a generated decoder, decided once per rule.
+    pub(crate) decodable: std::cell::RefCell<HashMap<String, bool>>,
 }
 
 /// `a::b::C<'_>` as `a::b::C`.
@@ -537,6 +539,7 @@ impl Rule {
                 .collect(),
             refs,
             memo: Default::default(),
+            decodable: Default::default(),
         }
     }
 

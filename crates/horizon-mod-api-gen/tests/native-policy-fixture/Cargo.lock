@@ -276,6 +276,7 @@ version = "0.1.0"
 dependencies = [
  "horizon-mod-api",
  "horizon-mod-api-gen",
+ "horizon-mod-point-shape",
  "quote",
  "syn 2.0.119",
 ]

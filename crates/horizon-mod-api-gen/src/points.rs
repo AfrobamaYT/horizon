@@ -18,6 +18,8 @@ pub mod source;
 /// One point, as `points.json` lists it.
 #[derive(Debug, serde::Serialize)]
 pub struct GamePoint {
+    /// Why the registration-policy reader cannot be generated, absent when it can.
+    pub runtime_refusal: Option<String>,
     pub name: String,
     /// The function, as an injection's `target` names it.
     pub target: String,
@@ -635,6 +637,35 @@ fn all_points<'a>(
     Ok(points)
 }
 
+type Calls = std::collections::BTreeMap<String, Result<crate::native_raw::Call, String>>;
+
+/// One ordered graph over the whole catalog, before any name selection, and each raw point's
+/// virtual call layouts in it. Guest and native generators share these descriptor IDs.
+fn catalog_graph(
+    rule: &crate::crossing::Rule,
+    ordered: &[(usize, Found<'_>)],
+) -> Result<(crate::native_policy::Graph, Calls), String> {
+    let mut graph = crate::native_policy::Graph::default();
+    let mut calls = Calls::new();
+    for (_, found) in ordered {
+        let shape = found.shape()?;
+        if shape.raw {
+            calls.insert(
+                found.target(),
+                crate::native_raw::register(
+                    rule,
+                    &found.module,
+                    found.owner.map(|(ty, _)| ty),
+                    found.sig,
+                    &shape,
+                    &mut graph,
+                ),
+            );
+        }
+    }
+    Ok((graph, calls))
+}
+
 /// The game's points, by name: every point function of the game module, and the listed ones of
 /// the crates below it. Staged private source targets are never part of this public list.
 pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
@@ -645,12 +676,29 @@ pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
     let (scanned, list) = scan(root)?;
     let rule = crate::crossing::Rule::new(&crate::internals::catalog(root)?);
     let mut points = Vec::new();
-    for (_, found) in all_points(&scanned, &list)? {
+    let ordered = all_points(&scanned, &list)?;
+    let (graph, calls) = catalog_graph(&rule, &ordered)?;
+    for (_, found) in ordered {
         let target = found.target();
         if private.contains(&plain_path(&target)) {
             continue;
         }
         let shape = found.shape()?;
+        let runtime = calls.get(&target).map(|call| {
+            call.clone().and_then(|call| {
+                crate::native_raw::generate_runtime(
+                    &rule,
+                    &found.module,
+                    found.owner.map(|(ty, _)| ty),
+                    found.sig,
+                    &shape,
+                    &graph,
+                    call,
+                )
+                .map(|_| ())
+            })
+        });
+        let admitted = matches!(runtime, Some(Ok(())));
         let api = shape.api_items(&target);
         points.push(GamePoint {
             record_item: shape.record_item(&target).to_string(),
@@ -662,9 +710,11 @@ pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
             at_return: shape.has_return(),
             raw: shape.raw,
             snapshot: shape.snapshot_able(found.sig)
+                || admitted
                 || (shape.raw
                     && crate::native_raw::generate(&rule, &found.module, found.sig, &shape)
                         .is_ok()),
+            runtime_refusal: runtime.and_then(Result::err),
             raw_shape: shape
                 .raw
                 .then(|| point_shape::raw_shape(&shape, found.sig, found.owner.map(|(ty, _)| ty))),
@@ -726,14 +776,81 @@ pub(crate) fn offset(source: &str, lines: &[usize], at: proc_macro2::LineColumn)
         .map_or(source.len(), |(i, _)| line + i)
 }
 
+/// The once-per-source readers, planners and decoders, and the pure schema catalog the loader
+/// resolves manifest declarations against, appended to the game crate's root.
+fn emit_runtime_module(
+    root: &Path,
+    rule: &crate::crossing::Rule,
+    entries: &[crate::internals::Internal],
+    graph: &crate::native_policy::Graph,
+    points: &[(usize, Found<'_>)],
+    calls: &Calls,
+) -> Result<(), String> {
+    let windows = crate::native_window::helpers(rule, graph)?;
+    let patches = crate::native_patch::helpers(rule, graph)?;
+    let layouts = graph.tokens();
+    let mut specs = Vec::new();
+    for (_, found) in points {
+        let Some(Ok(call)) = calls.get(&found.target()) else {
+            continue;
+        };
+        let head = call.head;
+        let tail = match call.tail {
+            Some(tail) => quote::quote!(Some(#tail)),
+            None => quote::quote!(None),
+        };
+        let receiver = match found.owner {
+            Some((ty, _)) => graph
+                .id(&rule.shape(&found.module, None, ty))
+                .map_or(quote::quote!(None), |id| quote::quote!(Some(#id))),
+            None => quote::quote!(None),
+        };
+        specs.push(quote::quote!(mod_points::endpoint_policy::PointSpec { head_call: #head, tail_call: #tail, receiver: #receiver }));
+    }
+    let mut fields = Vec::new();
+    for entry in entries.iter().filter(|entry| entry.kind == "field") {
+        let Some((owner, field)) = entry.path.rsplit_once("::") else {
+            continue;
+        };
+        let Some(receiver) = graph.layouts.iter().position(|layout| layout.name == owner) else {
+            continue;
+        };
+        let (path, hash) = (&entry.path, &entry.hash);
+        fields.push(quote::quote!(mod_points::endpoint_policy::InternalField { path: String::from(#path), kind: String::from("field"), hash: String::from(#hash), receiver: #receiver, field: String::from(#field) }));
+    }
+    let module = quote::quote! {
+        #[doc(hidden)]
+        #[allow(dead_code, clippy::all)]
+        pub mod __horizon_points {
+            #windows
+            #patches
+            /// The exact catalog the generated readers were emitted from.
+            pub fn catalog() -> mod_points::endpoint_policy::SchemaCatalog {
+                mod_points::endpoint_policy::SchemaCatalog {
+                    layouts: #layouts,
+                    points: vec![#(#specs),*],
+                    fields: vec![#(#fields),*],
+                }
+            }
+        }
+    };
+    let (_, lib) = crate_root(root, "horizon_client")?;
+    let mut source = fs::read_to_string(&lib).map_err(|e| format!("{}: {e}", lib.display()))?;
+    source.push_str("\n");
+    source.push_str(&module.to_string());
+    fs::write(&lib, source).map_err(|e| format!("{}: {e}", lib.display()))
+}
+
 /// The staging pass: puts `#[point]` on every point function of the staged copy at `root`, in
 /// place, declares each raw form's record and listener types after the item that holds the
 /// function, and gives each lower crate with points the points' dependencies. Run on a copy, never
 /// on a working tree: the source tree carries no `#[point]`.
 pub fn stage(root: &Path) -> Result<Staged, String> {
     let (scanned, list) = scan(root)?;
-    let rule = crate::crossing::Rule::new(&crate::internals::catalog(root)?);
+    let entries = crate::internals::catalog(root)?;
+    let rule = crate::crossing::Rule::new(&entries);
     let points = all_points(&scanned, &list)?;
+    let (graph, calls) = catalog_graph(&rule, &points)?;
     let mut staged = Staged::default();
     let mut packages = std::collections::BTreeSet::new();
     for (index, file) in scanned.iter().enumerate() {
@@ -780,14 +897,24 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
                     "#[horizon_mod_api_macros::point({})]{} ",
                     found.attribute(),
                     if found.shape()?.raw && !found.shape()?.snapshot_able(found.sig) {
-                        crate::native_raw::generate(
-                            &rule,
-                            &found.module,
-                            found.sig,
-                            &found.shape()?,
-                        )
-                        .map(|plan| format!(" {}", plan.attribute()))
-                        .unwrap_or_default()
+                        calls
+                            .get(&found.target())
+                            .cloned()
+                            .and_then(Result::ok)
+                            .and_then(|call| {
+                                crate::native_raw::generate_runtime(
+                                    &rule,
+                                    &found.module,
+                                    found.owner.map(|(ty, _)| ty),
+                                    found.sig,
+                                    &found.shape().ok()?,
+                                    &graph,
+                                    call,
+                                )
+                                .ok()
+                            })
+                            .map(|plan| format!(" {}", plan.attribute()))
+                            .unwrap_or_default()
                     } else {
                         String::new()
                     },
@@ -823,6 +950,7 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
             packages.insert(package.clone());
         }
     }
+    emit_runtime_module(root, &rule, &entries, &graph, &points, &calls)?;
     dependencies(root, packages)?;
     Ok(staged)
 }
@@ -1153,6 +1281,7 @@ mod tests {
             let shape = point_shape::shape(quote!(), &sig).unwrap();
             let api = shape.api_items(name);
             GamePoint {
+                runtime_refusal: None,
                 name: name.into(),
                 target: name.into(),
                 side: "none",
@@ -1219,6 +1348,7 @@ mod tests {
                     "raw_shape": point.raw_shape,
                     "raw_status": if point.snapshot { "generated primitive rows" } else if point.raw { "staged nominal reader needed" } else { "no raw place" },
                     "raw_snapshot": point.snapshot,
+                    "runtime_refusal": point.runtime_refusal,
                 }));
             }
         }
@@ -1232,6 +1362,19 @@ mod tests {
             points.iter().filter(|point| point.raw).count(),
             points.iter().filter(|point| point.snapshot).count()
         );
+        let mut refusals = std::collections::BTreeMap::<String, usize>::new();
+        for point in points.iter().filter(|point| point.raw) {
+            let reason = point
+                .runtime_refusal
+                .as_deref()
+                .map_or("admitted", |reason| &reason[..reason.len().min(110)]);
+            *refusals.entry(reason.to_owned()).or_default() += 1;
+        }
+        let mut refusals: Vec<_> = refusals.into_iter().collect();
+        refusals.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
+        for (reason, count) in refusals.iter().take(40) {
+            println!("runtime admission {count}: {reason}");
+        }
         for class in ["plain", "callback", "unclassified"] {
             let functions = points
                 .iter()
