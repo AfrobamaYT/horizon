@@ -4779,19 +4779,23 @@ impl Game<'_> {
                 round.not_ticked(items[i].id);
                 continue;
             }
-            let item = &mut items[i];
             // `addFreshEntity` during the entity pass: the item ticks from the
             // next tick on (`EntityTickList`).
-            if merging && self.joined_during_entity_pass(item.id) {
+            if merging && self.joined_during_entity_pass(items[i].id) {
                 continue;
             }
             if !ticking(
-                item.position.x.floor() as i32,
-                item.position.z.floor() as i32,
-            ) || round.canceled(item.id)
+                items[i].position.x.floor() as i32,
+                items[i].position.z.floor() as i32,
+            ) || round.canceled(items[i].id)
             {
                 continue;
             }
+            // Entity.baseTick: the entity-level invulnerability window of
+            // the saved data counts down (#916) — only for an item that
+            // really ticks in this pass.
+            self.tick_saved_invulnerable_time(items[i].id);
+            let item = &mut items[i];
             // ItemEntity.tick's noPhysics (servers only): out of a block
             // placed on it, towards the closest open side (#1252).
             let no_physics = merging && item.inside_block(&self.world, self.collision);
@@ -12188,6 +12192,7 @@ impl Game<'_> {
         }
     }
     /// Run equipment continuations with the acting player installed on the real host.
+    #[allow(clippy::too_many_arguments)]
     fn hurt_player_equipment(
         &mut self,
         source: horizon_world::damage_source::DamageTypeId,
@@ -12195,6 +12200,7 @@ impl Game<'_> {
         blocking: Option<horizon_client::health::Blocking>,
         living_cause: bool,
         causing: i32,
+        creative_source: bool,
         attack: &horizon_client::health::Attack,
     ) -> horizon_client::Result<horizon_client::health::BlockOutcome> {
         let rules = self.world.health_rules;
@@ -12214,6 +12220,7 @@ impl Game<'_> {
                 blocking,
                 living_cause,
                 causing,
+                creative_source,
                 helmet,
             )?;
         if let Some(damage) = hit.helmet_damage() {
@@ -14687,6 +14694,21 @@ impl Game<'_> {
                     ),
                 );
                 map.insert("Air".into(), horizon_core::nbt::Tag::Short(p.air as i16));
+                // Entity.saveWithoutId: the `Invulnerable` flag always, its
+                // `invulnerable_time` window only while open, like a mob's
+                // save (#916).
+                map.insert(
+                    "Invulnerable".into(),
+                    horizon_core::nbt::Tag::Byte(i8::from(p.health.permanently_invulnerable)),
+                );
+                if p.health.invulnerable_time > 0 {
+                    map.insert(
+                        "invulnerable_time".into(),
+                        horizon_core::nbt::Tag::Int(p.health.invulnerable_time),
+                    );
+                } else {
+                    map.remove(&"invulnerable_time".into());
+                }
                 // LivingEntity.addAdditionalSaveData: AttributeMap.pack.
                 map.insert("attributes".into(), p.saved_attributes());
             }

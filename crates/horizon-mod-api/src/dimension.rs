@@ -10,6 +10,23 @@ use serde_json::{Value, json};
 /// `NoiseBasedChunkGenerator`.
 pub(crate) const NOISE_GENERATOR: &str = "minecraft:noise";
 
+/// How a dimension chooses its biomes (`BiomeSource`): the level stem's `biome_source`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum BiomeSourceKind {
+    /// The one `biome` of the settings everywhere (`minecraft:fixed`).
+    #[default]
+    Fixed,
+    /// The `biomes` in a checkerboard of cells `2^biome_scale` chunks wide
+    /// (`minecraft:checkerboard`).
+    Checkerboard,
+    /// The Overworld's or the Nether's multi-noise biomes, by `biome_preset`
+    /// (`minecraft:multi_noise`).
+    MultiNoise,
+    /// The End's islands (`minecraft:the_end`).
+    End,
+}
+
 /// What a mod's dimension is made of. The default is the Overworld's shape
 /// and terrain over plains; the parts of a dimension type not named here are
 /// the Overworld's.
@@ -31,8 +48,17 @@ pub struct DimensionSettings {
     pub generator: String,
     /// The noise settings' id (`minecraft:overworld`, or a data pack's).
     pub noise_settings: String,
-    /// The one biome the level has.
+    /// The one biome the level has, with the `Fixed` biome source.
     pub biome: String,
+    /// How the level chooses its biomes. Only `Fixed` suits a mod's own chunk generator, which
+    /// writes terrain only.
+    pub biome_source: BiomeSourceKind,
+    /// The biomes a `Checkerboard` source alternates, at least one (vanilla sets no maximum).
+    pub biomes: Vec<String>,
+    /// A `Checkerboard`'s cell size as a power of two of chunks, 0 to 62 (vanilla's default is 2).
+    pub biome_scale: u32,
+    /// A `MultiNoise` source's preset: `minecraft:overworld` or `minecraft:nether`.
+    pub biome_preset: String,
     /// `DimensionType.hasFixedTime`: the sky's time does not advance (the Nether's and the End's).
     pub has_fixed_time: bool,
     /// `DimensionType.hasEnderDragonFight`: the level runs the End's dragon fight.
@@ -84,6 +110,10 @@ impl Default for DimensionSettings {
             generator: NOISE_GENERATOR.into(),
             noise_settings: "minecraft:overworld".into(),
             biome: "minecraft:plains".into(),
+            biome_source: BiomeSourceKind::Fixed,
+            biomes: Vec::new(),
+            biome_scale: 2,
+            biome_preset: "minecraft:overworld".into(),
             has_fixed_time: false,
             has_ender_dragon_fight: false,
             coordinate_scale: 1.0,
@@ -138,6 +168,44 @@ impl DimensionSettings {
                 "minecraft:gameplay/sky_light_level": self.sky_light_level,
             },
         })
+    }
+    /// The level stem's `biome_source`.
+    fn biome_source(&self) -> Value {
+        match self.biome_source {
+            BiomeSourceKind::Fixed => json!({"type": "minecraft:fixed", "biome": self.biome}),
+            BiomeSourceKind::Checkerboard => json!({
+                "type": "minecraft:checkerboard",
+                "biomes": self.biomes,
+                "scale": self.biome_scale,
+            }),
+            BiomeSourceKind::MultiNoise => {
+                json!({"type": "minecraft:multi_noise", "preset": self.biome_preset})
+            }
+            BiomeSourceKind::End => json!({"type": "minecraft:the_end"}),
+        }
+    }
+    /// What the biome source's codec refuses, if anything.
+    pub(crate) fn invalid_biome_source(&self) -> Option<String> {
+        let reason = match self.biome_source {
+            BiomeSourceKind::Fixed => return None,
+            BiomeSourceKind::Checkerboard if self.biomes.is_empty() => {
+                "a checkerboard needs at least one biome"
+            }
+            BiomeSourceKind::Checkerboard if self.biome_scale > 62 => "biome_scale must be 0 to 62",
+            BiomeSourceKind::MultiNoise
+                if !matches!(
+                    self.biome_preset.as_str(),
+                    "minecraft:overworld" | "minecraft:nether"
+                ) =>
+            {
+                "biome_preset must be minecraft:overworld or minecraft:nether"
+            }
+            _ if self.generator != NOISE_GENERATOR => {
+                "only the fixed biome source suits a chunk generator of a mod's own"
+            }
+            _ => return None,
+        };
+        Some(reason.to_owned())
     }
     /// What the dimension type's codec refuses in the fields besides the build height, if
     /// anything: a value out of its range, or a name the game has no such sky or lighting for.
@@ -242,7 +310,7 @@ impl DimensionInfo {
             "generator": {
                 "type": settings.generator,
                 "settings": settings.noise_settings,
-                "biome_source": {"type": "minecraft:fixed", "biome": settings.biome},
+                "biome_source": settings.biome_source(),
             },
         });
         ModDimension {
@@ -301,6 +369,91 @@ mod tests {
         assert!(refused(|s| s.cardinal_light = "up".into()).contains("cardinal_light"));
         assert!(
             refused(|s| s.infiniburn = "minecraft:infiniburn_end".into()).contains("infiniburn")
+        );
+    }
+}
+
+#[cfg(test)]
+mod biome_source_tests {
+    use super::*;
+
+    #[test]
+    fn each_source_names_the_stem_the_data_pack_codec_reads() {
+        let mut settings = DimensionSettings::default();
+        assert_eq!(
+            settings.biome_source(),
+            json!({"type": "minecraft:fixed", "biome": "minecraft:plains"})
+        );
+        settings.biome_source = BiomeSourceKind::Checkerboard;
+        settings.biomes = vec!["minecraft:desert".into(), "minecraft:plains".into()];
+        settings.biome_scale = 3;
+        assert_eq!(
+            settings.biome_source(),
+            json!({
+                "type": "minecraft:checkerboard",
+                "biomes": ["minecraft:desert", "minecraft:plains"],
+                "scale": 3
+            })
+        );
+        settings.biome_source = BiomeSourceKind::MultiNoise;
+        settings.biome_preset = "minecraft:nether".into();
+        assert_eq!(
+            settings.biome_source(),
+            json!({"type": "minecraft:multi_noise", "preset": "minecraft:nether"})
+        );
+        settings.biome_source = BiomeSourceKind::End;
+        assert_eq!(
+            settings.biome_source(),
+            json!({"type": "minecraft:the_end"})
+        );
+    }
+
+    #[test]
+    fn a_source_the_codec_refuses_is_refused_by_name() {
+        let refused = |edit: fn(&mut DimensionSettings)| {
+            let mut settings = DimensionSettings::default();
+            edit(&mut settings);
+            settings.invalid_biome_source().unwrap_or_default()
+        };
+        assert_eq!(refused(|_| {}), "");
+        // vanilla's codec takes a holder set of any size, so 65 biomes are accepted
+        assert_eq!(
+            refused(|s| {
+                s.biome_source = BiomeSourceKind::Checkerboard;
+                s.biomes = (0..65).map(|n| format!("test:biome_{n}")).collect();
+            }),
+            ""
+        );
+        assert!(
+            refused(|s| s.biome_source = BiomeSourceKind::Checkerboard).contains("checkerboard")
+        );
+        assert!(
+            refused(|s| {
+                s.biome_source = BiomeSourceKind::Checkerboard;
+                s.biomes = vec!["minecraft:plains".into()];
+                s.biome_scale = 63;
+            })
+            .contains("biome_scale")
+        );
+        assert!(
+            refused(|s| {
+                s.biome_source = BiomeSourceKind::MultiNoise;
+                s.biome_preset = "minecraft:end".into();
+            })
+            .contains("biome_preset")
+        );
+        assert!(
+            refused(|s| {
+                s.biome_source = BiomeSourceKind::End;
+                s.generator = "mymod:void".into();
+            })
+            .contains("fixed biome source")
+        );
+        assert_eq!(
+            refused(|s| {
+                s.biome_source = BiomeSourceKind::MultiNoise;
+            }),
+            ""
         );
     }
 }

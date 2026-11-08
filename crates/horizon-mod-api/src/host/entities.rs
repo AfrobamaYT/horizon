@@ -144,10 +144,21 @@ pub trait EntitiesBackend {
     /// Side: server.
     /// `Entity.isPermanentlyInvulnerable`: the `Invulnerable` flag, which
     /// only damage that bypasses invulnerability (the void, `/kill`) or a
-    /// creative player gets past. Mobs keep it; Horizon keeps no such flag
-    /// for players or other kinds yet, so they read None.
+    /// creative player gets past. Mobs keep it on themselves (saved with
+    /// them), players on their body (#916, not saved: Horizon's player save
+    /// keeps no such field yet), the other kinds in the saved `Invulnerable`
+    /// tag of their entity data (#916) — the tag the item damage path
+    /// already refuses by.
     #[access(WorldOnly)]
     fn entity_permanently_invulnerable(&self, entity: EntityRef) -> Option<bool>;
+    /// Side: server.
+    /// `Entity.invulnerableTime` (#916): the entity-level invulnerability
+    /// window, its own field on a mob and a player — never the living damage
+    /// cooldown — and the saved `invulnerable_time` tag for the other kinds.
+    /// Counted down by the base tick; `isTemporarilyInvulnerable` is it above
+    /// zero. None for a stale handle or a kind that keeps none.
+    #[access(WorldOnly)]
+    fn entity_invulnerable_time(&self, entity: EntityRef) -> Option<i32>;
     /// Side: server.
     /// `LivingEntity.damageCooldownTime`: 20 after a hit, counting down;
     /// while it is above 10 a hit does only what it deals beyond the last
@@ -525,6 +536,11 @@ pub trait EntitiesBackendMut {
     #[access(WorldOnly)]
     fn entity_set_damage_cooldown_time(&mut self, entity: EntityRef, ticks: i32) -> bool;
     /// Side: server.
+    /// `Entity.setInvulnerableTime` (#916): the write side of
+    /// `entity_invulnerable_time`. False where the entity is gone or keeps
+    /// no such field.
+    #[access(WorldOnly)]
+    fn entity_set_invulnerable_time(&mut self, entity: EntityRef, ticks: i32) -> bool;
     /// `Entity.hurtServer(level, source, amount)` of `amount` from a source
     /// of `damage_type` (`minecraft:generic`'s shape), `direct` the entity
     /// that dealt it (a shot arrow) and `causing` the one responsible for it
@@ -562,6 +578,27 @@ pub trait EntitiesBackendMut {
     fn entity_teleport_to(
         &mut self,
         entity: EntityRef,
+        pos: [f64; 3],
+        rotation: Option<[f32; 2]>,
+    ) -> bool;
+    /// Side: server.
+    /// Sends the entity to `pos` in the level `dimension` (`minecraft:the_nether`,
+    /// or a level a mod registered), as `/execute in <dimension> run tp` does
+    /// (`Entity.teleportTo(ServerLevel, ..)`): `pos` is in that level's own
+    /// coordinates (nothing scales it by `coordinate_scale`), a level nobody has
+    /// entered opens first, and a vehicle takes its passengers along. A player
+    /// arrives after the current tick, and `player_teleported` and
+    /// `player_changed_dimension` report the move. In the entity's own level
+    /// it is `entity_teleport_to`. False for what `entity_teleport_to` refuses,
+    /// a dimension that isn't registered, and kinds that cannot change level
+    /// (all but a player, a mob, a boat or a minecart). A fake player stays
+    /// where it is, and the call is still true. Nothing builds ground at the
+    /// destination.
+    #[access(WorldOnly)]
+    fn entity_teleport_to_level(
+        &mut self,
+        entity: EntityRef,
+        dimension: &str,
         pos: [f64; 3],
         rotation: Option<[f32; 2]>,
     ) -> bool;
