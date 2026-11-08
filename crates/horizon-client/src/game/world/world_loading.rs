@@ -960,6 +960,17 @@ pub(super) fn make_streaming(
             }
         }
     });
+    // The sea level the level's rules and the mods read is the one its generator builds with
+    // (`ChunkGenerator.getSeaLevel`), so a pack's noise settings or a superflat world are seen:
+    // the superflat generators' is -63 (`FlatLevelSource.getSeaLevel`).
+    let register_sea_level = |sea_level: i32| {
+        if let Ok(key) = horizon_core::LevelKey::parse(dim.id()) {
+            horizon_world::level::register_sea_level(key, sea_level);
+        }
+    };
+    if flat.is_some() || flat_vanilla.is_some() {
+        register_sea_level(-63);
+    }
     let mut streaming = if let Some(inner) = debug {
         Streaming::new(
             Arc::new(Persistent {
@@ -1071,6 +1082,7 @@ pub(super) fn make_streaming(
             })?;
         inner.set_loot_source(loot);
         inner.add_mod_signs(res.facts());
+        register_sea_level(inner.sea_level());
         let inner = Arc::new(inner);
         if dim == Dim::Overworld && structures {
             inner.search_rings_behind();
