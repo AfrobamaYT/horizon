@@ -74,6 +74,8 @@ jobs:
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy
           rustup default stable
           echo "WGPU_BACKEND=dx12" >> "$GITHUB_ENV"
+      - name: Check the mod API type boundary (including negative control)
+        run: python3 tools/ci/check_api_boundary.py
       - name: Test offline research tooling
         run: python -m unittest discover -s tests -v
       - name: Install Rust toolchain and the ALSA and udev headers the client links against

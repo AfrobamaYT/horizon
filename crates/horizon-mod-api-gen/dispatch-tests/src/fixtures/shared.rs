@@ -115,7 +115,7 @@ mod generated {
 use generated::*;
 struct Installed {
     mods: Arc<[ModEntry]>,
-    subscribers: horizon_client_core::subscribers::Subscribers,
+    subscribers: horizon_mod_runtime::subscribers::Subscribers,
 }
 thread_local! {
     /// The hooks each dispatch entered, a mod at a time.
@@ -132,7 +132,7 @@ fn install(mods: Arc<[ModEntry]>) {
             .map(move |hook| (index, *hook as usize))
     });
     let subscribers =
-        horizon_client_core::subscribers::Subscribers::new(HOOK_COUNT, mods.len(), subscriptions);
+        horizon_mod_runtime::subscribers::Subscribers::new(HOOK_COUNT, mods.len(), subscriptions);
     // Test dispatch needs the same static lifetime as the real installation.
     MODS.set(Some(Box::leak(Box::new(Installed { mods, subscribers }))));
 }
