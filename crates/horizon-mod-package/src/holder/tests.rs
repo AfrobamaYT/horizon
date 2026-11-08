@@ -11,7 +11,7 @@ struct Scene {
     request: Request,
     claims: Vec<Claim>,
     snapshots: Vec<Snapshot>,
-    _record: File,
+    _record: Option<File>,
 }
 fn deadline() -> Instant {
     Instant::now() + Duration::from_secs(3)
@@ -95,7 +95,7 @@ impl Scene {
             },
             claims,
             snapshots,
-            _record: file,
+            _record: Some(file),
         }
     }
     fn ready(&self) -> PathBuf {
@@ -464,6 +464,7 @@ fn replaced_tree_completion_or_unreserved_image_never_starts_game() {
         let mut scene = Scene::new(false);
         scene.snapshots.clear(); // Model stale GUI descriptions without directory delete-denial.
         if change == 0 {
+            drop(scene._record.take()); // Also release the retained child file's Windows delete denial.
             let world = &scene.request.entry.trees[1].path;
             fs::rename(world, world.with_extension("old")).unwrap();
             fs::create_dir(world).unwrap();
