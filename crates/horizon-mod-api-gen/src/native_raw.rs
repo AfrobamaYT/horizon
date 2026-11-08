@@ -127,9 +127,6 @@ fn roots(
     signature: &Signature,
     shape: &point_shape::Shape,
 ) -> Result<(Roots, Option<Roots>), String> {
-    if module.split("::").next() != Some("horizon_client") {
-        return Err("lower-crate raw points need their own once-per-crate helper module".into());
-    }
     let authority = point_shape::raw_shape(shape, signature, None);
     let mut inputs = Vec::new();
     if let (Some(receiver), Some(owner)) = (signature.receiver(), owner) {
