@@ -325,3 +325,49 @@ A key exists only where the moment, side, facts and outcome all agree; otherwise
 [paper-ItemCraftedEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/inventory/ItemCraftedEvent.html
 [paper-ItemDespawnEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/ItemDespawnEvent.html
 [paper-EntityPickupItemEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/EntityPickupItemEvent.html
+
+## Event counterparts: base-on hooks (#1015)
+
+Paper API 26.3 (paper-api `26.3.build.244-stable`), public Javadoc; Horizon cited by function name; scope = the 20 `base-on` hooks below.
+Status is judged on moment, side, information and result; “No key” means no `paper` key is added.
+
+| Horizon hook | Paper event / status | Evidence and porting boundary |
+|---|---|---|
+| `on_effect_added` | **Partial:** [`EntityPotionEffectEvent`][paper-EntityPotionEffectEvent] | The event is cancellable before the modification, while the hook is listen-only after `addEffect`; it does expose the entity and effect/amplifier facts. No key. |
+| `on_equip` | **Partial:** [`EntityEquipmentChangedEvent`][paper-EntityEquipmentChangedEvent] | Non-cancellable and carries equipment changes, but it fires after attribute/enchantment updates for any detected change (durability, login, etc.), not specifically before the equip sound, and the dossier gives no old/new item detail per slot. No key. |
+| `on_use_tick` | **Gap:** none | No Paper event was provided for each tick of an in-progress item use with remaining ticks; interaction events fire on the initial click, not the use tick. No key. |
+| `perform_bonemeal` | **Gap:** none | No Paper event for `BonemealableBlock.performBonemeal` was provided or cited; the vanilla growth moment has no counterpart in the dossier. No key. |
+| `pickup_xp` | **Partial:** [`PlayerPickupExperienceEvent`][paper-PlayerPickupExperienceEvent] | Same attempt-to-pick-up moment and cancellation, and it exposes the orb, but it has no setters for the hook's `value` and `count` outputs. No key. |
+| `piston_post` | **Gap:** none (nearest [`BlockPistonExtendEvent`][paper-BlockPistonExtendEvent] / [`BlockPistonRetractEvent`][paper-BlockPistonRetractEvent]) | Paper's piston events are the cancellable pre-move events; the hook fires after movement/destruction, so the post moment is uncovered. No key. |
+| `piston_pre` | **Partial:** [`BlockPistonExtendEvent`][paper-BlockPistonExtendEvent] / [`BlockPistonRetractEvent`][paper-BlockPistonRetractEvent] | Cancellable pre-move events match the moment and side, but their `getBlocks()` describes moved blocks and does not expose the hook's separate `destroy` list. No key. |
+| `player_advancement_done` | **Covered:** [`PlayerAdvancementDoneEvent`][paper-PlayerAdvancementDoneEvent] | Fires after all criteria are complete, server-side, non-cancellable, and exposes the player and advancement, matching the listen-only hook. Key added. |
+| `player_advancement_progress` | **Partial:** [`PlayerAdvancementCriterionGrantEvent`][paper-PlayerAdvancementCriterionGrantEvent] | Covers the post-progress grant branch and exposes progress/criterion, but not revocation, and it is cancellable while the hook is listen-only. No key. |
+| `player_arm_swing` | **Partial:** [`PlayerArmSwingEvent`][paper-PlayerArmSwingEvent] | Exposes the hand and is server-side, but it is cancellable (the hook only listens) and is the swing event rather than the hook's after-handling notification. No key. |
+| `player_attack_cooldown_reset` | **Partial:** [`PlayerAttackEntityCooldownResetEvent`][paper-PlayerAttackEntityCooldownResetEvent] | Only fires for an attack on an entity, while the hook fires for every main-hand swing reset (including mining and clicking nothing); it is also deprecated and cancellable. No key. |
+| `player_bed_enter` | **Covered:** [`PlayerBedEnterEvent`][paper-PlayerBedEnterEvent] | Fired when the player is about to enter the bed after the sleep attempt is resolved, server-side and cancellable, with the player and bed; cancellation matches the hook's `cancel`. Key added. |
+| `player_bed_leave` | **Partial:** [`PlayerBedLeaveEvent`][paper-PlayerBedLeaveEvent] | Same leaving-bed moment and bed information, but the event is cancellable (and can change spawn-setting behaviour) while the hook is listen-only. No key. |
+| `player_bucket_entity` | **Partial:** [`PlayerBucketEntityEvent`][paper-PlayerBucketEntityEvent] | Exposes the captured entity and buckets server-side, but it is cancellable before the capture, while the hook is listen-only after the mob is removed and the bucket given. No key. |
+| `player_bundle_item_select` | **Covered:** [`PlayerBundleItemSelectEvent`][paper-PlayerBundleItemSelectEvent] | Non-cancellable selection event with player, slot/raw slot and selected index, matching the hook's server-side listen-only selection. Key added. |
+| `player_change_beacon_effect` | **Partial:** [`PlayerChangeBeaconEffectEvent`][paper-PlayerChangeBeaconEffectEvent] | Carries the beacon and primary/secondary effects, but it is cancellable with setters and fires when the player sets the effect, while the hook only listens after the effects are stored. No key. |
+| `player_changed_dimension` | **Gap:** none (nearest [`PlayerPortalEvent`][paper-PlayerPortalEvent]) | Paper only offers a cancellable pre-teleport portal event; the hook is a post-move notification for portals, commands and respawns. No key. |
+| `player_client_loaded_world` | **Covered:** [`PlayerClientLoadedWorldEvent`][paper-PlayerClientLoadedWorldEvent] | Non-cancellable event fired after the client reports the world loaded (the timeout case is distinguishable via `isTimeout()`), matching the server-side listen-only hook. Key added. |
+| `player_clone` | **Gap:** none | No Paper event for copying player data to the new player after death or End return was provided; no cited event covers the moment. No key. |
+| `player_command` | **Gap:** none (nearest [`ServerCommandEvent`][paper-ServerCommandEvent], [`UnknownCommandEvent`][paper-UnknownCommandEvent], [`PlayerCommandSendEvent`][paper-PlayerCommandSendEvent]) | The candidates cover non-player commands, unknown commands only, or the command list, not a player-typed command before execution and its cancellation. No key. |
+
+[paper-EntityEquipmentChangedEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/entity/EntityEquipmentChangedEvent.html
+[paper-PlayerPickupExperienceEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/player/PlayerPickupExperienceEvent.html
+[paper-BlockPistonExtendEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/BlockPistonExtendEvent.html
+[paper-BlockPistonRetractEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/BlockPistonRetractEvent.html
+[paper-PlayerAdvancementDoneEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerAdvancementDoneEvent.html
+[paper-PlayerAdvancementCriterionGrantEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/player/PlayerAdvancementCriterionGrantEvent.html
+[paper-PlayerArmSwingEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/PlayerArmSwingEvent.html
+[paper-PlayerAttackEntityCooldownResetEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/player/PlayerAttackEntityCooldownResetEvent.html
+[paper-PlayerBedLeaveEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerBedLeaveEvent.html
+[paper-PlayerBucketEntityEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerBucketEntityEvent.html
+[paper-PlayerBundleItemSelectEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/inventory/PlayerBundleItemSelectEvent.html
+[paper-PlayerChangeBeaconEffectEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/PlayerChangeBeaconEffectEvent.html
+[paper-PlayerPortalEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerPortalEvent.html
+[paper-PlayerClientLoadedWorldEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/PlayerClientLoadedWorldEvent.html
+[paper-ServerCommandEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/server/ServerCommandEvent.html
+[paper-UnknownCommandEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/command/UnknownCommandEvent.html
+[paper-PlayerCommandSendEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerCommandSendEvent.html
