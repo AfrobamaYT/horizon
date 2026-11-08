@@ -3411,7 +3411,7 @@ mod random_chance_command_tests {
         }
         std::fs::write(folder.join("pig.json"),r#"{"type":"minecraft:entity_properties","entity":"this","predicate":{"minecraft:entity_type":"minecraft:pig"}}"#).unwrap();
         game.world_root = dir.clone();
-        game.reload_datapacks(false, &[]);
+        game.reload_datapacks(false, &[]).unwrap();
         assert!(game.run_command("scoreboard objectives add h122 dummy"));
         assert!(game.run_command("function h122:admit"));
         assert_eq!(game.score.board.score("pack", "h122").unwrap().value, 17);
