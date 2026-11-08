@@ -182,9 +182,10 @@ fn is_name(s: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_')
 }
 
-/// The names a label gives (`ServerTickEvent.Pre / .Post`): notes in
-/// brackets and a leading package dropped, a name that starts with `.` taken
-/// as a sibling of the one before it.
+/// The names a label gives (`ServerTickEvent.Pre / .Post`, or
+/// `EntityJoinLevelEvent, FinalizeSpawnEvent`): notes in brackets and a
+/// leading package dropped, a name that starts with `.` taken as a sibling
+/// of the one before it.
 fn counterparts(label: &str) -> Vec<String> {
     let mut plain = String::new();
     let mut depth = 0u32;
@@ -197,7 +198,11 @@ fn counterparts(label: &str) -> Vec<String> {
         }
     }
     let mut out: Vec<String> = Vec::new();
-    for part in plain.split(" / ").map(str::trim) {
+    for part in plain
+        .split(" / ")
+        .flat_map(|part| part.split(','))
+        .map(str::trim)
+    {
         let full = match (part.strip_prefix('.'), out.last()) {
             (Some(rest), Some(prev)) => match prev.rsplit_once('.') {
                 Some((parent, _)) => format!("{parent}.{rest}"),
