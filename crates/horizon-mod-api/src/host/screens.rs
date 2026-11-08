@@ -33,6 +33,15 @@ pub trait ScreensClientHost {
     #[access(ClientSetup)]
     fn screen_hovered_item(&self) -> Option<String>;
     /// Side: client.
+    /// The open inventory screen's slot boxes in menu slot order
+    /// (`AbstractContainerScreen.leftPos`/`topPos` plus each `Slot.x`/`Slot.y`, 16x16). A box
+    /// is `[x, y, width, height]` in GUI pixels, with `None` for a hidden slot.
+    /// Returns `None` for a stale menu, another screen, or an inventory covered
+    /// by the recipe book. The boxes follow the actual layout, including GUI
+    /// scale and the recipe book's horizontal offset.
+    #[access(WorldOnly)]
+    fn menu_slot_boxes(&self, menu: MenuRef) -> Option<Vec<Option<[f32; 4]>>>;
+    /// Side: client.
     /// Requests vanilla's menu background blur for this frame, with a per-frame guard
     /// so blur is applied at most once per frame. Returns true if blur was newly
     /// requested this frame, or false if it was already applied/requested this frame.
