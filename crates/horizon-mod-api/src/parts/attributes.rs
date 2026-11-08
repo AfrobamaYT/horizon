@@ -113,7 +113,6 @@ impl AttributesRegistrar for PartRegistrar {
 mod tests {
     use super::*;
     use crate::AttributeRegistrationError;
-    use horizon_world::attributes::Definition;
     pub use horizon_world::attributes::Sentiment;
 
     /// `RangedAttribute`'s own checks and the registration's: an id outside

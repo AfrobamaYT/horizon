@@ -1423,7 +1423,7 @@ mod tests {
                 &[("ruby:mana".into(), 42.0), ("zeta:fury".into(), 7.0)],
             )
             .unwrap();
-        let mut live = LivingAttributes::default();
+        let live = LivingAttributes::default();
         assert_eq!(
             live.read(
                 &std::sync::Arc::new(merged.clone()),

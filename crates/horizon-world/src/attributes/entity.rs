@@ -599,7 +599,6 @@ mod row_tests {
             syncable,
             sentiment: Sentiment::Neutral,
         };
-        let vanilla = catalog.attributes().count();
         // Declared in the order the mods happen to register: the catalog
         // sorts them by mod id, then attribute id.
         let grown = catalog
