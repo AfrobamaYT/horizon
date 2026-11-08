@@ -86,14 +86,27 @@ impl fmt::Display for LinkError {
 impl std::error::Error for LinkError {}
 
 /// A linked group: its store, and each member's instance.
-pub struct Group {
-    store: Store<()>,
-    members: Vec<(String, Instance)>,
+pub struct Group<T: 'static = ()> {
+    pub(crate) store: Store<T>,
+    pub(crate) members: Vec<(String, Instance)>,
+    pub(crate) memory: Memory,
 }
 
-impl Group {
-    /// Links `members`, which must be in dependency order.
+impl Group<()> {
+    /// Links a group without host imports (useful for plain shared libraries).
     pub fn link(engine: &Engine, members: &[Member<'_>]) -> Result<Self, LinkError> {
+        Self::link_with(Store::new(engine, ()), members, |_, _, _| None)
+    }
+}
+
+impl<T: 'static> Group<T> {
+    /// Links `members`, which must be in dependency order.
+    pub fn link_with(
+        mut store: Store<T>,
+        members: &[Member<'_>],
+        mut host: impl FnMut(&mut Store<T>, &str, &str) -> Option<Extern>,
+    ) -> Result<Self, LinkError> {
+        let engine = store.engine();
         let mut parsed = Vec::with_capacity(members.len());
         for member in members {
             parsed.push(Layout::read(engine, member)?);
@@ -132,7 +145,6 @@ impl Group {
                 })?;
             got_funcs += layout.got_funcs;
         }
-        let mut store = Store::new(engine, ());
         let load = |why: wasmtime::Error, member: &str| LinkError::Instantiate {
             member: member.to_owned(),
             why: format!("{why:#}"),
@@ -169,76 +181,82 @@ impl Group {
                     member: member.name.to_owned(),
                     symbol: format!("{module}.{name}"),
                 };
-                let extern_ = match (module, name, import.ty()) {
-                    ("env", "memory", _) => Extern::Memory(memory),
-                    ("env", "__indirect_function_table", _) => Extern::Table(table),
-                    ("env", "__stack_pointer", _) => Extern::Global(stack),
-                    ("env", "__memory_base", _) => Extern::Global(
-                        Global::new(
-                            &mut store,
-                            GlobalType::new(ValType::I32, Mutability::Const),
-                            Val::I32(layout.memory_base as i32),
-                        )
-                        .map_err(|e| load(e, member.name))?,
-                    ),
-                    ("env", "__table_base", _) => Extern::Global(
-                        Global::new(
-                            &mut store,
-                            GlobalType::new(ValType::I32, Mutability::Const),
-                            Val::I32(layout.table_base as i32),
-                        )
-                        .map_err(|e| load(e, member.name))?,
-                    ),
-                    ("GOT.mem", symbol, _) => {
-                        let Some((owner, Extern::Global(global))) = symbols.get(symbol) else {
-                            return Err(unresolved());
-                        };
-                        let Val::I32(offset) = global.get(&mut store) else {
-                            return Err(unresolved());
-                        };
-                        let address = parsed[*owner].memory_base as i64 + i64::from(offset);
-                        Extern::Global(
+                let extern_ = if let Some(value) = host(&mut store, module, name) {
+                    value
+                } else {
+                    match (module, name, import.ty()) {
+                        ("env", "memory", _) => Extern::Memory(memory),
+                        ("env", "__indirect_function_table", _) => Extern::Table(table),
+                        ("env", "__stack_pointer", _) => Extern::Global(stack),
+                        ("env", "__memory_base", _) => Extern::Global(
                             Global::new(
                                 &mut store,
-                                GlobalType::new(ValType::I32, Mutability::Var),
-                                Val::I32(address as i32),
+                                GlobalType::new(ValType::I32, Mutability::Const),
+                                Val::I32(layout.memory_base as i32),
                             )
                             .map_err(|e| load(e, member.name))?,
-                        )
-                    }
-                    ("GOT.func", symbol, _) => {
-                        let Some((_, Extern::Func(func))) = symbols.get(symbol) else {
-                            return Err(unresolved());
-                        };
-                        let slot = match func_slots.get(symbol) {
-                            Some(slot) => *slot,
-                            None => {
-                                let slot = table_slot as u32;
-                                table_slot += 1;
-                                table
-                                    .set(&mut store, u64::from(slot), (*func).into())
-                                    .map_err(|e| load(e, member.name))?;
-                                func_slots.insert(symbol.to_owned(), slot);
-                                slot
+                        ),
+                        ("env", "__table_base", _) => Extern::Global(
+                            Global::new(
+                                &mut store,
+                                GlobalType::new(ValType::I32, Mutability::Const),
+                                Val::I32(layout.table_base as i32),
+                            )
+                            .map_err(|e| load(e, member.name))?,
+                        ),
+                        ("GOT.mem", symbol, _) => {
+                            let Some((owner, Extern::Global(global))) = symbols.get(symbol) else {
+                                return Err(unresolved());
+                            };
+                            let Val::I32(offset) = global.get(&mut store) else {
+                                return Err(unresolved());
+                            };
+                            let address = parsed[*owner].memory_base as i64 + i64::from(offset);
+                            Extern::Global(
+                                Global::new(
+                                    &mut store,
+                                    GlobalType::new(ValType::I32, Mutability::Var),
+                                    Val::I32(address as i32),
+                                )
+                                .map_err(|e| load(e, member.name))?,
+                            )
+                        }
+                        ("GOT.func", symbol, _) => {
+                            let Some((_, Extern::Func(func))) = symbols.get(symbol) else {
+                                return Err(unresolved());
+                            };
+                            let slot = match func_slots.get(symbol) {
+                                Some(slot) => *slot,
+                                None => {
+                                    let slot = table_slot as u32;
+                                    table_slot += 1;
+                                    table
+                                        .set(&mut store, u64::from(slot), (*func).into())
+                                        .map_err(|e| load(e, member.name))?;
+                                    func_slots.insert(symbol.to_owned(), slot);
+                                    slot
+                                }
+                            };
+                            Extern::Global(
+                                Global::new(
+                                    &mut store,
+                                    GlobalType::new(ValType::I32, Mutability::Var),
+                                    Val::I32(slot as i32),
+                                )
+                                .map_err(|e| load(e, member.name))?,
+                            )
+                        }
+                        ("env", symbol, ExternType::Func(ty)) => match symbols.get(symbol) {
+                            Some((_, found @ Extern::Func(_))) => found.clone(),
+                            // An import the build step renamed after its member (`<member>:…`): the
+                            // mod never calls it in the game, so it traps if it ever is.
+                            _ if symbol.contains(':') => {
+                                Extern::Func(trap(&mut store, &ty, symbol))
                             }
-                        };
-                        Extern::Global(
-                            Global::new(
-                                &mut store,
-                                GlobalType::new(ValType::I32, Mutability::Var),
-                                Val::I32(slot as i32),
-                            )
-                            .map_err(|e| load(e, member.name))?,
-                        )
-                    }
-                    ("env", symbol, ExternType::Func(ty)) => match symbols.get(symbol) {
-                        Some((_, found @ Extern::Func(_))) => found.clone(),
-                        // An import the build step renamed after its member (`<member>:…`): the
-                        // mod never calls it in the game, so it traps if it ever is.
-                        _ if symbol.contains(':') => Extern::Func(trap(&mut store, &ty, symbol)),
+                            _ => return Err(unresolved()),
+                        },
                         _ => return Err(unresolved()),
-                    },
-                    _ => return Err(unresolved()),
+                    }
                 };
                 imports.push(extern_);
             }
@@ -254,6 +272,10 @@ impl Group {
                 .collect();
             for (name, extern_) in exports {
                 if name.starts_with("__wasm_")
+                    || matches!(
+                        name.as_str(),
+                        "horizon_layout" | "horizon_in" | "horizon_hook"
+                    )
                     || name == "memory"
                     || !matches!(extern_, Extern::Func(_) | Extern::Global(_))
                 {
@@ -273,6 +295,7 @@ impl Group {
         let mut group = Self {
             store,
             members: instances,
+            memory,
         };
         for hook in ["__wasm_apply_data_relocs", "__wasm_call_ctors"] {
             for index in 0..group.members.len() {
@@ -318,7 +341,7 @@ impl Group {
 }
 
 /// A function that traps when called.
-fn trap(store: &mut Store<()>, ty: &FuncType, symbol: &str) -> Func {
+fn trap<T: 'static>(store: &mut Store<T>, ty: &FuncType, symbol: &str) -> Func {
     let symbol = symbol.to_owned();
     Func::new(&mut *store, ty.clone(), move |_, _, _| {
         Err(wasmtime::Error::msg(format!("{symbol} is not available")))
@@ -344,6 +367,19 @@ impl Layout {
         let mut seen = false;
         for payload in Parser::new(0).parse_all(member.module) {
             let payload = payload.map_err(|e| malformed(e.to_string()))?;
+            match &payload {
+                Payload::MemorySection(section) if section.count() != 0 => {
+                    return Err(malformed(
+                        "a shared member must import the group memory".into(),
+                    ));
+                }
+                Payload::TableSection(section) if section.count() != 0 => {
+                    return Err(malformed(
+                        "a shared member must import the group table".into(),
+                    ));
+                }
+                _ => {}
+            }
             if let Payload::CustomSection(section) = payload
                 && section.name() == "dylink.0"
             {
