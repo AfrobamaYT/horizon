@@ -41,25 +41,40 @@ impl std::error::Error for JsonNbtError {}
 /// spelling, already rounded by serde_json. UTF-8 input preserves valid UTF-16
 /// pairs; lone surrogates cannot reach this function through JSON Value.
 pub fn json_to_tag(value: &Value) -> Result<Tag, JsonNbtError> {
-    build_tag(JsonInput::Value(value))
+    build_tag(JsonInput::Value(value), 0)
 }
 
 /// Convert a borrowed object without cloning the JSON tree. The object itself
 /// counts toward the same 512-container limit as an object in json_to_tag.
 pub fn json_to_compound(values: &Map<String, Value>) -> Result<Compound, JsonNbtError> {
-    let Tag::Compound(values) = build_tag(JsonInput::Object(values))? else {
+    let Tag::Compound(values) = build_tag(JsonInput::Object(values), 0)? else {
         unreachable!("an object builds a compound")
     };
     Ok(values)
+}
+
+/// Convert a projection of borrowed object fields without cloning JSON payloads.
+/// `parent_depth` counts surrounding NBT containers in the caller's output
+/// schema. It includes synthetic metadata wrappers not present in the input.
+pub fn json_fields_to_compound<'a>(
+    fields: impl IntoIterator<Item = (&'a str, &'a Value)>,
+    parent_depth: usize,
+) -> Result<Compound, JsonNbtError> {
+    let fields: Vec<_> = fields.into_iter().collect();
+    let Tag::Compound(compound) = build_tag(JsonInput::Fields(&fields), parent_depth)? else {
+        unreachable!("fields build a compound")
+    };
+    Ok(compound)
 }
 
 #[derive(Clone, Copy)]
 enum JsonInput<'a> {
     Value(&'a Value),
     Object(&'a Map<String, Value>),
+    Fields(&'a [(&'a str, &'a Value)]),
 }
-fn validate_json(root: JsonInput<'_>) -> Result<(), JsonNbtError> {
-    let mut pending = vec![(root, 0, false)];
+fn validate_json(root: JsonInput<'_>, parent_depth: usize) -> Result<(), JsonNbtError> {
+    let mut pending = vec![(root, parent_depth, false)];
     while let Some((input, depth, nested)) = pending.pop() {
         match input {
             JsonInput::Value(Value::Null) if nested => return Err(JsonNbtError::NestedNull),
@@ -85,13 +100,24 @@ fn validate_json(root: JsonInput<'_>) -> Result<(), JsonNbtError> {
                         .map(|v| (JsonInput::Value(v), depth + 1, true)),
                 );
             }
+            JsonInput::Fields(fields) => {
+                if depth >= MAX_DEPTH {
+                    return Err(JsonNbtError::TooDeep);
+                }
+                pending.extend(
+                    fields
+                        .iter()
+                        .rev()
+                        .map(|(_, v)| (JsonInput::Value(v), depth + 1, true)),
+                );
+            }
             _ => {}
         }
     }
     Ok(())
 }
-fn build_tag(root: JsonInput<'_>) -> Result<Tag, JsonNbtError> {
-    validate_json(root)?;
+fn build_tag(root: JsonInput<'_>, parent_depth: usize) -> Result<Tag, JsonNbtError> {
+    validate_json(root, parent_depth)?;
     enum Work<'a> {
         Enter(JsonInput<'a>),
         List(usize),
@@ -124,6 +150,17 @@ fn build_tag(root: JsonInput<'_>) -> Result<Tag, JsonNbtError> {
                             .values()
                             .rev()
                             .map(|v| Work::Enter(JsonInput::Value(v))),
+                    );
+                }
+                JsonInput::Fields(fields) => {
+                    work.push(Work::Object(
+                        fields.iter().map(|(key, _)| (*key).into()).collect(),
+                    ));
+                    work.extend(
+                        fields
+                            .iter()
+                            .rev()
+                            .map(|(_, value)| Work::Enter(JsonInput::Value(value))),
                     );
                 }
             },
@@ -187,75 +224,94 @@ fn validate_tag(root: &Tag) -> Result<(), JsonNbtError> {
 /// cannot hold those numbers or UTF-16 strings, and Gson's strict writer also
 /// refuses non-finite numbers. No replacement with null, strings or U+FFFD.
 pub fn tag_to_json(root: &Tag) -> Result<Value, JsonNbtError> {
-    validate_tag(root)?;
-    enum Work<'a> {
-        Enter(&'a Tag),
-        List(usize),
-        Object(Vec<String>),
+    JsonTag::new(root).map(JsonTag::to_json)
+}
+
+/// Borrowed proof that a tag fits the JSON representation and nesting bound.
+/// Construct all proofs before building a larger output to avoid partial JSON
+/// temporaries when a later payload is refused.
+#[derive(Clone, Copy)]
+pub struct JsonTag<'a> {
+    root: &'a Tag,
+}
+impl<'a> JsonTag<'a> {
+    /// Check without cloning payloads or constructing JSON.
+    pub fn new(root: &'a Tag) -> Result<Self, JsonNbtError> {
+        validate_tag(root)?;
+        Ok(Self { root })
     }
-    let mut work = vec![Work::Enter(root)];
-    let mut done = Vec::new();
-    while let Some(step) = work.pop() {
-        match step {
-            Work::Enter(tag) => {
-                let value = match tag {
-                    Tag::End => Value::Null,
-                    Tag::Byte(v) => Value::from(*v),
-                    Tag::Short(v) => Value::from(*v),
-                    Tag::Int(v) => Value::from(*v),
-                    Tag::Long(v) => Value::from(*v),
-                    Tag::Float(bits) => Value::Number(
-                        Number::from_f64(
-                            crate::java_number::java_float(f32::from_bits(*bits))
-                                .parse::<f64>()
-                                .expect("validated finite float"),
-                        )
-                        .expect("validated finite float"),
-                    ),
-                    // Do not reparse through serde_json: its optional parser
-                    // features must not affect an already typed double's bits.
-                    Tag::Double(bits) => Value::Number(
-                        Number::from_f64(f64::from_bits(*bits)).expect("validated finite double"),
-                    ),
-                    Tag::String(s) => Value::String(s.to_string().expect("validated UTF-16")),
-                    Tag::ByteArray(values) => {
-                        Value::Array(values.iter().map(|v| Value::from(*v as i8)).collect())
-                    }
-                    Tag::IntArray(values) => {
-                        Value::Array(values.iter().copied().map(Value::from).collect())
-                    }
-                    Tag::LongArray(values) => {
-                        Value::Array(values.iter().copied().map(Value::from).collect())
-                    }
-                    Tag::List(values) => {
-                        work.push(Work::List(values.len()));
-                        work.extend(values.iter().rev().map(Work::Enter));
-                        continue;
-                    }
-                    Tag::Compound(values) => {
-                        work.push(Work::Object(
-                            values
-                                .keys()
-                                .map(|k| k.to_string().expect("validated UTF-16"))
-                                .collect(),
-                        ));
-                        work.extend(values.values().rev().map(Work::Enter));
-                        continue;
-                    }
-                };
-                done.push(value);
-            }
-            Work::List(len) => {
-                let values = done.split_off(done.len() - len);
-                done.push(Value::Array(values));
-            }
-            Work::Object(keys) => {
-                let values = done.split_off(done.len() - keys.len());
-                done.push(Value::Object(keys.into_iter().zip(values).collect()));
+    /// Construct JSON from the validated, immutably borrowed tag.
+    pub fn to_json(self) -> Value {
+        enum Work<'a> {
+            Enter(&'a Tag),
+            List(usize),
+            Object(Vec<String>),
+        }
+        let mut work = vec![Work::Enter(self.root)];
+        let mut done = Vec::new();
+        while let Some(step) = work.pop() {
+            match step {
+                Work::Enter(tag) => {
+                    let value = match tag {
+                        Tag::End => Value::Null,
+                        Tag::Byte(v) => Value::from(*v),
+                        Tag::Short(v) => Value::from(*v),
+                        Tag::Int(v) => Value::from(*v),
+                        Tag::Long(v) => Value::from(*v),
+                        Tag::Float(bits) => Value::Number(
+                            Number::from_f64(
+                                crate::java_number::java_float(f32::from_bits(*bits))
+                                    .parse::<f64>()
+                                    .expect("validated finite float"),
+                            )
+                            .expect("validated finite float"),
+                        ),
+                        // Do not reparse through serde_json: its optional parser
+                        // features must not affect an already typed double's bits.
+                        Tag::Double(bits) => Value::Number(
+                            Number::from_f64(f64::from_bits(*bits))
+                                .expect("validated finite double"),
+                        ),
+                        Tag::String(s) => Value::String(s.to_string().expect("validated UTF-16")),
+                        Tag::ByteArray(values) => {
+                            Value::Array(values.iter().map(|v| Value::from(*v as i8)).collect())
+                        }
+                        Tag::IntArray(values) => {
+                            Value::Array(values.iter().copied().map(Value::from).collect())
+                        }
+                        Tag::LongArray(values) => {
+                            Value::Array(values.iter().copied().map(Value::from).collect())
+                        }
+                        Tag::List(values) => {
+                            work.push(Work::List(values.len()));
+                            work.extend(values.iter().rev().map(Work::Enter));
+                            continue;
+                        }
+                        Tag::Compound(values) => {
+                            work.push(Work::Object(
+                                values
+                                    .keys()
+                                    .map(|k| k.to_string().expect("validated UTF-16"))
+                                    .collect(),
+                            ));
+                            work.extend(values.values().rev().map(Work::Enter));
+                            continue;
+                        }
+                    };
+                    done.push(value);
+                }
+                Work::List(len) => {
+                    let values = done.split_off(done.len() - len);
+                    done.push(Value::Array(values));
+                }
+                Work::Object(keys) => {
+                    let values = done.split_off(done.len() - keys.len());
+                    done.push(Value::Object(keys.into_iter().zip(values).collect()));
+                }
             }
         }
+        done.pop().expect("one root was built")
     }
-    Ok(done.pop().expect("one root was built"))
 }
 
 fn number(number: &Number) -> Tag {
@@ -612,5 +668,26 @@ mod tests {
             .unwrap()
             .join()
             .unwrap();
+    }
+    #[test]
+    fn borrowed_projection_counts_wrappers_and_skips_unselected_data() {
+        let map: Map<_, _> = [
+            ("selected".into(), nested_json(511)),
+            ("ignored".into(), nested_json(4096)),
+        ]
+        .into_iter()
+        .collect();
+        let selected = || {
+            map.iter()
+                .filter(|(k, _)| k.as_str() == "selected")
+                .map(|(k, v)| (k.as_str(), v))
+        };
+        let compound = json_fields_to_compound(selected(), 0).unwrap();
+        discard_tag(Tag::Compound(compound));
+        assert!(matches!(
+            json_fields_to_compound(selected(), 1),
+            Err(JsonNbtError::TooDeep)
+        ));
+        discard_json(Value::Object(map));
     }
 }

@@ -235,14 +235,18 @@ pub fn untrusted_http_url(url: &str) -> bool {
 
 /// `ClickEvent.CODEC` plus the legacy `value` field TextComponentHoverAndClickEventFix
 /// renames (`url` / `command` / `page`).
-pub fn parse_click_event(e: &serde_json::Map<String, Value>) -> Option<crate::text::ClickEvent> {
+pub fn parse_click_event(
+    e: &serde_json::Map<String, Value>,
+) -> Result<Option<crate::text::ClickEvent>, horizon_core::json_nbt::JsonNbtError> {
+    use crate::text::ClickEvent;
+    use horizon_core::json_nbt::json_to_tag;
     let text = |k: &str| e.get(k).and_then(Value::as_str).map(str::to_owned);
     let legacy = || text("value");
-    match e.get("action").and_then(Value::as_str) {
+    let event = match e.get("action").and_then(Value::as_str) {
         Some("open_url") => text("url")
             .or_else(legacy)
             .filter(|u| untrusted_http_url(u))
-            .map(crate::text::ClickEvent::OpenUrl),
+            .map(ClickEvent::OpenUrl),
         Some("change_page") => e
             .get("page")
             .and_then(Value::as_i64)
@@ -254,28 +258,36 @@ pub fn parse_click_event(e: &serde_json::Map<String, Value>) -> Option<crate::te
             })
             .and_then(|p| i32::try_from(p).ok())
             .filter(|p| *p >= 1)
-            .map(crate::text::ClickEvent::ChangePage),
+            .map(ClickEvent::ChangePage),
         Some("suggest_command") => text("command")
             .or_else(legacy)
-            .map(crate::text::ClickEvent::SuggestCommand),
-        Some("run_command") => text("command")
-            .or_else(legacy)
-            .map(crate::text::ClickEvent::RunCommand),
-        Some("copy_to_clipboard") => text("value").map(crate::text::ClickEvent::CopyToClipboard),
-        // ClickEvent.ShowDialog.CODEC: a `minecraft:dialog` registry id or
-        // the dialog itself; the server may send it (isAllowedFromServer).
-        Some("show_dialog") => e.get("dialog").map(|dialog| {
-            crate::text::ClickEvent::ShowDialog(crate::scoreboard::json_to_tag(dialog))
-        }),
-        Some("custom") => Some(crate::text::ClickEvent::Custom {
-            id: crate::identifier::parse_identifier(&text("id")?)?,
-            payload: e
+            .map(ClickEvent::SuggestCommand),
+        Some("run_command") => text("command").or_else(legacy).map(ClickEvent::RunCommand),
+        Some("copy_to_clipboard") => text("value").map(ClickEvent::CopyToClipboard),
+        Some("show_dialog") => e
+            .get("dialog")
+            .map(json_to_tag)
+            .transpose()?
+            .map(|tag| ClickEvent::ShowDialog(tag.into())),
+        Some("custom") => {
+            let Some(id) = e
+                .get("id")
+                .and_then(Value::as_str)
+                .and_then(crate::identifier::parse_identifier)
+            else {
+                return Ok(None);
+            };
+            let payload = e
                 .get("payload")
-                .filter(|value| !value.is_null())
-                .map(crate::scoreboard::json_to_tag),
-        }),
+                .filter(|v| !v.is_null())
+                .map(json_to_tag)
+                .transpose()?
+                .map(Into::into);
+            Some(ClickEvent::Custom { id, payload })
+        }
         _ => None,
-    }
+    };
+    Ok(event)
 }
 
 // Hover entity names can themselves contain components. Clone their retained
@@ -349,7 +361,7 @@ fn object_style<'a>(
     // ClickEvent.CODEC: the actions a chat line acts on here. A component
     // from a server never opens a file.
     if let Some(e) = style_event_object(o, "click_event", "clickEvent") {
-        style.click = parse_click_event(e);
+        style.click = parse_click_event(e).ok().flatten();
     }
     // HoverEvent.ShowText, ShowItem and ShowEntity.
     if let Some(e) = style_event_object(o, "hover_event", "hoverEvent") {
@@ -641,11 +653,9 @@ fn build_node<'a>(
         Value::Object(o) => {
             let content = if let Some(t) = overridden {
                 t
-            } else if let Some(object) = inline_object_with_fallback(
-                o,
-                o.get("object").and_then(Value::as_str),
-                o.get("fallback").map(|v| plain_component(child(v))),
-            ) {
+            } else if let Some(object) =
+                inline_object_with_fallback(o, o.get("fallback").map(|v| plain_component(child(v))))
+            {
                 let mut text = Text::literal("\u{fffc}");
                 text.spans[0].style.inline_object = Some(object);
                 text
@@ -690,28 +700,45 @@ pub fn inline_object(
     resolve: &mut dyn FnMut(&str) -> Text,
     contents: &mut dyn FnMut(&serde_json::Map<String, Value>) -> Option<Text>,
 ) -> Option<InlineObject> {
-    let kind = object.get("object").and_then(Value::as_str);
     let fallback = object
         .get("fallback")
         .map(|value| plain_component(to_text_with(value, resolve, contents)));
-    inline_object_with_fallback(object, kind, fallback)
+    inline_object_with_fallback(object, fallback)
 }
 
 /// Decode object identity/defaults without rendering its recursive fallback.
 /// Structured component capture retains the fallback as a component instead.
-pub fn inline_object_fields(object: &serde_json::Map<String, Value>) -> Option<InlineObject> {
-    inline_object_with_fallback(object, object.get("object").and_then(Value::as_str), None)
+pub enum InlineObjectFields<'a> {
+    Player { profile: &'a Value, hat: bool },
+    Atlas { atlas: &'a str, sprite: &'a str },
+}
+pub fn inline_object_fields(
+    object: &serde_json::Map<String, Value>,
+) -> Option<InlineObjectFields<'_>> {
+    match object.get("object").and_then(Value::as_str) {
+        Some("player") | None if object.contains_key("player") => {
+            Some(InlineObjectFields::Player {
+                profile: object.get("player")?,
+                hat: object.get("hat").and_then(Value::as_bool).unwrap_or(true),
+            })
+        }
+        Some("atlas") | None if object.contains_key("sprite") => Some(InlineObjectFields::Atlas {
+            atlas: object
+                .get("atlas")
+                .and_then(Value::as_str)
+                .unwrap_or("minecraft:blocks"),
+            sprite: object.get("sprite")?.as_str()?,
+        }),
+        _ => None,
+    }
 }
 
 fn inline_object_with_fallback(
     object: &serde_json::Map<String, Value>,
-    kind: Option<&str>,
     fallback: Option<String>,
 ) -> Option<InlineObject> {
-    match kind {
-        Some("player") | None if object.contains_key("player") => {
-            let profile = object.get("player")?.clone();
-            // PlayerSprite.defaultFallback.
+    Some(match inline_object_fields(object)? {
+        InlineObjectFields::Player { profile, hat } => {
             let fallback = fallback.unwrap_or_else(|| {
                 match profile
                     .as_str()
@@ -721,40 +748,29 @@ fn inline_object_with_fallback(
                     None => "[unknown player head]".to_owned(),
                 }
             });
-            Some(InlineObject::Player {
-                profile,
-                hat: object.get("hat").and_then(Value::as_bool).unwrap_or(true),
+            InlineObject::Player {
+                profile: clone_value(profile).into(),
+                hat,
                 fallback,
-            })
+            }
         }
-        Some("atlas") | None if object.contains_key("sprite") => {
-            let atlas = object
-                .get("atlas")
-                .and_then(Value::as_str)
-                .unwrap_or("minecraft:blocks")
-                .to_owned();
-            let sprite = object.get("sprite")?.as_str()?.to_owned();
-            // AtlasSprite.defaultFallback: short names, the atlas unless blocks.
+        InlineObjectFields::Atlas { atlas, sprite } => {
             let fallback = fallback.unwrap_or_else(|| {
-                let short = |id: &str| match id.split_once(':') {
-                    Some(("minecraft", path)) => path.to_owned(),
-                    Some(_) => id.to_owned(),
-                    None => id.to_owned(),
-                };
-                if short(&atlas) == "blocks" {
-                    format!("[{}]", short(&sprite))
+                let sprite_name = sprite.strip_prefix("minecraft:").unwrap_or(sprite);
+                let atlas_name = atlas.strip_prefix("minecraft:").unwrap_or(atlas);
+                if atlas_name == "blocks" {
+                    format!("[{sprite_name}]")
                 } else {
-                    format!("[{}@{}]", short(&sprite), short(&atlas))
+                    format!("[{sprite_name}@{atlas_name}]")
                 }
             });
-            Some(InlineObject::Atlas {
-                atlas,
-                sprite,
+            InlineObject::Atlas {
+                atlas: atlas.into(),
+                sprite: sprite.into(),
                 fallback,
-            })
+            }
         }
-        _ => None,
-    }
+    })
 }
 
 /// `CustomName` as text: a string keeps its legacy formatting codes, anything
@@ -812,6 +828,52 @@ mod tests {
                         std::mem::forget(output);
                     }
                 }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn opaque_profile_and_click_payloads_build_on_256_kib() {
+        std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(|| {
+                let nested =
+                    |depth| (0..depth).fold(serde_json::json!(1), |v, _| Value::Array(vec![v]));
+                let profile = Value::Object(
+                    [
+                        ("name".into(), "Test".into()),
+                        ("future".into(), nested(511)),
+                    ]
+                    .into_iter()
+                    .collect(),
+                );
+                let mut tree = serde_json::json!({"object": "player"});
+                tree["player"] = profile;
+                for _ in 1..512 {
+                    let mut parent = serde_json::json!({"translate": "test.opaque"});
+                    parent["with"] = Value::Array(vec![tree]);
+                    tree = parent;
+                }
+                let mut click = serde_json::json!({"action": "custom", "id": "test:click"});
+                click["payload"] = nested(512);
+                tree["click_event"] = click;
+                let language =
+                    crate::lang::Language::of("en_us", [("test.opaque".into(), "%s".into())]);
+                crate::lang::scoped(language, || {
+                    let text = Text::from(tree);
+                    assert_eq!(text.plain(), "[Test head]");
+                    assert!(matches!(
+                        text.spans[0].style.inline_object,
+                        Some(InlineObject::Player { .. })
+                    ));
+                    assert!(matches!(
+                        text.spans[0].style.click,
+                        Some(crate::text::ClickEvent::Custom { .. })
+                    ));
+                    crate::text::discard_text(text);
+                });
             })
             .unwrap()
             .join()
@@ -1069,12 +1131,12 @@ mod tests {
         for (payload, expected) in [
             (None, None),
             (Some(serde_json::Value::Null), None),
-            (Some(serde_json::json!(42)), Some(Tag::Int(42))),
+            (Some(serde_json::json!(42)), Some(Tag::Byte(42))),
             (
                 Some(serde_json::json!({"shop": "potions", "amount": 3})),
                 Some(Tag::Compound(
                     [
-                        ("amount".into(), Tag::Int(3)),
+                        ("amount".into(), Tag::Byte(3)),
                         ("shop".into(), Tag::String("potions".into())),
                     ]
                     .into_iter()
@@ -1096,7 +1158,7 @@ mod tests {
                     style.click,
                     Some(ClickEvent::Custom {
                         id: "test:shop".into(),
-                        payload: expected.clone(),
+                        payload: expected.clone().map(Into::into),
                     })
                 );
             }
