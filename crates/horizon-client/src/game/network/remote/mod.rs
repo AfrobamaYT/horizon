@@ -12615,6 +12615,7 @@ mod tests {
                 super::Tracked {
                     kind: "minecraft:zombie".into(),
                     position: [0.0; 3],
+                    codec_base: [0.0; 3],
                     silent: false,
                     vehicle: None,
                 },

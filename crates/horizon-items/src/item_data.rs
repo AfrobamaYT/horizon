@@ -1620,7 +1620,7 @@ mod tests {
         );
         assert_eq!(
             crate::item_nbt::item_to_nbt(&stack),
-            horizon_world::nbt::parse_snbt(r#"{id:"minecraft:enchanted_book",count:1}"#)
+            horizon_core::nbt::parse_snbt(r#"{id:"minecraft:enchanted_book",count:1}"#)
                 .unwrap()
                 .0,
         );
@@ -1645,7 +1645,7 @@ mod tests {
                 r#"{"!minecraft:stored_enchantments":{}}"#,
             ),
         ] {
-            let expected = horizon_world::nbt::parse_snbt(patch).unwrap().0;
+            let expected = horizon_core::nbt::parse_snbt(patch).unwrap().0;
             let stack = parse_stack(&format!("{{id:'{item}',count:1,components:{patch}}}"))
                 .unwrap()
                 .unwrap();
@@ -1656,7 +1656,7 @@ mod tests {
     #[test]
     fn an_empty_book_patch_keeps_unrelated_components() {
         let stack = parse_stack(r#"{id:"minecraft:enchanted_book",count:1,components:{"minecraft:stored_enchantments":{},"minecraft:custom_data":{keep:7}}}"#).unwrap().unwrap();
-        let expected = horizon_world::nbt::parse_snbt(r#"{"minecraft:custom_data":{keep:7}}"#)
+        let expected = horizon_core::nbt::parse_snbt(r#"{"minecraft:custom_data":{keep:7}}"#)
             .unwrap()
             .0;
         assert_eq!(encode_components(&stack), Some(expected));

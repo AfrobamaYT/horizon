@@ -706,11 +706,11 @@ mod tests {
         };
         let partner = b.seen(None);
         let mut events = Vec::new();
-        let mut lr = horizon_core::random::LegacyRandom::new(0);
+        let mut fixture = crate::health::TestLevel::new(0);
         let ran = with_test_world(&[partner], |w, _| {
             let mut cx = Cx {
                 w,
-                lr: &mut lr,
+                level: &mut fixture.level(),
                 events: &mut events,
             };
             let mut breed = Breed::new(1.0);

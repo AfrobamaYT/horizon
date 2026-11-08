@@ -1603,14 +1603,13 @@ mod tests {
         items[1] = Some(ItemStack::new("minecraft:oak_log", 1));
         world.block_entities.insert(
             k,
-            BlockEntity::Mod(Box::new(
+            BlockEntity::Mod(Box::new(crate::containers::ModBlockEntity::new(
+                "test:station".into(),
                 ModBlockEntityFields {
-                    id: "test:station".into(),
                     items,
                     ..Default::default()
-                }
-                .into(),
-            )),
+                },
+            ))),
         );
         let t: &'static ModMenuType = Box::leak(Box::new(ModMenuType {
             id: "test:station",
@@ -1638,6 +1637,7 @@ mod tests {
             sent_data: Vec::new(),
             hidden: Vec::new(),
             mod_type: Some(t),
+            registry_id: "test:station".into(),
             craft: None,
         });
         // Nothing made yet: nothing shown.

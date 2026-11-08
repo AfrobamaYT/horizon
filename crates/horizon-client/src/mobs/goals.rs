@@ -4136,11 +4136,11 @@ mod melee_continue_tests {
 
     /// Tick one `<MeleeAttack>` goal through the real selector.
     fn tick(goals: &mut GoalSelector, m: &mut Mob, world: &MobWorld) {
-        let mut lr = LegacyRandom::new(0);
+        let mut fixture = crate::health::TestLevel::new(0);
         let mut events = Vec::new();
         let mut cx = Cx {
             w: world,
-            lr: &mut lr,
+            level: &mut fixture.level(),
             events: &mut events,
         };
         goals.tick(m, &mut cx);

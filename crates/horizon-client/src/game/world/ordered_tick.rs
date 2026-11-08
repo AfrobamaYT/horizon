@@ -258,7 +258,7 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{find_join, first_join};
+    use super::first_join;
     use horizon_client::chunk::Chunk;
     use horizon_client::join_seq::{JoinList, JoinSeq, Joined as _};
     use horizon_core::position::ChunkPos;
@@ -303,7 +303,18 @@ mod tests {
 
     #[test]
     fn first_join_uses_join_sequence_when_storage_is_reordered() {
-        let mut list = JoinList::default();
+        struct E {
+            join: JoinSeq,
+        }
+        impl horizon_client::join_seq::Joined for E {
+            fn join_seq(&self) -> JoinSeq {
+                self.join
+            }
+            fn set_join_seq(&mut self, join: JoinSeq) {
+                self.join = join;
+            }
+        }
+        let mut list: JoinList<E> = JoinList::default();
         for _ in 0..3 {
             list.push(E {
                 join: JoinSeq::UNJOINED,

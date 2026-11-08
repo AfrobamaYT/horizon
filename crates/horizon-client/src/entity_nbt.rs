@@ -4349,7 +4349,7 @@ mod tests {
     // load cannot inherit a predicate from a contradictory saved compound.
     #[test]
     fn arrow_can_break_mutation_clone_and_absent_load_save_actual_state() {
-        let parse = |text: &str| horizon_world::nbt::parse_snbt(text).unwrap().0;
+        let parse = |text: &str| horizon_core::nbt::parse_snbt(text).unwrap().0;
         let raw = parse(
             "{id:\"minecraft:arrow\",Pos:[1d,200d,1d],NoGravity:1b,marker:37,can_break:{blocks:\"minecraft:chorus_flower\"}}",
         );
