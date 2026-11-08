@@ -52,7 +52,9 @@ mixed-type list near that bound: network NBT inserts synthetic compounds which c
 encoded nesting. A 512-list payload ending in `[Byte(1), Short(128)]` demonstrates this distinction.
 This is a known wasm-only wire limit, not a reason to tighten native Text. No new carrier or separate
 encoded-wire budget is installed here; the replacement derived `Wire` path in #1909 handles it without
-synthetic wrappers. The current boundary must return a typed refusal rather than panic or trap.
+synthetic wrappers. The Text Via boundary maps such carrier failures to `TextFormError::Malformed`, while preserving
+existing typed Text refusals. Generated-runtime tests exercise second-stage carrier lowering/lifting,
+unsent calls and unchanged event writeback; they do not alter or retune the Tag codec.
 
 ## Ownership versus crossing safety
 
@@ -69,14 +71,14 @@ for the iterative implementation passed at these stack sizes:
 
 | Shape | Largest failing bytes | Smallest passing bytes |
 | --- | ---: | ---: |
-| Extra | 1,249,280 | 1,253,376 |
-| Translation argument | 1,536,000 | 1,540,096 |
+| Extra | 1,396,736 | 1,400,832 |
+| Translation argument | 1,716,224 | 1,720,320 |
 | Hover text | 1,105,920 | 1,110,016 |
 | Selector separator | 561,152 | 565,248 |
-| Atlas fallback | 913,408 | 917,504 |
+| Atlas fallback | 1,044,480 | 1,048,576 |
 | Entity hover name | 1,105,920 | 1,110,016 |
 | NBT separator | 561,152 | 565,248 |
-| Player fallback | 913,408 | 917,504 |
+| Player fallback | 1,044,480 | 1,048,576 |
 
 These are observed debug-build thresholds, not portable stack guarantees or an entire tick-frame
 margin proof. No thread-stack constant is installed here; X3 owns that follow-up. See [X3.md](X3.md)

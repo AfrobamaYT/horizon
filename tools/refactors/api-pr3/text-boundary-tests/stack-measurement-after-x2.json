@@ -4,13 +4,13 @@
   "results": [
     {
       "relation": "extra",
-      "overflow_bytes": 1249280,
-      "pass_bytes": 1253376
+      "overflow_bytes": 1396736,
+      "pass_bytes": 1400832
     },
     {
       "relation": "translation argument",
-      "overflow_bytes": 1536000,
-      "pass_bytes": 1540096
+      "overflow_bytes": 1716224,
+      "pass_bytes": 1720320
     },
     {
       "relation": "hover text",
@@ -24,8 +24,8 @@
     },
     {
       "relation": "atlas fallback",
-      "overflow_bytes": 913408,
-      "pass_bytes": 917504
+      "overflow_bytes": 1044480,
+      "pass_bytes": 1048576
     },
     {
       "relation": "entity hover name",
@@ -39,8 +39,8 @@
     },
     {
       "relation": "player fallback",
-      "overflow_bytes": 913408,
-      "pass_bytes": 917504
+      "overflow_bytes": 1044480,
+      "pass_bytes": 1048576
     }
   ]
 }
