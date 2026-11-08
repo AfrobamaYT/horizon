@@ -50,9 +50,14 @@ the dimension type the game reads: `has_fixed_time`, `has_ender_dragon_fight`, `
 `ambient_light`, `infiniburn`, the monster spawn light range and block light limit, the `skybox`,
 the `cardinal_light` and the gameplay switches (`water_evaporates`, `fast_lava`,
 `respawn_anchor_works`, `nether_portal_spawns_piglin`, `piglins_zombify`, `snow_golem_melts`,
-`can_start_raid`, `sky_light_level`). A field left at its default is the Overworld's, and the game
-refuses a value out of range (a `coordinate_scale` of 0, an `ambient_light` above 1, an unknown
-`skybox`) at startup with a message naming the mod. The level opens, ticks, saves and closes as the
+`can_start_raid`, `sky_light_level`) and the bed rule (`bed_can_sleep`, `bed_can_set_spawn`,
+`bed_destroy_on_use`, `bed_destroy_on_leave`: `always`, `when_dark` or `never`, and whether a bed
+explodes or breaks; the same four with `straw_bed_` for the straw bed). A field left at its default is the Overworld's, and the game
+refuses a value out of range (a `coordinate_scale` outside 0.00001 to 30000000, an `ambient_light` that is not a number, an unknown
+`skybox`, a bed rule that is none of the three) at startup with a message naming the mod. The
+`coordinate_scale` is what `execute in mymod:pocket` scales a position by, and what a portal
+between two levels scales by (`DimensionType.getTeleportationScale`); a position given to a
+teleport call is taken as it is. The level opens, ticks, saves and closes as the
 Nether and the End do, in `dimensions/mymod/pocket/` of the world, and clients receive its
 dimension type when they join. A client of a server takes the whole type, not only the build
 range: the level's fluids, mobs, beds and time follow the type the server sent, as on the host,
@@ -61,6 +66,12 @@ whether or not the client has the mod that registered the level.
 `sky_color`, `fog_color` (`#rrggbb`) and `cloud_height` set the sky overhead, the fog at the
 horizon and the clouds' height; left as None they are the Overworld's. They apply to the host's own
 world: a client of another server that has the mod's dimension shows the Overworld's sky there.
+
+`day_cycle` picks the timelines and the clock the dimension type names: `overworld` (the day and moon
+cycles, the villagers' schedule and the Overworld's clock, the default), `nether` (the schedule only,
+no clock), `end` or `none`. It sets how the level's sky and light change over the day in the host's
+world, whether monsters burn in daylight, and which clock `/time` reads there. `level.dimension_type(host)`
+gives the timelines and `default_clock` back. The day time itself is the world's one clock.
 
 The level's biomes are the one `biome` everywhere unless `biome_source` says otherwise:
 `BiomeSourceKind::Checkerboard` alternates the `biomes` in cells `2^biome_scale` chunks wide,
