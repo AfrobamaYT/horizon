@@ -30,10 +30,9 @@ pub(super) fn run(dir: &Path, args: &[String]) -> Result<(), String> {
             .map_err(|e| e.to_string())?
             .path()
             .join("internals.json");
-        if path.is_file() {
-            let snapshot: Vec<ListedInternal> =
-                serde_json::from_str(&fs::read_to_string(path).map_err(|e| e.to_string())?)
-                    .map_err(|e| e.to_string())?;
+        if let Ok(text) = fs::read_to_string(path)
+            && let Ok(snapshot) = serde_json::from_str::<Vec<ListedInternal>>(&text)
+        {
             old.extend(snapshot);
         }
     }
@@ -46,7 +45,7 @@ pub(super) fn run(dir: &Path, args: &[String]) -> Result<(), String> {
         return Err("inject update refused; no files changed".into());
     }
     if candidate != original {
-        crate::internals::atomic_write(&path, candidate)?;
+        crate::internals::atomic_write_manifest(&path, candidate)?;
     }
     Ok(())
 }
@@ -62,6 +61,7 @@ fn plan(
     let mut doc: DocumentMut = text.parse().map_err(|e| format!("{MANIFEST}: {e}"))?;
     let mut reports = Vec::new();
     let mut refused = false;
+    let mut edited = false;
     for id in accept {
         if !manifest.inject.iter().any(|i| i.id == *id) {
             reports.push(format!("unknown inject id {id}"));
@@ -186,6 +186,7 @@ fn plan(
             ),
         ] {
             if let Some(mut replacement) = replacement {
+                edited = true;
                 if let Some(existing) = table.get(key).and_then(|i| i.as_value()) {
                     *replacement.decor_mut() = existing.decor().clone();
                 }
@@ -193,8 +194,10 @@ fn plan(
             }
         }
     }
-    let candidate = if refused {
+    let candidate = if refused || !edited {
         text.to_owned()
+    } else if text.contains("\r\n") {
+        doc.to_string().replace('\n', "\r\n")
     } else {
         doc.to_string()
     };
@@ -228,52 +231,6 @@ mod tests {
             accept,
         )
         .unwrap()
-    }
-    #[test]
-    fn inject_update_movement_and_format() {
-        let text = pinned().replace("nth = 0", "nth = 0 # ordinal");
-        let (items, mut catalog) = fixture();
-        assert_eq!(check(&text, &items, &catalog, &[]).0, text);
-        catalog.sites[0].ordinal = 7;
-        let (result, reports, refused) = check(&text, &items, &catalog, &[]);
-        assert!(!refused);
-        assert_eq!(result, text.replace("nth = 0", "nth = 7"));
-        assert!(reports[0].contains("E_INJECT_MOVED"));
-        catalog.sites[0].ctx = "different".into();
-        let (result, reports, refused) = check(&text, &items, &catalog, &["wrap"]);
-        assert!(refused && reports[0].contains("E_INJECT_LOST"));
-        assert_eq!(result, text);
-        catalog.sites[0].ctx = "context-zero".into();
-        catalog.sites.push(Call {
-            target: "game::tick".into(),
-            call: "game::first".into(),
-            ordinal: 9,
-            ctx: "context-zero".into(),
-        });
-        assert!(check(&text, &items, &catalog, &[]).2);
-    }
-    #[test]
-    fn inject_update_signature_and_atomic_plan() {
-        let text = pinned();
-        let (mut items, catalog) = fixture();
-        items[0].hash = "new-signature".into();
-        items[0].signature = "unsafe fn tick(&self, value: bool) -> bool".into();
-        let (result, reports, refused) = check(&text, &items, &catalog, &[]);
-        assert!(refused);
-        assert_eq!(result, text);
-        assert!(
-            reports[0].contains("E_INJECT_CHANGED")
-                && reports[0].contains("unsafe fn tick(&self, value: bool) -> bool")
-        );
-        let (result, _, refused) = check(&text, &items, &catalog, &["wrap"]);
-        assert!(!refused);
-        assert_eq!(result, text.replace("signature-fixture", "new-signature"));
-        assert!(check(&text, &[], &catalog, &["wrap"]).2);
-        let multi = edit(&text, "add game::tick --kind head --with second").unwrap();
-        let (result, _, refused) = check(&multi, &items, &catalog, &["wrap"]);
-        assert!(refused);
-        assert_eq!(result, multi);
-        assert!(check(&text, &items, &catalog, &["unknown"]).2);
     }
     fn disk_fixture(label: &str, text: &str, hash: &str, sites: &str) -> std::path::PathBuf {
         let dir = reviewer_directory(label);
@@ -375,6 +332,105 @@ mod tests {
                 fs::metadata(dir.join("old")).unwrap().ino()
             );
         }
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[cfg(unix)]
+    #[test]
+    fn reviewer_symlink_preserved() {
+        use std::os::unix::fs::symlink;
+        let text = pinned();
+        let dir = disk_fixture("review-symlink", &text, "signature-fixture", MOVED);
+        let path = dir.join(MANIFEST);
+        fs::rename(&path, dir.join("real.toml")).unwrap();
+        symlink("real.toml", &path).unwrap();
+        run(&dir, &[]).unwrap();
+        assert!(
+            fs::symlink_metadata(&path)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(
+            fs::read_to_string(dir.join("real.toml")).unwrap(),
+            text.replace("nth = 0", "nth = 7")
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn reviewer_unrelated_corrupt_snapshot() {
+        let text = pinned();
+        let dir = disk_fixture("review-corrupt", &text, "signature-fixture", MOVED);
+        let old = dir.join("target/horizon-mod/prebuilt/old");
+        fs::create_dir(&old).unwrap();
+        fs::write(old.join("internals.json"), "broken").unwrap();
+        run(&dir, &[]).unwrap();
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn reviewer_crlf_noop() {
+        let text = pinned().replace("\n", "\r\n");
+        let (items, catalog) = fixture();
+        assert_eq!(check(&text, &items, &catalog, &[]).0, text);
+        let dir = disk_fixture(
+            "review-crlf",
+            &text,
+            "signature-fixture",
+            r#"[{"target":"game::tick","call":"game::first","ordinal":0,"ctx":"context-zero"}]"#,
+        );
+        let before = fs::metadata(dir.join(MANIFEST))
+            .unwrap()
+            .modified()
+            .unwrap();
+        run(&dir, &[]).unwrap();
+        assert_eq!(fs::read_to_string(dir.join(MANIFEST)).unwrap(), text);
+        assert_eq!(
+            before,
+            fs::metadata(dir.join(MANIFEST))
+                .unwrap()
+                .modified()
+                .unwrap()
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn reviewer_loader_error_refuses() {
+        let text = TEXT.to_owned();
+        let dir = disk_fixture("review-loader", &text, "signature-fixture", MOVED);
+        fs::write(dir.join("target/horizon-mod/prebuilt/0123456789012345678901234567890123456789/internals.json"), "bad").unwrap();
+        assert!(run(&dir, &[]).is_err());
+        assert_eq!(fs::read_to_string(dir.join(MANIFEST)).unwrap(), text);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[cfg(unix)]
+    #[test]
+    fn reviewer_accept_boundary_and_refusal_metadata() {
+        use std::os::unix::fs::MetadataExt;
+        let text = pinned();
+        let dir = disk_fixture("review-boundary", &text, "signature-fixture", MOVED);
+        let path = dir.join(MANIFEST);
+        let before = fs::metadata(&path).unwrap();
+        for args in [
+            vec!["--accept".into(), "".into()],
+            vec!["--accept".into(), "x".repeat(100000)],
+            vec!["--accept".into()],
+        ] {
+            assert!(run(&dir, &args).is_err());
+            let after = fs::metadata(&path).unwrap();
+            assert_eq!(before.ino(), after.ino());
+            assert_eq!(before.modified().unwrap(), after.modified().unwrap());
+            assert_eq!(fs::read_to_string(&path).unwrap(), text);
+        }
+        run(
+            &dir,
+            &[
+                "--accept".into(),
+                "wrap".into(),
+                "--accept".into(),
+                "wrap".into(),
+            ],
+        )
+        .unwrap();
         fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -102,7 +102,7 @@ fn add(dir: &Path, args: &[String]) -> Result<(), String> {
     )
     .map_err(|e| format!("{}: {e}", points.display()))?;
     let candidate = append(&original, &manifest, &request, &internals, &catalog)?;
-    crate::internals::atomic_write(&path, candidate)
+    crate::internals::atomic_write_manifest(&path, candidate)
 }
 
 fn append(
@@ -462,15 +462,20 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn reviewer_symlink_manifest_does_not_overwrite_referent() {
+    fn reviewer_symlink_manifest_writes_referent() {
         let dir = reviewer_directory("symlink");
         let path = dir.join(MANIFEST);
         let referent = dir.join("referent.toml");
         fs::rename(&path, &referent).unwrap();
         std::os::unix::fs::symlink(&referent, &path).unwrap();
         invoke(&dir, "add game::tick --kind head").unwrap();
-        assert!(fs::symlink_metadata(&path).unwrap().is_file());
-        assert_eq!(read(&referent), TEXT);
+        assert!(
+            fs::symlink_metadata(&path)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(parse_manifest(&read(&referent)).inject.len(), 1);
         assert_eq!(parse_manifest(&read(path)).inject.len(), 1);
         fs::remove_dir_all(dir).unwrap();
     }
