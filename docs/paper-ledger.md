@@ -238,3 +238,49 @@ name and scope is the base/dragon server hooks below. Rows without a key differ 
 [paper-EntityChangeBlockEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/EntityChangeBlockEvent.html
 [paper-EntityAddToWorldEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/entity/EntityAddToWorldEvent.html
 [paper-EntityRemoveFromWorldEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/entity/EntityRemoveFromWorldEvent.html
+
+## Event counterparts: base entity hooks (#1015)
+
+Paper API 26.3 (paper-api `26.3.build.244-stable`), public Javadoc only, cited by event name; Horizon hooks are cited by function name.
+Scope: the 20 base-entity hooks below, comparing each Javadoc moment, side, exposed facts and cancel/setter behaviour against the hook's contract.
+
+| Horizon hook | Paper event / status | Evidence and porting boundary |
+|---|---|---|
+| `entity_teleport` | **Partial:** [`PlayerTeleportEvent`][paper-PlayerTeleportEvent] | A player command teleport carries the same from/to coordinates and a `getCause()` field, but the event is players-only, fires before the move and is cancellable, while the hook reports every server entity after its same-level command teleport and is listen-only. No key. |
+| `entity_tick_listened` | **Gap:** none | No Paper/Bukkit event describes whether a mod listens to entity ticks; the hook is Horizon's opt-in gate asked before the tick round and has no game moment to map. No key. |
+| `entity_tick_post` | **Gap:** none | The Paper API has no per-entity tick event and none of the candidates mark the after-tick moment for mobs, items, minecarts or boats. No key. |
+| `entity_tick_pre` | **Gap:** none | For the same reason no event marks an entity about to tick, so the hook's pre-tick cancel (no AI, physics, ageing or merging) has no counterpart. No key. |
+| `entity_toggle_glide` | **Partial:** [`EntityToggleGlideEvent`][paper-EntityToggleGlideEvent] | Same server-side gliding toggle for a player and the `isGliding()` fact, but the event fires before the toggle is applied and is cancellable, while the hook reports a guest's change after it was applied and is listen-only. No key. |
+| `entity_unleash` | **Partial:** [`EntityUnleashEvent`][paper-EntityUnleashEvent] | Same entity and server-side unleash, but the event is "immediately prior to" it and cancellable with `isDropLeash()`/`setDropLeash()`, while the hook fires after the leash is removed (before the lead drop is handled) and cannot cancel or choose the drop. No key. |
+| `exp_bottle` | **Partial:** [`ExpBottleEvent`][paper-ExpBottleEvent] | Same thrown bottle and the experience it releases, but the event fires when the bottle hits and is cancellable with `setExperience()`/`setShowEffect()`, while the hook reports the break after the experience was awarded and cannot change it. No key. |
+| `experience_orb_can_merge` | **Partial:** [`ExperienceOrbMergeEvent`][paper-ExperienceOrbMergeEvent] | The event marks the server about to merge two orbs, after vanilla's answer, while the hook is asked earlier for every pair whose boxes meet and lets a mod answer either way, so it can force a merge the event never fires for; the spawning orb (`from` is 0) is not an `ExperienceOrb` the event could pass. No key. |
+| `experience_orb_merge` | **Partial:** [`ExperienceOrbMergeEvent`][paper-ExperienceOrbMergeEvent] | For two existing orbs the moment (about to merge), the target/source orbs and the cancel match the hook's `into`, `from` and `canceled`, but the hook also merges a spawning orb that is not an entity yet (`from` is 0, only `from_value` known), which an event exposing two orbs cannot describe. No key. |
+| `explosion_detonate` | **Partial:** [`EntityExplodeEvent`][paper-EntityExplodeEvent] (block blasts: [`BlockExplodeEvent`][paper-BlockExplodeEvent]) | The server-side block-interaction moment and mutable `blockList()` are related to the hook's positions to spare, but Paper splits entity and block sources and documents no event when mob griefing disables block interaction, while the hook hears every server explosion. Paper also exposes cancellation and a drop-yield setter that the hook cannot express; its public Javadoc does not establish that cancellation prevents entity damage. No key. |
+| `explosion_prime` | **Partial:** [`ExplosionPrimeEvent`][paper-ExplosionPrimeEvent] | Same moment (an explosion about to begin) and `getRadius()` gives the radius, but the event is documented for an entity's decision to explode and is cancellable with radius and fire setters, while the hook hears every server explosion and is listen-only. No key. |
+| `fill_bucket` | **Partial:** [`PlayerBucketFillEvent`][paper-PlayerBucketFillEvent] / [`PlayerBucketEmptyEvent`][paper-PlayerBucketEmptyEvent] | The hook fires at one point in `BucketItem.use` for both filling and emptying, and Paper matches each half (same moment, player's bucket use, cancellable); but no single event covers the hook, because filling and emptying are separate events. No key. |
+| `fire_odds` | **Gap:** none (nearest [`BlockSpreadEvent`][paper-BlockSpreadEvent]) | The hook replaces a level's flammability table, a lookup rather than a game moment, and `BlockSpreadEvent` only fires when a block actually spreads and can only cancel that spread; it exposes no ignite or burn odds. No key. |
+| `firework_explode` | **Partial:** [`FireworkExplodeEvent`][paper-FireworkExplodeEvent] | Same rocket and position via `getEntity()`, but the event fires when the firework explodes and is cancellable, while the hook reports the explosion after its effects and damage have run and cannot cancel. No key. |
+| `fluid_level_change` | **Partial:** [`FluidLevelChangeEvent`][paper-FluidLevelChangeEvent] | Same server-side fluid-level change, with the block's current data and `getNewData()` carrying the fluid type and levels, and cancellation keeping the old level. However, `setNewData()` can change the resulting block data, while the hook can only cancel and cannot change `to`. No key. |
+| `food_level_changed` | **Partial:** [`FoodLevelChangeEvent`][paper-FoodLevelChangeEvent] | Same server-side player food change, with a mutable resultant food level and cancellation, but Paper's `getItem()` identifies the triggering consumed item, which the hook does not pass. The hook also combines a player turn's changes into one notification, rather than identifying an individual triggering change. No key. |
+| `furnace_burn` | **Partial:** [`FurnaceBurnEvent`][paper-FurnaceBurnEvent] | Same block and fuel item, but the event fires before the fuel is burned and is cancellable with burn-time and burning setters, while the hook reports after the furnace consumed the fuel and began or resumed burning and is listen-only. No key. |
+| `furnace_extract` | **Partial:** [`FurnaceExtractEvent`][paper-FurnaceExtractEvent] | Same server-side moment when a player takes output, and `getPlayer()`, the block, `getItemStack()` and `getItemAmount()` carry the hook's player, pos, item and count. However, the inherited `setExpToDrop()` changes the experience awarded after the event, while the hook is listen-only and exposes no experience amount or output. No key. |
+| `furnace_smelt` | **Partial:** [`FurnaceSmeltEvent`][paper-FurnaceSmeltEvent] | Same block, input and result, but the event fires before the result is written and can be cancelled, while the hook reports after the output grew and cannot change it. No key. |
+| `furnace_start_smelt` | **Partial:** [`FurnaceStartSmeltEvent`][paper-FurnaceStartSmeltEvent] | Same server-side start of smelting, with the block and inherited `getSource()` carrying the position and input item. However, Paper exposes the recipe and total cook time and lets a plugin change that time with `setTotalCookTime()`, while the hook reports that the cooking timer advanced from zero and is listen-only. No key. |
+
+[paper-EntityToggleGlideEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/EntityToggleGlideEvent.html
+[paper-EntityUnleashEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/EntityUnleashEvent.html
+[paper-ExpBottleEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/ExpBottleEvent.html
+[paper-ExperienceOrbMergeEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/entity/ExperienceOrbMergeEvent.html
+[paper-EntityExplodeEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/EntityExplodeEvent.html
+[paper-BlockExplodeEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/BlockExplodeEvent.html
+[paper-ExplosionPrimeEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/ExplosionPrimeEvent.html
+[paper-PlayerBucketFillEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerBucketFillEvent.html
+[paper-PlayerBucketEmptyEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerBucketEmptyEvent.html
+[paper-BlockSpreadEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/BlockSpreadEvent.html
+[paper-FireworkExplodeEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/FireworkExplodeEvent.html
+[paper-FluidLevelChangeEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/FluidLevelChangeEvent.html
+[paper-FoodLevelChangeEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/FoodLevelChangeEvent.html
+[paper-FurnaceBurnEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/inventory/FurnaceBurnEvent.html
+[paper-FurnaceExtractEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/inventory/FurnaceExtractEvent.html
+[paper-FurnaceSmeltEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/inventory/FurnaceSmeltEvent.html
+[paper-FurnaceStartSmeltEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/inventory/FurnaceStartSmeltEvent.html
