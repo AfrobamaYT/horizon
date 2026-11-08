@@ -1880,7 +1880,7 @@ impl Game<'_> {
             return false;
         }
         // A dragon part is no LivingEntity: `canCriticalAttack` is false.
-        let (amount, _, _, _) = self.melee_damage("minecraft:ender_dragon", false);
+        let (amount, _, _, _) = self.melee_damage("minecraft:ender_dragon", false, Some(id));
         self.swing_arm();
         // The part's box.
         let area = self

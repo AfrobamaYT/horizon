@@ -164,42 +164,106 @@ impl Game<'_> {
         loss
     }
     /// `getEnchantedDamage - base`: damage bonus of the held weapon against a mob type.
-    pub(super) fn enchant_damage_bonus(&mut self, target: &str) -> f32 {
-        self.enchanted_damage(target, 0.0)
+    pub(super) fn enchant_damage_bonus(&mut self, target: &str, victim: Option<u32>) -> f32 {
+        self.enchanted_damage(target, 0.0, victim)
     }
     /// `Player.getEnchantedDamage`: `base` run through the held weapon's
     /// damage effects against a mob type.
-    pub(super) fn enchanted_damage(&mut self, target: &str, base: f32) -> f32 {
+    pub(super) fn enchanted_damage(&mut self, target: &str, base: f32, victim: Option<u32>) -> f32 {
         let Some(held) = self.held().map(|stack| self.item_combat_stack(stack)) else {
             return base;
         };
-        let source = self.stack_melee_damage_type(
-            Some(&held),
+        let actors = self
+            .player
+            .as_ref()
+            .and_then(|player| victim.map(|victim| (player.entity_id as u32, victim)));
+        self.weapon_enchanted_damage(
+            &held,
+            actors,
+            target,
+            &self.stack_melee_damage_type(
+                Some(&held),
+                self.player
+                    .as_ref()
+                    .map_or((0.0, false), |p| (p.fall_distance, p.fall_flying)),
+                true,
+            ),
+            base,
             self.player
                 .as_ref()
-                .map_or((0.0, false), |p| (p.fall_distance, p.fall_flying)),
-            true,
-        );
+                .map(|p| (p.fall_distance, p.fall_flying)),
+        )
+    }
+
+    /// Evaluate a pre-hit weapon snapshot with actual actor identities supplied by the hit.
+    pub(super) fn weapon_enchanted_damage(
+        &mut self,
+        held: &ItemStack,
+        actors: Option<(u32, u32)>,
+        target: &str,
+        damage_type: &str,
+        base: f32,
+        direct_motion: Option<(f64, bool)>,
+    ) -> f32 {
         let ctx = EffectContext {
             this: Some(target),
             attacker: Some("minecraft:player"),
             direct_attacker: Some("minecraft:player"),
             is_direct: true,
-            damage_type: Some(&source),
-            direct_motion: self
-                .player
-                .as_ref()
-                .map(|p| (p.fall_distance, p.fall_flying)),
+            damage_type: Some(damage_type),
+            direct_motion,
             items: Some(world_items!(self)),
             ..Default::default()
         };
-        stack_enchanted_damage(
-            &world_stations!(self).enchantments,
-            &held,
+        // Read effective levels once: get_enchantment_level may itself be mod-provided.
+        let levels = held.all_enchantments();
+        let custom = self.remote.is_none()
+            && self.is_logical_server()
+            && world_stations!(self)
+                .enchantments
+                .has_custom_damage(&levels);
+        let actors = actors.filter(|_| custom).and_then(|(attacker, victim)| {
+            let epoch = self.native_lifecycle.epoch()?;
+            Some((
+                mod_api::EntityRef::new(epoch, attacker),
+                mod_api::EntityRef::new(epoch, victim),
+            ))
+        });
+        let weapon = actors.and_then(|_| {
+            use crate::game::api_values::TryIntoApi;
+            held.try_into_api().ok()
+        });
+        let mut random = self.world.random.clone();
+        let value = world_stations!(self).enchantments.modify_damage(
+            &levels,
             &ctx,
-            &mut self.world.random,
+            &mut random,
             base,
-        )
+            &mut |slot, config, level, value| {
+                let Some(((attacker, victim), weapon)) = actors.zip(weapon.as_ref()) else {
+                    return value;
+                };
+                let Some(effect) = super::mods::ENCHANTMENT_DAMAGE_EFFECTS
+                    .get()
+                    .and_then(|effects| effects.get(slot))
+                else {
+                    return value;
+                };
+                effect.apply(
+                    self,
+                    &mod_api::EnchantmentDamageContext {
+                        attacker: mod_api::LivingRef::new(attacker),
+                        victim,
+                        weapon,
+                        level,
+                        config,
+                    },
+                    value,
+                )
+            },
+        );
+        self.world.random = random;
+        value
     }
     /// `Player.attack`'s extra knockback: `getKnockback` (the weapon's knockback
     /// enchantment, halved) plus 0.5 for a sprinting full-strength hit, and
