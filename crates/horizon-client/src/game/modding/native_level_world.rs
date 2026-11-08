@@ -137,11 +137,11 @@ impl Game<'_> {
 
     /// The level's dimension type with its gameplay attributes, from the facts the game uses.
     pub(super) fn level_dimension_type(&self, level: LevelRef) -> Option<LevelDimensionType> {
-        use horizon_world::dimension_type::{CardinalLight, DimensionFacts, Skybox};
+        use horizon_world::dimension_type::{CardinalLight, Skybox};
         use horizon_world::worldgen::value_provider::IntProvider;
         self.native_level_read_world(level)?;
         let key = horizon_core::LevelKey::parse(level.dimension_id()).ok()?;
-        let facts = DimensionFacts::of_level(key);
+        let facts = self.dimension_facts_for(key);
         Some(LevelDimensionType {
             id: facts.id.clone(),
             min_y: facts.height.min_y,
