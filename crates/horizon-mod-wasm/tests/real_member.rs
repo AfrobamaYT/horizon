@@ -1,4 +1,6 @@
 //! The build-tool fixture is a real shared module, not a component.
+// Generated fixtures exercise every shape; TODO(#2273): make the generator emit clippy-clean code.
+#![allow(clippy::all, unused_comparisons, unreachable_patterns, dead_code)]
 #[path = "fixture/src/shutdown.rs"]
 mod shutdown;
 use horizon_mod_package::manifest::Package;

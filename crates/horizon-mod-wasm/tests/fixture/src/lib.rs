@@ -22,6 +22,8 @@ impl Hooks for Mod {
     }
 }
 
+// Only the guest ABI exports reach this fixture function; the bench target does not call it.
+#[allow(dead_code)]
 pub fn on_tick(_: mod_api::HostSide<'_>, args: &mut mod_points::TickArgs) {
     args.cancel = true;
 }
