@@ -2694,6 +2694,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no sign-editing event)",
+        paper = "SignChangeEvent",
         cancellable = true
     )]
     fn sign_changed(
@@ -4011,14 +4012,16 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no resource-pack status event)"
+        neoforge = "none (NeoForge has no resource-pack status event)",
+        paper = "PlayerResourcePackStatusEvent"
     )]
     fn resource_pack_status();
     /// The world's spawn point changed to `pos` and `angle`.
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        paper = "SpawnChangeEvent"
     )]
     fn spawn_change();
     /// TNT at `pos` is about to be lit (primed): a flint and steel or a fire
