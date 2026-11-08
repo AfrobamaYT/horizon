@@ -57,8 +57,8 @@ fn abandoned_resident_wrapper_passes_are_expired_and_logged_even_in_release() {
                     table.entity_lookup::<()>(&dimension, 7, |_| None),
                     EntityLookup::Taken
                 );
-                // Plain extracted values require explicit terminal retirement.
-                drop(held);
+                // Leave this scope without the required terminal retirement.
+                assert_eq!(held.id, 7);
             } else {
                 let mut list = ResidentList::default();
                 list.bind_residency(&journal, owner, |entity: &Stored| (entity.id, entity.join));
