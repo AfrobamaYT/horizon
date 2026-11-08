@@ -152,3 +152,73 @@ fn opaque_hidden_fields_are_not_reached_and_enum_ordinals_are_local() {
     assert!(plan.field(choice, Some(1), 0));
     assert!(!plan.field(choice, Some(0), 0));
 }
+
+/// Helpers live in `crate::__horizon_points` and are called from the game's other modules, so each
+/// emitted fn must not be private: a private helper is E0603 at every call site.
+#[test]
+fn staged_helpers_are_callable_from_sibling_modules() {
+    let rule = Rule::new(&[internal(
+        "horizon_client::Game",
+        "struct",
+        "struct Game { a: u16 }",
+    )]);
+    let mut graph = Graph::default();
+    graph.add(
+        &rule,
+        &rule.shape("horizon_client", None, &syn::parse_str("Game").unwrap()),
+    );
+    for emitted in [
+        crate::native_window::helpers(&rule, &graph).unwrap(),
+        crate::native_patch::helpers(&rule, &graph).unwrap(),
+    ] {
+        let file: syn::File = syn::parse2(emitted).unwrap();
+        let fns: Vec<_> = file
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                syn::Item::Fn(item) => Some(item),
+                _ => None,
+            })
+            .collect();
+        assert!(!fns.is_empty());
+        for item in fns {
+            assert!(
+                !matches!(item.vis, syn::Visibility::Inherited),
+                "{} is private",
+                item.sig.ident
+            );
+        }
+    }
+}
+
+/// `isize` has no Wire impl, so a whole-value decode of anything holding one is a compile error
+/// in the game; the decoder refuses it, and a patch root of that type takes no patch.
+#[test]
+fn isize_layouts_have_no_decoder_and_take_no_patch() {
+    let rule = Rule::new(&[internal(
+        "horizon_client::Cursor",
+        "struct",
+        "struct Cursor { column: isize }",
+    )]);
+    let cursor = rule.shape("horizon_client", None, &syn::parse_str("Cursor").unwrap());
+    let scalar = rule.shape("horizon_client", None, &syn::parse_str("isize").unwrap());
+    assert!(crate::native_value::decode_call(&rule, &cursor).is_err());
+    assert!(crate::native_value::decode_call(&rule, &scalar).is_err());
+    let mut graph = Graph::default();
+    graph.add(&rule, &cursor);
+    let patch = crate::native_patch::generate_runtime(
+        &rule,
+        "horizon_client",
+        None,
+        &syn::parse_str("isize").unwrap(),
+        quote::quote!(**slot),
+        quote::quote!(&trees[0]),
+        quote::quote!(plan),
+        true,
+        &graph,
+        quote::quote!(policy),
+    )
+    .unwrap()
+    .to_string();
+    assert!(!patch.contains("take"), "{patch}");
+}

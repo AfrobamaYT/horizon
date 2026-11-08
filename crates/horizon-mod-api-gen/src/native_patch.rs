@@ -111,7 +111,7 @@ fn emit(
     if matches!(shape, Shape::Ref { mutable: false, .. }) {
         return Ok(quote!(if !__np_tree.is_empty() { #reject; }));
     }
-    if let (Some((graph, _)), Shape::Named(..)) = (runtime, shape)
+    if let Some((graph, _)) = runtime
         && let Some(id) = graph.id(shape)
         && graph.layouts[id].opaque.is_some()
     {
