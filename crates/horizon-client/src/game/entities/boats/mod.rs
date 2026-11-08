@@ -298,7 +298,6 @@ impl Boat {
     }
     /// Where the passenger at `index` of `count` stands, at the boat's current
     /// (or, with `previous`, last) place: `getPassengerAttachmentPoint`
-
     /// turned with the boat, less the passenger's `rider_offset`.
     pub fn seat(
         &self,
