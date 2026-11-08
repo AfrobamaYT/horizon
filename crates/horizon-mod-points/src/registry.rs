@@ -301,6 +301,11 @@ impl SlotListener {
         self.place
     }
 
+    #[cfg(any(target_arch = "wasm32", feature = "wasm-guest"))]
+    pub(crate) fn injection(&self) -> &'static str {
+        self.injection
+    }
+
     /// The mod's id.
     pub fn id(&self) -> &'static str {
         self.id

@@ -6,14 +6,18 @@ use crate::{
 use std::cell::RefCell;
 
 thread_local! {
-    static LISTENERS: RefCell<Vec<(usize, *const ())>> = const { RefCell::new(Vec::new()) };
+    static LISTENERS: RefCell<Vec<(usize, String, *const ())>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Installs a typed API listener in this guest and enables the generated export table.
 /// The host registers the subscribed places in its ordinary ordered listener list.
 pub fn register(listener: &SlotListener) -> Result<(), crate::RegisterError> {
     if let Some(ApiKind::Typed(function)) = listener.api_kind() {
-        LISTENERS.with(|slots| slots.borrow_mut().push((listener.place(), function)));
+        LISTENERS.with(|slots| {
+            slots
+                .borrow_mut()
+                .push((listener.place(), listener.injection().to_owned(), function))
+        });
         mod_api::wire::guest::extend(0x8000_0000, 0xC000_0000, crate::guest_dispatch);
         Ok(())
     } else {
@@ -22,25 +26,31 @@ pub fn register(listener: &SlotListener) -> Result<(), crate::RegisterError> {
 }
 
 /// The places this guest listens at, in registration order.
-pub fn subscriptions() -> Vec<u32> {
+pub fn subscriptions() -> Vec<(u32, String)> {
     LISTENERS.with(|slots| {
         slots
             .borrow()
             .iter()
-            .map(|(place, _)| *place as u32)
+            .map(|(place, injection, _)| (*place as u32, injection.clone()))
             .collect()
     })
 }
 
-pub(crate) fn fire(place: PointId, mut call: impl FnMut(*const ())) {
-    // Copy one entry at a time; listeners may reenter the guest through the host.
-    let len = LISTENERS.with(|slots| slots.borrow().len());
-    for index in 0..len {
-        let (at, function) = LISTENERS.with(|slots| slots.borrow()[index]);
-        if at == place as usize {
-            call(function);
-        }
-    }
+pub(crate) fn fire(
+    place: PointId,
+    index: u32,
+    call: impl FnOnce(*const ()),
+) -> Result<(), mod_api::wire::WireError> {
+    let function = LISTENERS.with(|slots| {
+        slots
+            .borrow()
+            .get(index as usize)
+            .filter(|(at, _, _)| *at == place as usize)
+            .map(|(_, _, function)| *function)
+    });
+    let function = function.ok_or(mod_api::wire::WireError::Invalid("unknown point listener"))?;
+    call(function);
+    Ok(())
 }
 
 #[cfg(target_arch = "wasm32")]
