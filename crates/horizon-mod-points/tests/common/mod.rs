@@ -1,7 +1,7 @@
 //! The loopback shared by the policy-fixture tests: one synchronous guest call per firing,
 //! under a registration policy, with the encoded value's lifetime checked after apply.
 use mod_api::wire::{Id, Reader, Record, ResourceCodec, ResourceScope, WireError, Writer};
-use mod_api::{RowError, RowPages, RowWindow};
+use mod_api::{RowError, RowFunction, RowPages, RowWindow};
 use mod_points::{__private::RawForward, endpoint_policy::EndpointPolicy, exposure::Plan};
 use std::{
     any::{Any, TypeId},
@@ -14,26 +14,45 @@ use std::{
 };
 
 #[derive(Default)]
-struct Resources(RefCell<Vec<Arc<dyn RowPages>>>);
+struct Resources {
+    pages: RefCell<Vec<Arc<dyn RowPages>>>,
+    functions: RefCell<Vec<Arc<dyn RowFunction>>>,
+}
 impl ResourceCodec for Resources {
     fn store(&self, value: Box<dyn Any>) -> Result<Id, WireError> {
+        let value = match value.downcast::<Arc<dyn RowPages>>() {
+            Ok(value) => {
+                let mut values = self.pages.borrow_mut();
+                values.push(*value);
+                return Ok(Id(values.len() as u64));
+            }
+            Err(value) => value,
+        };
         let value = value
-            .downcast::<Arc<dyn RowPages>>()
+            .downcast::<Arc<dyn RowFunction>>()
             .map_err(|_| WireError::Invalid("wrong resource"))?;
-        let mut values = self.0.borrow_mut();
+        let mut values = self.functions.borrow_mut();
         values.push(*value);
         Ok(Id(values.len() as u64))
     }
     fn load(&self, id: Id, view: TypeId) -> Result<Box<dyn Any>, WireError> {
-        if view != TypeId::of::<Arc<dyn RowPages>>() {
+        let index = (id.0 as usize).wrapping_sub(1);
+        if view == TypeId::of::<Arc<dyn RowPages>>() {
+            self.pages
+                .borrow()
+                .get(index)
+                .cloned()
+                .map(|value| Box::new(value) as Box<dyn Any>)
+        } else if view == TypeId::of::<Arc<dyn RowFunction>>() {
+            self.functions
+                .borrow()
+                .get(index)
+                .cloned()
+                .map(|value| Box::new(value) as Box<dyn Any>)
+        } else {
             return Err(WireError::Invalid("wrong view"));
         }
-        self.0
-            .borrow()
-            .get(id.0 as usize - 1)
-            .cloned()
-            .map(|value| Box::new(value) as Box<dyn Any>)
-            .ok_or(WireError::Invalid("unknown resource"))
+        .ok_or(WireError::Invalid("unknown resource"))
     }
 }
 
@@ -64,7 +83,7 @@ impl RawForward for Endpoint {
         reply.take::<()>().unwrap();
         let applied = record.apply(reply.rest());
         assert_eq!(applied.is_err(), self.refused.load(Ordering::Relaxed));
-        let source = resources.0.borrow().first().cloned().unwrap();
+        let source = resources.pages.borrow().first().cloned().unwrap();
         // The call marker is still live: apply must already have closed the encoded value.
         assert_eq!(
             source.window(RowWindow {
