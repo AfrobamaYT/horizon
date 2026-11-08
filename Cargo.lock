@@ -494,6 +494,7 @@ dependencies = [
  "horizon-mod-api-gen",
  "horizon-mod-package",
  "horizon-port-pack",
+ "serde",
  "serde_json",
  "sha2",
  "toml",
@@ -2173,6 +2174,7 @@ version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
+ "serde",
  "syn 2.0.119",
 ]
 
