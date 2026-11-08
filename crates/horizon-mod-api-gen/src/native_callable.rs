@@ -19,8 +19,8 @@ pub struct CallableCodecs {
 
 /// Generate codecs for an ordered list of native parameters and one native result.
 pub fn codecs(rule: &Rule, arguments: &[Shape], result: &Shape) -> Result<CallableCodecs, String> {
-    let args = native_value::codec(rule, &Shape::Tuple(arguments.to_vec()))?;
-    let result = native_value::codec(rule, result)?;
+    let args = native_value::staged_codec(rule, &Shape::Tuple(arguments.to_vec()))?;
+    let result = native_value::staged_codec(rule, result)?;
     let decode = args.decode;
     let encode = result.encode;
     Ok(CallableCodecs {
@@ -69,21 +69,41 @@ pub fn is_callback(ty: &Type) -> bool {
     signature(ty).is_some()
 }
 
-/// One decoded argument: its owned type, and whether the callee takes it by shared reference.
-fn argument(ty: &Type) -> Result<(Type, bool), String> {
+/// How the callee takes one decoded argument.
+#[derive(PartialEq)]
+enum Lend {
+    Value,
+    Shared,
+    /// By `&mut`: the decoded value is lent exclusively and its final state returns beside the
+    /// result, so the caller sees the callee's writes.
+    Exclusive,
+}
+
+/// One decoded argument: its owned type, and how the callee takes it.
+fn argument(ty: &Type) -> Result<(Type, Lend), String> {
     match ty {
-        Type::Reference(reference) if reference.mutability.is_some() => Err(format!(
-            "`{}` is a mutable reference: a value decoded from bytes cannot carry the callee's writes back",
-            quote!(#ty)
-        )),
-        Type::Reference(reference) => Ok((
-            match &*reference.elem {
-                Type::Path(path) if path.path.is_ident("str") => syn::parse_quote!(String),
-                elem => elem.clone(),
-            },
-            true,
-        )),
-        ty => Ok((ty.clone(), false)),
+        Type::Reference(reference) => {
+            let str_like =
+                matches!(&*reference.elem, Type::Path(path) if path.path.is_ident("str"));
+            if reference.mutability.is_some() {
+                if str_like || matches!(&*reference.elem, Type::Slice(_) | Type::TraitObject(_)) {
+                    return Err(format!(
+                        "`{}` is an unsized mutable reference: it has no owned value to write back",
+                        quote!(#ty)
+                    ));
+                }
+                return Ok(((*reference.elem).clone(), Lend::Exclusive));
+            }
+            Ok((
+                if str_like {
+                    syn::parse_quote!(String)
+                } else {
+                    (*reference.elem).clone()
+                },
+                Lend::Shared,
+            ))
+        }
+        ty => Ok((ty.clone(), Lend::Value)),
     }
 }
 
@@ -91,7 +111,8 @@ fn argument(ty: &Type) -> Result<(Type, bool), String> {
 /// callback argument, decoding the argument tuple, calling `callee` (a place expression of the
 /// callback's own type) and encoding its result, or the reason this signature cannot project.
 /// Arguments and result are owned ordinary Wire values: a `&T` argument is decoded as `T` and
-/// lent to the call, a `&mut T` argument or any layout without a Wire codec is a gap.
+/// lent to the call, a `&mut T` argument is decoded as `T`, lent exclusively and returned after
+/// the result in a tuple `(result, final T..)`; a layout without a Wire codec is a gap.
 pub fn invocation(
     rule: &Rule,
     module: &str,
@@ -233,18 +254,23 @@ fn body(
     let mut shapes = Vec::new();
     let mut lend = Vec::new();
     let mut owned_types = Vec::new();
+    let mut written = Vec::new();
     for (index, input) in inputs.iter().enumerate() {
-        let (owned, by_reference) = argument(input)?;
-        shapes.push(rule.shape(module, owner, &owned));
+        let (owned, how) = argument(input)?;
+        let shape = rule.shape(module, owner, &owned);
+        if how == Lend::Exclusive {
+            written.push((index, shape.clone()));
+        }
+        shapes.push(shape);
         owned_types.push(rule.qualify(module, &owned));
         let member = syn::Index::from(index);
-        lend.push(if by_reference {
-            quote!(&__arguments.#member)
-        } else {
-            quote!(__arguments.#member)
+        lend.push(match how {
+            Lend::Value => quote!(__arguments.#member),
+            Lend::Shared => quote!(&__arguments.#member),
+            Lend::Exclusive => quote!(&mut __arguments.#member),
         });
     }
-    let args = native_value::codec(rule, &Shape::Tuple(shapes))
+    let args = native_value::staged_codec(rule, &Shape::Tuple(shapes))
         .map_err(|reason| format!("argument tuple: {reason}"))?;
     // A borrowed string result crosses as the owned string it is a view of.
     let borrowed_str = matches!(output, Type::Reference(r) if r.mutability.is_none()
@@ -254,11 +280,23 @@ fn body(
     } else {
         output.clone()
     };
-    let result = native_value::codec(rule, &rule.shape(module, owner, &owned_output))
-        .map_err(|reason| format!("result `{}`: {reason}", quote!(#output)))?;
+    let mut result_shapes = vec![rule.shape(module, owner, &owned_output)];
+    result_shapes.extend(written.iter().map(|(_, shape)| shape.clone()));
+    let result = if written.is_empty() {
+        native_value::staged_codec(rule, &result_shapes[0])
+    } else {
+        native_value::staged_codec(rule, &Shape::Tuple(result_shapes))
+    }
+    .map_err(|reason| format!("result `{}`: {reason}", quote!(#output)))?;
     let decode = args.decode;
     let encode = result.encode;
     let call = call(&lend);
+    let members = written.iter().map(|(index, _)| syn::Index::from(*index));
+    let returned = if written.is_empty() {
+        quote!()
+    } else {
+        quote!(let __result = (__result, #(__arguments.#members,)*);)
+    };
     let call = if borrowed_str {
         quote!(#call.to_owned())
     } else {
@@ -266,11 +304,13 @@ fn body(
     };
     Ok(quote! {
         let mut __reader = mod_api::wire::Reader::new(__bytes);
-        let __arguments: (#(#owned_types,)*) = { let input = &mut __reader; #decode };
+        #[allow(unused_mut)]
+        let mut __arguments: (#(#owned_types,)*) = { let input = &mut __reader; #decode };
         if !__reader.rest().is_empty() {
             return Err(mod_api::wire::WireError::Trailing.into());
         }
         let __result = #call;
+        #returned
         let mut __writer = mod_api::wire::Writer::new();
         { let out = &mut __writer; let value = &__result; #encode }
         if let Some(error) = __writer.error() {
@@ -316,7 +356,7 @@ mod tests {
             assert_eq!(reason(ty), Ok(()), "{ty}");
         }
         let gap = |ty| reason(ty).unwrap_err();
-        assert!(gap("fn(&mut Self, PlayerRef)").contains("mutable reference"));
+        assert!(gap("fn(&mut Self, PlayerRef)").contains("argument tuple"));
         assert!(gap("&mut dyn FnMut(UiResources, &std::path::Path)").contains("argument tuple"));
         assert!(gap("&dyn Fn(&str) -> Option<Json>").contains("result"));
         assert!(!is_callback(&syn::parse_str("&dyn EventLoopCtl").unwrap()));
@@ -359,7 +399,8 @@ mod tests {
         assert_eq!(gaps[3], None);
         assert!(gaps[4].as_ref().unwrap().contains("generic"));
         assert!(gaps[5].as_ref().unwrap().contains("by value"));
-        assert!(gaps[6].as_ref().unwrap().contains("mutable reference"));
+        // A `&mut u32` argument is decoded, lent and returned beside the result.
+        assert_eq!(gaps[6], None);
         assert_eq!(gaps[7], None);
         // The object's shape keeps the trait's identity, through every pointer.
         let object =

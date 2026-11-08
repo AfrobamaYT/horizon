@@ -16,6 +16,15 @@ pub fn codec(rule: &Rule, shape: &Shape) -> Result<ValueCodec, String> {
     build(rule, shape, &mut Vec::new(), Mode::Inline)
 }
 
+/// [`codec`] for a value built and read inline at a staged point, where the fields of the
+/// layouts of the workspace crates below the game are public (the staged copy widens them).
+pub fn staged_codec(rule: &Rule, shape: &Shape) -> Result<ValueCodec, String> {
+    rule.widened.set(true);
+    let codec = codec(rule, shape);
+    rule.widened.set(false);
+    codec
+}
+
 /// How a named layout below the requested shape is spelled.
 #[derive(Clone, Copy, PartialEq)]
 enum Mode {
@@ -311,6 +320,7 @@ fn fields(
     mode: Mode,
 ) -> Result<ValueCodec, String> {
     if named.foreign
+        && !(named.widened && rule.widened.get())
         && fields
             .iter()
             .any(|f| !matches!(f.vis, syn::Visibility::Public(_)))

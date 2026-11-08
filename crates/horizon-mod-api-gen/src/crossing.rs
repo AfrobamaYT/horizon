@@ -411,6 +411,9 @@ pub struct Named {
     pub guarded: bool,
     /// Declared in another crate than the game's, where the table reads it.
     pub foreign: bool,
+    /// Declared in a workspace crate below the game, whose fields the staged copy makes public
+    /// (the mod API's own layouts and other crates' are not).
+    pub widened: bool,
     /// `#[non_exhaustive]` on it or a case of it: another crate can't build it.
     pub sealed: bool,
 }
@@ -440,6 +443,9 @@ pub struct Rule {
     memo: std::cell::RefCell<HashMap<String, Crossing>>,
     /// Every non-generic listed trait, by path: the trait objects that cross as method tables.
     traits: HashMap<String, TraitDecl>,
+    /// Set while a codec is built for a call at a staged point, where a widened layout's fields
+    /// are public: its constructor is then not private.
+    pub(crate) widened: std::cell::Cell<bool>,
     /// Whether a named layout has a generated decoder, decided once per rule.
     pub(crate) decodable: std::cell::RefCell<HashMap<String, bool>>,
 }
@@ -530,6 +536,9 @@ impl Rule {
                     opaque_reason,
                     guarded,
                     foreign,
+                    widened: foreign
+                        && path.starts_with("horizon_")
+                        && !API_CRATES.contains(&path.split("::").next().unwrap_or_default()),
                     sealed,
                 },
             );
@@ -575,6 +584,7 @@ impl Rule {
             refs,
             memo: Default::default(),
             traits,
+            widened: Default::default(),
             decodable: Default::default(),
         }
     }

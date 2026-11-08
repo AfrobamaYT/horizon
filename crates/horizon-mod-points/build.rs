@@ -390,7 +390,7 @@ fn receiver_fixture(out_dir: &std::path::Path) {
                 // The real catalog's trait and the shape of winit's `ControlFlow`.
                 entry(
                     "horizon_client::startup_menu::EventLoopCtl",
-                    "trait EventLoopCtl { fn exit(&self); fn set_control_flow(&self, flow: ControlFlow); }",
+                    "trait EventLoopCtl { fn exit(&self); fn set_control_flow(&self, flow: ControlFlow); fn bump(&self, n: &mut u32) -> bool; }",
                 ),
                 entry(
                     "horizon_client::startup_menu::ControlFlow",

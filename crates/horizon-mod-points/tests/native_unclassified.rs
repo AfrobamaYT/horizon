@@ -37,6 +37,7 @@ pub mod startup_menu {
 pub trait EventLoopCtl {
     fn exit(&self);
     fn set_control_flow(&self, flow: ControlFlow);
+    fn bump(&self, n: &mut u32) -> bool;
 }
 #[derive(Default)]
 struct Ctl {
@@ -53,6 +54,10 @@ impl EventLoopCtl for Ctl {
     }
     fn set_control_flow(&self, flow: ControlFlow) {
         self.flows.lock().unwrap().push(flow);
+    }
+    fn bump(&self, n: &mut u32) -> bool {
+        *n += 10;
+        *n > 12
     }
 }
 include!(concat!(env!("OUT_DIR"), "/native_raw_unclassified.rs"));
@@ -92,15 +97,24 @@ fn head(snapshot: mod_points::snapshot::Snapshot<'_>, edits: &mut mod_api::wire:
             .read::<Arc<dyn RowFunction>>(owned.field(table, ordinal).unwrap())
             .unwrap()
     };
-    // Two methods, and no third.
-    assert!(owned.field(table, 2).is_none());
-    let (exit, set_flow) = (method(0), method(1));
+    // Three methods, and no fourth.
+    assert!(owned.field(table, 3).is_none());
+    let (exit, set_flow, bump) = (method(0), method(1), method(2));
     if MODE.load(Ordering::Relaxed) == 0 && first {
         // Methods are called through the real object.
         assert_eq!(exit.invoke(bytes(&())).unwrap(), bytes(&()));
         set_flow.invoke(bytes(&(1u32,))).unwrap();
         // `WaitUntil` carries its instant as nanoseconds from now.
         set_flow.invoke(bytes(&(2u32, 5_000_000_000u64))).unwrap();
+        // A `&mut u32` argument is lent exclusively; its final value returns beside the result.
+        assert_eq!(
+            mod_api::wire::Reader::decode::<(bool, u32)>(&bump.invoke(bytes(&(5u32,))).unwrap()),
+            Ok((true, 15))
+        );
+        assert_eq!(
+            mod_api::wire::Reader::decode::<(bool, u32)>(&bump.invoke(bytes(&(1u32,))).unwrap()),
+            Ok((false, 11))
+        );
         // An unknown variant, short and trailing input are refused before the method runs.
         assert!(set_flow.invoke(bytes(&(9u32,))).is_err());
         assert!(set_flow.invoke(vec![]).is_err());
