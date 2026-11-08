@@ -442,14 +442,27 @@ pub fn set_transport_cooldown(m: &mut Mob, ticks: i32) {
 
 /// The happy ghast grew up (`adultGhastSetup`): every running behaviour
 /// stops (`Brain.stopAll`) and the memories are cleared; the brain no
-/// longer ticks.
-pub fn grown_up(m: &mut Mob) {
+/// longer ticks. A running mod behavior stops with its `stop` callback,
+/// as `Brain.stopAll` reaches every running behavior's (#824); the
+/// vanilla entries keep the port's own state reset.
+pub fn grown_up(m: &mut Mob, w: &MobWorld<'_>) {
     let Some(b) = m.extra.animal_brain.as_deref_mut() else {
         return;
     };
-    for e in b.list.iter_mut() {
-        e.b.reset();
+    let mut list = std::mem::take(&mut b.list);
+    for e in list.iter_mut() {
+        if let B::Mod(mod_e) = &mut e.b {
+            if mod_e.running() {
+                mod_e.do_stop(m, w);
+            }
+            mod_e.reset();
+        } else {
+            e.b.reset();
+        }
     }
+    let b = m.extra.animal_brain.as_deref_mut();
+    let Some(b) = b else { return };
+    b.list = list;
     b.mem = Memories::default();
     m.nav_stop();
 }

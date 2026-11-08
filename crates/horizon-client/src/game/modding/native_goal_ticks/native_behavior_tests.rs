@@ -26,7 +26,10 @@ static CALLS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static REFUSALS: Mutex<Vec<mod_api::BehaviorRefusal>> = Mutex::new(Vec::new());
 
 fn record(call: &str) {
-    CALLS.lock().unwrap().push(call.to_owned());
+    CALLS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .push(call.to_owned());
 }
 
 /// The behavior every runner test drives: journals its calls and answers
@@ -220,7 +223,12 @@ fn a_failed_entry_condition_draws_nothing_and_calls_nothing() {
             assert_eq!(random_of(level), before, "a failed start draws nothing");
         });
         assert!(!probe.running());
-        assert!(CALLS.lock().unwrap().is_empty());
+        assert!(
+            CALLS
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .is_empty()
+        );
     });
 }
 
@@ -307,7 +315,9 @@ fn a_type_with_no_brain_is_refused_at_construction() {
         game.resolve_parts().unwrap();
         zombie(game, 8, [3.5, 65.0, 3.5]);
         assert_eq!(
-            *REFUSALS.lock().unwrap(),
+            *REFUSALS
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
             [mod_api::BehaviorRefusal::NoBrain],
             "the part learned at construction that a zombie has no brain"
         );
@@ -471,7 +481,10 @@ fn a_behavior_writes_the_walk_target_and_the_refusals_hold() {
         let mut level = test_level.level();
         // Idle at day 3000 (no job site): the behavior starts.
         villager_tick(game, 8, 100, 3000, &mut level);
-        let reads = READS.lock().unwrap().clone();
+        let reads = READS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
         assert_eq!(
             reads[0], "Some(BrainWalkTarget { at: [7.5, 64.5, 9.5], speed: 0.5, close: 1 })",
             "the walk target reads back at the block's centre"
@@ -512,7 +525,10 @@ fn only_an_active_activity_starts_but_core_always_does() {
         for i in 0..10 {
             villager_tick(game, 8, 100 + i, 3000, &mut level);
         }
-        let calls = CALLS.lock().unwrap().clone();
+        let calls = CALLS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
         assert!(
             calls.iter().all(|c| !c.starts_with("hide/")),
             "a hidden activity never starts: {calls:?}"
@@ -559,7 +575,10 @@ fn a_running_behavior_keeps_ticking_across_the_activity_change() {
         for i in 0..5 {
             villager_tick(game, 8, 110 + i, 13000, &mut level);
         }
-        let calls = CALLS.lock().unwrap().clone();
+        let calls = CALLS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
         let ticks_after = calls.iter().filter(|c| *c == "one/tick").count();
         assert!(ticks_after >= 5, "still ticking at night: {calls:?}");
         assert_eq!(
@@ -587,7 +606,10 @@ fn refresh_stops_a_running_behavior_and_the_rebuild_is_fresh() {
         let mut level = test_level.level();
         villager_tick(game, 8, 100, 3000, &mut level);
         assert_eq!(
-            CALLS.lock().unwrap().clone(),
+            CALLS
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone(),
             ["one/check", "one/start", "one/tick"],
             "it runs, ticked in the same brain tick that started it"
         );
@@ -597,13 +619,19 @@ fn refresh_stops_a_running_behavior_and_the_rebuild_is_fresh() {
             mobs::villager_brain::age_boundary_reached(m, w, level, events);
         });
         assert_eq!(
-            CALLS.lock().unwrap().clone(),
+            CALLS
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone(),
             ["one/check", "one/start", "one/tick", "one/stop"],
             "refreshBrain stopped it"
         );
         villager_tick(game, 8, 102, 3000, &mut level);
         assert_eq!(
-            CALLS.lock().unwrap().clone(),
+            CALLS
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone(),
             [
                 "one/check",
                 "one/start",
@@ -714,7 +742,10 @@ fn a_sniffer_behavior_sets_a_walk_target() {
         let mut test_level = horizon_client::health::TestLevel::new(0);
         let mut level = test_level.level();
         animal_tick(game, 8, 100, 3000, &mut level);
-        let reads = READS.lock().unwrap().clone();
+        let reads = READS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
         assert_eq!(
             reads[0], "Some(BrainWalkTarget { at: [7.5, 64.5, 9.5], speed: 0.5, close: 1 })",
             "the sniffer's walk target reads back at the block's centre"
@@ -799,24 +830,35 @@ fn grown_up_stops_a_running_ghastling_behavior() {
         let mut level = test_level.level();
         animal_tick(game, 8, 100, 3000, &mut level);
         assert_eq!(
-            CALLS.lock().unwrap().clone(),
+            CALLS
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone(),
             ["one/check", "one/start", "one/tick"],
             "the ghastling's behavior runs"
         );
-        // `HappyGhast.adultGhastSetup`: the brain stops for good.
-        {
-            let mut mobs = game.mobs.lift();
-            mobs::animal_brain::grown_up(&mut mobs[0]);
-            game.mobs = mobs;
-        }
-        for i in 0..5 {
-            animal_tick(game, 8, 101 + i, 3000, &mut level);
-        }
+        // `HappyGhast.adultGhastSetup`: `Brain.stopAll` reaches the running
+        // behavior's stop, then nothing more reaches it.
+        with_villager_tick(game, 8, 101, 3000, &mut level, |m, w, _level, _events| {
+            mobs::animal_brain::grown_up(m, w);
+        });
+        let calls = CALLS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
         assert_eq!(
-            CALLS.lock().unwrap().clone(),
-            ["one/check", "one/start", "one/tick"],
-            "nothing more reaches it, and no stop callback runs"
+            calls,
+            ["one/check", "one/start", "one/tick", "one/stop"],
+            "the stop callback ran once"
         );
+        for i in 0..5 {
+            animal_tick(game, 8, 102 + i, 3000, &mut level);
+        }
+        let calls = CALLS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        assert_eq!(calls.len(), 4, "not one call after the stop: {calls:?}");
     });
 }
 
@@ -879,7 +921,10 @@ fn a_breeze_behavior_starts_in_fight_and_writes_its_target() {
         let mut level = test_level.level();
         // A breeze's default activity is FIGHT.
         monster_tick(game, 8, 100, 3000, &mut level);
-        let reads = READS.lock().unwrap().clone();
+        let reads = READS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
         assert_eq!(
             reads[0], "Some(BrainWalkTarget { at: [7.5, 64.5, 9.5], speed: 0.5, close: 1 })",
             "the breeze's walk target reads back"
@@ -940,5 +985,65 @@ fn warden_behaviors_join_after_vanilla_of_their_priority() {
             .filter(|k| !k.2 && k.0 == key.0 && k.1 == key.1)
             .count();
         assert!(before > 0, "vanilla ({key:?}) comes first");
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources"]
+fn a_panicking_behavior_leaves_the_rest_of_the_tick_working() {
+    CALLS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clear();
+    ADDS.lock().unwrap().clear();
+    ADDS.lock().unwrap().push(plan("minecraft:villager", |b| {
+        let mut panicking = Probe::named("boom", 60);
+        panicking.panic_in_start = true;
+        b.add(Activity::Core, 50, 1000, 1000, &[], panicking)
+            .unwrap();
+    }));
+    ADDS.lock().unwrap().push(plan("minecraft:villager", |b| {
+        b.add(
+            Activity::Core,
+            51,
+            1000,
+            1000,
+            &[],
+            Probe::named("calm", 60),
+        )
+        .unwrap();
+    }));
+    with_game(|game| {
+        install_game_mods();
+        game.resolve_parts().unwrap();
+        villager(game, 8, [3.5, 65.0, 3.5]);
+        let mut test_level = horizon_client::health::TestLevel::new(0);
+        let mut level = test_level.level();
+        // One behavior panics in its start; the other starts and ticks in
+        // the same brain tick, and the mob's own goal selector answers
+        // after it (no journal of the engine's stayed poisoned).
+        villager_tick(game, 8, 100, 3000, &mut level);
+        let calls = CALLS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        assert!(
+            calls.contains(&"boom/check".to_owned()) && calls.contains(&"boom/start".to_owned()),
+            "the panicking one was asked: {calls:?}"
+        );
+        assert!(
+            calls.contains(&"calm/check".to_owned())
+                && calls.contains(&"calm/start".to_owned())
+                && calls.contains(&"calm/tick".to_owned()),
+            "the other one runs the same tick: {calls:?}"
+        );
+        // The villager's own goal selector still ticks (the goal tests'
+        // Counter part is not installed here; the selector itself answers).
+        with_villager_tick(game, 8, 101, 3000, &mut level, |m, w, level, events| {
+            let mut cx = mobs::goals::Cx { w, level, events };
+            let mut selector = std::mem::take(&mut m.ai.goals);
+            selector.tick(m, &mut cx);
+            m.ai.goals = selector;
+        });
     });
 }
