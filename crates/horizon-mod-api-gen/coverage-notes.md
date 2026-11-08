@@ -1,7 +1,7 @@
 
 ## Provider-query review: trust boundaries and native-side notes
 
-The implementation at fdccc11a1d and exact-variant tests at 40b17368f1 were independently reviewed. Full structural reply decoding, including trailing-byte validation and static owner conversion, completes before any cursor writeback. The reviewer reproduced refusal without cursor mutation for truncated cursors, invalid Option/bool tags and trailing bytes, and killed missing-writeback and late-validation mutants.
+The implementation at fdccc11a1d and exact-variant tests at 40b17368f1 were independently reviewed. Full structural reply decoding, including trailing-byte validation and static owner conversion, completes before any cursor writeback. The reviewer reproduced refusal without cursor mutation for incomplete cursors, invalid Option/bool tags and trailing bytes, and killed missing-writeback and late-validation mutants.
 
 The stale provider-id and backwards / u32::MAX cursor probes forge the trusted HOST reply after the native encoder has returned. They do not establish hostile GUEST control of production provider-query replies. Native HostCodec creates ordinary Held ids by inserting their objects into its live generational table; return-to-origin erased values are resolved against the guest's typed handler table. Native invocation and release check incoming native Held ids. No HOST_VALIDATE request or additional per-resource round trip was added.
 
