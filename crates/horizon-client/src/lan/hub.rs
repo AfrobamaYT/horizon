@@ -391,6 +391,9 @@ pub struct Hub {
     pub former_names: std::collections::HashMap<u128, String>,
     last_clock: i64,
     last_rate: f32,
+    /// The total and rate last told of the clock the level in place follows when it is not the
+    /// Overworld's (`level_clock`); `i64::MIN` while none is.
+    last_level_clock: (i64, f32),
     /// The Overworld clock's total while `World.day_time` follows another clock (the level in
     /// place has its own); None while it follows the Overworld's.
     pub overworld_day: Option<i64>,
@@ -724,6 +727,7 @@ impl<'w> Columns<'w> {
 struct LevelSync {
     last_clock: i64,
     last_rate: f32,
+    last_level_clock: (i64, f32),
     weather: (bool, f32, f32),
 }
 
@@ -732,6 +736,7 @@ impl Default for LevelSync {
         Self {
             last_clock: i64::MIN,
             last_rate: 0.0,
+            last_level_clock: (i64::MIN, 0.0),
             weather: (false, 0.0, 0.0),
         }
     }
@@ -781,6 +786,7 @@ impl Hub {
             riding: Default::default(),
             last_clock: i64::MIN,
             last_rate: 0.0,
+            last_level_clock: (i64::MIN, 0.0),
             overworld_day: None,
             level_clock: None,
             ticking: (20.0, false),
@@ -2755,6 +2761,31 @@ impl Hub {
         }
         self.last_clock = day;
         self.last_rate = rate;
+        // The same for the clock the level follows when it is not the Overworld's: a jump
+        // (`time set` in the level) or a new rate reaches its players at once.
+        match self.level_clock.clone() {
+            Some((name, level_rate)) => {
+                let total = world.day_time;
+                let (last_total, last_rate) = self.last_level_clock;
+                let step = i64::from(level_rate.ceil() as i32).max(1);
+                if last_total != i64::MIN
+                    && ((total - last_total).abs() > step || level_rate != last_rate)
+                    && let Some(clock) = self.sync.id("minecraft:world_clock", &name)
+                {
+                    self.broadcast_level(&C::SetTime(play::SetTime {
+                        game_time: world.game_time,
+                        clocks: vec![play::ClockState {
+                            clock,
+                            total_ticks: total,
+                            partial_tick: 0.0,
+                            rate: level_rate,
+                        }],
+                    }));
+                }
+                self.last_level_clock = (total, level_rate);
+            }
+            None => self.last_level_clock = (i64::MIN, 0.0),
+        }
         self.sync_ticking(ctx.tick_rate, ctx.tick_frozen, ctx.tick_steps);
         let w = &world.weather;
         let (raining, rain, thunder) = self.weather;
@@ -5281,13 +5312,23 @@ impl Hub {
         let leaving = LevelSync {
             last_clock: self.last_clock,
             last_rate: self.last_rate,
+            last_level_clock: self.last_level_clock,
             weather: self.weather,
         };
         let entering = self.level_sync.remove(dimension).unwrap_or_default();
         self.level_sync
             .insert(std::mem::take(&mut self.config.dimension), leaving);
-        (self.last_clock, self.last_rate, self.weather) =
-            (entering.last_clock, entering.last_rate, entering.weather);
+        (
+            self.last_clock,
+            self.last_rate,
+            self.last_level_clock,
+            self.weather,
+        ) = (
+            entering.last_clock,
+            entering.last_rate,
+            entering.last_level_clock,
+            entering.weather,
+        );
         self.config.dimension = dimension.to_owned();
         self.dimension_type = self
             .sync
