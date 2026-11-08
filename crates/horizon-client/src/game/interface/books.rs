@@ -1572,9 +1572,7 @@ impl Game<'_> {
                 }
                 // HoveredTextEffects.TOOLTIP_AND_CURSOR: the hovered words' hover
                 // event, drawn as the chat draws it (componentHoverEffect).
-                hovered = pages
-                    .get(*page)
-                    .and_then(|t| self.book_style_at(t, left));
+                hovered = pages.get(*page).and_then(|t| self.book_style_at(t, left));
             }
         }
         if let Some(style) = hovered {
