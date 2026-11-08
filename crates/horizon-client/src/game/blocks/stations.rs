@@ -2258,7 +2258,11 @@ impl Game<'_> {
         Some(
             self.build_stack_tooltip_lines(stack, false, creative, advanced, false)
                 .into_iter()
-                .map(|(text, color)| mod_api::TooltipElement::Text(text, color))
+                .filter_map(|(text, color)| {
+                    crate::game::api_values::TryIntoApi::try_into_api(&text)
+                        .ok()
+                        .map(|text| mod_api::TooltipElement::Text(text, color))
+                })
                 .collect(),
         )
     }
@@ -3506,7 +3510,12 @@ mod tests {
             let inventory: Vec<_> = game
                 .stack_tooltip_lines(&stack, false, false)
                 .into_iter()
-                .map(|(text, color)| TooltipElement::Text(text, color))
+                .map(|(text, color)| {
+                    TooltipElement::Text(
+                        crate::game::api_values::TryIntoApi::try_into_api(&text).unwrap(),
+                        color,
+                    )
+                })
                 .collect();
             let advanced = game.options_advanced_tooltips();
             assert!(resource.tooltip(game, advanced, false).unwrap() == inventory);
@@ -3515,7 +3524,7 @@ mod tests {
                 assert_eq!(
                     lines.iter().any(|line| matches!(
                         line,
-                        TooltipElement::Text(text, _) if text.plain() == "minecraft:iron_sword"
+                        TooltipElement::Text(text, _) if matches!(&text.content, mod_api::text::TextContent::Literal(s) if s == "minecraft:iron_sword")
                     )),
                     advanced
                 );

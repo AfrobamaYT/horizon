@@ -369,7 +369,7 @@ impl Game<'_> {
                 continue;
             };
             let mut replace_vanilla = false;
-            self.native_block_screen_effect_draw(mod_api::__private::BlockScreenEffectDrawCall {
+            self.native_block_screen_effect_draw(super::native_hooks::BlockScreenEffectDrawCall {
                 effect,
                 state,
                 pos,

@@ -9,8 +9,8 @@
 /// Generated dispatch entry points, not hand-written hook implementations.
 mod fire;
 pub(in crate::game) use fire::{
-    BlockDropsCall, ConnectsToCall, EntityChangeBlockPreCall, ItemAfterVerticalCollisionCall,
-    UpdateShapeCall,
+    BlockDropsCall, BlockScreenEffectDrawCall, ConnectsToCall, EntityChangeBlockPreCall,
+    ItemAfterVerticalCollisionCall, UpdateShapeCall,
 };
 
 use super::native_data_maps::NativeDataMapType;
@@ -83,7 +83,9 @@ use mod_api::{
     NativeActiveEffect, NativeBlockClick, NativeBlockUpdateFlags, NativeInteractionResult,
     NativeItemClick, NativeItemDrop, NativeTriState, NeighbourUpdate, TooltipElement, UsePhase,
 };
-use mod_api::{BlockKey, DebugEntry, DebugRenderer, EffectKey, GuiLayer, RuntimeSprite};
+use mod_api::{
+    BlockKey, CameraDrawContext, DebugEntry, DebugRenderer, EffectKey, GuiLayer, RuntimeSprite,
+};
 use mod_api::{
     CameraType, Identifier, MobRef, NativeDespawn, NativePermissionLevel, NativeSpawnCheck,
     NativeSpawnReason, SoundPlay, SoundRef,
