@@ -155,16 +155,15 @@ mod tests {
             ("test:block", "minecraft:stone", 16, 1.0, false),
             ("test:block", "minecraft:stone", 0, f32::INFINITY, false),
         ] {
-            let api = Block {
-                id: id.into(),
-                template: template.into(),
-                item,
-                properties: BlockProperties {
+            let api = {
+                let mut draft = Block::new(id, template);
+                draft.item = item;
+                draft.properties = BlockProperties {
                     light: Some(light),
                     hardness: Some(hardness),
                     ..Default::default()
-                },
-                ..Default::default()
+                };
+                draft
             };
             let old = engine::Block {
                 id: id.into(),
@@ -186,6 +185,19 @@ mod tests {
                 expected.declare(&[old], &[])
             );
             assert_eq!(actual.blocks, expected.blocks);
+            if light == 16 {
+                let valid = engine::Block {
+                    id: "test:first".into(),
+                    template: "minecraft:stone".into(),
+                    ..Default::default()
+                };
+                let bad = api.try_into_engine(&()).unwrap();
+                let mut admission = horizon_mod_package::Content::declared("test");
+                let error = admission.declare(&[valid, bad], &[]).unwrap_err();
+                assert_eq!(error, "block test:block: light is 0 to 15");
+                assert!(admission.blocks.is_empty());
+                assert!(admission.items.is_empty());
+            }
         }
         for (id, template, max, remainder) in [
             ("test:item", "minecraft:stick", 64, None),
@@ -196,12 +208,11 @@ mod tests {
             ("test:item", "minecraft:stick", 64, Some("test:missing")),
             ("test:item", "minecraft:stick", 64, Some("minecraft:bucket")),
         ] {
-            let api = Item {
-                id: id.into(),
-                template: template.into(),
-                max_stack_size: Some(max),
-                crafting_remainder: remainder.map(str::to_owned),
-                ..Default::default()
+            let api = {
+                let mut draft = Item::new(id, template);
+                draft.max_stack_size = Some(max);
+                draft.crafting_remainder = remainder.map(str::to_owned);
+                draft
             };
             let old = engine::Item {
                 id: id.into(),
@@ -224,10 +235,9 @@ mod tests {
 
     #[test]
     fn declaration_component_patch_preserves_values_and_removals() {
-        let api = Item {
-            id: "test:item".into(),
-            template: "minecraft:stick".into(),
-            components: vec![
+        let api = {
+            let mut draft = Item::new("test:item", "minecraft:stick");
+            draft.components = vec![
                 ("minecraft:max_stack_size".into(), Some(Tag::Int(16))),
                 (
                     "minecraft:custom_data".into(),
@@ -236,8 +246,8 @@ mod tests {
                     )),
                 ),
                 ("minecraft:damage".into(), None),
-            ],
-            ..Default::default()
+            ];
+            draft
         };
         let converted = api.try_into_engine(&()).unwrap();
         assert_eq!(
@@ -261,10 +271,9 @@ mod tests {
 
     #[test]
     fn declaration_nested_block_overrides_are_not_lost() {
-        let api = Block {
-            id: "test:block".into(),
-            template: "minecraft:stone".into(),
-            properties: BlockProperties {
+        let api = {
+            let mut draft = Block::new("test:block", "minecraft:stone");
+            draft.properties = BlockProperties {
                 friction: Some(0.8),
                 explosion_resistance: Some(7.0),
                 requires_tool: Some(true),
@@ -279,18 +288,16 @@ mod tests {
                 occludes: Some(false),
                 destroy_overlay: Some(false),
                 ..Default::default()
-            },
-            state_properties: BTreeMap::from([(
-                "powered".into(),
-                mod_api::BlockStateProperty::Boolean,
-            )]),
-            default_state: BTreeMap::from([("powered".into(), "false".into())]),
-            shapes: Some(mod_api::BlockShapes {
+            };
+            draft.state_properties =
+                BTreeMap::from([("powered".into(), mod_api::BlockStateProperty::Boolean)]);
+            draft.default_state = BTreeMap::from([("powered".into(), "false".into())]);
+            draft.shapes = Some(mod_api::BlockShapes {
                 properties: vec![],
                 values: BTreeMap::new(),
                 default: Some(vec![[0.0, 0.0, 0.0, 16.0, 8.0, 16.0]]),
-            }),
-            ..Default::default()
+            });
+            draft
         };
         let converted = api.try_into_engine(&()).unwrap();
         assert_eq!(

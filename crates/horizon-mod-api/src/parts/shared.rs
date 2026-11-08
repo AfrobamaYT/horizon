@@ -1059,11 +1059,7 @@ pub mod tests {
                 ["gauge", "connector", "press", "hoard"]
                     .into_iter()
                     .chain(CAPABILITY_TYPES.iter().copied())
-                    .map(|id| mod_api::Block {
-                        id: format!("test:{id}"),
-                        template: "minecraft:stone".into(),
-                        ..Default::default()
-                    }),
+                    .map(|id| mod_api::Block::new(format!("test:{id}"), "minecraft:stone")),
             );
         }
     }

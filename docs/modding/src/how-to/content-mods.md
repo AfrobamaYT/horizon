@@ -2,7 +2,7 @@
 
 Trait mods declare content through `BlocksEvent` and `ItemsEvent`, using API-owned
 `mod_api::Block` and `mod_api::Item` records. Start with `Block::new(id, template)` or
-`Item::new(id, template)`, passing parsed `Identifier` values, then set the overrides.
+`Item::new(id, template)`, passing identifier strings, then set the overrides. The drafts are unvalidated; admission reports malformed values with the content loader's refusal messages.
 These are load-time declaration drafts, not live registry entries. The game admits them
 with the content-file checks, atomically for each namespace, before resources load.
 A block's `item` defaults to false in code.

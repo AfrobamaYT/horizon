@@ -4053,13 +4053,10 @@ mod tests {
                     .build();
             }
             fn blocks(&self, _context: &mod_api::RegistrationContext, event: &mut BlocksEvent<'_>) {
-                event
-                    .blocks
-                    .extend([FIRST, SECOND, EMPTY, PLAIN].map(|id| mod_api::Block {
-                        id: id.into(),
-                        template: "minecraft:white_banner".into(),
-                        ..Default::default()
-                    }));
+                event.blocks.extend(
+                    [FIRST, SECOND, EMPTY, PLAIN]
+                        .map(|id| mod_api::Block::new(id, "minecraft:white_banner")),
+                );
             }
         }
         let case = std::env::var(CHILD).unwrap();

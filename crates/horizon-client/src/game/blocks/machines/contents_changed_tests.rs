@@ -120,11 +120,9 @@ impl Hooks for Observed {
     }
 
     fn blocks(&self, _: &RegistrationContext, event: &mut BlocksEvent<'_>) {
-        event.blocks.push(mod_api::Block {
-            id: DEPOT.into(),
-            template: "minecraft:white_banner".into(),
-            ..Default::default()
-        });
+        event
+            .blocks
+            .push(mod_api::Block::new(DEPOT, "minecraft:white_banner"));
     }
 }
 
