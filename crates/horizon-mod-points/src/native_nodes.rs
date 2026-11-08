@@ -96,6 +96,34 @@ impl NativeNode for Text<'_> {
     }
 }
 
+/// An indexed view over a borrowed standard collection iterator.
+pub struct Collection<F> {
+    pub key: u64,
+    pub count: u64,
+    pub visit: F,
+}
+impl<F> NativeNode for Collection<F>
+where
+    F: Fn(u64, &mut Visitor<'_>) -> Result<(), RowError>,
+{
+    fn key(&self) -> u64 {
+        self.key
+    }
+    fn value(&self, f: &mut Header<'_>) -> Result<(), RowError> {
+        f(Some(&self.count))
+    }
+    fn len(&self) -> u64 {
+        self.count
+    }
+    fn child(&self, n: u64, f: &mut Visitor<'_>) -> Result<(), RowError> {
+        if n >= self.count {
+            return Err(RowError::Bounds);
+        }
+        let field = u32::try_from(n).map_err(|_| RowError::Bounds)?;
+        (self.visit)(n, &mut |_, _, node| f(Step::Index(n), field, node))
+    }
+}
+
 /// Borrowed sequence. The closure wraps one element only for the duration of a visit.
 pub struct Sequence<'a, T, F> {
     pub items: &'a [T],
