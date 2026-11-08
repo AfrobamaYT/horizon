@@ -187,6 +187,17 @@ impl Game<'_> {
             .is_some_and(|kind| registry.in_tag(kind, "minecraft:bypasses_invulnerability"));
         !(bypass || creative_source)
     }
+    /// `DamageSource.isCreativePlayer` (#916): the causing player's creative
+    /// mode, the host's own or a guest's; false for anything else. The one
+    /// decision every invulnerability gate shares with `/damage`'s and the
+    /// dragon's.
+    pub(in crate::game) fn creative_source_of(&self, cause: Option<Target>) -> bool {
+        match cause {
+            Some(Target::Player) => self.creative,
+            Some(Target::Guest(conn)) => self.command_guest(conn).is_some_and(|g| g.creative()),
+            _ => false,
+        }
+    }
     /// Writes the `invulnerable_time` tag into a non-mob entity's saved data
     /// (#916).
     fn set_saved_invulnerable_time(&mut self, t: Target, ticks: i32) -> bool {
@@ -897,6 +908,41 @@ mod tests {
                 game.tick_saved_invulnerable_time(14);
             }
             assert_eq!(game.entity_invulnerable_time(stand), Some(0));
+        });
+    }
+
+    /// #916, coderabbit: an item outside the entity-ticking chunks does not
+    /// tick, so its saved window does not count down in that pass — while
+    /// one the pass reaches does.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn an_item_outside_the_ticking_chunks_keeps_its_window() {
+        use horizon_client::items::ItemStack;
+        use horizon_client::motion::PlayerMotion;
+        with_game(|game| {
+            // A player's tickets: chunks out of the simulation distance
+            // around them do not tick entities.
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.update_chunk_tickets();
+            let stack = || ItemStack {
+                item: "minecraft:stone".into(),
+                count: 1,
+                damage: 0,
+                extra: None,
+            };
+            game.spawn_item(stack(), [0.5, 64.0, 0.5], [0.0; 3], 10);
+            game.spawn_item(stack(), [100000.5, 64.0, 0.5], [0.0; 3], 10);
+            let near = game.entity(game.dropped[0].id).unwrap();
+            let far = game.entity(game.dropped[1].id).unwrap();
+            assert!(game.entity_set_invulnerable_time(near, 5));
+            assert!(game.entity_set_invulnerable_time(far, 5));
+            game.tick_items();
+            assert_eq!(game.entity_invulnerable_time(near), Some(4));
+            assert_eq!(
+                game.entity_invulnerable_time(far),
+                Some(5),
+                "outside the ticking chunks, the window holds"
+            );
         });
     }
 

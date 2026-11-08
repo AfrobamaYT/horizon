@@ -65,6 +65,10 @@ pub struct SavedBody {
     pub food_tick_timer: i32,
     /// `TicksFrozen`: the time spent in powder snow.
     pub ticks_frozen: i32,
+    /// `Invulnerable` and its `invulnerableTime` window (#916), the same
+    /// tags the host's own save keeps.
+    pub invulnerable: bool,
+    pub invulnerable_time: i32,
 }
 
 impl SavedBody {
@@ -79,6 +83,8 @@ impl SavedBody {
             food_exhaustion: motion.health.food.exhaustion,
             food_tick_timer: motion.health.food.timer,
             ticks_frozen: motion.ticks_frozen,
+            invulnerable: motion.health.permanently_invulnerable,
+            invulnerable_time: motion.health.invulnerable_time,
         }
     }
     /// Put it on a new body.
@@ -91,6 +97,8 @@ impl SavedBody {
         motion.health.food.exhaustion = self.food_exhaustion;
         motion.health.food.timer = self.food_tick_timer;
         motion.ticks_frozen = self.ticks_frozen;
+        motion.health.permanently_invulnerable = self.invulnerable;
+        motion.health.invulnerable_time = self.invulnerable_time;
     }
 }
 

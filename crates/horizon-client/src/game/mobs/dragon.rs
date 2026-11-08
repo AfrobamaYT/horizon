@@ -1599,11 +1599,7 @@ impl Game<'_> {
         // `Entity.isInvulnerableToBase` over the saved flag and window
         // (#916), with the attacker's creative mode as `isCreativePlayer`,
         // before the dragon's own borrow of the game.
-        let creative = match cause.or(by) {
-            Some(Target::Player) => self.creative,
-            Some(Target::Guest(conn)) => self.command_guest(conn).is_some_and(|g| g.creative()),
-            _ => false,
-        };
+        let creative = self.creative_source_of(cause.or(by));
         if self.saved_refuses_damage(id, ty, creative) {
             return false;
         }

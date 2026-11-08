@@ -3156,6 +3156,8 @@ mod hub_tests {
                 food_exhaustion: 1.5,
                 food_tick_timer: 33,
                 ticks_frozen: 60,
+                invulnerable: false,
+                invulnerable_time: 0,
             });
             let mut extra = Tag::Compound(Default::default());
             if let Tag::Compound(map) = &mut extra {
@@ -3212,6 +3214,8 @@ mod hub_tests {
             food_exhaustion: 0.0,
             food_tick_timer: 0,
             ticks_frozen: 0,
+            invulnerable: false,
+            invulnerable_time: 0,
         };
         {
             let value = Some(mine);
@@ -3258,6 +3262,8 @@ mod hub_tests {
                     food_exhaustion: 41.0,
                     food_tick_timer: 0,
                     ticks_frozen: 0,
+                    invulnerable: false,
+                    invulnerable_time: 0,
                 });
             }),
         ];

@@ -273,13 +273,7 @@ impl Game<'_> {
                 };
                 // `DamageSource.isCreativePlayer`: a creative player's hit
                 // passes the victim's invulnerability (#916).
-                let creative_source = match cause.or(by) {
-                    Some(Target::Player) => self.creative,
-                    Some(Target::Guest(conn)) => {
-                        self.command_guest(conn).is_some_and(|g| g.creative())
-                    }
-                    _ => false,
-                };
+                let creative_source = self.creative_source_of(cause.or(by));
                 // resolvePlayerResponsibleForDamage: remember the causing player's UUID.
                 let by_player = match cause.or(by) {
                     Some(Target::Player) => self.lan_acting,
@@ -381,11 +375,7 @@ impl Game<'_> {
         let Some(kind) = registry.id(damage_type) else {
             return false;
         };
-        let creative = match causing {
-            Some(Target::Player) => self.creative,
-            Some(Target::Guest(conn)) => self.command_guest(conn).is_some_and(|g| g.creative()),
-            _ => false,
-        };
+        let creative = self.creative_source_of(causing);
         let id = match target {
             Target::Boat(id) | Target::Cart(id) => id,
             _ => return false,
@@ -431,11 +421,7 @@ impl Game<'_> {
         let Some(kind) = registry.id(damage_type) else {
             return false;
         };
-        let creative = match causing {
-            Some(Target::Player) => self.creative,
-            Some(Target::Guest(conn)) => self.command_guest(conn).is_some_and(|g| g.creative()),
-            _ => false,
-        };
+        let creative = self.creative_source_of(causing);
         if self.saved_refuses_damage(id, damage_type, creative)
             || !self
                 .ui

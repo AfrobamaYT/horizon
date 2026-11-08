@@ -1787,6 +1787,8 @@ pub(super) mod tests {
                         food_exhaustion: 0.0,
                         food_tick_timer: 0,
                         ticks_frozen: 0,
+                        invulnerable: false,
+                        invulnerable_time: 0,
                     });
                 }
                 guest.inventory[0] = Some(ItemStack::new("minecraft:stone", 1));
