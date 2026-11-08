@@ -5,7 +5,7 @@ pub use phase::{
 };
 mod __private {
     pub use crate::phase::{
-        LoadAccess, ModPhase, PhaseError, PhaseOwner, check_access, current_phase, install_packages,
-        RegistrationData, install_registration_data,
+        LoadAccess, ModPhase, PhaseError, PhaseOwner, RegistrationData, check_access,
+        current_phase, install_packages, install_registration_data,
     };
 }

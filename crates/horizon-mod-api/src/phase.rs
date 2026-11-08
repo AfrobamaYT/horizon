@@ -376,13 +376,20 @@ impl RegistrationData {
         }
     }
     fn registry(&self, name: &str) -> Option<Arc<[String]>> {
-        let at = self.registries.binary_search_by(|(known, _)| known.as_str().cmp(name));
+        let at = self
+            .registries
+            .binary_search_by(|(known, _)| known.as_str().cmp(name));
         Some(self.registries[at.ok()?].1.clone())
     }
     fn setting(&self, mod_id: &str, key: &str) -> Option<String> {
-        let mod_at = self.settings.binary_search_by(|(known, _)| known.as_str().cmp(mod_id)).ok()?;
+        let mod_at = self
+            .settings
+            .binary_search_by(|(known, _)| known.as_str().cmp(mod_id))
+            .ok()?;
         let values = &self.settings[mod_at].1;
-        let at = values.binary_search_by(|(known, _)| known.as_str().cmp(key)).ok()?;
+        let at = values
+            .binary_search_by(|(known, _)| known.as_str().cmp(key))
+            .ok()?;
         Some(values[at].1.clone())
     }
 }
@@ -1041,7 +1048,11 @@ mod tests {
             fn register(&self, _: &mut dyn Registrar, cx: &RegistrationContext) {
                 *self.0.lock().unwrap() = probe(cx);
             }
-            fn component_types(&self, cx: &RegistrationContext, event: &mut ComponentTypesEvent<'_>) {
+            fn component_types(
+                &self,
+                cx: &RegistrationContext,
+                event: &mut ComponentTypesEvent<'_>,
+            ) {
                 *event.types = probe(cx);
             }
         }
@@ -1064,8 +1075,11 @@ mod tests {
         );
 
         let registered = Arc::new(Mutex::new(Vec::new()));
-        let mods: Mods =
-            vec![ModEntry::new("reader", Box::new(Reader(registered.clone())))].into();
+        let mods: Mods = vec![ModEntry::new(
+            "reader",
+            Box::new(Reader(registered.clone())),
+        )]
+        .into();
         crate::install(mods.clone());
         let expected = [
             r#"Ok(["minecraft:air", "minecraft:stone"])"#,
