@@ -641,13 +641,18 @@ fn wire_loopback_provider_queries_return_owned_options_and_atomic_cursor_writeba
         .unwrap();
     assert!(matches!(block, BlockProviderOf::EnergyHandler(_)));
     assert_eq!((index, owner, before), (6, "test:block", true));
-    let (_, owner, before) = guest::Guest
+    let (entity, owner, before) = guest::Guest
         .entity_provider("test:energy", "test:mob", &mut index)
         .unwrap();
+    assert!(matches!(
+        entity,
+        EntityProviderOf::EnergyHandlerOptionDirection(_)
+    ));
     assert_eq!((index, owner, before), (8, "test:entity", false));
-    let (_, owner, before) = guest::Guest
+    let (item, owner, before) = guest::Guest
         .item_provider("test:energy", REGISTERED_ITEM.get().unwrap(), &mut index)
         .unwrap();
+    assert!(matches!(item, ItemProviderOf::EnergyHandler(_)));
     assert_eq!((index, owner, before), (11, "test:item", true));
     corrupt.set(true);
     index = 42;
