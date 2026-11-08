@@ -3995,6 +3995,7 @@ mod tests {
                 &render,
                 &facts,
                 crate::models::load_visibility(&root, assets.registry)?,
+                None,
             )?),
             assets: assets.clone(),
             render,
