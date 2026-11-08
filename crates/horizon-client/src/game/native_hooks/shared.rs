@@ -3506,6 +3506,10 @@ impl Game<'_> {
             .collect();
         rows.extend(native.packages().iter().map(|package| {
             let m = &package.manifest;
+            self.settings
+                .mods
+                .info
+                .insert(m.id.clone(), horizon_client::mod_list::ModInfo::of(m, None));
             Installed {
                 id: m.id.clone(),
                 title: [m.name.as_str(), " ", m.version.as_str()].concat(),
