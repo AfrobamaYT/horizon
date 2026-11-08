@@ -454,3 +454,18 @@ Status is judged on moment, side, information and result; “No key” means no 
 [paper-PlayerChangedWorldEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerChangedWorldEvent.html
 
 [paper-PlayerCommandPreprocessEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerCommandPreprocessEvent.html
+
+## Event counterparts: base world border, lifecycle and save hooks (#1015)
+
+Paper API 26.3 (paper-api `26.3.build.244-stable`), cited from its public Javadoc only; Horizon hooks are cited by function name, never by line.
+Scope = the four `base.rs` hooks below: two world-border notifications, the server world lifecycle and the completed-save cycle.
+
+| Horizon hook | Paper event / status | Evidence and porting boundary |
+|---|---|---|
+| `world_border_bounds_changed` | **Partial:** [`WorldBorderBoundsChangeEvent`][paper-WorldBorderBoundsChangeEvent] | Moment and side agree: the event fires for an instant change or a timed move request, which is exactly when `cmd_worldborder` calls the hook after `set_size`/`lerp_to`, and Paper is server-side. The boundary is the result and the information: the event is cancellable and exposes `getOldSize`/`getNewSize` plus `setNewSize`/`setDuration`, while the listen-only hook passes no size or duration and fires after the change, so it can neither cancel nor alter it. No key. |
+| `world_border_center_changed` | **Partial:** [`WorldBorderCenterChangeEvent`][paper-WorldBorderCenterChangeEvent] | Same moment and server side: the event is "called when a world border's center is changed", matching `cmd_worldborder`'s call after `set_center`. The boundary is the result: the event is cancellable and offers `setNewCenter`, whereas the hook is listen-only, passes only the fact of the change and cannot prevent or retarget it. No key. |
+| `world_lifecycle` | **Gap:** none | The hook bundles several server phases, including `WorldOpenFailed`/`WorldCloseFailed` carrying the engine's own failure text; the dossier lists no Paper candidate, and no cited event exposes an open/close failure string or a single world open-through-close phase sequence. No key. |
+| `world_saved` | **Gap:** none | The hook fires once when a whole save cycle finished (levels, parked levels, metadata, player autosaves) and says whether chunk writes were flushed (`wait`); the dossier cites no Paper event at that moment, and no cited event carries a flush/still-pending flag. No key. |
+
+[paper-WorldBorderBoundsChangeEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/world/border/WorldBorderBoundsChangeEvent.html
+[paper-WorldBorderCenterChangeEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/world/border/WorldBorderCenterChangeEvent.html
