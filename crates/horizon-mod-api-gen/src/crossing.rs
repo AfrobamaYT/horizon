@@ -823,10 +823,10 @@ impl Rule {
             .map(|s| s.ident.to_string())
             .collect::<Vec<_>>()
             .join("::");
-        // Instants and durations have a Wire codec (`native_value`) but no leaf shape: they
+        // These std and serde_json types have a Wire codec (`native_value`) but no leaf shape: they
         // are never walked. A foreign layout writes them without the import facts.
-        if matches!(name.as_str(), "Instant" | "Duration")
-            && args.is_empty()
+        let known = resolved.as_deref().unwrap_or(&spelled);
+        let time = matches!(name.as_str(), "Instant" | "Duration")
             && match resolved.as_deref() {
                 Some(path) => matches!(
                     path,
@@ -836,9 +836,20 @@ impl Rule {
                         | "web_time::Duration"
                 ),
                 None => module.starts_with("winit"),
-            }
+            };
+        let opaque_codec = if time {
+            Some(format!("std::time::{name}"))
+        } else if matches!(known, "serde_json::Value") {
+            Some("serde_json::Value".to_owned())
+        } else if matches!(known, "std::path::Path" | "std::path::PathBuf") {
+            Some("std::path::PathBuf".to_owned())
+        } else {
+            None
+        };
+        if let Some(codec) = opaque_codec
+            && args.is_empty()
         {
-            return Shape::Opaque(Some(format!("std::time::{name}")));
+            return Shape::Opaque(Some(codec));
         }
         if self
             .refs

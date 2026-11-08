@@ -249,7 +249,22 @@ fn frame(
         let ordinal = index as u64;
         let field = index as u32;
         let callable = if native_callable::is_callback(ty) {
-            native_callable::invocation(rule, module, owner, ty, quote!((*__roots.#member))).ok()
+            {
+                // The receiver, when the call has one, is the first root.
+                let first = &roots[0].0;
+                let receiver = (index > 0
+                    && owner.is_some_and(|owner| quote!(#first).to_string() == owner))
+                .then(|| quote!((*__roots.0)));
+                native_callable::invocation(
+                    rule,
+                    module,
+                    owner,
+                    ty,
+                    quote!((*__roots.#member)),
+                    receiver,
+                )
+                .ok()
+            }
         } else {
             None
         };

@@ -85,6 +85,13 @@ fn argument(ty: &Type) -> Result<(Type, Lend), String> {
         Type::Reference(reference) => {
             let str_like =
                 matches!(&*reference.elem, Type::Path(path) if path.path.is_ident("str"));
+            // A shared `&Path` crosses as its text, owned as a `PathBuf`.
+            if reference.mutability.is_none()
+                && matches!(&*reference.elem, Type::Path(path)
+                    if path.path.segments.last().is_some_and(|s| s.ident == "Path"))
+            {
+                return Ok((syn::parse_quote!(std::path::PathBuf), Lend::Shared));
+            }
             if reference.mutability.is_some() {
                 if str_like || matches!(&*reference.elem, Type::Slice(_) | Type::TraitObject(_)) {
                     return Err(format!(
@@ -113,22 +120,36 @@ fn argument(ty: &Type) -> Result<(Type, Lend), String> {
 /// Arguments and result are owned ordinary Wire values: a `&T` argument is decoded as `T` and
 /// lent to the call, a `&mut T` argument is decoded as `T`, lent exclusively and returned after
 /// the result in a tuple `(result, final T..)`; a layout without a Wire codec is a gap.
+///
+/// A leading `&mut Self` or `&Self` parameter is bound to `receiver`, the call's own receiver
+/// place (`&mut Game` for `fn(&mut Self, PlayerRef)`): the listener supplies only the rest, and
+/// the callee's writes land on the real receiver, so nothing is copied or written back.
 pub fn invocation(
     rule: &Rule,
     module: &str,
     owner: Option<&str>,
     ty: &Type,
     callee: TokenStream,
+    receiver: Option<TokenStream>,
 ) -> Result<TokenStream, String> {
-    let (inputs, output) = signature(ty).ok_or("not a callback")?;
-    body(
-        rule,
-        module,
-        owner,
-        &inputs,
-        &output,
-        |lend| quote!((#callee)(#(#lend),*)),
-    )
+    let (mut inputs, output) = signature(ty).ok_or("not a callback")?;
+    let bound = match (inputs.first(), receiver) {
+        (Some(Type::Reference(first)), Some(receiver)) if matches!(&*first.elem, Type::Path(p) if p.path.is_ident("Self")) =>
+        {
+            let lend = if first.mutability.is_some() {
+                quote!(&mut #receiver)
+            } else {
+                quote!(&#receiver)
+            };
+            inputs.remove(0);
+            Some(lend)
+        }
+        _ => None,
+    };
+    body(rule, module, owner, &inputs, &output, |lend| {
+        let lend = bound.iter().chain(lend);
+        quote!((#callee)(#(#lend),*))
+    })
 }
 
 /// One method of a listed trait, by declaration order.
@@ -325,6 +346,10 @@ mod tests {
     use super::*;
 
     fn reason(ty: &str) -> Result<(), String> {
+        with_receiver(ty, false)
+    }
+
+    fn with_receiver(ty: &str, receiver: bool) -> Result<(), String> {
         let rule = Rule::new(&[crate::internals::Internal {
             path: "horizon_client::BlockPos".into(),
             kind: "struct",
@@ -341,6 +366,7 @@ mod tests {
             None,
             &syn::parse_str(ty).unwrap(),
             quote!(callee),
+            receiver.then(|| quote!(receiver)),
         )
         .map(|_| ())
     }
@@ -356,9 +382,13 @@ mod tests {
             assert_eq!(reason(ty), Ok(()), "{ty}");
         }
         let gap = |ty| reason(ty).unwrap_err();
-        assert!(gap("fn(&mut Self, PlayerRef)").contains("argument tuple"));
+        // `&mut Self` is not a value from bytes, but the call's own receiver can be lent.
+        assert!(gap("fn(&mut Self, u32)").contains("argument tuple"));
+        assert_eq!(with_receiver("fn(&mut Self, u32)", true), Ok(()));
+        // Json and paths cross as text.
+        assert_eq!(reason("&dyn Fn(&str) -> Option<serde_json::Value>"), Ok(()));
+        assert_eq!(reason("&mut dyn FnMut(u32, &std::path::Path)"), Ok(()));
         assert!(gap("&mut dyn FnMut(UiResources, &std::path::Path)").contains("argument tuple"));
-        assert!(gap("&dyn Fn(&str) -> Option<Json>").contains("result"));
         assert!(!is_callback(&syn::parse_str("&dyn EventLoopCtl").unwrap()));
     }
 

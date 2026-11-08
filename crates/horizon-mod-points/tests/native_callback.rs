@@ -104,11 +104,13 @@ fn head(snapshot: mod_points::snapshot::Snapshot<'_>, _: &mut mod_api::wire::Rec
         REENTERED.lock().unwrap().take(),
         Some(Err(RowError::Reentrant))
     );
-    // `&Path` has no Wire codec: the leaf is a typed header with no callable and no children.
-    let publish = snapshot.field(0, 5).unwrap();
-    assert!(snapshot.ty(publish).is_some());
-    assert!(snapshot.field(publish, 0).is_none());
-    assert!(snapshot.read::<Arc<dyn RowFunction>>(publish).is_err());
+    // `&Path` crosses as its text: the listener publishes through the real closure.
+    assert_eq!(
+        function(5)
+            .invoke(bytes(&(3u32, "some/dir".to_string())))
+            .unwrap(),
+        bytes(&())
+    );
 }
 
 #[test]
@@ -162,7 +164,7 @@ fn callback_arguments_cross_as_callables_within_the_call_lease() {
     // native body added its own call with 100.
     assert_eq!(total.load(Ordering::Relaxed), 110);
     assert_eq!(result, Some(100 + 1000 + 10000 + 110 * 100000));
-    assert_eq!(published, 1);
+    assert_eq!(published, 1 + 3);
     assert_eq!(HEADS.load(Ordering::Relaxed), 1);
     // After the call ends the retained callable is refused and the closure is not run again.
     let before = calls.load(Ordering::Relaxed);

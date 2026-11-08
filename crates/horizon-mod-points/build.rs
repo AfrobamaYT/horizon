@@ -425,4 +425,28 @@ fn receiver_fixture(out_dir: &std::path::Path) {
             body: "{ let n = load(\"minecraft:overworld\")?; let w = wanted(\"w\") as u32; let r = rain(BlockPos { x: depth as i32, y: 64, z: -3 }) as u32; let e = emit(n); publish(1, std::path::Path::new(\"p\")); Some(n + w * 1000 + r * 10000 + e * 100000) }",
         },
     );
+    // A callback taking the call's own receiver (`fn(&mut Self, ..)`) and one returning JSON.
+    policy_fixture(
+        out_dir,
+        PolicyFixture {
+            file: "native_raw_bound.rs",
+            entries: vec![
+                entry(
+                    "horizon_client::startup_menu::Loading",
+                    "pub struct Loading { pub actions: u32 }",
+                ),
+                entry(
+                    "horizon_client::startup_menu::Action",
+                    "pub enum Action { Quit, Options }",
+                ),
+            ],
+            module: "horizon_client::startup_menu",
+            owner: Some("Loading"),
+            impl_path: "startup_menu::Loading",
+            signature: "fn menu_action(&mut self, fire: fn(&mut Self, u32), data: &dyn Fn(&str) -> Option<serde_json::Value>, action: Action)",
+            name: "game_startup_menu_loading_menu_action",
+            fields: &["actions"],
+            body: "{ let _ = action; fire(self, 7); let _ = data(\"k\"); }",
+        },
+    );
 }

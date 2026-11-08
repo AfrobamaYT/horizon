@@ -90,6 +90,28 @@ fn build(
             ),
             encode: quote!(out.put(&u64::try_from(value.saturating_duration_since(std::time::Instant::now()).as_nanos()).unwrap_or(u64::MAX));),
         },
+        // JSON crosses as its text, a path as its (lossy) UTF-8 text.
+        Shape::Opaque(Some(name)) if name == "serde_json::Value" => ValueCodec {
+            decode: quote!({
+                let text: String = input.take()?;
+                serde_json::from_str::<serde_json::Value>(&text)
+                    .map_err(|_| mod_api::wire::WireError::Invalid("json text"))?
+            }),
+            encode: quote!({
+                let text = value.to_string();
+                out.put(&text);
+            }),
+        },
+        Shape::Opaque(Some(name)) if name == "std::path::PathBuf" => ValueCodec {
+            decode: quote!({
+                let text: String = input.take()?;
+                std::path::PathBuf::from(text)
+            }),
+            encode: quote!({
+                let text = value.to_string_lossy().into_owned();
+                out.put(&text);
+            }),
+        },
         Shape::Opaque(Some(name)) if name == "std::time::Duration" => ValueCodec {
             decode: quote!({
                 let secs = input.take::<u64>()?;

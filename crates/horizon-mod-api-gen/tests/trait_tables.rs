@@ -41,3 +41,47 @@ fn catalog_traits_cross_per_method() {
         (2, 2)
     );
 }
+
+#[test]
+fn catalog_callbacks_resolve_json_paths_and_name_the_engine_gap() {
+    use horizon_mod_api_gen::native_callable::invocation;
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let rule = Rule::new(&horizon_mod_api_gen::internals::rule_catalog(&root).unwrap());
+    let callback = |module: &str, owner: Option<&str>, ty: &str, receiver: bool| {
+        invocation(
+            &rule,
+            module,
+            owner,
+            &syn::parse_str(ty).unwrap(),
+            quote::quote!(callee),
+            receiver.then(|| quote::quote!(receiver)),
+        )
+        .map(|_| ())
+    };
+    // JSON crosses as text when written as the std path. The real module writes the alias
+    // `Json` (`use serde_json::Value as Json;`), which the catalog's import facts do not
+    // record for an external crate's type, so that spelling is still unresolved.
+    assert_eq!(
+        callback(
+            "horizon_client::game::test_environments",
+            None,
+            "&dyn Fn(&str) -> Option<serde_json::Value>",
+            false
+        ),
+        Ok(())
+    );
+    // `UiResources` owns GPU atlases: no Wire value, so the argument tuple is the gap.
+    let gap = callback(
+        "horizon_client::game::resource_load",
+        None,
+        "&mut dyn FnMut(UiResources, &std::path::Path)",
+        false,
+    )
+    .unwrap_err();
+    assert!(gap.contains("argument tuple"), "{gap}");
+    // `fn(&mut Self, PlayerRef)` is callable once the call's receiver is bound.
+    let player = "fn(&mut Self, mod_api::PlayerRef)";
+    let module = "horizon_client::game::lan_actions::tick";
+    assert!(callback(module, Some("Game"), player, false).is_err());
+    assert_eq!(callback(module, Some("Game"), player, true), Ok(()));
+}
