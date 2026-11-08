@@ -117,6 +117,47 @@ pub fn set_fluid_looks(mods: &[ContentMod]) {
     *FLUID_LOOKS.write().unwrap_or_else(|e| e.into_inner()) = looks;
 }
 
+/// Registers the world fluids the mods declare, before any block table is read from the root.
+/// Returns their registry names, source and flowing, for the fluid keys.
+pub fn register_world_fluids(
+    mods: &[ContentMod],
+) -> std::result::Result<Vec<String>, horizon_world::fluid::ModFluidRegistrationError> {
+    let mut names = Vec::new();
+    for look in mods.iter().flat_map(|m| &m.content.fluids) {
+        let Some(world) = look.world else { continue };
+        let flowing_id = look.flowing_id();
+        names.push(look.id.clone());
+        names.push(flowing_id.clone());
+        horizon_world::fluid::register_mod_fluid(horizon_world::fluid::ModFluidType {
+            id: look.id.clone(),
+            flowing_id,
+            bucket: look.bucket_id(),
+            rules: horizon_world::fluid::ModFluidRules {
+                tick_delay: world.tick_delay,
+                drop_off: world.drop_off,
+                slope_find_distance: world.slope_find_distance,
+                converts_to_source: world.source_conversion,
+            },
+        })?;
+    }
+    Ok(names)
+}
+
+/// Joins the world fluids native mods declare in code to the content mods of their namespaces:
+/// a fluid's file, if it has one, keeps saying how it looks.
+pub fn accept_world_fluids(mods: &mut [ContentMod], fluids: &[FluidLook]) {
+    for fluid in fluids {
+        let namespace = fluid.id.split_once(':').map_or("", |(ns, _)| ns);
+        let Some(owner) = mods.iter_mut().find(|m| m.id == namespace) else {
+            continue;
+        };
+        match owner.content.fluids.iter_mut().find(|f| f.id == fluid.id) {
+            Some(look) => look.world = fluid.world,
+            None => owner.content.fluids.push(fluid.clone()),
+        }
+    }
+}
+
 /// How the fluid `id` looks, when a mod declares it.
 pub fn fluid_look(id: &str) -> Option<FluidLook> {
     FLUID_LOOKS

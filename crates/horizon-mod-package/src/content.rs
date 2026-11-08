@@ -424,6 +424,52 @@ struct CreativeTabFile {
 struct FluidFile {
     sprite: Option<String>,
     tint: Option<u32>,
+    world: Option<WorldFluid>,
+}
+
+/// What makes a fluid exist in the world: a block holding it, as `minecraft:water`'s does, and
+/// how it flows. Each value defaults to water's, in `data/<id>/horizon/fluid/` as in code
+/// (`Registrar::declare_world_fluid`).
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct WorldFluid {
+    /// Game ticks between two flow steps (`Fluid.getTickDelay`), 1 or more.
+    pub tick_delay: i32,
+    /// What it loses per block it flows (`FlowingFluid.getDropOff`), 1 to 7.
+    pub drop_off: i32,
+    /// How far it looks for a way down (`FlowingFluid.getSlopeFindDistance`), 1 to 4.
+    pub slope_find_distance: i32,
+    /// Whether two sources make a third (`FlowingFluid.canConvertToSource`). Off by default:
+    /// water's comes from a game rule, which a mod's fluid does not read.
+    pub source_conversion: bool,
+    /// Whether it has a filled bucket, the item `<id>_bucket`.
+    pub bucket: bool,
+}
+impl Default for WorldFluid {
+    fn default() -> Self {
+        Self {
+            tick_delay: 5,
+            drop_off: 1,
+            slope_find_distance: 4,
+            source_conversion: false,
+            bucket: true,
+        }
+    }
+}
+impl WorldFluid {
+    /// Refuses values the simulation cannot run: no step, no spread, or an unbounded search.
+    pub fn check(&self) -> Result<(), String> {
+        if self.tick_delay < 1 {
+            return Err("tick_delay is 1 or more".into());
+        }
+        if !(1..=7).contains(&self.drop_off) {
+            return Err("drop_off is 1 to 7".into());
+        }
+        if !(1..=4).contains(&self.slope_find_distance) {
+            return Err("slope_find_distance is 1 to 4".into());
+        }
+        Ok(())
+    }
 }
 
 /// How a fluid the mod names looks on the client (`data/<id>/horizon/fluid/`), as
@@ -437,6 +483,40 @@ pub struct FluidLook {
     pub sprite: Option<String>,
     /// `0xAARRGGBB`.
     pub tint: Option<u32>,
+    /// How it exists in the world; none for a fluid only a tank holds.
+    pub world: Option<WorldFluid>,
+}
+impl FluidLook {
+    /// The registry name of its flowing form: `<namespace>:flowing_<path>`.
+    pub fn flowing_id(&self) -> String {
+        match self.id.split_once(':') {
+            Some((namespace, path)) => format!("{namespace}:flowing_{path}"),
+            None => format!("flowing_{}", self.id),
+        }
+    }
+    /// The filled bucket a world fluid has.
+    pub fn bucket_id(&self) -> Option<String> {
+        self.world
+            .filter(|world| world.bucket)
+            .map(|_| format!("{}_bucket", self.id))
+    }
+    /// The block a world fluid is in the world: water's behaviour and states under its own id.
+    pub fn world_block(&self) -> Option<Block> {
+        self.world.map(|_| Block {
+            id: self.id.clone(),
+            template: "minecraft:water".into(),
+            ..Block::default()
+        })
+    }
+    /// The item its bucket is: a water bucket's under its own id, leaving the empty bucket.
+    pub fn world_bucket(&self) -> Option<Item> {
+        self.bucket_id().map(|id| Item {
+            id,
+            template: "minecraft:water_bucket".into(),
+            crafting_remainder: Some("minecraft:bucket".into()),
+            ..Item::default()
+        })
+    }
 }
 
 /// A creative inventory tab the mod adds (`data/<id>/horizon/creative_tab/`):
@@ -1063,11 +1143,37 @@ impl Content {
                     "{name}: sprite is an atlas sprite id (namespace:path)"
                 ));
             }
-            self.fluids.push(FluidLook {
+            if let Some(world) = &file.world {
+                world.check().map_err(|e| format!("{name}: world: {e}"))?;
+            }
+            let look = FluidLook {
                 id: fluid,
                 sprite: file.sprite,
                 tint: file.tint,
-            });
+                world: file.world,
+            };
+            if self.fluids.iter().any(|known| {
+                known.id == look.id
+                    || (known.world.is_some() && known.flowing_id() == look.id)
+                    || (look.world.is_some()
+                        && (look.flowing_id() == known.id
+                            || (known.world.is_some() && look.flowing_id() == known.flowing_id())))
+            }) {
+                return Err(format!("{name}: fluid name declared twice"));
+            }
+            if let Some(block) = look.world_block() {
+                if self.blocks.iter().any(|known| known.id == block.id) {
+                    return Err(format!("{name}: block {} is declared twice", block.id));
+                }
+                self.blocks.push(block);
+            }
+            if let Some(item) = look.world_bucket() {
+                if self.items.iter().any(|known| known.id == item.id) {
+                    return Err(format!("{name}: item {} is declared twice", item.id));
+                }
+                self.items.push(item);
+            }
+            self.fluids.push(look);
         }
         for (kind, name) in types {
             let file: EntityType =
@@ -2667,6 +2773,76 @@ capabilities = ["registries"]
 
     /// A creative tab: a title, an icon and its items, all item ids.
     #[test]
+    fn world_fluid_generated_names_cannot_collide() {
+        let files: &[(&str, &[u8])] = &[
+            ("data/ruby/horizon/fluid/oil.json", br#"{"world":{}}"#),
+            (
+                "data/ruby/horizon/fluid/flowing_oil.json",
+                br#"{"world":{}}"#,
+            ),
+        ];
+        assert!(
+            hmod("fluid-collision", MANIFEST_TEXT, files)
+                .unwrap_err()
+                .contains("declared twice")
+        );
+    }
+
+    #[test]
+    fn a_world_fluid_brings_its_block_and_bucket() {
+        let files: &[(&str, &[u8])] = &[
+            (
+                "data/ruby/horizon/fluid/oil.json",
+                br#"{"tint":4278190080,"world":{"tick_delay":20,"drop_off":2,"slope_find_distance":2}}"#,
+            ),
+            (
+                "data/ruby/horizon/fluid/mist.json",
+                br#"{"world":{"bucket":false}}"#,
+            ),
+        ];
+        let content = hmod("world-fluid", MANIFEST_TEXT, files).unwrap();
+        let oil = content.fluids.iter().find(|f| f.id == "ruby:oil").unwrap();
+        assert_eq!(oil.flowing_id(), "ruby:flowing_oil");
+        assert_eq!(oil.world.unwrap().tick_delay, 20);
+        assert!(!oil.world.unwrap().source_conversion);
+        let block = content.blocks.iter().find(|b| b.id == "ruby:oil").unwrap();
+        assert_eq!(block.template, "minecraft:water");
+        assert!(!block.item, "the fluid's block has no block item");
+        let bucket = content
+            .items
+            .iter()
+            .find(|i| i.id == "ruby:oil_bucket")
+            .unwrap();
+        assert_eq!(bucket.template, "minecraft:water_bucket");
+        assert!(content.blocks.iter().any(|b| b.id == "ruby:mist"));
+        assert!(!content.items.iter().any(|i| i.id == "ruby:mist_bucket"));
+    }
+
+    #[test]
+    fn a_world_fluid_refuses_what_cannot_flow_and_a_second_block() {
+        for world in [
+            br#"{"world":{"tick_delay":0}}"#.as_slice(),
+            br#"{"world":{"drop_off":8}}"#,
+            br#"{"world":{"slope_find_distance":5}}"#,
+        ] {
+            let files: &[(&str, &[u8])] = &[("data/ruby/horizon/fluid/oil.json", world)];
+            assert!(hmod("bad-world-fluid", MANIFEST_TEXT, files).is_err());
+        }
+        let files: &[(&str, &[u8])] = &[
+            ("data/ruby/horizon/fluid/oil.json", br#"{"world":{}}"#),
+            (
+                "data/ruby/horizon/block/oil.json",
+                br#"{"template":"minecraft:stone"}"#,
+            ),
+        ];
+        assert!(
+            hmod("clashing-world-fluid", MANIFEST_TEXT, files)
+                .unwrap_err()
+                .contains("declared twice")
+        );
+    }
+
+    #[test]
     fn fluids_declare_a_sprite_and_a_tint() {
         let files: &[(&str, &[u8])] = &[
             (
@@ -2682,12 +2858,14 @@ capabilities = ["registries"]
                 FluidLook {
                     id: "ruby:bare".into(),
                     sprite: None,
-                    tint: None
+                    tint: None,
+                    world: None,
                 },
                 FluidLook {
                     id: "ruby:steam".into(),
                     sprite: Some("ruby:gui/fluids/steam".into()),
-                    tint: Some(4291343520)
+                    tint: Some(4291343520),
+                    world: None,
                 },
             ]
         );

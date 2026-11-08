@@ -195,7 +195,8 @@ impl MobWorld<'_> {
                                 out.lava = out.lava.max(depth);
                                 out.in_lava = true;
                             }
-                            Fluid::None => {}
+                            // A mod's fluid is in neither tag: no entity swims in it.
+                            Fluid::None | Fluid::Modded => {}
                         }
                     }
                 }
@@ -242,7 +243,8 @@ impl MobWorld<'_> {
                     let p = BlockPos::new(x, y, z);
                     let state = self.fluid_tables.fluid(self.world.block(x, y, z));
                     let current = match state.kind() {
-                        FluidKind::Empty => continue,
+                        // A mod's fluid is in neither tag, so it pushes no entity.
+                        FluidKind::Empty | FluidKind::Mod(_) | FluidKind::ModFlowing(_) => continue,
                         FluidKind::Water | FluidKind::FlowingWater => &mut water,
                         FluidKind::Lava | FluidKind::FlowingLava => &mut lava,
                     };

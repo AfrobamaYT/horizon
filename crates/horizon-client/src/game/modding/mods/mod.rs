@@ -228,6 +228,7 @@ struct NativeDeclared {
     blocks: Vec<horizon_mod_package::content::Block>,
     items: Vec<horizon_mod_package::content::Item>,
     types: Vec<horizon_mod_package::content::BlockEntityType>,
+    fluids: Vec<horizon_mod_package::content::FluidLook>,
 }
 
 /// The same native declarations serve startup and every pack reload.
@@ -238,10 +239,14 @@ fn native_declared() -> &'static NativeDeclared {
         Game::native_blocks(&RegistrationContext::new(), &mut blocks);
         Game::native_items(&RegistrationContext::new(), &mut items);
         let types = super::api_values::block_entity_declarations();
+        let fluids = mod_api::__private::declared_world_fluids().to_vec();
+        blocks.extend(fluids.iter().filter_map(|f| f.world_block()));
+        items.extend(fluids.iter().filter_map(|f| f.world_bucket()));
         NativeDeclared {
             blocks,
             items,
             types,
+            fluids,
         }
     })
 }
@@ -507,6 +512,7 @@ pub(super) fn content_overlay(
         blocks,
         items,
         types,
+        fluids,
     } = native_declared();
     if !blocks.is_empty() || !items.is_empty() || !types.is_empty() {
         let known = match &mut known {
@@ -517,6 +523,7 @@ pub(super) fn content_overlay(
         if !errors.is_empty() {
             return Err(errors.join("\n").into());
         }
+        mod_content::accept_world_fluids(&mut mods, fluids);
         // A file item's remainder named a code-declared item that was refused: that mod
         // alone is left out, not every content mod through the overlay's check.
         for e in mod_content::drop_dangling_remainders(&mut mods) {
@@ -562,6 +569,7 @@ pub(super) fn content_root(
 ) -> horizon_client::Result<horizon_assets::resource_source::ResourceRoot> {
     let jar_store = horizon_client::logging::game_home().join("jars");
     let overlay = content_overlay(root, sources, &jar_store)?;
+    let world_fluids = horizon_client::mod_content::register_world_fluids(&overlay.mods)?;
     register_block_entity_types(overlay.root.prepared(), &overlay.mods)?;
     if overlay.announce {
         horizon_protocol::mod_list::set_local(overlay.announced);
@@ -585,10 +593,11 @@ pub(super) fn content_root(
     let fluids = behavior["fluids"]
         .as_array()
         .ok_or("missing fluid registry")?;
-    let fluids = fluids
+    let mut fluids = fluids
         .iter()
         .map(|value| value.as_str().ok_or("invalid fluid registry entry"))
         .collect::<Result<Vec<_>, _>>()?;
+    fluids.extend(world_fluids.iter().map(String::as_str));
     mod_api::__private::resolve_fluids(&fluids).map_err(|errors| {
         errors
             .into_iter()

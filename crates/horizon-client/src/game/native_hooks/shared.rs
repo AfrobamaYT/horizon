@@ -2926,10 +2926,13 @@ impl Game<'_> {
         self.native_slot_tick(-106, false);
     }
     fn native_slot_tick(&mut self, slot: i32, selected: bool) {
-        if self.native_carried_slot(slot).is_none_or(|s| s.is_none()) {
+        if !mod_api::__private::has_part_hook(mod_api::HookId::InventoryTick) {
             return;
         }
-        self.native_inventory_tick(slot, selected);
+        let Some(stack) = self.native_carried_slot(slot).and_then(|s| s.clone()) else {
+            return;
+        };
+        self.native_inventory_tick(&stack, slot, selected);
         if let Some(stack) = self.native_carried_slot(slot)
             && stack.as_ref().is_some_and(|s| s.count == 0)
         {
