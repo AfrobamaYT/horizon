@@ -38,20 +38,22 @@ pub fn generate(
                     let child = self.emit(to, None)?;
                     methods.push(quote!(pub fn value(&self) -> #child { #child(self.0.clone()) }));
                 }
-                Shape::Scalar(Scalar::String | Scalar::Str) => methods.push(quote!(
-                    pub fn encode(value: &str) -> Result<Vec<u8>, mod_api::wire::WireError> {
-                        let mut out = mod_api::wire::Writer::new();
-                        out.limit(1_048_576);
-                        out.put_str(value);
-                        if let Some(e) = out.error() {
-                            return Err(e);
+                Shape::Scalar(Scalar::String | Scalar::Str) | Shape::DynError => {
+                    methods.push(quote!(
+                        pub fn encode(value: &str) -> Result<Vec<u8>, mod_api::wire::WireError> {
+                            let mut out = mod_api::wire::Writer::new();
+                            out.limit(1_048_576);
+                            out.put_str(value);
+                            if let Some(e) = out.error() {
+                                return Err(e);
+                            }
+                            Ok(out.into_bytes())
                         }
-                        Ok(out.into_bytes())
-                    }
-                    pub fn text(&self, max_units: usize) -> Result<String, mod_api::RowError> {
-                        self.0.utf16(max_units)
-                    }
-                )),
+                        pub fn text(&self, max_units: usize) -> Result<String, mod_api::RowError> {
+                            self.0.utf16(max_units)
+                        }
+                    ))
+                }
                 Shape::Scalar(Scalar::Signed("isize")) => {
                     return Err("isize has no ordinary Wire encoding".into());
                 }
@@ -70,6 +72,17 @@ pub fn generate(
                         pub fn encode_some(value: &[u8]) -> Result<Vec<u8>, mod_api::wire::WireError> { let mut out = mod_api::wire::Writer::new(); out.limit(1_048_576); out.put(&1u8); out.put_bytes(value); if let Some(e) = out.error() { return Err(e); } Ok(out.into_bytes()) }
                         pub fn value(&self) -> Result<Option<#child>, mod_api::RowError> {
                             match self.0.read::<u32>()? { 0 => Ok(None), 1 => Ok(Some(#child(self.0.child(1)?.child(0)?))), _ => Err(mod_api::RowError::Unsupported) }
+                        }
+                    });
+                }
+                Shape::Result(ok, err) => {
+                    let ok = self.emit(ok, None)?;
+                    let err = self.emit(err, None)?;
+                    methods.push(quote! {
+                        pub fn encode_ok(value: &[u8]) -> Result<Vec<u8>, mod_api::wire::WireError> { let mut out = mod_api::wire::Writer::new(); out.limit(1_048_576); out.put(&0u8); out.put_bytes(value); if let Some(e) = out.error() { return Err(e); } Ok(out.into_bytes()) }
+                        pub fn encode_err(value: &[u8]) -> Result<Vec<u8>, mod_api::wire::WireError> { let mut out = mod_api::wire::Writer::new(); out.limit(1_048_576); out.put(&1u8); out.put_bytes(value); if let Some(e) = out.error() { return Err(e); } Ok(out.into_bytes()) }
+                        pub fn value(&self) -> Result<Result<#ok, #err>, mod_api::RowError> {
+                            match self.0.read::<u32>()? { 0 => Ok(Ok(#ok(self.0.child(0)?.child(0)?))), 1 => Ok(Err(#err(self.0.child(1)?.child(0)?))), _ => Err(mod_api::RowError::Unsupported) }
                         }
                     });
                 }
@@ -218,6 +231,7 @@ pub fn generate(
                 Shape::Tuple(parts) | Shape::Collection(_, parts) => {
                     parts.iter().all(|p| self.writable(p, open))
                 }
+                Shape::Result(ok, err) => self.writable(ok, open) && self.writable(err, open),
                 _ => true,
             }
         }
