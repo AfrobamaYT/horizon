@@ -16,7 +16,9 @@ The log records exact input/output SHA-256 hashes for 24 source files. The API
 cut replaces 52 old state tokens and removes one old key token in the raw
 reexport. Two private engine imports retain numeric provenance. Only the two
 transitional explicit-raw dispatch lookup arms are removed; recursive inferred
-state normalization and numeric engine storage remain.
+state normalization and numeric engine storage remain. The source-only
+mechanical diff is 52 inserted / 80 deleted lines; this is a symbol rewrite,
+not a file/module move (0 moved lines).
 
 Known constructor fixtures were explicitly deferred, not interpreted as ordinals
 by the script. Subsequent compiler repairs are separate `Hand-written` commits:
@@ -47,6 +49,9 @@ is reused rather than introducing another transport form.
 
 - Full `cargo check --workspace --tests --examples`: passed in 1 minute 44 seconds.
 - `tests.test_mod_api_boundary`: 5 passed before the source push.
+- `tests.test_block_state_swap`: 5 passed.
+- Changed Parts fixture regressions: 13 passed; placement replacement/refusal
+  short-circuit regression: 1 passed.
 - Integrated source-identity regression: 1 passed, including assertion-killed
   wrong-source and removed-routing mutations of the actual observer body.
 - Native `wasm-host` key-import regression: 1 passed, preserving refusal before
