@@ -50,14 +50,7 @@ impl mod_api::prelude::BlockStatesBackend for Server {
             return Some(mod_api::FluidDefinition::TankOnly);
         }
         Some(mod_api::FluidDefinition::World {
-            default: mod_api::__private::engine_fluid_state(
-                key,
-                horizon_world::fluid::FluidState::new(
-                    horizon_world::fluid::FluidKind::Water,
-                    8,
-                    true,
-                ),
-            ),
+            default: mod_api::__private::fluid_state(key, 8, false, true),
             properties: vec![mod_api::StateProperty::new(
                 "falling".into(),
                 vec!["true".into(), "false".into()],
@@ -115,9 +108,11 @@ impl mod_api::prelude::TagsHost for Server {
         } else {
             horizon_world::fluid::FluidState::new(horizon_world::fluid::FluidKind::Water, 8, true)
         };
-        Some(mod_api::__private::engine_fluid_state(
+        Some(mod_api::__private::fluid_state(
             mod_api::__private::world_fluid_key(engine.kind() as usize)?,
-            engine,
+            engine.amount(),
+            engine.falling(),
+            engine.is_source(),
         ))
     }
 }

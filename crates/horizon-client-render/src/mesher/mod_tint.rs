@@ -242,7 +242,12 @@ impl BlockAndTintGetter for Region<'_, '_, '_> {
             .get(id as usize)
             .map_or(FluidState::EMPTY, |i| i.fluid);
         let key = mod_api::__private::world_fluid_key(state.kind() as usize)?;
-        Some(mod_api::__private::engine_fluid_state(key, state))
+        Some(mod_api::__private::fluid_state(
+            key,
+            state.amount(),
+            state.falling(),
+            state.is_source(),
+        ))
     }
     fn brightness(&self, layer: LightLayer, pos: [i32; 3]) -> i32 {
         let light = self.light(pos);

@@ -15,7 +15,12 @@ pub fn native_ingredient(
     data: &horizon_core::nbt::Compound,
     items: &mut Vec<String>,
 ) {
-    mod_api::dispatch_ingredient(&mod_api::OwningLoad::new(context), kind, data, items);
+    mod_api::dispatch_ingredient(
+        &horizon_client_render::api_context::LoadReader(context).context(),
+        kind,
+        data,
+        items,
+    );
 }
 /// Items a mod's own recipe type takes in a station slot, added to the
 /// recipe property sets (`RecipeManager.RECIPE_PROPERTY_SETS`): what a
@@ -33,7 +38,10 @@ pub fn native_recipe_property_sets(
     context: &LoadContext,
     additions: &mut Vec<RecipePropertyAddition>,
 ) {
-    mod_api::dispatch_recipe_property_sets(&mod_api::OwningLoad::new(context), additions);
+    mod_api::dispatch_recipe_property_sets(
+        &horizon_client_render::api_context::LoadReader(context).context(),
+        additions,
+    );
 }
 /// A mod's own ingredient kind, matching a concrete stack at craft time:
 /// the ingredient's `test` calls here with the kind, its NBT compound and the
@@ -50,7 +58,7 @@ pub fn native_ingredient_test(
     accept: &mut bool,
 ) {
     mod_api::dispatch_ingredient_test(
-        &mod_api::OwningLoop::new(context),
+        &horizon_client_render::api_context::LoopReader(context).context(),
         kind,
         data,
         stack,

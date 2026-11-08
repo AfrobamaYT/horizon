@@ -3405,7 +3405,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         out = "items",
         context = "data_load",
         version = 3,
-        target = "mod_api::crafting::native_ingredient",
+        target = "horizon_client_lib::crafting::native_hooks::native_ingredient",
         neoforge = "ICustomIngredient"
     )]
     fn ingredient();
