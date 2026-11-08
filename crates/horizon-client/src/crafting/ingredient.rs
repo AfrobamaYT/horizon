@@ -1,9 +1,10 @@
 //! Engine recipe ingredients and stack matching.
+use super::native_hooks::native_ingredient;
 use super::{ItemStack, Items};
 use crate::native_stack_hooks::ingredient_test as native_ingredient_test;
 use horizon_world::native_load_context::LoadContext;
+use mod_api::__private::{WalkedIngredient, dedup_keep_order, resolved_items};
 pub use mod_api::crafting::Shape;
-use mod_api::crafting::{WalkedIngredient, dedup_keep_order, native_ingredient, resolved_items};
 use serde_json::Value;
 use std::collections::HashSet;
 /// Where `Ingredient::resolve` leaves the hook's answer inside the occurrence

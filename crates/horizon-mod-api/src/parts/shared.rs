@@ -757,13 +757,16 @@ pub mod tests {
             registrar.block_key(&id);
         }
         super::install_registrar(registrar, schema).unwrap();
-        crate::registry_keys::resolve_fluids(&[
-            "minecraft:empty",
-            "minecraft:water",
-            "minecraft:flowing_water",
-            "minecraft:lava",
-            "minecraft:flowing_lava",
-        ])
+        crate::registry_keys::resolve_fluids(
+            &[
+                "minecraft:empty",
+                "minecraft:water",
+                "minecraft:flowing_water",
+                "minecraft:lava",
+                "minecraft:flowing_lava",
+            ],
+            &[],
+        )
         .unwrap();
     }
 
@@ -1075,13 +1078,16 @@ pub mod tests {
         .into();
         crate::install(mods.clone());
         install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
-        crate::registry_keys::resolve_fluids(&[
-            "minecraft:water",
-            "minecraft:lava",
-            "minecraft:flowing_water",
-            "minecraft:flowing_lava",
-            "minecraft:empty",
-        ])
+        crate::registry_keys::resolve_fluids(
+            &[
+                "minecraft:water",
+                "minecraft:lava",
+                "minecraft:flowing_water",
+                "minecraft:flowing_lava",
+                "minecraft:empty",
+            ],
+            &[],
+        )
         .unwrap();
         crate::registry_keys::resolve_block_keys(
             [
