@@ -868,15 +868,13 @@ impl Game<'_> {
                     }
                 };
                 let m = &package.manifest;
-                let refused = horizon_mod_wasm::refused()
-                    .iter()
-                    .find(|(id, _)| *id == m.id);
+                let refused = horizon_mod_wasm::refusal(&m.id);
                 live_switch_of(path, &package, &mut content_ids, &mut live_ids);
                 Installed {
                     id: m.id.clone(),
                     title: format!("{} {}", m.name, m.version),
                     description: m.description.clone(),
-                    problem: refused.map(|(_, why)| format!("Not loaded: {why}")),
+                    problem: refused.map(|why| format!("Not loaded: {why}")),
                     dev: self.mods.dev.contains(path),
                     native: None,
                 }
