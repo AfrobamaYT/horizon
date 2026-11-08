@@ -3,7 +3,7 @@ use quote::quote;
 use std::{collections::BTreeMap, fs, path::PathBuf};
 fn main() {
     let entries = [("Data", "struct", "struct Data { list: Vec<u32>, choice: Choice, map: BTreeMap<u8,u32>, set: BTreeSet<u32> }"), ("Choice", "enum", "enum Choice { Empty, Value(u32) }")].map(|(name,kind,signature)| Internal { path: format!("horizon_client::model::{name}"), kind, signature: signature.into(), cfg: String::new(), hash: String::new(), shape_only: false, opaque_reason: None, refs: BTreeMap::from([("BTreeMap".into(), "std::collections::BTreeMap".into()),("BTreeSet".into(),"std::collections::BTreeSet".into())]) });
-    let mut entries = entries.to_vec();
+    let mut entries = Vec::from(entries);
     for (name, signature, opaque) in [
         (
             "Game",

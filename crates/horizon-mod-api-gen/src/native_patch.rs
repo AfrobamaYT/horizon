@@ -178,6 +178,9 @@ fn emit(
             }
         }
         Shape::Named(path, _) => {
+            if runtime.is_some_and(|(graph, _)| graph.id(shape).is_none()) {
+                return Err("missing runtime patch layout".into());
+            }
             let named = rule.named(path).ok_or("missing patch layout")?;
             if named.guarded || named.opaque_reason.is_some() {
                 return Err(format!(
@@ -225,7 +228,16 @@ fn emit(
                         if let Some(variant)=__np_tree.child(mod_points::locators::Step::Variant(#tag)) { #(#blocks)* }
                     }));
                 }
-                quote!(match &mut (#place) { #(#arms,)* _ => { #reject; } })
+                let preflight = runtime.and_then(|(graph, policy)| graph.id(shape).map(|layout| {
+                    let checks = fields.iter().enumerate().map(|(i, f)| {
+                        let tag = f.case.unwrap().0;
+                        let ordinal = fields[..i].iter().filter(|f| f.case.is_some_and(|c| c.0 == tag)).count() as u32;
+                        let id = i as u32;
+                        quote!(if variant.child(mod_points::locators::Step::Field(#id)).is_some() && !(#policy).field(#layout, Some(#tag), #ordinal) { #reject; })
+                    });
+                    quote!(for (_, variant) in __np_tree.children() { #(#checks)* })
+                }));
+                quote!(#preflight match &mut (#place) { #(#arms,)* _ => { #reject; } })
             } else {
                 let mut blocks = Vec::new();
                 let mut ids = Vec::new();
