@@ -479,6 +479,16 @@ fn level_save_takes_a_server_host(server: &mut dyn ServerHost, level: LevelRef) 
     level.request_save(server)
 }
 
+/// Compile-only: a block event is queued from a server host.
+#[allow(dead_code)]
+fn block_event_takes_a_server_host(
+    server: &mut dyn ServerHost,
+    level: LevelRef,
+    block: BlockKey,
+) -> bool {
+    level.block_event(server, [0, 64, 0], block, 0, 0)
+}
+
 /// Compile-only: the player rule reads on any host, and the writes on a server host.
 #[allow(dead_code)]
 fn player_rules_take_their_hosts(

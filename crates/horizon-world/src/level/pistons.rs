@@ -129,15 +129,12 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         param_a: i32,
         param_b: i32,
     ) {
-        let event = BlockEventData {
+        self.ticks.queue_block_event(BlockEventData {
             pos,
             block,
             param_a,
             param_b,
-        };
-        if !self.ticks.block_events.contains(&event) {
-            self.ticks.block_events.push(event);
-        }
+        });
     }
     /// `BlockState.triggerEvent`.
     fn trigger_event(&mut self, state: BlockStateId, pos: BlockPos, a: i32, b: i32) -> bool {
@@ -847,9 +844,7 @@ impl Behaviours {
             }
         }
         for event in reschedule {
-            if !ticks.block_events.contains(&event) {
-                ticks.block_events.push(event);
-            }
+            ticks.queue_block_event(event);
         }
     }
     /// `Level.tickBlockEntities` for moving pistons (the only block entities
