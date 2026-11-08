@@ -8221,7 +8221,7 @@ impl Game<'_> {
             return true;
         }
         // startDestroyBlock refuses a restricted break before predicting it.
-        if self.remote_break_restricted() {
+        if self.remote_break_restricted(hit.pos) {
             self.mining = None;
             return true;
         }
@@ -8436,12 +8436,21 @@ impl Game<'_> {
         }
         self.mining = None;
     }
-    /// `Player.blockActionRestricted` as far as this client reads it: a
-    /// spectator never breaks, an adventure player only with a main-hand
-    /// item the server gave `can_break`. Whether its predicate matches the
-    /// block is left to the server, which sends the block back if not.
-    fn remote_break_restricted(&self) -> bool {
+    /// `Player.blockActionRestricted` for the block at `pos`: a spectator
+    /// never breaks, an adventure player only with a main-hand item whose
+    /// `can_break` matches the block (`ItemStack.canBreakBlockInAdventureMode`).
+    /// A predicate this client could not decode (exact components) only
+    /// tells that the server gave one, and the server sends the block back
+    /// if it does not match.
+    fn remote_break_restricted(&self, pos: [i32; 3]) -> bool {
         use horizon_protocol::item::{WirePatch, component::CAN_BREAK};
+        if self
+            .held()
+            .and_then(|s| s.data())
+            .is_some_and(|d| d.other("minecraft:can_break").is_some())
+        {
+            return self.block_action_restricted(pos);
+        }
         self.spectator()
             || (!self.may_build()
                 && !self
@@ -8540,7 +8549,18 @@ impl Game<'_> {
                     )
                 })
                 .unwrap_or((false, false));
-            let passes = is_painting || frame_passes || boat_passes || cart_passes;
+            // Cushion.interact on a client: PASS when sneaked at or when
+            // something already sits on it, CONSUME (no swing) otherwise.
+            let is_cushion = self.cushions.iter().any(|c| c.id as i32 == hit.id);
+            let cushion_passes = is_cushion
+                && (sneaking
+                    || self.riding.is_some_and(|r| r as i32 == hit.id)
+                    || self
+                        .mobs
+                        .iter()
+                        .any(|m| m.extra.mount.is_some_and(|r| r as i32 == hit.id)));
+            let passes =
+                is_painting || frame_passes || boat_passes || cart_passes || cushion_passes;
             // Otherwise the main hand's turn takes it; there is no off hand turn.
             if response.is_none() && hand == Hand::Off && !passes {
                 return false;
@@ -8571,8 +8591,9 @@ impl Game<'_> {
             }
             // Minecart.interact boards the cart and answers CONSUME on the client,
             // which ends the click without an arm swing. AbstractBoat.interact
-            // answers SUCCESS there, which swings.
-            if remote_object_swings(response, is_rideable_cart) {
+            // answers SUCCESS there, which swings. Cushion.interact answers
+            // CONSUME there too.
+            if remote_object_swings(response, is_rideable_cart || is_cushion) {
                 self.with_hand(hand, Game::swing_arm);
             }
             return true;
@@ -8885,6 +8906,29 @@ impl Game<'_> {
                 if self.spawn_egg_allowed(&stack.item) {
                     self.with_hand(hand, Game::swing_arm);
                 }
+                return true;
+            } else if let Some(stack) = held.as_ref().filter(|_| item_used)
+                && &*stack.item == "minecraft:potion"
+                && stack.potion() == Some("minecraft:water")
+                && hit.face != [0, -1, 0]
+                && self
+                    .named_block_in_tag("minecraft:convertible_to_mud", &self.block_name(hit.pos))
+                && (self.may_build()
+                    || self.with_hand(hand, |g| g.can_place_on_in_adventure(hit.pos)))
+            {
+                // PotionItem.useOn on a client level: SUCCESS. The bottle is
+                // poured out into the hand and the block turns to mud here at
+                // once; the sounds (`playSound(null, ...)`) and the splash
+                // particles (`sendParticles`) are the server's.
+                if let Some(mud) = self.pack.assets.registry.default_state("minecraft:mud") {
+                    let pos =
+                        horizon_core::position::BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]);
+                    self.predict_blocks(&vec![(pos, mud)], seq);
+                }
+                self.with_hand(hand, |g| {
+                    g.filled_result(ItemStack::new("minecraft:glass_bottle", 1))
+                });
+                self.with_hand(hand, Game::swing_arm);
                 return true;
             } else if let Some(stack) = held.as_ref().filter(|_| item_used)
                 && (self.with_hand(hand, |g| g.predict_item_on_block(stack, &hit))
@@ -9493,6 +9537,28 @@ impl Game<'_> {
                 self.with_hand(hand, Game::swing_arm);
             }
             return succeeded;
+        }
+        // KnowledgeBookItem.use on this client: the book is used up either
+        // way. With recipes it is SUCCESS (swings, ends the click); with none
+        // it is FAIL, and the other hand gets its turn. The recipes go as
+        // their NBT on the wire, and the item's own default is an empty list,
+        // so a stack whose patch sets them has some.
+        if &*held.item == "minecraft:knowledge_book" {
+            /// `DataComponents.RECIPES`' registry id (26.3).
+            const RECIPES: i32 = 68;
+            let has_recipes = held
+                .wire_patch()
+                .is_some_and(|p| horizon_protocol::item::WirePatch::adds(&p, RECIPES))
+                || held
+                    .data()
+                    .and_then(|d| d.other("minecraft:recipes"))
+                    .is_some_and(|t| matches!(t, Tag::List(l) if !l.is_empty()));
+            self.with_hand(hand, Game::consume_held);
+            if has_recipes {
+                self.apply_use_cooldown(&held);
+                self.with_hand(hand, Game::swing_arm);
+            }
+            return has_recipes;
         }
         // Food starts being eaten (Consumable.startConsuming). A food that
         // can't be eaten (full and not always-edible) fails the use
@@ -10211,6 +10277,23 @@ impl Game<'_> {
             .own_attribute("minecraft:attack_knockback")
             .map_or(0.0, |v| v as f32);
         let sprinting = self.player.as_ref().is_some_and(|p| p.sprinting);
+        // attackVisualEffects: a RemotePlayer's hurtClient is true, so a
+        // critical hit (full strength, canCriticalAttack) with damage left
+        // after baseDamageScaleFactor runs LocalPlayer.crit, this client's
+        // own CRIT emitter beside the one the server's Animate brings.
+        // magicBoost is 0 on a client, so no ENCHANTED_HIT one.
+        if damage * (0.2 + strength * strength * 0.8) > 0.0 && self.critical_attack(strength) {
+            use horizon_client::particles::{ParticleOptions, ParticleType};
+            let m = &self.mobs[mob];
+            let feet = [m.position.x, m.position.y, m.position.z];
+            let (width, height) = (m.kind.width, m.kind.height);
+            self.particles.tracking_emitter(
+                ParticleOptions::simple(ParticleType::Crit),
+                feet,
+                width,
+                height,
+            );
+        }
         if !horizon_client::attack_strength::attacker_slows_after_hit(
             damage, knockback, strength, sprinting,
         ) {
@@ -10285,7 +10368,7 @@ impl Game<'_> {
                     self.swing_arm();
                     self.send(S::Punch(Empty));
                 }
-            } else if self.remote_break_restricted() {
+            } else if self.remote_break_restricted(hit.pos) {
                 // continueDestroyBlock returned false: no swing.
             } else if !air {
                 if self.remote_mining(false) {
@@ -10603,6 +10686,20 @@ impl Game<'_> {
         if threw {
             self.swing_hand(Hand::Main, SwingAnimation::DEFAULT);
         }
+        true
+    }
+    /// A QUICK_MOVE on the server's open menu with nothing predicted: the
+    /// client's slots stay as they are and every slot it moved comes back from
+    /// the server (`broadcastChanges`), the answer the next step waits for.
+    /// A prediction the server agrees with gets no answer at all.
+    pub(super) fn remote_quick_move_unpredicted(&mut self, internal: usize) -> bool {
+        let (container, menu) = self.remote_menu();
+        let Some(slot) = Self::menu_slot_index(&menu, internal) else {
+            return false;
+        };
+        let carried = self.carried.clone();
+        let click = (slot as i16, 0, Input::QuickMove, Vec::new(), carried);
+        self.send_clicks(container, vec![click]);
         true
     }
     /// A Shift double click on a server (`AbstractContainerScreen.mouseReleased`):
@@ -11817,6 +11914,7 @@ pub(super) fn item_has_use(info: &horizon_client::items::ItemInfo) -> bool {
                 | "goat_horn"
                 | "bundle"
                 | "brush"
+                | "knowledge_book"
         )
 }
 

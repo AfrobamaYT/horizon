@@ -285,6 +285,7 @@ fn lifecycle_fixture_walks_other_owners() {
             game.others.clear();
             for &(id, at) in entries {
                 game.others.push(crate::game::commands::OtherEntity {
+                    knot_check: None,
                     join: Default::default(),
                     id,
                     kind: "minecraft:marker".into(),
