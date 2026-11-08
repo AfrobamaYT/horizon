@@ -134,6 +134,7 @@ const EXPORTS: &[&str] = &[
     "BlockTintSource",
     "ParticleProvider",
     "EnchantmentDamageEffect",
+    "CommandArgumentType",
     "GroundStateProvider",
     "PlaceProvider",
     "TooltipAppender",

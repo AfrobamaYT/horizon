@@ -1546,8 +1546,10 @@ pub struct NativeServerPlayer {
 /// `pay <player:player> <amount:integer>`, `balance [player:player]`,
 /// `eco give <player:player> <amount:integer>`. Kinds: `word`, `text` (the
 /// rest of the line, last), `integer`, `number`, `boolean`, `player`,
-/// `item`, `block_pos`. Usages of one command share their words; the
-/// server merges them into one tree. Each executable usage keeps its own level:
+/// `item`, `block_pos`, or a command argument type a mod registered with
+/// `Registrar::register_command_argument`, named by its namespaced id:
+/// `machine use <machine:mymod:machine>`. Usages of one command share their
+/// words; the server merges them into one tree. Each executable usage keeps its own level:
 /// a public `foo bar` lets everyone traverse `foo`, but does not make an
 /// operator-only `foo` executable. Optional arguments also allow execution at
 /// their preceding prefixes, at that usage's level.
