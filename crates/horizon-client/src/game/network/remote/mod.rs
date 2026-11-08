@@ -543,7 +543,7 @@ pub(super) struct Remote {
     pub(super) use_item: Option<Arc<str>>,
     pub(super) dimension: DimensionType,
     /// The level's key (`minecraft:overworld`): where its far terrain is kept.
-    pub(super) level: String,
+    pub(in crate::game) level: String,
     /// `level`'s key, as mods' handles name the level.
     pub(super) level_key: mod_api::DimensionKey,
     /// `ClientPlayerNetworkEvent.LoggingOut` was fired for this connection: every way out
@@ -2629,6 +2629,24 @@ impl Game<'_> {
                 .with_dimension(&dimension)
                 .in_column(shape.column()),
         );
+        // The server's dimension type gives the level's facts (what it does to fluids, mobs,
+        // beds and time), not only its shape: a level of a mod the server runs is no
+        // longer taken for the Overworld.
+        if let Some((name, json)) = r.registries.dimension_json(spawn.dimension_type) {
+            let base = horizon_world::dimension_type::DimensionFacts::base_for_type(&name);
+            match horizon_world::dimension_type::DimensionFacts::patched(base, &name, &json) {
+                Ok(facts) => {
+                    if let Ok(key) = horizon_core::LevelKey::parse(&spawn.dimension) {
+                        horizon_world::dimension_type::DimensionFacts::set_levels(vec![(
+                            key, facts,
+                        )]);
+                    }
+                }
+                Err(why) => log::warn!(
+                    "the server's dimension type {name} is refused ({why}); the level keeps the type its name has here"
+                ),
+            }
+        }
         r.dimension = dimension;
         r.resolve_clocks();
         self.world.day_time = r.clock_time(r.default_clock);
