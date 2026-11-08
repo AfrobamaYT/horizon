@@ -8,7 +8,13 @@ use super::native_block_entity_draw::{BlockEntityDraw, place_turning};
 use glam::{Mat4, Vec3};
 use horizon_client::{block_entity_render::diffuse_lights, hud::HudBatch, mesher::Vertex};
 use horizon_world::level::data::state_flags;
-use mod_api::{NativeSceneBlock, NativeSceneView};
+use mod_api::NativeSceneView;
+/// Prepared scene data. Entity fields remain borrowed for the duration of the draw.
+pub(super) struct SceneBlock<'a> {
+    pub pos: [i32; 3],
+    pub state: horizon_world::registry::BlockStateId,
+    pub entity: Option<&'a mod_api::SceneBlockEntity>,
+}
 
 /// A quad in the scene's blocks, before it is seen: its corners, UVs in the
 /// atlas, ABGR colour, and its outward normal.
@@ -82,7 +88,7 @@ impl Game<'_> {
         &self,
         batch: &mut HudBatch,
         rect: [f32; 4],
-        blocks: &[NativeSceneBlock],
+        blocks: &[SceneBlock<'_>],
         view: NativeSceneView,
     ) {
         if !self.native_window() || !view.scale.is_finite() || view.scale <= 0.0 {

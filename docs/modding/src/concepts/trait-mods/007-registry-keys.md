@@ -35,6 +35,13 @@ and call `state.property(&metadata, "facing")` or `state.with(&metadata, "facing
 supplied `StateConstraint`s. Changes return a new value and never mutate the original.
 Unknown keys, ordinals and property combinations return typed `BlockStateError`s.
 
+`NativeSceneBlock::new(pos, state, entity)` and `StructureTemplateBlock::new(pos, state, nbt)`
+use this owned `BlockState`, including all properties. Structure reads preserve vanilla palette
+selection, mirror-then-rotation and placement order; an unavailable state mapping refuses the
+whole snapshot with `None`. `DrawContext::draw_scene` checks the entire scene before drawing:
+an unknown key, invalid ordinal or unavailable mapping draws nothing, never a partial scene or
+a replacement air block. Native and wasm use the same values and refusal rules.
+
 Tint callbacks receive the same immutable metadata resource explicitly, without a `Host`.
 The game prepares their owned state array before constructing mesh tables; renderer workers
 only copy those values and invoke metadata reads. When world numeric state IDs are reordered,
