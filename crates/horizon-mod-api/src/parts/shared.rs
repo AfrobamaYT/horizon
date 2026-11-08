@@ -1025,8 +1025,8 @@ pub mod tests {
     pub(crate) struct Level;
     #[cfg(test)]
     impl LevelHost for Level {
-        fn block_state(&self, _: [i32; 3]) -> BlockStateId {
-            unimplemented!()
+        fn block_state(&self, _: [i32; 3]) -> Option<crate::BlockState> {
+            None
         }
         fn state_with_property(&self, _: BlockStateId, _: &str, _: &str) -> Option<BlockStateId> {
             None
