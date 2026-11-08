@@ -49,6 +49,67 @@ fn direct_biome_lists_preserve_large_ordered_duplicates() {
 }
 
 #[test]
+fn direct_biome_distinct_catalog_has_no_size_ceiling() {
+    let names: Vec<String> = (0..9000).map(|i| format!("test:biome_{i}")).collect();
+    let catalog = BiomeSourceCatalog::new(
+        &names.iter().cloned().collect(),
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+    )
+    .unwrap();
+    let definition = catalog
+        .decode(
+            &serde_json::json!({
+                "type":"checkerboard", "scale":0, "biomes":names,
+            })
+            .to_string(),
+        )
+        .unwrap();
+    let BiomeSourceDefinition::Checkerboard {
+        biomes: BiomeSet::Direct(decoded),
+        scale,
+    } = definition
+    else {
+        panic!("wrong source")
+    };
+    assert_eq!(decoded, names);
+    let source = CheckerboardBiomeSource::new(decoded, scale).unwrap();
+    // Shift by 2, add with Java wrapping, then floor-mod by 9000.
+    for (quart, expected) in [
+        ([0, 0, 0], "test:biome_0"),
+        ([4, 0, 8], "test:biome_3"),
+        ([-1, 99, 0], "test:biome_8999"),
+        ([-5, 0, -4], "test:biome_8997"),
+        ([36004, 0, 0], "test:biome_1"),
+    ] {
+        assert_eq!(source.noise_biome(quart).unwrap(), expected);
+    }
+}
+
+#[test]
+fn direct_biome_tag_and_preset_catalogs_have_no_size_ceiling() {
+    let tags: BTreeMap<String, Vec<String>> = (0..9000)
+        .map(|i| (format!("test:tag_{i}"), vec!["test:biome".into(); 8]))
+        .collect();
+    let presets = (0..9000).map(|i| format!("test:preset_{i}")).collect();
+    let catalog =
+        BiomeSourceCatalog::new(&BTreeSet::from(["test:biome".into()]), &tags, &presets).unwrap();
+    assert!(
+        matches!(catalog.decode(r##"{"type":"checkerboard","biomes":"#test:tag_8999"}"##).unwrap(),
+        BiomeSourceDefinition::Checkerboard { biomes: BiomeSet::Tag { members, .. }, .. } if members.len() == 8)
+    );
+    assert_eq!(
+        catalog
+            .decode(r#"{"type":"multi_noise","preset":"test:preset_8999"}"#)
+            .unwrap(),
+        BiomeSourceDefinition::Preset {
+            name: "test:preset_8999".into(),
+            inline: false
+        }
+    );
+}
+
+#[test]
 fn direct_biome_empty_sampling_is_refused() {
     let source = CheckerboardBiomeSource::<()>::new(vec![], 0).unwrap();
     assert_eq!(

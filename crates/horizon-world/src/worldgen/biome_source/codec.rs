@@ -40,13 +40,6 @@ impl BiomeSourceCatalog {
         tags: &BTreeMap<String, Vec<String>>,
         presets: &BTreeSet<String>,
     ) -> Result<Self, DecodeError> {
-        if biomes.len() > 8192
-            || tags.len() > 8192
-            || presets.len() > 8192
-            || tags.values().map(Vec::len).sum::<usize>() > 65536
-        {
-            return Err(DecodeError::Field("biome source catalog size"));
-        }
         let biomes = biomes
             .iter()
             .map(|v| identifier(v))
