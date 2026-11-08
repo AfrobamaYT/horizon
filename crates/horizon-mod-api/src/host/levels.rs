@@ -756,7 +756,8 @@ pub trait LevelsBackendMut {
     /// note, a bell's 1 rings it) if `pos` still holds `block`, and a handled event reaches the
     /// players' copy of the block. The same event queued twice runs once; one in a chunk
     /// that isn't ticking waits for it. True means queued, not handled. False for a block
-    /// key no block has, a parked level, a stale handle or a client.
+    /// key no block has, a position outside the level's build height, a parked level, a stale
+    /// handle or a client.
     #[access(WorldOnly)]
     fn level_block_event(
         &mut self,

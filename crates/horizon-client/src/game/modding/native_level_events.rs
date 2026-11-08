@@ -86,7 +86,8 @@ impl Game<'_> {
     /// Queues block event `a`, `b` for `block` at `pos` in the level in place
     /// (`ServerLevel.blockEvent`): `run_block_events` hands it to the block's
     /// `triggerEvent` after this tick's scheduled ticks if `pos` still holds
-    /// `block`. False for an unresolved block key, a parked level, a stale
+    /// `block`. False for an unresolved block key, a position outside the
+    /// build height (it could never reach a block), a parked level, a stale
     /// handle or a client.
     pub(super) fn level_block_event(
         &mut self,
@@ -99,7 +100,7 @@ impl Game<'_> {
         let Some(block) = super::api_values::behavior_block(block, self.res.behaviours()) else {
             return false;
         };
-        if !self.level_in_place(level) {
+        if !self.level_in_place(level) || !self.world.shape.contains_y(pos[1]) {
             return false;
         }
         self.block_ticks.queue_block_event(BlockEventData {
@@ -231,6 +232,12 @@ mod tests {
             assert!(level.block_event(game, [0, 64, 0], note_key, 0, 0));
             assert!(level.block_event(game, [0, 64, 0], stone_key, 0, 0));
             assert_eq!(game.block_ticks.block_events.len(), 2);
+            let (bottom, height) = level.height(game).unwrap();
+            assert!(!level.block_event(game, [0, bottom - 1, 0], note_key, 0, 0));
+            assert!(
+                !level.block_event(game, [0, bottom + height, 0], note_key, 0, 0),
+                "above the build height"
+            );
             assert!(!stale.block_event(game, [0, 64, 0], note_key, 0, 0));
             assert!(
                 !nether.block_event(game, [0, 64, 0], note_key, 0, 0),
