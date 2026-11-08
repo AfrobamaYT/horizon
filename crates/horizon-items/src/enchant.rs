@@ -47,10 +47,9 @@ impl DamageValueEffect {
                 .map(|effect| Self::resolve(effect, ids))
                 .collect::<Result<Vec<_>, _>>()
                 .map(Self::AllOf),
-            "minecraft:add"
-            | "minecraft:multiply"
-            | "minecraft:set"
-            | "minecraft:remove_binomial" => Ok(Self::Builtin(effect.clone())),
+            kind if kind.is_empty() || !kind.contains(':') || kind.starts_with("minecraft:") => {
+                Ok(Self::Builtin(effect.clone()))
+            }
             kind => ids
                 .iter()
                 .position(|id| id == kind)
@@ -81,7 +80,15 @@ impl DamageValueEffect {
             Self::AllOf(nodes) => nodes.iter().fold(value, |value, node| {
                 node.apply(level, random, value, custom)
             }),
-            Self::Custom { slot, config } => custom(*slot, config, level, value),
+            Self::Custom { slot, config } => {
+                let result = custom(*slot, config, level, value);
+                // Bound mod output before a subsequent per-unit built-in effect.
+                if result.is_nan() {
+                    value
+                } else {
+                    result.clamp(0.0, 1024.0)
+                }
+            }
         }
     }
 }
@@ -495,8 +502,8 @@ impl Enchantments {
             ) {
                 Ok(nodes) => nodes,
                 Err(error) => {
-                    eprintln!("enchantment {id}: {error}");
-                    continue;
+                    eprintln!("synced enchantment {id}: {error}; retaining display definition");
+                    None
                 }
             };
             let t = table.get_or_insert_with(|| self.clone());
@@ -1158,6 +1165,55 @@ pub fn apply_value_effect(
 pub mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn custom_damage_output_is_bounded_before_builtin_nodes() {
+        let node = DamageValueEffect::resolve(
+            &json!({"type":"minecraft:all_of", "effects":[
+                {"type":"test:damage"}, {"type":"minecraft:remove_binomial","chance":0},
+                {"type":"minecraft:add","value":2}
+            ]}),
+            &["test:damage".into()],
+        )
+        .unwrap();
+        for (output, expected) in [
+            (f32::NAN, 9.0),
+            (f32::INFINITY, 1026.0),
+            (f32::NEG_INFINITY, 2.0),
+            (-1.0, 2.0),
+            (f32::MAX, 1026.0),
+        ] {
+            assert_eq!(
+                node.apply(1, &mut LegacyRandom::new(0), 7.0, &mut |_, _, _, _| output),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn synced_unknown_damage_retains_enchantment_definition() {
+        let definition = json!({"description":"Remote", "effects":{"minecraft:damage":[
+            {"effect":{"type":"remote:damage"}}
+        ]}});
+        let table = sample()
+            .with_entries([("remote:enchantment", &definition)])
+            .unwrap()
+            .unwrap();
+        assert!(table.get("remote:enchantment").is_some());
+    }
+
+    #[test]
+    fn legacy_value_types_remain_noops() {
+        for kind in ["minecraft:exponential", "minecraft:unknown", "add", ""] {
+            let node = DamageValueEffect::resolve(&json!({"type":kind}), &[]).unwrap();
+            assert_eq!(
+                node.apply(1, &mut LegacyRandom::new(0), 7.0, &mut |_, _, _, _| panic!(
+                    "not custom"
+                )),
+                7.0
+            );
+        }
+    }
 
     #[test]
     fn custom_damage_nodes_compose_with_vanilla_in_order() {

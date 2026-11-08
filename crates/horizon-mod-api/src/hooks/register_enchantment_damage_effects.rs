@@ -11,7 +11,8 @@ pub trait Hooks {
 `Identifier` before content loads. Use that identifier as a value node's `type` in an enchantment's
 `minecraft:damage` component. The callback receives a read-only `ServerHost`, actual attacker and
 victim handles (`LivingRef` and `EntityRef`), a pre-hit weapon snapshot, enchantment level and the node's configuration as a borrowed NBT `Tag`, converted once at load.
-Return the transformed damage value. Registration rejects duplicate and vanilla identifiers.
+Return the transformed damage value. NaN retains the input; other outputs (including infinities)
+are clamped to 0..=1024 before subsequent nodes, bounding per-unit built-in work. Registration rejects duplicate and vanilla identifiers.
 
 The engine resolves identifiers during content loading, including resource/data pack reloads.
 Unknown identifiers reject the containing enchantment with a diagnostic naming both identifiers.

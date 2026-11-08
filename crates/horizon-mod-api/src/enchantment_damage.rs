@@ -21,6 +21,8 @@ pub struct EnchantmentDamageContext<'a> {
 /// The host is read-only; callbacks may be nested and must not retain hit context.
 pub trait EnchantmentDamageEffect: Send + Sync + 'static {
     /// Transform the value at this node, in vanilla enchantment and node order.
+    /// NaN retains the input. Other results, including infinities, are clamped
+    /// to 0..=1024 before the next node, bounding per-unit built-in work.
     fn apply(
         &self,
         host: &dyn ServerHost,
