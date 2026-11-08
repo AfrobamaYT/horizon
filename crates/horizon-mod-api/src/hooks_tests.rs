@@ -418,3 +418,24 @@ fn level_queries_take_their_hosts(
     let _: Result<Option<Vec<ItemStack>>, StackWriteError> =
         level.block_drops(server, [0, 64, 0], Some(tool), Some(shooter));
 }
+
+/// Compile-only: the player rule reads on any host, and the writes on a server host.
+#[allow(dead_code)]
+fn player_rules_take_their_hosts(
+    read: &dyn Host,
+    server: &mut dyn ServerHost,
+    player: PlayerRef,
+    other: PlayerRef,
+    stack: &ItemStack,
+    config: PlayerRespawnConfig,
+) {
+    let _: Option<bool> = player.may_use_item_at(read, [0, 64, 0], NativeBlockFace::Up, stack);
+    let _: Option<bool> = player.can_harm(read, other);
+    let _: Option<Option<PlayerRespawnConfig>> = player.respawn_config(read);
+    let _: Option<bool> = player.text_filtering(read);
+    let _: Option<bool> = player.sleep_ignored(read);
+    let _: Option<bool> = player.counts_for_sleep(read);
+    let _: Option<u32> = player.sleep_timer(read);
+    let _: bool = player.set_respawn_config(server, Some(config));
+    let _: bool = player.set_sleep_timer(server, 0);
+}

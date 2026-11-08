@@ -1,7 +1,7 @@
 //! Game modes beyond survival and creative (`GameType`): adventure players
 //! cannot build, spectators fly through blocks and only watch.
 use super::{Game, Screen};
-use horizon_client::{collisions::SceneCollisions, command::args::GameMode};
+use horizon_client::{collisions::SceneCollisions, command::args::GameMode, items::ItemStack};
 use horizon_world::world_movement::in_range_of_ground;
 
 pub(super) fn mode_from_id(id: i32) -> GameMode {
@@ -149,11 +149,13 @@ impl Game<'_> {
     /// `saveWithFullMetadata` (no block entity fails). `components` is not
     /// looked at on this path.
     fn adventure_predicate(&self, component: &str, pos: [i32; 3]) -> bool {
-        let Some(tag) = self
-            .held()
-            .and_then(|s| s.data())
-            .and_then(|d| d.other(component))
-        else {
+        self.held()
+            .is_some_and(|stack| self.stack_adventure_predicate(stack, component, pos))
+    }
+    /// `adventure_predicate` for any `stack`, not only the main hand's.
+    fn stack_adventure_predicate(&self, stack: &ItemStack, component: &str, pos: [i32; 3]) -> bool {
+        use horizon_core::nbt::Tag;
+        let Some(tag) = stack.data().and_then(|d| d.other(component)) else {
             return false;
         };
         self.adventure_predicate_at(tag, pos)
@@ -264,6 +266,24 @@ impl Game<'_> {
     /// matches the clicked block (`Player.mayUseItemAt`).
     pub(super) fn can_place_on_in_adventure(&self, clicked: [i32; 3]) -> bool {
         self.adventure_predicate("minecraft:can_place_on", clicked)
+    }
+    /// `Player.mayUseItemAt(pos, face, stack)` for a player who `may_build`
+    /// or not: builders always may, anyone else only when `stack`'s
+    /// `can_place_on` matches the block clicked, the one `pos` lies against.
+    pub(super) fn may_use_item_at(
+        &self,
+        may_build: bool,
+        pos: [i32; 3],
+        face: horizon_core::geometry::Direction,
+        stack: &ItemStack,
+    ) -> bool {
+        let [dx, dy, dz] = face.opposite().normal();
+        may_build
+            || self.stack_adventure_predicate(
+                stack,
+                "minecraft:can_place_on",
+                [pos[0] + dx, pos[1] + dy, pos[2] + dz],
+            )
     }
     /// `ServerPlayer.setGameMode(SPECTATOR)`: `stopRiding`.
     fn dismount_for_spectator(&mut self) {
