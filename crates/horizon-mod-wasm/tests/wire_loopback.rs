@@ -650,3 +650,35 @@ fn wire_loopback_resource_codec_restores_context_between_groups() {
         "no context survives the outer guard"
     );
 }
+
+#[test]
+fn wire_loopback_resource_load_restores_module_after_cross_group_unwind() {
+    fn load(id: Id) -> Arc<dyn StructurePiece> {
+        let mut bytes = Writer::new();
+        bytes.put(&id);
+        Reader::decode(bytes.bytes()).unwrap()
+    }
+    let id = guest::add_handler(vec![guest::view::<dyn StructurePiece>(Arc::new(Piece))]);
+    let mut first = Box::new(boundary::Cx::default());
+    first.module = Some(WasmMod {
+        subscribed: &[],
+        corrupt: false,
+    });
+    let mut second = Box::new(boundary::Cx::default());
+    second.module = Some(WasmMod {
+        subscribed: &[],
+        corrupt: true,
+    });
+    let _outer = unsafe { boundary::resource_scope(&mut *first, true) };
+    let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _inner = unsafe { boundary::resource_scope(&mut *second, true) };
+        assert_eq!(load(id).bounding_box(), mod_api::BoundingBox::default());
+        // Resume directly to avoid depending on the process-wide guest panic logger.
+        std::panic::resume_unwind(Box::new(()));
+    }));
+    assert!(unwind.is_err());
+    assert_eq!(
+        load(id).bounding_box(),
+        mod_api::BoundingBox::new([1, 2, 3], [4, 5, 6])
+    );
+}
