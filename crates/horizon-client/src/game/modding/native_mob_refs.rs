@@ -735,9 +735,10 @@ mod tests {
                 &self,
                 host: &dyn mod_api::Host,
                 event: &mut mod_api::LivingChangeTargetEvent<'_>,
-            ) {
+            ) -> mod_api::Flow {
                 assert!(event.mob.living().health(host).is_some());
                 *event.new_target = *self.0.lock().unwrap();
+                mod_api::Flow::Continue
             }
         }
         let redirect = Arc::new(Mutex::new(None));
