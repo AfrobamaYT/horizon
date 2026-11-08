@@ -701,8 +701,30 @@ mod tests {
                     hooks.matches("answer").count(),
                     apart.len()
                 );
-                for a in apart.iter().take(40) {
-                    println!("apart {a}");
+                for m in surface
+                    .methods
+                    .iter()
+                    .filter(|m| apart.contains(&format!("{}::{}", m.owner, m.name)))
+                    .step_by(6)
+                {
+                    for p in &m.params {
+                        if let super::ty::Ty::Ref(t, _) = &p.1 {
+                            if let super::ty::Ty::Named(d) = &**t {
+                                if let super::ty::Kind::Record(fs) = &surface.types.defs[*d].kind {
+                                    for f in fs {
+                                        if super::calls::probe(&surface.types, &f.ty).is_none() {
+                                            println!("badfield {}.{} {:?}", m.name, f.rust, f.ty);
+                                        }
+                                    }
+                                } else {
+                                    println!(
+                                        "notrecord {} {:?}",
+                                        m.name, surface.types.defs[*d].kind
+                                    );
+                                }
+                            }
+                        }
+                    }
                 }
                 for def in &surface.types.defs {
                     if let super::ty::Kind::Opaque(why) = &def.kind {
