@@ -231,8 +231,10 @@ impl DimensionSettings {
     pub(crate) fn invalid_field(&self) -> Option<String> {
         let light = |n: i32| (0..=15).contains(&n);
         let (low, high) = self.monster_spawn_light_level;
-        let reason = if !(self.coordinate_scale > 0.0 && self.coordinate_scale <= 30_000_000.0) {
-            "coordinate_scale must be above 0 and at most 30000000"
+        let reason = if !horizon_world::dimension_type::DimensionFacts::valid_coordinate_scale(
+            self.coordinate_scale,
+        ) {
+            "coordinate_scale must be 0.00001 to 30000000"
         } else if !(0.0..=1.0).contains(&self.ambient_light) {
             "ambient_light must be 0 to 1"
         } else if !(0.0..=15.0).contains(&self.sky_light_level) {
@@ -391,6 +393,7 @@ mod tests {
             bed_can_sleep: "never".into(),
             bed_can_set_spawn: "when_dark".into(),
             bed_destroy_on_use: true,
+            bed_destroy_on_leave: true,
             ..Default::default()
         };
         assert_eq!(settings.invalid_field(), None);
@@ -402,7 +405,7 @@ mod tests {
         .unwrap();
         assert_eq!(facts.bed_rule.can_sleep, BedRuleTest::Never);
         assert_eq!(facts.bed_rule.can_set_spawn, BedRuleTest::WhenDark);
-        assert!(facts.bed_rule.destroy_on_use && !facts.bed_rule.destroy_on_leave);
+        assert!(facts.bed_rule.destroy_on_use && facts.bed_rule.destroy_on_leave);
         let bad = DimensionSettings {
             bed_can_sleep: "sometimes".into(),
             ..Default::default()
@@ -419,6 +422,10 @@ mod tests {
         };
         assert!(refused(|s| s.coordinate_scale = 0.0).contains("coordinate_scale"));
         assert!(refused(|s| s.coordinate_scale = f64::NAN).contains("coordinate_scale"));
+        // below the codec's 1.0E-5, a ratio with a normal scale is infinite
+        assert!(refused(|s| s.coordinate_scale = f64::from_bits(1)).contains("coordinate_scale"));
+        assert!(refused(|s| s.coordinate_scale = 1.0e-6).contains("coordinate_scale"));
+        assert_eq!(refused(|s| s.coordinate_scale = f64::from(1.0e-5_f32)), "");
         assert!(refused(|s| s.ambient_light = 1.5).contains("ambient_light"));
         assert!(refused(|s| s.sky_light_level = 16.0).contains("sky_light_level"));
         assert!(
