@@ -261,7 +261,7 @@ impl Game<'_> {
             return None;
         };
         let m = self.mobs.iter().find(|m| m.id == id)?;
-        let source = Damage::of(Self::damage_kind(damage_type));
+        let source = Damage::of(Self::damage_kind(&self.motion.health.damage, damage_type));
         Some(m.refuses_damage(&source))
     }
 

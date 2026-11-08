@@ -51,16 +51,14 @@ refuse the manifest. Both code targets may declare top-level `internals`, an arr
 | `game` | string | not empty, the Minecraft version (`"26.3"`) |
 | `horizon` | string | the exact Horizon commit, 40 lowercase hex characters |
 | `mixins` | string | the exact horizon-mixins commit, 40 lowercase hex characters |
-| `injection` | array of tables | optional injections, written as `[[native.injection]]` |
 | `module` | array of tables | optional support modules, written as `[[native.module]]` |
 
-An injection has a unique, nonempty `id` and a `kind`; it selects exactly one of `hook` or `target`, and
-exactly one of `helper` or `raw`. A helper is a selected `.rs` file under `src/`, or `build.rs`.
+Both access modes use the same top-level declarations.
 API function listeners use top-level `[[inject]]`: `id`, `at`, lowercase `kind`, `with`, and `hash`,
 with optional `access` (default `api`) and `priority` (default 0). `head` and `return` are supported
 for API slots; internals slots also accept the listed call kinds with `call`, `nth` and `ctx`.
 Unknown fields are refused by the schema. API function declarations use only `[[inject]]`.
-See [Injections](../injections.md) for the fields, bindings and point injections, and
+See [Injections](../injections.md) for the fields and point injections, and
 [Native mods](../how-to/native-mods.md#named-hook-points) for the named hook contracts.
 
 A module has a unique, nonempty `id` (one id space with the injections), a `file` naming the game source
@@ -108,9 +106,10 @@ wasm entries, even when declared. Loading them refuses with `native only: <path>
 suggesting an opt-in file. The daily prebuilt always generates a table from the checkout's
 per-mod declarations. A launcher build from source generates one only when an enabled wasm
 package in the instance declares internals, and uses only those installed mods' paths, not
-the checkout's seed files. With no such mod it retains the empty table. Standalone server
-exports currently have no instance declarations and keep the empty table; use an instance
-build with the mod installed or the daily prebuilt when the mod needs internals.
+the checkout's seed files. With no such mod it retains the empty table. A standalone server
+export takes declarations from `.hmod` packages placed directly in its explicit input folder,
+without reading an instance. Install and enable the same packages in the server's game folder
+to use that table ([Standalone server export](../how-to/native-mods/035-standalone-server-export.md)).
 
 Top-level `[dependencies]` declares other mods by id: a semver requirement string, or
 `{ version = "^1", optional = true }`. These versions refer to `horizon-mod.toml`, not Cargo metadata.
