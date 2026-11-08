@@ -15,6 +15,8 @@ pub const DIMENSIONS: &str = "dimensions";
 /// The bundle of `dimension_type/<id>.json` dimension types. Nothing
 /// prepared has it: the vanilla types' are `LevelHeight::vanilla`.
 pub const DIMENSION_TYPES: &str = "dimension_types";
+/// The bundle of `worldgen/noise_settings/<id>.json` noise generator settings.
+pub const NOISE_SETTINGS: &str = "settings";
 
 /// Pack folders (`data/<ns>/<kind>/`) the chunk generator reads, and the
 /// bundle each joins.
@@ -30,7 +32,7 @@ const KINDS: [(&str, &str); 16] = [
     ("worldgen/material_condition", "conditions"),
     ("worldgen/material_rule", "rules"),
     ("worldgen/noise", "noises"),
-    ("worldgen/noise_settings", "settings"),
+    ("worldgen/noise_settings", NOISE_SETTINGS),
     ("worldgen/placed_feature", "placed_features"),
     ("worldgen/processor_list", "processor_lists"),
     ("worldgen/structure", "structures"),
@@ -86,6 +88,9 @@ pub struct ModDimension {
     /// The fields of its dimension type the mod sets, as JSON text: the rest
     /// are the overworld's.
     pub dimension_type: String,
+    /// The sea level the mod gives the level, for a chunk generator whose terrain has none to
+    /// read. It wins over the noise settings' (`stem_sea_level`).
+    pub sea_level: Option<i32>,
 }
 
 static MOD_DIMENSIONS: OnceLock<Vec<ModDimension>> = OnceLock::new();
@@ -697,6 +702,7 @@ mod level_facts_tests {
             dimension_type: r#"{"min_y":-64,"height":384,"coordinate_scale":2.0,
                 "attributes":{"minecraft:gameplay/water_evaporates":true}}"#
                 .into(),
+            sea_level: None,
         });
         let facts = o.level_facts("test:pocket").unwrap().unwrap();
         assert_eq!(facts.coordinate_scale, 2.0);
@@ -727,6 +733,7 @@ mod level_facts_tests {
             id: "test:bad".into(),
             stem: r#"{"type":"test:bad"}"#.into(),
             dimension_type: r#"{"min_y":0,"height":64,"skybox":"moon"}"#.into(),
+            sea_level: None,
         });
         assert!(o.level_facts("test:bad").unwrap().is_err());
     }

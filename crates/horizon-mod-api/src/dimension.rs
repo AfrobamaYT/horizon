@@ -97,6 +97,11 @@ pub struct DimensionSettings {
     pub can_start_raid: bool,
     /// `minecraft:gameplay/sky_light_level`: the sky light that daylight is measured against, 0 to 15.
     pub sky_light_level: f32,
+    /// `Level.getSeaLevel`: the sea level mob spawning, rain and snow, maps and phantoms use. With
+    /// `None` it is the noise settings' own for `minecraft:noise`, and the Overworld's 63 for a
+    /// chunk generator a mod registered, which reads none; `Some` is for that generator, whose
+    /// terrain the game cannot read a sea level from, and wins over the noise settings'.
+    pub sea_level: Option<i32>,
 }
 
 impl Default for DimensionSettings {
@@ -131,6 +136,7 @@ impl Default for DimensionSettings {
             snow_golem_melts: false,
             can_start_raid: true,
             sky_light_level: 15.0,
+            sea_level: None,
         }
     }
 }
@@ -317,6 +323,7 @@ impl DimensionInfo {
             id: self.id.to_string(),
             stem: stem.to_string(),
             dimension_type: settings.dimension_type().to_string(),
+            sea_level: settings.sea_level,
         }
     }
 }
