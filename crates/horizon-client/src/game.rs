@@ -24983,6 +24983,13 @@ pub fn run_with(
         .select(&std::env::current_dir()?, &early_settings.mods.enabled);
     let mod_phase = mod_api::__private::PhaseOwner::new(mod_api::__private::ModPhase::Packages);
     api_values::install_packages(options.mods.native.packages(), &options.mods.selected);
+    // Wasm receives exactly the inventory native mods see, before registration starts.
+    {
+        use mod_api::__private::game::RegistrationContextNew;
+        let context = mod_api::RegistrationContext::new();
+        let inventory: Vec<_> = context.mods().iter().cloned().collect();
+        horizon_mod_wasm::initialize(&inventory);
+    }
     mod_phase.advance(mod_api::__private::ModPhase::Registration)?;
     if let Err(refused) = crate::game::api_values::install_parts(mod_api::__private::mods()) {
         panic!("Mod parts refused:\n{}", refused.join("\n"));

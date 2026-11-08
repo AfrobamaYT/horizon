@@ -307,6 +307,7 @@ pub fn load_installed(game_dir: &Path, dev: &[PathBuf]) -> Loaded {
     {
         Some(std) => load(&std, packages),
         None => Loaded {
+            modules: Vec::new(),
             mods: Vec::new(),
             manifests: Vec::new(),
             refused: packages
@@ -321,6 +322,7 @@ pub fn load_installed(game_dir: &Path, dev: &[PathBuf]) -> Loaded {
     }
     let _ = REFUSED.set(refused.clone());
     loaded.refused = refused;
+    let _ = MODULES.set(loaded.modules.clone());
     loaded
 }
 
@@ -330,6 +332,27 @@ pub struct Loaded {
     pub mods: Vec<mod_api::ModEntry>,
     pub manifests: Vec<Manifest>,
     pub refused: Vec<(String, Refusal)>,
+    modules: Vec<WasmMod>,
+}
+
+static MODULES: OnceLock<Vec<WasmMod>> = OnceLock::new();
+
+/// Supplies the complete native/content inventory after the game's dispatch order is installed,
+/// before registration. Constructors and subscription queries run before this, as on native.
+pub fn initialize(inventory: &[mod_api::PackageInfo]) {
+    initialize_modules(MODULES.get().map_or(&[], Vec::as_slice), inventory);
+}
+fn initialize_modules(modules: &[WasmMod], inventory: &[mod_api::PackageInfo]) {
+    for module in modules {
+        module.call(
+            CallClass::Load,
+            boundary::Frame::default(),
+            mod_api::wire::INIT,
+            None,
+            |w| w.put(inventory),
+            |_| Ok(()),
+        );
+    }
 }
 
 pub fn load(std_member: &[u8], packages: Vec<WasmPackage>) -> Loaded {
@@ -349,23 +372,6 @@ pub fn load(std_member: &[u8], packages: Vec<WasmPackage>) -> Loaded {
             return loaded;
         }
     };
-    let inventory: Vec<_> = packages
-        .iter()
-        .map(|p| {
-            let m = &p.manifest;
-            mod_api::PackageInfo::new(
-                m.id.clone(),
-                m.version.clone(),
-                mod_api::PackageKind::Code,
-                match m.side {
-                    horizon_mod_package::manifest::Side::Both => mod_api::Side::Both,
-                    horizon_mod_package::manifest::Side::Client => mod_api::Side::Client,
-                },
-                m.owned_namespaces().map(str::to_owned).collect(),
-                m.dependencies.keys().cloned().collect(),
-            )
-        })
-        .collect();
     for indices in groups {
         let mut members = vec![link::Member {
             name: "libstd.so",
@@ -385,16 +391,6 @@ pub fn load(std_member: &[u8], packages: Vec<WasmPackage>) -> Loaded {
             }
             let mut checked = Vec::new();
             for mut module in mods {
-                module
-                    .call(
-                        CallClass::Load,
-                        boundary::Frame::default(),
-                        mod_api::wire::INIT,
-                        None,
-                        |w| w.put(&inventory),
-                        |_| Ok(()),
-                    )
-                    .ok_or_else(|| Refusal::Runtime("initialization failed".into()))?;
                 let names: Vec<String> = module
                     .call(
                         CallClass::Load,
@@ -415,6 +411,7 @@ pub fn load(std_member: &[u8], packages: Vec<WasmPackage>) -> Loaded {
                 for (module, i) in mods.into_iter().zip(indices) {
                     let manifest = packages[i].manifest.clone();
                     let id = Box::leak(manifest.id.clone().into_boxed_str());
+                    loaded.modules.push(module.clone());
                     loaded
                         .mods
                         .push(mod_api::ModEntry::new(id, Box::new(module)));

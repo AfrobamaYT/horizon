@@ -427,6 +427,9 @@ impl WasmMod {
                 w.clear();
                 w.put(&released);
                 self.invoke(&mut store, mod_api::wire::RELEASE, &w, &mut output)?;
+                if !output.is_empty() {
+                    return Err(WireError::Trailing.into());
+                }
             }
             w.clear();
             if let Some(handler) = handler {

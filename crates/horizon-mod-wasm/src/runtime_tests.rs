@@ -85,14 +85,48 @@ fn loader_initializes_and_installs_a_wasm_entry() {
     .unwrap();
     let module = guest(
         mod_api::wire::LAYOUT,
-        "local.get 0 i32.const -256 i32.eq if (result i64) i64.const 0 else i64.const 17592186044420 end",
+        r#"local.get 0 i32.const -256 i32.eq if (result i64)
+            i32.const 4096 local.get 2 i32.store
+            i32.const 2048 local.get 1 local.get 2 memory.copy
+            i64.const 0
+          else local.get 0 i32.const 2 i32.eq if (result i64)
+            i64.const 8796093022208 i32.const 4096 i32.load i64.extend_i32_u i64.or
+          else i64.const 4398046511108 end end"#,
     );
-    let manifest = horizon_mod_package::manifest::Manifest::parse(&format!("id = 'roundtrip'\nname = 'Roundtrip'\nversion = '1.0.0'\napi = '0.2'\n[wasm]\nsha512 = '{}'\ntoolchain = 'test'\nbuilt_with = 'test'\n", "a".repeat(128))).unwrap();
+    let manifest = horizon_mod_package::manifest::Manifest::parse(&format!("id = 'roundtrip'\nname = 'Roundtrip'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = []\n[wasm]\nsha512 = '{}'\ntoolchain = 'test'\nbuilt_with = 'test'\n", "a".repeat(128))).unwrap();
     let loaded = crate::load(&std, vec![crate::WasmPackage { manifest, module }]);
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
     assert_eq!(loaded.mods.len(), 1);
     assert_eq!(loaded.mods[0].fields().id, "roundtrip");
     assert_eq!(loaded.manifests[0].id, "roundtrip");
+    let inventory: Vec<_> = ["native", "roundtrip", "content"]
+        .into_iter()
+        .map(|id| {
+            mod_api::PackageInfo::new(
+                id.into(),
+                "1.0.0".into(),
+                mod_api::PackageKind::Code,
+                mod_api::Side::Both,
+                vec![id.into()],
+                Vec::new(),
+            )
+        })
+        .collect();
+    crate::initialize_modules(&loaded.modules, &inventory);
+    let echoed: Vec<mod_api::PackageInfo> = loaded.modules[0]
+        .call(
+            CallClass::Hook,
+            Frame::default(),
+            2,
+            None,
+            |_| {},
+            |r| r.take(),
+        )
+        .unwrap();
+    assert_eq!(
+        echoed.iter().map(|p| p.id()).collect::<Vec<_>>(),
+        ["native", "roundtrip", "content"]
+    );
 }
 
 #[test]
