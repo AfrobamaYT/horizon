@@ -2828,7 +2828,7 @@ impl Game<'_> {
         })
     }
     /// Options.advancedItemTooltips (F3+H).
-    fn options_advanced_tooltips(&self) -> bool {
+    pub(super) fn options_advanced_tooltips(&self) -> bool {
         self.settings.file.bool("advancedItemTooltips")
     }
     /// `TooltipRenderUtil`: dark box with the purple border, first line spaced.
