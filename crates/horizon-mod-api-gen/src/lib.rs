@@ -606,6 +606,8 @@ mod dispatch;
 mod host_param;
 mod index;
 pub mod native_patch;
+/// Generate codecs for ordinary scoped native callable resources.
+pub mod native_callable;
 /// Canonical identities for native row layouts.
 pub mod native_schema;
 pub mod native_value;
