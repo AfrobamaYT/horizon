@@ -244,7 +244,7 @@ fn resources() -> String {
         let path = trait_path(owner);
         writeln!(store,"if value.is::<std::sync::Arc<dyn {path}>>() {{ let value = *value.downcast::<std::sync::Arc<dyn {path}>>().map_err(|_| WireError::Invalid(\"wrong handler\"))?; return Ok(unsafe {{ (&mut *self.cx).held.insert_long(Box::new(OwnerThread::new(value))) }}); }}").unwrap();
         for container in ["Box", "std::sync::Arc"] {
-            writeln!(load,"if view == std::any::TypeId::of::<{container}<dyn {path}>>() {{ return Ok(Box::new({container}::new(crate::WasmHandler {{ index:id,module }}) as {container}<dyn {path}>)); }}").unwrap();
+            writeln!(load,"if view == std::any::TypeId::of::<{container}<dyn {path}>>() {{ return Ok(Box::new({container}::new(crate::WasmHandler::new(&module,id)) as {container}<dyn {path}>)); }}").unwrap();
         }
     }
     format!(
@@ -275,7 +275,12 @@ pub(super) fn generate(surface: &mut super::Surface<'_>) -> Result<String, Strin
     code.push_str(
         "pub fn import_id(owner: &str, name: &str) -> Option<u32> { match (owner,name) {\n",
     );
-    for (id, m) in imports(&surface.methods).iter().enumerate() {
+    for (id, m) in imports(&surface.methods)
+        .iter()
+        .copied()
+        .chain(held_methods(&surface.methods))
+        .enumerate()
+    {
         writeln!(code, "({:?},{:?}) => Some({id}),", m.owner, m.name).unwrap();
     }
     code.push_str("_ => None } }\n");

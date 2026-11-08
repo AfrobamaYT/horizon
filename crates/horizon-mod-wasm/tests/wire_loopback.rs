@@ -43,6 +43,12 @@ fn call_refused<E: From<(mod_api::Identifier, String)>>() -> E {
     ))
 }
 impl WasmHandler {
+    fn new(module: &WasmMod, index: Id) -> Self {
+        Self {
+            module: module.clone(),
+            index,
+        }
+    }
     fn subscriptions(&self, owner: &'static str, id: u32) -> &'static [Option<mod_api::HookId>] {
         let names = self
             .module
