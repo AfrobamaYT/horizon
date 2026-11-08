@@ -3,18 +3,21 @@
 use crate::*;
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 use std::sync::Mutex;
 
 thread_local! {
     /// The native mod hook this thread is inside, for the panic hook to name.
     static IN_NATIVE_MOD: Cell<Option<NativeModCall>> = const { Cell::new(None) };
+    static NATIVE_FRAME: Cell<Option<u64>> = const { Cell::new(None) };
+    static NEXT_FRAME: Cell<u64> = const { Cell::new(0) };
     /// The converted package this thread is executing, for the panic hook to name.
-    static IN_CONVERTED_PACKAGE: RefCell<Option<ConvertedCall>> = const { RefCell::new(None) };
+    static IN_CONVERTED_PACKAGE: RefCell<Option<Rc<ConvertedScope>>> = const { RefCell::new(None) };
 }
 
 /// The native mod hook this thread is inside, if any.
 pub fn current_native_call() -> Option<NativeModCall> {
-    IN_NATIVE_MOD.with(Cell::get)
+    IN_NATIVE_MOD.try_with(Cell::get).ok().flatten()
 }
 /// What the game is doing, set as it goes: graphics adapter, settings, packs, world.
 static DETAILS: Mutex<Vec<(&'static str, String)>> = Mutex::new(Vec::new());
@@ -31,14 +34,34 @@ pub struct NativeModCall {
 /// Marks this thread as inside `call` until the guard drops, which also happens while a panic
 /// unwinds. A hook called from a hook is named by the inner call.
 pub fn enter_native_mod(call: NativeModCall) -> NativeModGuard {
+    let frame = NEXT_FRAME
+        .try_with(|c| {
+            let next = c.get().checked_add(1);
+            if let Some(next) = next {
+                c.set(next);
+            }
+            next
+        })
+        .ok()
+        .flatten();
+    let outer_frame = NATIVE_FRAME.try_with(|c| c.replace(frame)).ok().flatten();
     NativeModGuard {
-        outer: IN_NATIVE_MOD.with(|c| c.replace(Some(call))),
+        _thread: std::marker::PhantomData,
+        outer_frame,
+        outer: IN_NATIVE_MOD
+            .try_with(|c| c.replace(Some(call)))
+            .ok()
+            .flatten(),
         _timing: crate::__private::profiler::enter(call),
     }
 }
 /// The `[mod] id` of the native mod this thread is inside a hook of, if any.
 pub fn current_native_mod() -> Option<&'static str> {
-    IN_NATIVE_MOD.with(Cell::get).map(|call| call.id)
+    IN_NATIVE_MOD
+        .try_with(Cell::get)
+        .ok()
+        .flatten()
+        .map(|call| call.id)
 }
 
 /// A call into one package a native runtime hosts, beside the runtime's own [`NativeModCall`].
@@ -57,7 +80,15 @@ pub struct ConvertedCall {
 
 /// The converted package this thread is executing, if any.
 pub fn current_converted_call() -> Option<ConvertedCall> {
-    IN_CONVERTED_PACKAGE.with(|current| current.borrow().clone())
+    IN_CONVERTED_PACKAGE
+        .try_with(|current| {
+            let current = current.borrow();
+            let scope = current.as_ref()?;
+            let frame = NATIVE_FRAME.try_with(Cell::get).ok().flatten()?;
+            (scope.live.get() && scope.frame == frame).then(|| scope.call.clone())
+        })
+        .ok()
+        .flatten()
 }
 
 /// The packages one native runtime declared it loaded.
@@ -75,7 +106,7 @@ pub struct ConvertedPackages {
 
 impl ConvertedPackages {
     /// Declares `packages` as the ones `runtime` (its `[mod] id`) loaded. Ids read from
-    /// manifests or module bytes are interned once here, before any call reaches them.
+    /// manifests or module bytes are stored here. Entering clones an owned id on each call.
     pub fn new<I>(runtime: &'static str, packages: I) -> Self
     where
         I: IntoIterator,
@@ -128,21 +159,44 @@ impl ConvertedPackage<'_> {
             export: export.into(),
             site: site.into(),
         };
-        let outer = IN_CONVERTED_PACKAGE.with(|current| current.replace(Some(call)));
-        Some(ConvertedPackageGuard { outer })
+        let frame = NATIVE_FRAME.try_with(Cell::get).ok().flatten()?;
+        let scope = Rc::new(ConvertedScope {
+            call,
+            frame,
+            live: Cell::new(true),
+        });
+        let outer = IN_CONVERTED_PACKAGE
+            .try_with(|current| current.replace(Some(scope.clone())))
+            .ok()?;
+        Some(ConvertedPackageGuard { outer, scope })
     }
 }
 
-/// Puts back the converted package scope that `ConvertedPackage::enter` found.
+struct ConvertedScope {
+    call: ConvertedCall,
+    frame: u64,
+    live: Cell<bool>,
+}
+
+/// Restores the previous live scope on this thread. This guard is not Send or Sync.
+/// Attribution ends when its native frame exits, even if the guard is retained.
+/// Worker threads have no scope unless the runtime enters one on that thread.
 #[must_use]
 // exhaustive: its field is private, so mods cannot build or destructure it
 pub struct ConvertedPackageGuard {
-    outer: Option<ConvertedCall>,
+    outer: Option<Rc<ConvertedScope>>,
+    scope: Rc<ConvertedScope>,
 }
 
 impl Drop for ConvertedPackageGuard {
     fn drop(&mut self) {
-        IN_CONVERTED_PACKAGE.with(|current| *current.borrow_mut() = self.outer.take());
+        self.scope.live.set(false);
+        let _ = IN_CONVERTED_PACKAGE.try_with(|current| {
+            let mut current = current.borrow_mut();
+            if current.as_ref().is_some_and(|s| Rc::ptr_eq(s, &self.scope)) {
+                *current = self.outer.take().filter(|s| s.live.get());
+            }
+        });
     }
 }
 
@@ -150,12 +204,15 @@ impl Drop for ConvertedPackageGuard {
 #[must_use]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct NativeModGuard {
+    _thread: std::marker::PhantomData<Rc<()>>,
+    outer_frame: Option<u64>,
     outer: Option<NativeModCall>,
     _timing: Option<crate::__private::profiler::Guard>,
 }
 impl Drop for NativeModGuard {
     fn drop(&mut self) {
-        IN_NATIVE_MOD.with(|c| c.set(self.outer));
+        let _ = NATIVE_FRAME.try_with(|c| c.replace(self.outer_frame.take()));
+        let _ = IN_NATIVE_MOD.try_with(|c| c.set(self.outer));
     }
 }
 /// Sets one line of the report's details (replacing the last value under `key`).
@@ -180,6 +237,103 @@ pub fn details() -> Vec<(&'static str, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn crash_guard_is_thread_affine() {
+        trait Ambiguous<A> {
+            fn check() {}
+        }
+        impl<T: ?Sized> Ambiguous<()> for T {}
+        impl<T: ?Sized + Send> Ambiguous<u8> for T {}
+        let _ = <ConvertedPackageGuard as Ambiguous<_>>::check;
+    }
+
+    #[test]
+    fn crash_retained_scope_cannot_reach_later_frame() {
+        let packages = ConvertedPackages::new("runtime", ["guest"]);
+        let native = runtime("first");
+        let scope = packages
+            .package("guest")
+            .unwrap()
+            .enter("run", "site")
+            .unwrap();
+        drop(native);
+        let _later = runtime("second");
+        assert_eq!(current_converted_call(), None);
+        drop(scope);
+    }
+
+    #[test]
+    fn crash_nested_native_frame_hides_outer_scope() {
+        let packages = ConvertedPackages::new("runtime", ["guest"]);
+        let _native = runtime("first");
+        let _scope = packages
+            .package("guest")
+            .unwrap()
+            .enter("run", "site")
+            .unwrap();
+        let inner = runtime("second");
+        assert_eq!(current_converted_call(), None);
+        drop(inner);
+        assert!(current_converted_call().is_some());
+    }
+
+    #[test]
+    fn crash_out_of_order_scope_drop_does_not_resurrect() {
+        let packages = ConvertedPackages::new("runtime", ["guest"]);
+        let _native = runtime("first");
+        let package = packages.package("guest").unwrap();
+        let outer = package.enter("outer", "site").unwrap();
+        let inner = package.enter("inner", "site").unwrap();
+        drop(outer);
+        assert_eq!(current_converted_call().unwrap().export, "inner");
+        drop(inner);
+        assert_eq!(current_converted_call(), None);
+    }
+
+    #[test]
+    fn crash_scope_reader_rejects_exited_native_frame() {
+        let packages = ConvertedPackages::new("runtime", ["guest"]);
+        let native = runtime("first");
+        let _scope = packages
+            .package("guest")
+            .unwrap()
+            .enter("run", "site")
+            .unwrap();
+        drop(native);
+        assert_eq!(current_converted_call(), None);
+    }
+
+    #[test]
+    fn crash_tls_teardown_is_non_panicking() {
+        struct Last;
+        impl Drop for Last {
+            fn drop(&mut self) {
+                assert_eq!(current_converted_call(), None);
+                let packages = ConvertedPackages::new("runtime", ["guest"]);
+                assert!(
+                    packages
+                        .package("guest")
+                        .unwrap()
+                        .enter("run", "site")
+                        .is_none()
+                );
+            }
+        }
+        thread_local! { static LAST: Last = const { Last }; }
+        std::thread::spawn(|| {
+            LAST.with(|_| {});
+            let _native = runtime("first");
+            let packages = ConvertedPackages::new("runtime", ["guest"]);
+            let _scope = packages
+                .package("guest")
+                .unwrap()
+                .enter("run", "site")
+                .unwrap();
+        })
+        .join()
+        .unwrap();
+    }
 
     fn runtime(hook: &'static str) -> NativeModGuard {
         enter_native_mod(NativeModCall {
