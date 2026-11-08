@@ -1002,6 +1002,91 @@ mod tests {
     use super::*;
 
     #[test]
+    fn selected_guest_exports_keep_the_full_layout() {
+        let make = |name: &str| {
+            let sig: syn::Signature = syn::parse_str(&format!("fn {name}()")).unwrap();
+            let shape = point_shape::shape(quote!(), &sig).unwrap();
+            let api = shape.api_items(name);
+            GamePoint {
+                name: name.into(),
+                target: name.into(),
+                side: "none",
+                host: "none",
+                record: shape.record().to_string(),
+                args: vec![],
+                returns: "cancel",
+                at_return: true,
+                raw: false,
+                raw_shape: None,
+                listener: None,
+                return_listener: None,
+                record_item: shape.record_item(name).to_string(),
+                api: [
+                    api.listeners.to_string(),
+                    api.variants.to_string(),
+                    api.dispatch.to_string(),
+                ],
+            }
+        };
+        let points = [make("first"), make("second")];
+        let selected = std::collections::BTreeSet::from(["first_return".to_string()]);
+        let all = records(&points, &[]);
+        let selected = records_selected(&points, &[], Some(&selected));
+        let layout = |source: &str| {
+            syn::parse_file(source)
+                .unwrap()
+                .items
+                .into_iter()
+                .find_map(|item| match item {
+                    syn::Item::Const(c) if c.ident == "POINT_LAYOUT" => {
+                        Some(c.expr.to_token_stream().to_string())
+                    }
+                    _ => None,
+                })
+                .unwrap()
+        };
+        assert_eq!(layout(&all), layout(&selected));
+        let file = syn::parse_file(&selected).unwrap();
+        let wires = file.items.iter().filter(|item| matches!(item, syn::Item::Impl(imp) if imp.trait_.as_ref().is_some_and(|(_, path, _)| path.segments.last().unwrap().ident == "Wire"))).count();
+        assert_eq!(wires, 1);
+        assert!(selected.contains("fn point_first"));
+        assert!(!selected.contains("fn point_second"));
+        assert!(selected.contains("table [PointId :: FirstReturn as usize]"));
+        assert!(!selected.contains("table [PointId :: First as usize]"));
+    }
+
+    #[test]
+    fn raw_point_inventory() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let points = game_points(&root).unwrap();
+        let mut inventory = Vec::new();
+        for point in &points {
+            assert_eq!(point.raw_shape.is_some(), point.raw, "{}", point.target);
+            for at_return in [false, true] {
+                if at_return && !point.at_return && !point.raw {
+                    continue;
+                }
+                inventory.push(serde_json::json!({
+                    "name": if at_return { format!("{}_return", point.name) } else { point.name.clone() },
+                    "target": point.target,
+                    "api": !at_return || point.at_return,
+                    "raw_shape": point.raw_shape,
+                    "raw_status": if point.raw { "snapshot generator needed" } else { "no raw place" },
+                }));
+            }
+        }
+        if let Ok(path) = std::env::var("POINT_INVENTORY") {
+            fs::write(path, serde_json::to_vec_pretty(&inventory).unwrap()).unwrap();
+        }
+        println!(
+            "{} functions; {} places; {} raw functions",
+            points.len(),
+            inventory.len(),
+            points.iter().filter(|point| point.raw).count()
+        );
+    }
+
+    #[test]
     fn record_mutability_catalog_proof() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let points = game_points(&root).unwrap();
