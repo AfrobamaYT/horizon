@@ -47,7 +47,8 @@ def main():
     put(source, ".horizon-revision", "0" * 40)
     put(source, "Cargo.lock", 'version = 4\n\n[[package]]\nname = "horizon-client"\nversion = "0.1.0"\n')
     client = source / "crates/horizon-client"
-    put(client, "Cargo.toml", '[package]\nname="horizon-client"\nversion="0.1.0"\nedition="2024"\n')
+    # Keep the library's target identity, but do not name this synthetic executable after the game.
+    put(client, "Cargo.toml", '[package]\nname="horizon-client"\nversion="0.1.0"\nedition="2024"\n[[bin]]\nname="area-execution-proof"\npath="src/main.rs"\n')
     put(client, "src/lib.rs", "pub mod game;\n")
     put(client, "src/main.rs", '''fn main() {
     assert_eq!(horizon_client::game::run(), 211);
@@ -115,7 +116,7 @@ horizon-mod-api-gen={{path={generator}}}
     # Absolute includes back into prepared must not make this relocated build pass.
     shutil.rmtree(prepared)
     run("build", ["cargo", "build", "--manifest-path", output / "Cargo.toml", "-p", "horizon-client"])
-    executable = "horizon-client.exe" if os.name == "nt" else "horizon-client"
+    executable = "area-execution-proof.exe" if os.name == "nt" else "area-execution-proof"
     executed = run("execute", [build / "debug" / executable])
     if executed.stdout.strip() != "AREA_AND_NATIVE_HOOK_HELPERS=211":
         raise RuntimeError(f"Missing execution proof; see {root / 'execute.log'}")
