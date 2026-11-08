@@ -102,7 +102,7 @@ impl Game<'_> {
 
     /// Each column's height on `h` (none where its chunk is not loaded) and its blocks from `below` under it to
     /// `above` - 1 over it, bottom first (air outside the column and where it is not loaded), as indices into the
-    /// names seen, with the biome's grass, foliage and water tints at the column's top (0 where it is not loaded;
+    /// full states seen, with the biome's grass, foliage and water tints at the column's top (0 where it is not loaded;
     /// unblended). `Err`, reading nothing, when `below + above` is 0 or more than the level's height, or the read
     /// would be more than `MAX_READ` blocks.
     pub(super) fn read_loaded_block_columns(
@@ -259,14 +259,16 @@ fn column_blocks(
     let per = (below + above) as usize;
     let mut blocks = Vec::with_capacity(total);
     let mut palette: Vec<BlockStateId> = Vec::new();
-    // (a state's index into the names, worked out once a state)
+    // A full state's palette index, worked out once per distinct state.
     let mut seen: FxHashMap<u32, u16> = FxHashMap::default();
-    let mut index = |s: BlockStateId| -> u16 {
-        *seen.entry(s.0).or_insert_with(|| {
-            let i = palette.len();
-            palette.push(s);
-            i as u16
-        })
+    let mut index = |s: BlockStateId| -> Option<u16> {
+        if let Some(&index) = seen.get(&s.0) {
+            return Some(index);
+        }
+        let index = u16::try_from(palette.len()).ok()?;
+        palette.push(s);
+        seen.insert(s.0, index);
+        Some(index)
     };
     for (&(x, z), base) in columns.iter().zip(bases) {
         let chunk = world.chunks.get(&(x >> 4, z >> 4));
@@ -279,11 +281,11 @@ fn column_blocks(
                         Ok(y) if (bottom..top).contains(&y) => chunk.block(x & 15, y, z & 15),
                         _ => world.air,
                     };
-                    blocks.push(index(s));
+                    blocks.push(index(s)?);
                 }
             }
             _ => {
-                let air = index(world.air);
+                let air = index(world.air)?;
                 blocks.extend(std::iter::repeat_n(air, per));
             }
         }
@@ -699,8 +701,19 @@ mod tests {
                 air, air, air, air, air, // not loaded
             ]
         );
-        // names once each
+        // Distinct states appear once each.
         assert_eq!(palette.len(), 3);
+    }
+
+    #[test]
+    fn column_palette_preserves_distinct_property_states() {
+        let mut w = world();
+        w.set(1, 5, 1, BlockStateId(2)).unwrap();
+        w.set(1, 6, 1, BlockStateId(4)).unwrap();
+        w.set(1, 7, 1, BlockStateId(2)).unwrap();
+        let (palette, blocks) = column_blocks(&w, &[(1, 1)], &[Some(5)], 0, 3).unwrap();
+        assert_eq!(palette, [BlockStateId(2), BlockStateId(4)]);
+        assert_eq!(blocks, [0, 1, 0]);
     }
 
     #[test]

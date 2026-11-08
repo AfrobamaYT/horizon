@@ -1,7 +1,7 @@
 # Typed bulk block edits
 
 `NativeBlockEdit.palette` contains complete `BlockState` values. Construct them with
-`BlockState::of(host.block_metadata(), block, constraints)` (or change an existing state
+`BlockState::of(&host.block_states(), block, constraints)` (or change an existing state
 with `with`). `filters` contains owned `StatePredicate` values. `StatePredicate::block`
 validates property names and values strictly; `StatePredicate::tag` retains arbitrary
 property requirements, including for an empty tag, and rejects duplicate properties.

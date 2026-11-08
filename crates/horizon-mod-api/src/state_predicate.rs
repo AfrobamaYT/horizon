@@ -148,4 +148,5 @@ impl From<&StatePredicate> for StatePredicateRecord {
 }
 
 #[cfg(test)]
+#[path = "state_predicate/tests.rs"]
 mod tests;
