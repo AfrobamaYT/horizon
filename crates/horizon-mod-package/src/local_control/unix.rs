@@ -123,6 +123,8 @@ fn peer(stream: &Stream) -> io::Result<()> {
         }
         uid
     };
+    #[cfg(test)]
+    let uid = TEST_PEER_UID.with(|source| source.get().unwrap_or(uid));
     check_peer_uid(uid)
 }
 fn check_peer_uid(uid: u32) -> io::Result<()> {
@@ -131,12 +133,27 @@ fn check_peer_uid(uid: u32) -> io::Result<()> {
     }
     Ok(())
 }
+#[cfg(test)]
+std::thread_local! {
+    // Per-thread override keeps parallel real-credential tests isolated.
+    static TEST_PEER_UID: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
+}
 #[test]
-fn foreign_peer_uid_is_refused() {
-    let foreign = unsafe { libc::geteuid() } ^ 1;
-    assert!(
-        matches!(check_peer_uid(foreign), Err(error) if error.kind() == io::ErrorKind::PermissionDenied)
-    );
+fn foreign_peer_uid_is_refused_on_connect_and_accept() {
+    for server in [false, true] {
+        let (_root, marker) = super::tests::marker();
+        let mut endpoint = Endpoint::bind(&marker).unwrap();
+        let deadline = Instant::now() + std::time::Duration::from_secs(3);
+        let _client = server.then(|| connect(&marker, deadline).unwrap());
+        TEST_PEER_UID.set(Some(unsafe { libc::geteuid() } ^ 1));
+        let result = if server {
+            endpoint.accept(deadline)
+        } else {
+            connect(&marker, deadline)
+        };
+        TEST_PEER_UID.set(None);
+        assert!(matches!(result, Err(error) if error.kind() == io::ErrorKind::PermissionDenied));
+    }
 }
 impl Drop for Endpoint {
     fn drop(&mut self) {

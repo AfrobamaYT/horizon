@@ -1,7 +1,7 @@
 use super::*;
 use std::os::{fd::AsRawFd, unix::ffi::OsStrExt};
 
-fn marker() -> (tempfile::TempDir, Marker) {
+pub(super) fn marker() -> (tempfile::TempDir, Marker) {
     let root = tempfile::tempdir().unwrap();
     let parent = root.path().canonicalize().unwrap();
     let directory = parent.join(std::ffi::OsStr::from_bytes(b"fresh-\xff"));
