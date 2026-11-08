@@ -520,6 +520,7 @@ mod tests {
                     slots: 27,
                     data_slots: 0,
                     results: Vec::new(),
+                    crafting: None,
                 }));
                 for is_mod in [false, true] {
                     game.world.block_entities.insert(

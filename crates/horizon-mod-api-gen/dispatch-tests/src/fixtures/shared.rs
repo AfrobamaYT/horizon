@@ -98,6 +98,7 @@ mod generated {
     }
     pub(super) mod mod_api {
         pub(super) use super::super::ItemStack;
+        pub struct FluidModel;
         include!(concat!(env!("OUT_DIR"), "/dispatch_fixtures_api.rs"));
     }
     include!(concat!(env!("OUT_DIR"), "/mod_api_generated.rs"));
