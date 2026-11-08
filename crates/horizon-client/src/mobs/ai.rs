@@ -671,19 +671,50 @@ fn drop_invalid_player_target(m: &mut Mob, w: &MobWorld) {
         }
     }
 }
+/// A tick either completed or paused at the fox's inline consumption boundary.
+#[derive(Debug)]
+pub enum TickProgress {
+    Complete(bool),
+    Consumption {
+        decision: super::fox::Consumption,
+        /// The base-tick snapshot, before contact ignition or listener writes.
+        was_on_fire: bool,
+    },
+}
+
+/// Run a whole mob tick when no owning-host pause is needed by the caller.
 pub fn tick(
     m: &mut Mob,
     w: &MobWorld,
     level: &mut DamageLevel<'_>,
     events: &mut Vec<MobEvent>,
 ) -> bool {
+    match tick_until_consumption(m, w, level, events) {
+        TickProgress::Complete(kept) => kept,
+        TickProgress::Consumption {
+            decision,
+            was_on_fire,
+        } => {
+            super::fox::apply_consumption(&decision, w, m, events);
+            resume_after_consumption(m, w, level, was_on_fire, events)
+        }
+    }
+}
+
+/// Stop before a fox's effect draws so its owner can provide a mutable host.
+pub fn tick_until_consumption(
+    m: &mut Mob,
+    w: &MobWorld,
+    level: &mut DamageLevel<'_>,
+    events: &mut Vec<MobEvent>,
+) -> TickProgress {
     if m.removed {
-        return false;
+        return TickProgress::Complete(false);
     }
     // ServerLevel.tick checks despawning before ticking the entity.
     if !check_despawn(m, w) {
         m.removed = true;
-        return false;
+        return TickProgress::Complete(false);
     }
     // `Entity.computeSpeed`: what it moved in the last tick.
     let known_speed = m.position.subtract(m.previous);
@@ -703,7 +734,7 @@ pub fn tick(
     // Mob.tick pre-update hooks (Creeper.tick swells before super.tick).
     pre_tick(m, w, events);
     if m.removed {
-        return false;
+        return TickProgress::Complete(false);
     }
     if m.species() == Species::ZombieVillager {
         // ZombieVillager.tick counts the cure down before super.tick, with
@@ -723,7 +754,7 @@ pub fn tick(
         if super::creaking::is_creaking(m) && super::creaking::tearing_down(m) {
             super::creaking::tear_down(m, events);
         }
-        return false;
+        return TickProgress::Complete(false);
     }
     // LivingEntity.tick: updatingUsingItem, the stab of a spear in use.
     if m.alive() {
@@ -745,6 +776,42 @@ pub fn tick(
         super::villager::stop_sleeping(m, w, events);
         super::villager_brain::woken(m, w.game_time);
     }
+    // Fox.aiStep consumes before its super.aiStep, so the hook and its RNG
+    // precede goals, travel and block effects at the resumed position.
+    if m.species() == Species::Fox
+        && !m.no_ai
+        && let Some(decision) = super::fox::ai_step_until_consumption(m, w, events)
+    {
+        return TickProgress::Consumption {
+            decision,
+            was_on_fire,
+        };
+    }
+    TickProgress::Complete(ai_and_finish_tick(m, w, level, was_on_fire, events))
+}
+
+/// Resume a fox after its item effect, before the living AI/movement step.
+pub fn resume_after_consumption(
+    m: &mut Mob,
+    w: &MobWorld,
+    level: &mut DamageLevel<'_>,
+    was_on_fire: bool,
+    events: &mut Vec<MobEvent>,
+) -> bool {
+    if m.removed {
+        return false;
+    }
+    super::fox::before_living_ai_step(m, w);
+    ai_and_finish_tick(m, w, level, was_on_fire, events)
+}
+
+fn ai_and_finish_tick(
+    m: &mut Mob,
+    w: &MobWorld,
+    level: &mut DamageLevel<'_>,
+    was_on_fire: bool,
+    events: &mut Vec<MobEvent>,
+) -> bool {
     if m.no_ai {
         update_fall_flying(m, w, events);
         reset_effect_fall_distance(m);
@@ -807,6 +874,23 @@ pub fn tick(
     } else {
         ai_step(m, w, level, events);
     }
+    if m.no_ai && m.species() == Species::Fox {
+        super::fox::finish_ai_step(m, w, events);
+    }
+    finish_tick(m, w, level, was_on_fire, events)
+}
+
+/// Resume the living tick after species AI, before block effects and animation.
+/// Kept as one continuation so an inline action can regain its owning host and
+/// then run the same remaining work, in the original order.
+#[inline]
+pub fn finish_tick(
+    m: &mut Mob,
+    w: &MobWorld,
+    level: &mut DamageLevel<'_>,
+    was_on_fire: bool,
+    events: &mut Vec<MobEvent>,
+) -> bool {
     count_fall_fly_ticks(m);
     effects_from_blocks(m, w, level, events);
     extinguish_if_wet(m, w, was_on_fire, events);
@@ -1777,9 +1861,6 @@ fn ai_step(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, events: &mut 
             .is_some_and(|t| t.position.distance_squared(m.position) > 121.0);
         super::witch::ai_step(m, w.loop_context, events, far);
     }
-    if m.species() == Species::Fox {
-        super::fox::pre_ai_step(m);
-    }
     // AbstractHorse.aiStep: the tail swishes now and then (moveTail).
     if super::equine::is_equine(m.species()) {
         super::equine::tail_tick(m);
@@ -2498,7 +2579,7 @@ fn species_ai_step(
         Species::Armadillo => super::armadillo::tick(m),
         Species::Frog => super::frog::tick(m),
         Species::Goat => super::goat::tick(m),
-        Species::Fox => super::fox::ai_step(m, w, events),
+        Species::Fox => super::fox::finish_ai_step(m, w, events),
         Species::Turtle => super::turtle::ai_step(m, w, events),
         Species::Sheep if m.extra.anim_ticks > 0 => {
             m.extra.anim_ticks -= 1;

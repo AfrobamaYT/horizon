@@ -7883,6 +7883,7 @@ impl Game<'_> {
     }
     fn apply_consume_effect(
         &mut self,
+        consumed: &horizon_client::items::ItemStack,
         effect: &horizon_client::items::ConsumeEffect,
         mob: Option<mod_api::LivingRef>,
         allow_native: bool,
@@ -7961,7 +7962,7 @@ impl Game<'_> {
                 if mob.is_some() {
                     return None;
                 }
-                self.teleport_randomly(teleport)
+                self.teleport_randomly(teleport, consumed)
             }
             ConsumeEffect::PlaySound(sound) => {
                 let at = match mob {
