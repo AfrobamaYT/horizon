@@ -4,6 +4,13 @@
 //! Mods page.
 pub mod link;
 mod runtime;
+#[allow(
+    dead_code,
+    unused_variables,
+    unused_mut,
+    unsafe_op_in_unsafe_fn,
+    clippy::all
+)]
 pub(crate) mod boundary {
     include!(concat!(env!("OUT_DIR"), "/wire_host_generated.rs"));
 }

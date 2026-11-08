@@ -110,7 +110,7 @@ pub struct WasmMod {
     id: Arc<str>,
     running: Arc<Running>,
     input: TypedFunc<u32, u32>,
-    hook: TypedFunc<(u32, u32, u32), u64>,
+    hook: TypedFunc<u32, u64>,
     pub subscribed: &'static [Option<HookId>],
     released: Arc<Mutex<Vec<Id>>>,
     subscriptions: Arc<Mutex<std::collections::HashMap<(Id, u32), &'static [Option<HookId>]>>>,
@@ -502,7 +502,7 @@ impl WasmMod {
             .memory
             .ok_or_else(|| wasmtime::Error::msg("no memory"))?;
         memory.write(&mut *store, ptr as usize, input.bytes())?;
-        let result = self.hook.call(&mut *store, (id, ptr, len))?;
+        let result = self.hook.call(&mut *store, id)?;
         let ptr = (result >> 32) as usize;
         let len = result as u32;
         if len == u32::MAX {
