@@ -95,9 +95,8 @@ load, and `if_installed!` keeps the mod from calling it.
 ## Injection points
 
 API-typed `[[inject]]` listeners use the same generated `mod_points` records and constructors as
-native listeners. The wasm build takes the pinned game's staged `points.json` as an explicit
-`--points` input when injections are declared. Only the declared places' guest codecs and dispatch
-functions are compiled into the member; the complete catalog still determines its layout hash.
+native listeners. When injections are declared, the wasm build requires the pinned game's staged
+`points.json`, supplied via `--catalog` or beside the configured std member.
 Listeners register in the host's ordinary point list, with the same priority, dependency order,
 owner enable flag and stop behavior as native listeners. Mixins remain native-only.
 
