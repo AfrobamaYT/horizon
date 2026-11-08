@@ -7034,6 +7034,7 @@ mod tests {
                 converts_to_source: false,
             },
         });
+        let fluid = fluid.unwrap();
         let tick = |kind: FluidKind| SavedTick {
             kind: horizon_core::ticks::TickTypeId(kind.tick_id()),
             pos: BlockPos::new(1, 64, 2),

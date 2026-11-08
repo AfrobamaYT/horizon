@@ -47,18 +47,53 @@ fn mod_fluid_table() -> std::sync::RwLockReadGuard<'static, Vec<&'static ModFlui
 
 /// Registers a mod's fluid before any block table is built from the registry. Registering an id
 /// again replaces what it does and keeps its number.
-pub fn register_mod_fluid(fluid: ModFluidType) -> ModFluid {
+pub fn register_mod_fluid(fluid: ModFluidType) -> Result<ModFluid, ModFluidRegistrationError> {
     let mut table = MOD_FLUIDS.write().unwrap_or_else(|e| e.into_inner());
+    register_in(&mut table, fluid)
+}
+
+/// A fluid registration was refused without changing the registry.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ModFluidRegistrationError {
+    /// Source or flowing names collide.
+    NameCollision,
+    /// All process-lifetime fluid identifiers are occupied.
+    Capacity,
+}
+impl std::fmt::Display for ModFluidRegistrationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "world fluid registration refused: {self:?}")
+    }
+}
+impl std::error::Error for ModFluidRegistrationError {}
+
+fn register_in(
+    table: &mut Vec<&'static ModFluidType>,
+    fluid: ModFluidType,
+) -> Result<ModFluid, ModFluidRegistrationError> {
     let at = table.iter().position(|known| known.id == fluid.id);
+    if fluid.id == fluid.flowing_id
+        || table.iter().enumerate().any(|(i, known)| {
+            Some(i) != at
+                && (known.id == fluid.flowing_id
+                    || known.flowing_id == fluid.id
+                    || known.flowing_id == fluid.flowing_id)
+        })
+    {
+        return Err(ModFluidRegistrationError::NameCollision);
+    }
+    if at.is_none() && table.len() > usize::from(u16::MAX) {
+        return Err(ModFluidRegistrationError::Capacity);
+    }
     let leaked: &'static ModFluidType = Box::leak(Box::new(fluid));
     match at {
         Some(at) => {
             table[at] = leaked;
-            ModFluid(at as u16)
+            Ok(ModFluid(at as u16))
         }
         None => {
             table.push(leaked);
-            ModFluid(u16::try_from(table.len() - 1).expect("fewer than 65536 mod fluids"))
+            Ok(ModFluid((table.len() - 1) as u16))
         }
     }
 }
@@ -550,7 +585,75 @@ mod mod_fluid_tests {
                 converts_to_source: false,
             },
         })
+        .unwrap()
     }
+    #[test]
+    fn fluid_registration_refuses_collisions_and_capacity_atomically() {
+        let a = oil("refusal:oil", "refusal:flowing_oil").get();
+        let before = mod_fluids();
+        let mut collision = a.clone();
+        collision.id = a.flowing_id.clone();
+        collision.flowing_id = "refusal:flowing_flowing_oil".into();
+        assert_eq!(
+            register_mod_fluid(collision),
+            Err(ModFluidRegistrationError::NameCollision)
+        );
+        for (id, _) in before {
+            for kind in [FluidKind::Mod(id), FluidKind::ModFlowing(id)] {
+                assert_eq!(FluidKind::from_name(kind.name()), Some(kind));
+            }
+        }
+        // A full process-lifetime table, even if only one fluid is live now.
+        let mut table = vec![a; 65536];
+        let snapshot = table.clone();
+        let mut next = a.clone();
+        next.id = "refusal:new".into();
+        next.flowing_id = "refusal:flowing_new".into();
+        assert_eq!(
+            register_in(&mut table, next),
+            Err(ModFluidRegistrationError::Capacity)
+        );
+        assert_eq!(table, snapshot);
+        table.truncate(1);
+        assert_eq!(register_in(&mut table, a.clone()), Ok(ModFluid(0)));
+    }
+
+    #[test]
+    fn fluid_shape_cache_keeps_each_registry_entry_separate() {
+        use horizon_core::position::BlockPos;
+        struct Above(FluidState);
+        impl FluidHeightWorld for Above {
+            type Error = std::convert::Infallible;
+            fn fluid(&mut self, _: [i32; 3]) -> Result<FluidState, Self::Error> {
+                Ok(self.0)
+            }
+            fn sturdy_down(&mut self, _: [i32; 3]) -> Result<bool, Self::Error> {
+                Ok(false)
+            }
+        }
+        let a = FluidState::new(FluidKind::Mod(oil("shape:a", "shape:flowing_a")), 8, false);
+        let b = FluidState::new(FluidKind::Mod(oil("shape:b", "shape:flowing_b")), 8, false);
+        let water = FluidState::new(FluidKind::Water, 8, false);
+        for order in [[a, water, b], [water, b, a], [b, a, water]] {
+            let mut cache = crate::fluid_shape::FluidShapeCache::default();
+            for state in order {
+                let above = if state == a { a } else { FluidState::EMPTY };
+                let expected = if state == a {
+                    1.0
+                } else {
+                    f64::from(8.0_f32 / 9.0)
+                };
+                let shape = cache
+                    .shape(&mut Above(above), state, BlockPos::new(0, 0, 0))
+                    .unwrap();
+                assert_eq!(
+                    shape.bounds().unwrap().max(horizon_core::geometry::Axis::Y),
+                    expected
+                );
+            }
+        }
+    }
+
     fn block(name: &str, level: u8) -> BlockState {
         BlockState {
             name: name.into(),

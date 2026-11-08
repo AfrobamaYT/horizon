@@ -550,7 +550,7 @@ pub(super) fn content_root(
 ) -> horizon_client::Result<horizon_assets::resource_source::ResourceRoot> {
     let jar_store = horizon_client::logging::game_home().join("jars");
     let overlay = content_overlay(root, sources, &jar_store)?;
-    let world_fluids = horizon_client::mod_content::register_world_fluids(&overlay.mods);
+    let world_fluids = horizon_client::mod_content::register_world_fluids(&overlay.mods)?;
     register_block_entity_types(overlay.root.prepared(), &overlay.mods)?;
     if overlay.announce {
         horizon_protocol::mod_list::set_local(overlay.announced);

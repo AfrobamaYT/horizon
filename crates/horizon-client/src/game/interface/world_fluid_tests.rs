@@ -3,8 +3,8 @@
 use super::native_entity_refs::tests::{run_fresh_cases, with_game_at};
 use horizon_client::chunk::Chunk;
 use horizon_core::position::BlockPos;
-use horizon_mod_package::content::WorldFluid;
 use horizon_world::{chunk::BlockState, fluid::FluidKind, registry::BlockStateId};
+use mod_api::WorldFluid;
 use mod_api::{FluidPart, FluidRulesEvent, Hooks, LevelHost, ModEntry, Registrar};
 use std::sync::Arc;
 

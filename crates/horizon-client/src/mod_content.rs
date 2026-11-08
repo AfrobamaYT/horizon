@@ -119,7 +119,9 @@ pub fn set_fluid_looks(mods: &[ContentMod]) {
 
 /// Registers the world fluids the mods declare, before any block table is read from the root.
 /// Returns their registry names, source and flowing, for the fluid keys.
-pub fn register_world_fluids(mods: &[ContentMod]) -> Vec<String> {
+pub fn register_world_fluids(
+    mods: &[ContentMod],
+) -> Result<Vec<String>, horizon_world::fluid::ModFluidRegistrationError> {
     let mut names = Vec::new();
     for look in mods.iter().flat_map(|m| &m.content.fluids) {
         let Some(world) = look.world else { continue };
@@ -136,9 +138,9 @@ pub fn register_world_fluids(mods: &[ContentMod]) -> Vec<String> {
                 slope_find_distance: world.slope_find_distance,
                 converts_to_source: world.source_conversion,
             },
-        });
+        })?;
     }
-    names
+    Ok(names)
 }
 
 /// Joins the world fluids native mods declare in code to the content mods of their namespaces:

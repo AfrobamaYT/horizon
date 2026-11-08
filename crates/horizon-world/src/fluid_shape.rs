@@ -31,12 +31,10 @@ impl FluidShapeCache {
         if state.kind() == FluidKind::Empty {
             return Ok(VoxelShape::empty());
         }
-        // A mod's fluid shares water's shapes: they depend only on the height.
-        let row = state
-            .kind()
-            .vanilla_index()
-            .map_or(if state.is_source() { 2 } else { 1 }, usize::from);
+        // tick_id is distinct for every source and flowing registry entry.
+        let row = state.kind().tick_id() as usize;
         let index = row * 18 + usize::from(state.falling()) * 9 + usize::from(state.amount());
+        self.shapes.resize(self.shapes.len().max(index + 1), None);
         if let Some(shape) = &self.shapes[index] {
             return Ok(shape.clone());
         }

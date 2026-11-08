@@ -1092,6 +1092,15 @@ impl Content {
                 tint: file.tint,
                 world: file.world,
             };
+            if self.fluids.iter().any(|known| {
+                known.id == look.id
+                    || (known.world.is_some() && known.flowing_id() == look.id)
+                    || (look.world.is_some()
+                        && (look.flowing_id() == known.id
+                            || (known.world.is_some() && look.flowing_id() == known.flowing_id())))
+            }) {
+                return Err(format!("{name}: fluid name declared twice"));
+            }
             if let Some(block) = look.world_block() {
                 if self.blocks.iter().any(|known| known.id == block.id) {
                     return Err(format!("{name}: block {} is declared twice", block.id));
@@ -2618,6 +2627,22 @@ capabilities = ["registries"]
     }
 
     /// A creative tab: a title, an icon and its items, all item ids.
+    #[test]
+    fn world_fluid_generated_names_cannot_collide() {
+        let files: &[(&str, &[u8])] = &[
+            ("data/ruby/horizon/fluid/oil.json", br#"{"world":{}}"#),
+            (
+                "data/ruby/horizon/fluid/flowing_oil.json",
+                br#"{"world":{}}"#,
+            ),
+        ];
+        assert!(
+            hmod("fluid-collision", MANIFEST_TEXT, files)
+                .unwrap_err()
+                .contains("declared twice")
+        );
+    }
+
     #[test]
     fn a_world_fluid_brings_its_block_and_bucket() {
         let files: &[(&str, &[u8])] = &[
