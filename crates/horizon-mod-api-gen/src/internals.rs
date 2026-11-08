@@ -1233,6 +1233,18 @@ pub fn discover(root: &Path) -> Result<Widened, String> {
     stage(root, true)
 }
 
+/// Read the same original signatures and reachable layouts as staging, without changing files.
+/// Visibility edits are collected but never emitted, so build-time consumers can safely build
+/// a crossing rule over the catalog in a normal source checkout.
+pub fn catalog(root: &Path) -> Result<Vec<Internal>, String> {
+    let path = root.join("crates/horizon-mod-api-gen/internals.txt");
+    let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(collect(root, &[("internals.txt", text)], false)?
+        .entries
+        .into_values()
+        .collect())
+}
+
 fn stage(root: &Path, discovery: bool) -> Result<Widened, String> {
     let path = root.join("crates/horizon-mod-api-gen/internals.txt");
     let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -1246,6 +1258,10 @@ fn widen_with(root: &Path, lists: &[(&str, String)]) -> Result<Widened, String> 
 }
 
 fn widen_mode(root: &Path, lists: &[(&str, String)], discovery: bool) -> Result<Widened, String> {
+    collect(root, lists, discovery)?.finish()
+}
+
+fn collect(root: &Path, lists: &[(&str, String)], discovery: bool) -> Result<Pass, String> {
     let mut pass = Pass {
         discovery,
         ..Pass::default()
@@ -1313,7 +1329,7 @@ fn widen_mode(root: &Path, lists: &[(&str, String)], discovery: bool) -> Result<
                 .or_insert_with(|| (start, "#![allow(deprecated)]\n".into()));
         }
     }
-    pass.finish()
+    Ok(pass)
 }
 
 #[cfg(test)]
@@ -1368,6 +1384,51 @@ mod tests {
         fn drop(&mut self) {
             fs::remove_dir_all(&self.0).unwrap();
         }
+    }
+
+    #[test]
+    fn catalog_is_read_only_and_staging_output_keeps_its_goldens() {
+        fn files(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+            let mut result = BTreeMap::new();
+            for entry in fs::read_dir(root).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    result.extend(files(&path));
+                } else {
+                    let bytes = fs::read(&path).unwrap();
+                    result.insert(path, bytes);
+                }
+            }
+            result
+        }
+        let plain = Fixture::new("fn f() {}\n");
+        plain.put("crates/horizon-mod-api-gen/internals.txt", "");
+        let before = files(&plain.0);
+        let original = catalog(&plain.0).unwrap();
+        assert_eq!(files(&plain.0), before);
+        let widened = widen(&plain.0).unwrap();
+        assert_eq!(plain.game(), "pub fn f() {}\n");
+        assert_eq!(
+            serde_json::to_value(original).unwrap(),
+            serde_json::to_value(widened.entries).unwrap()
+        );
+
+        let diagnostic = Fixture::new("fn f() {}\n");
+        diagnostic.put("crates/horizon-mod-api-gen/internals.txt", "");
+        let original = catalog(&diagnostic.0).unwrap();
+        let discovered = discover(&diagnostic.0).unwrap();
+        assert_eq!(
+            diagnostic.game(),
+            "#[deprecated(note = \"horizon-internal:fn:horizon_client::game::f\")]\npub fn f() {}\n"
+        );
+        assert_eq!(
+            fs::read_to_string(diagnostic.0.join("crates/horizon-client/src/lib.rs")).unwrap(),
+            "#![allow(deprecated)]\nmod game; mod entry;\n"
+        );
+        assert_eq!(
+            serde_json::to_value(original).unwrap(),
+            serde_json::to_value(discovered.entries).unwrap()
+        );
     }
 
     #[test]
@@ -1878,7 +1939,7 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
     }
 
     #[test]
-    fn explicitly_listed_lower_layouts_are_widened_and_walked() {
+    fn explicitly_listed_lower_layouts_are_widened() {
         let fixture = shapes_fixture("struct Game {}\n");
         fixture.put(
             "crates/horizon-items/src/item_stack.rs",
@@ -1906,9 +1967,6 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
             text.contains("pub struct ItemStack { pub count: u8 }"),
             "{text}"
         );
-        let (code, counts) = crate::internals_table::table(&result.entries, &[path.into()]);
-        assert_eq!(counts.types, 1, "{code}");
-        assert_eq!(counts.skipped, 0);
     }
 
     #[test]
@@ -1931,18 +1989,6 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
             assert_eq!(
                 stack.opaque_reason,
                 Some("not an unconditional game dependency")
-            );
-            let (_, counts) = crate::internals_table::table(
-                &widened.entries,
-                &widened
-                    .entries
-                    .iter()
-                    .map(|i| i.path.clone())
-                    .collect::<Vec<_>>(),
-            );
-            assert_eq!(
-                counts.skipped_types["not an unconditional game dependency"],
-                1
             );
             let source =
                 fs::read_to_string(fixture.0.join("crates/horizon-items/src/item_stack.rs"))
@@ -1974,16 +2020,6 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
             widened.entries[0].opaque_reason,
             Some("shape module walk failed")
         );
-        let (_, counts) = crate::internals_table::table(
-            &widened.entries,
-            &widened
-                .entries
-                .iter()
-                .map(|i| i.path.clone())
-                .collect::<Vec<_>>(),
-        );
-        assert_eq!(counts.types, 0);
-        assert_eq!(counts.skipped_types["shape module walk failed"], 1);
     }
 
     #[test]
@@ -2156,16 +2192,12 @@ pub struct ItemStack { a: First, b: Second, c: second::Kind }
             "struct Guarded { #[cfg(feature = \"audio\")] sound: u8 }\nenum Cases { #[cfg_attr(feature = \"audio\", cfg(unix))] Audio, Normal }\n",
         );
         let widened = widen_with(&fixture.0, &[]).unwrap();
-        let (_, counts) = crate::internals_table::table(
-            &widened.entries,
-            &widened
-                .entries
-                .iter()
-                .map(|i| i.path.clone())
-                .collect::<Vec<_>>(),
-        );
-        assert_eq!(counts.types, 0);
-        assert_eq!(counts.skipped_types["opaque type"], 2);
+        let guarded = widened
+            .entries
+            .iter()
+            .filter(|entry| entry.opaque_reason.is_some())
+            .count();
+        assert_eq!(guarded, 2);
     }
 
     #[test]
@@ -2318,63 +2350,6 @@ const LABEL: &str = "é"; struct AfterUnicode;
                     .contains("pub fn run")
             );
         }
-    }
-
-    #[test]
-    fn guarded_game_keeps_slots_thunks_and_wasm_handles() {
-        use crate::crossing::{Crossing, Rule, Shape};
-        let fixture = Fixture::new(
-            "struct Game<'a> { large: [u64; 32], marker: &'a str, #[cfg(feature = \"x\")] extra: u8 }\nimpl Game<'_> { fn next_autosave_interval(&self) -> i64 { 42 } }\n",
-        );
-        let method = "horizon_client::game::Game<'_>::next_autosave_interval";
-        let field = "horizon_client::game::Game<'_>::large";
-        fixture.put(
-            "crates/horizon-mod-api-gen/slots/test.txt",
-            "horizon_client::game::Game::next_autosave_interval\n",
-        );
-        let result = widen_with(&fixture.0, &[]).unwrap();
-        let entries = &result.entries;
-        let method_entry = entries.iter().find(|i| i.path == method).unwrap();
-        // Discovered from 0af894a3a0^, before #1762 added Game's cfg field.
-        assert_eq!(method_entry.hash, "5829bc5b9f60aaca");
-        let rule = Rule::new(entries);
-        let shape = Shape::Named("horizon_client::game::Game".into(), 1);
-        assert_eq!(rule.crossing_of(&shape), Crossing::Handle);
-        let (code, counts) = crate::internals_table::table(entries, &[method.into(), field.into()]);
-        assert_eq!(counts.thunks, 1);
-        assert_eq!(counts.refused[field], "conditional field or variant");
-        crate::internals_table::tests::run_fixture(
-            &code,
-            "mod game { pub struct Game<'a> { pub large: [u64; 32], pub marker: &'a str } impl Game<'_> { pub fn next_autosave_interval(&self) -> i64 { 42 } } }",
-            "let _ = (std::mem::size_of::<Op>(), std::mem::size_of::<Reply>(), std::mem::size_of::<Value>()); let game = game::Game { large: [0; 32], marker: \"\" }; assert_eq!(game.large[0], 0); assert_eq!(game.marker, \"\");",
-        );
-        let declaration = |i: &Internal| crate::internals_view::Declaration {
-            path: i.path.clone(),
-            hash: i.hash.clone(),
-            kind: Some(i.kind.into()),
-        };
-        let owner = entries
-            .iter()
-            .find(|i| i.kind == "struct" && i.path == "horizon_client::game::Game")
-            .unwrap();
-        let view = crate::internals_view::generate(
-            entries,
-            &[declaration(method_entry), declaration(owner)],
-            &[],
-            &[],
-        )
-        .unwrap();
-        let parsed = syn::parse_file(&view).unwrap();
-        let syn::Item::Mod(module) = &parsed.items[0] else {
-            panic!("view module")
-        };
-        let items = &module.content.as_ref().unwrap().1;
-        assert!(items.iter().any(|i| matches!(i, syn::Item::Struct(s) if s.ident.to_string().ends_with("Game") && matches!(s.fields, syn::Fields::Unnamed(_)))));
-        assert!(!view.contains("fn large"));
-        let field_entry = entries.iter().find(|i| i.path == field).unwrap();
-        let error = crate::internals_view::generate(entries, &[declaration(field_entry)], &[], &[])
-            .unwrap_err();
-        assert!(error.contains("conditional field or variant"), "{error}");
     }
 
     #[test]

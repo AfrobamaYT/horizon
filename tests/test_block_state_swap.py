@@ -47,6 +47,35 @@ class BlockStateSwapTest(unittest.TestCase):
             self.assertEqual(len(report["refused"]), 1)
             self.assertEqual(run.returncode == 0, not apply)
 
+    def test_known_constructor_is_deferred_without_guessing_its_semantics(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / "target", prefix="swap-deferred-") as directory:
+            root = Path(directory)
+            (root / "Cargo.toml").write_text("[workspace]\n")
+            api = root / "crates/horizon-mod-api/src"
+            api.mkdir(parents=True)
+            fixture = api / "wasm_key_tests.rs"
+            fixture.write_text("fn fixture() { let state = BlockStateId(19); }\n")
+            report = root / "report.json"
+            subprocess.run(["python3", str(SCRIPT), "--root", str(root), "--report", str(report), "--apply", "--defer-constructor-fixtures"], check=True, capture_output=True)
+            self.assertIn("BlockState(19)", fixture.read_text())
+            result = json.loads(report.read_text())
+            self.assertTrue(result["applied"])
+            self.assertEqual(len(result["hand_fixes"]), 1)
+
+    def test_only_transitional_arms_are_removed(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / "target", prefix="swap-arms-") as directory:
+            root = Path(directory)
+            (root / "Cargo.toml").write_text("[workspace]\n")
+            (root / "crates/horizon-mod-api/src").mkdir(parents=True)
+            dispatch = root / "crates/horizon-mod-api-gen/src/dispatch.rs"
+            dispatch.parent.mkdir(parents=True)
+            preserved = 'normalize("BlockStateId"); engine::<horizon_world::registry::BlockStateId>();\n'
+            dispatch.write_text(preserved + '                    "BlockStateId" if table == "block" => { first() }\n                    "BlockStateId" => { second() }\n                    "& ItemStack" => { third() }\n')
+            report = root / "report.json"
+            subprocess.run(["python3", str(SCRIPT), "--root", str(root), "--report", str(report), "--apply"], check=True, capture_output=True)
+            self.assertEqual(dispatch.read_text(), preserved + '                    "& ItemStack" => { third() }\n')
+            self.assertEqual(json.loads(report.read_text())["files"][0]["states_after"], 2)
+
     def test_qualified_engine_import_requires_ownership_review(self):
         source = "use horizon_world::registry::BlockStateId;\n"
         run, result, report = self.run_swap(source, True)

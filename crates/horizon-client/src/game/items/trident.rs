@@ -33,7 +33,7 @@ pub(super) struct ThrownTrident {
     pub(super) yaw: f32,
     pub(super) pitch: f32,
     pub(super) in_ground: bool,
-    in_ground_time: u32,
+    pub(super) in_ground_time: u32,
     /// `AbstractArrow.shakeTime`: seven ticks after sticking, no pickup.
     shake: u32,
     dealt_damage: bool,
@@ -558,11 +558,7 @@ impl Game<'_> {
             None => self.player_team().cloned(),
         };
         let target = host.hub.guest(conn).and_then(|g| team_of(self, &g.name));
-        let refused = !(self
-            .ui
-            .rules
-            .bool_at(horizon_client::gamerules::vanilla::PVP)
-            && horizon_client::scoreboard::teams_allow_damage(target.as_ref(), attacker.as_ref()));
+        let refused = !self.player_may_harm(target.as_ref(), attacker.as_ref());
         let shooter = self.player_attacker(t.guest);
         let from = [t.previous.x, t.previous.y, t.previous.z];
         self.guest_hit_by(conn, |g| {

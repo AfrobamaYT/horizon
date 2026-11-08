@@ -468,6 +468,9 @@ pub struct PlayerMotion {
     pub local_crouching: bool,
     pub pose: crate::pose::Pose,
     pub dimensions: crate::pose::Dimensions,
+    /// What `entity_size` answered for this body's pose and vanilla size (see
+    /// `game/modding/entity_sizes.rs`); `refresh_dimensions` keeps it while it holds.
+    pub size_answer: Option<crate::pose::SizeAnswer>,
     /// The `minecraft:scale` the dimensions were last built with
     /// (`Entity.refreshDimensions`), for the poses the body takes before it
     /// next refreshes.
@@ -594,6 +597,14 @@ impl PlayerMotion {
             self.air = extra
                 .and_then(|t| crate::save::number(t.get("Air")))
                 .unwrap_or(300) as i32;
+            // Entity.saveWithoutId's `Invulnerable` flag and its
+            // `invulnerable_time` window (#916).
+            self.health.permanently_invulnerable = extra
+                .and_then(|t| crate::save::number(t.get("Invulnerable")))
+                .is_some_and(|v| v != 0);
+            self.health.invulnerable_time = extra
+                .and_then(|t| crate::save::number(t.get("invulnerable_time")))
+                .unwrap_or(0) as i32;
             self.fall_distance = level.fall_distance;
             // LivingEntity.readAdditionalSaveData applies the saved attributes
             // before it reads the health (a raised max_health keeps its hearts).
@@ -701,6 +712,7 @@ impl PlayerMotion {
             local_crouching: false,
             pose: crate::pose::Pose::Standing,
             dimensions: crate::pose::Pose::Standing.dimensions(1.0),
+            size_answer: None,
             scale: 1.0,
             swimming: false,
             is_passenger: false,
@@ -1075,6 +1087,7 @@ impl MotionWorld<'_, '_, '_> {
         CollisionContext::for_entity(
             CollisionEntity {
                 identity: EntityIdentity(0),
+                kind: horizon_world::collision_context::EntityContextKind::Player,
                 y: self.player.position.y,
                 descending: self.player.shift_key_down,
                 main_hand: Some(CollisionItem::EMPTY),

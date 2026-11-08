@@ -13,7 +13,7 @@ pub(in crate::game) fn stack(
         .items
         .get_key_value(name)
         .ok_or(StackWriteError::UnknownItem)?;
-    Ok(encode_stack(value, name.clone()))
+    encode_stack(value, name.clone())
 }
 
 #[cfg(test)]

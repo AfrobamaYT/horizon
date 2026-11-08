@@ -1,9 +1,10 @@
 //! Engine recipe ingredients and stack matching.
+use super::native_hooks::native_ingredient;
 use super::{ItemStack, Items};
 use crate::native_stack_hooks::ingredient_test as native_ingredient_test;
 use horizon_world::native_load_context::LoadContext;
+use mod_api::__private::{WalkedIngredient, dedup_keep_order, resolved_items};
 pub use mod_api::crafting::Shape;
-use mod_api::crafting::{WalkedIngredient, dedup_keep_order, native_ingredient, resolved_items};
 use serde_json::Value;
 use std::collections::HashSet;
 /// Where `Ingredient::resolve` leaves the hook's answer inside the occurrence
@@ -83,8 +84,10 @@ impl Ingredient {
                     }
                     Some(k) if is_custom(k) => {
                         let mut list = Vec::new();
-                        if let Ok(data) = crate::json_nbt::json_to_compound(o) {
-                            native_ingredient(context, k, &data, &mut list);
+                        if mod_api::__private::listened(mod_api::HookId::Ingredient) {
+                            if let Ok(data) = crate::json_nbt::json_to_compound(o) {
+                                native_ingredient(context, k, &data, &mut list);
+                            }
                         }
                         dedup_keep_order(&mut list);
                         o.insert(RESOLVED_ITEMS.to_owned(), list.into());

@@ -90,7 +90,12 @@ pub(super) fn emit<'a>(
                 one_function(functions.iter(), function)?.clone(),
                 // A hook in the mod API crate, or in a crate above it, calls its dispatch
                 // directly; one below it calls the callback the game installs.
-                if matches!(krate, "horizon-mod-api" | "horizon-client-render") {
+                if matches!(krate, "horizon-mod-api" | "horizon-client-render")
+                    || super::has_call(
+                        &one_function(functions.iter(), function)?.block,
+                        &format!("dispatch_{name}"),
+                    )
+                {
                     format!("dispatch_{name}")
                 } else {
                     name.to_owned()
@@ -264,6 +269,7 @@ pub(super) fn emit<'a>(
                     PartKind::BlockEntity => ("BlockEntityPart", "block_entity"),
                     PartKind::Item => ("ItemPart", "item"),
                     PartKind::Menu => ("MenuPart", "menu"),
+                    PartKind::Fluid => ("FluidPart", "fluid"),
                 };
                 if is_render {
                     return Err(format!("render hook {name} cannot be scoped"));
@@ -277,33 +283,6 @@ pub(super) fn emit<'a>(
                     "BlockState" if table == "block" => format!("block_value({key})"),
                     "BlockState" => {
                         format!("{table}(|| super::registry_keys::block_id({key}.block()))")
-                    }
-                    "BlockStateId" if table == "block" => {
-                        let Some((level, _)) = host.as_ref().filter(|_| is_level) else {
-                            return Err(format!("{name} has no level to name {key}'s block"));
-                        };
-                        let state_name = if hook.side == Side::Both {
-                            format!(
-                                "match &{level} {{ LevelSide::Server({level}) | LevelSide::Client({level}) => {level}.state_block({key}), }}"
-                            )
-                        } else {
-                            format!("{level}.state_block({key})")
-                        };
-                        format!(
-                            "block_key(({state_name}).and_then(super::registry_keys::block_key))"
-                        )
-                    }
-                    "BlockStateId" => {
-                        let Some((level, _)) = host.as_ref().filter(|_| is_level) else {
-                            return Err(format!("{name} has no level to name {key}'s block"));
-                        };
-                        if hook.side == Side::Both {
-                            format!(
-                                "{table}(|| match &{level} {{ LevelSide::Server({level}) | LevelSide::Client({level}) => {level}.state_block({key}), }})"
-                            )
-                        } else {
-                            format!("{table}(|| {level}.state_block({key}))")
-                        }
                     }
                     "& ItemStack" => {
                         format!("{table}(|| super::registry_keys::item_id({key}.item()))")
@@ -859,7 +838,10 @@ fn stack_crossing_routed(
         let stack = contains_boundary(ty, STACK_VALUES);
         let infallible = contains_boundary(ty, INFALLIBLE_VALUES);
         let mutable = matches!(ty, Type::Reference(r) if r.mutability.is_some());
-        if surfaces.contains_key(name.as_str()) || (!stack && !block && !infallible && !mutable) {
+        if surfaces.contains_key(name.as_str())
+            || matches!(ty, Type::Reference(r) if matches!(&*r.elem, Type::TraitObject(_)))
+            || (!stack && !block && !infallible && !mutable)
+        {
             arguments.push(name.clone());
             continue;
         }
@@ -1287,6 +1269,31 @@ fn main() {
                 if success { "passed" } else { "mutant killed" }
             );
         }
+    }
+
+    #[test]
+    fn boundary_draw_context_is_borrowed_not_snapshotted() {
+        let state: Type = syn::parse_quote!(BlockState);
+        let draw: Type = syn::parse_quote!(&mut dyn CameraDrawContext);
+        let replace: Type = syn::parse_quote!(&mut bool);
+        let crossing = stack_crossing(
+            &[
+                ("state".into(), &state),
+                ("draw".into(), &draw),
+                ("replace".into(), &replace),
+            ],
+            None,
+            "BlockScreenEffectDraw",
+            false,
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            crossing.arguments,
+            ["__api_state", "draw", "&mut __api_replace"]
+        );
+        assert!(!crossing.before.contains("__api_draw"));
+        assert!(!crossing.after.contains("*draw"));
     }
 
     #[test]

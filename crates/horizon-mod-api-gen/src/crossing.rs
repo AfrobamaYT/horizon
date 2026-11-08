@@ -421,6 +421,8 @@ pub struct Rule {
     /// Import facts in each lexical module. Conflicting conditional imports stay unresolved.
     refs: HashMap<String, BTreeMap<String, Option<String>>>,
     memo: std::cell::RefCell<HashMap<String, Crossing>>,
+    /// Whether a named layout has a generated decoder, decided once per rule.
+    pub(crate) decodable: std::cell::RefCell<HashMap<String, bool>>,
 }
 
 /// `a::b::C<'_>` as `a::b::C`.
@@ -537,6 +539,7 @@ impl Rule {
                 .collect(),
             refs,
             memo: Default::default(),
+            decodable: Default::default(),
         }
     }
 
@@ -746,9 +749,6 @@ impl Rule {
             .as_deref()
             .and_then(|p| p.rsplit("::").next())
             .unwrap_or(&name);
-        if matches!(name, "HashSet" | "BTreeSet") {
-            return opaque;
-        }
         let single = |args: Vec<Shape>| -> Option<Box<Shape>> {
             let [inner] = <[Shape; 1]>::try_from(args).ok()?;
             Some(Box::new(inner))
@@ -830,6 +830,11 @@ impl Rule {
             // Nodes erase pointers to `*mut ()`; a slice's metadata cannot survive that.
             Shape::Slice(_) => Crossing::Opaque,
             Shape::Collection(collection, args) => {
+                // Sets have no stable addressable element nodes, even though their owned
+                // value shape can be used by a native codec.
+                if matches!(collection, Collection::HashSet | Collection::BTreeSet) {
+                    return Crossing::Opaque;
+                }
                 let walked = match collection {
                     Collection::HashMap | Collection::BTreeMap => &args[..2],
                     _ => &args[..1],

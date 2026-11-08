@@ -12,7 +12,7 @@ pub trait Hooks {
         contract = "listen",
         context = "loop",
         version = 2,
-        target = "mod_api::crafting::native_ingredient_test",
+        target = "horizon_client_lib::crafting::native_hooks::native_ingredient_test",
         neoforge = "ICustomIngredient"
     )]
     fn ingredient_test();

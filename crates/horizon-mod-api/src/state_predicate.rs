@@ -5,7 +5,6 @@ use crate::{BlockKey, BlockMetadata, BlockState, BlockStateError, StateConstrain
 /// An unknown or missing property on a tag member never matches.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
-#[horizon_mod_api_macros::wasm(via = StatePredicateRecord)]
 pub struct StatePredicate {
     target: StatePredicateTarget,
     constraints: Vec<StateConstraint>,

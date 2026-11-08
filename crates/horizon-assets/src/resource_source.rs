@@ -1,6 +1,7 @@
 //! Open resource layers, shared by asset packs and passive mod data.
 //! Archive layers retain one reader and never materialize their entries.
 //! Diverges from upstream: asset and passive jar-data layers share this source.
+#[cfg(not(target_arch = "wasm32"))]
 use crate::zip::Zip;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
@@ -11,8 +12,52 @@ use std::{
     sync::Arc,
 };
 
+/// File identity/change stamps for resource-cache keys, following symlinks.
+pub(crate) fn metadata_fingerprint(metadata: &fs::Metadata) -> io::Result<u64> {
+    let mut hash = DefaultHasher::new();
+    metadata.len().hash(&mut hash);
+    metadata.modified()?.hash(&mut hash);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        (
+            metadata.dev(),
+            metadata.ino(),
+            metadata.ctime(),
+            metadata.ctime_nsec(),
+        )
+            .hash(&mut hash);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        metadata.creation_time().hash(&mut hash);
+    }
+    Ok(hash.finish())
+}
+
+fn copy_resource_bytes(
+    bytes: &[u8],
+    out: &mut impl io::Write,
+    budget: &std::sync::atomic::AtomicU64,
+) -> io::Result<()> {
+    use std::sync::atomic::Ordering;
+    let mut left = budget.load(Ordering::Relaxed);
+    loop {
+        let next = left.checked_sub(bytes.len() as u64).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::FileTooLarge, "pack exceeds unpack budget")
+        })?;
+        match budget.compare_exchange_weak(left, next, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => break,
+            Err(current) => left = current,
+        }
+    }
+    out.write_all(bytes)
+}
+
 enum Storage {
     Directory(PathBuf),
+    #[cfg(not(target_arch = "wasm32"))]
     Archive(Zip),
     Prefix {
         source: ResourceSource,
@@ -68,6 +113,7 @@ impl std::fmt::Debug for ResourceSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let kind = match self.0.as_ref() {
             Storage::Directory(_) => "Directory",
+            #[cfg(not(target_arch = "wasm32"))]
             Storage::Archive(_) => "Archive",
             Storage::Prefix { .. } => "Prefix",
             Storage::Index(_) => "Index",
@@ -80,13 +126,14 @@ impl std::fmt::Debug for ResourceSource {
 /// separate locations. Archive resources never acquire a filesystem pathname.
 #[derive(Clone, Debug)]
 pub struct ResourceRoot(Arc<Root>);
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct Root {
     prepared: PathBuf,
     cache: PathBuf,
     source: ResourceSource,
     data: ResourceSource,
     data_changes: ResourceSource,
+    runtime_block_sprites: Vec<String>,
 }
 impl ResourceRoot {
     pub fn directory(path: PathBuf) -> Self {
@@ -100,6 +147,7 @@ impl ResourceRoot {
             source,
             data,
             data_changes: ResourceSource::default(),
+            runtime_block_sprites: Vec::new(),
         }))
     }
     /// Passive server data is independent of the client's selected asset packs.
@@ -110,7 +158,34 @@ impl ResourceRoot {
             source: self.0.source.clone(),
             data,
             data_changes,
+            runtime_block_sprites: self.0.runtime_block_sprites.clone(),
         }))
+    }
+    /// Add generated client textures as the highest asset layer, keeping the
+    /// prepared tables and passive server data on their original sources.
+    pub fn with_runtime_textures(
+        mut self,
+        textures: BTreeMap<String, Resource>,
+        block_sprites: Vec<String>,
+    ) -> Self {
+        if textures.is_empty() {
+            return self;
+        }
+        let root = Arc::make_mut(&mut self.0);
+        let source = &root.source;
+        let mut files: BTreeMap<_, _> = source
+            .list("")
+            .into_iter()
+            .map(|name| (name.clone(), Resource::file(source.clone(), name)))
+            .collect();
+        files.extend(textures);
+        root.source = ResourceSource::indexed(files);
+        root.runtime_block_sprites = block_sprites;
+        self
+    }
+    /// Runtime block sprites to stitch even when no baked model names them.
+    pub fn runtime_block_sprites(&self) -> &[String] {
+        &self.0.runtime_block_sprites
     }
     pub fn data_changes(&self) -> &ResourceSource {
         &self.0.data_changes
@@ -215,6 +290,7 @@ impl ResourceSource {
                 .collect()
         }
         match self.0.as_ref() {
+            #[cfg(not(target_arch = "wasm32"))]
             Storage::Archive(archive) => {
                 collect(archive.names().filter(|name| stays_inside(name)), top)
             }
@@ -231,10 +307,12 @@ impl ResourceSource {
     pub fn directory(root: PathBuf) -> Self {
         Self(Arc::new(Storage::Directory(root)))
     }
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn archive(path: &Path) -> io::Result<Self> {
         Ok(Self::opened_archive(Zip::open(path)?))
     }
     /// Share an archive that was already opened while discovering its metadata.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn opened_archive(archive: Zip) -> Self {
         Self(Arc::new(Storage::Archive(archive)))
     }
@@ -267,12 +345,46 @@ impl ResourceSource {
         }
         match self.0.as_ref() {
             Storage::Directory(root) => horizon_core::prepared_files::read(&root.join(name)),
+            #[cfg(not(target_arch = "wasm32"))]
             Storage::Archive(archive) => archive.read(name),
             Storage::Prefix { source, prefix } => source.read(&format!("{prefix}{name}")),
             Storage::Index(files) => files
                 .get(name)
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, name.to_owned()))?
                 .read(),
+        }
+    }
+    /// Copy a resource under a shared output budget, streaming archive entries.
+    pub fn copy_to(
+        &self,
+        name: &str,
+        out: &mut impl io::Write,
+        budget: &std::sync::atomic::AtomicU64,
+    ) -> io::Result<()> {
+        if !stays_inside(name) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "unsafe resource name",
+            ));
+        }
+        match self.0.as_ref() {
+            Storage::Archive(archive) => archive.copy_to(name, out, budget).map(|_| ()),
+            Storage::Prefix { source, prefix } => {
+                source.copy_to(&format!("{prefix}{name}"), out, budget)
+            }
+            Storage::Index(files) => match &files
+                .get(name)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, name.to_owned()))?
+                .0
+            {
+                ResourceStorage::File { source, name } => source.copy_to(name, out, budget),
+                ResourceStorage::Bytes(bytes) => copy_resource_bytes(bytes, out, budget),
+            },
+            Storage::Directory(root) => copy_resource_bytes(
+                &horizon_core::prepared_files::read(&root.join(name))?,
+                out,
+                budget,
+            ),
         }
     }
     pub fn read_to_string(&self, name: &str) -> io::Result<String> {
@@ -291,6 +403,7 @@ impl ResourceSource {
             Storage::Directory(root) => {
                 horizon_core::prepared_files::read_head(&root.join(name), max)
             }
+            #[cfg(not(target_arch = "wasm32"))]
             Storage::Archive(archive) => archive.read_head(name, max),
             Storage::Prefix { source, prefix } => source.read_head(&format!("{prefix}{name}"), max),
             Storage::Index(files) => match &files
@@ -319,6 +432,7 @@ impl ResourceSource {
                     path.is_file()
                 }
             }
+            #[cfg(not(target_arch = "wasm32"))]
             Storage::Archive(archive) => archive.contains(name),
             Storage::Prefix { source, prefix } => source.contains(&format!("{prefix}{name}")),
             Storage::Index(files) => files.contains_key(name),
@@ -337,6 +451,7 @@ impl ResourceSource {
             Storage::Directory(root) => {
                 horizon_core::prepared_files::read_head(&root.join(name), max.saturating_add(1))?
             }
+            #[cfg(not(target_arch = "wasm32"))]
             Storage::Archive(archive) => return archive.read_limited(name, max),
             Storage::Prefix { source, prefix } => {
                 return source.read_limited(&format!("{prefix}{name}"), max);
@@ -383,6 +498,7 @@ impl ResourceSource {
                 out.sort();
                 out
             }
+            #[cfg(not(target_arch = "wasm32"))]
             Storage::Archive(archive) => archive
                 .names()
                 .filter(|name| name.starts_with(prefix) && stays_inside(name))
@@ -463,8 +579,9 @@ impl ResourceSource {
     fn file_fingerprint(&self, name: &str, archives: &mut HashMap<usize, u64>) -> Option<u64> {
         match self.0.as_ref() {
             Storage::Directory(root) => {
-                crate::zip::metadata_fingerprint(&fs::metadata(root.join(name)).ok()?).ok()
+                metadata_fingerprint(&fs::metadata(root.join(name)).ok()?).ok()
             }
+            #[cfg(not(target_arch = "wasm32"))]
             Storage::Archive(archive) => {
                 let key = Arc::as_ptr(&self.0) as usize;
                 let fingerprint = match archives.get(&key) {
@@ -504,6 +621,32 @@ mod tests {
     };
 
     struct Fixture(PathBuf);
+
+    #[test]
+    fn runtime_textures_join_the_asset_generation_without_changing_data() {
+        let source = ResourceSource::indexed(BTreeMap::from([(
+            "assets/demo/textures/block/original.png".into(),
+            Resource::bytes(vec![1]),
+        )]));
+        let data = ResourceSource::default();
+        let root = ResourceRoot::new("prepared".into(), "cache".into(), source.clone())
+            .with_data(data.clone(), ResourceSource::default());
+        let name = "assets/demo/textures/block/generated.png";
+        let texture = |byte| BTreeMap::from([(name.into(), Resource::bytes(vec![byte]))]);
+        let first = root
+            .clone()
+            .with_runtime_textures(texture(2), vec!["demo:block/generated".into()]);
+        let second = root.with_runtime_textures(texture(3), vec!["demo:block/generated".into()]);
+        assert_eq!(first.source().list("assets/").len(), 2);
+        assert_eq!(first.source().read(name).unwrap(), [2]);
+        assert!(!source.contains(name));
+        assert!(first.data().same_generation(&data));
+        assert_eq!(first.runtime_block_sprites(), ["demo:block/generated"]);
+        assert_ne!(
+            first.source().fingerprint_under("assets", &["textures"]),
+            second.source().fingerprint_under("assets", &["textures"]),
+        );
+    }
     impl Fixture {
         fn new() -> Self {
             static NEXT: AtomicU64 = AtomicU64::new(0);

@@ -399,16 +399,6 @@ impl Game<'_> {
         if !self.load_block_entity_data(key, &merged) {
             return Ok(false);
         }
-        let kept = self.world.block_entities.get(&key);
-        if kept.is_some_and(|kept| {
-            !matches!(kept, BlockEntity::Banner(_) | BlockEntity::Sign(_))
-                && nameable(key, kept, &block)
-        }) {
-            match save::text(merged.get("CustomName")) {
-                Some(name) => self.world.block_names.insert(key, name),
-                None => self.world.block_names.remove(&key),
-            };
-        }
         self.after_commit(After::Updated(key));
         self.after_commit(After::Changed(key));
         Ok(true)
@@ -437,7 +427,10 @@ impl Game<'_> {
         let [x, y, z] = entity.fields().position;
         match block_entity {
             BlockEntity::Banner(banner) => banner.name.clone(),
-            _ => world.block_names.get(&(x, y, z)).cloned(),
+            _ => world.block_names.get(&(x, y, z)).map(|name| match name {
+                Tag::String(text) => text.to_string_lossy(),
+                component => horizon_client::component::name_text(component).plain(),
+            }),
         }
     }
 
@@ -518,7 +511,7 @@ impl Game<'_> {
             Some(BlockEntity::Banner(banner)) => banner.name = name.map(str::to_owned),
             _ => {
                 match name {
-                    Some(name) => self.world.block_names.insert(key, name.to_owned()),
+                    Some(name) => self.world.block_names.insert(key, Tag::String(name.into())),
                     None => self.world.block_names.remove(&key),
                 };
             }
@@ -542,7 +535,7 @@ fn save_with_metadata(
         return None;
     };
     if let Some(name) = world.block_names.get(&pos) {
-        data.insert("CustomName".into(), Tag::String(name.as_str().into()));
+        data.insert("CustomName".into(), name.clone());
     }
     Some(data)
 }
@@ -612,7 +605,6 @@ fn menu_holds(menu: &Menu, key: (i32, i32, i32)) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::api_values::TryIntoApi;
     use horizon_client::chunk::Chunk;
     use horizon_world::registry::BlockStateId;
     use mod_api::HostTransaction;
@@ -753,12 +745,7 @@ mod tests {
                 for block in ["minecraft:stone", "minecraft:chest"] {
                     let state = host.block_state_id(block).unwrap();
                     assert_eq!(
-                        level.set_block(
-                            host,
-                            [0, 64, 0],
-                            state.try_into_api().unwrap(),
-                            NativeBlockUpdateFlags::NEIGHBORS
-                        ),
+                        level.set_block(host, [0, 64, 0], state, NativeBlockUpdateFlags::NEIGHBORS),
                         Ok(true)
                     );
                 }
@@ -1205,6 +1192,22 @@ mod tests {
             assert!(chest.set_name(game, None).unwrap());
             assert_eq!(chest.name(game), None);
 
+            // An unrelated API merge must preserve the loaded rich name, not
+            // remove it through the plain-text name accessor's projection.
+            let styled = "{text:\"Styled\",color:\"aqua\",extra:[{text:\" chest\",bold:1b}]}";
+            let name = Tag::Compound(compound(styled));
+            assert!(game.load_block_entity_nbt([0, 64, 0], &format!("{{CustomName:{styled}}}")));
+            assert_eq!(game.world.block_names.get(&(0, 64, 0)), Some(&name));
+            assert!(chest.merge_data(game, compound(stick)).unwrap());
+            assert_eq!(slot3(game), Some(3));
+            assert_eq!(game.world.block_names.get(&(0, 64, 0)), Some(&name));
+            assert_eq!(
+                chest.data(game).unwrap().get(&"CustomName".into()),
+                Some(&name)
+            );
+            assert!(chest.replace_data(game, compound("{}")).unwrap());
+            assert_eq!((slot3(game), chest.name(game)), (None, None));
+
             // An abort puts back data and name; a commit keeps them.
             let host: &mut dyn ServerHost = game;
             let aborted: Result<(), ()> = host.transaction(|host, _| {
@@ -1335,7 +1338,7 @@ mod tests {
         fn write(
             game: &mut Game<'_>,
             pos: [i32; 3],
-            state: BlockStateId,
+            state: mod_api::BlockState,
             flags: NativeBlockUpdateFlags,
         ) -> bool {
             game.with_level(|_, level, ticks| {
@@ -1363,32 +1366,42 @@ mod tests {
             let chest = state("minecraft:chest", None);
             let young = state("minecraft:wheat", Some("0"));
             let grown = state("minecraft:wheat", Some("7"));
+            use crate::game::api_values::TryIntoApi;
+            let api_stone = stone.try_into_api().unwrap();
+            let api_chest = chest.try_into_api().unwrap();
+            let api_young = young.try_into_api().unwrap();
+            let api_grown = grown.try_into_api().unwrap();
             let flags = NativeBlockUpdateFlags::NEIGHBORS | NativeBlockUpdateFlags::KNOWN_SHAPE;
             let key = (0, 64, 0);
 
-            assert!(write(game, [0, 64, 0], stone, flags));
+            assert!(write(game, [0, 64, 0], api_stone, flags));
             assert!(game.world.block_entities.get(&key).is_none());
-            assert!(write(game, [0, 64, 0], chest, flags));
+            assert!(write(game, [0, 64, 0], api_chest, flags));
             assert!(matches!(
                 game.world.block_entities.get(&key),
                 Some(BlockEntity::Chest(_))
             ));
-            assert!(write(game, [0, 64, 0], stone, flags));
+            assert!(write(game, [0, 64, 0], api_stone, flags));
             assert_eq!(game.world.block(0, 64, 0), stone);
             assert!(game.world.block_entities.get(&key).is_none());
 
             // A crop's whole-state growth: no block entity, and a repeat changes nothing.
-            assert!(write(game, [0, 64, 0], young, flags));
-            assert!(write(game, [0, 64, 0], grown, flags));
+            assert!(write(game, [0, 64, 0], api_young, flags));
+            assert!(write(game, [0, 64, 0], api_grown, flags));
             assert_eq!(game.world.block(0, 64, 0), grown);
             assert!(game.world.block_entities.get(&key).is_none());
-            assert!(!write(game, [0, 64, 0], grown, flags));
+            assert!(!write(game, [0, 64, 0], api_grown, flags));
 
             // Unloaded, outside the build height and invalid: refused, nothing loaded.
             let chunks = game.world.chunks.len();
-            assert!(!write(game, [16, 64, 0], stone, flags));
-            assert!(!write(game, [0, 10000, 0], stone, flags));
-            assert!(!write(game, [0, 64, 0], BlockStateId(u32::MAX), flags));
+            assert!(!write(game, [16, 64, 0], api_stone, flags));
+            assert!(!write(game, [0, 10000, 0], api_stone, flags));
+            assert!(!write(
+                game,
+                [0, 64, 0],
+                mod_api::BlockStateRecord::new(api_stone.block(), u16::MAX).into(),
+                flags
+            ));
             assert_eq!(game.world.chunks.len(), chunks);
             assert_eq!(game.world.block(0, 64, 0), grown);
 
@@ -1401,7 +1414,7 @@ mod tests {
 
             // A client's copy of the level is not the server's.
             game.options.dedicated = None;
-            assert!(!write(game, [0, 64, 0], stone, flags));
+            assert!(!write(game, [0, 64, 0], api_stone, flags));
             assert_eq!(game.world.block(0, 64, 0), grown);
         });
     }

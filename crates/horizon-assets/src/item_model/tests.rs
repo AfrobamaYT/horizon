@@ -1,4 +1,5 @@
 use super::*;
+use serde_json::json;
 
 #[test]
 fn identifier_adds_default_namespace() {
@@ -176,10 +177,18 @@ fn registered_range_property_thresholds_on_the_mods_number_per_stack() {
 fn registered_tint_source_colours_each_stack_from_its_entry() {
     struct Env;
     impl ItemEnv for Env {
-        fn item_tint_source(&self, source: &str, config: &Value, stack: &StackView) -> i32 {
+        fn item_tint_source(
+            &self,
+            source: &str,
+            config: &horizon_core::nbt::Tag,
+            stack: &StackView,
+        ) -> i32 {
             assert_eq!(source, "tinttest:charge");
             match stack.count {
-                1 => config["default"].as_i64().unwrap() as i32,
+                1 => match config.get("default") {
+                    Some(horizon_core::nbt::Tag::Int(v)) => *v,
+                    _ => panic!("expected integer default"),
+                },
                 _ => 0xFF11_2233_u32 as i32,
             }
         }
@@ -191,6 +200,7 @@ fn registered_tint_source_colours_each_stack_from_its_entry() {
     ]);
     assert_eq!(kept, ["tinttest:charge"]);
     assert!(register_tint_sources(vec!["tinttest:charge".into()]).is_empty());
+    assert!(ClientItem::from_json(r#"{"model":{"type":"minecraft:model","model":"tinttest:item/grey","tints":[{"type":"tinttest:charge","bad":null}]}}"#).is_err());
     let json = r#"{"model":{
         "type":"minecraft:model", "model":"tinttest:item/grey",
         "tints":[
@@ -296,4 +306,50 @@ fn registered_select_property_picks_the_case_the_mod_answers_per_stack() {
         assert_eq!(chosen(4, &Env), "selecttest:item/idle");
         assert_eq!(chosen(1, &NoEnv), "selecttest:item/idle");
     }
+}
+
+#[test]
+fn a_patched_stack_reads_its_patch_over_its_items_defaults() {
+    let mut models = ItemModels::default();
+    Arc::make_mut(&mut models.prototypes).insert(
+        "minecraft:diamond_sword".into(),
+        Components::from_iter([
+            (
+                "minecraft:item_model".into(),
+                json!("minecraft:diamond_sword"),
+            ),
+            ("minecraft:max_damage".into(), json!(1561)),
+            ("minecraft:rarity".into(), json!("common")),
+        ]),
+    );
+    let mut stack = StackView::new("minecraft:diamond_sword", 1);
+    stack.patch.insert(
+        "minecraft:enchantments".into(),
+        Some(json!({"minecraft:sharpness": 5})),
+    );
+    stack
+        .patch
+        .insert("minecraft:rarity".into(), Some(json!("rare")));
+    stack.patch.insert("minecraft:max_damage".into(), None);
+    let view = models.components_view(&stack);
+    assert_eq!(view.get("minecraft:rarity"), Some(&json!("rare")));
+    assert_eq!(view.get("minecraft:max_damage"), None, "a removed default");
+    assert_eq!(
+        view.get("minecraft:item_model"),
+        Some(&json!("minecraft:diamond_sword"))
+    );
+    assert!(view.contains_key("minecraft:enchantments"));
+    assert!(!view.contains_key("minecraft:custom_name"));
+    // Every key reads as the merged map has it.
+    let merged = models.components(&stack);
+    for key in [
+        "minecraft:rarity",
+        "minecraft:max_damage",
+        "minecraft:item_model",
+        "minecraft:enchantments",
+        "minecraft:custom_name",
+    ] {
+        assert_eq!(view.get(key), merged.get(key), "{key}");
+    }
+    assert_eq!(view.to_map(), *merged);
 }

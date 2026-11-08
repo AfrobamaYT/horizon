@@ -1,11 +1,8 @@
 /// The structure box a piece's `bounding_box` answers, in world blocks.
 pub use horizon_core::bounding_box::BoundingBox;
 pub use horizon_core::equipment_slot::EquipmentSlot;
-#[horizon_mod_api_macros::wasm(via = String)]
 pub use horizon_core::identifier::Identifier;
-#[horizon_mod_api_macros::wasm(via = Tag)]
 pub use horizon_core::nbt::Compound;
-#[horizon_mod_api_macros::wasm(via = Vec<u8>)]
 pub use horizon_core::nbt::Tag;
 pub use horizon_core::use_animation::UseAnimation;
 pub use {
@@ -17,7 +14,6 @@ pub use {
         AttachmentCodec, AttachmentError, AttachmentForm, AttachmentPolicy, AttachmentStore,
         AttachmentType, AttachmentValue, AttachmentWrite, Holder,
     },
-    horizon_world::{level::BlockId, registry::BlockStateId},
 };
 // hidden: the game's maps behind the store, not part of the mod surface
 #[doc(hidden)]

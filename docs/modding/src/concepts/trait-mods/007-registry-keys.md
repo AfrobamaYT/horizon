@@ -99,6 +99,12 @@ is available through restricted level Hosts, without borrowing an engine registr
 `block_state_id`, tag names and existing fluid operation arguments remain strings for now.
 
 Declare a tank-only fluid in your own namespace with `r.declare_fluid("chocolate")`; the returned `FluidKey` identifies it for the mod load. Request vanilla or another mod's declared fluid with `r.fluid_key("minecraft:water")` or `r.fluid_key("other:chocolate")`. Requests resolve after all registrations, so declaration order does not matter; an unknown request stops the load and names the requesting mod. Tank-only fluids have no world simulation or world state. Fluid stacks and recipe ingredients use these keys; remaining fluid operations move to them in subsequent changes.
+Declare a fluid that exists in the world with `let mut fluid = WorldFluid::default(); fluid.drop_off = 2; r.declare_world_fluid("oil", fluid);`,
+using `mod_api::WorldFluid`, the code form of a fluid file's `world` object ([content mods](../../how-to/content-mods.md)): it adds the block
+`mymod:oil`, the flowing fluid `mymod:flowing_oil` and the bucket `mymod:oil_bucket`, and its fluid file, if it has one,
+still says how it looks. `r.fluid_part("mymod:oil", Part)` attaches a `FluidPart`, whose `fluid_rules` can change the
+declared values by position on the server. It is asked for every cell a spread looks at, so answer fast.
+
 A saved tank whose fluid's mod is absent carries an opaque unresolved identity. Its stack's
 `key()` is `None`; `UnresolvedFluid::id(host)` reads its saved name. It can move between
 name-backed mod tanks, but not into vanilla buckets or cauldrons.
@@ -119,8 +125,8 @@ and GUI `item` / `item_model` take `ItemKey`. `block_item`, `fluid_bucket` and
 `NativeHit.block` return block keys; `BlockEntityDrawContext::block` takes one.
 `NativeHeldItem.id` (including use-start/stop events) and `NativeStack.item`
 carry item keys, not names. Unknown incoming slots are refused at the boundary.
-`block_sprites` takes resolved `BlockStateId` values, preserving properties without
-parsing state strings. The pre-change block event carries resolved `from` / `to`
+`block_sprites` takes API-owned `BlockState` values, preserving properties without
+parsing state strings or exposing numeric engine state IDs. The pre-change block event carries resolved `from` / `to`
 states and does not allocate their names. Property names and values in
 `set_block_property` are not block identifiers and remain strings.
 
@@ -169,6 +175,7 @@ The sample's `ProcessingRecipes::publish` retains these keys; `result` then chec
 | Engine item property values | `mod_api::{ItemBar, ItemRarity}` | Resource methods retain their signatures; damageability, glint and repair checks use game-owned metadata reads. |
 | Package manifest `Side` | `mod_api::Side` | Match `Client` and `Both` on the package metadata snapshot. This is not `HostSide` or the executing logical side. |
 | Command `Suggestion` | `mod_api::Suggestion` | Construct with `Suggestion::new((start, end), text)`; optional `tooltip` and `int_value` remain writable. Offsets are byte offsets. |
+| Package block and item declarations | `mod_api::{Block, Item}` | Use API-owned declaration records in the registration events. Component patches are ordered `(String, Option<Tag>)` entries, with `None` removing the component; the game converts once at load and applies content-file admission checks. |
 | Package block entity type storage | `mod_api::BlockEntityTypeDecl` | Existing `r.block_entity_type(...).build()` registration is unchanged. The declaration snapshot no longer exposes the package parser's model; the game converts it once when declarations freeze. |
 | Component protocol vocabulary | `text::{TextContent, TextNbtSource, TextObject, TextClick, TextHover}` | Match these enums exhaustively: their serialized vocabulary is closed. Records remain `non_exhaustive`. |
 | Renderer GUI commands | `mod_api::GuiDraw` | `DrawContext::gui_paint` returns a typed text-conversion result; handle refusal before drawing. HUD hooks reject invalid writeback as a whole. |
@@ -226,16 +233,6 @@ Inline player and atlas objects use `Option<Box<Text>>` for their fallback: `Non
 keeps the engine-computed default; `Some` preserves a styled or translatable component
 rather than flattening it to a string.
 
-`TextForm` crosses the generated wasm boundary as a typed, shallow node table:
-`TextNodeContent` selects the content kind, `TextNodeStyle` contains overrides, and
-`TextNodeHover` identifies the hover kind without embedding child components.
-Parent/relation rows carry all children, arguments, separators, fallbacks and hover
-names/text. Conversion is iterative, accepts depth 512 and rejects malformed tables,
-duplicate singleton edges and missing hover-text children. Opaque NBT fields follow
-the 512-container rule above; there is no separate 100-container JSON restriction.
-Unknown fields are retained under the shared NbtOps normalization rules, while typed
-fields remain authoritative and cannot promote untrusted file actions.
-
 The native boundary plans borrowed source topology before cloning payloads. It reads
 source-less spans directly and validates every Tag's JSON representation before building
 an engine component. `Text::validate()` checks tree/payload bounds and profile fields
@@ -252,8 +249,8 @@ A refused hook capture does not dispatch; a refused writeback leaves every field
 No subscriber means no conversion or snapshot allocation.
 
 Recursive `Clone`, `Eq` and `Drop` of a tree a mod itself built are ordinary Rust ownership,
-not part of the boundary guarantee. A wasm guest overflowing its own stack on a received
-512-deep tree traps within its dependency group.
+not part of the boundary guarantee.
+
 `Text::new(content)` constructs any content kind without exposing an engine value.
 The content, NBT-source, object, click and hover enums are exhaustive protocol enums;
 new cases change the link contract, just as enum-case order does. Mod matches should

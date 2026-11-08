@@ -4,22 +4,9 @@ use crate::{BlockKey, BlockState, BlockStateError, BlockStateRecord};
 /// States of one block in immutable definition order, not world numeric ID order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-#[horizon_mod_api_macros::wasm(via = BlockStateRangeRecord)]
 pub struct BlockStateRange {
     first: BlockState,
     count: u32,
-}
-
-/// Transport form; conversion validates the ordinal span before constructing a range.
-// hidden: derived codec transport for the private validated range.
-#[doc(hidden)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct BlockStateRangeRecord {
-    /// The first local state value.
-    pub first: BlockState,
-    /// The number of ordinals in the span.
-    pub count: u32,
 }
 
 impl BlockStateRange {
@@ -59,21 +46,6 @@ impl BlockStateRange {
         })
     }
 }
-impl TryFrom<BlockStateRangeRecord> for BlockStateRange {
-    type Error = BlockStateError;
-    fn try_from(value: BlockStateRangeRecord) -> Result<Self, Self::Error> {
-        Self::new(value.first, value.count)
-    }
-}
-impl From<&BlockStateRange> for BlockStateRangeRecord {
-    fn from(value: &BlockStateRange) -> Self {
-        Self {
-            first: value.first,
-            count: value.count,
-        }
-    }
-}
-
 /// Resolve a block's immutable definition span without a world-number mapping.
 // hidden: engine metadata service implementation, re-exported only through __private.
 #[doc(hidden)]
@@ -96,7 +68,7 @@ mod tests {
         BlockStateRecord::new(BlockKey(block), ordinal).into()
     }
     #[test]
-    fn local_range_validates_transport_and_never_wraps_ordinals() {
+    fn local_range_validates_spans_and_never_wraps_ordinals() {
         let range = BlockStateRange::new(state(3, 65534), 2).unwrap();
         assert_eq!(
             range.iter().map(BlockState::ordinal).collect::<Vec<_>>(),
@@ -111,13 +83,6 @@ mod tests {
         );
         assert_eq!(
             BlockStateRange::new(state(3, 0), u32::MAX),
-            Err(BlockStateError::UnknownState)
-        );
-        assert_eq!(
-            BlockStateRange::try_from(BlockStateRangeRecord {
-                first: state(3, 65535),
-                count: 2
-            }),
             Err(BlockStateError::UnknownState)
         );
         assert_eq!(

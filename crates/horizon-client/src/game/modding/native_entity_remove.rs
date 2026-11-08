@@ -2,10 +2,12 @@
 //! (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387): `Entity.discard`
 //! and `Entity.remove` with a reason. Nothing dies and nothing drops loot.
 //! `Entity.spawnAtLocation` drops an item at one.
-//! The handle reads as gone from the call on, as `isRemoved` does. A mob
-//! leaves at once; the other kinds leave at the level's next sweep of
-//! departed entities, a few times per tick, so a hook that removes one never
-//! shifts the lists the game is walking. A vehicle with a chest spills it, as vanilla's `remove` does.
+//! Everything `Entity.setRemoved` tells the world happens at the call: the
+//! handle and selectors stop finding the entity, its passengers get off and
+//! mods hear it leave. A mob's list entry is marked at once too; the other
+//! kinds stay in their lists until the level's next sweep of departed
+//! entities, a few times per tick, so a hook that removes one never shifts the
+//! lists the game is walking. A vehicle with a chest spills it at that sweep, as vanilla's `remove` does.
 use super::{Game, commands::Target};
 use horizon_client::items::ItemStack;
 use horizon_core::{geometry::Vec3, position::BlockPos};
@@ -14,28 +16,36 @@ use mod_api::{EntityRef, NativeRemovalReason};
 impl Game<'_> {
     /// Removes the entity with no death and no loot (`Entity.discard`): a
     /// chest boat or a minecart with a chest still drops what it holds, and
-    /// a boat its lead, as vanilla's `remove` does. False for a player, or a
-    /// stale handle.
+    /// a boat its lead, as vanilla's `remove` does. False for a player, a dragon part,
+    /// or a stale handle.
     pub(super) fn entity_discard(&mut self, entity: EntityRef) -> bool {
         self.entity_remove(entity, NativeRemovalReason::Discarded)
     }
     /// Removes the entity for `reason` (`Entity.remove`): `Discarded`, as
     /// `discard`, or `Killed`, which also runs a mob's effects that act on
     /// removal (Oozing's slimes, Weaving's cobwebs, Wind Charged's burst),
-    /// still with no death and no loot. False for a player, or a stale
+    /// still with no death and no loot. False for a player, a dragon part, or a stale
     /// handle.
     pub(super) fn entity_remove(&mut self, entity: EntityRef, reason: NativeRemovalReason) -> bool {
         let killed = reason == NativeRemovalReason::Killed;
         match self.native_entity_target(entity) {
-            None | Some(Target::Player | Target::Guest(_)) => false,
+            // A part leaves the level with its dragon, never alone.
+            None | Some(Target::Player | Target::Guest(_) | Target::DragonPart(_)) => false,
             Some(Target::Mob(id)) => {
                 self.remove_mob_now(id, killed);
                 true
             }
             Some(t) => {
-                if !self.persist.removals.contains(&t) {
-                    self.persist.removals.push(t);
+                // Read before the entity counts as removed: its handle stops resolving.
+                let passengers = self.entity_passengers(entity).unwrap_or_default();
+                // `Entity.setRemoved`: the reason first, so the hooks below see
+                // it removed; then the passengers get off and the level is told.
+                // Only players and mobs ride, so this kind has no vehicle to leave.
+                self.persist.removals.push(t);
+                for passenger in passengers {
+                    self.entity_stop_riding(passenger);
                 }
+                self.native_entity_left(entity.id());
                 true
             }
         }
@@ -210,6 +220,101 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources"]
+    fn selectors_stop_matching_a_discarded_entity_before_the_sweep() {
+        use super::super::{commands::OtherEntity, native_entity_refs::tests::with_game};
+        use horizon_core::geometry::Vec3;
+
+        with_game(|game| {
+            game.others.push(OtherEntity {
+                knot_check: None,
+                join: Default::default(),
+                item_transformation: None,
+                interaction: None,
+                id: 12,
+                kind: "minecraft:marker".into(),
+                position: Vec3::ZERO,
+                yaw: 0.0,
+                pitch: 0.0,
+            });
+            game.ui.registries.permission = 4;
+            let selector = "execute if entity @e[type=minecraft:marker]";
+            assert!(game.run_command(selector));
+            let entity = game.entity(12).unwrap();
+            assert!(entity.discard(game));
+            // No sweep has run, as in the hook that discarded it.
+            assert_eq!(game.others.len(), 1);
+            assert!(!game.run_command(selector));
+            assert!(game.level_entity(12).is_none());
+            game.native_removals_flush();
+            assert!(game.others.is_empty());
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources and an isolated process for native mods"]
+    fn removal_dismounts_and_tells_mods_once_at_the_call() {
+        use super::super::{boats::Boat, native_entity_refs::tests::with_game};
+        use horizon_client::mobs::Mob;
+        use horizon_core::geometry::Vec3;
+        use mod_api::{EntityLeaveLevelEvent, Hooks, ServerHost};
+        use std::sync::{Arc, Mutex};
+
+        /// The entities heard leaving, and whether each read as gone by then.
+        #[derive(Clone, Default)]
+        struct Observer(Arc<Mutex<Vec<(u32, bool)>>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Observer {
+            fn entity_leave_level(
+                &self,
+                host: &mut dyn ServerHost,
+                event: &mut EntityLeaveLevelEvent<'_>,
+            ) {
+                let gone = host.entity(event.entity).is_none();
+                self.0.lock().unwrap().push((event.entity, gone));
+            }
+        }
+        let observer = Observer::default();
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "removal-observer",
+            Box::new(observer.clone()),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                game.native_joins_skip();
+                let boat_id = game.take_entity_id();
+                game.boats.push(Boat::new(
+                    boat_id,
+                    "oak".into(),
+                    Vec3::new(0.0, 64.0, 0.0),
+                    0.0,
+                ));
+                let mob_id = game.take_entity_id();
+                let cow = game.res.mob_types().get("minecraft:cow").unwrap().clone();
+                game.mobs
+                    .push(Mob::new(mob_id, cow, Vec3::new(0.0, 64.0, 0.0), 0.0));
+                game.native_joins_flush(false, 0);
+                let boat = game.entity(boat_id).unwrap();
+                let mob = game.entity(mob_id).unwrap();
+                assert!(game.entity_start_riding(mob, boat, true));
+                assert_eq!(game.entity_vehicle(mob), Some(boat));
+
+                assert!(boat.discard(game));
+                // Told, and off the vehicle, with the boat still in its list.
+                assert!(game.boats.iter().any(|b| b.id == boat_id));
+                assert_eq!(*observer.0.lock().unwrap(), vec![(boat_id, true)]);
+                assert_eq!(game.entity_vehicle(mob), None);
+                assert!(!game.mobs.iter().any(|m| m.extra.mount == Some(boat_id)));
+
+                game.native_leaves_flush();
+                assert!(!game.boats.iter().any(|b| b.id == boat_id));
+                assert_eq!(*observer.0.lock().unwrap(), vec![(boat_id, true)]);
+            });
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
     fn discard_other_clears_nbt_and_saved_entity() {
         use super::super::{commands::OtherEntity, native_entity_refs::tests::with_game};
         use horizon_client::{chunk::Chunk, save::SaveDir};
@@ -229,8 +334,10 @@ mod tests {
                 .chunks
                 .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
             game.others.push(OtherEntity {
+                knot_check: None,
                 join: Default::default(),
                 item_transformation: None,
+                interaction: None,
                 id: 12,
                 kind: "minecraft:text_display".into(),
                 position: Vec3::new(1.0, 70.0, 1.0),
@@ -411,8 +518,10 @@ mod tests {
 
         with_game(|game| {
             game.others.push(OtherEntity {
+                knot_check: None,
                 join: Default::default(),
                 item_transformation: None,
+                interaction: None,
                 id: 12,
                 kind: "minecraft:marker".into(),
                 position: Vec3::ZERO,

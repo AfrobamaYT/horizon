@@ -32,7 +32,10 @@ pub fn has_custom_block_tint_sources() -> bool {
 }
 
 fn has_custom_sources(blocks: &BTreeMap<String, Arc<[TintLayer]>>) -> bool {
-    blocks.values().flat_map(|layers| layers.iter()).any(|layer| matches!(layer, TintLayer::Source(_)))
+    blocks
+        .values()
+        .flat_map(|layers| layers.iter())
+        .any(|layer| matches!(layer, TintLayer::Source(_)))
 }
 
 /// One tint layer of one state.
@@ -238,8 +241,16 @@ impl BlockAndTintGetter for Region<'_, '_, '_> {
             .info
             .get(id as usize)
             .map_or(FluidState::EMPTY, |i| i.fluid);
-        let key = mod_api::__private::world_fluid_key(state.kind())?;
-        Some(mod_api::__private::engine_fluid_state(key, state))
+        let key = match state.kind().vanilla_index() {
+            Some(index) => mod_api::__private::world_fluid_key(usize::from(index))?,
+            None => mod_api::__private::fluid_key(state.kind().name())?,
+        };
+        Some(mod_api::__private::fluid_state(
+            key,
+            state.amount(),
+            state.falling(),
+            state.is_source(),
+        ))
     }
     fn brightness(&self, layer: LightLayer, pos: [i32; 3]) -> i32 {
         let light = self.light(pos);

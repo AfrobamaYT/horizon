@@ -4,7 +4,6 @@ use crate::{BlockKey, BlockMetadata, BlockStateError, BlockStateRecord, StateCon
 /// A block and its local state ordinal. Persist canonical names and properties, not this value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-#[horizon_mod_api_macros::wasm(via = BlockStateRecord)]
 pub struct BlockState {
     block: BlockKey,
     state: u16,

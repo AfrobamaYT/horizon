@@ -79,9 +79,14 @@ pub(super) fn state_fluid(
 
 /// Convert the engine's state using the load-owned kind-to-key mapping.
 pub(super) fn api_fluid_state(state: EngineFluidState) -> Option<FluidState> {
-    Some(mod_api::__private::engine_fluid_state(
-        mod_api::__private::world_fluid_key(state.kind())?,
-        state,
+    Some(mod_api::__private::fluid_state(
+        match state.kind().vanilla_index() {
+            Some(index) => mod_api::__private::world_fluid_key(usize::from(index))?,
+            None => mod_api::__private::fluid_key(state.kind().name())?,
+        },
+        state.amount(),
+        state.falling(),
+        state.is_source(),
     ))
 }
 
@@ -118,16 +123,27 @@ impl Game<'_> {
         mod_api::__private::unresolved_fluid_name(fluid)
     }
 
-    /// The merged tag tables, once the world has built them. None on a server's client, whose
-    /// tags are not the server's, and before the world has loaded its tags (the world lock is
-    /// installed after they are built).
+    /// The tag tables mods read: on a client the tags its server sent, once they are installed
+    /// (`install_remote_tags`), elsewhere the merged tables, once the world has built them (the
+    /// world lock is installed after they are built). None before that.
     pub(super) fn native_tag_items(&self) -> Option<&Items> {
-        (!self.options.execution_role.is_client() && self.session_lock.is_some())
-            .then(|| self.items())
+        if self.options.execution_role.is_client() {
+            return self.remote.as_ref()?.tags.as_ref();
+        }
+        self.session_lock.is_some().then(|| self.items())
     }
 
-    /// Whether the resolved block is in the world's merged block tag. Unknown tags return false;
-    /// unavailable authoritative tags or owning-thread block mappings return None.
+    /// `items`' block tags, over this game's resolved block keys.
+    pub(super) fn block_tag_sets(
+        &self,
+        items: &Items,
+    ) -> std::collections::HashMap<String, std::collections::HashSet<BlockKey>> {
+        prepare_block_tags(items)
+    }
+
+    /// Whether the resolved block is in the world's merged block tag, on a client the tag its
+    /// server sent. Unknown tags return false; unavailable tags or owning-thread block mappings
+    /// return None.
     pub(super) fn block_in_tag(&self, block: BlockKey, tag: &str) -> Option<bool> {
         self.native_tag_items()?;
         block_in_tag(block, tag)
@@ -150,8 +166,8 @@ impl Game<'_> {
     }
 
     /// Whether `fluid` is in the fluid tag `tag` (`FluidState.is(TagKey)`, `minecraft:water` or
-    /// `water`), over the merged fluid tags. An unknown tag is false. None as for
-    /// `block_in_tag`.
+    /// `water`), over the merged fluid tags, on a client those its server sent. An unknown tag
+    /// is false. None as for `block_in_tag`.
     pub(super) fn fluid_in_tag(&self, fluid: &str, tag: &str) -> Option<bool> {
         Some(fluid_in_tag(self.native_tag_items()?, fluid, tag))
     }
@@ -624,10 +640,20 @@ mod tests {
             });
             game.options.dedicated = Some(Vec::new());
             let bounds = game.level_height(level).unwrap();
-            let parsed = game.block_state_id("minecraft:oak_slab[waterlogged=true]");
-            let default = game.block_state_default(mod_api::__private::part_tests::block_key(
-                "minecraft:oak_slab",
-            ));
+            use super::super::api_values::TryIntoApi;
+            let stone = stone.try_into_api().unwrap();
+            let slab = slab.try_into_api().unwrap();
+            let invalid = mod_api::BlockStateRecord::new(stone.block(), u16::MAX).into();
+            let parsed = game
+                .block_state_id("minecraft:oak_slab[waterlogged=true]")
+                .try_into_api()
+                .unwrap();
+            let default = game
+                .block_state_default(mod_api::__private::part_tests::block_key(
+                    "minecraft:oak_slab",
+                ))
+                .try_into_api()
+                .unwrap();
             game.with_level(|_, host, ticks| {
                 assert_eq!(
                     host.block_state_id("minecraft:oak_slab[waterlogged=true]"),
@@ -663,7 +689,7 @@ mod tests {
                         .unwrap()
                         .contains("waterlogged=true")
                 );
-                assert_eq!(host.state_string(BlockStateId(u32::MAX)), None);
+                assert_eq!(host.state_string(invalid), None);
                 assert_eq!((host.min_y(), host.height()), bounds);
                 assert_eq!(
                     host.block_in_tag(
@@ -721,7 +747,7 @@ mod tests {
 
                 assert_eq!(hit.state_string(stone).as_deref(), Some("minecraft:stone"));
                 assert!(hit.state_string(slab).unwrap().contains("waterlogged=true"));
-                assert_eq!(hit.state_string(BlockStateId(u32::MAX)), None);
+                assert_eq!(hit.state_string(invalid), None);
                 assert_eq!((hit.min_y(), hit.height()), bounds);
                 assert_eq!(
                     hit.block_in_tag(

@@ -9,7 +9,7 @@ pub use jar::{
     JarConflict, JarInputsError, JarRef, JarRequirement, MissingJar, collect_jar_requirements,
     missing_jars,
 };
-pub use wasm::{MAX_WASM, Wasm, WasmError, export_prefix, sha512_of};
+pub use wasm::{MAX_WASM, Wasm, WasmError, sha512_of};
 
 use serde::{Deserialize, Serialize};
 use std::{
@@ -60,7 +60,7 @@ pub struct Manifest {
     /// Original Java jars, layered in list order below this mod's own files.
     #[serde(default)]
     pub jar: Vec<JarRef>,
-    /// Exact build pins and optional raw injections for a code mod.
+    /// Exact build pins and support modules for a code mod.
     pub native: Option<Native>,
     /// A wasm mod's `mod.wasm`, its toolchain and what it was linked against.
     pub wasm: Option<Wasm>,
@@ -94,8 +94,6 @@ pub struct Native {
     pub horizon: String,
     pub mixins: String,
     #[serde(default)]
-    pub injection: Vec<Injection>,
-    #[serde(default)]
     pub module: Vec<Module>,
 }
 
@@ -125,93 +123,6 @@ pub struct Module {
     pub source: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub visibility: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct Injection {
-    pub id: String,
-    pub target: Option<String>,
-    pub hook: Option<String>,
-    pub hook_version: Option<u32>,
-    pub kind: InjectionKind,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub helper: Option<String>,
-    /// A crate-root function of the target point's raw listener type.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub raw: Option<String>,
-    #[serde(default)]
-    pub cancellable: bool,
-    pub argument: Option<usize>,
-    #[serde(default)]
-    pub bindings: Vec<Binding>,
-    pub priority: Option<i32>,
-    pub selector: Option<String>,
-    pub ordinal: Option<usize>,
-    pub require: Option<usize>,
-    pub fingerprint: Option<String>,
-    pub slice: Option<Slice>,
-    pub variable: Option<Variable>,
-    pub result: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum InjectionKind {
-    Head,
-    BeforeCall,
-    Overwrite,
-    Return,
-    ModifyArg,
-    ModifyConstant,
-    WrapOperation,
-    /// A native raw site listener that skips a unit-returning call when it returns false.
-    WrapWithCondition,
-    ModifyArgs,
-    ModifyVariable,
-    ModifyExpressionValue,
-    AfterCall,
-    AfterAssign,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct Binding {
-    pub name: String,
-    pub ty: String,
-    pub value: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct Slice {
-    pub from: Option<Anchor>,
-    pub to: Option<Anchor>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct Anchor {
-    pub selector: String,
-    pub ordinal: usize,
-    pub require: usize,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct Variable {
-    pub name: String,
-    pub ordinal: usize,
-    pub at: Access,
-    #[serde(default)]
-    pub parameter: bool,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum Access {
-    Store,
-    Load,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
@@ -259,83 +170,23 @@ pub fn revision(value: &str) -> bool {
 
 pub(super) fn valid_mod_id(id: &str) -> bool {
     (1..=64).contains(&id.len())
+        && !reserved_mod_id(id)
         && id
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
+
+fn reserved_mod_id(id: &str) -> bool {
+    matches!(id, "con" | "prn" | "aux" | "nul")
+        || (id.len() == 4
+            && (id.starts_with("com") || id.starts_with("lpt"))
+            && matches!(id.as_bytes()[3], b'1'..=b'9'))
 }
 
 fn rust_ident(name: &str) -> bool {
     !name.is_empty()
         && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
         && !name.as_bytes()[0].is_ascii_digit()
-}
-
-/// One injection's own rules: a hook or a target, and a source helper or raw
-/// function that listens at a point as only a point's listener can.
-fn check_injection(injection: &Injection) -> Result<(), String> {
-    // Modules share horizon-mixins' one id space with injections.
-    if injection.hook.is_some() == injection.target.is_some() {
-        return Err(format!(
-            "{MANIFEST}: injection needs exactly one hook or target"
-        ));
-    }
-    match (&injection.helper, &injection.raw) {
-        (Some(helper), None) if plain_path(helper) && source_file(helper) => {}
-        (None, Some(method)) if rust_ident(method) => {}
-        _ => {
-            return Err(format!(
-                "{MANIFEST}: injection needs exactly one source helper or raw"
-            ));
-        }
-    }
-    let source_options = injection.cancellable
-        || !injection.bindings.is_empty()
-        || injection.argument.is_some()
-        || injection.require.is_some()
-        || injection.slice.is_some()
-        || injection.variable.is_some()
-        || injection.result.is_some();
-    let site = injection.raw.is_some() && injection.selector.is_some();
-    if site {
-        if injection.target.is_none()
-            || !matches!(
-                injection.kind,
-                InjectionKind::BeforeCall
-                    | InjectionKind::AfterCall
-                    | InjectionKind::ModifyArg
-                    | InjectionKind::ModifyExpressionValue
-                    | InjectionKind::WrapOperation
-                    | InjectionKind::WrapWithCondition
-            )
-            || source_options
-        {
-            return Err(format!(
-                "{MANIFEST}: injection {}: a raw call-site listener needs target, selector and a call-site kind; no non-local cancellation, bindings, argument, require, slice, variable or result",
-                injection.id
-            ));
-        }
-        return Ok(());
-    }
-    if matches!(injection.kind, InjectionKind::WrapWithCondition) {
-        return Err(format!(
-            "{MANIFEST}: WRAP_WITH_CONDITION needs a raw call-site listener"
-        ));
-    }
-    // Point listeners run at the head or return with the point's own types, so nothing
-    // else of a mixin applies.
-    if injection.raw.is_some()
-        && (injection.hook.is_some()
-            || !matches!(injection.kind, InjectionKind::Head | InjectionKind::Return)
-            || source_options
-            || injection.selector.is_some()
-            || injection.ordinal.is_some())
-    {
-        return Err(format!(
-            "{MANIFEST}: injection {}: a raw listener listens at the HEAD or RETURN of the point its `target` names, and takes the point's record: no `hook` (a hook is its own Hooks method), bindings, cancellable, argument, selector, ordinal, require, slice, variable or result (cancel through the record's `cancel`); use a helper for the rest",
-            injection.id
-        ));
-    }
-    Ok(())
 }
 
 impl Internal {
@@ -375,6 +226,12 @@ impl Manifest {
                 "{MANIFEST}: internals need a [native] or [wasm] mod"
             ));
         }
+        if reserved_mod_id(&m.id) {
+            return Err(format!(
+                "{MANIFEST}: id {:?} is a reserved Windows device name",
+                m.id
+            ));
+        }
         if !valid_mod_id(&m.id) {
             return Err(format!(
                 "{MANIFEST}: id {:?} is not [a-z0-9_]{{1,64}}",
@@ -389,23 +246,11 @@ impl Manifest {
         if m.native.is_some() && m.wasm.is_some() {
             return Err(format!("{MANIFEST}: a mod is [native] or [wasm], not both"));
         }
-        if m.wasm.is_some() && !wasm::exportable(&m.id) {
-            return Err(format!(
-                "{MANIFEST}: a wasm mod's id is words that each start with a letter (`{}`)",
-                m.id
-            ));
-        }
         inject::Inject::check_all(&m.inject, &m.id, m.native.is_some() || m.wasm.is_some())
             .map_err(|e| format!("{MANIFEST}: {e}"))?;
         if let Some(native) = &m.native {
             let mut ids: std::collections::HashSet<_> =
                 m.inject.iter().map(|entry| &entry.id).collect();
-            for injection in &native.injection {
-                if injection.id.is_empty() || !ids.insert(&injection.id) {
-                    return Err(format!("{MANIFEST}: empty or duplicate injection id"));
-                }
-                check_injection(injection)?;
-            }
             for module in &native.module {
                 if module.id.is_empty() || !ids.insert(&module.id) {
                     return Err(format!("{MANIFEST}: empty or duplicate module id"));
@@ -539,12 +384,17 @@ impl Package {
                 .take(MAX_WASM + 1)
                 .read_to_end(&mut bytes)
         } else {
-            let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
-            let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
-            zip.by_name(WASM)
-                .map_err(|_| WasmError::Missing.to_string())?
-                .take(MAX_WASM + 1)
-                .read_to_end(&mut bytes)
+            #[cfg(target_arch = "wasm32")]
+            return Err("archive I/O is unavailable on wasm32".into());
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+                let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+                zip.by_name(WASM)
+                    .map_err(|_| WasmError::Missing.to_string())?
+                    .take(MAX_WASM + 1)
+                    .read_to_end(&mut bytes)
+            }
         };
         read.map_err(|e| format!("{WASM}: {e}"))?;
         wasm.check(&bytes).map_err(|e| e.to_string())?;
@@ -619,9 +469,14 @@ impl Package {
                     path.display()
                 ));
             }
-            let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
-            let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
-            return Self::read_zip(&mut zip);
+            #[cfg(target_arch = "wasm32")]
+            return Err("archive I/O is unavailable on wasm32".into());
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+                let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+                return Self::read_zip(&mut zip);
+            }
         };
         let package = Self::from_parts(&toml, icon, has_cargo, has_source, has_wasm)?;
         if let Some(wasm) = &package.manifest.wasm {
@@ -632,6 +487,7 @@ impl Package {
     }
 
     /// Read and validate an archive, including all selected source and resource entries.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn read_zip<R: Read + std::io::Seek>(zip: &mut zip::ZipArchive<R>) -> Result<Self, String> {
         let mut icon = None;
         let mut has_cargo = false;
@@ -776,10 +632,15 @@ impl Package {
         if path.is_dir() {
             return path.join(MANIFEST).is_file();
         }
-        std::fs::File::open(path)
-            .ok()
-            .and_then(|f| zip::ZipArchive::new(f).ok())
-            .is_some_and(|mut zip| zip.by_name(MANIFEST).is_ok())
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            std::fs::File::open(path)
+                .ok()
+                .and_then(|f| zip::ZipArchive::new(f).ok())
+                .is_some_and(|mut zip| zip.by_name(MANIFEST).is_ok())
+        }
+        #[cfg(target_arch = "wasm32")]
+        false
     }
     /// Select and validate a flat project's source and resource files deterministically.
     pub fn directory_files(
@@ -853,6 +714,7 @@ impl Package {
     }
 
     /// Pack a flat project, selecting its source and resource files deterministically.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn pack_directory(root: &Path) -> Result<Vec<u8>, String> {
         let package = Self::read(root)?;
         let mut files = package.directory_files(root)?;
@@ -866,6 +728,7 @@ impl Package {
     }
 
     /// The `.hmod` bytes for `manifest_text` and selected project files.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn write_files(manifest_text: &str, files: &[(&str, &[u8])]) -> Result<Vec<u8>, String> {
         use std::io::Write;
         let manifest = Manifest::parse(manifest_text)?;
@@ -1024,6 +887,24 @@ pub fn find(dir: &Path) -> Vec<PathBuf> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn windows_device_mod_ids_are_refused() {
+        for id in ["con", "prn", "aux", "nul", "com1", "com9", "lpt1", "lpt9"] {
+            assert!(
+                Manifest::parse(&EXAMPLE.replace("ruby", id))
+                    .unwrap_err()
+                    .contains("reserved Windows device name"),
+                "{id}"
+            );
+        }
+        for id in ["console", "com0", "com10", "lpt0", "con_tool"] {
+            assert!(
+                Manifest::parse(&EXAMPLE.replace("ruby", id)).is_ok(),
+                "{id}"
+            );
+        }
+    }
+
     const EXAMPLE: &str = r#"
 id = "ruby"
 name = "Ruby"
@@ -1033,16 +914,36 @@ capabilities = ["registries"]
 "#;
 
     #[test]
-    fn unified_and_native_raw_injections_share_the_id_namespace() {
+    fn unified_injections_and_native_modules_share_the_id_namespace() {
         let pin = "a".repeat(40);
-        let text = |raw_id| {
+        let text = |module_id| {
             format!(
-                "{EXAMPLE}[native]\ngame='26.3'\nhorizon='{pin}'\nmixins='{pin}'\n[[inject]]\nid='shared'\nat='game::tick'\nkind='head'\nwith='tick'\nhash='signature'\n[[native.injection]]\nid='{raw_id}'\ntarget='game::tick'\nkind='HEAD'\nraw='raw_tick'\n"
+                "{EXAMPLE}[native]\ngame='26.3'\nhorizon='{pin}'\nmixins='{pin}'\n[[inject]]\nid='shared'\nat='game::tick'\nkind='head'\nwith='tick'\nhash='signature'\n[[native.module]]\nid='{module_id}'\nfile='game.rs'\nname='runtime'\nsource='src/runtime.rs'\n"
             )
         };
         assert!(Manifest::parse(&text("distinct")).is_ok());
         let error = Manifest::parse(&text("shared")).unwrap_err();
-        assert!(error.contains("duplicate injection id"), "{error}");
+        assert!(error.contains("duplicate module id"), "{error}");
+    }
+
+    #[test]
+    fn wasm_internals_declarations_parse_with_and_without_kind_and_need_a_wasm_or_native_mod() {
+        let wasm = format!(
+            "[wasm]\nsha512='{}'\ntoolchain='t'\nbuilt_with='t'\n",
+            "a".repeat(128)
+        );
+        let injection = "[[inject]]\nid='fell'\nat='Game::break_block'\nkind='head'\nwith='fell'\naccess='internals'\nhash='h'\n";
+        let text = |internals: &str, tail: &str| format!("{EXAMPLE}{internals}{tail}");
+        let ok = Manifest::parse(&text(
+            "internals=[{path='Game::world',kind='field',hash='1'},{path='Game::tick',hash='2'}]\n",
+            &format!("{wasm}{injection}"),
+        ))
+        .unwrap();
+        assert_eq!(ok.internals[0].kind.as_deref(), Some("field"));
+        assert_eq!(ok.internals[1].kind, None);
+        // A wasm internals listener with nothing declared, and declarations with no code mod.
+        assert!(Manifest::parse(&text("", &format!("{wasm}{injection}"))).is_err());
+        assert!(Manifest::parse(&text("internals=[{path='Game::world',hash='1'}]\n", "")).is_err());
     }
 
     #[test]
@@ -1094,20 +995,31 @@ capabilities = ["registries"]
     }
 
     #[test]
-    fn unknown_injection_fields_are_refused_by_the_schema() {
-        for code in [
-            format!(
-                "[native]\ngame='26.3'\nhorizon='{}'\nmixins='{}'\n",
-                "a".repeat(40),
-                "b".repeat(40)
-            ),
-            format!("[wasm]\nsha512='{}'\ntoolchain='1.99.1'\n", "0".repeat(128)),
+    fn native_unknown_fields_are_refused_at_the_owning_boundary() {
+        let pin = "a".repeat(40);
+        let base = format!("{EXAMPLE}[native]\ngame='26.3'\nhorizon='{pin}'\nmixins='{pin}'\n");
+        let mut accepted = Vec::new();
+        for field in [
+            "injection=[]",
+            "[[native.injection]]\nid='tick'\ntarget='game::tick'\nkind='HEAD'\nraw='tick'",
+            "internals=[]",
+            "[[native.internals]]\npath='Game'\nhash='h'",
+            "unexpected=true",
         ] {
-            for kind in ["HEAD", "RETURN"] {
-                let error = Manifest::parse(&format!("{EXAMPLE}{code}[[native.injection]]\nid='tick'\ntarget='game::tick'\nkind='{kind}'\ntrait_method='tick'\n")).unwrap_err();
-                assert!(error.contains("unknown field"), "{error}");
+            let text = format!("{base}{field}\n");
+            match Manifest::parse(&text) {
+                Ok(_) => accepted.push(field),
+                Err(error) => assert!(error.contains("unknown field"), "{error}"),
+            }
+            // The same owning serde boundary applies outside Manifest::parse.
+            if toml::from_str::<Native>(text.split("[native]\n").nth(1).unwrap()).is_ok() {
+                accepted.push(field);
             }
         }
+        assert!(
+            accepted.is_empty(),
+            "accepted unknown native fields: {accepted:?}"
+        );
     }
 
     #[test]
@@ -1144,55 +1056,46 @@ capabilities = ["registries"]
     }
 
     #[test]
-    fn declared_internals_and_raw_injections_have_one_explicit_form() {
+    fn declared_internals_and_unified_injections_have_one_explicit_form() {
+        let pin = "a".repeat(40);
         let base = format!(
-            "{EXAMPLE}[native]\ngame='26.3'\nhorizon='{}'\nmixins='{}'\n",
-            "a".repeat(40),
-            "b".repeat(40)
+            "{EXAMPLE}internals=[{{path='Game',hash='1234'}}]\n[native]\ngame='26.3'\nhorizon='{pin}'\nmixins='{pin}'\n"
         );
-        let injection = "[[native.injection]]\nid='count'\ntarget=\"horizon_client::game::Game<'_>::tick\"\nkind='HEAD'\n";
         let text = format!(
-            "{}{injection}raw='count'\n",
-            base.replace(
-                "[native]",
-                "internals=[{path='horizon_client::game::Game',hash='1234'}]\n[native]"
-            )
+            "{base}[[inject]]\nid='count'\nat='Game::tick'\nkind='head'\nwith='count'\naccess='internals'\nhash='h'\n"
         );
         let manifest = Manifest::parse(&text).unwrap();
-        assert_eq!(manifest.internals[0].path, "horizon_client::game::Game");
-        let native = manifest.native.unwrap();
-        assert_eq!(native.injection[0].raw.as_deref(), Some("count"));
-        for keys in [
-            "",
-            "raw='count'\nhelper='src/a.rs'",
-            "raw=''",
-            "raw='nested::count'",
-            "raw='0count'",
-        ] {
-            let error = Manifest::parse(&format!("{base}{injection}{keys}\n")).unwrap_err();
+        assert_eq!(manifest.internals[0].path, "Game");
+        assert_eq!(manifest.inject[0].with, "count");
+        for name in ["", "nested::count", "0count"] {
             assert!(
-                error.contains("exactly one source helper or raw"),
-                "{error}"
+                Manifest::parse(&text.replace("with='count'", &format!("with='{name}'"))).is_err()
             );
         }
+        for obsolete in [
+            "helper='src/a.rs'",
+            "cancellable=true",
+            "bindings=[{name='a',ty='u8',value='a'}]",
+            "hook='tick'",
+        ] {
+            assert!(Manifest::parse(&format!("{text}{obsolete}\n")).is_err());
+        }
         for bad in [
-            text.replace("kind='HEAD'", "kind='BEFORE_CALL'"),
-            text.replace("raw='count'", "raw='count'\ncancellable=true"),
-            text.replace(
-                "raw='count'",
-                "raw='count'\nbindings=[{name='a',ty='u8',value='a'}]",
-            ),
-            text.replace("target=", "hook="),
             text.replace("hash='1234'", "hash=''"),
-            text.replace("path='horizon_client::game::Game'", "path=''"),
-            text.replace(
-                "hash='1234'}",
-                "hash='1234'},{path='horizon_client::game::Game',hash='5678'}",
-            ),
+            text.replace("path='Game'", "path=''"),
+            text.replace("hash='1234'}", "hash='1234'},{path='Game',hash='5678'}"),
+            text.replace("with='count'", "with=''"),
+            text.replace("with='count'", "with='count'\nraw='count'"),
         ] {
             assert!(Manifest::parse(&bad).is_err(), "accepted {bad}");
         }
-        Manifest::parse(&text.replace("kind='HEAD'", "kind='RETURN'")).unwrap();
+        Manifest::parse(&text.replace("kind='head'", "kind='return'")).unwrap();
+        let content = format!("{EXAMPLE}internals=[{{path='Game',hash='h'}}]\n");
+        assert!(
+            Manifest::parse(&content)
+                .unwrap_err()
+                .contains("internals need")
+        );
     }
 
     #[test]
@@ -1207,7 +1110,7 @@ capabilities = ["registries"]
         let module = &manifest.native.as_ref().unwrap().module[0];
         assert_eq!(module.name, "runtime");
         assert_eq!(module.visibility, None);
-        // Forwarded whole to horizon-mixins, like `injection`.
+        // Support modules still forward whole to horizon-mixins.
         let forwarded = toml::to_string(manifest.native.as_ref().unwrap()).unwrap();
         assert!(forwarded.contains("[[module]]"));
         assert!(forwarded.contains("id = \"runtime\""));
@@ -1220,7 +1123,7 @@ capabilities = ["registries"]
             // duplicate id, also against an injection's
             format!("{valid}{valid}"),
             format!(
-                "{valid}[[native.injection]]\nid = 'runtime'\ntarget = 'a'\nkind = 'HEAD'\nraw = 'b'\n"
+                "{valid}[[inject]]\nid = 'runtime'\nat = 'a'\nkind = 'head'\nwith = 'b'\nhash = 'h'\n"
             ),
             // not an identifier
             valid.replace("name = 'runtime'", "name = 'run time'"),
@@ -1388,7 +1291,12 @@ capabilities = ["registries"]
 
     #[test]
     fn a_wasm_mod_carries_exactly_its_declared_module() {
-        let module = b"\0asm\x01\0\0\0".to_vec();
+        // A minimal valid shared member: a `dylink.0` section and the three guest exports.
+        let module = wat::parse_str(
+            r#"(module (@custom "dylink.0" "\01\04\00\00\00\00")
+                (func (export "horizon_layout")) (func (export "horizon_in")) (func (export "horizon_hook")))"#,
+        )
+        .unwrap();
         let text = format!(
             "{}\n[wasm]\nsha512 = \"{}\"\ntoolchain = \"1.99.1\"\nbuilt_with = \"test\"\n",
             EXAMPLE.trim_end(),
@@ -1415,7 +1323,7 @@ capabilities = ["registries"]
     }
 
     #[test]
-    fn wasm_non_raw_declarations_fail_schema_even_with_unified_injects() {
+    fn wasm_packages_refuse_unknown_native_fields_even_with_unified_injects() {
         use sha2::{Digest, Sha512};
         use std::io::Write;
         let module = b"\0asm\x01\0\0\0";
@@ -1423,12 +1331,12 @@ capabilities = ["registries"]
             "{EXAMPLE}[wasm]\nsha512='{:x}'\ntoolchain='1.99.1'\n",
             Sha512::digest(module)
         );
-        let foreign = "[[native.injection]]\nid='non_raw'\ntarget='game::tick'\nkind='HEAD'\nhelper='src/count.rs'\n";
+        let foreign = "[native]\ngame='26.3'\nhorizon='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'\nmixins='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'\n[[native.injection]]\nid='non_raw'\ntarget='game::tick'\nkind='HEAD'\nhelper='src/count.rs'\n";
         let missing_raw = foreign.replace("helper='src/count.rs'\n", "");
         assert!(
             Manifest::parse(&format!("{base}{missing_raw}"))
                 .unwrap_err()
-                .contains("missing field `game`")
+                .contains("unknown field `injection`")
         );
         for unified in [
             "",
@@ -1446,8 +1354,8 @@ capabilities = ["registries"]
             let mut archive = zip::ZipArchive::new(zip.finish().unwrap()).unwrap();
             let error = Package::read_zip(&mut archive)
                 .err()
-                .expect("native source declaration without native pins refused");
-            assert!(error.contains("missing field `game`"), "{error}");
+                .expect("unknown native field refused before package classification");
+            assert!(error.contains("unknown field `injection`"), "{error}");
         }
     }
 

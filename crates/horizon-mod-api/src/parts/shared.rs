@@ -80,6 +80,7 @@ pub struct Parts {
     pub(crate) block_entity_kinds: HashMap<Box<str>, Vec<Attached<dyn BlockEntityPart>>>,
     pub(crate) items: HashMap<Box<str>, Vec<Attached<dyn ItemPart>>>,
     pub(crate) menus: HashMap<Box<str>, Vec<Attached<dyn MenuPart>>>,
+    pub(crate) fluids: HashMap<Box<str>, Vec<Attached<dyn FluidPart>>>,
     /// Entity parts by entity type id (`minecraft:zombie`), for the goal
     /// registration at every `Mob` construction (#1077). They carry no scoped
     /// hook, so they never enter `hooks`.
@@ -110,6 +111,7 @@ pub struct HookParts {
     pub(crate) block_entity_kinds: HashMap<Box<str>, Vec<Attached<dyn BlockEntityPart>>>,
     pub(crate) items: HashMap<Box<str>, Vec<Attached<dyn ItemPart>>>,
     pub(crate) menus: HashMap<Box<str>, Vec<Attached<dyn MenuPart>>>,
+    pub(crate) fluids: HashMap<Box<str>, Vec<Attached<dyn FluidPart>>>,
 }
 
 /// Which things a capability's providers are registered by.
@@ -140,6 +142,9 @@ pub(crate) struct Installed {
     pub(crate) tags: TagParts,
     pub(crate) block_entity_types: Vec<BlockEntityTypeDecl>,
     pub(crate) entity_attributes: Vec<EntityAttributeDeclaration>,
+    pub(crate) world_fluids: Vec<(String, crate::WorldFluid)>,
+    pub(crate) entity_attribute_modifications: Vec<EntityAttributeModification>,
+    pub(crate) spawn_placements: Vec<SpawnPlacementDeclaration>,
     pub(crate) registry_keys: horizon_mod_runtime::registry_keys::Requests,
     pub(crate) effects: OnceLock<horizon_mod_runtime::registry_keys::Effects>,
     pub(crate) resolved_block_entity_types: OnceLock<horizon_mod_runtime::registry_keys::Names>,
@@ -479,6 +484,7 @@ impl Parts {
         index!(block_entity_kinds, block_entity_subscribed);
         index!(items, item_subscribed);
         index!(menus, menu_subscribed);
+        index!(fluids, fluid_subscribed);
     }
 }
 
@@ -520,6 +526,9 @@ pub struct PartRegistrar {
     pub(crate) tags: TagParts,
     pub(crate) block_entity_types: Vec<BlockEntityTypeDecl>,
     pub(crate) entity_attributes: Vec<EntityAttributeDeclaration>,
+    pub(crate) world_fluids: Vec<(String, crate::WorldFluid)>,
+    pub(crate) entity_attribute_modifications: Vec<EntityAttributeModification>,
+    pub(crate) spawn_placements: Vec<SpawnPlacementDeclaration>,
     pub(crate) registry_keys: Rc<RefCell<horizon_mod_runtime::registry_keys::Requests>>,
     pub(crate) effects: OnceLock<horizon_mod_runtime::registry_keys::Effects>,
     pub(crate) controllers: Vec<ControllerInfo>,
@@ -542,6 +551,9 @@ impl PartRegistrar {
             tags: TagParts::default(),
             block_entity_types: Vec::new(),
             entity_attributes: Vec::new(),
+            world_fluids: Vec::new(),
+            entity_attribute_modifications: Vec::new(),
+            spawn_placements: Vec::new(),
             registry_keys: Default::default(),
             effects: OnceLock::new(),
             controllers: Vec::new(),
@@ -679,6 +691,9 @@ pub(crate) fn install_registrar(
         tags: registrar.tags,
         block_entity_types: registrar.block_entity_types,
         entity_attributes: registrar.entity_attributes,
+        world_fluids: registrar.world_fluids,
+        entity_attribute_modifications: registrar.entity_attribute_modifications,
+        spawn_placements: registrar.spawn_placements,
         resolved_block_entity_types: OnceLock::new(),
         registry_keys: Rc::try_unwrap(registrar.registry_keys)
             .unwrap_or_else(|_| unreachable!("registration scope has ended"))
@@ -757,24 +772,17 @@ pub mod tests {
             registrar.block_key(&id);
         }
         super::install_registrar(registrar, schema).unwrap();
-        crate::registry_keys::resolve_effects(
-            horizon_client_core::potions::all_effects()
-                .map(|def| horizon_client_core::potions::namespaced(def.id)),
-            |id| horizon_client_core::potions::effect(id).map(|def| def.index),
+        crate::registry_keys::resolve_fluids(
+            &[
+                "minecraft:empty",
+                "minecraft:water",
+                "minecraft:flowing_water",
+                "minecraft:lava",
+                "minecraft:flowing_lava",
+            ],
+            &[],
         )
         .unwrap();
-        crate::registry_keys::resolve_fluids(&[
-            "minecraft:empty",
-            "minecraft:water",
-            "minecraft:flowing_water",
-            "minecraft:lava",
-            "minecraft:flowing_lava",
-        ])
-        .unwrap();
-        if let Some(types) = horizon_client_core::block_entity_types::current() {
-            crate::registry_keys::resolve_block_entity_types(types.names(), |id| types.key(id))
-                .unwrap();
-        }
     }
 
     /// A previously requested block in the game fixture. Unknown names are a fixture error.
@@ -795,10 +803,20 @@ pub mod tests {
 
     /// A registered effect exposed by the real load-owned mapping, also for unrequested vanilla entries.
     pub fn effect_key(id: &str) -> EffectKey {
-        let index = horizon_client_core::potions::effect(id)
-            .expect("fixture registered this effect")
-            .index;
-        crate::registry_keys::effect_key(index).expect("fixture resolved effect keys")
+        let canonical = if id.contains(':') {
+            id.to_owned()
+        } else {
+            format!("minecraft:{id}")
+        };
+        EffectKey(
+            *super::resolved_effects()
+                .get()
+                .expect("fixture resolved effects")
+                .names
+                .slots
+                .get(&canonical)
+                .expect("fixture registered this effect"),
+        )
     }
 
     #[cfg(test)]
@@ -848,12 +866,7 @@ pub mod tests {
             ["mod lookup requested unknown block absent:block"]
         );
         assert_eq!(
-            crate::registry_keys::resolve_effects(
-                horizon_client_core::potions::all_effects()
-                    .map(|def| horizon_client_core::potions::namespaced(def.id)),
-                |id| horizon_client_core::potions::effect(id).map(|def| def.index)
-            )
-            .unwrap_err(),
+            crate::registry_keys::resolve_effects(std::iter::empty(), |_| None).unwrap_err(),
             ["mod lookup requested unknown effect absent:effect"]
         );
     }
@@ -1028,19 +1041,20 @@ pub mod tests {
         fn block_state(&self, _: [i32; 3]) -> Option<crate::BlockState> {
             None
         }
-        fn state_with_property(&self, _: BlockStateId, _: &str, _: &str) -> Option<BlockStateId> {
+        fn state_with_property(&self, _: BlockState, _: &str, _: &str) -> Option<BlockState> {
             None
         }
-        fn state_block(&self, state: BlockStateId) -> Option<&str> {
-            [
-                "minecraft:air",
-                "test:gauge",
-                "test:other",
-                "test:connector",
-                "test:press",
-            ]
-            .get(state.0 as usize)
-            .copied()
+        fn state_block(&self, state: BlockState) -> Option<&str> {
+            let metadata = crate::__private::block_definitions()?;
+            let slot = state.block().0 as usize;
+            if u32::from(state.ordinal()) >= metadata.definitions.get(slot)?.state_count() {
+                return None;
+            }
+            metadata
+                .names
+                .entries
+                .get(slot)
+                .map(|entry| entry.id.as_str())
         }
     }
 
@@ -1060,11 +1074,7 @@ pub mod tests {
                 ["gauge", "connector", "press", "hoard"]
                     .into_iter()
                     .chain(CAPABILITY_TYPES.iter().copied())
-                    .map(|id| horizon_mod_package::content::Block {
-                        id: format!("test:{id}"),
-                        template: "minecraft:stone".into(),
-                        ..Default::default()
-                    }),
+                    .map(|id| mod_api::Block::new(format!("test:{id}"), "minecraft:stone")),
             );
         }
     }
@@ -1079,13 +1089,16 @@ pub mod tests {
         .into();
         crate::install(mods.clone());
         install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
-        crate::registry_keys::resolve_fluids(&[
-            "minecraft:water",
-            "minecraft:lava",
-            "minecraft:flowing_water",
-            "minecraft:flowing_lava",
-            "minecraft:empty",
-        ])
+        crate::registry_keys::resolve_fluids(
+            &[
+                "minecraft:water",
+                "minecraft:lava",
+                "minecraft:flowing_water",
+                "minecraft:flowing_lava",
+                "minecraft:empty",
+            ],
+            &[],
+        )
         .unwrap();
         crate::registry_keys::resolve_block_keys(
             [

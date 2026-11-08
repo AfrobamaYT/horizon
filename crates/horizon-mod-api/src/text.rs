@@ -4,7 +4,6 @@ use horizon_core::nbt::clone_tag;
 
 /// A component tree, retaining translation keys, styles and ordered children.
 #[derive(Clone, Debug, PartialEq)]
-#[horizon_mod_api_macros::wasm(via = TextForm)]
 #[non_exhaustive]
 pub struct Text {
     /// The component's contents before its children.

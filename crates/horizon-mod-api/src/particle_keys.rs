@@ -5,7 +5,6 @@ use std::sync::OnceLock;
 /// A particle requested at registration, resolved once when providers load.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: only the load-owned table creates keys
-#[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
 pub struct ParticleKey(pub(crate) u32);
 
 fn resolved() -> &'static OnceLock<Particles> {

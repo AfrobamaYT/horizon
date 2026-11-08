@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 /// Shown once, before the first native mod is installed.
-pub const NOTICE: &str = "Native mods aren't sandboxed: they run with full access to your computer, like any program. Install only mods whose authors you trust. To play with one, build the game on the Mods page; the first build downloads Rust and takes 20 to 30 minutes.";
+pub const NOTICE: &str = "Native mods aren't sandboxed: they run with full access to your computer, like any program. Install only mods whose authors you trust. To play with one, build the game on the Mods page; a build may download Rust and other build tools.";
 
 /// A native mod: its id, its version and a digest of its files (None for a build from before
 /// `native-mods.json` kept them).
@@ -228,14 +228,9 @@ fn record(version: &str) -> Option<serde_json::Value> {
     serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
 }
 
-/// How many seconds build `version` took, when its record says.
-pub fn built_secs(version: &str) -> Option<u64> {
-    record(version)?["secs"].as_u64()
-}
-
 /// The profile native build `version` was built with (`native-mods.json`'s `profile`).
 pub fn built_profile(version: &str) -> Option<native_mods::Profile> {
-    native_mods::Profile::parse(record(version)?["profile"].as_str()?)
+    serde_json::from_value(record(version)?.get("profile")?.clone()).ok()
 }
 
 /// `state`, once the mode counts: a build made in another mode than `chosen` is not this mode's
@@ -277,18 +272,7 @@ pub fn fingerprint(home: &Path, version: Option<&str>) -> String {
     let mut out = format!("{}\n{version:?}\n", home.display());
     // The on/off list (`browser::java::is_enabled`).
     out += &fs::read_to_string(home.join("horizon-mods.txt")).unwrap_or_default();
-    let mut packages = hmods(home);
-    // A wasm mod's declarations also select a source build's internals table.
-    packages.extend(
-        fs::read_dir(home.join(horizon_mod_package::mod_list::DIR))
-            .into_iter()
-            .flatten()
-            .flatten()
-            .map(|entry| entry.path())
-            .filter(|path| path.extension().is_some_and(|ext| ext == "hmod")),
-    );
-    packages.sort();
-    for path in packages
+    for path in hmods(home)
         .into_iter()
         .flat_map(|p| [p.clone(), p.with_extension("origin.json")])
         .chain([home.join("mod-browser.json")])
@@ -345,7 +329,7 @@ mod tests {
     }
 
     #[test]
-    fn regular_wasm_package_changes_invalidate_the_build_view_cache() {
+    fn regular_wasm_package_changes_leave_the_build_view_cache_alone() {
         let home = std::env::temp_dir().join(format!("wasm-build-view-{}", std::process::id()));
         fs::create_dir_all(home.join(horizon_mod_package::mod_list::DIR)).unwrap();
         let package = home
@@ -354,7 +338,13 @@ mod tests {
         fs::write(&package, b"a").unwrap();
         let before = fingerprint(&home, None);
         fs::write(&package, b"ab").unwrap();
-        assert_ne!(before, fingerprint(&home, None));
+        // If staged internals selection for wasm mods returns, a wasm package is a build input
+        // again and this must go back to `assert_ne!` (main's original assertion).
+        assert_eq!(
+            before,
+            fingerprint(&home, None),
+            "a wasm package is not a build input: the native build never reads it"
+        );
         fs::remove_dir_all(home).unwrap();
     }
 

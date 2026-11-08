@@ -15,6 +15,13 @@ pub trait ClientRenderClientHost {
     /// Set the drawn length; use [`InstanceGroupRef::set_len`].
     #[access(PublishedResources)]
     fn instance_group_set_len(&self, group: InstanceGroupRef, len: u32) -> Result<(), GroupError>;
+    /// Replace the group pose; use [`InstanceGroupRef::set_group_transform`].
+    #[access(PublishedResources)]
+    fn instance_group_set_transform(
+        &self,
+        group: InstanceGroupRef,
+        transform: [f32; 12],
+    ) -> Result<(), GroupError>;
     /// Retire retained model copies; use [`InstanceGroupRef::destroy`].
     #[access(PublishedResources)]
     fn instance_group_destroy(&self, group: InstanceGroupRef) -> Result<(), GroupError>;
@@ -53,7 +60,7 @@ pub trait ClientRenderClientHost {
     /// kept with `BlockEntityDraw::keep`. The face culled against that side comes first, else the first facing it;
     /// None when the model has no face that way or isn't baked. API @API:block_face_sprite@.
     #[access(PublishedResources)]
-    fn block_face_sprite(&self, state: BlockStateId, side: Direction) -> Option<BlockFaceTexture>;
+    fn block_face_sprite(&self, state: BlockState, side: Direction) -> Option<BlockFaceTexture>;
     /// Side: client.
     /// Published asset/data read: available in Setup, Reloading and World.
     /// For a client mod: what each resolved block state draws on its six sides, preserving
@@ -63,7 +70,7 @@ pub trait ClientRenderClientHost {
     /// cube. None for a block the game does not know. The model is the state's first random variant. API
     /// 380.
     #[access(PublishedResources)]
-    fn block_sprites(&self, blocks: &[BlockStateId]) -> Vec<Option<BlockSprites>>;
+    fn block_sprites(&self, blocks: &[BlockState]) -> Vec<Option<BlockSprites>>;
     /// Side: client.
     /// Published asset/data read: available in Setup, Reloading and World.
     /// For a client mod: each texture's sprite by name (`minecraft:block/stone`, `block/stone`), none for one no

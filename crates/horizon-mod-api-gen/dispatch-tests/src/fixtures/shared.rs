@@ -98,14 +98,11 @@ impl ServerHost for TestHost {}
 impl ClientHost for TestHost {}
 #[allow(dead_code)]
 mod generated {
-    mod horizon_mod_package {
-        pub mod content {
-            pub struct Block;
-            pub struct Item;
-        }
-    }
     pub(super) mod mod_api {
+        pub struct Block;
+        pub struct Item;
         pub(super) use super::super::ItemStack;
+        pub struct FluidModel;
         include!(concat!(env!("OUT_DIR"), "/dispatch_fixtures_api.rs"));
     }
     include!(concat!(env!("OUT_DIR"), "/mod_api_generated.rs"));
@@ -115,7 +112,7 @@ mod generated {
 use generated::*;
 struct Installed {
     mods: Arc<[ModEntry]>,
-    subscribers: horizon_client_core::subscribers::Subscribers,
+    subscribers: horizon_mod_runtime::subscribers::Subscribers,
 }
 thread_local! {
     /// The hooks each dispatch entered, a mod at a time.
@@ -132,7 +129,7 @@ fn install(mods: Arc<[ModEntry]>) {
             .map(move |hook| (index, *hook as usize))
     });
     let subscribers =
-        horizon_client_core::subscribers::Subscribers::new(HOOK_COUNT, mods.len(), subscriptions);
+        horizon_mod_runtime::subscribers::Subscribers::new(HOOK_COUNT, mods.len(), subscriptions);
     // Test dispatch needs the same static lifetime as the real installation.
     MODS.set(Some(Box::leak(Box::new(Installed { mods, subscribers }))));
 }
@@ -182,12 +179,14 @@ struct Parts {
     block_entities: Vec<&'static dyn BlockEntityPart>,
     items: Vec<&'static dyn ItemPart>,
     menus: Vec<&'static dyn MenuPart>,
+    fluids: Vec<&'static dyn FluidPart>,
 }
 static NO_PARTS: Parts = Parts {
     blocks: Vec::new(),
     block_entities: Vec::new(),
     items: Vec::new(),
     menus: Vec::new(),
+    fluids: Vec::new(),
 };
 thread_local! {
     static PARTS: std::cell::Cell<&'static Parts> = const { std::cell::Cell::new(&NO_PARTS) };
@@ -243,6 +242,9 @@ impl Parts {
     }
     fn menu<'k>(&self, _: impl FnOnce() -> Option<&'k str>) -> &[&'static dyn MenuPart] {
         &self.menus
+    }
+    fn fluid<'k>(&self, _: impl FnOnce() -> Option<&'k str>) -> &[&'static dyn FluidPart] {
+        &self.fluids
     }
 }
 fn entered_parts<'a, P: ?Sized>(
@@ -638,6 +640,9 @@ mod api {
     pub mod first_person {
         #[derive(Clone, Copy)]
         pub struct Hand;
+    }
+    pub mod widgets {
+        pub struct TextEdit;
     }
     pub mod hud_layout {
         pub struct HealthInputs;

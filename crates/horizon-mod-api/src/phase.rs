@@ -1,6 +1,27 @@
 //! Restricted views for registration and data loading.
-pub use horizon_world::native_load_context::{DataLoadOrigin, LoopSide};
-use std::sync::{Arc, OnceLock};
+/// The owning boundary that starts a data load.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DataLoadOrigin {
+    /// Server data loading, including a reload.
+    ServerDataLoad,
+    /// Client resource preloading.
+    ClientPreload,
+}
+
+/// The side that owns a resource-generation loop.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum LoopSide {
+    /// A server loop.
+    Server,
+    /// A client loop.
+    Client,
+}
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, OnceLock},
+};
 
 /// The permission boundary of the current owning thread. Only the game advances it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -348,6 +369,94 @@ pub fn install_packages(native: &[PackageInfo], content: &[PackageInfo]) {
     );
 }
 
+/// Install the host's ordered package inventory in a guest at initialization.
+// hidden: the guest runtime installs this once before dispatching hooks.
+#[doc(hidden)]
+pub fn install_guest_packages(packages: Vec<PackageInfo>) {
+    let _ = PACKAGES.set(packages.into());
+}
+
+/// The registries and settings registration reads: captured by the engine once, before the
+/// first registration hook runs, and the same for every registration step. Lookups are binary
+/// searches over sorted lists, so a clone of the context copies nothing.
+#[derive(Clone)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
+pub struct RegistrationData {
+    /// Built-in registry names in ID order, by registry name.
+    pub(crate) registries: Arc<[(String, Arc<[String]>)]>,
+    /// Each loaded mod's settings, by mod ID then key.
+    pub(crate) settings: Arc<[(String, Arc<[(String, String)]>)]>,
+}
+
+impl RegistrationData {
+    /// The engine's snapshot: `registries` maps a registry name to its names in ID order,
+    /// `settings` a mod ID to its settings.
+    pub fn new(
+        registries: BTreeMap<String, Vec<String>>,
+        settings: BTreeMap<String, BTreeMap<String, String>>,
+    ) -> Self {
+        Self {
+            registries: registries
+                .into_iter()
+                .map(|(name, ids)| (name, ids.into()))
+                .collect(),
+            settings: settings
+                .into_iter()
+                .map(|(id, values)| (id, values.into_iter().collect()))
+                .collect(),
+        }
+    }
+    fn registry(&self, name: &str) -> Option<Arc<[String]>> {
+        let at = self
+            .registries
+            .binary_search_by(|(known, _)| known.as_str().cmp(name));
+        Some(self.registries[at.ok()?].1.clone())
+    }
+    fn setting(&self, mod_id: &str, key: &str) -> Option<String> {
+        let mod_at = self
+            .settings
+            .binary_search_by(|(known, _)| known.as_str().cmp(mod_id))
+            .ok()?;
+        let values = &self.settings[mod_at].1;
+        let at = values
+            .binary_search_by(|(known, _)| known.as_str().cmp(key))
+            .ok()?;
+        Some(values[at].1.clone())
+    }
+}
+
+static REGISTRATION_DATA: OnceLock<RegistrationData> = OnceLock::new();
+
+#[cfg(any(test, feature = "testing"))]
+thread_local! {
+    static TEST_REGISTRATION_DATA: std::cell::RefCell<Option<RegistrationData>> = const { std::cell::RefCell::new(None) };
+}
+/// Runs `f` with `data` as the registration data, for tests.
+#[cfg(any(test, feature = "testing"))]
+pub fn with_test_registration_data<R>(data: RegistrationData, f: impl FnOnce() -> R) -> R {
+    TEST_REGISTRATION_DATA.set(Some(data));
+    let result = f();
+    TEST_REGISTRATION_DATA.set(None);
+    result
+}
+
+fn registration_data() -> Option<RegistrationData> {
+    #[cfg(any(test, feature = "testing"))]
+    if let Some(data) = TEST_REGISTRATION_DATA.with_borrow(Clone::clone) {
+        return Some(data);
+    }
+    REGISTRATION_DATA.get().cloned()
+}
+
+/// Records the registries and settings registration reads, once at startup, after the
+/// package inventory and before the first registration hook; a second call panics.
+pub fn install_registration_data(data: RegistrationData) {
+    assert!(
+        REGISTRATION_DATA.set(data).is_ok(),
+        "registration data already installed"
+    );
+}
+
 /// Read-only view of the startup package inventory, shared: cloning it copies no package.
 #[derive(Clone)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
@@ -382,8 +491,42 @@ impl LoadedMods {
     }
 }
 
+/// Why a registration read was refused.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RegistrationReadError {
+    /// The engine supplied no registry or settings data to this context.
+    Unavailable,
+    /// The registry name is not a namespaced identifier (`minecraft:item`).
+    InvalidRegistryName(String),
+    /// No built-in registry has this name.
+    UnknownRegistry(String),
+    /// The setting key is empty or names a path rather than one key.
+    InvalidSettingKey(String),
+    /// No loaded package has this ID, so it has no settings to read.
+    UnknownMod(String),
+}
+impl std::fmt::Display for RegistrationReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "registration read refused: {self:?}")
+    }
+}
+impl std::error::Error for RegistrationReadError {}
+
 /// A registration phase's view. Declarations go on the hook's event; there is
 /// no world, handle constructor, transaction or game Host at this point.
+///
+/// Every registration hook (`register`, `component_types`, `blocks`, `items`,
+/// `standalone_models` and the other `Register*` hooks) reads the same frozen view,
+/// captured once before the first of them runs, so an answer never depends on
+/// dispatch order or on which hook asks:
+///
+/// - [`mods`](Self::mods): the loaded packages.
+/// - [`registry`](Self::registry): the built-in registries, as `registries.json` lists them.
+///   Entries that mods declare during registration are not in it; a mod already has its own
+///   declarations on its event or registrar.
+/// - [`setting`](Self::setting): the settings on disk for the loaded packages when registration
+///   began. Later writes are not seen.
 ///
 /// ```compile_fail
 /// use mod_api::{Host, RegistrationContext};
@@ -405,18 +548,51 @@ impl LoadedMods {
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct RegistrationContext {
     pub(crate) mods: LoadedMods,
+    pub(crate) data: Option<RegistrationData>,
 }
 
 impl RegistrationContext {
     pub(crate) fn new() -> Self {
         Self {
             mods: LoadedMods::new(),
+            data: registration_data(),
         }
     }
 
     /// The loaded-mod view, independent of this phase's event or registrar.
     pub fn mods(&self) -> &LoadedMods {
         &self.mods
+    }
+
+    /// A built-in registry's names in ID order, for validating the keys a mod declares.
+    pub fn registry(&self, name: &str) -> Result<Arc<[String]>, RegistrationReadError> {
+        if crate::Identifier::parse_namespaced(name).is_none() {
+            return Err(RegistrationReadError::InvalidRegistryName(name.to_owned()));
+        }
+        self.data()?
+            .registry(name)
+            .ok_or_else(|| RegistrationReadError::UnknownRegistry(name.to_owned()))
+    }
+
+    /// A loaded mod's setting as it was when registration began: `Ok(None)` when the mod
+    /// has not set it. The key is one setting's name, not a path.
+    pub fn setting(
+        &self,
+        mod_id: &str,
+        key: &str,
+    ) -> Result<Option<String>, RegistrationReadError> {
+        if key.is_empty() || matches!(key, "." | "..") || key.contains(['/', '\\', '\0']) {
+            return Err(RegistrationReadError::InvalidSettingKey(key.to_owned()));
+        }
+        let data = self.data()?;
+        if self.mods.get(mod_id).is_none() {
+            return Err(RegistrationReadError::UnknownMod(mod_id.to_owned()));
+        }
+        Ok(data.setting(mod_id, key))
+    }
+
+    fn data(&self) -> Result<&RegistrationData, RegistrationReadError> {
+        self.data.as_ref().ok_or(RegistrationReadError::Unavailable)
     }
 }
 
@@ -465,19 +641,32 @@ pub trait DataLoadContext {
     fn mods(&self) -> LoadedMods;
 }
 
+/// Immutable resource-generation reads supplied by an owning loader.
+pub trait LoadReader: Sync {
+    /// Registry names in ID order.
+    fn registry(&self, name: &str) -> Option<Arc<[String]>>;
+    /// Fluid tags and their members in source order.
+    fn fluid_tags(&self) -> Arc<[(String, Arc<[String]>)]>;
+    /// A captured setting, without file I/O.
+    fn setting(&self, mod_id: &str, key: &str) -> Option<String>;
+}
+
 /// The game's owning load, as a [`DataLoadContext`].
 // hidden: the game's side of the context, not part of the mod surface
 #[doc(hidden)]
 // exhaustive: its fields are private; only the game builds it
 pub struct OwningLoad<'a> {
-    source: &'a horizon_world::native_load_context::LoadContext,
+    source: &'a dyn LoadReader,
+    origin: DataLoadOrigin,
     mods: LoadedMods,
 }
 
 impl<'a> OwningLoad<'a> {
-    pub fn new(source: &'a horizon_world::native_load_context::LoadContext) -> Self {
+    /// Borrow a loader's immutable reader at its owning boundary.
+    pub fn new(origin: DataLoadOrigin, source: &'a dyn LoadReader) -> Self {
         Self {
             source,
+            origin,
             mods: LoadedMods::new(),
         }
     }
@@ -485,7 +674,7 @@ impl<'a> OwningLoad<'a> {
 
 impl DataLoadContext for OwningLoad<'_> {
     fn origin(&self) -> DataLoadOrigin {
-        self.source.origin()
+        self.origin
     }
     fn registry(&self, name: &str) -> Option<Arc<[String]>> {
         self.source.registry(name)
@@ -494,7 +683,7 @@ impl DataLoadContext for OwningLoad<'_> {
         crate::registry_keys::fluid_key(id)
     }
     fn fluid_tags(&self) -> Option<Arc<[(String, Arc<[String]>)]>> {
-        Some(self.source.fluid_tags().clone())
+        Some(self.source.fluid_tags())
     }
     fn setting(&self, mod_id: &str, key: &str) -> Option<String> {
         self.source.setting(mod_id, key)
@@ -535,19 +724,30 @@ pub trait LoopContext {
     fn mods(&self) -> LoadedMods;
 }
 
+/// Immutable resource-generation reads supplied by an owning loop.
+pub trait LoopReader: Sync {
+    /// Registry names in ID order.
+    fn registry(&self, name: &str) -> Option<Arc<[String]>>;
+    /// A captured setting, without file I/O.
+    fn setting(&self, mod_id: &str, key: &str) -> Option<String>;
+}
+
 /// The game's loop, as a [`LoopContext`].
 // hidden: the game's side of the context, not part of the mod surface
 #[doc(hidden)]
 // exhaustive: its fields are private; only the game builds it
 pub struct OwningLoop<'a> {
-    source: &'a horizon_world::native_load_context::LoopContext,
+    source: &'a dyn LoopReader,
+    side: LoopSide,
     mods: LoadedMods,
 }
 
 impl<'a> OwningLoop<'a> {
-    pub fn new(source: &'a horizon_world::native_load_context::LoopContext) -> Self {
+    /// Borrow a loop's immutable reader at its owning boundary.
+    pub fn new(side: LoopSide, source: &'a dyn LoopReader) -> Self {
         Self {
             source,
+            side,
             mods: LoadedMods::new(),
         }
     }
@@ -555,7 +755,7 @@ impl<'a> OwningLoop<'a> {
 
 impl LoopContext for OwningLoop<'_> {
     fn side(&self) -> LoopSide {
-        self.source.side()
+        self.side
     }
     fn registry(&self, name: &str) -> Option<Arc<[String]>> {
         self.source.registry(name)
@@ -575,7 +775,6 @@ mod tests {
     #[test]
     fn resolved_dispatch_slice_keeps_order_in_registration_config_and_reload() {
         use crate::*;
-        use horizon_mod_package::dependencies;
         use std::sync::Mutex;
         struct Trace {
             id: &'static str,
@@ -605,25 +804,8 @@ mod tests {
         mod_api::impl_host_areas!(Server);
         impl ServerHost for Server {}
         mod_api::impl_server_host_areas!(Server);
-        let declarations: Vec<_> = ["z", "lib", "a"].into_iter().map(|id| {
-            let deps = if id == "lib" { "" } else { "[dependencies]\nlib='^1'" };
-            horizon_mod_package::Manifest::parse(&format!("id='{id}'\nname='{id}'\nversion='1'\napi='0.2'\ncapabilities=['registries']\n{deps}")).unwrap()
-        }).collect();
-        let declared: Vec<_> = declarations
-            .iter()
-            .map(|m| dependencies::from_manifest(&m.dependencies))
-            .collect();
-        let inputs: Vec<_> = declarations
-            .iter()
-            .zip(&declared)
-            .map(|(m, dependencies)| dependencies::Mod {
-                id: &m.id,
-                version: &m.version,
-                has_api: true,
-                dependencies,
-            })
-            .collect();
-        let order = dependencies::resolve(&inputs).unwrap().order;
+        // The loader supplies a dependency-resolved slice; phase dispatch must retain it.
+        let order = [1, 0, 2];
         let calls = Arc::new(Mutex::new(Vec::new()));
         let ids = ["z", "lib", "a"];
         let mods: Mods = order
@@ -750,7 +932,11 @@ mod tests {
         use ModPhase::*;
         for phase in [Packages, Registration, Setup, Config, Reloading, World] {
             let _owner = PhaseOwner::new(phase);
-            for operation in ["fluid_state_definition", "fluid_state_validate"] {
+            for operation in [
+                "fluid_state_definition",
+                "fluid_state_validate",
+                "fluid_type_properties",
+            ] {
                 let result = std::panic::catch_unwind(|| {
                     check_access(operation, LoadAccess::Metadata);
                 });
@@ -847,17 +1033,15 @@ mod tests {
 
     #[test]
     fn a_loop_context_reads_its_side_registries_and_mods() {
-        use horizon_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs};
-        let registries =
-            std::collections::BTreeMap::from([("item".to_owned(), vec!["a:b".into()])]);
-        let load = LoadContext::new(
-            DataLoadOrigin::ClientPreload,
-            std::sync::Arc::new(LoadInputs::new(registries, Default::default())),
-            [],
-        );
-        let source = load.loop_context(LoopSide::Client, []);
+        let source = TestReader {
+            registries: std::collections::BTreeMap::from([(
+                "item".to_owned(),
+                vec!["a:b".into()].into(),
+            )]),
+            tags: Arc::from([]),
+        };
         with_test_packages(&["one", "two"], || {
-            let context = OwningLoop::new(&source);
+            let context = OwningLoop::new(LoopSide::Client, &source);
             assert_eq!(context.side(), LoopSide::Client);
             assert_eq!(
                 context.registry("item").as_deref(),
@@ -867,5 +1051,129 @@ mod tests {
             assert_eq!(context.setting("one", "mode"), None);
             assert_eq!(context.mods().ids().collect::<Vec<_>>(), ["one", "two"]);
         });
+    }
+
+    #[test]
+    fn registration_hooks_read_one_snapshot_and_refuse_bad_reads() {
+        use crate::*;
+        use std::sync::Mutex;
+
+        /// Every answer the context gives this hook, for the keys the test names.
+        fn probe(cx: &RegistrationContext) -> Vec<String> {
+            let registry = |name| format!("{:?}", cx.registry(name));
+            let setting = |id, key| format!("{:?}", cx.setting(id, key));
+            vec![
+                registry("minecraft:item"),
+                registry("minecraft:missing"),
+                registry("item"),
+                registry(""),
+                setting("reader", "mode"),
+                setting("reader", "unset"),
+                setting("other", "mode"),
+                setting("absent", "mode"),
+                setting("reader", ""),
+                setting("reader", ".."),
+                setting("reader", "../mode"),
+                setting("reader", "a\\b"),
+            ]
+        }
+        struct Reader(Arc<Mutex<Vec<String>>>);
+        #[crate::__subscriptions]
+        impl Hooks for Reader {
+            fn register(&self, _: &mut dyn Registrar, cx: &RegistrationContext) {
+                *self.0.lock().unwrap() = probe(cx);
+            }
+            fn component_types(
+                &self,
+                cx: &RegistrationContext,
+                event: &mut ComponentTypesEvent<'_>,
+            ) {
+                *event.types = probe(cx);
+            }
+        }
+
+        let data = RegistrationData::new(
+            BTreeMap::from([(
+                "minecraft:item".to_owned(),
+                vec!["minecraft:air".to_owned(), "minecraft:stone".to_owned()],
+            )]),
+            BTreeMap::from([
+                (
+                    "reader".to_owned(),
+                    BTreeMap::from([("mode".to_owned(), "fast".to_owned())]),
+                ),
+                (
+                    "other".to_owned(),
+                    BTreeMap::from([("mode".to_owned(), "slow".to_owned())]),
+                ),
+            ]),
+        );
+
+        let registered = Arc::new(Mutex::new(Vec::new()));
+        let mods: Mods = vec![ModEntry::new(
+            "reader",
+            Box::new(Reader(registered.clone())),
+        )]
+        .into();
+        crate::install(mods.clone());
+        let expected = [
+            r#"Ok(["minecraft:air", "minecraft:stone"])"#,
+            r#"Err(UnknownRegistry("minecraft:missing"))"#,
+            r#"Err(InvalidRegistryName("item"))"#,
+            r#"Err(InvalidRegistryName(""))"#,
+            r#"Ok(Some("fast"))"#,
+            "Ok(None)",
+            r#"Ok(Some("slow"))"#,
+            r#"Err(UnknownMod("absent"))"#,
+            r#"Err(InvalidSettingKey(""))"#,
+            r#"Err(InvalidSettingKey(".."))"#,
+            r#"Err(InvalidSettingKey("../mode"))"#,
+            r#"Err(InvalidSettingKey("a\\b"))"#,
+        ];
+        with_test_packages(&["reader", "other"], || {
+            with_test_registration_data(data, || {
+                crate::install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false)
+                    .unwrap();
+                assert_eq!(*registered.lock().unwrap(), expected);
+                let mut types = Vec::new();
+                dispatch_component_types(&RegistrationContext::new(), &mut types);
+                assert_eq!(types, expected, "a later step reads the same snapshot");
+            });
+            // No engine view: every read is refused, and a bad name or key still says so.
+            crate::install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
+            let refused = registered.lock().unwrap().clone();
+            assert_eq!(refused[0], "Err(Unavailable)");
+            assert_eq!(refused[2], r#"Err(InvalidRegistryName("item"))"#);
+            assert_eq!(refused[4], "Err(Unavailable)");
+            assert_eq!(refused[8], r#"Err(InvalidSettingKey(""))"#);
+        });
+    }
+}
+
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct TestReader {
+    pub registries: std::collections::BTreeMap<String, Arc<[String]>>,
+    pub tags: Arc<[(String, Arc<[String]>)]>,
+}
+#[cfg(test)]
+impl LoadReader for TestReader {
+    fn registry(&self, name: &str) -> Option<Arc<[String]>> {
+        self.registries.get(name).cloned()
+    }
+    fn fluid_tags(&self) -> Arc<[(String, Arc<[String]>)]> {
+        self.tags.clone()
+    }
+    fn setting(&self, _: &str, _: &str) -> Option<String> {
+        None
+    }
+}
+#[cfg(test)]
+impl LoopReader for TestReader {
+    fn registry(&self, name: &str) -> Option<Arc<[String]>> {
+        self.registries.get(name).cloned()
+    }
+    fn setting(&self, _: &str, _: &str) -> Option<String> {
+        None
     }
 }

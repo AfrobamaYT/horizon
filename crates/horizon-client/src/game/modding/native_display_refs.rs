@@ -583,8 +583,10 @@ mod tests {
     fn push(game: &mut Game<'_>, id: u32, kind: &str) -> DisplayRef {
         game.options.dedicated = Some(Vec::new());
         game.others.push(OtherEntity {
+            knot_check: None,
             join: Default::default(),
             item_transformation: None,
+            interaction: None,
             id,
             kind: kind.into(),
             position: Vec3::new(1.0, 70.0, 1.0),
@@ -607,8 +609,10 @@ mod tests {
             assert_eq!(item.kind(game), Some(NativeDisplayKind::Item));
             assert_eq!(text.entity(), game.entity(21).unwrap());
             game.others.push(OtherEntity {
+                knot_check: None,
                 join: Default::default(),
                 item_transformation: None,
+                interaction: None,
                 id: 24,
                 kind: "minecraft:marker".into(),
                 position: Vec3::ZERO,
@@ -731,17 +735,29 @@ mod tests {
             assert_eq!(text.text_shadow(game), Some(false));
             assert_eq!(text.see_through(game), Some(true));
 
-            let stone = game.block_state_id("minecraft:stone").unwrap();
+            let stone = game
+                .block_state_id("minecraft:stone")
+                .unwrap()
+                .try_into_api()
+                .unwrap();
             let stairs = game
                 .block_state_id("minecraft:oak_stairs[facing=east]")
+                .unwrap()
+                .try_into_api()
                 .unwrap();
-            let air = game.block_state_id("minecraft:air").unwrap();
+            let air = game
+                .block_state_id("minecraft:air")
+                .unwrap()
+                .try_into_api()
+                .unwrap();
             assert_eq!(block.block_state(game), Some(air));
             assert!(block.set_block_state(game, stone));
             assert_eq!(block.block_state(game), Some(stone));
             assert!(block.set_block_state(game, stairs));
             assert_eq!(block.block_state(game), Some(stairs));
-            assert!(!block.set_block_state(game, BlockStateId(u32::MAX as _)));
+            let invalid = mod_api::BlockStateRecord::new(stairs.block(), u16::MAX).into();
+            assert!(!block.set_block_state(game, invalid));
+            assert_eq!(block.block_state(game), Some(stairs));
 
             let sword = ItemStack {
                 item: "minecraft:diamond_sword".into(),

@@ -24,6 +24,10 @@ pub enum PositionSource {
 pub struct ParticleOptions {
     /// Provider identity issued by `Registrar::particle_key`, never an engine enum.
     pub ty: ParticleKey,
+    /// Older entity-effect providers use velocity as RGB; true is ambient.
+    pub legacy_entity_effect: Option<bool>,
+    /// Older trails choose their lifetime in the provider rather than on the wire.
+    pub legacy_trail_lifetime: bool,
     /// `BlockParticleOption`: the block's particle sprite and terrain tint.
     pub block: Option<(String, u32)>,
     /// RGB(A) for dust, spells, entity effects and tinted leaves.
@@ -52,6 +56,8 @@ impl ParticleOptions {
     pub fn simple(ty: ParticleKey) -> Self {
         Self {
             ty,
+            legacy_entity_effect: None,
+            legacy_trail_lifetime: false,
             block: None,
             color: [1.0; 4],
             scale: 1.0,

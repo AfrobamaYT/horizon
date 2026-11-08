@@ -22,7 +22,11 @@ pub(crate) fn block_jump_factor(
     let Ok(state) = state.try_into_api() else {
         return;
     };
-    mod_api::dispatch_block_jump_factor(&mod_api::OwningLoop::new(context), state, factor);
+    mod_api::dispatch_block_jump_factor(
+        &horizon_client_render::api_context::LoopReader(context).context(),
+        state,
+        factor,
+    );
 }
 pub(crate) fn block_speed_factor(
     context: &horizon_world::native_load_context::LoopContext,
@@ -35,7 +39,11 @@ pub(crate) fn block_speed_factor(
     let Ok(state) = state.try_into_api() else {
         return;
     };
-    mod_api::dispatch_block_speed_factor(&mod_api::OwningLoop::new(context), state, factor);
+    mod_api::dispatch_block_speed_factor(
+        &horizon_client_render::api_context::LoopReader(context).context(),
+        state,
+        factor,
+    );
 }
 
 /// Resolve the metadata default through the sole numeric reverse index, without allocation.
@@ -341,6 +349,9 @@ where
 }
 
 /// Validate a mod value against the game's registry before admitting it to engine state.
+#[path = "api_values/content_declarations.rs"]
+mod content_declarations;
+
 pub(crate) trait TryIntoEngine<Context: ?Sized = Items> {
     type Engine;
     type Error;
@@ -560,6 +571,7 @@ impl TryIntoEngine for mod_api::NativeItemDrop {
     type Error = StackWriteError;
     fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
         Ok(Self::Engine {
+            random: None,
             stack: self.stack.try_into_engine(items)?,
             position: self.position,
             velocity: self.velocity,
@@ -707,10 +719,13 @@ impl TryIntoEngine for mod_api::ItemResource {
 /// The write conversion below adds authoritative registry-dependent validation.
 pub(in crate::game) fn stack_value(value: &ApiStack) -> Result<EngineStack, StackWriteError> {
     let id = mod_api::__private::item_key_id(value.item()).ok_or(StackWriteError::UnknownItem)?;
-    Ok(encode_stack(value, id.into()))
+    encode_stack(value, id.into())
 }
 
-fn encode_stack(value: &ApiStack, item: std::sync::Arc<str>) -> EngineStack {
+fn encode_stack(
+    value: &ApiStack,
+    item: std::sync::Arc<str>,
+) -> Result<EngineStack, StackWriteError> {
     let mut patch = value.components().map(|patch| patch.as_nbt().clone());
     // Let the existing component codec preserve explicit zero versus prototype inheritance.
     if value.damage_component() == Some(0) {
@@ -720,12 +735,14 @@ fn encode_stack(value: &ApiStack, item: std::sync::Arc<str>) -> EngineStack {
     }
     let patch = patch.map(Tag::Compound);
     let (_, extra) = horizon_items::item_data::decode_components(patch.as_ref());
-    EngineStack {
+    let stack = EngineStack {
         item,
         count: value.count(),
         damage: value.damage(),
         extra,
-    }
+    };
+    content_declarations::validate_decoded_effects(patch.as_ref(), &stack)?;
+    Ok(stack)
 }
 
 impl TryIntoEngine for ApiStack {
@@ -739,7 +756,7 @@ impl TryIntoEngine for ApiStack {
             .items
             .get_key_value(id)
             .ok_or(StackWriteError::UnknownItem)?;
-        let stack = encode_stack(self, id.clone());
+        let stack = encode_stack(self, id.clone())?;
         let effective = |name: &str, default: u32| -> Result<u32, StackWriteError> {
             match stack.data().and_then(|data| data.other(name)) {
                 Some(Tag::Int(value)) => {
@@ -1047,7 +1064,9 @@ pub(crate) fn install_stack_hooks() {
                 return;
             }
             if let Ok(stack) = stack.try_into_api() {
-                mod_api::crafting::native_ingredient_test(context, kind, data, &stack, accept);
+                horizon_client::crafting::native_hooks::native_ingredient_test(
+                    context, kind, data, &stack, accept,
+                );
             }
         },
         enchantments: |stack, target, value| {
@@ -1133,7 +1152,8 @@ pub(crate) fn menu_slot_rules(
     let Ok(stack) = stack.try_into_api() else {
         return;
     };
-    let context = mod_api::OwningLoop::new(context);
+    let reader = horizon_client_render::api_context::LoopReader(context);
+    let context = reader.context();
     mod_api::dispatch_menu_slot_rules(&context, menu, slot, &stack, may_place, max_stack);
 }
 
@@ -1168,7 +1188,7 @@ pub(crate) fn stacked_on_other(
             cancellation_result,
         };
         mod_api::dispatch_item_stacked_on_other(
-            &mod_api::OwningLoop::new(context),
+            &horizon_client_render::api_context::LoopReader(context).context(),
             &mut api,
             &mut candidate_canceled,
         );
@@ -1699,7 +1719,51 @@ fn apply_block_entity_snapshot(
             .map_err(|_| BlockEntitySnapshotError::InvalidStack)?;
         entity.apply_snapshot(fields, snapshot.revision().changes());
     }
+    if let Some(fields) = snapshot.client_update_fields() {
+        entity.set_client_update_fields(fields.clone());
+    }
     Ok(())
+}
+
+// Validation runs after all listeners return; dispatch does not retain per-mod provenance.
+// Bound diagnostics even when mods register many entity types.
+fn finish_block_entity_writeback<T>(
+    entity: &mut crate::containers::ModBlockEntity,
+    snapshot: &mod_api::ModBlockEntity,
+    before: mod_api::containers::ModRevision,
+    items: &Items,
+    hook: &'static str,
+    output: Result<T, BlockEntitySnapshotError>,
+) -> Result<T, BlockEntitySnapshotError> {
+    let result = output.and_then(|output| {
+        apply_block_entity_snapshot(entity, snapshot, before, items)?;
+        Ok(output)
+    });
+    if let Err(reason) = &result {
+        let changes = entity
+            .revision()
+            .changes()
+            .max(snapshot.revision().changes())
+            .saturating_add(1);
+        entity.apply_snapshot((**entity).clone(), changes);
+        static REPORTED: std::sync::Mutex<Vec<(String, &'static str)>> =
+            std::sync::Mutex::new(Vec::new());
+        let mut reported = REPORTED.lock().unwrap_or_else(|poison| poison.into_inner());
+        if reported.len() < 1024
+            && !reported
+                .iter()
+                .any(|(id, name)| id == entity.id() && *name == hook)
+        {
+            reported.push((entity.id().to_owned(), hook));
+            log::warn!(
+                "Rejected block entity writeback: entity type {}, hook {}, reason {:?}",
+                entity.id(),
+                hook,
+                reason
+            );
+        }
+    }
+    result
 }
 
 impl super::Game<'_> {
@@ -1716,7 +1780,14 @@ impl super::Game<'_> {
         };
         let revision = api.revision();
         self.native_block_entity_tick(pos, &mut api);
-        let _ = apply_block_entity_snapshot(entity, &api, revision, self.items());
+        let _ = finish_block_entity_writeback(
+            entity,
+            &api,
+            revision,
+            self.items(),
+            "block_entity_tick",
+            Ok(()),
+        );
     }
     pub(in crate::game) fn api_block_entity_update_tag(
         pos: [i32; 3],
@@ -1798,9 +1869,17 @@ impl super::Game<'_> {
         };
         let revision = api.revision();
         self.native_menu_button(context, &mut api, &mut cursor);
-        if let Ok(cursor) = cursor.try_into_engine(self.items())
-            && apply_block_entity_snapshot(entity, &api, revision, self.items()).is_ok()
-        {
+        let cursor = cursor
+            .try_into_engine(self.items())
+            .map_err(|_| BlockEntitySnapshotError::InvalidStack);
+        if let Ok(cursor) = finish_block_entity_writeback(
+            entity,
+            &api,
+            revision,
+            self.items(),
+            "menu_button",
+            cursor,
+        ) {
             *carried = cursor;
         }
     }
@@ -1829,9 +1908,17 @@ impl super::Game<'_> {
             &mut held,
             &mut candidate_handled,
         );
-        if let Ok(held) = held.try_into_engine(self.items())
-            && apply_block_entity_snapshot(entity, &api, revision, self.items()).is_ok()
-        {
+        let held = held
+            .try_into_engine(self.items())
+            .map_err(|_| BlockEntitySnapshotError::InvalidStack);
+        if let Ok(held) = finish_block_entity_writeback(
+            entity,
+            &api,
+            revision,
+            self.items(),
+            "menu_quick_move",
+            held,
+        ) {
             *stack = held;
             *handled = candidate_handled;
         }
@@ -1864,6 +1951,48 @@ mod stacked_slot_tests;
 #[cfg(test)]
 mod block_entity_snapshot_tests {
     use super::*;
+    #[test]
+    fn rejected_writebacks_invalidate_tick() {
+        assert_rejected_writeback("block_entity_tick");
+    }
+    #[test]
+    fn rejected_writebacks_invalidate_menu_button() {
+        assert_rejected_writeback("menu_button");
+    }
+    #[test]
+    fn rejected_writebacks_invalidate_menu_quick_move() {
+        assert_rejected_writeback("menu_quick_move");
+    }
+    fn assert_rejected_writeback(hook: &'static str) {
+        let items = Items::for_tests(Default::default());
+        let mut entity =
+            crate::containers::ModBlockEntity::new("test:rejected".into(), Default::default());
+        let mut snapshot = entity.try_into_api().unwrap();
+        let before = snapshot.revision();
+        snapshot.data.push(42);
+        let claimed = snapshot.revision().changes();
+        // Tick rejection: wrong identity. Menu rejection: invalid cursor/held output.
+        let output = if hook == "block_entity_tick" {
+            snapshot = mod_api::ModBlockEntity::new("other:type".into(), Default::default());
+            Ok(())
+        } else {
+            Err(BlockEntitySnapshotError::InvalidStack)
+        };
+        assert!(
+            finish_block_entity_writeback(&mut entity, &snapshot, before, &items, hook, output)
+                .is_err()
+        );
+        assert!(entity.data.is_empty());
+        assert_eq!(
+            entity.revision().changes(),
+            if hook == "block_entity_tick" {
+                1
+            } else {
+                claimed + 1
+            }
+        );
+    }
+
     #[test]
     fn unchanged_snapshots_keep_revision_and_callback_writes_advance_it() {
         let mut entity =
@@ -1903,6 +2032,33 @@ mod block_entity_snapshot_tests {
             Err(BlockEntitySnapshotError::InvalidRevision)
         );
         assert_eq!(entity.data, [7, 8, 9]);
+    }
+
+    #[test]
+    fn a_callbacks_client_update_fields_reach_the_queue_only_from_a_valid_snapshot() {
+        use mod_api::__private::game::ModBlockEntityViewNew;
+        let items = Items::for_tests(Default::default());
+        let mut entity =
+            crate::containers::ModBlockEntity::new("test:machine".into(), Default::default());
+        let batch =
+            horizon_core::nbt::Compound::from([("effect".into(), horizon_core::nbt::Tag::Int(23))]);
+        let made = entity.revision();
+        let mut snapshot = entity.try_into_api().unwrap();
+        let before = snapshot.revision();
+        mod_api::ModBlockEntityView::new(&mut snapshot).set_client_update_fields(batch.clone());
+        // Nothing but the queue moved, and an unchanged snapshot still delivers.
+        apply_block_entity_snapshot(&mut entity, &snapshot, before, &items).unwrap();
+        assert_eq!(entity.revision(), made);
+        assert_eq!(entity.take_client_update_fields(), Some(batch.clone()));
+        // A snapshot naming another entity is refused whole.
+        let mut other = mod_api::ModBlockEntity::new("test:machine".into(), Default::default());
+        let before = other.revision();
+        mod_api::ModBlockEntityView::new(&mut other).set_client_update_fields(batch);
+        assert_eq!(
+            apply_block_entity_snapshot(&mut entity, &other, before, &items),
+            Err(BlockEntitySnapshotError::InvalidRevision)
+        );
+        assert!(!entity.has_client_update_fields());
     }
 }
 
@@ -2892,6 +3048,15 @@ pub(in crate::game) fn register_game_keys(ids: impl IntoIterator<Item = String>)
             super::native_dimensions::valid_shape,
         )
     });
+    mod_api::__private::resolve_effects(
+        horizon_client_core::potions::all_effects()
+            .map(|def| horizon_client_core::potions::namespaced(def.id)),
+        |id| horizon_client_core::potions::effect(id).map(|def| def.index),
+    )
+    .unwrap();
+    if let Some(types) = horizon_client_core::block_entity_types::current() {
+        mod_api::__private::resolve_block_entity_types(types.names(), |id| types.key(id)).unwrap();
+    }
 }
 
 pub(in crate::game) fn game_rule_registry() -> horizon_client_core::gamerules::RuleRegistry {
@@ -2915,5 +3080,7 @@ mod loot_values;
 #[path = "api_values/particle_values.rs"]
 mod particle_values;
 pub(crate) use loot_values::{dispatch_loot_condition, dispatch_loot_function};
+#[path = "api_values/phase_values.rs"]
+mod phase_values;
 #[path = "api_values/small_values.rs"]
 mod small_values;
