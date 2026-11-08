@@ -1468,6 +1468,7 @@ mod tests {
                 let mut model = FluidModel::default();
                 model.fluid = "registration_test:oil".into();
                 model.flowing = Some("registration_test:block/oil_flow".into());
+                model.overlay = Some("registration_test:block/oil_overlay".into());
                 event.models.push(model);
             }
         }
@@ -1487,6 +1488,10 @@ mod tests {
                     assert_eq!(
                         models[0].flowing.as_deref(),
                         Some("registration_test:block/oil_flow")
+                    );
+                    assert_eq!(
+                        models[0].overlay.as_deref(),
+                        Some("registration_test:block/oil_overlay")
                     );
                 });
             },
