@@ -137,7 +137,8 @@ mod tests {
 
         // A valid API key absent from this world's index refuses, rather than drawing air.
         let only_air = BlockRegistry::from_facts_json(
-            br#"{"defaults":{"minecraft:air":0},"states":[["a",true,false,"","minecraft:air"]]}"#,
+            br#"{"defaults":{"minecraft:air":0},"states":[["a",true,false,"","minecraft:air"]]}"#
+                .as_slice(),
         )
         .unwrap();
         block_state::bind(&only_air).unwrap();
