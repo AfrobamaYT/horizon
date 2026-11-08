@@ -128,7 +128,10 @@ impl mod_api::prelude::TagsHost for Server {
             horizon_world::fluid::FluidState::new(horizon_world::fluid::FluidKind::Water, 8, true)
         };
         Some(mod_api::__private::fluid_state(
-            mod_api::__private::world_fluid_key(engine.kind() as usize)?,
+            match engine.kind().vanilla_index() {
+                Some(index) => mod_api::__private::world_fluid_key(usize::from(index))?,
+                None => mod_api::__private::fluid_key(engine.kind().name())?,
+            },
             engine.amount(),
             engine.falling(),
             engine.is_source(),

@@ -148,7 +148,27 @@ mod tests {
         engine.record_block(2.0);
         engine.record_shield_damage(3.0);
         engine.record_should_cause_side_effects(true);
+        engine.add_reduction_modifier(
+            engine::Reduction::Armor,
+            engine::ReductionChange::Scale(0.5),
+        );
         let mut api = engine.try_into_api().unwrap();
+        assert_eq!(
+            api.reduction_modifiers().collect::<Vec<_>>(),
+            vec![(Reduction::Armor, mod_api::ReductionChange::Scale(0.5))]
+        );
+        api.add_reduction_modifier(Reduction::Armor, mod_api::ReductionChange::Add(2.0));
+        let adjusted = api.try_into_engine(&()).unwrap();
+        assert_eq!(
+            engine::DamageValues::from(&adjusted).reduction_modifiers,
+            vec![
+                (
+                    engine::Reduction::Armor,
+                    engine::ReductionChange::Scale(0.5)
+                ),
+                (engine::Reduction::Armor, engine::ReductionChange::Add(2.0))
+            ]
+        );
         assert_eq!(api.reduction(Reduction::Invulnerability), 2.0);
         assert_eq!(api.reduction(Reduction::Armor), 4.0);
         assert_eq!(api.reduction(Reduction::Enchantments), 0.5);
