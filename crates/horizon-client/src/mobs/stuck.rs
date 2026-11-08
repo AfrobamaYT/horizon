@@ -16,11 +16,11 @@ impl Stuck {
     /// `AbstractArrow.onHitEntity`: a hit that hurt, from an arrow that
     /// does not pierce, leaves it stuck.
     pub fn add_arrow(&mut self) {
-        self.arrows += 1;
+        self.arrows = self.arrows.wrapping_add(1);
     }
     /// `Bee.doHurtTarget`: a sting that hurt.
     pub fn add_stinger(&mut self) {
-        self.stingers += 1;
+        self.stingers = self.stingers.wrapping_add(1);
     }
     /// The server's part of `LivingEntity.tick`: one in a count's worth of
     /// `20 * (30 - count)` ticks falls out. Whether the counts changed.
@@ -46,6 +46,30 @@ impl Stuck {
 #[cfg(test)]
 mod tests {
     use super::Stuck;
+
+    #[test]
+    fn arrow_hit_wraps_max_mod_count() {
+        let mut s = Stuck {
+            arrows: i32::MAX,
+            ..Stuck::default()
+        };
+        s.add_arrow();
+        assert_eq!(s.arrows, i32::MIN);
+        assert!(!s.tick());
+        assert_eq!(s.arrows, i32::MIN);
+    }
+
+    #[test]
+    fn sting_wraps_max_mod_count() {
+        let mut s = Stuck {
+            stingers: i32::MAX,
+            ..Stuck::default()
+        };
+        s.add_stinger();
+        assert_eq!(s.stingers, i32::MIN);
+        assert!(!s.tick());
+        assert_eq!(s.stingers, i32::MIN);
+    }
 
     /// `LivingEntity.tick`: with `n` stuck the timer starts at
     /// `20 * (30 - n)` and one falls out when it runs down.
