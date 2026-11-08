@@ -27,8 +27,8 @@ pub struct Environment {
     packs: PackModifiers,
 }
 
-/// The attributes a mod or a data pack set in the dimension types of the levels it added, by level
-/// id, and the environment each makes over the Overworld's the first time it is asked for
+/// The dimension types (their `attributes` and `timelines`) of the levels a mod or a data pack
+/// added, by level id, and the environment each makes over the Overworld's the first time it is asked for
 /// (`None` when its attributes are refused, which falls back to the Overworld's).
 type LevelAttributes = HashMap<String, &'static (Json, OnceLock<Option<Environment>>)>;
 static LEVELS: LazyLock<RwLock<LevelAttributes>> = LazyLock::new(Default::default);
@@ -622,13 +622,16 @@ impl Environment {
         let mut json: Json = serde_json::from_slice(
             &root.read(&format!("data/minecraft/dimension_type/{dimension}.json"))?,
         )?;
-        if let Some(extra) = extra.as_object() {
+        if let Some(attributes) = extra["attributes"].as_object() {
             if !json["attributes"].is_object() {
                 json["attributes"] = Json::Object(Default::default());
             }
             if let Some(own) = json["attributes"].as_object_mut() {
-                own.extend(extra.iter().map(|(k, v)| (k.clone(), v.clone())));
+                own.extend(attributes.iter().map(|(k, v)| (k.clone(), v.clone())));
             }
+        }
+        if !extra["timelines"].is_null() {
+            json["timelines"] = extra["timelines"].clone();
         }
         let id = format!("minecraft:{dimension}");
         let mine: Vec<_> = packs
@@ -751,7 +754,7 @@ impl Environment {
         !self.post.is_empty()
     }
 
-    /// Replaces the levels' own attributes (a dimension type's `attributes` object), at a world's
+    /// Replaces the levels' own dimension types (their `attributes` and `timelines`), at a world's
     /// load. The table is leaked: one small entry per level and world load.
     pub fn set_level_attributes(levels: Vec<(String, Json)>) {
         let table = levels
@@ -1150,7 +1153,7 @@ mod tests {
         assert!(std::ptr::eq(Environment::for_level(id, &base), &base));
         Environment::set_level_attributes(vec![(
             id.to_owned(),
-            serde_json::json!({"minecraft:gameplay/sky_light_level": 4.0}),
+            serde_json::json!({"attributes": {"minecraft:gameplay/sky_light_level": 4.0}}),
         )]);
         let own = Environment::for_level(id, &base);
         assert!(!std::ptr::eq(own, &base));
@@ -1175,7 +1178,7 @@ mod tests {
         let base = Environment::load(&source).unwrap();
         Environment::set_level_attributes(vec![(
             "test:bad_env".to_owned(),
-            serde_json::json!({"minecraft:visual/not_an_attribute": 1}),
+            serde_json::json!({"attributes": {"minecraft:visual/not_an_attribute": 1}}),
         )]);
         assert!(std::ptr::eq(
             Environment::for_level("test:bad_env", &base),
