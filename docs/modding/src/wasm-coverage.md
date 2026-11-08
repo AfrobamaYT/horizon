@@ -326,6 +326,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Backend::effect_key` | crosses | Wire call |
 | `Backend::block_entity_type_key_id` | crosses | Wire call |
 | `Backend::level_find_closest_biome` | crosses | Wire call |
+| `Backend::level_find_nearest_structure` | crosses | Wire call |
 | `Backend::level_get_sky_darken` | crosses | Wire call |
 | `Backend::level_block_floor_height` | crosses | Wire call |
 | `Backend::level_biome_at` | crosses | Wire call |
@@ -339,8 +340,10 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Backend::level_mod_forced_chunks` | crosses | Wire call |
 | `Backend::chunk_loaded` | crosses | Wire call |
 | `Backend::chunk_status` | crosses | Wire call |
+| `Backend::chunk_watchers` | crosses | Wire call |
 | `Backend::level_recipe_for` | crosses | Wire call |
 | `Backend::level_entities_in` | crosses | Wire call |
+| `Backend::level_online_players` | crosses | Wire call |
 | `Backend::level_block_state` | crosses | Wire call |
 | `Backend::level_block_transform` | crosses | Wire call |
 | `Backend::level_block` | crosses | Wire call |

@@ -36,6 +36,25 @@ pub trait LevelsBackend {
         biome: &str,
         parameters: BiomeSearch,
     ) -> Option<BiomeSearchResult>;
+    /// Side: server.
+    /// `ServerLevel.findNearestMapStructure` without skipping known starts: the
+    /// nearest start of `structure`, an id or a `#tag`, searched in this
+    /// level's generator as `/locate structure` does. Random-spread structure
+    /// sets are searched in squares of placement cells out to
+    /// [`StructureSearch::radius`]; concentric rings (strongholds) check every
+    /// ring position whatever the radius. Starts are built as the search needs
+    /// them, without loading or generating chunks or switching parked levels.
+    /// None for no start, a structure that does not generate in this level,
+    /// a world without structures, a stale level, a client, a negative radius,
+    /// one above [`StructureSearch::MAX_RADIUS`], and an origin outside the
+    /// world's 30,000,000-block bound.
+    #[access(WorldOnly)]
+    fn level_find_nearest_structure(
+        &self,
+        level: LevelRef,
+        structure: &str,
+        parameters: StructureSearch,
+    ) -> Option<StructureSearchResult>;
     /// Side: both.
     /// `Level.getSkyDarken`: the sky-light reduction from dimension, time and weather.
     /// Reads any loaded server level, including parked levels, or the current client level.
@@ -111,6 +130,15 @@ pub trait LevelsBackend {
     #[access(WorldOnly)]
     fn chunk_status(&self, chunk: ChunkRef) -> Option<ChunkStatus>;
     /// Side: server.
+    /// `ChunkMap.getPlayers(pos, false)`: the players watching this chunk, those
+    /// it is inside the view of and was sent to, in the order the server keeps
+    /// its players. A player watches it from its `chunk_watch` until it leaves
+    /// the view; Horizon's far-ring columns past the view distance are not
+    /// watched. Fake players watch nothing. Loaded or not, a chunk nobody
+    /// watches gives an empty list. None on a client and for a stale handle.
+    #[access(WorldOnly)]
+    fn chunk_watchers(&self, chunk: ChunkRef) -> Option<Vec<PlayerRef>>;
+    /// Side: server.
     /// Match and assemble through the engine's recipe matcher, without consuming inputs.
     /// Covers minecraft:crafting, smelting, blasting, smoking, campfire_cooking,
     /// stonecutting and smithing, including data-pack recipes of those types.
@@ -119,6 +147,7 @@ pub trait LevelsBackend {
     /// Dynamic custom outputs and contextual predicates remain mod-owned.
     /// A valid input without a match returns Ok(None); invalid shapes/items and unavailable
     /// levels are typed refusals. Crafting dimensions are 1 through 3, with row-major slots.
+
     #[access(WorldOnly)]
     fn level_recipe_for(
         &self,
@@ -144,6 +173,15 @@ pub trait LevelsBackend {
         min: [f64; 3],
         max: [f64; 3],
     ) -> Option<Vec<EntityRef>>;
+    /// Side: server.
+    /// `ServerLevel.players`: the online players in this level, parked or in
+    /// place, each once under their own UUID, also during a guest's turn. Fake
+    /// players are not listed, as vanilla's list leaves out connectionless
+    /// players; a player displaced by a nested guest turn is not listed either,
+    /// since its handle cannot resolve until that turn ends. None on a client
+    /// and for a stale handle.
+    #[access(WorldOnly)]
+    fn level_online_players(&self, level: LevelRef) -> Option<Vec<PlayerRef>>;
     /// Side: both.
     /// The block state ID at `pos` (`Level.getBlockState`), without formatting a string.
     /// None for a chunk that isn't loaded or a `y` outside the world. On a client, the
