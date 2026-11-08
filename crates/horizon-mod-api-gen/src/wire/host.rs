@@ -350,7 +350,9 @@ pub(super) fn generate(surface: &mut super::Surface<'_>) -> Result<String, Strin
                 if m.receiver == Some(true) { "_mut" } else { "" }
             )
         };
-        writeln!(code, "{id} => {{ {body} if !input.rest().is_empty() {{ return Err(ServeError::Decode(WireError::Tag(u32::MAX))); }} let receiver = {receiver}; let answer = receiver.{}({}); {answer} }},",m.name,args.join(",")).unwrap();
+        // Keep decoded values on the selected method's stack, not in the dispatcher's
+        // shared frame: a native import may synchronously re-enter wasm.
+        writeln!(code, "{id} => {{ #[inline(never)] unsafe fn invoke(cx: *mut Cx, input: &mut Reader<'_>, out: &mut Writer) -> Result<(), ServeError> {{ {body} if !input.rest().is_empty() {{ return Err(ServeError::Decode(WireError::Tag(u32::MAX))); }} let receiver = {receiver}; let answer = receiver.{}({}); {answer} Ok(()) }} unsafe {{ invoke(cx, &mut input, out)?; }} }},",m.name,args.join(",")).unwrap();
     }
     code.push_str("_ => return Err(ServeError::Unsupported(id)) } Ok(()) }\n");
     writeln!(
