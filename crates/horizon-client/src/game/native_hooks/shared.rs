@@ -1836,9 +1836,20 @@ impl GameLevel<'_> {
     pub(super) fn new_block_entity(&self, name: &str) -> Option<BlockEntity> {
         let mut nbt = None;
         if horizon_client::block_entity_types::type_for(name).is_some() {
-            self.native_block_entity(name, &mut nbt);
+            self.native_block_entity(name, self.registry.default_state(name)?, &mut nbt);
         }
         block_entity_for_block(self.registry, self.facts, name, nbt.unwrap_or_default())
+    }
+    /// Creates a declared state-aware block entity from its actual state. No answer
+    /// means no entity; the registered declaration owns its type identity.
+    pub(super) fn new_block_entity_for_state(&self, state: BlockStateId) -> Option<BlockEntity> {
+        let name = &self.registry.state(state)?.name;
+        if self.world.block_entities.stateful_entity(state.0) {
+            let mut nbt = None;
+            self.native_block_entity(name, state, &mut nbt);
+            return block_entity_for_block(self.registry, self.facts, name, nbt?);
+        }
+        self.new_block_entity(name)
     }
     /// Replaces the block at `pos` with `state` through `Level.setBlock`, as
     /// `Game::native_set_block` does for the Host, from a hook that gets the
@@ -1867,8 +1878,9 @@ impl GameLevel<'_> {
         let b = self.behaviours;
         let changed = b.set_block(self, ticks, at, state, flags);
         let landed = self.world.block(pos[0], pos[1], pos[2]);
-        if let Some(name) = block_entity_to_create(self.facts, changed, previous, state, landed)
-            && let Some(entity) = self.new_block_entity(&name)
+        if !self.world.block_entities.stateful_entity(landed.0)
+            && block_entity_to_create(self.facts, changed, previous, state, landed).is_some()
+            && let Some(entity) = self.new_block_entity_for_state(landed)
         {
             put_block_entity(self.world, pos, entity);
         }
@@ -2938,6 +2950,7 @@ impl Game<'_> {
     /// native mod's, made as a write of the level creates it
     /// (`GameLevel::new_block_entity`). Only a declared mod type builds the
     /// level.
+    #[cfg(test)]
     pub(super) fn new_block_entity(&mut self, name: &str) -> Option<BlockEntity> {
         if horizon_client::block_entity_types::type_for(name).is_none() {
             return block_entity_for_block(
@@ -2948,6 +2961,37 @@ impl Game<'_> {
             );
         }
         self.with_level(|_, level, _| level.new_block_entity(name))
+    }
+    /// Compile static state-factory ownership once per level, including on clients.
+    pub(super) fn ensure_stateful_entity_table(&mut self) {
+        if self.world.block_entities.has_stateful_entity_table() {
+            return;
+        }
+        let registry = self.pack.assets.registry;
+        let mut blocks = FxHashMap::default();
+        let states = (0..registry.len() as u32)
+            .map(|id| {
+                let Some(state) = registry.state(BlockStateId(id)) else {
+                    return false;
+                };
+                if state.name.starts_with("minecraft:") {
+                    return false;
+                }
+                *blocks.entry(state.name.as_str()).or_insert_with(|| {
+                    let mut stateful = false;
+                    self.native_stateful_block_entity(&state.name, &mut stateful);
+                    stateful
+                })
+            })
+            .collect();
+        self.world.block_entities.set_stateful_entities(states);
+    }
+    /// Create a block entity from an actual state using the level's creation hook.
+    pub(super) fn new_block_entity_for_state(
+        &mut self,
+        state: BlockStateId,
+    ) -> Option<BlockEntity> {
+        self.with_level(|_, level, _| level.new_block_entity_for_state(state))
     }
     /// The containers of the mod blocks' block entities, by block state
     /// (`native_block_entity_container`), checked.

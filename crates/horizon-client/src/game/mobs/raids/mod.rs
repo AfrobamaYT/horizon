@@ -153,6 +153,9 @@ struct PatrolCx<'a, 'g, 'h> {
     can_spawn: &'h dyn Fn(&Game, [i32; 3]) -> bool,
 }
 impl SpawnLevel for PatrolCx<'_, '_, '_> {
+    fn within_world_border(&self, x: i32, z: i32) -> bool {
+        self.level.within_world_border(x, z)
+    }
     fn state(&self, x: i32, y: i32, z: i32) -> horizon_world::registry::BlockStateId {
         self.level.state(x, y, z)
     }
@@ -189,8 +192,8 @@ impl SpawnLevel for PatrolCx<'_, '_, '_> {
     fn peaceful(&self) -> bool {
         self.level.peaceful()
     }
-    fn dimension(&self) -> spawn_rules::Dimension {
-        self.level.dimension()
+    fn dimension_type(&self) -> &horizon_world::dimension_type::DimensionFacts {
+        self.level.dimension_type()
     }
     fn surface_slime_chance(&self, x: i32, y: i32, z: i32) -> f32 {
         self.level.surface_slime_chance(x, y, z)
@@ -211,7 +214,7 @@ impl PatrolLevel for PatrolCx<'_, '_, '_> {
             .bool_at(horizon_client::gamerules::vanilla::SPAWN_PATROLS)
     }
     fn bright_outside(&self) -> bool {
-        self.level.game.dim == Dim::Overworld && self.level.game.sky_darken() < 4
+        !self.level.game.dimension_type().has_fixed_time && self.level.game.sky_darken() < 4
     }
     /// `PatrolSpawner.tick` picks from `level.players()`: the local player
     /// and every guest in the level.
@@ -408,7 +411,7 @@ impl Game<'_> {
                     .clone()
             })
             .unwrap_or_default();
-        attributes.value(key, self.dim.id(), &biome, self.world.day_time)
+        attributes.value(key, &self.dimension_type().id, &biome, self.world.day_time)
     }
 
     /// `BadOmenMobEffect` and `RaidOmenMobEffect.applyEffectTick` for the

@@ -34,6 +34,7 @@
 # Reference
 
 - [NeoForge data files](reference/neoforge-data.md)
+- [NeoForge extension coverage](reference/neoforge-extensions.md)
 - [The manifest and the package](reference/manifest.md)
 - [The registry index and `.hpack`](reference/registry-index.md)
 - [The mod API (rustdoc)](reference/api.md)

@@ -946,7 +946,7 @@ pub fn mob_to_nbt(
         | "minecraft:llama"
         | "minecraft:trader_llama" => {
             map.insert("Tame".into(), Tag::Byte(i8::from(m.extra.tame)));
-            map.insert("Temper".into(), Tag::Int(i32::from(m.extra.variant3)));
+            map.insert("Temper".into(), Tag::Int(m.extra.equine_temper));
             map.insert("Bred".into(), Tag::Byte(i8::from(m.extra.bred)));
             // AbstractHorse.addAdditionalSaveData; Horizon does not model the
             // eating haystack yet.
@@ -1245,9 +1245,19 @@ pub fn mob_to_nbt(
                 Tag::Int(crate::mobs::aquatic::dark_ticks(m)),
             );
         }
-        // Phantom.addAdditionalSaveData.
+        // Phantom.addAdditionalSaveData: the size, and the circling anchor.
+        // `storeNullable` writes nothing for a phantom that has none, so its
+        // save carries no `anchor_pos` at all.
         "minecraft:phantom" => {
             map.insert("size".into(), Tag::Int(m.extra.size));
+            match m.extra.home {
+                Some(anchor) => {
+                    map.insert("anchor_pos".into(), Tag::IntArray(anchor.to_vec()));
+                }
+                None => {
+                    map.remove(&"anchor_pos".into());
+                }
+            }
         }
         "minecraft:slime" | "minecraft:magma_cube" => {
             map.insert("Size".into(), Tag::Int(m.extra.size.max(1) - 1));
@@ -1920,7 +1930,15 @@ pub fn mob_from_nbt(
     }
     if crate::mobs::equine::is_equine(m.species()) {
         m.extra.tame = flag(tag, "Tame");
-        m.extra.variant3 = number(tag.get("Temper")).unwrap_or(0).clamp(0, 100) as u8;
+        if matches!(
+            m.species(),
+            crate::mobs::Species::Camel | crate::mobs::Species::CamelHusk
+        ) {
+            // The existing camel path is outside the seven saved writers.
+            m.extra.variant3 = number(tag.get("Temper")).unwrap_or(0).clamp(0, 100) as u8;
+        } else {
+            m.extra.equine_temper = tag.get("Temper").and_then(int_value).unwrap_or(0);
+        }
         m.extra.bred = flag(tag, "Bred");
         m.extra.owner = crate::save::uuid_from_tag(tag.get("Owner"));
         let v = number(tag.get("Variant")).unwrap_or(0) as i32;
@@ -2300,8 +2318,11 @@ pub fn mob_from_nbt(
         m.extra.flag2 = flag(tag, "wasOnGround");
     }
     if m.species() == crate::mobs::Species::Phantom {
-        // Phantom.readAdditionalSaveData: setPhantomSize(size).
+        // Phantom.readAdditionalSaveData: setPhantomSize(size), and the circling
+        // anchor, absent or unreadable when the save has no anchor at all
+        // (`input.read("anchor_pos", BlockPos.CODEC).orElse(null)`).
         crate::mobs::phantom::set_size(&mut m, number(tag.get("size")).unwrap_or(0) as i32);
+        m.extra.home = home_block_pos(tag.get("anchor_pos"));
     }
     // Zombie, Piglin and Zoglin.readAdditionalSaveData: IsBaby (the baby
     // zombies of trial spawners).
@@ -3307,12 +3328,29 @@ pub fn falling_block_to_nbt(
 /// (block state tag, position, motion, time, fall distance)
 pub fn falling_block_from_nbt(tag: &Tag) -> Option<(Tag, Vec3, Vec3, i32, f64)> {
     Some((
-        tag.get("BlockState")?.clone(),
+        tag.get("BlockState")
+            .cloned()
+            .unwrap_or_else(|| string("minecraft:sand")),
         position(tag)?,
         motion(tag),
         number(tag.get("Time")).unwrap_or(0) as i32,
         float(tag.get("fall_distance")).unwrap_or(0.0),
     ))
+}
+
+/// FallingBlockEntity.readAdditionalSaveData uses the modern state codec.
+pub fn falling_state_from_nbt(registry: &BlockRegistry, tag: &Tag) -> Option<BlockStateId> {
+    BlockState::from_nbt(tag)
+        .ok()
+        .and_then(|mut state| {
+            state.name = horizon_core::identifier::Identifier::parse(&state.name)
+                .ok()?
+                .to_string();
+            registry
+                .id(&state)
+                .or_else(|| registry.default_state(&state.name))
+        })
+        .or_else(|| registry.default_state("minecraft:sand"))
 }
 
 /// `NoGravity` and `DropItem` (true when absent) of a saved falling block.
@@ -4383,7 +4421,7 @@ mod tests {
             events
                 .iter()
                 .find_map(|e| match e {
-                    crate::mobs::MobEvent::Explode(_, radius, _) => Some(*radius),
+                    crate::mobs::MobEvent::Explode(_, radius, ..) => Some(*radius),
                     _ => None,
                 })
                 .expect("the creeper exploded")
@@ -4715,6 +4753,94 @@ mod tests {
         let cleared = armor_stand_to_nbt(&a, [0; 4], Some(&saved));
         assert!(cleared.get("NoGravity").is_none());
         assert!(!armor_stand_from_nbt(&cleared, 7).unwrap().no_gravity);
+    }
+
+    fn falling_decode_registry() -> BlockRegistry {
+        BlockRegistry::from_nbt(&Tag::compound([
+            ("DataVersion", Tag::Int(horizon_world::DATA_VERSION)),
+            (
+                "states",
+                Tag::List(
+                    ["minecraft:air", "minecraft:sand", "minecraft:gravel"]
+                        .into_iter()
+                        .map(string)
+                        .collect(),
+                ),
+            ),
+            (
+                "defaults",
+                Tag::compound([
+                    ("minecraft:air", Tag::Int(0)),
+                    ("minecraft:sand", Tag::Int(1)),
+                    ("minecraft:gravel", Tag::Int(2)),
+                ]),
+            ),
+        ]))
+        .unwrap()
+    }
+
+    fn falling_decode_input() -> Tag {
+        horizon_core::nbt::parse_snbt(
+            "{Pos:[3.5d,200d,4.5d],Motion:[0d,0d,0d],Time:10,DropItem:0b,NoGravity:1b}",
+        )
+        .unwrap()
+        .0
+    }
+
+    fn falling_decode_save(registry: &BlockRegistry, input: &Tag) -> Tag {
+        let (state, pos, motion, time, distance) =
+            falling_block_from_nbt(input).expect("absent BlockState is valid input");
+        let actual = falling_state_from_nbt(registry, &state).unwrap();
+        assert_eq!(falling_block_flags(input), (true, false));
+        // Save only the decoded concrete model; no original source compound.
+        let saved = falling_block_to_nbt(
+            state_to_nbt(registry, actual),
+            pos,
+            motion,
+            time,
+            false,
+            crate::falling_block::Damage::default(),
+            distance,
+            [0.0, 0.0],
+            [96, 0, 0, 1],
+        );
+        assert_eq!(saved.get("Pos"), input.get("Pos"));
+        assert_eq!(saved.get("Motion"), input.get("Motion"));
+        assert_eq!(saved.get("Time"), Some(&Tag::Int(10)));
+        assert_eq!(saved.get("DropItem"), Some(&Tag::Byte(0)));
+        saved
+    }
+
+    #[test]
+    fn falling_decode_absent_state_saves_actual_sand_without_raw() {
+        let registry = falling_decode_registry();
+        let saved = falling_decode_save(&registry, &falling_decode_input());
+        assert_eq!(saved.get("BlockState"), Some(&string("minecraft:sand")));
+    }
+
+    #[test]
+    fn falling_decode_modern_boundary_keeps_shared_legacy_reader() {
+        let registry = falling_decode_registry();
+        let legacy = Tag::compound([("Name", string("minecraft:gravel"))]);
+        assert_eq!(
+            state_from_nbt(&registry, &legacy),
+            registry.default_state("minecraft:gravel")
+        );
+        for (state, expected) in [
+            (string("minecraft:sand"), "minecraft:sand"),
+            (
+                Tag::compound([("id", string("minecraft:gravel"))]),
+                "minecraft:gravel",
+            ),
+            (string("minecraft:air"), "minecraft:air"),
+            (legacy, "minecraft:sand"),
+            (Tag::Compound(Default::default()), "minecraft:sand"),
+        ] {
+            let mut input = falling_decode_input();
+            put(&mut input, "BlockState", state);
+            let saved = falling_decode_save(&registry, &input);
+            assert_eq!(saved.get("BlockState"), Some(&string(expected)));
+        }
     }
 
     #[test]
@@ -9235,5 +9361,70 @@ mod carrier_inventory_tests {
                 .get("Inventory")
                 .is_none()
         );
+    }
+}
+
+#[cfg(test)]
+mod equine_temper_preservation_tests {
+    use super::*;
+    use crate::mobs::Species;
+
+    #[test]
+    fn temper_preservation_decodes_and_saves_without_raw_input() {
+        for (name, species) in [
+            ("llama", Species::Llama),
+            ("trader_llama", Species::TraderLlama),
+            ("horse", Species::Horse),
+        ] {
+            let mut kind = crate::mobs::sensor_scan_tests::kind();
+            let def = Arc::make_mut(&mut kind);
+            def.id = format!("minecraft:{name}");
+            def.species = species;
+            let types = [(def.id.clone(), kind.clone())].into();
+            for value in [50, 0, 30, 100, -7, 1000, i32::MIN, i32::MAX] {
+                let raw = Tag::compound([
+                    ("id", string(&format!("minecraft:{name}"))),
+                    ("Pos", doubles(&[1.5, 200.0, 1.5])),
+                    ("Temper", Tag::Int(value)),
+                    ("Tame", Tag::Byte(1)),
+                    ("NoAI", Tag::Byte(1)),
+                    ("Strength", Tag::Int(3)),
+                    ("ChestedHorse", Tag::Byte(1)),
+                ]);
+                let m = mob_from_nbt(&raw, &types, 7, None).unwrap();
+                assert_eq!(m.species(), species);
+                assert!(m.extra.tame && m.no_ai);
+                let stale =
+                    Tag::compound([("Temper", Tag::Int(17)), ("audit:unrelated", Tag::Int(9))]);
+                for base in [None, Some(&raw), Some(&stale)] {
+                    let saved = mob_to_nbt(&m, [93, 0, 0, 1], base, None, |_| None);
+                    assert_eq!(
+                        saved.get("Temper"),
+                        Some(&Tag::Int(value)),
+                        "{name}: loaded temper is not a gameplay limit"
+                    );
+                    assert_eq!(saved.get("Tame"), Some(&Tag::Byte(1)));
+                    if species != Species::Horse {
+                        assert_eq!(saved.get("Strength"), Some(&Tag::Int(3)));
+                        assert_eq!(saved.get("ChestedHorse"), Some(&Tag::Byte(1)));
+                    }
+                    if base == Some(&stale) {
+                        assert_eq!(saved.get("audit:unrelated"), Some(&Tag::Int(9)));
+                    }
+                }
+            }
+            let fresh = Mob::new(7, kind, Vec3::ZERO, 0.0);
+            let saved = mob_to_nbt(&fresh, [93, 0, 0, 1], None, None, |_| None);
+            assert_eq!(saved.get("Temper"), Some(&Tag::Int(0)));
+            let absent = Tag::compound([
+                ("id", string(&format!("minecraft:{name}"))),
+                ("Pos", doubles(&[1.5, 200.0, 1.5])),
+            ]);
+            let decoded = mob_from_nbt(&absent, &types, 7, None).unwrap();
+            assert_eq!(
+                mob_to_nbt(&decoded, [0; 4], None, None, |_| None).get("Temper"),
+                Some(&Tag::Int(0))
+            );
+        }
     }
 }
