@@ -664,6 +664,48 @@ mod tests {
     }
 
     #[test]
+    fn internals_access_refuses_the_mod_and_its_dependents_but_api_access_loads() {
+        let inject = |access: &str| {
+            format!(
+                "[[inject]]\nid = \"stop\"\nat = \"horizon_client::game::server_lifecycle::remember_shutdown\"\nkind = \"head\"\nwith = \"on_stop\"\naccess = \"{access}\"\nhash = \"h\"\n"
+            )
+        };
+        let packages = vec![
+            package(
+                "deep",
+                "1.0.0",
+                "",
+                'a',
+                "t",
+                &format!(
+                    "[[internals]]\npath = \"Game::world\"\nkind = \"field\"\nhash = \"h\"\n{}",
+                    inject("internals")
+                ),
+            ),
+            package("user", "1.0.0", "deep = \"^1\"", 'b', "t", ""),
+            package("typed", "1.0.0", "", 'c', "t", &inject("api")),
+        ];
+        let (groups, refused) = groups(&packages);
+        assert_eq!(ids(&packages, &groups), [vec!["typed"]]);
+        assert_eq!(
+            refused,
+            [
+                ("deep".to_string(), Refusal::Internals),
+                (
+                    "user".to_string(),
+                    Refusal::DependencyRefused {
+                        dependency: "deep".into()
+                    }
+                ),
+            ]
+        );
+        assert_eq!(
+            Refusal::Internals.to_string(),
+            "internals access is native-only"
+        );
+    }
+
+    #[test]
     fn another_build_of_a_dependency_or_toolchain_is_refused() {
         let linked = format!("[wasm.linked]\nlib = \"{}\"\n", "f".repeat(128));
         let packages = vec![
