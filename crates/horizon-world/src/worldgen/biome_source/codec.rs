@@ -96,9 +96,6 @@ impl BiomeSourceCatalog {
             return Ok(BiomeSet::Direct(vec![self.biome(raw)?]));
         }
         let values: Vec<Box<RawValue>> = serde_json::from_str(raw.get())?;
-        if values.len() > 8192 {
-            return Err(DecodeError::Field("biome holder set size"));
-        }
         Ok(BiomeSet::Direct(
             values
                 .iter()
