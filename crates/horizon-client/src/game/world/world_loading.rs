@@ -844,14 +844,15 @@ fn set_level_types(
         }
     }
     horizon_world::dimension_type::DimensionFacts::set_levels(facts);
-    // The sky, fog and cloud attributes of the levels a mod or a pack added.
+    // The attributes and timelines (the sky, fog and cloud over the day) of the levels a mod or a
+    // pack added.
     let attributes = shapes
         .extra
         .iter()
         .filter_map(|level| {
             let (_, json) = overrides.level_type_json(level.id)?;
-            let attributes = json.get("attributes")?.clone();
-            Some((level.id.to_owned(), attributes))
+            let named = json.get("attributes").is_some() || json.get("timelines").is_some();
+            named.then(|| (level.id.to_owned(), json))
         })
         .collect();
     horizon_client::environment::Environment::set_level_attributes(attributes);

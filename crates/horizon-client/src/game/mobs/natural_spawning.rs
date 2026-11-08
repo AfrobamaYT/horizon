@@ -729,7 +729,7 @@ impl NaturalLevel for GameLevel<'_, '_> {
             .collect()
     }
     fn structure_spawns(&self) -> &StructureSpawns {
-        StructureSpawns::shared(&self.game.options.resources)
+        &self.game.structure_spawns
     }
     fn nearest_player_positions(&self) -> &[[f64; 3]] {
         &self.nearest
