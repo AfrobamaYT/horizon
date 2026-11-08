@@ -941,8 +941,10 @@ pub(crate) fn records_selected(
     let mut api_places = proc_macro2::TokenStream::new();
     let mut layout = 0xcbf29ce484222325u64;
     let snapshot = syn::parse_file(include_str!("../../horizon-mod-points/src/snapshot.rs"))
+        .expect("snapshot key schema");
+    let rows = syn::parse_file(include_str!("../../horizon-mod-api/src/row_pages.rs"))
         .expect("snapshot row schema");
-    for item in snapshot.items {
+    for item in snapshot.items.into_iter().chain(rows.items) {
         let schema = match item {
             syn::Item::Type(alias) if alias.ident == "Row" => {
                 alias.ty.to_token_stream().to_string()
