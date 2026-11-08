@@ -1858,7 +1858,8 @@ impl Game<'_> {
         let hit_source = hurt_source(kind, by_id, origin.entity_id);
         let source = counts.then_some(hit_source);
         // Part fire immunity is independent of LivingEntity's base check.
-        if is_fire(kind) {
+        // Commands call the dragon itself and have already checked that base.
+        if is_fire(kind) && !origin.invulnerability_checked {
             return Hurt::Refused;
         }
         if !origin.invulnerability_checked
