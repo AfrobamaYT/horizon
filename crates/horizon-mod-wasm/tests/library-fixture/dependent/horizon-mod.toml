@@ -8,8 +8,6 @@ capabilities = ["registries"]
 
 [dependencies]
 wasm_test_library = "0.1.0"
-wasm_test_observer = "0.1.0"
-
 
 [[inject]]
 id = "tick"

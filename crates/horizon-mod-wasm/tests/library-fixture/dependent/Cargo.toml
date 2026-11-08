@@ -9,6 +9,5 @@ horizon-mod-points = { path = "../../../../horizon-mod-points" }
 horizon-mod-api = { path = "../../../../horizon-mod-api" }
 wasm-test-library = { path = "../library" }
 
-wasm-test-observer = { path = "../observer" }
 
 [workspace]

@@ -425,7 +425,11 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
         });
     let mut module = wasm_encoder::Module::new();
     let mut private_exports = Vec::new();
-    let krate = std::env::var("CARGO_CRATE_NAME").unwrap_or_default();
+    let krate = if role == "member" {
+        std::env::var("CARGO_CRATE_NAME").map_err(|_| "Cargo did not identify the member crate")?
+    } else {
+        String::new()
+    };
     for payload in wasmparser::Parser::new(0).parse_all(&bytes) {
         let payload = payload.map_err(|e| e.to_string())?;
         if let wasmparser::Payload::CustomSection(c) = &payload
@@ -522,7 +526,7 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
 
 #[cfg(test)]
 mod export_tests {
-    use super::member_export;
+    use super::{group_export, member_export};
     #[test]
     fn compiler_allocator_shims_are_private_but_library_symbols_are_public() {
         assert!(!member_export(
@@ -535,5 +539,17 @@ mod export_tests {
             "_RNvCs5Y1sYENNevt_10shared_lib12shared_value"
         ));
         assert!(member_export("horizon_hook"));
+    }
+    #[test]
+    fn only_owned_rust_symbols_are_published_to_the_group() {
+        let own = "_RNvCs5Y1sYENNevt_10shared_lib12shared_value";
+        assert!(group_export(own, "shared_lib"));
+        assert!(!group_export(own, "other"));
+        let method = "_RNvXs1_CskfiYWmmseqF_18wasm_test_observerNtB5_9DependentNtNtCscdi4KFDYmTw_7mod_api9generated15BlockEntityPart17block_entity_tick";
+        assert!(group_export(method, "wasm_test_observer"));
+        assert!(!group_export(method, "wasm_test_library"));
+        let upstream = "_RNvMs2_NtNtCscdi4KFDYmTw_7mod_api5parts14block_entitiesDNtB7_9RegistrarEL_17block_entity_type";
+        assert!(!group_export(upstream, "wasm_test_observer"));
+        assert!(group_export("horizon_hook", "wasm_test_observer"));
     }
 }

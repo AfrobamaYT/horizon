@@ -100,6 +100,15 @@ plus the `env` base globals and the `GOT.mem` and `GOT.func` relocations used by
 The loader supplies linker globals such as `GOT.mem.__heap_base` and `GOT.mem.__data_end`;
 member constructors run after linking. Groups do not share memory with one another.
 
+The build step moves a core start function to the explicit `__wasm_start` export. The loader
+instantiates members, fills self-referencing GOT entries from their actual exports, then runs
+`__wasm_start`, data relocations and constructors in that order. A raw core start is refused:
+it would execute before its own addresses could be relocated. `horizon.private` metadata lists
+compiler implementation exports that remain local to a member (for example an upstream inline
+method emitted in several members). Their original symbols can resolve that member's own GOT,
+but are not published as library definitions. This is symbol visibility metadata, not function
+glue or another Rust interface.
+
 Pointers and lengths below are wasm32 `u32` values. The game provides these imports in the
 `horizon` module:
 
