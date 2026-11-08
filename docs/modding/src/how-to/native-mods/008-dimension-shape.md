@@ -120,6 +120,15 @@ It is false for an unregistered dimension and for an entity that cannot change l
 orb, a projectile); a fake player stays where it is. Nothing builds a platform at the destination, so look for the
 ground first, or place one.
 
+### Sea level
+
+`level.sea_level(host)` reads the Y a level's terrain is generated with its sea at: 63 in the Overworld, 32 in the
+Nether, 0 in the End, and for a mod's level of the noise generator the `sea_level` of its `noise_settings`. It is
+None for a level of a generator the mod wrote (that terrain has no sea level to read) and for noise settings a
+data pack replaced. It is the sea level the game uses for the level: terrain and aquifers, mob spawning and
+behaviour (drowned, turtles, phantoms), rain and snow, and maps. A level whose noise settings the game cannot read
+keeps the Overworld's.
+
 ### Saving a level
 
 `level.request_save(host)` asks the server to save a level, as the autosave and `/save-all` do, with its

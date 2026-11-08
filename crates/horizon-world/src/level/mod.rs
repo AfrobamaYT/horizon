@@ -204,6 +204,41 @@ pub fn vanilla_sea_level(level: LevelKey) -> i32 {
     }
 }
 
+/// The sea levels of the levels a mod registered, from the noise settings their stems name, by
+/// level key: set at each world's load (`set_sea_levels`), as the dimension types' facts are.
+static SEA_LEVELS: std::sync::LazyLock<RwLock<HashMap<LevelKey, i32>>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// Replaces the registered levels' sea levels, at a world's load.
+pub fn set_sea_levels(levels: Vec<(LevelKey, i32)>) {
+    *SEA_LEVELS.write().unwrap_or_else(|e| e.into_inner()) = levels.into_iter().collect();
+}
+
+/// Registers one level's sea level, as a server told a client the level of a mod or a data pack
+/// has (`CommonPlayerSpawnInfo.seaLevel`); the levels of a world's own load are set by
+/// `set_sea_levels`.
+pub fn register_sea_level(level: LevelKey, sea_level: i32) {
+    SEA_LEVELS
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(level, sea_level);
+}
+
+/// The sea level a mod's level was registered with, if it has one.
+pub fn registered_sea_level(level: LevelKey) -> Option<i32> {
+    SEA_LEVELS
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&level)
+        .copied()
+}
+
+/// A level's sea level: the one its noise settings give (`registered_sea_level`), else the
+/// built-in level's (`vanilla_sea_level`).
+pub fn sea_level_of(level: LevelKey) -> i32 {
+    registered_sea_level(level).unwrap_or_else(|| vanilla_sea_level(level))
+}
+
 /// Game rules consulted by block behaviour (vanilla defaults).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GameRules {
@@ -744,6 +779,11 @@ pub trait LevelAccess {
     /// The level's key.
     fn level_key(&self) -> LevelKey {
         self.dimension().key()
+    }
+    /// The level's sea level (`Level.getSeaLevel`): the built-in level's, unless an implementor
+    /// knows its level's own (a mod's level with other noise settings).
+    fn sea_level(&self) -> i32 {
+        vanilla_sea_level(self.level_key())
     }
     /// The level's dimension type.
     fn dimension_type(&self) -> &DimensionFacts {
@@ -1644,6 +1684,31 @@ impl Behaviours {
 #[cfg(test)]
 mod dimension_key_tests {
     use super::*;
+
+    /// A registered level has its own sea level; any other has its built-in level's, and the
+    /// table clears.
+    #[test]
+    fn a_registered_level_has_its_own_sea_level() {
+        let pocket = LevelKey::parse("test:sea_pocket").unwrap();
+        assert_eq!(sea_level_of(pocket), 63);
+        assert_eq!(registered_sea_level(pocket), None);
+        set_sea_levels(vec![(pocket, 120)]);
+        assert_eq!(sea_level_of(pocket), 120);
+        assert_eq!(registered_sea_level(pocket), Some(120));
+        assert_eq!(sea_level_of(LevelKey::NETHER), 32);
+        set_sea_levels(Vec::new());
+        assert_eq!(sea_level_of(pocket), 63);
+    }
+
+    #[test]
+    fn a_built_in_level_keeps_the_sea_level_its_generator_registered() {
+        // A superflat Overworld builds with -63, not the Overworld's 63.
+        register_sea_level(LevelKey::OVERWORLD, -63);
+        assert_eq!(sea_level_of(LevelKey::OVERWORLD), -63);
+        assert_eq!(sea_level_of(LevelKey::NETHER), 32);
+        set_sea_levels(Vec::new());
+        assert_eq!(sea_level_of(LevelKey::OVERWORLD), 63);
+    }
 
     #[test]
     fn dimension_and_key_round_trip_and_sea_levels() {

@@ -677,7 +677,35 @@ pub(super) fn level_shapes(
     // What the packs leave out is logged when the generator reads them.
     let (overrides, _) =
         horizon_client::datapack::worldgen_overrides(&enabled, |b| biomes.contains(b));
-    shapes_of(&overrides)
+    let shapes = shapes_of(&overrides);
+    set_level_sea_levels(&shapes, resources);
+    shapes
+}
+
+/// The sea levels of the levels the mods registered with the noise generator: the `sea_level` of
+/// the noise settings their stems name, which the game's spawning, weather and maps then use. A
+/// level of another generator, or whose noise settings are not in the game's resources, has its
+/// built-in level's.
+fn set_level_sea_levels(shapes: &horizon_client::chunk::LevelShapes, resources: &std::path::Path) {
+    use horizon_world::worldgen::overrides::{mod_dimensions, stem_sea_level};
+    let read = |id: &str| -> Option<serde_json::Value> {
+        let (namespace, path) = id.split_once(':').unwrap_or(("minecraft", id));
+        let file = resources.join(format!(
+            "data/{namespace}/worldgen/noise_settings/{path}.json"
+        ));
+        serde_json::from_slice(&std::fs::read(file).ok()?).ok()
+    };
+    let levels = shapes
+        .extra
+        .iter()
+        .filter_map(|level| {
+            let dimension = mod_dimensions().iter().find(|d| d.id == level.id)?;
+            let stem: serde_json::Value = serde_json::from_str(&dimension.stem).ok()?;
+            let sea = stem_sea_level(&stem, &read)?;
+            Some((horizon_core::LevelKey::parse(level.id).ok()?, sea))
+        })
+        .collect();
+    horizon_world::level::set_sea_levels(levels);
 }
 
 /// The levels' shapes the mods' and packs' worldgen entries give.
@@ -933,6 +961,17 @@ pub(super) fn make_streaming(
             }
         }
     });
+    // The sea level the level's rules and the mods read is the one its generator builds with
+    // (`ChunkGenerator.getSeaLevel`), so a pack's noise settings or a superflat world are seen:
+    // the superflat generators' is -63 (`FlatLevelSource.getSeaLevel`).
+    let register_sea_level = |sea_level: i32| {
+        if let Ok(key) = horizon_core::LevelKey::parse(dim.id()) {
+            horizon_world::level::register_sea_level(key, sea_level);
+        }
+    };
+    if flat.is_some() || flat_vanilla.is_some() {
+        register_sea_level(-63);
+    }
     let mut streaming = if let Some(inner) = debug {
         Streaming::new(
             Arc::new(Persistent {
@@ -1044,6 +1083,7 @@ pub(super) fn make_streaming(
             })?;
         inner.set_loot_source(loot);
         inner.add_mod_signs(res.facts());
+        register_sea_level(inner.sea_level());
         let inner = Arc::new(inner);
         if dim == Dim::Overworld && structures {
             inner.search_rings_behind();

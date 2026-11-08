@@ -101,6 +101,23 @@ pub fn mod_dimensions() -> &'static [ModDimension] {
     MOD_DIMENSIONS.get().map_or(&[], Vec::as_slice)
 }
 
+/// The sea level a level stem's noise generator builds its terrain at: its `settings`
+/// (`NoiseGeneratorSettings.seaLevel`), a noise settings id that `read` resolves to its JSON or the
+/// settings inline. None for any other generator, whose terrain has no sea level to read, and for
+/// settings `read` cannot find.
+pub fn stem_sea_level(stem: &Value, read: &dyn Fn(&str) -> Option<Value>) -> Option<i32> {
+    let generator = &stem["generator"];
+    if generator["type"].as_str() != Some("minecraft:noise") {
+        return None;
+    }
+    let settings = match &generator["settings"] {
+        Value::String(id) => read(id)?,
+        inline @ Value::Object(_) => inline.clone(),
+        _ => return None,
+    };
+    i32::try_from(settings["sea_level"].as_i64()?).ok()
+}
+
 /// `ns:path` for a pack file `data/<ns>/<kind>/<path>.json`.
 fn resource_id(file: &str, kind: &str) -> Option<String> {
     let (ns, rest) = file.strip_prefix("data/")?.split_once('/')?;
@@ -717,5 +734,28 @@ mod level_facts_tests {
             dimension_type: r#"{"min_y":0,"height":64,"skybox":"moon"}"#.into(),
         });
         assert!(o.level_facts("test:bad").unwrap().is_err());
+    }
+}
+
+#[cfg(test)]
+mod stem_sea_level_tests {
+    use super::stem_sea_level;
+    use serde_json::json;
+
+    /// The sea level is the noise settings', named by id or inline; another generator has none.
+    #[test]
+    fn a_noise_stem_reads_its_settings_sea_level() {
+        let read = |id: &str| (id == "test:high").then(|| json!({"sea_level": 120}));
+        let named = |settings: &str| json!({"generator": {"type": "minecraft:noise", "settings": settings}});
+        assert_eq!(stem_sea_level(&named("test:high"), &read), Some(120));
+        assert_eq!(stem_sea_level(&named("test:absent"), &read), None);
+        let inline = json!({"generator": {
+            "type": "minecraft:noise", "settings": {"sea_level": -16},
+        }});
+        assert_eq!(stem_sea_level(&inline, &read), Some(-16));
+        let flat = json!({"generator": {"type": "minecraft:flat", "settings": {"sea_level": 5}}});
+        assert_eq!(stem_sea_level(&flat, &read), None);
+        let bad = json!({"generator": {"type": "minecraft:noise", "settings": {"sea_level": "x"}}});
+        assert_eq!(stem_sea_level(&bad, &read), None);
     }
 }

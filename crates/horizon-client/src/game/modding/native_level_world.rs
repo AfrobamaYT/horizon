@@ -38,6 +38,7 @@ fn weather_flags((rain, thunder): (f32, f32)) -> (bool, bool) {
 /// A read-only view of one level's column for `Level.isRainingAt`, so a level parked
 /// while the server ticks another answers like the one in place.
 struct RainView<'a> {
+    sea_level: i32,
     world: &'a World,
     facts: &'a horizon_client::blocks::BlockFacts,
     biomes: &'a horizon_client::biome::Biomes,
@@ -48,6 +49,9 @@ struct RainView<'a> {
 }
 
 impl LevelAccess for RainView<'_> {
+    fn sea_level(&self) -> i32 {
+        self.sea_level
+    }
     fn block_state(&self, pos: BlockPos) -> BlockStateId {
         self.world.block(pos.x, pos.y, pos.z)
     }
@@ -190,6 +194,18 @@ impl Game<'_> {
         })
     }
 
+    /// The sea level of the level's terrain: a built-in level's, or the noise settings a mod's
+    /// level names. None as the host call says.
+    pub(super) fn level_sea_level(&self, level: LevelRef) -> Option<i32> {
+        use horizon_core::LevelKey;
+        self.native_level_world(level)?;
+        let key = LevelKey::parse(level.dimension_id()).ok()?;
+        if matches!(key, LevelKey::OVERWORLD | LevelKey::NETHER | LevelKey::END) {
+            return Some(horizon_world::level::vanilla_sea_level(key));
+        }
+        horizon_world::level::registered_sea_level(key)
+    }
+
     /// The world's seed (`WorldOptions.seed`), as `/seed` shows it.
     pub(super) fn level_seed(&self, level: LevelRef) -> Option<i64> {
         self.native_level_world(level)?;
@@ -263,6 +279,7 @@ impl Game<'_> {
             return None;
         }
         let view = RainView {
+            sea_level: Dim::sea_level_of_id(level.dimension_id()),
             world,
             facts: self.res.facts(),
             biomes: world_biomes!(self),
