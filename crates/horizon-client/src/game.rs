@@ -1141,22 +1141,12 @@ impl LevelAccess for GameLevel<'_> {
         fluid: horizon_world::fluid::ModFluid,
         registered: horizon_world::fluid::ModFluidRules,
     ) -> horizon_world::fluid::ModFluidRules {
-        let mut rules = registered;
-        if self.native_authoritative {
-            self.native_fluid_rules(mod_api::__private::FluidRulesCall {
-                dimension: self.dimension,
-                pos,
-                fluid: &fluid.get().id,
-                tick_delay: &mut rules.tick_delay,
-                drop_off: &mut rules.drop_off,
-                slope_find_distance: &mut rules.slope_find_distance,
-                converts_to_source: &mut rules.converts_to_source,
-            });
-            rules.tick_delay = rules.tick_delay.max(1);
-            rules.drop_off = rules.drop_off.clamp(1, 7);
-            rules.slope_find_distance = rules.slope_find_distance.clamp(1, 4);
+        if !self.native_authoritative {
+            return registered;
         }
-        rules
+        Self::answered_fluid_rules(self.dimension, pos, fluid, registered, |call| {
+            self.native_fluid_rules(call)
+        })
     }
     fn allow_block_ignite(&self, pos: BlockPos, cause: &'static str) -> bool {
         let mut cancel = false;
