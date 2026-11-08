@@ -789,9 +789,13 @@ fn vanilla_mobs_at<L: NaturalLevel>(
         .map_or(&[], Vec::as_slice)
 }
 
+fn total_weight(list: &[SpawnEntry]) -> i64 {
+    list.iter().map(|e| i64::from(e.weight)).sum()
+}
+
 /// `WeightedList.getRandom`.
 pub fn weighted_pick(list: &[SpawnEntry], random: &mut impl RandomSource) -> Option<SpawnEntry> {
-    let total: i64 = list.iter().map(|e| i64::from(e.weight)).sum();
+    let total = total_weight(list);
     if total <= 0 {
         return None;
     }
@@ -1466,7 +1470,7 @@ pub fn spawn_mobs_for_chunk_generation<L: NaturalLevel, R: RandomSource, Q: Rand
         .and_then(|b| b.get("creature"))
         .cloned()
         .unwrap_or_default();
-    if mobs.iter().map(|e| e.weight).sum::<u32>() == 0 {
+    if total_weight(&mobs) == 0 {
         return;
     }
     let probability = l.creature_probability(sx, sy, sz);
@@ -1590,6 +1594,22 @@ fn top_non_colliding<L: NaturalLevel>(l: &L, entity: &str, x: i32, z: i32) -> [i
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spawn_weights_do_not_overflow_u32() {
+        let entry = SpawnEntry {
+            entity: "minecraft:zombie".into(),
+            weight: i32::MAX as u32,
+            min: 1,
+            max: 1,
+            constant: true,
+        };
+        assert_eq!(
+            total_weight(&[entry.clone(), entry.clone(), entry]),
+            3 * i64::from(i32::MAX)
+        );
+        assert_eq!(total_weight(&[]), 0);
+    }
 
     /// Vanilla's limits stand until a part answers; an answer replaces them, higher or lower,
     /// and a group stops growing at the size the answer names.
