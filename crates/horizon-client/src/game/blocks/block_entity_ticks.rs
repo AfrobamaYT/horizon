@@ -156,7 +156,7 @@ impl Game<'_> {
     /// `BlockState.getTicker` of every state, for the block entities ticked
     /// here. A creaking heart keeps its slot while uprooted (see
     /// `tick_creaking_heart`).
-    fn ticking_states(&self) -> Vec<Ticking> {
+    pub(in crate::game) fn ticking_states(&self) -> Vec<Ticking> {
         let registry = self.pack.assets.registry;
         (0..registry.len())
             .map(|i| {
