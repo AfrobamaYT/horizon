@@ -1939,7 +1939,14 @@ impl<R: RandomSource> Context<'_, R> {
                     let tag = if value.is_null() {
                         None
                     } else {
-                        let Ok(tag) = horizon_core::json_nbt::json_to_tag(value) else {
+                        // CustomData uses TagParser's lenient codec: an SNBT
+                        // string is a compound, not a literal string tag.
+                        let decoded = if id == "minecraft:custom_data" {
+                            nbt_predicate_tag(value)
+                        } else {
+                            horizon_core::json_nbt::json_to_tag(value).ok()
+                        };
+                        let Some(tag) = decoded else {
                             continue;
                         };
                         Some(tag)
@@ -3350,6 +3357,13 @@ mod custom_data_predicate_tests {
     /// by `loot give @s kill`, VanillaCommandExecOracle, #12196): a typed NBT
     /// subset (`NbtUtils.compareNbt`), lists matched element by element, no
     /// custom data read as `{}`, and a JSON pattern's whole numbers as bytes.
+    #[test]
+    fn data_file_custom_data_snbt_matches_a_nonempty_predicate() {
+        // doubled writes and loads a real loot-table data file, including
+        // set_components followed by filtered, rather than calling the matcher.
+        assert_eq!(doubled(Some("{nested:{k:7}}")), ["magenta", "light_gray"]);
+    }
+
     #[test]
     fn filtered_matches_custom_data_as_vanilla() {
         let rich = r#"{h:1b,nested:{k:7,extra:9},entries:[{k:1b,extra:2b},{k:2b}],wide:9007199254740993L,spare:"keep"}"#;
