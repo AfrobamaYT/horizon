@@ -3712,15 +3712,20 @@ impl Game<'_> {
     fn level_key(&self) -> horizon_core::LevelKey {
         horizon_core::LevelKey::builtin_or_overworld(self.dim.id())
     }
+    /// The level's dimension type: a mod's or a data pack's own when it has one, else the
+    /// built-in level's.
     fn dimension_type(&self) -> &'static horizon_world::dimension_type::DimensionFacts {
-        horizon_world::dimension_type::DimensionFacts::of_builtin_level(self.level_key())
+        horizon_world::dimension_type::DimensionFacts::of_level(
+            horizon_core::LevelKey::parse(self.dim.id())
+                .unwrap_or(horizon_core::LevelKey::OVERWORLD),
+        )
     }
     fn dimension_type_of(
         &self,
         dim: Dim,
     ) -> &'static horizon_world::dimension_type::DimensionFacts {
-        horizon_world::dimension_type::DimensionFacts::of_builtin_level(
-            horizon_core::LevelKey::builtin_or_overworld(dim.id()),
+        horizon_world::dimension_type::DimensionFacts::of_level(
+            horizon_core::LevelKey::parse(dim.id()).unwrap_or(horizon_core::LevelKey::OVERWORLD),
         )
     }
     /// `Level.isDarkOutside`.

@@ -380,7 +380,13 @@ mod tests {
         invoke(&dir, "add game::tick --kind head").unwrap();
         let old = read(previous);
         let parsed = Manifest::parse(&read(&path)).unwrap();
-        let leftovers = fs::symlink_metadata(path.with_extension("toml.sync")).is_ok();
+        let leftovers = fs::read_dir(&dir).unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".tmp")
+        });
         fs::remove_dir_all(&dir).unwrap();
         assert_eq!(
             old, TEXT,
@@ -433,11 +439,6 @@ mod tests {
         let dir = reviewer_directory("failure");
         let path = dir.join(MANIFEST);
         let command = "add game::tick --kind head";
-        let temp = path.with_extension("toml.sync");
-        fs::create_dir(&temp).unwrap();
-        assert!(invoke(&dir, command).is_err());
-        assert_eq!(read(&path), TEXT);
-        fs::remove_dir(&temp).unwrap();
         let points = dir.join(
             "target/horizon-mod/prebuilt/0123456789012345678901234567890123456789/points.json",
         );

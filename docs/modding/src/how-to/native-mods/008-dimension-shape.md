@@ -16,6 +16,16 @@ skylight and ceiling from its dimension shape. It accepts `&dyn Host`, including
 level is parked, and returns `None` for a stale or unavailable level or on a client. It does
 not load a level or allocate.
 
+### Dimension type
+
+`level.dimension_type(host)` reads a level's dimension type (`Level.dimensionType()` and its
+gameplay attributes) as a `LevelDimensionType`: the build range, `coordinate_scale`, `ambient_light`,
+`has_fixed_time`, `infiniburn`, the monster spawn light range, the sky and the gameplay switches. A
+level on a vanilla type returns that type's values, a registered dimension returns what its
+`DimensionSettings` set, and a data pack's dimension type counts the same way. It returns `None` for
+a stale handle, and on a client it reads the level that window shows; a client of another server
+reads the Overworld's values for a level that server's mods added.
+
 ### Registering a dimension
 
 `register_dimension` gives every world a level of the mod's own. Call it once, at startup, in
@@ -35,8 +45,14 @@ impl Hooks for MyMod {
 
 The level is `mymod:pocket`. `DimensionSettings` sets the build height, `has_skylight`,
 `has_ceiling`, the `generator` (`minecraft:noise` by default), its `noise_settings` and the level's
-one `biome`; the default is the Overworld's shape and terrain over plains, and the parts of a
-dimension type not named here are the Overworld's. The level opens, ticks, saves and closes as the
+one `biome`; the default is the Overworld's shape and terrain over plains. It also sets the rest of
+the dimension type the game reads: `has_fixed_time`, `has_ender_dragon_fight`, `coordinate_scale`,
+`ambient_light`, `infiniburn`, the monster spawn light range and block light limit, the `skybox`,
+the `cardinal_light` and the gameplay switches (`water_evaporates`, `fast_lava`,
+`respawn_anchor_works`, `nether_portal_spawns_piglin`, `piglins_zombify`, `snow_golem_melts`,
+`can_start_raid`, `sky_light_level`). A field left at its default is the Overworld's, and the game
+refuses a value out of range (a `coordinate_scale` of 0, an `ambient_light` above 1, an unknown
+`skybox`) at startup with a message naming the mod. The level opens, ticks, saves and closes as the
 Nether and the End do, in `dimensions/mymod/pocket/` of the world, and clients receive its
 dimension type when they join.
 
