@@ -30,16 +30,21 @@ enum Case {
     PendingDeath,
     UnloadedRow,
     Normal,
+    NormalRemoval,
 }
 
 struct PanicOnDespawn {
     calls: Arc<AtomicUsize>,
     at: Option<usize>,
+    force_allow: bool,
 }
 #[mod_api::__subscriptions]
 impl mod_api::Hooks for PanicOnDespawn {
     fn mob_despawn(&self, _: &dyn mod_api::Host, event: &mut mod_api::MobDespawnEvent<'_>) {
         let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+        if self.force_allow {
+            *event.result = mod_api::NativeDespawn::Allow;
+        }
         if self.at == Some(call) {
             // An unwound answer must not become the next attempt's answer.
             *event.result = mod_api::NativeDespawn::Allow;
@@ -87,13 +92,14 @@ fn mob_despawn_listener_panic_preserves_owned_rows_and_lent_random() {
         Case::PendingDeath,
         Case::UnloadedRow,
         Case::Normal,
+        Case::NormalRemoval,
     ] {
         for dimension in [Dim::Overworld, Dim::Nether] {
             eprintln!("MOB_PANIC_CASE:{case:?}:{dimension:?}");
             let at = match case {
                 Case::First | Case::UnloadedRow => Some(1),
                 Case::Later | Case::PendingDeath => Some(2),
-                Case::Normal => None,
+                Case::Normal | Case::NormalRemoval => None,
             };
             let calls = Arc::new(AtomicUsize::new(0));
             let mods = vec![mod_api::ModEntry::new(
@@ -101,6 +107,7 @@ fn mob_despawn_listener_panic_preserves_owned_rows_and_lent_random() {
                 Box::new(PanicOnDespawn {
                     calls: calls.clone(),
                     at,
+                    force_allow: case == Case::NormalRemoval,
                 }),
             )]
             .into();
@@ -157,7 +164,12 @@ fn mob_despawn_listener_panic_preserves_owned_rows_and_lent_random() {
                         }
                         game.mobs.push(mob);
                     }
-                    let expected: Vec<_> = game.mobs.iter().map(|mob| (mob.id, mob.join)).collect();
+                    let joined: Vec<_> = game.mobs.iter().map(|mob| (mob.id, mob.join)).collect();
+                    let expected = if case == Case::NormalRemoval {
+                        Vec::new()
+                    } else {
+                        joined.clone()
+                    };
                     LEVEL_VALUE
                         .set(&mut game.world.attachments, Holder::Level, 42)
                         .unwrap();
@@ -179,7 +191,7 @@ fn mob_despawn_listener_panic_preserves_owned_rows_and_lent_random() {
                     }));
                     assert_eq!(
                         calls.load(Ordering::SeqCst),
-                        at.unwrap_or(expected.len()),
+                        at.unwrap_or(joined.len()),
                         "actual listener count or stop boundary differed"
                     );
                     if at.is_some() {
@@ -204,9 +216,10 @@ fn mob_despawn_listener_panic_preserves_owned_rows_and_lent_random() {
                             "normal pass did not consume collision writes"
                         );
                     }
-                    assert!(
+                    assert_eq!(
                         game.died.contains(&74),
-                        "prior death notification was forgotten"
+                        case != Case::NormalRemoval,
+                        "prior death notification was forgotten or a removed corpse retained"
                     );
                     assert_eq!(
                         LEVEL_VALUE
@@ -261,6 +274,18 @@ fn mob_despawn_listener_panic_preserves_owned_rows_and_lent_random() {
                     );
                     let mut table = EntityTable::new(journal);
                     assert_resident_mobs(game, &mut table, &owner, &expected);
+                    if case == Case::NormalRemoval {
+                        for &(id, _) in &joined {
+                            let found = table.entity_lookup(&owner.dimension, id, |at| {
+                                let mob = &game.mobs[game.mobs.locate(at.join)?];
+                                Some(SourceEntity {
+                                    id: mob.id,
+                                    value: (mob.id, mob.join),
+                                })
+                            });
+                            assert!(matches!(found, EntityLookup::Missing));
+                        }
+                    }
                     if case != Case::UnloadedRow {
                         game.tick_creature_entities().unwrap();
                         assert_eq!(
