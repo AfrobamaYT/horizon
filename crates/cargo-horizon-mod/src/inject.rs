@@ -69,7 +69,13 @@ fn request(args: &[String]) -> Result<Request<'_>, String> {
     })
 }
 
+#[path = "inject_update.rs"]
+mod update;
+
 pub fn run(args: &[String]) -> Result<(), String> {
+    if args.first().is_some_and(|command| command == "update") {
+        return update::run(Path::new("."), &args[1..]);
+    }
     if args.first().is_some_and(|command| command == "sync") {
         return crate::inject_sync::run(&args[1..]);
     }
@@ -219,7 +225,7 @@ fn append(
 #[cfg(test)]
 mod tests {
     use super::*;
-    const TEXT: &str = "# keep this comment\nid = 'example'\nname = 'Example'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = ['registries']\n\n[native]\ngame = '26.3'\nmixins = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'\nhorizon = '0123456789012345678901234567890123456789'\n";
+    pub(super) const TEXT: &str = "# keep this comment\nid = 'example'\nname = 'Example'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = ['registries']\n\n[native]\ngame = '26.3'\nmixins = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'\nhorizon = '0123456789012345678901234567890123456789'\n";
     fn read(path: impl AsRef<Path>) -> String {
         fs::read_to_string(path).unwrap()
     }
@@ -232,10 +238,10 @@ mod tests {
     fn invoke(dir: &Path, command: &str) -> Result<(), String> {
         add(dir, &args(command))
     }
-    fn fixture() -> (Vec<ListedInternal>, Catalog) {
+    pub(super) fn fixture() -> (Vec<ListedInternal>, Catalog) {
         (serde_json::from_str(r#"[{"path":"game::tick","kind":"method","signature":"fn tick(&mut self)","hash":"signature-fixture"}]"#).unwrap(), serde_json::from_str(r#"{"sites":[{"target":"game::tick","call":"game::first","ordinal":0,"ctx":"context-zero"},{"target":"game::tick","call":"game::first","ordinal":2,"ctx":"context-two"},{"target":"game::tick","call":"game::other","ordinal":0,"ctx":"other-context"}]}"#).unwrap())
     }
-    fn edit(text: &str, args: &str) -> Result<String, String> {
+    pub(super) fn edit(text: &str, args: &str) -> Result<String, String> {
         let args = self::args(args);
         let manifest = Manifest::parse(text)?;
         let (internals, catalog) = fixture();
@@ -357,7 +363,7 @@ mod tests {
         assert!(append(TEXT, &manifest, &request, &internals, &catalog).is_err());
     }
 
-    fn reviewer_directory(label: &str) -> std::path::PathBuf {
+    pub(super) fn reviewer_directory(label: &str) -> std::path::PathBuf {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
             "../../target/reviewer-{label}-{}",
             std::process::id()
