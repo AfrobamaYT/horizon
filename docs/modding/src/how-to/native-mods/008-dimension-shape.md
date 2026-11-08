@@ -111,6 +111,15 @@ of a chunk generator the mod wrote has no noise settings to read: set `Dimension
 (it wins over the noise settings'), else it is 63. It is the sea level the game uses for the level: terrain and
 aquifers, mob spawning and behaviour (drowned, turtles, phantoms), rain and snow, and maps.
 
+### Day clocks
+
+Each level goes by its dimension type's `default_clock`: the Overworld by `minecraft:overworld`, the End by
+`minecraft:the_end`, a level without one (the Nether) by the Overworld's. Every clock the world has met runs at its
+own rate and keeps its own total, saved in `world_clocks.dat`, so a level with a clock of its own has its own day:
+its sky, its spawning and its beds follow that clock, and `/time` in the level sets it.
+`level.clock_time(host)` reads the level's own clock in ticks (None for a level without a default clock);
+`level.day_time(host)` stays the Overworld's, whichever level is asked.
+
 ### Which level a hook is in
 
 The block-behaviour hooks (`neighbor_changed`, `random_tick`, `crop_grow`, `block_changed` and the rest) name their
