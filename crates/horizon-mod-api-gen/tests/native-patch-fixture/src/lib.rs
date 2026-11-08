@@ -1,3 +1,5 @@
+#![deny(unused_braces)]
+
 #[cfg(test)]
 mod model {
     use std::collections::{BTreeMap, BTreeSet};

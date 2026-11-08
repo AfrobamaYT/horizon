@@ -29,7 +29,7 @@ pub fn generate(
 ) -> Result<TokenStream, String> {
     if !writable {
         return Ok(
-            quote!({ if !(#tree).is_empty() { return Err(mod_api::wire::WireError::Invalid("readonly patch root")); } }),
+            quote!(if !(#tree).is_empty() { return Err(mod_api::wire::WireError::Invalid("readonly patch root")); }),
         );
     }
     let body = emit(
@@ -40,7 +40,7 @@ pub fn generate(
         0,
     )?;
     Ok(
-        quote!({ let __np_value = &mut (#place); let __np_tree = #tree; let __np_plan = &mut (#plan); #body }),
+        quote!({ let __np_value = &mut (#place); let __np_tree = #tree; let __np_plan = &mut (#plan); #body; }),
     )
 }
 fn emit(
@@ -78,7 +78,7 @@ fn emit(
             return Ok(if matches!(shape, Shape::Ref { .. }) {
                 body
             } else {
-                quote!({ if let Some(bytes) = __np_tree.value() { #whole } else { #body } })
+                quote!(if let Some(bytes) = __np_tree.value() { #whole } else { #body })
             });
         }
         Shape::Tuple(parts) => {
@@ -199,7 +199,7 @@ fn emit(
         }
         _ => return Err(format!("unimplemented: native patch planner for {shape:?}")),
     };
-    Ok(quote!({ if let Some(bytes)=__np_tree.value() { #whole } else { #descendants } }))
+    Ok(quote!(if let Some(bytes)=__np_tree.value() { #whole } else { #descendants }))
 }
 fn fully_exposed(rule: &Rule, shape: &Shape, exposure: &dyn Exposure, depth: usize) -> bool {
     if depth > 128 {
