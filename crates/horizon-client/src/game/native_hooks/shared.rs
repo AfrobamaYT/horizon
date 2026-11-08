@@ -4549,7 +4549,8 @@ mod tests {
                     mod_api::dispatch_block_highlight(
                         &game,
                         [1, 2, 3],
-                        super::BlockStateId(7),
+                        crate::game::api_values::TryIntoApi::try_into_api(&super::BlockStateId(7))
+                            .unwrap(),
                         0.5,
                         &mut canceled,
                     );

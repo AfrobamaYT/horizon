@@ -42,6 +42,9 @@ pub mod __private {
     pub fn has_part_hook(_: crate::HookId) -> bool {
         true
     }
+    pub fn listened(_: crate::HookId) -> bool {
+        true
+    }
     pub fn has_scoped_hook(_: crate::HookId) -> bool {
         true
     }

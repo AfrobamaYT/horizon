@@ -331,8 +331,8 @@ mod tests {
             ["minecraft:stone".into()].into(),
         );
         for facts in [
-            r#"{"defaults":{"minecraft:stone":0,"test:machine":1},"states":[["s",false,false,"","minecraft:stone"],["m",false,false,"","test:machine"]]}"#,
-            r#"{"defaults":{"minecraft:stone":1,"test:machine":0},"states":[["m",false,false,"","test:machine"],["s",false,false,"","minecraft:stone"]]}"#,
+            r#"{"defaults":{"minecraft:air":2,"minecraft:stone":0,"test:machine":1},"states":[["s",false,false,"","minecraft:stone"],["m",false,false,"","test:machine"],["a",true,false,"","minecraft:air"]]}"#,
+            r#"{"defaults":{"minecraft:air":2,"minecraft:stone":1,"test:machine":0},"states":[["m",false,false,"","test:machine"],["s",false,false,"","minecraft:stone"],["a",true,false,"","minecraft:air"]]}"#,
         ] {
             // Build reordered numeric registries from the same API definitions.
             let registry = BlockRegistry::from_facts_json(facts.as_bytes()).unwrap();

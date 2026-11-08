@@ -2547,7 +2547,13 @@ mod tests {
                 _host: &mut dyn mod_api::ServerHost,
                 event: &mut VanillaGameEventEvent<'_>,
             ) -> mod_api::Flow {
-                self.0.lock().unwrap().push(event.affected_state);
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push(event.affected_state.map(|state| {
+                        crate::game::api_values::TryIntoEngine::try_into_engine(&state, &())
+                            .unwrap()
+                    }));
                 mod_api::Flow::Continue
             }
         }

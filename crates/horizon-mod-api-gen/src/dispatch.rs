@@ -995,6 +995,23 @@ mod stack_crossing_tests {
             &Default::default(),
         )
         .unwrap();
+        let global = stack_crossing_routed(
+            &[
+                ("state".into(), &state),
+                ("secondary".into(), &state),
+                ("writes".into(), &writes),
+            ],
+            None,
+            "Proof",
+            false,
+            None,
+            &Default::default(),
+        )
+        .unwrap();
+        let global = format!(
+            "{} callback(__api_state, __api_secondary, &mut __api_writes); {}",
+            global.before, global.after
+        );
         let guard = "if !crate::game::api_values::block_state::block_listens(mod_api::HookId::Proof, state) { return; }";
         let body = format!(
             "{} callback(__api_state, __api_secondary, &mut __api_writes); {}",
@@ -1002,6 +1019,10 @@ mod stack_crossing_tests {
         );
         let unguarded = body.replace(guard, "");
         let late = unguarded.replace("callback(", &format!("{guard} callback("));
+        let after_scalar = unguarded.replace(
+            "let __api_secondary",
+            &format!("{guard} let __api_secondary"),
+        );
         assert_ne!(body, unguarded);
         let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../target/block-routing-proof");
@@ -1009,23 +1030,43 @@ mod stack_crossing_tests {
         let index = directory.join("index.rs");
         std::fs::write(
             &index,
-            include_str!("../../horizon-client/src/game/modding/api_values/block_state.rs"),
+            // Count actual scalar crossings as well as collection conversions. The
+            // routing helper itself must not trigger this conversion observer.
+            include_str!("../../horizon-client/src/game/modding/api_values/block_state.rs").replace(
+                "pub(crate) fn to_api(&self, state: BlockStateId) -> Result<BlockState, BlockStateError> {",
+                "pub(crate) fn to_api(&self, state: BlockStateId) -> Result<BlockState, BlockStateError> { crate::CONVERSIONS.fetch_add(1, crate::Ordering::Relaxed);",
+            ),
         )
         .unwrap();
         for (name, body, success) in [
             ("baseline", body, true),
             ("no_guard", unguarded, false),
             ("late_guard", late, false),
+            ("after_scalar_guard", after_scalar, false),
+            ("global_listener", global, true),
         ] {
             let source = directory.join(format!("{name}.rs"));
             let binary = directory.join(name);
-            std::fs::write(
-                &source,
-                include_str!("../../../tools/refactors/api-pr3b/block_routing.rs")
-                    .replace("INDEX_PATH", index.to_str().unwrap())
-                    .replace("FIRE_BODY", &body),
-            )
-            .unwrap();
+            let mut fixture = include_str!("../../../tools/refactors/api-pr3b/block_routing.rs")
+                .replace("INDEX_PATH", index.to_str().unwrap())
+                .replace("FIRE_BODY", &body);
+            if name == "global_listener" {
+                fixture = fixture.replace("fn main()", "fn routing_main()");
+                fixture.push_str(
+                    r#"
+fn main() {
+    let b = BlockState(BlockKey(8), 0);
+    game::api_values::bind(&registry::BlockRegistry(vec![Ok(b)]));
+    let mut writes = vec![42];
+    Game.fire(registry::BlockStateId(0), registry::BlockStateId(0), &mut writes);
+    assert_eq!(CALLS.load(Ordering::Relaxed), 1);
+    assert_eq!(writes, vec![42,99]);
+    println!("ordinary global listener sees unrelated block B");
+}
+"#,
+                );
+            }
+            std::fs::write(&source, fixture).unwrap();
             let compiled = std::process::Command::new("rustc")
                 .args(["--edition=2024", "-O"])
                 .arg(source)

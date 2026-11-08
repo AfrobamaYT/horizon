@@ -92,38 +92,38 @@ mod tests {
                 registrar.block_part(key, Part);
             }
         }
-        mod_api::__private::part_tests::install_parts_fixture(&[mod_api::ModEntry::new(
-            "routing",
-            Box::new(Listener),
-        )])
-        .unwrap();
-        let facts = r#"{"defaults":{"minecraft:stone":0,"minecraft:dirt":1},"states":[["s",false,false,"","minecraft:stone"],["d",false,false,"","minecraft:dirt"]]}"#;
-        let registry = BlockRegistry::from_facts_json(facts.as_bytes()).unwrap();
-        super::super::resolve_block_definitions(&registry).unwrap();
-        mod_api::__private::resolve_parts(
-            &Default::default(),
-            &Default::default(),
-            mod_api::__private::KnownIds {
-                block: &|_| true,
-                item: &|_| false,
-            },
-        )
-        .unwrap();
-        assert!(block_listens(
-            mod_api::HookId::AnalogOutput,
-            BlockStateId(0)
-        ));
-        let start = std::time::Instant::now();
-        for _ in 0..1_000 {
-            assert!(!block_listens(
+        let mods: mod_api::Mods =
+            vec![mod_api::ModEntry::new("routing", Box::new(Listener))].into();
+        mod_api::testing::with_mods(mods.clone(), || {
+            mod_api::__private::part_tests::install_parts_fixture(&mods).unwrap();
+            let facts = r#"{"defaults":{"minecraft:air":2,"minecraft:stone":0,"minecraft:dirt":1},"states":[["s",false,false,"","minecraft:stone"],["d",false,false,"","minecraft:dirt"],["a",true,false,"","minecraft:air"]]}"#;
+            let registry = BlockRegistry::from_facts_json(facts.as_bytes()).unwrap();
+            super::super::resolve_block_definitions(&registry).unwrap();
+            mod_api::__private::resolve_parts(
+                &Default::default(),
+                &Default::default(),
+                mod_api::__private::KnownIds {
+                    block: &|_| true,
+                    item: &|_| false,
+                },
+            )
+            .unwrap();
+            assert!(block_listens(
                 mod_api::HookId::AnalogOutput,
-                std::hint::black_box(BlockStateId(1))
+                BlockStateId(0)
             ));
-        }
-        println!(
-            "actual Index and Parts: 1000 unrelated-block guards in {} ns",
-            start.elapsed().as_nanos()
-        );
+            let start = std::time::Instant::now();
+            for _ in 0..1_000 {
+                assert!(!block_listens(
+                    mod_api::HookId::AnalogOutput,
+                    std::hint::black_box(BlockStateId(1))
+                ));
+            }
+            println!(
+                "actual Index and Parts: 1000 unrelated-block guards in {} ns",
+                start.elapsed().as_nanos()
+            );
+        });
     }
 
     #[test]

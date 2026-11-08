@@ -300,7 +300,7 @@ pub fn mark_game_thread() {
 pub enum ResolvePartsError {
     /// An item key names no loaded item.
     ItemKeys(Vec<ItemKeyError>),
-    /// Legacy block or item Part registration refusals.
+    /// Block or item Part resolution refusals, including unavailable block metadata.
     Parts(Vec<String>),
 }
 
