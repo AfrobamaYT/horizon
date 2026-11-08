@@ -788,11 +788,11 @@ fn animal_behaviors_join_after_vanilla_of_their_priority() {
         assert_eq!(vanilla, bare, "vanilla's order stands");
         let core_mod = joined
             .iter()
-            .position(|k| k.2 && k.0 == 0 && k.1 == "core")
+            .position(|k| k.2 && k.0 == 0 && k.1 == mobs::animal_brain::Act::Core)
             .unwrap();
         let idle_vanilla = joined
             .iter()
-            .position(|k| !k.2 && k.0 == 0 && k.1 == "idle")
+            .position(|k| !k.2 && k.0 == 0 && k.1 == mobs::animal_brain::Act::Idle)
             .unwrap();
         assert!(core_mod < idle_vanilla, "Core's whole bucket precedes Idle");
         for (i, key) in joined.iter().enumerate().filter(|(_, k)| k.2) {

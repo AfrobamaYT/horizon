@@ -32,6 +32,14 @@ pub enum Act {
     Fight,
 }
 impl Act {
+    fn slot(self) -> u8 {
+        match self {
+            Act::Core => 1,
+            Act::Idle => 5,
+            Act::Fight => 14,
+        }
+    }
+
     fn name(self) -> &'static str {
         match self {
             Act::Core => "core",
@@ -175,16 +183,7 @@ pub fn init(m: &mut Mob, shuffle_seed: i64) {
     let before = list.len();
     attach_behaviors(&m.kind.id, &mut list);
     if list.len() > before {
-        list.sort_by_key(|e| {
-            (
-                e.prio,
-                match e.act {
-                    Act::Core => 1,
-                    Act::Idle => 5,
-                    Act::Fight => 14,
-                },
-            )
-        });
+        list.sort_by_key(|e| (e.prio, e.act.slot()));
     }
     m.extra.brain = Some(Box::new(Brain {
         mem: Memories::default(),
@@ -1403,12 +1402,7 @@ fn timed(min: i32, max: i32) -> Timed {
 /// `availableBehaviorsByPriority`'s order: priority, then the activity's
 /// hash slot (core 1, idle 5, fight 14), then insertion order.
 fn sorted(mut v: Vec<(i32, Act, B)>) -> Vec<Entry> {
-    let slot = |a: Act| match a {
-        Act::Core => 1,
-        Act::Idle => 5,
-        Act::Fight => 14,
-    };
-    v.sort_by_key(|(p, a, _)| (*p, slot(*a)));
+    v.sort_by_key(|(p, a, _)| (*p, a.slot()));
     v.into_iter()
         .map(|(prio, act, b)| Entry { prio, act, b })
         .collect()
