@@ -43,6 +43,8 @@ fn stateful_creation_uses_actual_state_and_preserves_existing_entity() {
         }
     }
     #[mod_api::horizon_part]
+    impl BlockPart for Factory {}
+    #[mod_api::horizon_part]
     impl BlockEntityPart for Factory {
         fn stateful_block_entity(&self, _: &dyn Host, event: &mut StatefulBlockEntityEvent<'_>) {
             if event.block == BLOCK {
@@ -74,6 +76,7 @@ fn stateful_creation_uses_actual_state_and_preserves_existing_entity() {
     let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
     let root = crate::game::mods::content_root(&base, &Default::default()).unwrap();
     with_game_at(root.prepared().to_path_buf(), |game| {
+        game.options.dedicated = Some(Vec::new());
         game.world
             .chunks
             .insert((0, 0), Arc::new(Chunk::empty(0, 0)));

@@ -1637,6 +1637,11 @@ mod tests {
         let directory = std::env::var_os("HORIZON_EXPLOSION_ITEMS_FIXTURE")
             .expect("set HORIZON_EXPLOSION_ITEMS_FIXTURE to the fixture directory");
         crate::game::native_entity_refs::tests::with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
             game.run_explosion_items_fixture(std::path::Path::new(&directory))
                 .unwrap();
         });

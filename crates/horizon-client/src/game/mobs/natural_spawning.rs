@@ -1202,6 +1202,11 @@ mod tests {
         use horizon_core::position::BlockPos;
         use horizon_world::level::LevelAccess;
         crate::game::native_entity_refs::tests::with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
             game.border.set_center([8.0, 8.0]);
             game.border.set_size(16.0);
             assert!(game.natural_level().can_spawn_in_chunk(0, 0));
@@ -1227,6 +1232,11 @@ mod tests {
         use horizon_client::{chunk::Chunk, motion::PlayerMotion};
         use std::sync::Arc;
         crate::game::native_entity_refs::tests::with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
             // Only the center chunk can tick: its eight neighbors are loaded,
             // but none of those has all its own neighbors. The center is partial.
             for x in -1..=1 {

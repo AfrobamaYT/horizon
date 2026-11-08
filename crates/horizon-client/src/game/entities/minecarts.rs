@@ -3731,6 +3731,11 @@ mod cart_push_tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_pushed_chest_cart_keeps_its_rolled_loot() {
         super::super::native_entity_refs::tests::with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
             let stone = game
                 .pack
                 .assets
