@@ -50,10 +50,6 @@ const STD_CRATES: &[&str] = &[
 /// Guest boundary exports, kept even though they originate in an rlib dependency.
 const GUEST_EXPORTS: &[&str] = &["horizon_layout", "horizon_in", "horizon_hook"];
 
-fn group_export(name: &str) -> bool {
-    GUEST_EXPORTS.contains(&name)
-}
-
 /// The pinned toolchain's version line, its sysroot's linker, installing it first if needed.
 struct Toolchain {
     version: String,
@@ -68,7 +64,19 @@ fn pinned(tool: &str) -> Command {
         c.args(["run", TOOLCHAIN, tool]);
         c
     } else {
-        Command::new(tool)
+        let home = std::env::var_os("RUSTUP_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/opt/rustup"));
+        let directory = home.join("toolchains");
+        let installed = std::fs::read_dir(directory).ok().and_then(|entries| {
+            entries.filter_map(Result::ok).find_map(|entry| {
+                let name = entry.file_name();
+                let name = name.to_str()?;
+                let binary = entry.path().join("bin").join(tool);
+                (name.starts_with(&format!("{TOOLCHAIN}-")) && binary.is_file()).then_some(binary)
+            })
+        });
+        Command::new(installed.unwrap_or_else(|| PathBuf::from(tool)))
     };
     command.env_remove("RUSTC").env_remove("RUSTC_WRAPPER");
     command
@@ -408,11 +416,6 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
             continue;
         } else if role == "std" && arg == "--gc-sections" {
             out.push("--no-gc-sections".to_owned());
-        } else if arg == "--export" {
-            let name = args.next().unwrap_or_default();
-            if role == "std" || group_export(&name) {
-                out.extend([arg, name]);
-            }
         } else {
             out.push(arg);
         }
@@ -480,22 +483,6 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
             module.section(&section);
             continue;
         }
-        // `--shared` exports every visible symbol; a member keeps only its group exports and
-        // the linker's own (`__wasm_*`), so two members' copies of a crate's `#[no_mangle]`
-        // items (a JS runtime's glue, the guest entry) don't collide in one group.
-        if let wasmparser::Payload::ExportSection(reader) = &payload
-            && role != "std"
-        {
-            let mut section = wasm_encoder::ExportSection::new();
-            for export in reader.clone() {
-                let export = export.map_err(|e| e.to_string())?;
-                if group_export(export.name) || export.name.starts_with("__wasm_") {
-                    section.export(export.name, export.kind.into(), export.index);
-                }
-            }
-            module.section(&section);
-            continue;
-        }
         if let Some((id, range)) = payload.as_section() {
             module.section(&wasm_encoder::RawSection {
                 id,
@@ -504,19 +491,4 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
         }
     }
     std::fs::write(&output, module.finish()).map_err(|e| e.to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::group_export;
-
-    #[test]
-    fn wasm_guest_exports_are_kept() {
-        for name in ["horizon_layout", "horizon_in", "horizon_hook"] {
-            assert!(group_export(name));
-        }
-        for name in ["cabi_realloc", "old:interface#hook", "unrelated"] {
-            assert!(!group_export(name));
-        }
-    }
 }

@@ -2150,6 +2150,8 @@ dependencies = [
  "sha2",
  "tar",
  "toml",
+ "wasmparser 0.261.0",
+ "wat",
  "zip",
 ]
 
