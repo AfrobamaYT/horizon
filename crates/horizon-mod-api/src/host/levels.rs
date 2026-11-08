@@ -443,7 +443,8 @@ pub trait LevelsBackend {
     /// next. Water is 5, lava 30 (10 in the Nether, where it flows fast) and the empty fluid 0; a
     /// flowing form answers as its source. A mod's world fluid answers what it declared, as its
     /// `fluid_rules` parts change it at `pos`, floored at 1. None for a stale handle, a client,
-    /// a position that isn't loaded or is outside the world, and a fluid with no world form.
+    /// a level parked while the server ticks another, a position that isn't loaded or is outside
+    /// the world, and a fluid with no world form.
     #[access(WorldOnly)]
     fn level_fluid_tick_delay(
         &self,
