@@ -5486,10 +5486,10 @@ mod tests {
         );
     }
 
-    /// `GameRuleChangedEvent` as the server's setters fire it: only for a
-    /// rule `GameRules.set` took, with its id and new value, to every mod.
+    /// API dispatch preserves each accepted rule's id and typed value for every mod.
+    /// Engine schema validation belongs to the game's rule setter tests.
     #[test]
-    fn a_game_rule_change_reaches_every_mod_once_the_rule_is_set() {
+    fn a_game_rule_change_reaches_every_mod_with_its_typed_value() {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let mods: Vec<ModEntry> = vec![
             ModEntry::new("recorder-10", Box::new(Recorder(seen.clone()))),
@@ -5497,36 +5497,11 @@ mod tests {
         ];
         install(mods.into());
         let mut host = FakeHost::new();
-        let mut rules = horizon_client_core::gamerules::GameRules::default();
-        // What `set_game_rule` and the other setters do.
-        use horizon_client_core::gamerules::Value as EngineValue;
-        // Independent engine inputs and expected API values: production conversion lives in Game.
-        for (name, engine, value) in [
-            (
-                "keep_inventory",
-                EngineValue::Bool(true),
-                GameRuleValue::Bool(true),
-            ),
-            (
-                "random_tick_speed",
-                EngineValue::Int(-1),
-                GameRuleValue::Int(-1),
-            ),
-            ("keep_inventory", EngineValue::Int(1), GameRuleValue::Int(1)),
-            (
-                "no_such_rule",
-                EngineValue::Bool(true),
-                GameRuleValue::Bool(true),
-            ),
-            (
-                "random_tick_speed",
-                EngineValue::Int(7),
-                GameRuleValue::Int(7),
-            ),
+        for (id, value) in [
+            ("minecraft:keep_inventory", GameRuleValue::Bool(true)),
+            ("minecraft:random_tick_speed", GameRuleValue::Int(7)),
         ] {
-            if rules.set(name, engine) {
-                dispatch_game_rule_changed(&mut host, &["minecraft:", name].concat(), value, None);
-            }
+            dispatch_game_rule_changed(&mut host, id, value, None);
         }
         assert_eq!(
             *seen.lock().unwrap(),

@@ -1,4 +1,6 @@
 //! Load and match hook adapters at the engine boundary.
+use horizon_world::native_load_context::LoadContext;
+use mod_api::RecipePropertyAddition;
 /// A recipe ingredient of a mod's own kind: the entry named a type in a
 /// namespace outside `minecraft:`, and the loader kept it for this call.
 /// The kind and the converted NBT data the file wrote are here; fill `items` with the

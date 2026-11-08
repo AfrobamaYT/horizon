@@ -5,8 +5,8 @@ use super::{
     BlockSide, CapabilityKey, DataLoadContext, FluidIdentity, FluidKey, ItemCapabilityKey,
     ItemPlace, ItemResource, ItemStack, ResourceHandler, ServerHost, Transaction,
 };
+use crate::__private::ingredient_parser::WalkedIngredient;
 use crate::Components;
-use crate::ingredient_parser::WalkedIngredient;
 use std::{fmt, marker::PhantomData};
 
 /// An amount of one fluid, as NeoForge's `FluidStack`: its registered or unresolved
@@ -604,10 +604,10 @@ mod tests {
         let items = ();
         // Supply the resolved ids fixture, not a second JSON/NBT converter.
         let parse = |v: &serde_json::Value, _items: &()| {
-            crate::ingredient_parser::WalkedIngredient::walk(
+            crate::__private::ingredient_parser::WalkedIngredient::walk(
                 v,
                 &HashMap::new(),
-                &crate::ingredient_parser::resolved_items,
+                &crate::__private::ingredient_parser::resolved_items,
                 &|data| {
                     let ids = data.get("horizon:resolved_items")?.as_array()?;
                     let ids = ids
