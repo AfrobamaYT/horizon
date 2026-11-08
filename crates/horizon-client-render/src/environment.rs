@@ -792,7 +792,7 @@ impl Environment {
     /// client has no file for is skipped with a warning. None when the type's attributes are
     /// refused.
     pub fn with_type(base: &Environment, extra: &Json) -> Option<Environment> {
-        Self::load_dimension_with(&base.source, &base.dimension, extra)
+        Self::load_dimension_attributes(&base.source, &base.dimension, &base.packs, extra)
             .map_err(|e| log::warn!("the server's dimension type: attributes refused: {e}"))
             .ok()
     }
