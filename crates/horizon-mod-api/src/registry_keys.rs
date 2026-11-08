@@ -503,3 +503,24 @@ mod hot_call_key_tests {
         });
     }
 }
+
+#[cfg(test)]
+mod fluid_mapping_tests {
+    #[test]
+    fn world_fluid_order_is_supplied_by_engine_not_key_order() {
+        crate::parts::tests::install_parts_fixture(&[]).unwrap();
+        super::resolve_fluids(
+            &["minecraft:lava", "minecraft:empty", "minecraft:water"],
+            &["minecraft:empty", "minecraft:water", "minecraft:lava"],
+        )
+        .unwrap();
+        for (index, expected) in ["minecraft:empty", "minecraft:water", "minecraft:lava"]
+            .iter()
+            .enumerate()
+        {
+            let key = super::world_fluid_key(index).unwrap();
+            assert_eq!(super::fluid_id(key), Some(*expected));
+        }
+        assert!(super::world_fluid_key(3).is_none());
+    }
+}
