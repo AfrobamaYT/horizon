@@ -1406,7 +1406,8 @@ mod tests {
                 r#"{"values":["h155c:zero","h155c:five"]}"#,
             )
             .unwrap();
-            game.reload_datapacks(false, &game.level.enabled_features.clone());
+            game.reload_datapacks(false, &game.level.enabled_features.clone())
+                .unwrap();
             game.build_registries();
             game.set_allow_commands(true);
             assert_eq!(game.fns.store.tag_functions("h155c:pair").len(), 2);
@@ -1690,7 +1691,8 @@ mod tests {
                 "scoreboard players add #pack h155 1\nreturn 1\n",
             )
             .unwrap();
-            game.reload_datapacks(false, &game.level.enabled_features.clone());
+            game.reload_datapacks(false, &game.level.enabled_features.clone())
+                .unwrap();
             game.build_registries();
             game.set_allow_commands(true);
             for name in ["zero", "five", "fail", "fallthrough", "admit"] {
