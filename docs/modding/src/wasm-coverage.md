@@ -183,6 +183,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Backend::block_state_matches` | crosses | Wire call |
 | `Backend::fluid_state_definition` | crosses | Wire call |
 | `Backend::fluid_type_properties` | crosses | Wire call |
+| `Backend::fluid_legacy_block` | crosses | Wire call |
 | `Backend::fluid_state_validate` | crosses | Wire call |
 | `Backend::boss_bar_id` | crosses | Wire call |
 | `Backend::boss_bar_name` | crosses | Wire call |
@@ -362,6 +363,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Backend::level_best_neighbor_signal` | crosses | Wire call |
 | `Backend::level_has_neighbor_signal` | crosses | Wire call |
 | `Backend::level_dimension_shape` | crosses | Wire call |
+| `Backend::level_dimension_type` | crosses | Wire call |
 | `Backend::level_sea_level` | crosses | Wire call |
 | `Backend::level_seed` | crosses | Wire call |
 | `Backend::level_difficulty` | crosses | Wire call |
@@ -831,6 +833,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `BlockEntityDrawContext::spin` | crosses | Wire call |
 | `BlockEntityDrawContext::still` | crosses | Wire call |
 | `BlockEntityDrawContext::model` | crosses | Wire call |
+| `BlockEntityDrawContext::terrain_model` | crosses | Wire call |
 | `BlockEntityDrawContext::text` | crosses | Wire call |
 | `BlockEntityDrawContext::text_width` | crosses | Wire call |
 | `BlockEntityDrawContext::model_part` | crosses | Wire call |
@@ -911,6 +914,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Registrar::block_key` | crosses | Wire call |
 | `Registrar::attach_block_part` | crosses | Wire call |
 | `Registrar::attach_block_part_tag` | crosses | Wire call |
+| `Registrar::add_dimension` | crosses | Wire call |
 | `Registrar::effect_key` | crosses | Wire call |
 | `Registrar::provide_entity_capability` | crosses | Wire call |
 | `Registrar::declare_entity_attributes` | crosses | Wire call |

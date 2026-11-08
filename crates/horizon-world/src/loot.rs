@@ -1914,10 +1914,10 @@ impl<R: RandomSource> Context<'_, R> {
                 {
                     let map = &mut content;
                     for field in ["title", "author"] {
-                        if let Some(value) = f.get(field) {
-                            if let Ok(tag) = horizon_core::json_nbt::json_to_tag(value) {
-                                map.insert(field.into(), tag);
-                            }
+                        if let Some(value) = f.get(field)
+                            && let Ok(tag) = horizon_core::json_nbt::json_to_tag(value)
+                        {
+                            map.insert(field.into(), tag);
                         }
                     }
                     // `WrittenBookContent`'s generation is 0 to 3; the codec
