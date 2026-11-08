@@ -76,6 +76,8 @@ fn engine_options(options: TerrainModelOptions<'_>) -> NativeModelRenderOptions<
     }
 }
 
+/// Appends `faces` under `draw`'s pose at `light`, or appends nothing and returns `Refused` when
+/// the renderer refuses the model or `options`.
 fn draw_terrain_model(
     draw: &mut BlockEntityDraw,
     faces: &[BakedFace],
