@@ -5296,9 +5296,9 @@ mod item_fall_on_tests {
         with_mods(mods, || {
             let mut loaded = 0;
             for dimension in [crate::game::Dim::Overworld, crate::game::Dim::Nether] {
+                let scratch = std::env::temp_dir()
+                    .join(format!("item-loan-{}-{dimension:?}", std::process::id()));
                 super::super::native_entity_refs::tests::with_game(|game| {
-                    let scratch = std::env::temp_dir()
-                        .join(format!("item-loan-{}-{dimension:?}", std::process::id()));
                     game.world_root = scratch.clone();
                     game.enter_level(dimension).unwrap();
                     loaded += 1;
@@ -5350,8 +5350,8 @@ mod item_fall_on_tests {
                         stone,
                         "aborted landing writes were not queued"
                     );
-                    let _ = std::fs::remove_dir_all(scratch);
                 });
+                let _ = std::fs::remove_dir_all(scratch);
             }
             assert_eq!(loaded, 2, "both resource fixtures ran");
         });
