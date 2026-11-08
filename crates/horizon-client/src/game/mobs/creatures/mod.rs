@@ -268,11 +268,13 @@ impl ProjectileWorld for ProjWorld<'_, '_> {
         )
         .map(|c| (c.drag, c.surface))
     }
-    fn solid(&self, p: [i32; 3]) -> bool {
-        self.w
-            .facts
-            .get(self.w.world.block(p[0], p[1], p[2]))
-            .full_collision
+    fn can_stand_on(&self, p: [i32; 3], entity_y: f64) -> bool {
+        horizon_client::collisions::projectile_can_stand_on(
+            self.w.world,
+            self.w.collision,
+            BlockPos::new(p[0], p[1], p[2]),
+            entity_y,
+        )
     }
 }
 
@@ -1887,7 +1889,7 @@ impl Game<'_> {
         cancel
     }
     /// LivingEntity.die / dropAllDeathLoot.
-    fn mob_died(&mut self, m: &Mob) {
+    pub(super) fn mob_died(&mut self, m: &Mob) {
         if self.mob_death_canceled(m) {
             return;
         }
@@ -2751,7 +2753,7 @@ impl Game<'_> {
         self.handle_mob_events_reusable(&mut events)
     }
 
-    fn handle_mob_events_reusable(&mut self, events: &mut Vec<MobEvent>) -> Result<()> {
+    pub(super) fn handle_mob_events_reusable(&mut self, events: &mut Vec<MobEvent>) -> Result<()> {
         let mut broke: Vec<u32> = Vec::new();
         for e in events.drain(..) {
             match e {

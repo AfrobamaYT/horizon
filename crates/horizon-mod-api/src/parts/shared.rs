@@ -146,6 +146,7 @@ pub(crate) struct Installed {
     pub(crate) world_fluids: Vec<horizon_mod_package::content::FluidLook>,
     pub(crate) entity_attribute_modifications: Vec<EntityAttributeModification>,
     pub(crate) attributes: Vec<super::attributes::AttributeDeclaration>,
+    pub(crate) spawn_placements: Vec<SpawnPlacementDeclaration>,
     pub(crate) registry_keys: horizon_mod_runtime::registry_keys::Requests,
     pub(crate) effects: OnceLock<horizon_mod_runtime::registry_keys::Effects>,
     pub(crate) resolved_block_entity_types: OnceLock<horizon_mod_runtime::registry_keys::Names>,
@@ -531,6 +532,7 @@ pub struct PartRegistrar {
     pub(crate) world_fluids: Vec<horizon_mod_package::content::FluidLook>,
     pub(crate) entity_attribute_modifications: Vec<EntityAttributeModification>,
     pub(crate) attributes: Vec<super::attributes::AttributeDeclaration>,
+    pub(crate) spawn_placements: Vec<SpawnPlacementDeclaration>,
     pub(crate) registry_keys: Rc<RefCell<horizon_mod_runtime::registry_keys::Requests>>,
     pub(crate) effects: OnceLock<horizon_mod_runtime::registry_keys::Effects>,
     pub(crate) controllers: Vec<ControllerInfo>,
@@ -555,6 +557,7 @@ impl PartRegistrar {
             world_fluids: Vec::new(),
             entity_attribute_modifications: Vec::new(),
             attributes: Vec::new(),
+            spawn_placements: Vec::new(),
             registry_keys: Default::default(),
             effects: OnceLock::new(),
             controllers: Vec::new(),
@@ -689,6 +692,7 @@ pub(crate) fn install_registrar(
         world_fluids: registrar.world_fluids,
         attributes: registrar.attributes,
         entity_attribute_modifications: registrar.entity_attribute_modifications,
+        spawn_placements: registrar.spawn_placements,
         resolved_block_entity_types: OnceLock::new(),
         registry_keys: Rc::try_unwrap(registrar.registry_keys)
             .unwrap_or_else(|_| unreachable!("registration scope has ended"))
