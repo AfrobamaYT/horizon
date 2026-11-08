@@ -364,6 +364,15 @@ fn server_inventory_operations_take_a_server_host(
     )
 }
 
+/// Compile-only: a client mod reads the open inventory screen's slot boxes through its menu handle.
+#[allow(dead_code)]
+fn menu_slot_boxes_take_a_client_host(
+    host: &dyn ClientHost,
+    menu: MenuRef,
+) -> Option<Vec<Option<[f32; 4]>>> {
+    menu.slot_boxes(host)
+}
+
 /// Compile-only: the world data, tick, sky and sight queries as a mod calls them, the reads on any
 /// host and the writes (which move the level's random or its saved data) on a server host.
 #[allow(dead_code)]
