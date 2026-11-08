@@ -7,6 +7,25 @@ use std::collections::{BTreeMap, HashMap};
 /// What a due task hands back: its id, the owning mod's `[mod] id` and the mod's token.
 pub(super) type DueTask = (TaskId, &'static str, u64);
 
+/// Runs every item `next` yields through `run`, even when one run panics: the other items still
+/// run, and the first panic comes back for the caller to put back in flight once it has restored
+/// its own state. `state` is passed to both so each may borrow the whole of it in turn.
+pub(super) fn run_all<S, T>(
+    state: &mut S,
+    next: fn(&mut S) -> Option<T>,
+    run: fn(&mut S, T),
+) -> Option<Box<dyn std::any::Any + Send>> {
+    let mut panic = None;
+    while let Some(item) = next(state) {
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&mut *state, item)));
+        if let Err(payload) = result {
+            panic.get_or_insert(payload);
+        }
+    }
+    panic
+}
+
 #[derive(Default)]
 pub(super) struct ScheduledTasks {
     /// Ticks advanced since the world opened.
@@ -54,21 +73,26 @@ impl ScheduledTasks {
         true
     }
 
-    /// One server tick passed: the tasks now due, in the order they were scheduled. Tasks
-    /// scheduled while these run are due on a later tick.
-    pub(super) fn advance(&mut self) -> Vec<DueTask> {
+    /// A server tick starts: "now" moves to it, before any hook of the tick runs, so a task
+    /// scheduled by one is measured from this tick and never fires in it.
+    pub(super) fn begin_tick(&mut self) {
         self.now += 1;
-        let later = self.queue.split_off(&(self.now + 1, 0));
-        let due = std::mem::replace(&mut self.queue, later);
-        let mut out = Vec::with_capacity(due.len());
-        for ((_, id), (owner, token)) in due {
-            self.due.remove(&id);
-            if let Some(waiting) = self.pending.get_mut(owner) {
-                *waiting -= 1;
-            }
-            out.push((TaskId(id), owner, token));
+    }
+
+    /// The next task due by now, in the order they were scheduled, taken off the queue. One at a
+    /// time, so a task whose hook panics leaves the rest queued. A task scheduled while others
+    /// run is due on a later tick.
+    pub(super) fn pop_due(&mut self) -> Option<DueTask> {
+        let (&(due, id), _) = self.queue.first_key_value()?;
+        if due > self.now {
+            return None;
         }
-        out
+        let (owner, token) = self.queue.remove(&(due, id))?;
+        self.due.remove(&id);
+        if let Some(waiting) = self.pending.get_mut(owner) {
+            *waiting -= 1;
+        }
+        Some((TaskId(id), owner, token))
     }
 
     /// The world closed or opened: nothing carries over.
@@ -93,6 +117,12 @@ mod tests {
     const A: Option<&str> = Some("a");
     const B: Option<&str> = Some("b");
 
+    /// One tick: "now" moves, then every due task comes out.
+    fn advance(tasks: &mut ScheduledTasks) -> Vec<DueTask> {
+        tasks.begin_tick();
+        std::iter::from_fn(|| tasks.pop_due()).collect()
+    }
+
     fn ids(due: &[DueTask]) -> Vec<(u64, u64)> {
         due.iter().map(|d| (d.0.0, d.2)).collect()
     }
@@ -104,19 +134,35 @@ mod tests {
         tasks.schedule(A, 1, 10).unwrap();
         tasks.schedule(B, 2, 21).unwrap();
         tasks.schedule(B, 0, 0).unwrap();
-        assert_eq!(ids(&tasks.advance()), [(2, 10), (4, 0)]);
-        assert_eq!(ids(&tasks.advance()), [(1, 20), (3, 21)]);
-        assert!(tasks.advance().is_empty());
+        assert_eq!(ids(&advance(&mut tasks)), [(2, 10), (4, 0)]);
+        assert_eq!(ids(&advance(&mut tasks)), [(1, 20), (3, 21)]);
+        assert!(advance(&mut tasks).is_empty());
     }
 
     #[test]
     fn a_task_scheduled_while_others_run_is_due_on_a_later_tick() {
         let mut tasks = ScheduledTasks::default();
         tasks.schedule(A, 1, 1).unwrap();
-        let first = tasks.advance();
-        assert_eq!(first.len(), 1);
+        tasks.begin_tick();
+        assert!(tasks.pop_due().is_some());
         tasks.schedule(A, 0, 2).unwrap();
-        assert_eq!(ids(&tasks.advance()), [(2, 2)]);
+        assert!(tasks.pop_due().is_none());
+        assert_eq!(ids(&advance(&mut tasks)), [(2, 2)]);
+    }
+
+    #[test]
+    fn a_task_scheduled_from_the_tick_start_hook_waits_for_a_later_tick() {
+        // The lifecycle moves "now" before the start hook runs, so the hook schedules from the new
+        // tick: delay 0 and 1 fire on the next tick, delay N on the Nth after the current one.
+        let mut tasks = ScheduledTasks::default();
+        tasks.begin_tick();
+        tasks.schedule(A, 0, 100).unwrap();
+        tasks.schedule(A, 1, 101).unwrap();
+        tasks.schedule(A, 3, 103).unwrap();
+        assert!(tasks.pop_due().is_none());
+        assert_eq!(ids(&advance(&mut tasks)), [(1, 100), (2, 101)]);
+        assert!(advance(&mut tasks).is_empty());
+        assert_eq!(ids(&advance(&mut tasks)), [(3, 103)]);
     }
 
     #[test]
@@ -129,10 +175,10 @@ mod tests {
         assert!(!tasks.cancel(A, id));
         assert!(!tasks.cancel(A, TaskId(99)));
         for _ in 0..3 {
-            assert!(tasks.advance().is_empty());
+            assert!(advance(&mut tasks).is_empty());
         }
         let fired = tasks.schedule(A, 1, 2).unwrap();
-        assert_eq!(tasks.advance().len(), 1);
+        assert_eq!(advance(&mut tasks).len(), 1);
         assert!(!tasks.cancel(A, fired));
     }
 
@@ -147,9 +193,16 @@ mod tests {
         assert!(tasks.schedule(B, 5, 0).is_ok());
         // A fired or cancelled task frees its place.
         for _ in 0..5 {
-            tasks.advance();
+            advance(&mut tasks);
         }
         assert!(tasks.schedule(A, 1, 0).is_ok());
+    }
+
+    #[test]
+    fn the_largest_delay_does_not_wrap() {
+        let mut tasks = ScheduledTasks::default();
+        tasks.schedule(A, u32::MAX, 1).unwrap();
+        assert!(advance(&mut tasks).is_empty());
     }
 
     #[test]
@@ -157,7 +210,29 @@ mod tests {
         let mut tasks = ScheduledTasks::default();
         tasks.schedule(A, 1, 1).unwrap();
         tasks.clear();
-        assert!(tasks.advance().is_empty());
+        assert!(advance(&mut tasks).is_empty());
         assert_eq!(tasks.schedule(A, 1, 2).unwrap(), TaskId(1));
+    }
+
+    #[test]
+    fn a_panicking_task_does_not_drop_the_others() {
+        let mut state = (ScheduledTasks::default(), Vec::<u64>::new());
+        state.0.schedule(A, 1, 1).unwrap();
+        state.0.schedule(A, 1, 2).unwrap();
+        state.0.schedule(B, 1, 3).unwrap();
+        state.0.begin_tick();
+        let panic = run_all(
+            &mut state,
+            |s| s.0.pop_due(),
+            |s, task| {
+                if task.2 == 1 {
+                    panic!("the first task fails");
+                }
+                s.1.push(task.2);
+            },
+        );
+        assert!(panic.is_some(), "the panic comes back to the caller");
+        assert_eq!(state.1, [2, 3]);
+        assert!(state.0.pop_due().is_none());
     }
 }
