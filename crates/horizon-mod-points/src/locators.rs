@@ -76,6 +76,12 @@ impl Locators {
         Ok(id)
     }
 
+    /// Return the parent and final step of a known source-local node.
+    pub fn entry(&self, id: u32) -> Result<(Option<u32>, Step), RowError> {
+        let entry = self.entries.get(id as usize).ok_or(RowError::Bounds)?;
+        Ok((entry.parent, entry.step))
+    }
+
     /// Reconstruct a path from its root. Unknown ids are refused, never treated as offsets.
     pub fn path(&self, id: u32) -> Result<Vec<Step>, RowError> {
         let mut entry = *self.entries.get(id as usize).ok_or(RowError::Bounds)?;

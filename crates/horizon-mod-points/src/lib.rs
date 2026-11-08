@@ -21,6 +21,10 @@ pub mod snapshot;
 /// Source-local paths for checked native row readers.
 #[doc(hidden)]
 pub mod locators;
+
+/// Bounded output for generated native row readers.
+#[doc(hidden)]
+pub mod native_window;
 #[cfg(target_arch = "wasm32")]
 pub use guest::register;
 #[cfg(not(target_arch = "wasm32"))]
