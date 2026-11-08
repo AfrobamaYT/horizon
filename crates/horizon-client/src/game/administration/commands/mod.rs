@@ -69,6 +69,8 @@ pub(super) enum Target {
     Dragon(u32),
     /// A primed TNT, by its entity id (`minecraft:tnt`).
     Tnt(u32),
+    /// A cushion, by its entity id (`minecraft:cushion`).
+    Cushion(u32),
     /// A falling block, by its entity id (`minecraft:falling_block`).
     Falling(u32),
     /// A firework rocket, by its entity id (`minecraft:firework_rocket`).
@@ -185,6 +187,7 @@ fn non_player_entity_id(t: Target) -> Option<i32> {
     | Target::Crystal(id)
     | Target::Dragon(id)
     | Target::Tnt(id)
+    | Target::Cushion(id)
     | Target::Falling(id)
     | Target::Rocket(id)
     | Target::Trident(id)
@@ -599,6 +602,11 @@ impl Game<'_> {
                 .as_ref()
                 .filter(|d| d.id == id)
                 .map(|d| [d.position.x, d.position.y, d.position.z]),
+            Target::Cushion(id) => self
+                .cushions
+                .iter()
+                .find(|c| c.id == id)
+                .map(|c| [c.position.x, c.position.y, c.position.z]),
             Target::Tnt(id) => self
                 .tnts
                 .iter()
@@ -677,6 +685,7 @@ impl Game<'_> {
             Target::Crystal(_) => "minecraft:end_crystal".into(),
             Target::Dragon(_) => "minecraft:ender_dragon".into(),
             Target::Tnt(_) => "minecraft:tnt".into(),
+            Target::Cushion(_) => "minecraft:cushion".into(),
             Target::Falling(_) => "minecraft:falling_block".into(),
             Target::Rocket(_) => "minecraft:firework_rocket".into(),
             Target::Trident(_) => "minecraft:trident".into(),
@@ -954,6 +963,7 @@ impl Game<'_> {
         });
         candidates.extend(self.item_frames.iter().map(|f| Target::Frame(f.id)));
         candidates.extend(self.paintings.iter().map(|p| Target::Painting(p.id)));
+        candidates.extend(self.cushions.iter().map(|c| Target::Cushion(c.id)));
         candidates.extend(self.others.iter().map(|o| Target::Other(o.id)));
         candidates.extend(self.fangs.list.iter().map(|f| Target::Fangs(f.id)));
         // The End crystals and the dragon (EndCrystal and EnderDragon
@@ -1007,6 +1017,7 @@ impl Game<'_> {
             Target::Crystal(id),
             Target::Dragon(id),
             Target::Tnt(id),
+            Target::Cushion(id),
             Target::Falling(id),
             Target::Rocket(id),
             Target::Trident(id),
@@ -1040,6 +1051,7 @@ impl Game<'_> {
             Target::Crystal(id) => self.crystals.iter().any(|c| c.id == id),
             Target::Dragon(id) => self.dragon.as_ref().is_some_and(|d| d.id == id),
             Target::Tnt(id) => self.tnts.iter().any(|t| t.id == id),
+            Target::Cushion(id) => self.cushions.iter().any(|c| c.id == id),
             Target::Falling(id) => self.falling.iter().any(|f| f.id == id),
             Target::Rocket(id) => self.rockets.iter().any(|r| r.id == id),
             Target::Trident(id) => self.tridents.iter().any(|t| t.id == id),
@@ -1809,6 +1821,16 @@ impl Game<'_> {
                     }
                 }
             }
+            Target::Cushion(id) => {
+                // BlockAttachedEntity.setPos: the block it rests on follows the position.
+                if let Some(c) = self.cushions.iter_mut().find(|c| c.id == id) {
+                    c.position = v;
+                    c.pos = [v.x.floor() as i32, v.y.floor() as i32, v.z.floor() as i32];
+                    if let Some(r) = rotation {
+                        c.yaw = r[0];
+                    }
+                }
+            }
             Target::Falling(id) => {
                 if let Some(i) = self.falling.iter().position(|f| f.id == id) {
                     self.falling.update(i, |f| {
@@ -2510,6 +2532,7 @@ impl Game<'_> {
             Target::Crystal(id) => self.kill_crystal(id),
             Target::Dragon(id) => self.kill_dragon(id),
             Target::Tnt(id) => self.tnts.retain(|t| t.id != id),
+            Target::Cushion(id) => self.kill_cushion(id),
             Target::Falling(id) => self.falling.retain(|f| f.id != id),
             Target::Rocket(id) => self.rockets.retain(|r| r.id != id),
             Target::Trident(id) => self.tridents.retain(|t| t.id != id),
@@ -3295,6 +3318,19 @@ impl Game<'_> {
                     None => self.world.block_names.remove(&key),
                 };
             }
+        }
+        // LevelTicks.copyAreaFrom: the block ticks pending anywhere in the
+        // source box go to the same offset in the destination, before the
+        // command can fail on an empty count.
+        {
+            use horizon_core::position::BlockPos;
+            self.block_ticks.blocks.copy_area(
+                horizon_core::ticks::TickArea::new(
+                    BlockPos::new(min[0], min[1], min[2]),
+                    BlockPos::new(max[0], max[1], max[2]),
+                ),
+                BlockPos::new(dest[0] - min[0], dest[1] - min[1], dest[2] - min[2]),
+            );
         }
         if count == 0 {
             return Err(err("commands.clone.failed", &[]));
@@ -4601,6 +4637,7 @@ mod look_at_tests {
             Target::Crystal(7),
             Target::Dragon(7),
             Target::Tnt(7),
+            Target::Cushion(7),
             Target::Falling(7),
             Target::Rocket(7),
             Target::Trident(7),
@@ -5032,6 +5069,205 @@ mod selector_bounds_tests {
                 count
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod local_coordinate_command_tests {
+    use super::super::native_machines::tests::server_game;
+    use super::*;
+    use horizon_core::nbt::Tag;
+    use horizon_core::position::BlockPos;
+
+    fn pos_bits(tag: &Tag) -> [u64; 3] {
+        let Some(Tag::List(pos)) = tag.get("Pos") else {
+            panic!("actual saved Double position missing")
+        };
+        assert_eq!(pos.len(), 3);
+        std::array::from_fn(|i| match &pos[i] {
+            Tag::Double(bits) => *bits,
+            other => panic!("actual Pos must be Double: {other:?}"),
+        })
+    }
+    #[test]
+    #[ignore = "needs prepared resources and scratch homes/cwd"]
+    fn h149_actual_registered_local_commands_preserve_exact_saved_positions() {
+        let mut game = server_game();
+        game.build_registries();
+        game.set_allow_commands(true);
+        game.block_ticks
+            .add_empty_chunk(BlockPos::new(0, 0, 0).chunk())
+            .unwrap();
+        assert!(game.run_command("forceload add 0 0"));
+        assert!(game.run_command("fill 0 199 0 15 199 15 stone"));
+        assert!(game.run_command("scoreboard objectives add h149 dummy"));
+        let clock = game.world.game_time;
+        let mut failures = Vec::new();
+        let cases = [
+            (
+                "south",
+                "execute positioned 8.5 202.25 8.5 rotated 0.0 0.0 run tp 00000095-0000-0001-0000-000000000001 ^0.75 ^0.5 ^1.25",
+                [
+                    0x4022800000000000u64,
+                    0x4069580000000000u64,
+                    0x4023800000000000u64,
+                ],
+                false,
+            ),
+            (
+                "west",
+                "execute positioned 8.5 202.25 8.5 rotated 90.0 0.0 run tp 00000095-0000-0001-0000-000000000002 ^0.75 ^0.5 ^1.25",
+                [
+                    0x401d000000000000u64,
+                    0x4069580000000000u64,
+                    0x4022800000000000u64,
+                ],
+                false,
+            ),
+            (
+                "north",
+                "execute positioned 8.5 202.25 8.5 rotated 180.0 0.0 run tp 00000095-0000-0001-0000-000000000003 ^0.75 ^0.5 ^1.25",
+                [
+                    0x401f000000000000u64,
+                    0x4069580000000000u64,
+                    0x401d000000000000u64,
+                ],
+                false,
+            ),
+            (
+                "east",
+                "execute positioned 8.5 202.25 8.5 rotated 270.0 0.0 run tp 00000095-0000-0001-0000-000000000004 ^0.75 ^0.5 ^1.25",
+                [
+                    0x4023800000000000u64,
+                    0x4069580000000000u64,
+                    0x401f000000000000u64,
+                ],
+                false,
+            ),
+            (
+                "oblique",
+                "execute positioned 8.5 202.25 8.5 rotated 37.5 -22.25 run tp 00000095-0000-0001-0000-000000000005 ^0.1 ^0.1 ^0.1",
+                [
+                    0x402117934a6314b9u64,
+                    0x40694c2c5ee98f58u64,
+                    0x40213562572e889au64,
+                ],
+                false,
+            ),
+            (
+                "positioned_oblique",
+                "execute positioned 8.5 202.25 8.5 rotated 123.75 47.125 positioned ^0.1 ^0.1 ^0.1 run tp 00000095-0000-0001-0000-000000000006 ~ ~ ~",
+                [
+                    0x4020a7648c7aa86bu64,
+                    0x406947d514129374u64,
+                    0x4021025e8b180036u64,
+                ],
+                false,
+            ),
+            (
+                "world",
+                "execute positioned 8.5 202.25 8.5 rotated 37.5 -22.25 run tp 00000095-0000-0001-0000-000000000007 9.25 202.75 9.75",
+                [
+                    0x4022800000000000u64,
+                    0x4069580000000000u64,
+                    0x4023800000000000u64,
+                ],
+                true,
+            ),
+            (
+                "relative_eyes",
+                "execute positioned 8.5 202.25 8.5 rotated 37.5 -22.25 anchored eyes run tp 00000095-0000-0001-0000-000000000008 ~0.75 ~0.5 ~1.25",
+                [
+                    0x4022800000000000u64,
+                    0x4069580000000000u64,
+                    0x4023800000000000u64,
+                ],
+                true,
+            ),
+            (
+                "feet",
+                "execute as 00000095-0000-0001-0000-000000000009 at @s anchored feet rotated 37.5 -22.25 run tp @s ^ ^ ^",
+                [
+                    0x4012000000000000u64,
+                    0x4069000000000000u64,
+                    0x4012000000000000u64,
+                ],
+                true,
+            ),
+            (
+                "eyes",
+                "execute as 00000095-0000-0001-0000-00000000000a at @s anchored eyes rotated 37.5 -22.25 run tp @s ^ ^ ^",
+                [
+                    0x4012000000000000u64,
+                    0x4069187ae1400000u64,
+                    0x4012000000000000u64,
+                ],
+                true,
+            ),
+        ];
+        for (i, (name, command, want, control)) in cases.into_iter().enumerate() {
+            let number = i as i32 + 1;
+            let actor = format!("00000095-0000-0001-0000-{number:012x}");
+            let uuid = [149, 1, 0, number];
+            assert!(game.run_command(&format!(r#"summon pig 4.5 200 4.5 {{UUID:[I;149,1,0,{number}],Tags:["h149"],Health:10f,NoAI:1b,NoGravity:1b,Silent:1b,PersistenceRequired:1b,Motion:[0d,0d,0d],Rotation:[11f,7f]}}"#)));
+            let id = *game
+                .persist
+                .uuids
+                .iter()
+                .find(|(_, u)| **u == uuid)
+                .unwrap()
+                .0;
+            assert!(game.mobs.iter().any(|m| m.id == id));
+            assert!(game.run_command(&format!("execute if entity @e[type=pig,nbt={{UUID:[I;149,1,0,{number}],Health:10f,NoAI:1b,NoGravity:1b,Pos:[4.5d,200d,4.5d],Motion:[0d,0d,0d],Rotation:[11f,7f]}}]")));
+            assert!(game.world.loaded(4, 4));
+            let before = game.entity_nbt(Target::Mob(id)).unwrap();
+            assert_eq!(pos_bits(&before), [4.5f64, 200.0, 4.5].map(f64::to_bits));
+            assert_eq!(before.get("UUID"), Some(&Tag::IntArray(uuid.to_vec())));
+            assert_eq!(before.get("Health"), Some(&Tag::Float(10f32.to_bits())));
+            // Discard retained raw input: only actual modeled position may prove this.
+            game.persist.raw.remove(&id);
+            assert!(game.run_command("scoreboard players set #r h149 91"));
+            assert!(game.run_command("scoreboard players set #s h149 17"));
+            assert!(
+                game.run_command(&format!(
+                    "execute store result score #r h149 store success score #s h149 run {command}"
+                )),
+                "actual command accepted: {name}"
+            );
+            assert_eq!(game.score.board.score("#r", "h149").unwrap().value, 1);
+            assert_eq!(game.score.board.score("#s", "h149").unwrap().value, 1);
+            let model = game.mobs.iter().find(|m| m.id == id).unwrap();
+            let model_bits =
+                [model.position.x, model.position.y, model.position.z].map(f64::to_bits);
+            let saved = game.entity_nbt(Target::Mob(id)).unwrap();
+            let got = pos_bits(&saved);
+            assert_eq!(
+                model_bits, got,
+                "actual model and typed canonical save agree: {name}"
+            );
+            assert_eq!(saved.get("UUID"), before.get("UUID"));
+            for key in ["Health", "NoAI", "NoGravity", "Rotation", "Motion"] {
+                assert_eq!(saved.get(key), before.get(key), "unchanged {key}: {name}");
+            }
+            assert!(game.run_command(&format!("execute as {actor} at @s if block ~ 199 ~ stone")));
+            assert!(game.world.loaded(
+                f64::from_bits(got[0]).floor() as i32,
+                f64::from_bits(got[2]).floor() as i32,
+            ));
+            if control {
+                assert_eq!(
+                    got, want,
+                    "independent world/relative/anchor control {name}"
+                );
+            } else if got != want {
+                failures.push((name, got, want));
+            }
+            assert_eq!(game.world.game_time, clock, "zero observation ticks");
+        }
+        assert!(
+            failures.is_empty(),
+            "actual registered local-coordinate bit mismatches: {failures:#?}"
+        );
     }
 }
 

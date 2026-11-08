@@ -643,6 +643,9 @@ pub struct ItemView {
     pub enchantments: Vec<(String, u32)>,
     pub potion: Option<String>,
     pub custom_name: bool,
+    /// Typed snapshot for supported mob equipment views. `None` leaves this
+    /// family unprojected and unsupported; an empty compound is actual absence.
+    pub custom_data: Option<horizon_core::nbt::Tag>,
 }
 /// An entity as predicates see it.
 #[derive(Clone, Debug, Default)]
@@ -857,6 +860,20 @@ pub fn item(v: &Value, it: &ItemView, w: &dyn World) -> bool {
             return false;
         }
     }
+    // `CustomDataPredicate.matches`: typed subset matching of a projected
+    // stack snapshot. Unprojected consumers keep their unsupported behavior.
+    if let Some(pattern) = keyed(preds, "minecraft:custom_data").and_then(Value::as_str)
+        && let Some(actual) = it.custom_data.as_ref()
+    {
+        let Ok(pattern @ horizon_core::nbt::Tag::Compound(_)) =
+            crate::command::snbt::parse_fully(pattern)
+        else {
+            return false;
+        };
+        if !horizon_core::nbt_path::compare_nbt(&pattern, Some(actual)) {
+            return false;
+        }
+    }
     true
 }
 /// `LockCode.canUnlock`: a spectator opens any container; otherwise the
@@ -902,7 +919,7 @@ pub fn block(v: &Value, pos: [i32; 3], w: &dyn World) -> bool {
         let Ok((pattern, _)) = horizon_core::nbt::parse_snbt(nbt) else {
             return false;
         };
-        if !crate::nbt_path::compare_nbt(&pattern, w.block_entity_nbt(pos).as_ref()) {
+        if !horizon_core::nbt_path::compare_nbt(&pattern, w.block_entity_nbt(pos).as_ref()) {
             return false;
         }
     }
@@ -1058,7 +1075,7 @@ pub fn entity(v: &Value, e: &EntityView, w: &dyn World, origin: [f64; 3]) -> boo
             // pattern (`NbtUtils.compareNbt`); no compound known fails.
             "minecraft:nbt" => p.as_str().is_some_and(|s| {
                 horizon_core::nbt::parse_snbt(s).is_ok_and(|(pattern, _)| {
-                    crate::nbt_path::compare_nbt(&pattern, e.nbt.as_ref())
+                    horizon_core::nbt_path::compare_nbt(&pattern, e.nbt.as_ref())
                 })
             }),
             "minecraft:type_specific/player" => {

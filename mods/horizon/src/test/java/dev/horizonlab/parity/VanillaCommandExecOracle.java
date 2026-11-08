@@ -114,7 +114,8 @@ public final class VanillaCommandExecOracle {
             WorldDataConfiguration config = WorldDataConfiguration.DEFAULT;
             LevelSettings settings = new LevelSettings("Harness", GameType.SURVIVAL, LevelSettings.DifficultySettings.DEFAULT, true, config);
             WorldLoader.PackConfig packConfig = new WorldLoader.PackConfig(packs, config, false, true);
-            WorldLoader.InitConfig init = new WorldLoader.InitConfig(packConfig, Commands.CommandSelection.INTEGRATED, LevelBasedPermissionSet.OWNER);
+            WorldLoader.InitConfig init = new WorldLoader.InitConfig(packConfig, Commands.CommandSelection.INTEGRATED,
+                Boolean.getBoolean("horizon.functionAdmissionFixture") ? LevelBasedPermissionSet.GAMEMASTER : LevelBasedPermissionSet.OWNER);
             boolean flat = Boolean.getBoolean("horizon.parity.flat");
             WorldOptions options = new WorldOptions(seed, !flat, false);
             WorldStem stem = Util.<WorldStem>blockUntilDone(executor -> WorldLoader.load(init, context -> {
@@ -862,6 +863,15 @@ public final class VanillaCommandExecOracle {
                             throw new IllegalStateException("boat click: missing live boat");
                         player.connection.handleInteract(new net.minecraft.network.protocol.game.ServerboundInteractPacket(
                             boat.getId(), net.minecraft.world.InteractionHand.MAIN_HAND,
+                            net.minecraft.world.phys.Vec3.ZERO, false));
+                    }
+                    case "mob_interact" -> {
+                        // The player's real Interact packet on a live mob, by UUID.
+                        var mob = level.getEntity(UUID.fromString(op.get("uuid").getAsString()));
+                        if (!(mob instanceof net.minecraft.world.entity.Mob) || !mob.isAlive())
+                            throw new IllegalStateException("mob click: missing live mob");
+                        player.connection.handleInteract(new net.minecraft.network.protocol.game.ServerboundInteractPacket(
+                            mob.getId(), net.minecraft.world.InteractionHand.MAIN_HAND,
                             net.minecraft.world.phys.Vec3.ZERO, false));
                     }
                     case "use_item" -> {
