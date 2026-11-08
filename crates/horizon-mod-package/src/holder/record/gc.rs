@@ -96,6 +96,13 @@ impl Cleanup {
             let Some(payload) = payload else { continue };
             if !valid
                 || payload.entry.validate(16).is_err()
+                || !payload.roots.iter().all(|root| {
+                    payload
+                        .entry
+                        .trees
+                        .iter()
+                        .any(|tree| tree.identity == *root)
+                })
                 || open_directory(&payload.entry.data)
                     .ok()
                     .and_then(|dir| identity(&dir).ok())

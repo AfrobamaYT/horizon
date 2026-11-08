@@ -12,7 +12,7 @@ fn fixture() -> (tempfile::TempDir, PathBuf) {
     let record = Record {
         version: crate::local_control::VERSION,
         key: [0; 16],
-        roots: [[0; 2]; 2],
+        roots: [identity(&dir).unwrap(); 2],
         entry: Entry {
             version: crate::local_control::VERSION,
             data: root.path().to_owned(),
@@ -32,6 +32,43 @@ fn fixture() -> (tempfile::TempDir, PathBuf) {
         std::fs::write(path.join(name), b"raw capture").unwrap();
     }
     (root, path)
+}
+
+fn assert_malformed_roots_retained(invalid: &[usize]) {
+    let (root, path) = fixture();
+    let payload = path.join("launch.json");
+    let mut record: Record = serde_json::from_slice(&std::fs::read(&payload).unwrap()).unwrap();
+    for &index in invalid {
+        record.roots[index] = [u64::MAX; 2];
+    }
+    let bytes = serde_json::to_vec(&record).unwrap();
+    std::fs::write(&payload, &bytes).unwrap();
+    assert_eq!(
+        Cleanup::existing(root.path())
+            .unwrap()
+            .collect_records()
+            .unwrap(),
+        0
+    );
+    assert_eq!(std::fs::read(&payload).unwrap(), bytes);
+    assert_eq!(std::fs::read_dir(&path).unwrap().count(), 5);
+    for name in ["stdout.log", "stdout.log.1", "stderr.log", "stderr.log.1"] {
+        assert_eq!(std::fs::read(path.join(name)).unwrap(), b"raw capture");
+    }
+}
+
+#[test]
+fn both_malformed_roots_retain_entire_group() {
+    let _serial = SERIAL.lock().unwrap();
+    assert_malformed_roots_retained(&[0, 1]);
+}
+
+#[test]
+fn either_malformed_root_retains_entire_group() {
+    let _serial = SERIAL.lock().unwrap();
+    for index in 0..2 {
+        assert_malformed_roots_retained(&[index]);
+    }
 }
 
 #[cfg(unix)]
