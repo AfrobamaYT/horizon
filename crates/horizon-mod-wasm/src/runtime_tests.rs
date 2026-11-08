@@ -257,6 +257,71 @@ fn a_member_cannot_bypass_group_limits_with_private_memories() {
 }
 
 #[test]
+#[ignore = "requires shared std and the real noop fixture"]
+fn guest_input_pool_stays_flat_for_100k_no_import_calls() {
+    let std = std::fs::read(std::env::var("HORIZON_WASM_STD").unwrap()).unwrap();
+    let fixture = horizon_mod_package::manifest::Package::read_wasm(std::path::Path::new(
+        &std::env::var("HORIZON_WASM_FIXTURE").unwrap(),
+    ))
+    .unwrap();
+    let module = WasmMod::instantiate(
+        &engine().unwrap(),
+        &[
+            Member {
+                name: "std",
+                module: &std,
+            },
+            Member {
+                name: "fixture",
+                module: &fixture,
+            },
+        ],
+    )
+    .unwrap()
+    .pop()
+    .unwrap();
+    let subscriptions: Vec<String> = module
+        .call(
+            CallClass::Load,
+            Frame::default(),
+            crate::boundary::SUBSCRIBED,
+            None,
+            |_| {},
+            |r| r.take(),
+        )
+        .unwrap();
+    assert!(subscriptions.iter().any(|hook| hook == "server_stopped"));
+    let id = crate::boundary::export_id("Hooks", "server_stopped").unwrap();
+    let mut group = module.running.group.lock().unwrap();
+    group.store.set_epoch_deadline(30_000);
+    fn step(module: &WasmMod, store: &mut Store<State>, id: u32) {
+        let memory = store.data().memory.unwrap();
+        let input = module.input.call(&mut *store, 1).unwrap();
+        memory.write(&mut *store, input as usize, &[0]).unwrap();
+        let reply = module.hook.call(&mut *store, id).unwrap();
+        assert_eq!(reply as u32, 1);
+        let mut bytes = [0xff];
+        memory
+            .read(&*store, (reply >> 32) as usize, &mut bytes)
+            .unwrap();
+        assert_eq!(bytes, [0]);
+    }
+    for _ in 0..1000 {
+        step(&module, &mut group.store, id);
+    }
+    let memory = group.store.data().memory.unwrap();
+    let before = memory.size(&group.store);
+    for _ in 0..100_000 {
+        step(&module, &mut group.store, id);
+    }
+    let after = memory.size(&group.store);
+    assert_eq!(
+        after, before,
+        "warmed no-import calls must not retain inputs"
+    );
+}
+
+#[test]
 fn real_members_link_when_built() {
     let Some(dir) = std::env::var_os("HORIZON_WASM_TEST_MEMBERS") else {
         return;
