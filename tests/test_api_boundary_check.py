@@ -85,6 +85,14 @@ class ApiBoundaryCheckTests(unittest.TestCase):
         self.assert_rule("pub fn from_json(v: &serde_json::Value) {}", "json-signature")
         self.assertEqual(self.findings("pub use serde_json;", "src/exports/serde_json.rs"), [])
 
+    def test_recipe_source_file_exception_names_only_field_and_constructor(self):
+        path = "src/crafting.rs"
+        self.assertEqual(self.findings('pub struct Recipe { pub json: std::sync::Arc<serde_json::Value> }', path), [])
+        self.assertEqual(self.findings('impl Recipe { pub fn new(json: serde_json::Value) -> Self {} }', path), [])
+        self.assert_rule('pub struct Recipe { pub metadata: serde_json::Value }', "json-signature", path)
+        self.assert_rule('impl Recipe { pub fn other() -> serde_json::Value {} }', "json-signature", path)
+        self.assert_rule('pub struct Other { pub json: serde_json::Value }', "json-signature", path)
+
     def test_core_allowlist_is_leaf_exact(self):
         self.assertEqual(self.findings("pub use horizon_core::nbt::{Tag, Compound};"), [])
         self.assert_rule("pub use horizon_core::*;")
@@ -103,6 +111,23 @@ class ApiBoundaryCheckTests(unittest.TestCase):
     def test_test_only_module_is_not_surface(self):
         self.assertEqual(self.findings("#[cfg(test)] mod tests { pub use horizon_world::*; }"), [])
         self.assert_rule("#[cfg(feature = \"bad\")] pub mod x { pub use horizon_world::*; }")
+
+    def test_generated_placeholder_types_are_checked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)
+            self.assertEqual(boundary.generated_findings(target)[0].rule, "missing-generated")
+            out = target / "debug/build/horizon-mod-api-abcdef/out"
+            out.mkdir(parents=True)
+            (out / "mod_api_generated.rs").write_text('pub struct BlocksEvent { pub blocks: Vec<horizon_mod_package::content::Block> }')
+            (out / "mod_api_generated_host.rs").write_text('pub trait Host { fn leak() -> serde_json::Value; }')
+            found = boundary.generated_findings(target)
+            self.assertEqual({f.rule for f in found}, {"engine-type", "json-signature"})
+            (out / "mod_api_generated.rs").write_text('pub struct BlocksEvent { pub blocks: Vec<crate::BlockDeclaration> }')
+            (out / "mod_api_generated_host.rs").write_text('pub trait Host {}')
+            fixture = target / "debug/build/horizon-mod-api-gen-tests-fedcba/out"
+            fixture.mkdir(parents=True)
+            (fixture / "mod_api_generated.rs").write_text('pub use horizon_world::*;')
+            self.assertEqual(boundary.generated_findings(target), [])
 
     def test_dependency_aliases_and_target_tables(self):
         with tempfile.TemporaryDirectory() as directory:
