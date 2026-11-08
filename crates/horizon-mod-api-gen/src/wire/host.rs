@@ -244,11 +244,11 @@ fn resources() -> String {
         let path = trait_path(owner);
         writeln!(store,"if value.is::<std::sync::Arc<dyn {path}>>() {{ let value = *value.downcast::<std::sync::Arc<dyn {path}>>().map_err(|_| WireError::Invalid(\"wrong handler\"))?; return Ok(unsafe {{ (&mut *self.cx).held.insert_long(Box::new(OwnerThread::new(value))) }}); }}").unwrap();
         for container in ["Box", "std::sync::Arc"] {
-            writeln!(load,"if view == std::any::TypeId::of::<{container}<dyn {path}>>() {{ return Ok(Box::new({container}::new(crate::WasmHandler {{ index:id,module }}) as {container}<dyn {path}>)); }}").unwrap();
+            writeln!(load,"if view == std::any::TypeId::of::<{container}<dyn {path}>>() {{ return Ok(Box::new({container}::new(crate::WasmHandler::new(&module,id)) as {container}<dyn {path}>)); }}").unwrap();
         }
     }
     format!(
-        "struct HostCodec {{ cx:*mut Cx }} impl mod_api::wire::ResourceCodec for HostCodec {{ fn store(&self,value:Box<dyn std::any::Any>)->Result<mod_api::wire::Id,WireError> {{ {store} Err(WireError::Invalid(\"unknown handler type\")) }} fn load(&self,id:mod_api::wire::Id,view:std::any::TypeId)->Result<Box<dyn std::any::Any>,WireError> {{ let module=unsafe {{ (&*self.cx).module.clone() }}.ok_or(WireError::Invalid(\"no calling module\"))?; {load} Err(WireError::Invalid(\"unknown handler view\")) }} }} /// The Cx pointer must stay live for the whole synchronous call.\npub unsafe fn resource_scope(cx:*mut Cx)->mod_api::wire::ResourceScope {{ mod_api::wire::ResourceScope::new(std::rc::Rc::new(HostCodec {{cx}})) }}\n"
+        "struct HostCodec {{ cx:*mut Cx }} impl mod_api::wire::ResourceCodec for HostCodec {{ fn store(&self,value:Box<dyn std::any::Any>)->Result<mod_api::wire::Id,WireError> {{ {store} Err(WireError::Invalid(\"unknown handler type\")) }} fn load(&self,id:mod_api::wire::Id,view:std::any::TypeId)->Result<Box<dyn std::any::Any>,WireError> {{ let module=unsafe {{ (&*self.cx).module.clone() }}.ok_or(WireError::Invalid(\"no calling module\"))?; {load} Err(WireError::Invalid(\"unknown handler view\")) }} }} /// The Cx pointer must stay live for the whole synchronous call.\npub unsafe fn resource_scope(cx:*mut Cx,native_root:bool)->mod_api::wire::ResourceScope {{ let codec=std::rc::Rc::new(HostCodec {{cx}}); if native_root {{ unsafe {{ mod_api::wire::ResourceScope::native_root(codec) }} }} else {{ mod_api::wire::ResourceScope::new(codec) }} }}\n"
     )
 }
 pub(super) fn generate(surface: &mut super::Surface<'_>) -> Result<String, String> {
@@ -275,7 +275,12 @@ pub(super) fn generate(surface: &mut super::Surface<'_>) -> Result<String, Strin
     code.push_str(
         "pub fn import_id(owner: &str, name: &str) -> Option<u32> { match (owner,name) {\n",
     );
-    for (id, m) in imports(&surface.methods).iter().enumerate() {
+    for (id, m) in imports(&surface.methods)
+        .iter()
+        .copied()
+        .chain(held_methods(&surface.methods))
+        .enumerate()
+    {
         writeln!(code, "({:?},{:?}) => Some({id}),", m.owner, m.name).unwrap();
     }
     code.push_str("_ => None } }\n");
