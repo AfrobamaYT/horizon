@@ -10,6 +10,11 @@ pub mod icon;
 pub mod index;
 pub mod install_lock;
 pub mod internals;
+#[cfg(all(
+    feature = "runtime-process",
+    any(target_os = "linux", target_os = "macos")
+))]
+pub mod local_control;
 #[cfg(feature = "runtime-process")]
 pub mod locks;
 pub mod manifest;
