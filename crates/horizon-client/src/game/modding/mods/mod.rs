@@ -206,6 +206,7 @@ pub(super) fn freeze_declarations() {
 }
 
 struct NativeDeclared {
+    errors: Vec<String>,
     blocks: Vec<horizon_mod_package::content::Block>,
     items: Vec<horizon_mod_package::content::Item>,
     types: Vec<horizon_mod_package::content::BlockEntityType>,
@@ -219,7 +220,36 @@ fn native_declared() -> &'static NativeDeclared {
         Game::native_blocks(&RegistrationContext::new(), &mut blocks);
         Game::native_items(&RegistrationContext::new(), &mut items);
         let types = super::api_values::block_entity_declarations();
+        use super::api_values::TryIntoEngine;
+        let mut errors = Vec::new();
+        let blocks = blocks
+            .iter()
+            .filter_map(|v| {
+                v.try_into_engine(&())
+                    .map_err(|e| {
+                        errors.push(format!(
+                            "native blocks and items of {}: {e}",
+                            v.id.split(':').next().unwrap_or("")
+                        ))
+                    })
+                    .ok()
+            })
+            .collect();
+        let items = items
+            .iter()
+            .filter_map(|v| {
+                v.try_into_engine(&())
+                    .map_err(|e| {
+                        errors.push(format!(
+                            "native blocks and items of {}: {e}",
+                            v.id.split(':').next().unwrap_or("")
+                        ))
+                    })
+                    .ok()
+            })
+            .collect();
         NativeDeclared {
+            errors,
             blocks,
             items,
             types,
@@ -485,10 +515,14 @@ pub(super) fn content_overlay(
         }
     }
     let NativeDeclared {
+        errors,
         blocks,
         items,
         types,
     } = native_declared();
+    if !errors.is_empty() {
+        return Err(errors.join("\n").into());
+    }
     if !blocks.is_empty() || !items.is_empty() || !types.is_empty() {
         let known = match &mut known {
             Some(types) => types,
@@ -534,6 +568,67 @@ pub(super) fn content_overlay(
     })
 }
 
+fn resolve_particle_providers(
+    source: &horizon_assets::resource_source::ResourceSource,
+) -> Result<(), String> {
+    if mod_api::__private::particles_resolved() {
+        return Ok(());
+    }
+    // Resolve all particle providers once, alongside the other load-owned registries.
+    let mut particles: Vec<String> = horizon_client::particles::ParticleType::ALL
+        .iter()
+        .map(|ty| format!("minecraft:{}", ty.name()))
+        .collect();
+    particles.extend(
+        source
+            .list_under("assets", &["particles"])
+            .into_iter()
+            .filter_map(|path| {
+                let path = path.strip_prefix("assets/")?;
+                let (namespace, path) = path.split_once("/particles/")?;
+                let path = path.strip_suffix(".json")?;
+                let id = format!("{namespace}:{path}");
+                mod_api::Identifier::parse_namespaced(&id)?;
+                Some(id)
+            }),
+    );
+    mod_api::__private::resolve_particles(particles.iter().map(String::as_str), |id| {
+        horizon_client::particles::ParticleType::from_name(id)
+            .map(|ty| mod_api::__private::ParticleKind::Vanilla(ty as u32))
+            .or_else(|| {
+                (!id.starts_with("minecraft:")).then_some(mod_api::__private::ParticleKind::Custom)
+            })
+    })
+    .map_err(|errors| errors.join("\n"))?;
+    Ok(())
+}
+#[cfg(test)]
+mod particle_registry_reload_tests {
+    #[test]
+    fn repeated_particle_content_load_keeps_the_published_keys() {
+        mod_api::__private::part_tests::install_parts_fixture(&[]).unwrap();
+        let source = horizon_assets::resource_source::ResourceSource::indexed(
+            [(
+                "assets/invalid namespace/particles/bad name.json".into(),
+                horizon_assets::resource_source::Resource::bytes(Vec::new()),
+            )]
+            .into(),
+        );
+        super::resolve_particle_providers(&source).unwrap();
+        let first = mod_api::__private::particle_vanilla_key(
+            horizon_client::particles::ParticleType::Smoke as u32,
+        )
+        .unwrap();
+        super::resolve_particle_providers(&source).unwrap();
+        assert_eq!(
+            mod_api::__private::particle_vanilla_key(
+                horizon_client::particles::ParticleType::Smoke as u32
+            ),
+            Some(first)
+        );
+    }
+}
+
 /// The content root with everything the mods declare registered against the
 /// process: block entities, mob effects, entity and menu types, fluid looks,
 /// and the protocol's local mod list, each set once.
@@ -555,6 +650,7 @@ pub(super) fn content_root(
         );
     }
     register_mob_effects(&overlay.mods);
+    resolve_particle_providers(overlay.root.source())?;
     mod_api::__private::resolve_effects(
         horizon_client_core::potions::all_effects()
             .map(|def| horizon_client_core::potions::namespaced(def.id)),
@@ -570,7 +666,11 @@ pub(super) fn content_root(
         .iter()
         .map(|value| value.as_str().ok_or("invalid fluid registry entry"))
         .collect::<Result<Vec<_>, _>>()?;
-    mod_api::__private::resolve_fluids(&fluids).map_err(|errors| {
+    mod_api::__private::resolve_fluids(
+        &fluids,
+        &horizon_world::fluid::FluidKind::ALL.map(|kind| kind.name()),
+    )
+    .map_err(|errors| {
         errors
             .into_iter()
             .map(|error| error.to_string())
@@ -934,6 +1034,7 @@ impl Game<'_> {
         // worldgen keeps the state it loaded with until a restart.
         let content = &self.mods.content_ids;
         let mut next = wanted.clone();
+
         let mut waiting = Vec::new();
         for id in applied.symmetric_difference(&wanted) {
             if !content.contains(id) || self.mods.live_ids.contains(id) {
@@ -1015,6 +1116,9 @@ impl Game<'_> {
     }
     /// Apply the player's switches at the canonical native and wasm dispatch boundary.
     pub(super) fn sync_native_switches(&self) {
+        self.instance_groups
+            .borrow_mut()
+            .retire_disabled(&self.settings.mods.disabled);
         self.mods.apply_code_switches(&self.settings.mods.disabled);
     }
 }
@@ -1315,6 +1419,142 @@ mod tests {
             Some(20.0),
             "the live map answers the same row"
         );
+    }
+
+    /// A mod that adds an attribute vanilla zombies lack (#846,
+    /// `EntityAttributeModificationEvent`) changes the zombie type's default:
+    /// a zombie spawned after load answers it through the live attribute map
+    /// and carries it in its finalize defaults, while the rest of its row
+    /// and its spawn fields stay the zombie's.
+    #[test]
+    fn a_mods_attribute_addition_reaches_new_vanilla_zombies() {
+        use horizon_client::mobs::Mob;
+        use horizon_core::geometry::Vec3;
+        use horizon_world::attribute_map::ValueKind;
+        use horizon_world::attributes::entity::Catalog;
+        use mod_api::{Hooks, ModEntry, Registrar, RegistrationContext};
+
+        struct Lucky;
+        #[mod_api::__subscriptions]
+        impl Hooks for Lucky {
+            fn register(&self, registrar: &mut dyn Registrar, _: &RegistrationContext) {
+                registrar
+                    .modify_entity_attributes(
+                        "minecraft:zombie",
+                        vec![("minecraft:luck".to_string(), Some(2.5))],
+                    )
+                    .unwrap();
+            }
+        }
+        crate::game::api_values::install_parts(&[ModEntry::new("lucky", Box::new(Lucky))]).unwrap();
+
+        let bits = |n: f64| format!("{:016x}", n.to_bits());
+        let catalog = Arc::new(
+            Catalog::from_json(&serde_json::json!({
+                "data_version": horizon_world::DATA_VERSION,
+                "attributes": [
+                    {"id": "minecraft:max_health", "default": bits(20.0), "min": bits(1.0), "max": bits(1024.0), "syncable": true},
+                    {"id": "minecraft:movement_speed", "default": bits(0.7), "min": bits(0.0), "max": bits(1024.0), "syncable": true},
+                    {"id": "minecraft:luck", "default": bits(0.0), "min": bits(-1024.0), "max": bits(1024.0), "syncable": true}
+                ],
+                "entities": {
+                    "minecraft:zombie": {
+                        "minecraft:max_health": bits(20.0),
+                        "minecraft:movement_speed": bits(0.23000000417232513)
+                    }
+                }
+            }))
+            .unwrap(),
+        );
+        let read = |catalog: &Arc<Catalog>, name: &str| {
+            horizon_client::living_attributes::LivingAttributes::default().read(
+                catalog,
+                "minecraft:zombie",
+                name,
+                ValueKind::Computed,
+                Vec::new,
+            )
+        };
+        assert_eq!(
+            read(&catalog, "minecraft:luck"),
+            None,
+            "vanilla zombies lack it"
+        );
+
+        // core.motion, then rest.mobs, as the resource load runs them.
+        let modifications = mod_api::__private::entity_attribute_modifications();
+        assert_eq!(modifications.len(), 1);
+        let added = Arc::new(
+            super::super::resource_load::with_mod_attribute_additions(&catalog, modifications)
+                .unwrap(),
+        );
+        let mut types: std::collections::HashMap<_, _> = living_mod_types()
+            .into_iter()
+            .map(|(id, kind)| (id, Arc::unwrap_or_clone(kind)))
+            .collect();
+        super::super::resource_load::take_modified_attribute_rows(
+            &mut types,
+            &added,
+            modifications,
+        );
+
+        let zombie = Mob::new(
+            7,
+            Arc::new(types["minecraft:zombie"].clone()),
+            Vec3::ZERO,
+            0.0,
+        );
+        assert_eq!(read(&added, "minecraft:luck"), Some(2.5), "the live map");
+        assert_eq!(
+            zombie.kind.attributes.get("minecraft:luck"),
+            Some(&2.5),
+            "the finalize defaults"
+        );
+        assert_eq!(read(&added, "minecraft:max_health"), Some(20.0));
+        assert_eq!(zombie.health, 20.0, "the spawn's health");
+        assert_eq!(zombie.attrs.speed, 0.23000000417232513);
+        // Types nobody modified keep their rows.
+        assert_eq!(
+            types["minecraft:villager"].attributes.get("minecraft:luck"),
+            None
+        );
+    }
+
+    /// An addition the catalog cannot place (an attribute it does not know,
+    /// or a type with no attribute row) refuses the resource load, naming
+    /// the type.
+    #[test]
+    fn a_mods_attribute_addition_to_an_unknown_row_refuses_the_load() {
+        use horizon_world::attributes::entity::Catalog;
+        use mod_api::__private::EntityAttributeModification;
+
+        let catalog = Catalog::from_json(&serde_json::json!({
+            "data_version": horizon_world::DATA_VERSION,
+            "attributes": [
+                {"id": "minecraft:luck", "default": "0000000000000000", "min": "c090000000000000", "max": "4090000000000000", "syncable": true}
+            ],
+            "entities": {"minecraft:zombie": {}}
+        }))
+        .unwrap();
+        let addition = |entity: &str, attribute: &str| EntityAttributeModification {
+            entity: entity.into(),
+            attributes: vec![(attribute.into(), None)],
+        };
+        let error = super::super::resource_load::with_mod_attribute_additions(
+            &catalog,
+            &[addition("minecraft:zombie", "lucky:magic_resistance")],
+        )
+        .err()
+        .unwrap();
+        assert!(error.contains("minecraft:zombie"), "{error}");
+        assert!(error.contains("lucky:magic_resistance"), "{error}");
+        let error = super::super::resource_load::with_mod_attribute_additions(
+            &catalog,
+            &[addition("ruby:ghoul", "minecraft:luck")],
+        )
+        .err()
+        .unwrap();
+        assert!(error.contains("ruby:ghoul"), "{error}");
     }
 
     /// A content mod's type from the wandering trader, the neutral template

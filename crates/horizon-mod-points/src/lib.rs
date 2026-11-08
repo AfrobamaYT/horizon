@@ -25,6 +25,10 @@ pub mod snapshot;
 #[doc(hidden)]
 pub mod locators;
 
+/// Sparse native edit path metadata.
+#[doc(hidden)]
+pub mod native_patch;
+
 /// Bounded output for generated native row readers.
 #[doc(hidden)]
 pub mod native_window;

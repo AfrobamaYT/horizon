@@ -41,6 +41,9 @@ pub(super) struct Level {
     players: HashMap<u128, KeptPlayer>,
     /// Each entity's inventory (`entity_slots`) before this transaction first wrote it.
     entities: HashMap<u32, Vec<Option<ItemStack>>>,
+    /// Each mob's or armor stand's equipment before this transaction first
+    /// wrote it (#932), told apart for the way back.
+    equipment: HashMap<u32, KeptEquipment>,
     /// Each chested mob's item list's length before `entity_slots` first grew it to its slots
     /// in this transaction.
     mob_lengths: HashMap<u32, usize>,
@@ -98,6 +101,14 @@ struct KeptPlayer {
     carried: Option<ItemStack>,
 }
 
+/// A mob's or an armor stand's equipment as a transaction first wrote it
+/// (#932): the same eight slots, restored their own way.
+#[derive(Clone)]
+enum KeptEquipment {
+    Mob(Vec<Option<ItemStack>>),
+    Stand(Vec<Option<ItemStack>>),
+}
+
 #[derive(Clone)]
 struct KeptMenus {
     ender_items: Vec<Option<ItemStack>>,
@@ -123,6 +134,15 @@ pub(super) enum After {
     Spawn([f64; 3], ItemStack),
     /// The item entity with this id was emptied: removed, unless it holds items again.
     Emptied(u32),
+    /// `LivingEntity.onEquipItem`'s sound and equip/unequip game event, at the entity `who`
+    /// is: what an equipment write through a transaction tells the world only at the root
+    /// commit, so an abort stays quiet (#932).
+    Equip {
+        at: [f64; 3],
+        sound: Option<String>,
+        equips: bool,
+        who: u32,
+    },
 }
 
 /// Effects shared by transactional interaction contexts.
@@ -191,6 +211,9 @@ impl Game<'_> {
                 }
                 for (id, kept) in level.entities {
                     outer.entities.entry(id).or_insert(kept);
+                }
+                for (id, kept) in level.equipment {
+                    outer.equipment.entry(id).or_insert(kept);
                 }
                 for (id, kept) in level.item_entities {
                     outer.item_entities.entry(id).or_insert(kept);
@@ -310,6 +333,24 @@ impl Game<'_> {
             level.entities.entry(id).or_insert(slots);
         }
     }
+    /// Keeps mob `id`'s equipment as it is, if a transaction is open and hasn't yet (#932):
+    /// an abort puts every slot back and makes the attribute map over again.
+    pub(super) fn journal_equipment(&mut self, id: u32) {
+        let Some(level) = self.transactions.last_mut() else {
+            return;
+        };
+        if level.equipment.contains_key(&id) {
+            return;
+        }
+        let kept = if let Some(mob) = self.mobs.iter().find(|m| m.id == id && !m.removed) {
+            KeptEquipment::Mob(mob.equipment_stacks().iter().cloned().collect())
+        } else if let Some(stand) = self.armor_stands.iter().find(|a| a.id == id) {
+            KeptEquipment::Stand(stand.equipment.iter().cloned().collect())
+        } else {
+            return;
+        };
+        level.equipment.insert(id, kept);
+    }
     /// Sets item entity `id`'s stack, keeping it as it was if a transaction is open and hasn't
     /// yet. Emptied in one, it stays, empty, until the root commit removes it, so an abort can
     /// put its stack back. False where no such item entity is.
@@ -405,6 +446,17 @@ impl Game<'_> {
                     self.remove_dropped(i);
                 }
             }
+            After::Equip {
+                at,
+                sound,
+                equips,
+                who,
+            } => {
+                // `equip_item_effects` rebuilt from the entity it names: the
+                // sculk context reads the mob as it is at the root commit.
+                let ctx = self.who_context(Some(horizon_client::mobs::Who::Mob(who)), None);
+                self.equip_item_effects(at, sound, equips, ctx);
+            }
         }
     }
     fn root_commit(&mut self, level: Level) {
@@ -458,7 +510,34 @@ impl Game<'_> {
             }
         }
     }
-    fn roll_back(&mut self, level: Level) {
+    fn roll_back(&mut self, mut level: Level) {
+        // Each mob's equipment goes back as it was, and the attribute map is
+        // made over it again (#932).
+        let equipment = std::mem::take(&mut level.equipment);
+        for (id, kept) in equipment {
+            match kept {
+                KeptEquipment::Mob(stacks) => {
+                    let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
+                        continue;
+                    };
+                    for (slot, stack) in stacks.into_iter().enumerate() {
+                        mob.set_equipment_stack(slot, stack);
+                    }
+                    self.collect_mob_equipment_attributes(id);
+                }
+                // An armor stand keeps no live attribute map of its gear; the
+                // plain write puts its slots back as they were.
+                KeptEquipment::Stand(stacks) => {
+                    let Some(stand) = self.armor_stands.iter_mut().find(|a| a.id == id) else {
+                        continue;
+                    };
+                    for (slot, stack) in stacks.into_iter().enumerate() {
+                        stand.equipment.set(slot, stack);
+                    }
+                }
+            }
+        }
+
         for (pos, kept) in level.block_entities {
             if let (Some(entity), Some(now)) =
                 (kept.entity, self.world.block_entities.get_mut(&pos))
@@ -557,6 +636,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn cauldron_stat_listener_observes_committed_state_and_can_cancel() {
         use super::super::native_entity_refs::tests::run_fresh_cases;
+        use crate::game::api_values::TryIntoApi;
         use mod_api::{
             Flow, Hooks, ItemSpawnEvent, ItemTossEvent, ModEntry, Mods, PlayerStatAwardEvent,
         };
@@ -569,8 +649,8 @@ mod tests {
             return;
         }
         struct Listener {
-            seen: Arc<Mutex<Vec<(Option<mod_api::BlockStateId>, Option<String>)>>>,
-            drops: Arc<Mutex<Vec<(&'static str, Option<mod_api::BlockStateId>)>>>,
+            seen: Arc<Mutex<Vec<(Option<mod_api::BlockState>, Option<String>)>>>,
+            drops: Arc<Mutex<Vec<(&'static str, Option<mod_api::BlockState>)>>>,
         }
         #[mod_api::__subscriptions]
         impl Hooks for Listener {
@@ -661,7 +741,10 @@ mod tests {
                 assert!(game.use_on_cauldron(pos).unwrap());
                 assert_eq!(
                     seen.lock().unwrap().as_slice(),
-                    &[(Some(empty), Some("minecraft:bucket".into()))]
+                    &[(
+                        Some(empty.try_into_api().unwrap()),
+                        Some("minecraft:bucket".into())
+                    )]
                 );
                 game.world.set(pos[0], pos[1], pos[2], empty).unwrap();
                 game.inventory[0] = Some(ItemStack::new("minecraft:water_bucket", 1));
@@ -674,8 +757,14 @@ mod tests {
             assert_eq!(
                 *seen.lock().unwrap(),
                 vec![
-                    (Some(empty), Some("minecraft:bucket".into())),
-                    (Some(full), Some("minecraft:bucket".into()))
+                    (
+                        Some(empty.try_into_api().unwrap()),
+                        Some("minecraft:bucket".into())
+                    ),
+                    (
+                        Some(full.try_into_api().unwrap()),
+                        Some("minecraft:bucket".into())
+                    )
                 ]
             );
             let level2 = game
@@ -700,7 +789,10 @@ mod tests {
                 assert!(game.use_on_cauldron(pos).unwrap());
                 assert_eq!(
                     drops.lock().unwrap().as_slice(),
-                    &[("toss", Some(full)), ("spawn", Some(full))]
+                    &[
+                        ("toss", Some(full.try_into_api().unwrap())),
+                        ("spawn", Some(full.try_into_api().unwrap()))
+                    ]
                 );
                 drops.lock().unwrap().clear();
                 setup(game);
@@ -714,7 +806,10 @@ mod tests {
                 game.close_storage_transaction(true);
                 assert_eq!(
                     drops.lock().unwrap().as_slice(),
-                    &[("toss", Some(level2)), ("spawn", Some(level2))]
+                    &[
+                        ("toss", Some(level2.try_into_api().unwrap())),
+                        ("spawn", Some(level2.try_into_api().unwrap()))
+                    ]
                 );
             })
             .unwrap();
@@ -969,9 +1064,18 @@ mod tests {
         let empty = registry.default_state("minecraft:cauldron").unwrap();
         let jukebox = registry.default_state("minecraft:jukebox").unwrap();
         let flags = NativeBlockUpdateFlags::NEIGHBORS;
-        assert!(game.level_set_block(level, [0, 64, 0], chest, flags));
-        assert!(game.level_set_block(level, [2, 64, 0], full, flags));
-        assert!(game.level_set_block(level, [4, 64, 0], jukebox, flags));
+        assert_eq!(
+            game.level_set_block(level, [0, 64, 0], chest, flags),
+            Ok(true)
+        );
+        assert_eq!(
+            game.level_set_block(level, [2, 64, 0], full, flags),
+            Ok(true)
+        );
+        assert_eq!(
+            game.level_set_block(level, [4, 64, 0], jukebox, flags),
+            Ok(true)
+        );
         let sticks = |count| ItemStack::new("minecraft:stick", count);
         let stick = ItemResource::of(&sticks(1).try_into_api().unwrap());
         let rod = ItemResource::of(
@@ -1057,7 +1161,10 @@ mod tests {
         assert!(game.world.block_entities.attachments((0, 64, 0)).is_none());
 
         // An aborted cauldron change leaves no write behind in the world's queues.
-        assert!(game.level_set_block(level, [2, 64, 0], full, flags));
+        assert_eq!(
+            game.level_set_block(level, [2, 64, 0], full, flags),
+            Ok(true)
+        );
         game.world.block_log = Some(Vec::new());
         game.world.path_writes = Some(Vec::new());
         let queues = |game: &Game<'_>| {
@@ -1319,20 +1426,29 @@ mod tests {
             .registry
             .default_state("minecraft:chest")
             .unwrap();
-        assert!(game.level_set_block(level, [0, 64, 4], hopper, flags));
-        assert!(game.level_set_block(level, [2, 64, 4], chest, flags));
+        assert_eq!(
+            game.level_set_block(level, [0, 64, 4], hopper, flags),
+            Ok(true)
+        );
+        assert_eq!(
+            game.level_set_block(level, [2, 64, 4], chest, flags),
+            Ok(true)
+        );
         let slots = |game: &Game<'_>, pos| match game.world.block_entities.get(&pos) {
             Some(BlockEntity::Chest(items)) => items.iter().flatten().map(|s| s.count).sum::<u32>(),
             _ => panic!("no container at {pos:?}"),
         };
         for (id, moved) in [("test:pipe", 1), ("test:greedy", 0)] {
             let state = game.pack.assets.registry.default_state(id).unwrap();
-            assert!(game.level_set_block(
-                level,
-                [1, 64, 4],
-                state,
-                mod_api::NativeBlockUpdateFlags::NONE
-            ));
+            assert_eq!(
+                game.level_set_block(
+                    level,
+                    [1, 64, 4],
+                    state,
+                    mod_api::NativeBlockUpdateFlags::NONE
+                ),
+                Ok(true)
+            );
             if let Some(BlockEntity::Chest(items)) = game.world.block_entities.get_mut(&(0, 64, 4))
             {
                 items[0] = Some(sticks(2));

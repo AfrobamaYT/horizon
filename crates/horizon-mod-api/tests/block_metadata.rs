@@ -39,6 +39,7 @@ fn metadata_resource_worker_reads_allocate_nothing() {
             position: &|_| None,
             rule_count: 0,
         },
+        |_| false,
     )
     .unwrap();
     let properties = std::collections::BTreeMap::from([("lit".into(), "false".into())]);

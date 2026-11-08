@@ -82,9 +82,11 @@ impl std::fmt::Display for StackError {
 impl std::error::Error for StackError {}
 
 /// Why the game refused to accept an owned stack at a write boundary.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum StackWriteError {
+    /// A text field failed component conversion before this write.
+    Text(crate::text::TextFormError),
     /// The host has no game backend for this operation.
     Unavailable,
     /// The process-local key is not present in this game's item registry.
@@ -108,8 +110,16 @@ pub enum StackWriteError {
         /// The record-level normalization refusal.
         reason: StackError,
     },
+    /// A consume or death-protection component could not decode its opaque effect payload.
+    InvalidEffectPayload,
     /// A stack carries both maximum durability and a stack limit above one.
     StackableDamageable,
+}
+
+impl From<crate::text::TextFormError> for StackWriteError {
+    fn from(error: crate::text::TextFormError) -> Self {
+        Self::Text(error)
+    }
 }
 
 impl crate::NoBackend for StackWriteError {

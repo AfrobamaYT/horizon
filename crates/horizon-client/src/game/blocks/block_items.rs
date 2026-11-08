@@ -222,7 +222,13 @@ impl Game<'_> {
         // DecoratedPotBlock.getCloneItemStack: createDecoratedPotInstance, the
         // sherds only.
         let pot = &*facts.name == "minecraft:decorated_pot";
-        if (banner || pot)
+        // CopperGolemStatueBlockEntity.getItem: collectComponents (the golem's
+        // custom name), data or not.
+        let statue = matches!(
+            self.world.block_entities.get(&key),
+            Some(BlockEntity::CopperGolemStatue(_))
+        );
+        if (include_data || banner || pot || statue)
             && let Some(saved) = self.saved_block_entity(key)
         {
             let mut picked = block_entity_item::pick(&saved);
@@ -485,11 +491,10 @@ mod tests {
                     .expect("native type");
             }
             fn blocks(&self, _context: &mod_api::RegistrationContext, event: &mut BlocksEvent<'_>) {
-                event.blocks.push(horizon_mod_package::content::Block {
-                    id: CRATE.into(),
-                    template: "minecraft:white_banner".into(),
-                    item: true,
-                    ..Default::default()
+                event.blocks.push({
+                    let mut draft = mod_api::Block::new(CRATE, "minecraft:white_banner");
+                    draft.item = true;
+                    draft
                 });
             }
         }
@@ -509,12 +514,10 @@ mod tests {
             let level = game.level(game.dim.id()).unwrap();
             let state = game.pack.assets.registry.default_state(CRATE).unwrap();
             for x in [1, 2] {
-                assert!(game.level_set_block(
-                    level,
-                    [x, 64, 0],
-                    state,
-                    NativeBlockUpdateFlags::NONE
-                ));
+                assert_eq!(
+                    game.level_set_block(level, [x, 64, 0], state, NativeBlockUpdateFlags::NONE),
+                    Ok(true)
+                );
             }
             let Some(BlockEntity::Mod(first)) = game.world.block_entities.get_mut(&(1, 64, 0))
             else {

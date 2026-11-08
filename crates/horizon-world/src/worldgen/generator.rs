@@ -1847,16 +1847,24 @@ where
     /// ChunkGenerator.getBaseColumn: opacity of each noise-column state for
     /// a heightmap type, indexed from the minimum Y.
     fn base_column(&self, x: i32, z: i32, kind: HeightmapType) -> Vec<bool> {
-        self.base_columns(x, z, &[kind]).pop().unwrap_or_default()
+        self.base_columns_by(x, z, 1, &|_| kind)
+            .pop()
+            .unwrap_or_default()
     }
     /// One noise-column pass, as opacities for each heightmap kind.
-    fn base_columns(&self, x: i32, z: i32, kinds: &[HeightmapType]) -> Vec<Vec<bool>> {
+    fn base_columns_by(
+        &self,
+        x: i32,
+        z: i32,
+        count: usize,
+        kind: &dyn Fn(usize) -> HeightmapType,
+    ) -> Vec<Vec<bool>> {
         let (min, height) = self.column_range();
-        let mut columns = vec![vec![false; height as usize]; kinds.len()];
+        let mut columns = vec![vec![false; height as usize]; count];
         self.noise_column(x, z, &mut |y, state| {
             let state = self.data.states.get(state);
-            for (column, kind) in columns.iter_mut().zip(kinds) {
-                column[(y - min) as usize] = kind.is_opaque(state);
+            for (index, column) in columns.iter_mut().enumerate() {
+                column[(y - min) as usize] = kind(index).is_opaque(state);
             }
             false
         });
@@ -1865,14 +1873,19 @@ where
     /// ChunkGenerator.getBaseColumn's blocks, by what structures test
     /// (BlockState.isSolid is blocksMotion for the noise's blocks, which
     /// are never cobwebs or bamboo saplings).
-    fn noise_blocks(&self, x: i32, z: i32) -> super::structure::start::NoiseColumn {
-        use super::structure::start::{NoiseBlock, NoiseColumn};
+    fn noise_blocks_into(
+        &self,
+        x: i32,
+        z: i32,
+        column: &mut dyn super::structure::start::NoiseColumnTarget,
+    ) {
+        use super::structure::start::NoiseBlock;
         let (min, height) = self.column_range();
-        let mut blocks = vec![NoiseBlock::Air; height as usize];
+        column.resize(min, height as usize);
         let registry = self.data.registry;
         self.noise_column(x, z, &mut |y, state| {
             let props = self.data.states.get(state);
-            blocks[(y - min) as usize] = if props.is_air() {
+            let block = if props.is_air() {
                 NoiseBlock::Air
             } else {
                 match registry.state(state).map(|s| s.name.as_str()) {
@@ -1882,9 +1895,9 @@ where
                     _ => NoiseBlock::Other,
                 }
             };
+            column.set((y - min) as usize, block);
             false
         });
-        NoiseColumn { min, blocks }
     }
     /// iterateNoiseColumn from the top down until `visit` returns true.
     fn noise_column(&self, x: i32, z: i32, visit: &mut dyn FnMut(i32, BlockStateId) -> bool) {
@@ -2053,11 +2066,22 @@ where
     fn base_column(&mut self, x: i32, z: i32, kind: HeightmapType) -> Vec<bool> {
         self.pipeline.base_column(x, z, kind)
     }
-    fn base_columns(&mut self, x: i32, z: i32, kinds: &[HeightmapType]) -> Vec<Vec<bool>> {
-        self.pipeline.base_columns(x, z, kinds)
+    fn base_columns_by(
+        &mut self,
+        x: i32,
+        z: i32,
+        count: usize,
+        kind: &dyn Fn(usize) -> HeightmapType,
+    ) -> Vec<Vec<bool>> {
+        self.pipeline.base_columns_by(x, z, count, kind)
     }
-    fn noise_column(&mut self, x: i32, z: i32) -> super::structure::start::NoiseColumn {
-        self.pipeline.noise_blocks(x, z)
+    fn noise_column_into(
+        &mut self,
+        x: i32,
+        z: i32,
+        column: &mut dyn super::structure::start::NoiseColumnTarget,
+    ) {
+        self.pipeline.noise_blocks_into(x, z, column)
     }
     fn cold_enough_to_snow(&mut self, biome: BiomeId, pos: [i32; 3]) -> bool {
         let sea = self.pipeline.settings.sea_level;
@@ -2410,7 +2434,12 @@ pub trait StructureMobs: Send + Sync {
     ) -> bool;
 }
 
+/// A start chunk's saved `structures.starts`, including pending writes.
+pub type SavedStructureStarts =
+    dyn Fn(ChunkPos) -> Option<horizon_core::nbt::Compound> + Send + Sync;
+
 trait SeededPipeline: Send + Sync {
+    fn set_saved_starts(&self, source: Arc<SavedStructureStarts>);
     fn generate(
         &self,
         worker: &mut WorkerState,
@@ -2651,6 +2680,11 @@ where
             valid: BTreeSet::new(),
         };
         structures.use_saved_start(&mut queries, chunk, structure, pieces)
+    }
+    fn set_saved_starts(&self, source: Arc<SavedStructureStarts>) {
+        if let Some(structures) = &self.structures {
+            structures.set_saved_starts(source);
+        }
     }
     fn forget_structure_starts(&self) {
         if let Some(structures) = &self.structures {
@@ -3348,6 +3382,10 @@ pub struct OverworldGenerator {
     noise_clamped: Option<(NoiseSettings, NoiseSettings)>,
 }
 impl OverworldGenerator {
+    /// Install before workers run, so every cache miss can consult the save before generation.
+    pub fn set_saved_starts(&self, source: Arc<SavedStructureStarts>) {
+        self.pipeline.set_saved_starts(source);
+    }
     /// What the shared caches hold, for `horizon-ctl memory`.
     pub fn cache_census(&self) -> CacheCensus {
         self.pipeline.cache_census()
@@ -4909,6 +4947,102 @@ mod tests {
             .unwrap_or_else(|| {
                 Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.local/horizon-client/26.3")
             })
+    }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn saved_jigsaw_starts_match_generated_layouts() {
+        use super::super::structure::start::Piece;
+        use horizon_core::nbt::Compound;
+        let root = std::path::PathBuf::from(
+            std::env::var_os("HORIZON_TEST_RESOURCES").expect("resources"),
+        );
+        let registry = Box::leak(Box::new(crate::level::data::load_registry(&root).unwrap()));
+        let data = GeneratorData::load(&root.join("worldgen"), registry).unwrap();
+        for seed in [12345, 1234] {
+            for (dimension, names) in [
+                (
+                    "minecraft:overworld",
+                    &[
+                        "village_plains",
+                        "village_desert",
+                        "village_savanna",
+                        "village_snowy",
+                        "village_taiga",
+                        "pillager_outpost",
+                        "ancient_city",
+                        "trail_ruins",
+                        "trial_chambers",
+                    ][..],
+                ),
+                ("minecraft:the_nether", &["bastion_remnant"][..]),
+            ] {
+                let generator = OverworldGenerator::for_dimension(
+                    data.clone(),
+                    seed,
+                    "minecraft:normal",
+                    dimension,
+                )
+                .unwrap();
+                let mut worker = generator.worker();
+                let mut originals = Vec::new();
+                // A naturally generated area, including unsupported starts sharing its chunks.
+                if seed == 12345 && dimension == "minecraft:overworld" {
+                    let starts = worker.structure_starts(ChunkPos::new(11, -11));
+                    assert!(starts.iter().any(|s| s.name == "minecraft:ancient_city"));
+                    originals.extend(starts);
+                }
+                for (i, name) in names.iter().enumerate() {
+                    let name = format!("minecraft:{name}");
+                    let pos = ChunkPos::new(i as i32 * 3, 0);
+                    originals.push(
+                        worker
+                            .structure_start(&name, pos)
+                            .unwrap_or_else(|| panic!("{seed} {name}")),
+                    );
+                }
+                let mut saved = HashMap::<(i32, i32), Compound>::new();
+                worker.forget_structure_starts();
+                for original in &mut originals {
+                    // Locating a generated start can increment its count. A nonzero value also
+                    // proves that loading did not silently fall back to seed-identical generation.
+                    if original.pieces.iter().all(|p| matches!(p, Piece::Pool(_))) {
+                        Arc::get_mut(original)
+                            .expect("uncached placement start")
+                            .references = 3;
+                    }
+                    saved
+                        .entry((original.chunk.x, original.chunk.z))
+                        .or_default()
+                        .insert(original.name.as_str().into(), original.save().unwrap());
+                }
+                generator
+                    .set_saved_starts(Arc::new(move |pos| saved.get(&(pos.x, pos.z)).cloned()));
+                for original in &originals {
+                    let starts = worker.structure_starts(original.chunk);
+                    let loaded = starts
+                        .iter()
+                        .find(|s| s.name == original.name)
+                        .expect("saved or fallback start");
+                    assert_eq!(
+                        loaded.save(),
+                        original.save(),
+                        "{seed} {}: every saved field",
+                        original.name
+                    );
+                    assert_eq!(
+                        format!("{loaded:?}"),
+                        format!("{original:?}"),
+                        "{seed} {}: every runtime field",
+                        original.name
+                    );
+                    let again = generator.worker().structure_starts(original.chunk);
+                    assert!(
+                        again.iter().any(|s| Arc::ptr_eq(s, loaded)),
+                        "workers share admitted starts"
+                    );
+                }
+            }
+        }
     }
     /// The block registry the worldgen bundle needs. `GeneratorData` keeps it
     /// for as long as the generator lives, so it is shared, not freed.

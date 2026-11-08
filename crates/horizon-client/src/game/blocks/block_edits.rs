@@ -1,5 +1,5 @@
 //! A server mod's bulk block edit (`edit_blocks`): its palette and
-//! filters read as commands read blocks, its heights read, and its runs made
+//! filters compile to the command matcher, its heights read, and its runs made
 //! at once through `World::edit_runs`, with what `fill ... strict` does for
 //! the block entities and the watched blocks of each block changed.
 use super::Game;
@@ -8,7 +8,6 @@ use super::native_world_edit::{NativeBlockEdit as BlockEdit, NativeHeightmap as 
 use horizon_client::{
     block_edit::Run,
     chunk::ColumnLayout,
-    command::{Reader, args::BlockInput, block},
     containers::BlockEntity,
     fast_hash::{FxHashMap, FxHashSet},
     world::World,
@@ -24,40 +23,19 @@ type Tracked = ((i32, i32, i32), u32, u32);
 impl Game<'_> {
     /// Make a mod's block edit; how many blocks changed, or why none did.
     /// Every palette entry, filter and run is checked before anything
-    /// changes: an entry or filter that doesn't read, one with NBT (`{...}`,
-    /// refused: the bulk path sets states only), a run naming a palette entry
+    /// changes: an invalid typed state or predicate (NBT cannot be represented),
+    /// a run naming a palette entry
     /// or filter past the end, or more than 65536 filters, and nothing is
     /// made.
     pub(super) fn apply_block_edit(&mut self, edit: &BlockEdit) -> Result<u64, String> {
-        let parse = |name: &str, testing: bool| -> Result<BlockInput, String> {
-            let mut reader = Reader::new(name);
-            let b = block::parse(&mut reader, &self.ui.registries, testing)
-                .map_err(|e| format!("{name:?}: {}", e.message.plain()))?;
-            if reader.can_read() {
-                return Err(format!("{name:?}: more after the block"));
-            }
-            if b.nbt.is_some() {
-                return Err(format!("{name:?}: block NBT is not supported here"));
-            }
-            Ok(b)
-        };
-        let mut palette = Vec::with_capacity(edit.palette.len());
-        for name in &edit.palette {
-            let b = parse(name, false)?;
-            let state = self
-                .block_state(&b)
-                .map_err(|e| format!("{name:?}: {}", e.message.plain()))?;
-            palette.push(state.0);
-        }
-        let filters = edit
-            .filters
-            .iter()
-            .map(|f| parse(f, true))
-            .collect::<Result<Vec<_>, _>>()?;
+        let super::api_values::block_edit::PreparedBlockEdit { palette, filters } =
+            super::api_values::block_edit::prepare(edit)?;
         let runs = resolve_runs(edit, &palette, filters.len(), |h, x, z| {
             self.edit_height(h, x, z)
         })?;
         // (what the registry, the tags and the facts tell of a state, beside the world being changed)
+        self.ensure_stateful_entity_table();
+        let stateful = self.world.block_entities.stateful_entities();
         let registry = self.pack.assets.registry;
         // (the tags as `block_matches` reads them for commands)
         let world_items = match &self.world_tables {
@@ -81,6 +59,7 @@ impl Game<'_> {
                 let f = facts.get(BlockStateId(s));
                 watched.get(s as usize).copied().unwrap_or(false)
                     || f.block_entity
+                    || stateful.get(s as usize).copied().unwrap_or(false)
                     || BlockEntity::for_block(&f.name).is_some()
             },
         );
@@ -88,7 +67,7 @@ impl Game<'_> {
         // The block entities the new blocks bring, as `native_set_block` makes them (a mod block's own,
         // included), in the order `replace_block_entities` takes them: the positions needing a fresh entity.
         let name = |s: u32| self.res.facts().get(BlockStateId(s)).name.clone();
-        let wanted: Vec<Arc<str>> = out
+        let wanted: Vec<BlockStateId> = out
             .tracked
             .iter()
             .filter(|&&((x, y, z), old, new)| {
@@ -99,9 +78,11 @@ impl Game<'_> {
                         .get(&(x, y, z))
                         .is_some_and(|e| e.fits(&name(new)))
             })
-            .map(|&(_, _, new)| name(new))
+            .map(|&(_, _, new)| BlockStateId(new))
             .collect();
-        let mut made = make_block_entities(&wanted, |n| self.new_block_entity(n)).into_iter();
+        let mut made =
+            make_block_entities(&wanted, |state| self.new_block_entity_for_state(*state))
+                .into_iter();
         let facts = self.res.facts();
         let removed = replace_block_entities(
             &mut self.world,
@@ -126,7 +107,7 @@ impl Game<'_> {
 
     /// Each column's height on `h` (none where its chunk is not loaded) and its blocks from `below` under it to
     /// `above` - 1 over it, bottom first (air outside the column and where it is not loaded), as indices into the
-    /// names seen, with the biome's grass, foliage and water tints at the column's top (0 where it is not loaded;
+    /// full states seen, with the biome's grass, foliage and water tints at the column's top (0 where it is not loaded;
     /// unblended). `Err`, reading nothing, when `below + above` is 0 or more than the level's height, or the read
     /// would be more than `MAX_READ` blocks.
     pub(super) fn read_loaded_block_columns(
@@ -138,11 +119,8 @@ impl Game<'_> {
     ) -> Result<ColumnBlocks, String> {
         read_size(columns.len(), below, above, self.world.layout().height())?;
         let bases = self.loaded_column_heights(columns, h);
-        let facts = self.res.facts();
-        let (palette, blocks) = column_blocks(&self.world, columns, &bases, below, above, |s| {
-            facts.get(s).name.clone()
-        })
-        .ok_or("the read is too big")?;
+        let (palette, blocks) = column_blocks(&self.world, columns, &bases, below, above)
+            .ok_or("the read is too big")?;
         let biomes = self.res.biomes();
         let mut tints = Vec::with_capacity(columns.len() * 3);
         for (&(x, z), base) in columns.iter().zip(&bases) {
@@ -165,7 +143,7 @@ impl Game<'_> {
             }
         }
         Ok(ColumnBlocks {
-            palette,
+            palette: super::api_values::block_edit::column_palette(palette)?,
             bases,
             blocks,
             tints,
@@ -266,7 +244,7 @@ fn loaded_heights(
 }
 
 /// The blocks of each column from `below` under its base to `above` - 1 over
-/// it, bottom first, as indices into the names (`name`) seen: air outside the
+/// it, bottom first, as indices into full numeric states: air outside the
 /// column's chunk's own height and where there is no base. None, reading
 /// nothing, past `read_size`'s bound.
 fn column_blocks(
@@ -275,8 +253,7 @@ fn column_blocks(
     bases: &[Option<i32>],
     below: u32,
     above: u32,
-    name: impl Fn(BlockStateId) -> Arc<str>,
-) -> Option<(Vec<String>, Vec<u16>)> {
+) -> Option<(Vec<BlockStateId>, Vec<u16>)> {
     let total = read_size(
         columns.len(),
         below,
@@ -286,21 +263,17 @@ fn column_blocks(
     .ok()?;
     let per = (below + above) as usize;
     let mut blocks = Vec::with_capacity(total);
-    let mut palette: Vec<String> = Vec::new();
-    // (a state's index into the names, worked out once a state)
+    let mut palette: Vec<BlockStateId> = Vec::new();
+    // A full state's palette index, worked out once per distinct state.
     let mut seen: FxHashMap<u32, u16> = FxHashMap::default();
-    let mut index = |s: BlockStateId| -> u16 {
-        *seen.entry(s.0).or_insert_with(|| {
-            let name = name(s);
-            let i = palette
-                .iter()
-                .position(|n| **n == *name)
-                .unwrap_or_else(|| {
-                    palette.push(name.to_string());
-                    palette.len() - 1
-                });
-            i as u16
-        })
+    let mut index = |s: BlockStateId| -> Option<u16> {
+        if let Some(&index) = seen.get(&s.0) {
+            return Some(index);
+        }
+        let index = u16::try_from(palette.len()).ok()?;
+        palette.push(s);
+        seen.insert(s.0, index);
+        Some(index)
     };
     for (&(x, z), base) in columns.iter().zip(bases) {
         let chunk = world.chunks.get(&(x >> 4, z >> 4));
@@ -313,11 +286,11 @@ fn column_blocks(
                         Ok(y) if (bottom..top).contains(&y) => chunk.block(x & 15, y, z & 15),
                         _ => world.air,
                     };
-                    blocks.push(index(s));
+                    blocks.push(index(s)?);
                 }
             }
             _ => {
-                let air = index(world.air);
+                let air = index(world.air)?;
                 blocks.extend(std::iter::repeat_n(air, per));
             }
         }
@@ -388,15 +361,15 @@ fn resolve_runs(
 /// A block entity for each new block, in order: made for each position, as vanilla calls
 /// `EntityBlock.newBlockEntity` for each (a mod's may number its instances). A block that makes none (stone) is
 /// asked once.
-fn make_block_entities(
-    names: &[Arc<str>],
-    mut make: impl FnMut(&str) -> Option<BlockEntity>,
+fn make_block_entities<S: Eq + std::hash::Hash>(
+    states: &[S],
+    mut make: impl FnMut(&S) -> Option<BlockEntity>,
 ) -> Vec<Option<BlockEntity>> {
-    let mut none: FxHashSet<&str> = FxHashSet::default();
-    names
+    let mut none: FxHashSet<&S> = FxHashSet::default();
+    states
         .iter()
         .map(|n| {
-            if none.contains(&**n) {
+            if none.contains(n) {
                 return None;
             }
             let entity = make(n);
@@ -450,6 +423,78 @@ mod tests {
     use crate::game::native_world_edit::NativeBlockRun as BlockRun;
     use horizon_client::chunk::Chunk;
 
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn typed_bulk_late_refusals_preserve_the_world_and_emit_no_changes() {
+        use crate::game::api_values::TryIntoApi;
+        use mod_api::{
+            StateConstraint, StatePredicate, StatePredicateRecord, StatePredicateTarget,
+        };
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            // The shared fixture is unticked; expose the dedicated-server bulk surface.
+            game.options.dedicated = Some(Vec::new());
+            let dimension = game.dim.id().to_owned();
+            game.world
+                .chunks
+                .insert((0, 0), std::sync::Arc::new(Chunk::empty(0, 0)));
+            let registry = game.pack.assets.registry;
+            let air = registry.default_state("minecraft:air").unwrap();
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let api_air = air.try_into_api().unwrap();
+            let api_stone = stone.try_into_api().unwrap();
+            let metadata = mod_api::__private::block_definitions().unwrap();
+            let good = StatePredicate::block(metadata, api_air.block(), &[]).unwrap();
+            let bad = StatePredicate::from(StatePredicateRecord::new(
+                StatePredicateTarget::Block(api_air.block()),
+                vec![StateConstraint::new("unknown", "true")],
+            ));
+            let mut edit = BlockEdit {
+                palette: vec![api_stone],
+                filters: vec![good, bad],
+                runs: vec![BlockRun {
+                    x: 0,
+                    z: 0,
+                    y: 64,
+                    height: 1,
+                    surface: None,
+                    block: 0,
+                    only: Some(0),
+                }],
+            };
+            game.world.block_log = Some(Vec::new());
+            assert_eq!(game.world.block(0, 64, 0), air);
+            let refused = game.edit_blocks(&dimension, &edit);
+            assert_eq!(
+                game.world.block(0, 64, 0),
+                air,
+                "late filter refusal must preserve the world"
+            );
+            assert!(game.world.block_log.as_ref().unwrap().is_empty());
+            assert!(refused.is_err());
+
+            edit.filters.pop();
+            edit.palette
+                .push(mod_api::BlockStateRecord::new(api_stone.block(), u16::MAX).into());
+            let refused = game.edit_blocks(&dimension, &edit);
+            assert_eq!(
+                game.world.block(0, 64, 0),
+                air,
+                "late palette refusal must preserve the world"
+            );
+            assert!(game.world.block_log.as_ref().unwrap().is_empty());
+            assert!(refused.is_err());
+
+            edit.palette.pop();
+            assert_eq!(game.edit_blocks(&dimension, &edit), Ok(1));
+            assert_eq!(
+                game.world.block(0, 64, 0),
+                stone,
+                "the same valid run must actually mutate"
+            );
+            game.world.block_log = None;
+        });
+    }
+
     fn run(block: u32, only: Option<u32>) -> BlockRun {
         BlockRun {
             x: 1,
@@ -463,8 +508,8 @@ mod tests {
     }
     fn edit(runs: Vec<BlockRun>) -> BlockEdit {
         BlockEdit {
-            palette: vec!["stone".into(), "air".into()],
-            filters: vec!["#dirt".into()],
+            palette: vec![],
+            filters: vec![],
             runs,
         }
     }
@@ -720,12 +765,11 @@ mod tests {
             &[Some(65), Some(319), None],
             2,
             3,
-            |s| names(s.0),
         )
         .unwrap();
-        let read: Vec<&str> = blocks.iter().map(|&i| &*palette[i as usize]).collect();
+        let read: Vec<u32> = blocks.iter().map(|&i| palette[i as usize].0).collect();
         // (`names` calls state 2 a chest: here it stands for leaves)
-        let (leaves, stone, air) = ("minecraft:chest", "minecraft:stone", "minecraft:air");
+        let (leaves, stone, air) = (2, 1, 0);
         assert_eq!(
             read,
             [
@@ -734,8 +778,19 @@ mod tests {
                 air, air, air, air, air, // not loaded
             ]
         );
-        // names once each
+        // Distinct states appear once each.
         assert_eq!(palette.len(), 3);
+    }
+
+    #[test]
+    fn column_palette_preserves_distinct_property_states() {
+        let mut w = world();
+        w.set(1, 5, 1, BlockStateId(2)).unwrap();
+        w.set(1, 6, 1, BlockStateId(4)).unwrap();
+        w.set(1, 7, 1, BlockStateId(2)).unwrap();
+        let (palette, blocks) = column_blocks(&w, &[(1, 1)], &[Some(5)], 0, 3).unwrap();
+        assert_eq!(palette, [BlockStateId(2), BlockStateId(4)]);
+        assert_eq!(blocks, [0, 1, 0]);
     }
 
     #[test]
@@ -751,7 +806,7 @@ mod tests {
         assert!(read_size(usize::MAX, 2, 0, 384).is_err());
         assert_eq!(read_size(1 << 12, 256, 0, 384), Ok(MAX_READ));
         let w = columns_world();
-        assert!(column_blocks(&w, &[(1, 1)], &[Some(0)], u32::MAX, 2, |s| names(s.0)).is_none());
+        assert!(column_blocks(&w, &[(1, 1)], &[Some(0)], u32::MAX, 2).is_none());
     }
 
     #[test]
@@ -768,7 +823,7 @@ mod tests {
             .map(Arc::<str>::from),
             |n| {
                 calls.push(n.to_string());
-                (n == "machines:press").then(|| {
+                (n.as_ref() == "machines:press").then(|| {
                     BlockEntity::Mod(Box::new(horizon_client::containers::ModBlockEntity::new(
                         format!("press-{}", calls.len()),
                         Default::default(),
@@ -796,5 +851,23 @@ mod tests {
             calls,
             ["machines:press", "minecraft:stone", "machines:press"]
         );
+    }
+    #[test]
+    fn null_factories_are_cached_per_state_not_per_block_name() {
+        // One block can create no BE in one state and a BE in another.
+        // A cached null for the first state must not suppress the second.
+        let mut calls = Vec::new();
+        let made = make_block_entities(&[7_u32, 8, 7, 8], |state| {
+            calls.push(*state);
+            (*state == 8).then(|| {
+                BlockEntity::Mod(Box::new(horizon_client::containers::ModBlockEntity::new(
+                    "machines:heater".into(),
+                    Default::default(),
+                )))
+            })
+        });
+        assert_eq!(calls, [7, 8, 8]);
+        assert!(made[0].is_none() && made[2].is_none());
+        assert!(made[1].is_some() && made[3].is_some());
     }
 }

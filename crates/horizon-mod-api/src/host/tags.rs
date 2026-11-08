@@ -14,8 +14,9 @@ pub trait TagsHost {
     #[access(WorldOnly)]
     fn unresolved_fluid_id(&self, fluid: UnresolvedFluid) -> String;
     /// Side: both.
-    /// Whether the resolved block is in the world's merged block tag. Unknown tags return false;
-    /// unavailable authoritative tags or owning-thread block mappings return None.
+    /// Whether the resolved block is in the world's merged block tag, on a client the tag its
+    /// server sent. Unknown tags return false; unavailable tags or owning-thread block mappings
+    /// return None.
     #[access(Metadata)]
     fn block_in_tag(&self, block: BlockKey, tag: &str) -> Option<bool>;
     /// Side: both.
@@ -25,16 +26,16 @@ pub trait TagsHost {
     /// context (a state that reads its neighbours or block entity answers what its state alone
     /// gives). Empty for a state with no outline, such as air. None for an id no state has.
     #[access(Metadata)]
-    fn state_outline(&self, state: BlockStateId) -> Option<Vec<[f64; 6]>>;
+    fn state_outline(&self, state: BlockState) -> Option<Vec<[f64; 6]>>;
     /// Side: both.
     /// The fluid state `state` holds (`BlockState.getFluidState`): water for a waterlogged state,
     /// the empty fluid for most. None for an id no state has.
     #[access(Metadata)]
-    fn state_fluid_state(&self, state: BlockStateId) -> Option<FluidState>;
+    fn state_fluid_state(&self, state: BlockState) -> Option<FluidState>;
     /// Side: both.
     /// Whether `fluid` is in the fluid tag `tag` (`FluidState.is(TagKey)`, `minecraft:water` or
-    /// `water`), over the merged fluid tags. An unknown tag is false. None as for
-    /// `native_block_in_tag`.
+    /// `water`), over the merged fluid tags, on a client those its server sent. An unknown tag
+    /// is false. None as for `native_block_in_tag`.
     #[access(Metadata)]
     fn fluid_in_tag(&self, fluid: &str, tag: &str) -> Option<bool>;
     /// Side: both.
@@ -49,7 +50,7 @@ pub trait TagsHost {
     /// water and flowing water. None for `minecraft:empty`, whose bucket is air, and for a name
     /// no fluid has.
     #[access(Metadata)]
-    fn fluid_bucket(&self, fluid: &str) -> Option<&'static str>;
+    fn fluid_bucket(&self, fluid: &str) -> Option<ItemKey>;
     /// Side: both.
     /// The sound event a bucket plays as it picks `fluid` up (`Fluid.getPickupSound`),
     /// `minecraft:item.bucket.fill_lava` for lava and flowing lava. None for
