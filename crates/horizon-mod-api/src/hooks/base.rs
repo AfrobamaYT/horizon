@@ -1907,7 +1907,8 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "PlayerEvent.PlayerRespawnEvent"
+        neoforge = "PlayerEvent.PlayerRespawnEvent",
+        paper = "PlayerPostRespawnEvent"
     )]
     fn player_respawned();
     /// Final world fog, after the computed color hook, ordinary calculations and Horizon's fog
@@ -4310,7 +4311,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's PlayerLevelChangeEvent)"
+        neoforge = "none (NeoForge has no such event; Bukkit's PlayerLevelChangeEvent)",
+        paper = "PlayerLevelChangeEvent"
     )]
     fn player_level_change();
     /// A server player selected a loom pattern, after the loom menu accepted the button. `pattern` is
@@ -4397,7 +4399,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's PlayerRecipeBookSettingsChange)"
+        neoforge = "none (NeoForge has no such event; Bukkit's PlayerRecipeBookSettingsChange)",
+        paper = "PlayerRecipeBookSettingsChangeEvent"
     )]
     fn player_recipe_book_settings_change();
     /// A recipe is about to be unlocked for a server player. Set `cancel` to keep it locked. The
