@@ -100,13 +100,143 @@ pub fn invocation(
     callee: TokenStream,
 ) -> Result<TokenStream, String> {
     let (inputs, output) = signature(ty).ok_or("not a callback")?;
+    body(
+        rule,
+        module,
+        owner,
+        &inputs,
+        &output,
+        |lend| quote!((#callee)(#(#lend),*)),
+    )
+}
+
+/// One method of a listed trait, by declaration order.
+pub struct Method {
+    pub name: syn::Ident,
+    /// Whether the method takes `&mut self`: only an exclusive trait object can call it.
+    pub exclusive: bool,
+    /// The parameter types (without the receiver) and result, written in the trait's module,
+    /// or why this method cannot be a callable at all.
+    pub signature: Result<(Vec<Type>, Type), String>,
+}
+
+/// The methods of the listed trait at `path`, in declaration order. A method crosses as a
+/// callable when it is object-safe, takes `&self` or `&mut self`, has no type or const generics
+/// and is not async; whether its argument and result types cross is decided by [`method_call`].
+/// Supertrait methods are not part of the table.
+pub fn methods(rule: &Rule, path: &str) -> Vec<Method> {
+    let Some(decl) = rule.trait_decl(path) else {
+        return Vec::new();
+    };
+    decl.item
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            syn::TraitItem::Fn(method) => Some(method),
+            _ => None,
+        })
+        .map(|method| {
+            let sig = &method.sig;
+            let exclusive = sig
+                .receiver()
+                .is_some_and(|r| r.reference.is_some() && r.mutability.is_some());
+            let signature = (|| {
+                let receiver = sig
+                    .receiver()
+                    .ok_or("an associated function has no receiver")?;
+                if receiver.reference.is_none() || receiver.colon_token.is_some() {
+                    return Err("the receiver is taken by value or by a typed `self`".to_owned());
+                }
+                if sig.asyncness.is_some() {
+                    return Err("an async method returns a future".to_owned());
+                }
+                if sig
+                    .generics
+                    .params
+                    .iter()
+                    .any(|p| !matches!(p, syn::GenericParam::Lifetime(_)))
+                {
+                    return Err("a generic method is not object-safe".to_owned());
+                }
+                if sig.generics.where_clause.as_ref().is_some_and(|w| {
+                    w.predicates
+                        .iter()
+                        .any(|p| quote!(#p).to_string().contains("Sized"))
+                }) {
+                    return Err("`where Self: Sized` is not callable on an object".to_owned());
+                }
+                let mut inputs = Vec::new();
+                for input in sig.inputs.iter().skip(1) {
+                    let syn::FnArg::Typed(input) = input else {
+                        return Err("unexpected receiver".to_owned());
+                    };
+                    if matches!(&*input.ty, Type::ImplTrait(_)) {
+                        return Err("an `impl Trait` argument is generic".to_owned());
+                    }
+                    inputs.push((*input.ty).clone());
+                }
+                let output = match &sig.output {
+                    syn::ReturnType::Default => syn::parse_quote!(()),
+                    syn::ReturnType::Type(_, ty) => (**ty).clone(),
+                };
+                Ok((inputs, output))
+            })();
+            Method {
+                name: sig.ident.clone(),
+                exclusive,
+                signature,
+            }
+        })
+        .collect()
+}
+
+/// The invocation body of method `name` of the listed trait at `path`, called on the trait
+/// object place `callee`, or the reason the method cannot cross. Argument and result types are
+/// resolved in the trait's own module.
+pub fn method_call(
+    rule: &Rule,
+    path: &str,
+    name: &str,
+    callee: TokenStream,
+) -> Result<TokenStream, String> {
+    let module = &rule.trait_decl(path).ok_or("not a listed trait")?.module;
+    let method = methods(rule, path)
+        .into_iter()
+        .find(|method| method.name == name)
+        .ok_or("no such method")?;
+    let (inputs, output) = method.signature?;
+    let ident = method.name;
+    body(
+        rule,
+        module,
+        None,
+        &inputs,
+        &output,
+        |lend| quote!((#callee).#ident(#(#lend),*)),
+    )
+}
+
+/// Why method `name` cannot cross, if it cannot (the table's callable for it is then absent).
+pub fn method_gap(rule: &Rule, path: &str, name: &str) -> Option<String> {
+    method_call(rule, path, name, quote!(callee)).err()
+}
+
+/// The callee-independent part of an invocation: decode, call, encode.
+fn body(
+    rule: &Rule,
+    module: &str,
+    owner: Option<&str>,
+    inputs: &[Type],
+    output: &Type,
+    call: impl FnOnce(&[TokenStream]) -> TokenStream,
+) -> Result<TokenStream, String> {
     let mut shapes = Vec::new();
     let mut lend = Vec::new();
     let mut owned_types = Vec::new();
     for (index, input) in inputs.iter().enumerate() {
         let (owned, by_reference) = argument(input)?;
         shapes.push(rule.shape(module, owner, &owned));
-        owned_types.push(owned);
+        owned_types.push(rule.qualify(module, &owned));
         let member = syn::Index::from(index);
         lend.push(if by_reference {
             quote!(&__arguments.#member)
@@ -116,17 +246,18 @@ pub fn invocation(
     }
     let args = native_value::codec(rule, &Shape::Tuple(shapes))
         .map_err(|reason| format!("argument tuple: {reason}"))?;
-    let result = native_value::codec(rule, &rule.shape(module, owner, &output))
+    let result = native_value::codec(rule, &rule.shape(module, owner, output))
         .map_err(|reason| format!("result `{}`: {reason}", quote!(#output)))?;
     let decode = args.decode;
     let encode = result.encode;
+    let call = call(&lend);
     Ok(quote! {
         let mut __reader = mod_api::wire::Reader::new(__bytes);
         let __arguments: (#(#owned_types,)*) = { let input = &mut __reader; #decode };
         if !__reader.rest().is_empty() {
             return Err(mod_api::wire::WireError::Trailing.into());
         }
-        let __result = (#callee)(#(#lend),*);
+        let __result = #call;
         let mut __writer = mod_api::wire::Writer::new();
         { let out = &mut __writer; let value = &__result; #encode }
         if let Some(error) = __writer.error() {
@@ -176,5 +307,58 @@ mod tests {
         assert!(gap("&mut dyn FnMut(UiResources, &std::path::Path)").contains("argument tuple"));
         assert!(gap("&dyn Fn(&str) -> Option<Json>").contains("result"));
         assert!(!is_callback(&syn::parse_str("&dyn EventLoopCtl").unwrap()));
+    }
+
+    #[test]
+    fn trait_methods_cross_or_name_their_gap() {
+        let entry = |path: &str, kind, signature: &str| crate::internals::Internal {
+            path: path.into(),
+            kind,
+            signature: signature.into(),
+            cfg: String::new(),
+            hash: String::new(),
+            shape_only: false,
+            opaque_reason: None,
+            refs: Default::default(),
+        };
+        let rule = Rule::new(&[
+            entry(
+                "horizon_client::ctl::Ctl",
+                "trait",
+                "trait Ctl { fn exit(&self); fn flow(&self, flow: Flow); fn name(&self) -> &str; \
+                 fn each<T>(&self, t: T); fn take(self); fn edit(&mut self, e: &mut u32); \
+                 fn wait(&self, at: std::time::Instant) -> std::time::Duration; }",
+            ),
+            entry(
+                "horizon_client::ctl::Flow",
+                "enum",
+                "pub enum Flow { Poll, Wait, Until(std::time::Instant) }",
+            ),
+        ]);
+        let gaps: Vec<_> = methods(&rule, "horizon_client::ctl::Ctl")
+            .iter()
+            .map(|m| method_gap(&rule, "horizon_client::ctl::Ctl", &m.name.to_string()))
+            .collect();
+        assert_eq!(gaps[0], None);
+        assert_eq!(gaps[1], None);
+        assert!(gaps[2].as_ref().unwrap().contains("result"));
+        assert!(gaps[3].as_ref().unwrap().contains("generic"));
+        assert!(gaps[4].as_ref().unwrap().contains("by value"));
+        assert!(gaps[5].as_ref().unwrap().contains("mutable reference"));
+        assert_eq!(gaps[6], None);
+        // The object's shape keeps the trait's identity, through every pointer.
+        let object =
+            |ty: &str| rule.shape("horizon_client::ctl", None, &syn::parse_str(ty).unwrap());
+        for ty in [
+            "&dyn Ctl",
+            "&mut dyn Ctl",
+            "Box<dyn Ctl>",
+            "&(dyn Ctl + Send)",
+        ] {
+            assert!(
+                format!("{:?}", object(ty)).contains("dyn horizon_client::ctl::Ctl"),
+                "{ty}"
+            );
+        }
     }
 }

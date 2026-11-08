@@ -9,6 +9,18 @@ use quote::quote;
 mod tests;
 use std::collections::BTreeMap;
 
+/// The listed trait a `dyn path` layout name is the table of.
+fn table<'a>(rule: &Rule, reason: &'a str) -> Option<&'a str> {
+    let path = reason.strip_prefix("dyn ")?;
+    rule.trait_decl(path).map(|_| path)
+}
+
+/// The trait and method a `dyn path::method` layout name is the callable of.
+fn method<'a>(rule: &Rule, reason: &'a str) -> Option<(&'a str, &'a str)> {
+    let (path, name) = reason.strip_prefix("dyn ")?.rsplit_once("::")?;
+    rule.trait_decl(path).map(|_| (path, name))
+}
+
 /// Finite metadata graph, with transparent references and no native engine values.
 #[derive(Default)]
 pub struct Graph {
@@ -141,6 +153,29 @@ impl Graph {
                     opaque = Some("malformed collection".into());
                 }
                 children.extend(args.iter().take(count).map(|p| self.add(rule, p)));
+            }
+            // A listed trait's object is a table with one leaf per method, in declaration
+            // order; a method that cannot cross is an opaque leaf with its reason.
+            Shape::Opaque(Some(reason)) if table(rule, reason).is_some() => {
+                let path = table(rule, reason).expect("checked");
+                for (ordinal, method) in crate::native_callable::methods(rule, path)
+                    .iter()
+                    .enumerate()
+                {
+                    fields.push(Field {
+                        case: None,
+                        ordinal: ordinal as u32,
+                        name: method.name.to_string(),
+                        target: self.add(
+                            rule,
+                            &Shape::Opaque(Some(format!("dyn {path}::{}", method.name))),
+                        ),
+                    });
+                }
+            }
+            Shape::Opaque(Some(reason)) if method(rule, reason).is_some() => {
+                let (path, name) = method(rule, reason).expect("checked");
+                opaque = crate::native_callable::method_gap(rule, path, name);
             }
             Shape::Opaque(reason) => {
                 opaque = Some(reason.clone().unwrap_or("opaque layout".into()))

@@ -169,6 +169,7 @@ pub const CROSSING_FOREIGN: &[(&str, Foreign)] = &[
     ("winit::keyboard::ModifiersState", Foreign::Bits),
     ("winit::event::ElementState", Foreign::Layout),
     ("winit::event::MouseButton", Foreign::Layout),
+    ("winit::event_loop::ControlFlow", Foreign::Layout),
 ];
 
 /// How the [`CROSSING_FOREIGN`] type at `path` is read, if it is one.
@@ -414,6 +415,12 @@ pub struct Field<'r> {
     pub ty: &'r Type,
 }
 
+/// A listed trait's declaration, and the module its signatures are written in.
+pub struct TraitDecl {
+    pub module: String,
+    pub item: syn::ItemTrait,
+}
+
 /// The rule over one game's internals.
 pub struct Rule {
     named: HashMap<String, Named>,
@@ -421,6 +428,8 @@ pub struct Rule {
     /// Import facts in each lexical module. Conflicting conditional imports stay unresolved.
     refs: HashMap<String, BTreeMap<String, Option<String>>>,
     memo: std::cell::RefCell<HashMap<String, Crossing>>,
+    /// Every non-generic listed trait, by path: the trait objects that cross as method tables.
+    traits: HashMap<String, TraitDecl>,
     /// Whether a named layout has a generated decoder, decided once per rule.
     pub(crate) decodable: std::cell::RefCell<HashMap<String, bool>>,
 }
@@ -437,7 +446,23 @@ impl Rule {
     /// The rule over `internals`: every struct and enum they list, under no `cfg`.
     pub fn new(internals: &[Internal]) -> Self {
         let mut named = HashMap::new();
+        let mut traits = HashMap::new();
         for internal in internals {
+            if internal.cfg.is_empty()
+                && internal.kind == "trait"
+                && let Ok(syn::Item::Trait(item)) = syn::parse_str::<syn::Item>(&internal.signature)
+                && item.generics.params.is_empty()
+            {
+                let path = bare(&internal.path);
+                let module = path.rsplit_once("::").map_or("", |(module, _)| module);
+                traits.insert(
+                    path.clone(),
+                    TraitDecl {
+                        module: module.to_owned(),
+                        item,
+                    },
+                );
+            }
             if !internal.cfg.is_empty() || !matches!(internal.kind, "struct" | "enum") {
                 continue;
             }
@@ -539,7 +564,67 @@ impl Rule {
                 .collect(),
             refs,
             memo: Default::default(),
+            traits,
             decodable: Default::default(),
+        }
+    }
+
+    /// `ty` with every path to a listed layout spelled out in full, so that it means the same
+    /// type in another module than the one it was written in.
+    pub fn qualify(&self, module: &str, ty: &Type) -> Type {
+        use syn::visit_mut::VisitMut;
+        struct Qualify<'a>(&'a Rule, &'a str);
+        impl VisitMut for Qualify<'_> {
+            fn visit_type_path_mut(&mut self, node: &mut syn::TypePath) {
+                syn::visit_mut::visit_type_path_mut(self, node);
+                if node.qself.is_none()
+                    && let Some(found) = self.0.resolve(self.1, &node.path)
+                    && self.0.named.contains_key(&found)
+                    && let Ok(full) = syn::parse_str::<syn::Path>(&found)
+                {
+                    node.path = full;
+                }
+            }
+        }
+        let mut ty = ty.clone();
+        Qualify(self, module).visit_type_mut(&mut ty);
+        ty
+    }
+
+    /// The listed trait at `path`.
+    pub fn trait_decl(&self, path: &str) -> Option<&TraitDecl> {
+        self.traits.get(path)
+    }
+
+    /// The listed trait a `dyn` object of `ty`, written in `module`, is an object of, through
+    /// references, parentheses and `Box`: `&dyn T`, `&mut dyn T`, `Box<dyn T>`, `&(dyn T + Send)`.
+    pub fn trait_object(&self, module: &str, ty: &Type) -> Option<String> {
+        match ty {
+            Type::Reference(r) => self.trait_object(module, &r.elem),
+            Type::Paren(p) => self.trait_object(module, &p.elem),
+            Type::Group(g) => self.trait_object(module, &g.elem),
+            Type::TraitObject(object) => object.bounds.iter().find_map(|bound| {
+                let syn::TypeParamBound::Trait(bound) = bound else {
+                    return None;
+                };
+                let found = self.resolve(module, &bound.path)?;
+                self.traits.contains_key(&found).then_some(found)
+            }),
+            Type::Path(p) if p.qself.is_none() => {
+                let last = p.path.segments.last()?;
+                let boxed = last.ident == "Box"
+                    && self.resolve(module, &p.path).is_none_or(|path| {
+                        matches!(path.as_str(), "std::boxed::Box" | "alloc::boxed::Box")
+                    });
+                let PathArguments::AngleBracketed(args) = &last.arguments else {
+                    return None;
+                };
+                match (boxed, args.args.first()) {
+                    (true, Some(GenericArgument::Type(inner))) => self.trait_object(module, inner),
+                    _ => None,
+                }
+            }
+            _ => None,
         }
     }
 
@@ -642,6 +727,10 @@ impl Rule {
             },
             Type::Slice(s) => Shape::Slice(Box::new(self.shape(module, this, &s.elem))),
             Type::Path(p) if p.qself.is_none() => self.path(module, this, &p.path),
+            // A listed trait's object keeps its identity: its table is that trait's methods.
+            Type::TraitObject(_) => self
+                .trait_object(module, ty)
+                .map_or(opaque, |path| Shape::Opaque(Some(format!("dyn {path}")))),
             _ => opaque,
         }
     }
@@ -689,6 +778,23 @@ impl Rule {
             .map(|s| s.ident.to_string())
             .collect::<Vec<_>>()
             .join("::");
+        // Instants and durations have a Wire codec (`native_value`) but no leaf shape: they
+        // are never walked. A foreign layout writes them without the import facts.
+        if matches!(name.as_str(), "Instant" | "Duration")
+            && args.is_empty()
+            && match resolved.as_deref() {
+                Some(path) => matches!(
+                    path,
+                    "std::time::Instant"
+                        | "std::time::Duration"
+                        | "web_time::Instant"
+                        | "web_time::Duration"
+                ),
+                None => module.starts_with("winit"),
+            }
+        {
+            return Shape::Opaque(Some(format!("std::time::{name}")));
+        }
         if self
             .refs
             .get(module)

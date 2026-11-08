@@ -157,7 +157,9 @@ impl horizon_mod_api_gen::native_schema::Exposure for OnlyB {
 fn entry(path: &str, signature: &str) -> horizon_mod_api_gen::internals::Internal {
     horizon_mod_api_gen::internals::Internal {
         path: path.into(),
-        kind: if signature.contains("enum ") {
+        kind: if signature.contains("trait ") {
+            "trait"
+        } else if signature.contains("enum ") {
             "enum"
         } else {
             "struct"
@@ -366,6 +368,15 @@ fn receiver_fixture(out_dir: &std::path::Path) {
                 entry(
                     "horizon_client::startup_menu::Action",
                     "pub enum Action { Quit, Options }",
+                ),
+                // The real catalog's trait and the shape of winit's `ControlFlow`.
+                entry(
+                    "horizon_client::startup_menu::EventLoopCtl",
+                    "trait EventLoopCtl { fn exit(&self); fn set_control_flow(&self, flow: ControlFlow); }",
+                ),
+                entry(
+                    "horizon_client::startup_menu::ControlFlow",
+                    "pub enum ControlFlow { Poll, Wait, WaitUntil(std::time::Instant) }",
                 ),
             ],
             module: "horizon_client::startup_menu",

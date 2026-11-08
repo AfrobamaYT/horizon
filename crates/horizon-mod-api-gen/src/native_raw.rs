@@ -253,19 +253,8 @@ fn frame(
         } else {
             None
         };
-        let node = if let Some(body) = callable {
-            // A callback argument crosses as its opaque typed header carrying a host-held
-            // callable that borrows this call's leased place; the lease ends with the call.
-            let resolved = rule.shape(module, owner, ty);
-            let key = if let Some((graph, _)) = runtime {
-                let id = graph.id(&resolved).ok_or("missing runtime schema")?;
-                quote!((__raw_plan).key(#id).unwrap_or(0))
-            } else {
-                let identity = native_schema::identity(rule, &resolved, &native_schema::All)?;
-                schema.push_str(&identity);
-                schema.push(';');
-                quote!(const { mod_points::snapshot::key(#identity) })
-            };
+        // A callable node borrows this call's leased place; the lease ends with the call.
+        let callable_node = |body: TokenStream, key: TokenStream| {
             quote!(mod_points::native_nodes::Callable(
                 || unsafe {
                     mod_points::callable::FunctionSource::at(
@@ -281,6 +270,63 @@ fn frame(
                 },
                 #key
             ))
+        };
+        let table = if runtime.is_some() && callable.is_none() {
+            rule.trait_object(module, ty)
+        } else {
+            None
+        };
+        let node = if let (Some(path), Some((graph, _))) = (table, runtime) {
+            // A trait object crosses as a table of its methods in declaration order, one
+            // callable per method that can cross (any method a native listener could call on
+            // the object it receives); a method that cannot is a typed header without value.
+            let id = graph
+                .id(&rule.shape(module, owner, ty))
+                .ok_or("missing runtime schema")?;
+            let shared = matches!(ty, Type::Reference(reference) if reference.mutability.is_none());
+            let methods = native_callable::methods(rule, &path);
+            let count = methods.len() as u64;
+            let mut arms = Vec::new();
+            for (ordinal, method) in methods.iter().enumerate() {
+                let name = method.name.to_string();
+                let leaf = graph
+                    .id(&crate::crossing::Shape::Opaque(Some(format!(
+                        "dyn {path}::{name}"
+                    ))))
+                    .ok_or("missing runtime schema")?;
+                let key = quote!((__raw_plan).key(#leaf).unwrap_or(0));
+                let call = if method.exclusive && shared {
+                    Err("needs `&mut self` on a shared reference".to_owned())
+                } else {
+                    native_callable::method_call(rule, &path, &name, quote!((*__roots.#member)))
+                };
+                let child = match call {
+                    Ok(body) => callable_node(body, key),
+                    Err(_) => quote!(mod_points::native_nodes::Opaque(#key)),
+                };
+                let (ordinal, field) = (ordinal as u64, ordinal as u32);
+                arms.push(quote!(#ordinal => __horizon_visit(mod_points::locators::Step::Field(#field), #field, &#child),));
+            }
+            quote!(mod_points::native_nodes::Record {
+                key: (__raw_plan).key(#id).unwrap_or(0),
+                count: #count,
+                visit: |__index, __horizon_visit: &mut mod_points::native_nodes::Visitor<'_>| match __index {
+                    #(#arms)*
+                    _ => Err(mod_api::RowError::Bounds),
+                },
+            })
+        } else if let Some(body) = callable {
+            let resolved = rule.shape(module, owner, ty);
+            let key = if let Some((graph, _)) = runtime {
+                let id = graph.id(&resolved).ok_or("missing runtime schema")?;
+                quote!((__raw_plan).key(#id).unwrap_or(0))
+            } else {
+                let identity = native_schema::identity(rule, &resolved, &native_schema::All)?;
+                schema.push_str(&identity);
+                schema.push(';');
+                quote!(const { mod_points::snapshot::key(#identity) })
+            };
+            callable_node(body, key)
         } else if let Some((graph, _)) = runtime {
             {}
             native_window::generate_runtime(

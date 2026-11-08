@@ -73,6 +73,28 @@ fn build(
     mode: Mode,
 ) -> Result<ValueCodec, String> {
     let pair = match shape {
+        // An instant crosses as the nanoseconds from the moment it is encoded to it (none if
+        // past), and is rebuilt from the moment it is decoded; a duration as seconds and nanos.
+        Shape::Opaque(Some(name)) if name == "std::time::Instant" => ValueCodec {
+            decode: quote!(
+                std::time::Instant::now() + std::time::Duration::from_nanos(input.take::<u64>()?)
+            ),
+            encode: quote!(out.put(&u64::try_from(value.saturating_duration_since(std::time::Instant::now()).as_nanos()).unwrap_or(u64::MAX));),
+        },
+        Shape::Opaque(Some(name)) if name == "std::time::Duration" => ValueCodec {
+            decode: quote!({
+                let secs = input.take::<u64>()?;
+                let nanos = input.take::<u32>()?;
+                if nanos >= 1_000_000_000 {
+                    return Err(mod_api::wire::WireError::Invalid("duration nanoseconds"));
+                }
+                std::time::Duration::new(secs, nanos)
+            }),
+            encode: quote!({
+                out.put(&value.as_secs());
+                out.put(&value.subsec_nanos());
+            }),
+        },
         Shape::Scalar(Scalar::Str) | Shape::Ref { .. } | Shape::Slice(_) | Shape::Opaque(_) => {
             return Err(format!("non-owned or opaque shape: {shape:?}"));
         }
