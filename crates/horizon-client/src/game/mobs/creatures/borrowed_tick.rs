@@ -384,27 +384,44 @@ impl Game<'_> {
                     } else {
                         super::super::tick_profile::start().map(|t| (t, mobs[i].kind.clone()))
                     };
-                    let progress = if resuming {
-                        resuming = false;
-                        horizon_client::mobs::ai::TickProgress::Complete(
-                            horizon_client::mobs::riders::resume_after_consumption(
+                    let run_tick = || {
+                        if resuming {
+                            resuming = false;
+                            horizon_client::mobs::ai::TickProgress::Complete(
+                                horizon_client::mobs::riders::resume_after_consumption(
+                                    &mut mobs,
+                                    i,
+                                    &w,
+                                    &mut level,
+                                    resume_was_on_fire,
+                                    &mut events,
+                                ),
+                            )
+                        } else {
+                            horizon_client::mobs::riders::tick_until_consumption(
                                 &mut mobs,
                                 i,
                                 &w,
                                 &mut level,
-                                resume_was_on_fire,
                                 &mut events,
-                            ),
-                        )
-                    } else {
-                        horizon_client::mobs::riders::tick_until_consumption(
-                            &mut mobs,
-                            i,
-                            &w,
-                            &mut level,
-                            &mut events,
-                        )
+                            )
+                        }
                     };
+                    let progress =
+                        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run_tick)) {
+                            Ok(progress) => progress,
+                            Err(payload) => {
+                                mobs[i].despawn = mod_api::NativeDespawn::default();
+                                if seen_guest.is_none() {
+                                    base.player = w.player;
+                                } else if let Some(k) = lent {
+                                    spare =
+                                        w.player.map(|v| std::mem::replace(&mut guests[k].1, v));
+                                }
+                                dispatch_panic = Some(payload);
+                                break;
+                            }
+                        };
                     let kept = match progress {
                         horizon_client::mobs::ai::TickProgress::Complete(kept) => kept,
                         horizon_client::mobs::ai::TickProgress::Consumption {

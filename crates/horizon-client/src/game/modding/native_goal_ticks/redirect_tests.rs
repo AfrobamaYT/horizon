@@ -72,6 +72,9 @@ fn redirect_to_another_guest_switches_view_and_tags_subsequent_events() {
                 .unwrap()
                 .clone();
             let mut actor = Mob::new(9001, kind, Vec3::ZERO, 0.0);
+            let mut other = Mob::new(9002, actor.kind.clone(), Vec3::ZERO, 0.0);
+            other.ai.target = Some(Who::Player);
+            game.lan.as_mut().unwrap().mob_players.insert(other.id, 12);
             let mut world = game.mob_world_base(&[]);
             world.goal_host = Some(game);
             world.player_selection = Some(&selection);
@@ -85,6 +88,10 @@ fn redirect_to_another_guest_switches_view_and_tags_subsequent_events() {
             );
             assert_eq!(world.selected_player_identity().unwrap().1, second_id);
             assert_eq!(world.selected_player().unwrap().position.x, 13.0);
+            assert_eq!(
+                game.mob_target(&other, &actor, &world),
+                Some(LivingRef::new(game.entity(first_id).unwrap()))
+            );
             let after = world.route_player_event(MobEvent::AttackPlayer(1.0, [0.0; 3]));
             assert!(
                 matches!(after, MobEvent::ForPlayer { conn: Some(13), event }
