@@ -37,8 +37,46 @@ pub fn generate(
         &rule.shape(module, owner, ty),
         quote!(*__np_value),
         exposure,
+        None,
         0,
     )?;
+    Ok(
+        quote!({ let __np_value = &mut (#place); let __np_tree = #tree; let __np_plan = &mut (#plan); #body; }),
+    )
+}
+/// Emit a sparse planner gated by the registration-time runtime exposure plan.
+pub fn generate_runtime(
+    rule: &Rule,
+    module: &str,
+    owner: Option<&str>,
+    ty: &Type,
+    place: TokenStream,
+    tree: TokenStream,
+    plan: TokenStream,
+    writable: bool,
+    graph: &crate::native_policy::Graph,
+    policy: TokenStream,
+) -> Result<TokenStream, String> {
+    if !writable {
+        return Ok(
+            quote!(if !(#tree).is_empty() { return Err(mod_api::wire::WireError::Invalid("readonly patch root")); }),
+        );
+    }
+    let body = emit(
+        rule,
+        &rule.shape(module, owner, ty),
+        quote!(*__np_value),
+        &crate::native_schema::All,
+        Some((graph, &policy)),
+        0,
+    )
+    .unwrap_or_else(|_| {
+        quote!(if !__np_tree.is_empty() {
+            return Err(mod_api::wire::WireError::Invalid(
+                "unsupported native patch root",
+            ));
+        })
+    });
     Ok(
         quote!({ let __np_value = &mut (#place); let __np_tree = #tree; let __np_plan = &mut (#plan); #body; }),
     )
@@ -48,6 +86,7 @@ fn emit(
     shape: &Shape,
     place: TokenStream,
     exposure: &dyn Exposure,
+    runtime: Option<(&crate::native_policy::Graph, &TokenStream)>,
     depth: usize,
 ) -> Result<TokenStream, String> {
     if depth > 128 {
@@ -58,6 +97,9 @@ fn emit(
             "invalid or readonly patch path"
         ))
     );
+    if matches!(shape, Shape::Ref { mutable: false, .. }) {
+        return Ok(quote!(if !__np_tree.is_empty() { #reject; }));
+    }
     let codec = if fully_exposed(rule, shape, exposure, 0) {
         native_value::codec(rule, shape)
     } else {
@@ -70,7 +112,19 @@ fn emit(
         }
         Err(_) => quote!(#reject;),
     };
-    let child = |s: &Shape, p| emit(rule, s, p, exposure, depth + 1);
+    let whole = if let Some((graph, policy)) = runtime {
+        if let Some(id) = graph.id(shape) {
+            quote!(if !(#policy).complete(#id) { #reject; } #whole)
+        } else {
+            quote!(#reject;)
+        }
+    } else {
+        whole
+    };
+    let child = |s: &Shape, p| {
+        emit(rule, s, p, exposure, runtime, depth + 1)
+            .or_else(|_| Ok::<_, String>(quote!(#reject;)))
+    };
     let descendants = match shape {
         Shape::Ref { mutable: true, to } | Shape::Wrapped(Wrapper::Box, to) => {
             let body = child(to, quote!(*(#place)))?;
@@ -131,6 +185,9 @@ fn emit(
             }
         }
         Shape::Named(path, _) => {
+            if runtime.is_some_and(|(graph, _)| graph.id(shape).is_none()) {
+                return Err("missing runtime patch layout".into());
+            }
             let named = rule.named(path).ok_or("missing patch layout")?;
             if named.guarded || named.opaque_reason.is_some() {
                 return Err(format!(
@@ -163,7 +220,12 @@ fn emit(
                         binds.push(quote!(#member: #bind));
                         let s = rule.shape(&named.module, None, f.ty);
                         let body = child(&s, quote!(*#bind))?;
-                        blocks.push(quote!(if let Some(__np_tree)=variant.child(mod_points::locators::Step::Field(#id)) { #body }));
+                        let ordinal = fields[..i]
+                            .iter()
+                            .filter(|f| f.case.is_some_and(|c| c.0 == tag))
+                            .count() as u32;
+                        let gate = runtime.and_then(|(graph, policy)| graph.id(shape).map(|layout| quote!(if !(#policy).field(#layout, Some(#tag), #ordinal) { #reject; })));
+                        blocks.push(quote!(if let Some(__np_tree)=variant.child(mod_points::locators::Step::Field(#id)) { #gate #body }));
                     }
                     arms.push(quote!(#ty::#name { #(#binds,)* .. } => {
                         for (step,variant) in __np_tree.children() {
@@ -173,7 +235,16 @@ fn emit(
                         if let Some(variant)=__np_tree.child(mod_points::locators::Step::Variant(#tag)) { #(#blocks)* }
                     }));
                 }
-                quote!(match &mut (#place) { #(#arms,)* _ => { #reject; } })
+                let preflight = runtime.and_then(|(graph, policy)| graph.id(shape).map(|layout| {
+                    let checks = fields.iter().enumerate().map(|(i, f)| {
+                        let tag = f.case.unwrap().0;
+                        let ordinal = fields[..i].iter().filter(|f| f.case.is_some_and(|c| c.0 == tag)).count() as u32;
+                        let id = i as u32;
+                        quote!(if variant.child(mod_points::locators::Step::Field(#id)).is_some() && !(#policy).field(#layout, Some(#tag), #ordinal) { #reject; })
+                    });
+                    quote!(for (_, variant) in __np_tree.children() { #(#checks)* })
+                }));
+                quote!(#preflight match &mut (#place) { #(#arms,)* _ => { #reject; } })
             } else {
                 let mut blocks = Vec::new();
                 let mut ids = Vec::new();
@@ -186,7 +257,12 @@ fn emit(
                     let member = &f.member;
                     let s = rule.shape(&named.module, Some(path), f.ty);
                     let body = child(&s, quote!((#place).#member))?;
-                    blocks.push(quote!(if let Some(__np_tree)=__np_tree.child(mod_points::locators::Step::Field(#id)) { #body }));
+                    let gate = runtime.and_then(|(graph, policy)| {
+                        graph.id(shape).map(
+                            |layout| quote!(if !(#policy).field(#layout, None, #id) { #reject; }),
+                        )
+                    });
+                    blocks.push(quote!(if let Some(__np_tree)=__np_tree.child(mod_points::locators::Step::Field(#id)) { #gate #body }));
                 }
                 quote!(for (step,_) in __np_tree.children() { if ![#(mod_points::locators::Step::Field(#ids)),*].contains(&step) { #reject; } } #(#blocks)*)
             }
