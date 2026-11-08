@@ -798,3 +798,41 @@ Scope: the twenty misc-chunk hooks below, from `chunk_unwatch` to `entity_change
 [paper-PlayerPickBlockEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/PlayerPickBlockEvent.html
 [paper-PlayerCustomClickEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/PlayerCustomClickEvent.html
 [paper-EntityTeleportEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/EntityTeleportEvent.html
+
+## Event counterparts: entity lifecycle and interaction (#1015)
+
+Paper API 26.3 (paper-api `26.3.build.244-stable`), public Javadoc only; Horizon hooks are cited by function name, never by line.
+Scope: the 20 entity hooks below. A key is added only where moment, side, information and result all agree; everything else is Partial or Gap.
+
+| Horizon hook | Paper event / status | Evidence and porting boundary |
+|---|---|---|
+| `entity_constructing` | **Gap:** none | No dossier candidate covers entity construction while its holder can still be given attachments; nothing on the server-only Paper side exposes the kind and holder at that point. No key. |
+| `entity_inside` | **Partial:** [`EntityInsideBlockEvent`][paper-EntityInsideBlockEvent] | Same server-side subject (an entity inside a reacting block), with the block and entity available; but the event is documented for entering the hitbox while the hook fires once per entity and block per move, it is cancellable where the hook is listen-only, and it lacks the `precise` flag. No key. |
+| `entity_interact_specific` | **Partial:** [`PlayerInteractAtEntityEvent`][paper-PlayerInteractAtEntityEvent] | Same server-side right-click-on-entity moment, with the entity, player, hand and clicked position available; the held stack is accessible through the player. Paper cancellation prevents the interaction, but does not document the hook's successful claim that swings the hand and ends the click. No key. |
+| `entity_mob_griefing` | **Gap:** none | No dossier candidate answers the vanilla mob-griefing permission question for the different actions the hook gates; per-action events cannot replace the shared yes/no answer the hook returns. No key. |
+| `entity_place` | **Partial:** [`BlockPlaceEvent`][paper-BlockPlaceEvent] | Matches a server-side player placing a block, with block against, placed block, item and cancellation; its [`BlockMultiPlaceEvent`][paper-BlockMultiPlaceEvent] subclass also describes multi-block player placements. Paper is player-only here, while the hook also covers mob placers (enderman, snow golem), and Paper's Javadoc does not promise the hook's before-write moment. No key. |
+| `entity_size` | **Gap:** none | No dossier candidate reports a recalculated size, and no Paper event exposes width, height and eye height as values a mod can edit. No key. |
+| `entity_struck_by_lightning` | **Partial:** [`EntityZapEvent`][paper-EntityZapEvent] | Server-side lightning striking an entity, exposing both the struck entity and bolt and allowing cancellation; however, this is an entity-transformation event with a replacement entity, not the hook's general pre-hit permission for every struck entity. No key. |
+| `explosion_knockback` | **Partial:** [`EntityKnockbackEvent`][paper-EntityKnockbackEvent] | Server-side knockback about to be applied, with the entity and a settable vector; its documented `Cause.EXPLOSION` selects explosion knockback. It lacks the hook's explosion center and affected block list, and adds cancellation to the hook's vector override. No key. |
+| `explosion_start` | **Partial:** [`ExplosionPrimeEvent`][paper-ExplosionPrimeEvent] | Fires server-side when an entity decides to explode and is cancellable, overlapping the hook's pre-blast moment; but it is entity-only, so it does not cover all explosions. Both expose radius and fire, but Paper makes them settable while the hook only permits cancellation, and Paper lacks the hook's block interaction and damage type. No key. |
+| `farmland_trample` | **Partial:** [`PlayerInteractEvent`][paper-PlayerInteractEvent] | `Action.PHYSICAL` is the documented trampling path, server-side and cancellable; but the event is generic across physical interactions and player-only, and it lacks the fall `distance`, while the hook fires for mobs and players on landing. No key. |
+| `finalize_spawn` | **Gap:** none (nearest [`PreCreatureSpawnEvent`][paper-PreCreatureSpawnEvent]) | This cancellable server event exposes type, location and reason for limited natural and spawner attempts, even ones that may fail later; its Javadoc does not place it at mob finalization. It supplies neither the hook's unspawned mob nor difficulty and group overrides. No key. |
+| `fluid_flow` | **Gap:** none (nearest [`FluidLevelChangeEvent`][paper-FluidLevelChangeEvent]) | That event reports a block's fluid level changing and lets you set the new fluid data; it exposes no flow vector for an entity to edit, which is what `FlowingFluid.getFlow` computes. No key. |
+| `fluid_place_block` | **Partial:** [`BlockFormEvent`][paper-BlockFormEvent] | Its documented cases include obsidian/cobblestone forming on contact with water, overlapping server-side fluid-caused block placement; cancellation prevents formation and the new block state is available through the inherited API. It also covers unrelated formation and exposes no source `liquid_pos`, so it cannot represent the hook's full information and scope. No key. |
+| `game_rule_changed` | **Partial:** [`WorldGameRuleChangeEvent`][paper-WorldGameRuleChangeEvent] | Same subject and side, exposing the rule, the new value and a command sender; but the event is per-world and cancellable with a settable value, so it runs before the change is applied, while the hook is a listen-only server-wide notification that the rule was set. No key. |
+| `game_shutting_down` | **Gap:** none | No dossier candidate covers the end of the process; the hook fires after the client or dedicated server has stopped, a lifecycle moment no listed event describes. No key. |
+| `get_enchantment_level` | **Gap:** none | No dossier candidate fires on an enchantment-level read; nothing exposes a mutable level map for gameplay effects while leaving the stack's own component untouched. No key. |
+| `grindstone_place` | **Partial:** [`PrepareGrindstoneEvent`][paper-PrepareGrindstoneEvent] | Fires server-side when inputs are put in for grinding, exposing the inventory and an inherited `getResult`/`setResult` API, so the output can be replaced or cleared. It is non-cancellable and has no experience override, unlike the hook's `cancel` and `xp`. No key. |
+| `grindstone_take` | **Gap:** none (nearest [`PrepareGrindstoneEvent`][paper-PrepareGrindstoneEvent]) | It fires when an item is put in, not when the result is taken; no listed event covers the take or exposes the experience and input-remainder values. No key. |
+| `ingredient_test` | **Gap:** none | No dossier candidate runs inside recipe matching for a custom ingredient's predicate; the hook answers per stack test, which no listed event exposes. No key. |
+| `is_pathfindable` | **Gap:** none | No dossier candidate answers whether a block state is pathfindable per `PathComputationType`; no listed event exposes that per-state boolean. No key. |
+
+[paper-EntityInsideBlockEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/entity/EntityInsideBlockEvent.html
+[paper-BlockPlaceEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/BlockPlaceEvent.html
+[paper-RaidSpawnWaveEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/raid/RaidSpawnWaveEvent.html
+[paper-WorldGameRuleChangeEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/world/WorldGameRuleChangeEvent.html
+[paper-PrepareGrindstoneEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/inventory/PrepareGrindstoneEvent.html
+[paper-PlayerInteractAtEntityEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerInteractAtEntityEvent.html
+[paper-BlockMultiPlaceEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/BlockMultiPlaceEvent.html
+[paper-EntityZapEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/entity/EntityZapEvent.html
+[paper-PreCreatureSpawnEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/entity/PreCreatureSpawnEvent.html
