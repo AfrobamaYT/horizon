@@ -47,9 +47,9 @@ pub mod tests {
         // Independent engine-index fixture: requested slots must not be confused
         // with the loaded registry indices, and unrequested effects are completed.
         let effects = [
-            ("minecraft:speed", 4),
-            ("key_test:later", 9),
-            ("minecraft:poison", 17),
+            ("minecraft:speed", 2),
+            ("key_test:later", 0),
+            ("minecraft:poison", 1),
         ];
         crate::registry_keys::resolve_effects(effects.iter().map(|(id, _)| *id), |id| {
             effects
@@ -69,7 +69,9 @@ pub mod tests {
             crate::registry_keys::effect_id(keys[1]),
             Some("key_test:later")
         );
-        assert_eq!(crate::registry_keys::effect_key(9), Some(keys[1]));
+        assert_eq!(crate::registry_keys::effect_key(0), Some(keys[1]));
+        assert_eq!(crate::registry_keys::effect_index(keys[0]), Some(2));
+        assert_eq!(crate::registry_keys::effect_index(keys[1]), Some(0));
         for (id, index) in effects {
             let key = crate::registry_keys::effect_key(index).unwrap();
             assert_eq!(crate::registry_keys::effect_id(key), Some(id));
