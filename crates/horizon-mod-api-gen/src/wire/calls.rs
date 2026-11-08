@@ -367,6 +367,15 @@ fn held_in(types: &Types<'_>, ty: &Ty, statics: bool) -> Option<String> {
         ty if has_static(ty) => return None,
         Ty::Named(def) if types.defs[*def].lifetimes != 0 => return None,
         Ty::Dyn(..) | Ty::Handler(..) => return None,
+        Ty::Tuple(items) => format!(
+            "({},)",
+            items
+                .iter()
+                .map(|t| held_in(types, t, statics))
+                .collect::<Option<Vec<_>>>()?
+                .join(", ")
+        ),
+        Ty::Array(item, n) => format!("[{}; {n}]", held_in(types, item, statics)?),
         Ty::Option(inner) => format!("Option<{}>", held_in(types, inner, statics)?),
         Ty::Result(ok, err) => format!(
             "Result<{}, {}>",
@@ -409,8 +418,10 @@ fn lend(types: &Types<'_>, ty: &Ty, local: &str) -> Option<Lent> {
             Ty::Str(Str::Borrowed) | Ty::List(_, List::Slice) => {
                 (held(types, ty)?, format!("{local}.as_deref()"), false)
             }
+            _ if has_ref_in_data(ty) => return None,
             _ => (held(types, ty)?, local.to_string(), true),
         },
+        _ if has_ref_in_data(ty) => return None,
         _ => (held(types, ty)?, local.to_string(), true),
     };
     Some(Lent {
@@ -436,6 +447,41 @@ fn borrowed(
         (String::new(), Vec::new(), String::new(), String::new());
     for (i, f) in fields.iter().enumerate() {
         let local = format!("{name}_{i}");
+        // A frame object the event carries is the guest's own, never sent.
+        if let Ty::Dyn(_, m) = &f.ty {
+            writeln!(read, "let mut {local} = Guest;").unwrap();
+            build.push(format!(
+                "{}: &{}{local}",
+                f.rust,
+                if *m { "mut " } else { "" }
+            ));
+            continue;
+        }
+        // An event inside the event is read the same way, down to its own fields.
+        let nested = match &f.ty {
+            Ty::Ref(t, m) => Some((&**t, *m, true)),
+            ty => Some((ty, false, false)),
+        };
+        if let Some((Ty::Named(d), m, by_ref)) = nested
+            && types.defs[*d].lifetimes != 0
+        {
+            let (inner, expr, send) = borrowed(types, *d, &local, m)?;
+            read.push_str(&inner);
+            let m = if m { "mut " } else { "" };
+            build.push(format!(
+                "{}: {}{expr}",
+                f.rust,
+                if by_ref {
+                    format!("&{m}")
+                } else {
+                    String::new()
+                }
+            ));
+            if mutable {
+                back_own.push_str(&send);
+            }
+            continue;
+        }
         let lent = lend(types, &f.ty, &local)?;
         let m = if matches!(f.ty, Ty::Ref(_, true))
             || matches!(&f.ty, Ty::Option(t) if matches!(**t, Ty::Ref(_, true)))
@@ -590,4 +636,8 @@ pub(super) fn dispatch(types: &Types<'_>, methods: &[Method]) -> (String, Vec<St
 
 pub(super) fn plain_pub(m: &Method) -> bool {
     plain(m)
+}
+
+pub(super) fn probe(types: &Types<'_>, ty: &Ty) -> Option<()> {
+    lend(types, ty, "x").map(|_| ())
 }
