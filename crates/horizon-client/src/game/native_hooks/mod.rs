@@ -77,7 +77,7 @@ use mod_api::{
 use mod_api::{
     AttachmentStore, BonemealSource, ChunkRef, FluidStack, LevelRef, LogicalSide,
     NativeActiveEffect, NativeBlockClick, NativeBlockUpdateFlags, NativeInteractionResult,
-    NativeItemClick, NativeTriState, NeighbourUpdate, TooltipElement, UsePhase,
+    NativeItemClick, NativeItemDrop, NativeTriState, NeighbourUpdate, TooltipElement, UsePhase,
 };
 use mod_api::{BlockKey, DebugEntry, DebugRenderer, EffectKey, GuiLayer};
 use mod_api::{

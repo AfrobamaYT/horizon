@@ -625,7 +625,7 @@ impl GameLevel<'_> {
         {
             let mut next_experience = experience;
             let mut next_canceled = canceled;
-            self.native_block_drops(mod_api::__private::BlockDropsCall {
+            self.native_block_drops(crate::game::native_hooks::fire::BlockDropsCall {
                 dimension: self.dimension,
                 pos,
                 state,
