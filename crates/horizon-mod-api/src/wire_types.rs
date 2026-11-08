@@ -241,6 +241,15 @@ impl Wire for crate::Identifier {
             .map_err(|_| WireError::Invalid("invalid identifier"))
     }
 }
+impl Wire for crate::LevelKey {
+    const MIN: usize = 4;
+    fn put(&self, out: &mut Writer) {
+        out.put_str(&String::from(self));
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        Self::try_from(input.take::<String>()?).map_err(|_| WireError::Invalid("invalid level key"))
+    }
+}
 impl Wire for crate::ConfigPath {
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {

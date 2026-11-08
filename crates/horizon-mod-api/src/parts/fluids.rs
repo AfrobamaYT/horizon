@@ -133,6 +133,7 @@ pub mod tests {
         }
         assert_eq!(FluidKey::from_slot(chocolate.0), Ok(chocolate));
         assert!(fluid_key("missing:fluid").is_none());
+        assert_eq!(fluid_id(FluidKey(u32::MAX)), None);
     }
     /// A mod's tank: the game's tank at its position, reached from every side but its top, and
     /// misanswering as `lie` says.

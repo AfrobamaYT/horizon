@@ -69,11 +69,11 @@ pub mod tests {
             crate::registry_keys::effect_id(keys[1]),
             Some("key_test:later")
         );
-        assert_eq!(crate::registry_keys::effect_key(0), Some(keys[1]));
+        assert_eq!(crate::registry_keys::effect_key_by_index(0), Some(keys[1]));
         assert_eq!(crate::registry_keys::effect_index(keys[0]), Some(2));
         assert_eq!(crate::registry_keys::effect_index(keys[1]), Some(0));
         for (id, index) in effects {
-            let key = crate::registry_keys::effect_key(index).unwrap();
+            let key = crate::registry_keys::effect_key_by_index(index).unwrap();
             assert_eq!(crate::registry_keys::effect_id(key), Some(id));
         }
 

@@ -207,6 +207,14 @@ impl BlockEntityDrawContext for GameBlockEntityDrawContext<'_, '_> {
             .game
             .native_draw_text(&mut *self.surface, &text, at, color, glowing, outline))
     }
+    fn terrain_model(
+        &mut self,
+        model: ModelRef,
+        options: TerrainModelOptions<'_>,
+    ) -> Result<(), TerrainModelError> {
+        self.game
+            .native_draw_terrain_model(&mut *self.surface, model, options)
+    }
     fn text_width(&self, text: &str) -> f32 {
         self.game.native_draw_text_width(&*self.surface, text)
     }

@@ -33,6 +33,18 @@ fn dimension_type(settings: &DimensionSettings) -> Value {
             "minecraft:gameplay/snow_golem_melts": settings.snow_golem_melts,
             "minecraft:gameplay/can_start_raid": settings.can_start_raid,
             "minecraft:gameplay/sky_light_level": settings.sky_light_level,
+            "minecraft:gameplay/bed_rule": {
+                "can_sleep": settings.bed_can_sleep,
+                "can_set_spawn": settings.bed_can_set_spawn,
+                "destroy_on_use": settings.bed_destroy_on_use,
+                "destroy_on_leave": settings.bed_destroy_on_leave,
+            },
+            "minecraft:gameplay/straw_bed_rule": {
+                "can_sleep": settings.straw_bed_can_sleep,
+                "can_set_spawn": settings.straw_bed_can_set_spawn,
+                "destroy_on_use": settings.straw_bed_destroy_on_use,
+                "destroy_on_leave": settings.straw_bed_destroy_on_leave,
+            },
         },
     });
     let attributes = json["attributes"]
@@ -46,6 +58,19 @@ fn dimension_type(settings: &DimensionSettings) -> Value {
     }
     if let Some(height) = settings.cloud_height {
         attributes.insert("minecraft:visual/cloud_height".into(), json!(height));
+    }
+    let (timelines, clock) = match settings.day_cycle.as_str() {
+        "nether" => (json!("#minecraft:in_nether"), None),
+        "end" => (json!("#minecraft:in_end"), Some("minecraft:the_end")),
+        "none" => (json!([]), None),
+        _ => (
+            json!("#minecraft:in_overworld"),
+            Some("minecraft:overworld"),
+        ),
+    };
+    json["timelines"] = timelines;
+    if let Some(clock) = clock {
+        json["default_clock"] = json!(clock);
     }
     json
 }
@@ -87,6 +112,7 @@ pub(in crate::game) fn installed_dimensions() -> Vec<ModDimension> {
                 id,
                 stem: stem.to_string(),
                 dimension_type: dimension_type(&settings).to_string(),
+                sea_level: settings.sea_level,
             }
         })
         .collect()
