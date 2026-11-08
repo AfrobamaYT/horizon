@@ -182,8 +182,7 @@ impl Game<'_> {
             if let Some(consumable) = &consumable {
                 for effect in &consumable.effects {
                     if let ConsumeEffect::TeleportRandomly(teleport) = effect {
-                        let consumed =
-                            consumed.get_or_init(|| consumed_snapshot(&decision.stack));
+                        let consumed = consumed.get_or_init(|| consumed_snapshot(&decision.stack));
                         let mut actor = FoxTeleporter {
                             game,
                             consumer,
@@ -482,9 +481,11 @@ impl TeleportConsumeWorld for Teleporter<'_, '_> {
             &mut cancel,
         );
         if self.0.dim != dimension
-            || self.0.player.as_ref().is_none_or(|p| {
-                p.position != from || p.health.dead_or_dying()
-            })
+            || self
+                .0
+                .player
+                .as_ref()
+                .is_none_or(|p| p.position != from || p.health.dead_or_dying())
             || self.0.sleeping.is_some()
             || self.0.riding.is_some()
             || self.0.native_acting_player() != Some(player)
@@ -702,8 +703,8 @@ impl TeleportConsumeWorld for FoxTeleporter<'_, '_> {
 #[cfg(test)]
 mod teleport_hook_tests {
     use super::*;
-    use crate::game::native_entity_refs::tests::with_game;
     use crate::game::api_values::test_snapshot;
+    use crate::game::native_entity_refs::tests::with_game;
     use horizon_client::motion::PlayerMotion;
     use mod_api::{Flow, Hooks, ItemConsumptionTeleportEvent, ModEntry, ServerHost};
     use std::sync::{
@@ -728,7 +729,12 @@ mod teleport_hook_tests {
             assert_eq!(event.consumed.damage(), 3);
             assert!(event.consumed.components().is_some());
             if self.1.load(Ordering::SeqCst) {
-                assert!(event.consumer.entity().teleport_to(host, [3.0, 70.0, 3.0], None));
+                assert!(
+                    event
+                        .consumer
+                        .entity()
+                        .teleport_to(host, [3.0, 70.0, 3.0], None)
+                );
                 return Flow::Continue;
             }
             Flow::Cancel
@@ -766,7 +772,10 @@ mod teleport_hook_tests {
                 let info = game.items().get(&consumed.item).unwrap().clone();
                 let consumable = consumed.consumable(Some(&info)).unwrap().clone();
                 game.finish_consuming(&info, &consumable, &consumed);
-                assert_eq!(heard.lock().unwrap().as_slice(), std::slice::from_ref(&snapshot));
+                assert_eq!(
+                    heard.lock().unwrap().as_slice(),
+                    std::slice::from_ref(&snapshot)
+                );
                 assert_eq!(
                     game.held().unwrap().count,
                     6,
@@ -821,8 +830,8 @@ mod teleport_hook_tests {
 #[cfg(test)]
 mod fox_consumption_hook_tests {
     use super::*;
-    use crate::game::native_entity_refs::tests::with_game;
     use crate::game::api_values::test_snapshot;
+    use crate::game::native_entity_refs::tests::with_game;
     use horizon_client::mobs::{Mob, fox};
     use mod_api::{Flow, Hand, Hooks, ItemConsumptionTeleportEvent, ModEntry, ServerHost};
     use std::sync::{
@@ -854,11 +863,16 @@ mod fox_consumption_hook_tests {
                     Flow::Continue
                 }
                 2 => {
-                    assert!(event.consumer.set_hand_item(
-                        host,
-                        Hand::Main,
-                        Some(test_snapshot(&ItemStack::new("minecraft:stone", 1)))
-                    ).unwrap());
+                    assert!(
+                        event
+                            .consumer
+                            .set_hand_item(
+                                host,
+                                Hand::Main,
+                                Some(test_snapshot(&ItemStack::new("minecraft:stone", 1)))
+                            )
+                            .unwrap()
+                    );
                     Flow::Continue
                 }
                 3 => {
@@ -888,11 +902,15 @@ mod fox_consumption_hook_tests {
                             assert_eq!(next.position(host), Some([11.5, 64.0, 8.5]));
                             let next_living = host.living(next).unwrap();
                             assert_eq!(next_living.hand_item(host, Hand::Main).unwrap().count(), 7);
-                            assert!(next_living.set_hand_item(
-                                host,
-                                Hand::Main,
-                                Some(test_snapshot(&ItemStack::new("minecraft:stone", 1)))
-                            ).unwrap());
+                            assert!(
+                                next_living
+                                    .set_hand_item(
+                                        host,
+                                        Hand::Main,
+                                        Some(test_snapshot(&ItemStack::new("minecraft:stone", 1)))
+                                    )
+                                    .unwrap()
+                            );
                             assert!(next.teleport_to(host, [12.5, 64.0, 8.5], None));
                             assert!(host.entity(202).unwrap().discard(host));
                             let spawned = host
@@ -987,7 +1005,10 @@ mod fox_consumption_hook_tests {
                     game.mobs.push(actor);
                     let applied = game.apply_fox_consumption(&decision);
                     assert_eq!(applied, action <= 1);
-                    assert_eq!(heard.lock().unwrap().last(), Some(&(id, test_snapshot(&stack))));
+                    assert_eq!(
+                        heard.lock().unwrap().last(),
+                        Some(&(id, test_snapshot(&stack)))
+                    );
                     let actor = game.mobs.iter_mut().find(|m| m.id == id && !m.removed);
                     match action {
                         0 => {
