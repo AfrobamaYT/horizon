@@ -5197,7 +5197,10 @@ impl Game<'_> {
                 LevelDimension::Overworld => self.res.environment(),
                 LevelDimension::Nether => self.res.nether_environment(),
                 LevelDimension::End => self.res.end_environment(),
-                LevelDimension::Custom(_) => self.res.environment(),
+                LevelDimension::Custom(key) => horizon_client::environment::Environment::for_level(
+                    key.id(),
+                    self.res.environment(),
+                ),
             },
             raining: rain > 0.2,
             thundering: thunder > 0.9,
