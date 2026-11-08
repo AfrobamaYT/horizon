@@ -29,72 +29,21 @@ pub(crate) struct Cache {
     _lease: Locked,
 }
 
-/// A held lock that is released before its file closes. A child process spawned at that moment
-/// (Cargo, git) holds a copy of the descriptor until its exec, and closing ours alone would leave
-/// the lock taken through that copy: the next lease or cleanup would read Busy.
-pub(crate) struct Locked {
-    file: File,
-    release: Release,
-}
+pub(crate) use horizon_mod_package::locks::{LockMode, Locked, Release};
 
-#[derive(Clone, Copy)]
-pub(crate) enum Release {
-    Unlock,
-    Close,
-}
-
-impl Locked {
-    pub(crate) fn close_only(mut self) -> Self {
-        self.release = Release::Close;
-        self
-    }
-
-    pub(crate) fn file(&self) -> &File {
-        &self.file
-    }
-}
-
-pub(crate) enum LockMode {
-    Shared,
-    Exclusive,
-}
-
-impl Drop for Locked {
-    fn drop(&mut self) {
-        if matches!(self.release, Release::Unlock) {
-            let _ = self.file.unlock();
-        }
-    }
-}
-
-pub(crate) fn linked(metadata: &Metadata) -> bool {
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        // Includes junctions and other reparse points, not just symbolic links.
-        metadata.file_attributes() & 0x400 != 0
-    }
-    #[cfg(not(windows))]
-    {
-        metadata.file_type().is_symlink()
-    }
-}
-
+pub(crate) use horizon_mod_package::runtime_leases::linked;
 pub(crate) fn checked(path: &Path, directory: bool) -> Result<Option<Metadata>, Error> {
-    match fs::symlink_metadata(path) {
-        Ok(meta)
-            if linked(&meta)
-                || (if directory {
-                    !meta.is_dir()
-                } else {
-                    !meta.is_file()
-                }) =>
-        {
-            Err(Error::Unsafe(path.to_owned()))
+    horizon_mod_package::runtime_leases::checked(path, directory).map_err(Into::into)
+}
+impl From<horizon_mod_package::runtime_leases::Error> for Error {
+    fn from(error: horizon_mod_package::runtime_leases::Error) -> Self {
+        use horizon_mod_package::runtime_leases::Error as Shared;
+        match error {
+            Shared::Busy => Self::Busy,
+            Shared::UnsupportedFilesystem => Self::UnsupportedFilesystem,
+            Shared::Unsafe(path) => Self::Unsafe(path),
+            Shared::Io(error) => Self::Io(error),
         }
-        Ok(meta) => Ok(Some(meta)),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error.into()),
     }
 }
 
@@ -110,17 +59,9 @@ fn lock(path: &Path) -> Result<Locked, Error> {
 }
 
 pub(crate) fn locked(file: File, mode: LockMode) -> Result<Locked, Error> {
-    match mode {
-        LockMode::Shared => file.try_lock_shared(),
-        LockMode::Exclusive => file.try_lock(),
-    }
-    .map_err(|error| match error {
+    horizon_mod_package::locks::locked(file, mode).map_err(|error| match error {
         fs::TryLockError::WouldBlock => Error::Busy,
         fs::TryLockError::Error(error) => Error::Io(error),
-    })?;
-    Ok(Locked {
-        file,
-        release: Release::Unlock,
     })
 }
 

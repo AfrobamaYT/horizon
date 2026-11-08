@@ -31,13 +31,16 @@ flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs", 
 tar = { version = "0.4", default-features = false, optional = true }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"], optional = true }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_Storage_FileSystem"], optional = true }
 
 [features]
 runtime-process = ["dep:cap-std", "dep:cap-fs-ext", "dep:os_pipe", "dep:libc", "dep:windows-sys"]
 prebuilt = ["dep:cap-std", "dep:flate2", "dep:tar"]
 # The mod registry's index (docs/modding/src/reference/registry-index.md): the launcher, the registry server and its CI.
 index = ["dep:minisign-verify", "dep:horizon-shader-api"]
+
+[dev-dependencies]
+tempfile = "3.27.0"
 
 [lints]
 workspace = true

@@ -1,5 +1,5 @@
 //! Only known local lock implementations are accepted; remote/process-owned emulations are not.
-use crate::native_cache::Error;
+use super::Error;
 use cap_std::fs::Dir;
 
 pub(super) fn local(directory: &Dir) -> Result<(), Error> {
