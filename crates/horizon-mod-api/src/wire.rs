@@ -547,6 +547,7 @@ pub trait Wire: Sized {
         self.put(out);
     }
     fn take(input: &mut Reader<'_>) -> Result<Self, WireError>;
+    // hidden: internal Vec encoding specialization, not a mod-facing API
     /// Internal list codec; primitive numbers override this with a contiguous codec.
     #[doc(hidden)]
     fn put_list(items: &[Self], out: &mut Writer) {
@@ -555,6 +556,7 @@ pub trait Wire: Sized {
             item.put(out);
         }
     }
+    // hidden: internal list encoding preserves per-item resource ownership transfer
     #[doc(hidden)]
     fn put_owned_list(items: Vec<Self>, out: &mut Writer) {
         out.put_len(items.len());
@@ -562,6 +564,7 @@ pub trait Wire: Sized {
             out.put_owned(item);
         }
     }
+    // hidden: internal Vec decoding specialization for contiguous numeric payloads
     #[doc(hidden)]
     fn take_list(input: &mut Reader<'_>) -> Result<Vec<Self>, WireError> {
         input.list_with(usize::MAX, Self::take)
