@@ -621,7 +621,7 @@ impl GameLevel<'_> {
         } = dropped;
         if self.native_authoritative
             && mod_api::__private::listened(mod_api::HookId::BlockDrops)
-            && let (Ok(tool), Ok(mut snapshots)) = (tool.try_into_api(), items.try_into_api())
+            && let Ok(mut snapshots) = items.try_into_api()
         {
             let mut next_experience = experience;
             let mut next_canceled = canceled;
@@ -630,7 +630,7 @@ impl GameLevel<'_> {
                 pos,
                 state,
                 breaker,
-                tool: tool.as_ref(),
+                tool,
                 drops: &mut snapshots,
                 experience: &mut next_experience,
                 cancel: &mut next_canceled,
