@@ -722,9 +722,13 @@ pub fn mob_to_nbt(
     } else {
         map.remove(&horizon_core::nbt::JavaString::from("TicksFrozen"));
     }
+    // LivingEntity.addAdditionalSaveData: `putBoolean(FallFlying, isFallFlying())`.
+    map.insert(
+        "FallFlying".into(),
+        Tag::Byte(i8::from(m.extra.fall_flying)),
+    );
     for (key, value) in [
         ("AbsorptionAmount", Tag::Float(0)),
-        ("FallFlying", Tag::Byte(0)),
         ("current_impulse_context_reset_grace_time", Tag::Int(0)),
         (
             "Brain",
@@ -1117,13 +1121,15 @@ pub fn mob_to_nbt(
             );
             let mut memories: Vec<(&str, Tag)> = Vec::new();
             if m.extra.tame {
-                memories.push((
-                    "minecraft:liked_player",
-                    Tag::compound([(
-                        "value",
-                        Tag::IntArray(m.extra.owner.unwrap_or([0, 0, 0, 1]).to_vec()),
-                    )]),
-                ));
+                // `MemorySlot.visit`: the time to live only when it can expire.
+                let mut liked = vec![(
+                    "value",
+                    Tag::IntArray(m.extra.owner.unwrap_or([0, 0, 0, 1]).to_vec()),
+                )];
+                if let Some(ttl) = m.extra.allay.as_ref().and_then(|st| st.liked_player_ttl) {
+                    liked.push(("ttl", Tag::Long(ttl)));
+                }
+                memories.push(("minecraft:liked_player", Tag::compound(liked)));
             }
             // GlobalPos.CODEC, and the cooldown while it runs.
             if let Some(liked) = m.extra.allay.as_ref().and_then(|st| st.noteblock) {
@@ -1152,6 +1158,11 @@ pub fn mob_to_nbt(
             );
         }
         "minecraft:camel" | "minecraft:camel_husk" => {
+            // AbstractHorse.addAdditionalSaveData, including Camel.isTamed.
+            map.insert("Tame".into(), Tag::Byte(i8::from(m.extra.tame)));
+            map.insert("Temper".into(), Tag::Int(m.extra.equine_temper));
+            map.insert("Bred".into(), Tag::Byte(i8::from(m.extra.bred)));
+            map.insert("EatingHaystack".into(), Tag::Byte(i8::from(m.extra.flag)));
             // LastPoseTick: the pose change time, negative while sitting. The
             // game time is not known here; the world's save overwrites it
             // with the real one (`camel::synced_pose_tick`).
@@ -1185,6 +1196,7 @@ pub fn mob_to_nbt(
                 map.insert("listener".into(), st.vibration.to_nbt());
                 map.insert("anger".into(), warden_anger_to_nbt(&st.anger, &mut uuid_of));
             }
+            write_warden_owned_memories(m, map);
         }
         // Armadillo.addAdditionalSaveData: the time left to the next scute, and
         // the state it is in, which is always written (`idle` when it is not
@@ -1615,6 +1627,8 @@ pub fn mob_from_nbt(
     let mut m = Mob::new(id, kind, position, yaw);
     m.velocity = motion(tag);
     m.head_pitch = pitch;
+    // LivingEntity.readAdditionalSaveData: `setSharedFlag(7, getBooleanOr(FallFlying, false))`.
+    m.extra.fall_flying = flag(tag, "FallFlying");
     read_mob_home(&mut m, tag);
     m.on_ground = flag(tag, "OnGround");
     m.fall_distance = float(tag.get("fall_distance")).unwrap_or(0.0);
@@ -1930,15 +1944,8 @@ pub fn mob_from_nbt(
     }
     if crate::mobs::equine::is_equine(m.species()) {
         m.extra.tame = flag(tag, "Tame");
-        if matches!(
-            m.species(),
-            crate::mobs::Species::Camel | crate::mobs::Species::CamelHusk
-        ) {
-            // The existing camel path is outside the seven saved writers.
-            m.extra.variant3 = number(tag.get("Temper")).unwrap_or(0).clamp(0, 100) as u8;
-        } else {
-            m.extra.equine_temper = tag.get("Temper").and_then(int_value).unwrap_or(0);
-        }
+        // AbstractHorse.readAdditionalSaveData: the saved Int as is, camels included.
+        m.extra.equine_temper = tag.get("Temper").and_then(int_value).unwrap_or(0);
         m.extra.bred = flag(tag, "Bred");
         m.extra.owner = crate::save::uuid_from_tag(tag.get("Owner"));
         let v = number(tag.get("Variant")).unwrap_or(0) as i32;
@@ -2118,6 +2125,20 @@ pub fn mob_from_nbt(
         m.extra.owner = liked
             .and_then(|l| l.get("value"))
             .and_then(|v| crate::save::uuid_from_tag(Some(v)));
+        // `Brain.readAdditionalSaveData`: a memory saved with a time to live
+        // (`Codec.LONG`, read from any integer tag). `Long.MAX_VALUE` is
+        // `MemorySlot.NEVER_EXPIRE`: that memory never expires.
+        if let Some(st) = m.extra.allay.as_mut() {
+            st.liked_player_ttl = liked
+                .and_then(|l| match l.get("ttl")? {
+                    Tag::Byte(v) => Some(i64::from(*v)),
+                    Tag::Short(v) => Some(i64::from(*v)),
+                    Tag::Int(v) => Some(i64::from(*v)),
+                    Tag::Long(v) => Some(*v),
+                    _ => None,
+                })
+                .filter(|&ttl| ttl != i64::MAX);
+        }
         let memory = |key: &str| {
             tag.get("Brain")
                 .and_then(|b| b.get("memories"))
@@ -2149,6 +2170,9 @@ pub fn mob_from_nbt(
         crate::mobs::frog::set_pregnant(&mut m, true);
     }
     if crate::mobs::camel::is_camel(m.species()) {
+        // AbstractHorse.readAdditionalSaveData: the eating state (Temper is
+        // read with the other equines' above).
+        m.extra.flag = flag(tag, "EatingHaystack");
         // The tick is a game time: `camel::finish_load` puts it on the mob's
         // clock once the world's time is known.
         let tick = match tag.get("LastPoseTick") {
@@ -2226,6 +2250,7 @@ pub fn mob_from_nbt(
                     crate::mobs::warden::AngerManagement::from_saved(warden_anger_from_nbt(anger));
             }
         }
+        restore_warden_owned_memories(&mut m, tag);
     }
     // Armadillo.readAdditionalSaveData: the saved state through `switchToState`
     // (`onSyncedDataUpdated` then restarts the time in that state), idle for a
@@ -5667,6 +5692,60 @@ fn write_guarded_piglin_anger(m: &Mob, map: &mut Compound) {
     }
 }
 
+/// `Brain`'s two measured Warden Unit memories, using actual existing slots.
+fn write_warden_owned_memories(m: &Mob, map: &mut Compound) {
+    let brain = map
+        .entry("Brain".into())
+        .or_insert_with(|| Tag::Compound(Compound::new()));
+    let Tag::Compound(brain) = brain else { return };
+    let memories = brain
+        .entry("memories".into())
+        .or_insert_with(|| Tag::Compound(Compound::new()));
+    let Tag::Compound(memories) = memories else {
+        return;
+    };
+    let mem = m.extra.warden.as_ref().map(|st| &st.brain.mem);
+    for (key, slot) in [
+        ("minecraft:is_emerging", mem.map(|mem| &mem.is_emerging)),
+        ("minecraft:dig_cooldown", mem.map(|mem| &mem.dig_cooldown)),
+    ] {
+        if let Some(slot) = slot.filter(|slot| slot.present()) {
+            let mut entry = Tag::compound([("value", Tag::Compound(Compound::new()))]);
+            if slot.ttl() != i64::MAX {
+                put(&mut entry, "ttl", Tag::Long(slot.ttl()));
+            }
+            memories.insert(key.into(), entry);
+        } else {
+            memories.remove(&key.into());
+        }
+    }
+}
+/// `Brain` / `ExpirableValue`: admitted Unit values with absent or Long TTL.
+fn restore_warden_owned_memories(m: &mut Mob, tag: &Tag) {
+    let memories = tag.get("Brain").and_then(|brain| brain.get("memories"));
+    let Some(st) = m.extra.warden.as_mut() else {
+        return;
+    };
+    for (key, slot) in [
+        ("minecraft:is_emerging", &mut st.brain.mem.is_emerging),
+        ("minecraft:dig_cooldown", &mut st.brain.mem.dig_cooldown),
+    ] {
+        let Some(entry) = memories.and_then(|memories| memories.get(key)) else {
+            // Fresh Java read/load: absent entries do not retain finalize's slot.
+            slot.clear();
+            continue;
+        };
+        if !matches!(entry.get("value"), Some(Tag::Compound(value)) if value.is_empty()) {
+            continue; // Unmeasured malformed shapes retain existing initialization.
+        }
+        match entry.get("ttl") {
+            None => slot.set(()),
+            Some(Tag::Long(ttl)) => slot.set_ttl((), *ttl),
+            _ => {} // No new numeric/malformed TTL policy.
+        }
+    }
+}
+
 fn write_axolotl_memories(m: &Mob, map: &mut Compound) {
     let brain = map
         .entry("Brain".into())
@@ -5845,6 +5924,15 @@ pub fn bucket_data(m: &Mob) -> Tag {
     if let Some(ttl) = crate::mobs::animal_brain::hunting_cooldown(m) {
         put(&mut data, "HuntingCooldown", Tag::Long(ttl));
     }
+    // SulfurCube.saveToBucketTag: after the default data, its age.
+    if m.species() == crate::mobs::Species::SulfurCube {
+        put(&mut data, "age", Tag::Int(m.extra.age));
+        put(
+            &mut data,
+            "age_locked",
+            Tag::Byte(i8::from(m.extra.age_locked)),
+        );
+    }
     data
 }
 pub fn bucket_components(m: &Mob) -> crate::item_data::StackData {
@@ -5854,6 +5942,15 @@ pub fn bucket_components(m: &Mob) -> crate::item_data::StackData {
         .as_ref()
         .map(|name| Tag::String(name.as_str().into()));
     data.set_other("minecraft:bucket_entity_data", Some(bucket_data(m)));
+    // SulfurCube.saveToBucketTag: the body block, when it has one.
+    if m.species() == crate::mobs::Species::SulfurCube
+        && let Some(body) = m.extra.body_id()
+    {
+        data.set_other(
+            "minecraft:sulfur_cube_content",
+            Some(Tag::compound([("id", string(body))])),
+        );
+    }
     if m.species() == crate::mobs::Species::Axolotl {
         let variant = AXOLOTL_VARIANTS
             .get(usize::from(m.extra.variant))
@@ -8205,6 +8302,7 @@ mod held_item_name_tests {
             loot: &loot,
             damage: None,
             player: None,
+            player_killed: false,
             luck: 0.0,
             vehicle: None,
             mob_drops: true,
@@ -9361,6 +9459,195 @@ mod carrier_inventory_tests {
                 .get("Inventory")
                 .is_none()
         );
+    }
+}
+
+#[cfg(test)]
+mod camel_inherited_saved_tests {
+    use super::*;
+    use crate::mobs::Species;
+
+    fn types(species: Species, id: &str) -> HashMap<String, Arc<MobType>> {
+        let mut kind = crate::mobs::sensor_scan_tests::kind();
+        let ty = Arc::make_mut(&mut kind);
+        ty.id = id.into();
+        ty.species = species;
+        HashMap::from([(id.to_owned(), kind)])
+    }
+
+    fn input(id: &str, temper: Option<i32>) -> Tag {
+        let mut raw = Tag::compound([
+            ("id", string(id)),
+            ("Pos", doubles(&[1.5, 200.0, 4.5])),
+            ("Health", Tag::Float(10.0_f32.to_bits())),
+            ("NoAI", Tag::Byte(1)),
+            ("NoGravity", Tag::Byte(1)),
+            ("Silent", Tag::Byte(1)),
+            ("Invulnerable", Tag::Byte(1)),
+            ("LastPoseTick", Tag::Long(1)),
+            ("CustomName", string("kept")),
+            ("Tags", Tag::List(vec![string("kept")])),
+            ("audit:kept", Tag::Int(17)),
+        ]);
+        if let Some(temper) = temper {
+            put(&mut raw, "Tame", Tag::Byte(0));
+            put(&mut raw, "Temper", Tag::Int(temper));
+            put(&mut raw, "Bred", Tag::Byte(1));
+            put(&mut raw, "EatingHaystack", Tag::Byte(1));
+        }
+        raw
+    }
+
+    #[test]
+    fn camel_inherited_fields_decode_and_save_without_raw_or_with_stale_raw() {
+        for (species, id) in [
+            (Species::Camel, "minecraft:camel"),
+            (Species::CamelHusk, "minecraft:camel_husk"),
+        ] {
+            let types = types(species, id);
+            for temper in [None, Some(0), Some(50), Some(-1), Some(256), Some(i32::MAX)] {
+                let raw = input(id, temper);
+                let mob = mob_from_nbt(&raw, &types, 92, None).unwrap();
+                assert!(
+                    mob.extra.tame,
+                    "Camel.isTamed remains true even with Tame:0b"
+                );
+                assert_eq!(mob.extra.bred, temper.is_some());
+                assert_eq!(
+                    mob.extra.flag,
+                    temper.is_some(),
+                    "actual loaded eating state"
+                );
+                assert!(mob.no_ai && mob.no_gravity && mob.silent && mob.invulnerable_flag);
+                assert!(!mob.extra.camel_sitting && !mob.extra.flag2);
+                assert_eq!(mob.extra.pose_change_tick, 1);
+                let mut stale = raw.clone();
+                for (field, value) in [
+                    ("Tame", Tag::Byte(0)),
+                    ("Temper", Tag::Long(9999)),
+                    ("Bred", Tag::Byte(i8::from(temper.is_none()))),
+                    ("EatingHaystack", Tag::Byte(i8::from(temper.is_none()))),
+                ] {
+                    put(&mut stale, field, value);
+                }
+                for source in [None, Some(&raw), Some(&stale)] {
+                    let saved = mob_to_nbt(&mob, [92, 0, 0, 1], source, None, |_| None);
+                    assert_eq!(saved.get("Tame"), Some(&Tag::Byte(1)), "{id}, {temper:?}");
+                    assert_eq!(saved.get("Temper"), Some(&Tag::Int(temper.unwrap_or(0))));
+                    for field in ["Bred", "EatingHaystack"] {
+                        assert_eq!(
+                            saved.get(field),
+                            Some(&Tag::Byte(i8::from(temper.is_some())))
+                        );
+                    }
+                    for field in ["NoAI", "NoGravity", "Silent", "Invulnerable"] {
+                        assert_eq!(saved.get(field), Some(&Tag::Byte(1)));
+                    }
+                    assert_eq!(saved.get("UUID"), Some(&Tag::IntArray(vec![92, 0, 0, 1])));
+                    if source.is_some() {
+                        for field in ["CustomName", "Tags", "audit:kept"] {
+                            assert_eq!(saved.get(field), raw.get(field));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn camel_signed_state_and_mutations_override_contradictory_raw() {
+        for (species, id) in [
+            (Species::Camel, "minecraft:camel"),
+            (Species::CamelHusk, "minecraft:camel_husk"),
+        ] {
+            let types = types(species, id);
+            for (tag, value) in [
+                (Tag::Int(-1), -1),
+                (Tag::Int(256), 256),
+                (Tag::Int(i32::MAX), i32::MAX),
+                (Tag::Float((-1.5_f32).to_bits()), -2),
+                (Tag::Long(4_294_967_297), 1),
+                (string("bad"), 0),
+            ] {
+                let mut raw = input(id, Some(50));
+                put(&mut raw, "Temper", tag);
+                let mob = mob_from_nbt(&raw, &types, 92, None).unwrap();
+                assert_eq!(mob.extra.equine_temper, value, "actual signed model state");
+                assert!(mob.extra.tame && mob.extra.bred && mob.extra.flag);
+                assert_eq!(
+                    mob_to_nbt(&mob, [92, 0, 0, 1], None, None, |_| None).get("Temper"),
+                    Some(&Tag::Int(value))
+                );
+            }
+            let raw = input(id, Some(50));
+            let mut mob = mob_from_nbt(&raw, &types, 92, None).unwrap();
+            crate::mobs::camel::finish_load(&mut mob, 1024);
+            let unchanged = (
+                mob.id,
+                mob.position,
+                mob.velocity,
+                mob.health,
+                mob.extra.variant3,
+                mob.extra.pose_change_tick,
+                mob.extra.egg_time,
+                mob.extra.camel_sitting,
+                mob.extra.flag2,
+            );
+            mob.extra.equine_temper = -77;
+            mob.extra.bred = false;
+            mob.extra.flag = false;
+            for source in [None, Some(&raw)] {
+                let saved = mob_to_nbt(&mob, [92, 0, 0, 1], source, None, |_| None);
+                assert_eq!(saved.get("Temper"), Some(&Tag::Int(-77)));
+                assert_eq!(saved.get("Tame"), Some(&Tag::Byte(1)));
+                assert_eq!(saved.get("Bred"), Some(&Tag::Byte(0)));
+                assert_eq!(saved.get("EatingHaystack"), Some(&Tag::Byte(0)));
+            }
+            assert_eq!(
+                (
+                    mob.id,
+                    mob.position,
+                    mob.velocity,
+                    mob.health,
+                    mob.extra.variant3,
+                    mob.extra.pose_change_tick,
+                    mob.extra.egg_time,
+                    mob.extra.camel_sitting,
+                    mob.extra.flag2
+                ),
+                unchanged
+            );
+        }
+    }
+
+    #[test]
+    fn camel_saved_carry_leaves_the_seven_equine_paths_unchanged() {
+        for (species, id) in [
+            (Species::Horse, "minecraft:horse"),
+            (Species::Donkey, "minecraft:donkey"),
+            (Species::Mule, "minecraft:mule"),
+            (Species::SkeletonHorse, "minecraft:skeleton_horse"),
+            (Species::ZombieHorse, "minecraft:zombie_horse"),
+            (Species::Llama, "minecraft:llama"),
+            (Species::TraderLlama, "minecraft:trader_llama"),
+        ] {
+            let mut raw = input(id, Some(12));
+            put(&mut raw, "Tame", Tag::Byte(1));
+            let mob = mob_from_nbt(&raw, &types(species, id), 92, None).unwrap();
+            assert_eq!(mob.extra.equine_temper, 12);
+            assert!(!mob.extra.flag, "the other species' load path is unchanged");
+            for source in [None, Some(&raw)] {
+                let saved = mob_to_nbt(&mob, [92, 0, 0, 1], source, None, |_| None);
+                assert_eq!(saved.get("Temper"), Some(&Tag::Int(12)));
+                assert_eq!(saved.get("Tame"), Some(&Tag::Byte(1)));
+                assert_eq!(saved.get("Bred"), Some(&Tag::Byte(1)));
+                // Preserve the existing raw/default behavior outside Camel;
+                // this control does not claim the other species' eating codec.
+                assert_eq!(
+                    saved.get("EatingHaystack"),
+                    Some(&Tag::Byte(i8::from(source.is_some())))
+                );
+            }
+        }
     }
 }
 

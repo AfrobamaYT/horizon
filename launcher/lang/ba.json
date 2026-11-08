@@ -1205,5 +1205,6 @@
   "Can use the prebuilt game if one exists for your Horizon and it serves every enabled mod.": "Can use the prebuilt game if one exists for your Horizon and it serves every enabled mod.",
   "Native mods aren't sandboxed: they run with full access to your computer, like any program. Install only mods whose authors you trust. To play with one, build the game on the Mods page; a build may download Rust and other build tools.": "Native mods aren't sandboxed: they run with full access to your computer, like any program. Install only mods whose authors you trust. To play with one, build the game on the Mods page; a build may download Rust and other build tools.",
   "Native builds may download Rust and other build tools. Source builds compile the game on this computer.": "Native builds may download Rust and other build tools. Source builds compile the game on this computer.",
-  "{build} built and selected for its instance.": "{build} built and selected for its instance."
+  "{build} built and selected for its instance.": "{build} built and selected for its instance.",
+  "Found on this computer": "Был компьютерҙа табылды"
 }

@@ -41,13 +41,16 @@ mod creative_mining_probe;
 mod creative_search_fixture;
 mod cushion_placement_probe;
 mod emitter_particles_probe;
+mod enchant_durability_fixture;
 mod enchanting_fixture;
 mod entity_anim_fixture;
 mod entity_components_probe;
 mod entity_death_loot_fixture;
 mod entity_particles_probe;
 mod entity_sound_packet_fixture;
+mod environment_attribute_modifier_fixture;
 mod environment_fixture;
+mod falling_block_fixture;
 mod finalize_spawn_fixture;
 mod fire_starter_sound_probe;
 mod firework_tooltip_fixture;
@@ -154,11 +157,14 @@ probes! {
     conversion_tags_fixture,
     creative_search_fixture,
     emitter_particles_probe,
+    enchant_durability_fixture,
     enchanting_fixture,
+    falling_block_fixture,
     entity_anim_fixture,
     entity_components_probe,
     entity_death_loot_fixture,
     entity_particles_probe,
+    environment_attribute_modifier_fixture,
     environment_fixture,
     finalize_spawn_fixture,
     fire_starter_sound_probe,

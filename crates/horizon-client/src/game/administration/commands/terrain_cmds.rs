@@ -1317,3 +1317,122 @@ mod loot_position_tests {
         assert_eq!(game.world.game_time, time);
     }
 }
+
+#[cfg(test)]
+mod loot_kill_target_tests {
+    use super::*;
+    use crate::game::{Audio, Options, Progress, Settings, load_resources};
+    use horizon_client::{chunk::Chunk, containers::BlockEntity};
+    use std::sync::Arc;
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
+    fn loot_kill_uses_actual_sheep_state_without_killing_the_target() {
+        let root = std::path::PathBuf::from(
+            std::env::var_os("HORIZON_TEST_RESOURCES").expect("prepared resources required"),
+        );
+        let settings = Settings::default();
+        let loaded = load_resources(
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.game_dir = Some(
+            std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap()).join("h036-game"),
+        );
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
+            None,
+        )
+        .unwrap();
+        game.build_registries();
+        game.set_allow_commands(true);
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        game.block_ticks
+            .add_empty_chunk(ChunkPos::new(0, 0))
+            .unwrap();
+        assert!(game.run_command("forceload add 0 0"));
+        assert!(game.run_command("fill 0 199 0 15 199 15 stone"));
+        let clock = game.world.game_time;
+        let mut differences = Vec::new();
+        for (n, color, sheared, wool) in [
+            (1, 0, true, "minecraft:white_wool"),
+            (2, 14, true, "minecraft:red_wool"),
+            (3, 0, false, "minecraft:white_wool"),
+            (4, 14, false, "minecraft:red_wool"),
+        ] {
+            let uuid = format!("00000024-0000-0000-0000-{n:012x}");
+            assert!(game.run_command(&format!(
+                "summon sheep 4.5 200 4.5 {{UUID:[I;36,0,0,{n}],Health:8f,NoAI:1b,NoGravity:1b,Age:0,Color:{color}b,Sheared:{}b,Motion:[0d,0d,0d]}}", i32::from(sheared)
+            )));
+            let mob = game
+                .mobs
+                .iter()
+                .find(|m| game.persist.uuid_of(m.id) == Some([36, 0, 0, n]))
+                .unwrap();
+            assert_eq!(mob.kind.id, "minecraft:sheep");
+            assert_eq!(mob.health, 8.0);
+            assert!(mob.no_ai && mob.no_gravity);
+            assert_eq!(mob.extra.color, color);
+            assert_eq!(mob.extra.sheared, sheared);
+            let before = (mob.id, mob.position, mob.velocity, mob.health);
+            let x = 2 + n * 3;
+            assert!(game.run_command(&format!(
+                "setblock {x} 200 8 chest[facing=north,type=single,waterlogged=false] strict"
+            )));
+            let Some(BlockEntity::Chest(initial)) = game.world.block_entities.get(&(x, 200, 8))
+            else {
+                panic!("real chest required")
+            };
+            assert!(initial.iter().all(Option::is_none));
+            assert!(game.run_command(&format!("loot insert {x} 200 8 kill {uuid}")));
+            let Some(BlockEntity::Chest(items)) = game.world.block_entities.get(&(x, 200, 8))
+            else {
+                panic!("real output chest required")
+            };
+            let output: Vec<_> = items.iter().flatten().collect();
+            assert!(
+                output
+                    .iter()
+                    .any(|s| s.item.as_ref() == "minecraft:mutton" && (1..=2).contains(&s.count)),
+                "nonempty meat proves the command actually rolled"
+            );
+            let actual: u32 = output
+                .iter()
+                .filter(|s| s.item.as_ref() == wool)
+                .map(|s| s.count)
+                .sum();
+            if actual != u32::from(!sheared) {
+                differences.push((n, sheared, wool, actual));
+            }
+            let mob = game.mobs.iter().find(|m| m.id == before.0).unwrap();
+            assert_eq!((mob.id, mob.position, mob.velocity, mob.health), before);
+            assert_eq!(game.persist.uuid_of(mob.id), Some([36, 0, 0, n]));
+            assert_eq!((mob.extra.color, mob.extra.sheared), (color, sheared));
+        }
+        assert_eq!(game.world.game_time, clock);
+        assert!(
+            differences.is_empty(),
+            "actual command wool-state differences: {differences:?}"
+        );
+    }
+}

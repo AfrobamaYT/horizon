@@ -83,6 +83,7 @@ def install_datapack_fixtures(world, predicates, functions, jar, advancements=No
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--prepare', action='store_true')
+    parser.add_argument('--function-admission-fixture', action='store_true', help='compile initial Java functions at its actual GAMEMASTER permission, matching reload and native')
     parser.add_argument('--raid-village-fixture', action='store_true', help='match the existing development command trees in the isolated Java/native fixture processes')
     parser.add_argument('--raid-release-command-diagnostic', action='store_true', help='retain the unmatched native release-tree admission prerequisite diagnostic')
     parser.add_argument('--advancement-loot-inline-parser-diagnostic', action='store_true',
@@ -150,6 +151,9 @@ def main():
     parser.add_argument("--macro-source-type-fixture", action="store_true")
     parser.add_argument("--stand-fall-fixture", action="store_true")
     parser.add_argument('--orb-uuid-fixture', action='store_true')
+    parser.add_argument('--mob-absorption-fixture', action='store_true', help='a mob\'s Absorption effect once the absorption is used up')
+    parser.add_argument('--mob-absorption-infinite-fixture', action='store_true', help='infinite Absorption used up, kept, and beside another infinite effect')
+    parser.add_argument('--mob-absorption-raw-diagnostic', action='store_true', help='add each mob\'s whole entity data')
     parser.add_argument("--mob-pickup-save-fixture", action="store_true")
     parser.add_argument('--merchant-crafted-fixture', action='store_true')
     parser.add_argument('--mob-name-presentation-diagnostic', action='store_true',
@@ -341,6 +345,12 @@ def main():
     if args.selector_bounds_fixture:
         from selector_bounds_corpus import selector_bounds
         groups = [("setup", corpus_module.group_setup()), ("selector entity bounds", selector_bounds())]
+    if args.mob_absorption_fixture:
+        from mob_absorption_corpus import mob_absorption
+        groups = [('setup', corpus_module.group_setup()), ('mob depleted absorption', mob_absorption(args.mob_absorption_raw_diagnostic))]
+    if args.mob_absorption_infinite_fixture:
+        from mob_absorption_corpus import mob_absorption_infinite
+        groups = [('setup', corpus_module.group_setup()), ('mob infinite absorption', mob_absorption_infinite())]
     if args.boat_leash_view_fixture:
         from boat_leash_view_corpus import cases as boat_leash_views
         groups = [('setup', corpus_module.group_setup()),
@@ -401,6 +411,8 @@ def main():
         direct_input = build / 'orb-water-inputs.json'
         direct_input.write_text(json.dumps(arithmetic_inputs()), encoding='utf-8')
         java_options = ['-Dhorizon.orbWaterArithmetic=' + str(direct_input)]
+    if args.function_admission_fixture:
+        java_options.append('-Dhorizon.functionAdmissionFixture=true')
     run(['java', '-Xmx3G', '-Duser.timezone=UTC', *(['-Dhorizon.loadedFixture=true'] if args.loaded_fixture else []), *java_options, '-cp', os.pathsep.join([str(classes), str(jars['server']), dependency_path]),
          'dev.horizonlab.parity.VanillaCommandExecOracle', vanilla_dir / 'universe', script_path, build / 'vanilla.jsonl', SEED], 'java', cwd=vanilla_dir)
 
