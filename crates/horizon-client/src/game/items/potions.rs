@@ -1127,20 +1127,22 @@ impl Game<'_> {
                         food,
                     );
                     let registry = &self.motion.health.damage;
-                    actions.extend(changes.into_iter().filter_map(|change| match change {
-                        EffectTickChange::Heal(amount) => Some(EffectAction::Heal(amount)),
-                        // An unregistered damage type hurts nothing.
-                        EffectTickChange::Hurt(source, amount) => {
-                            NamedDamage::registered(registry, &source)
-                                .map(|damage| EffectAction::Hurt(damage.name, amount))
+                    actions.extend(changes.into_iter().filter_map(|change| {
+                        match change {
+                            EffectTickChange::Heal(amount) => Some(EffectAction::Heal(amount)),
+                            // An unregistered damage type hurts nothing.
+                            EffectTickChange::Hurt(source, amount) => {
+                                NamedDamage::registered(registry, &source)
+                                    .map(|damage| EffectAction::Hurt(damage.name, amount))
+                            }
+                            EffectTickChange::AddExhaustion(amount) => {
+                                Some(EffectAction::Exhaust(amount))
+                            }
+                            EffectTickChange::Eat(nutrition, saturation) => {
+                                Some(EffectAction::Eat(nutrition, saturation))
+                            }
+                            _ => unreachable!("EffectTickChange: unhandled variant"),
                         }
-                        EffectTickChange::AddExhaustion(amount) => {
-                            Some(EffectAction::Exhaust(amount))
-                        }
-                        EffectTickChange::Eat(nutrition, saturation) => {
-                            Some(EffectAction::Eat(nutrition, saturation))
-                        }
-                        _ => unreachable!("EffectTickChange: unhandled variant"),
                     }));
                     if keep {
                         OmenTick::Continue

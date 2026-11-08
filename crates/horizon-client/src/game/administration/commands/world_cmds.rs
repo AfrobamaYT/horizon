@@ -170,7 +170,9 @@ impl Game<'_> {
             "wind_charge" => DamageKind::WindCharge,
             "wither" => DamageKind::Wither,
             "generic" => DamageKind::Generic,
-            _ => NamedDamage::registered(catalog, ty).map_or(DamageKind::Generic, DamageKind::Named),
+            _ => {
+                NamedDamage::registered(catalog, ty).map_or(DamageKind::Generic, DamageKind::Named)
+            }
         }
     }
     /// `DamageCommand.damage`: apply its source and report an accepted hit.
@@ -348,14 +350,12 @@ impl Game<'_> {
                     from.map(|[x, y, z]| horizon_core::geometry::Vec3::new(x, y, z)),
                 ),
             ),
-            Target::Crystal(id) => {
-                self.command_damage_crystal(
-                    id,
-                    ty,
-                    Self::damage_kind(&self.motion.health.damage, ty),
-                    cause.or(by),
-                )
-            }
+            Target::Crystal(id) => self.command_damage_crystal(
+                id,
+                ty,
+                Self::damage_kind(&self.motion.health.damage, ty),
+                cause.or(by),
+            ),
             _ => false,
         }
     }
