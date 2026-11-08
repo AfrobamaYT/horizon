@@ -1199,7 +1199,7 @@ impl Game<'_> {
     }
     /// A consumable's effect of a mod's own kind: the item's `on_consume_effects`
     /// entry is of a type in a namespace of its own, and the loader kept it
-    /// for this call. The kind and the JSON the file wrote are here; the acting
+    /// for this call. The kind and the definition payload as a borrowed `Tag` are here; the acting
     /// player is the one consuming, and the game's own effects,
     /// sounds, teleports and drops are open. An unclaimed kind does
     /// nothing.
