@@ -376,6 +376,10 @@ fn borrowed_view_reply_is_byte_identical_to_owned_snapshot() {
     assert!(owned.error().is_none());
     assert!(borrowed.error().is_none());
     assert_eq!(borrowed.bytes(), owned.bytes());
+    let mut reply = Writer::new();
+    mod_api::ModBlockEntityView::new(&mut entity).__wire_put_snapshot(&mut reply);
+    assert!(reply.error().is_none());
+    assert_eq!(reply.bytes(), owned.bytes());
 }
 #[test]
 fn wire_loopback_readonly_private_projection() {
