@@ -2150,6 +2150,8 @@ dependencies = [
  "sha2",
  "tar",
  "toml",
+ "wasmparser 0.261.0",
+ "wat",
  "zip",
 ]
 
@@ -2194,8 +2196,12 @@ dependencies = [
 name = "horizon-mod-wasm"
 version = "0.1.0"
 dependencies = [
+ "horizon-core",
+ "horizon-mod-api",
+ "horizon-mod-api-gen",
  "horizon-mod-package",
  "log",
+ "serde_json",
  "wasmparser 0.261.0",
  "wasmtime",
  "wat",

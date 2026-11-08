@@ -1,0 +1,542 @@
+//! Host code. Runtime contract (on WasmMod and WasmHandler):
+//! `fn call<R>(&self, class: CallClass, frame: Frame, id: u32, handler: Option<Id>,
+//! encode: impl FnOnce(&mut Writer), decode: impl FnOnce(&mut Reader<'_>) -> Result<R, WireError>) -> Option<R>`.
+//! `None` means refused/trapped; the runtime poisons the group before returning it.
+use super::{
+    Method,
+    calls::*,
+    ty::{Kind, Ty},
+};
+use heck::ToSnakeCase;
+use std::fmt::Write;
+
+fn snake(owner: &str) -> String {
+    owner.rsplit("::").next().unwrap().to_snake_case()
+}
+
+fn frame(surface: &mut super::Surface<'_>) -> Result<String, String> {
+    use crate::index::Found;
+    let types = &mut surface.types;
+    let api = types.index.module("mod_api", &[])?;
+    let mut supers = Vec::new();
+    for owner in super::IMPORTS {
+        let path = owner.split("::").map(str::to_string).collect::<Vec<_>>();
+        let Found::Item(id) = types.index.resolve_path(api, &path)? else {
+            return Err(format!("{owner} is not a trait"));
+        };
+        let syn::Item::Trait(item) = types.index.item(id) else {
+            return Err(format!("{owner} is not a trait"));
+        };
+        let parents = item
+            .supertraits
+            .iter()
+            .filter_map(|b| match b {
+                syn::TypeParamBound::Trait(t) => Some(t.path.segments.last()?.ident.to_string()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        supers.push((*owner, parents));
+    }
+    let mut fields = String::new();
+    let mut methods = String::new();
+    for owner in super::IMPORTS {
+        let name = snake(owner);
+        let path = trait_path(owner);
+        if let Some((_, from, expr)) = super::REACHED.iter().find(|(o, ..)| o == owner) {
+            let mutable = from.ends_with("_mut")
+                || (from.is_empty()
+                    && surface
+                        .methods
+                        .iter()
+                        .any(|m| m.owner == *owner && m.receiver == Some(true)));
+            let body = if from.is_empty() {
+                let mut body = expr.to_string();
+                for accessor in ["level_host", "host", "level_random_host_mut", "host_mut"] {
+                    body = body.replace(&format!("{accessor}()"), &format!("self.{accessor}()"));
+                }
+                body.replace("level_self.host", "level_host")
+                    .replace("level_random_self.host_mut", "level_random_host_mut")
+            } else {
+                format!("let h = self.{from}()?; {expr}")
+            };
+            let body = body.replace(
+                "h.backend().map(crate::BackendRef::open)",
+                "crate::backend_of(h)",
+            );
+            writeln!(methods, "pub unsafe fn {name}{suffix}(&self) -> Result<&'static {m}dyn {path}, ServeError> {{ {body} }}", suffix=if mutable {"_mut"} else {""}, m=if mutable {"mut "} else {""}).unwrap();
+            continue;
+        }
+        writeln!(
+            fields,
+            "{name}: Option<(*mut (dyn {path} + 'static), bool)>,"
+        )
+        .unwrap();
+        writeln!(methods, "pub fn set_{name}(&mut self, v: &(dyn {path} + '_)) {{ self.{name} = Some((unsafe {{ std::mem::transmute(v as *const (dyn {path} + '_)) }}, false)); }} pub fn set_{name}_mut(&mut self, v: &mut (dyn {path} + '_)) {{ self.{name} = Some((unsafe {{ std::mem::transmute(v as *mut (dyn {path} + '_)) }}, true)); }}").unwrap();
+        for mutable in [false, true] {
+            let mut choices = Vec::new();
+            for sub in super::IMPORTS {
+                if super::REACHED.iter().any(|(o, ..)| o == sub) {
+                    continue;
+                }
+                let mut stack = vec![sub.rsplit("::").next().unwrap().to_string()];
+                let mut serves = false;
+                while let Some(t) = stack.pop() {
+                    if t == owner.rsplit("::").next().unwrap() {
+                        serves = true;
+                        break;
+                    }
+                    if let Some((_, parents)) = supers
+                        .iter()
+                        .find(|(o, _)| o.rsplit("::").next() == Some(t.as_str()))
+                    {
+                        stack.extend(parents.iter().cloned());
+                    }
+                }
+                if serves {
+                    choices.push(format!(
+                        "self.{}{filter}.map(|(p, _)| unsafe {{ &{m}*p as &{m}dyn {path} }})",
+                        snake(sub),
+                        filter = if mutable { ".filter(|(_, m)| *m)" } else { "" },
+                        m = if mutable { "mut " } else { "" }
+                    ));
+                }
+            }
+            let expr = choices.join(".or_else(|| ");
+            let expr = format!("{expr}{}", ")".repeat(choices.len().saturating_sub(1)));
+            writeln!(methods, "pub unsafe fn {name}{suffix}(&self) -> Result<&'static {m}dyn {path}, ServeError> {{ {expr}.ok_or(ServeError::Missing(\"{name}\")) }}", suffix=if mutable {"_mut"} else {""}, m=if mutable {"mut "} else {""}).unwrap();
+        }
+    }
+    Ok(format!(
+        "#[derive(Default)] pub struct Frame {{ {fields} }}\n// SAFETY: pointers are used only by unsafe serve during the synchronous call that lent them.\nunsafe impl Send for Frame {{}}\nimpl Frame {{ {methods} }}"
+    ))
+}
+
+fn resource(ty: &Ty) -> bool {
+    match ty {
+        Ty::Handler(..) => true,
+        Ty::Option(t) => resource(t),
+        _ => false,
+    }
+}
+fn supported_resource(ty: &Ty) -> bool {
+    match ty {
+        Ty::Handler(name, _) => super::exports().contains(&name.as_str()),
+        Ty::Option(t) => supported_resource(t),
+        _ => false,
+    }
+}
+fn take_arg(types: &super::ty::Types<'_>, ty: &Ty) -> String {
+    match ty {
+        Ty::Handler(_, boxed) => format!(
+            "{{ let index = input.take()?; let module = unsafe {{ (&*cx).module.clone() }}.ok_or(ServeError::Missing(\"module\"))?; {}::new(crate::WasmHandler {{ index, module }}) as {} }}",
+            if *boxed { "Box" } else { "std::sync::Arc" },
+            rust_ty(types, ty, false)
+        ),
+        Ty::Option(t) if resource(t) => format!(
+            "if input.take::<bool>()? {{ Some({}) }} else {{ None }}",
+            take_arg(types, t)
+        ),
+        _ => "input.take()?".into(),
+    }
+}
+fn put_resource(ty: &Ty, expr: &str) -> String {
+    match ty {
+        Ty::Handler(name, boxed) => {
+            let path = trait_path(name);
+            let value = if *boxed {
+                format!("std::sync::Arc::<dyn {path}>::from({expr})")
+            } else {
+                expr.into()
+            };
+            format!(
+                "{{ let value: std::sync::Arc<dyn {path}> = {value}; let id = unsafe {{ (&mut *cx).held.insert_long(Box::new(OwnerThread::new(value))) }}; out.put(&id); }}"
+            )
+        }
+        Ty::Option(t) => format!(
+            "match {expr} {{ Some(value) => {{ out.put(&true); {} }}, None => out.put(&false) }}",
+            put_resource(t, "value")
+        ),
+        _ => unreachable!(),
+    }
+}
+fn put(ty: &Ty, expr: &str) -> String {
+    match ty {
+        Ty::Ref(..) => format!("w.put(&*{expr});"),
+        Ty::Str(super::ty::Str::Borrowed | super::ty::Str::Static)
+        | Ty::List(_, super::ty::List::Slice) => format!("w.put({expr});"),
+        Ty::Option(inner)
+            if matches!(
+                **inner,
+                Ty::Ref(..)
+                    | Ty::Str(super::ty::Str::Borrowed)
+                    | Ty::List(_, super::ty::List::Slice)
+            ) =>
+        {
+            format!("w.put_opt({expr}.as_deref());")
+        }
+        _ => format!("w.put(&{expr});"),
+    }
+}
+
+fn event_input(
+    types: &super::ty::Types<'_>,
+    def: usize,
+    expr: &str,
+    setup: &mut String,
+    put: &mut String,
+) {
+    let Kind::Record(fields) = &types.defs[def].kind else {
+        return;
+    };
+    for f in fields {
+        let path = format!("{expr}.{}", f.rust);
+        match &f.ty {
+            Ty::Dyn(name, m) => {
+                write!(
+                    setup,
+                    "frame.set_{}{}(&{}*{path});",
+                    snake(name),
+                    if *m { "_mut" } else { "" },
+                    if *m { "mut " } else { "" }
+                )
+                .unwrap();
+            }
+            ty => {
+                let inner = match ty {
+                    Ty::Ref(t, _) => &**t,
+                    t => t,
+                };
+                if let Ty::Named(d) = inner
+                    && types.defs[*d].lifetimes != 0
+                {
+                    event_input(types, *d, &path, setup, put);
+                } else {
+                    put.push_str(&self::put(ty, &path));
+                }
+            }
+        }
+    }
+}
+fn fallback(types: &super::ty::Types<'_>, m: &Method) -> &'static str {
+    match &m.ret {
+        Ty::Result(ok, _) if **ok == Ty::Unit => "Ok(())",
+        Ty::Result(..) => "Err(call_refused())",
+        Ty::Named(d) if types.defs[*d].rust.ends_with("::Flow") => "mod_api::Flow::Continue",
+        _ => "NoAnswer::no_answer()",
+    }
+}
+
+pub(super) fn generate(surface: &mut super::Surface<'_>) -> Result<String, String> {
+    let mut code = String::from(
+        "// @generated by horizon-mod-api-gen; do not edit.\nuse mod_api::wire::{Reader, Writer, WireError, Slots};\n#[derive(Debug)] pub enum ServeError { Decode(WireError), Missing(&'static str), Stale, WrongThread, Unsupported(u32) } impl From<WireError> for ServeError { fn from(e: WireError) -> Self { Self::Decode(e) } } impl std::fmt::Display for ServeError { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, \"{self:?}\") } } impl std::error::Error for ServeError {} fn missing(s: &'static str) -> ServeError { ServeError::Missing(s) }\n#[derive(Default)] pub struct Cx { pub frames: Vec<Frame>, pub held: Slots<Box<dyn std::any::Any + Send>>, pub module: Option<crate::WasmMod> } impl Cx { pub fn frame(&self) -> Result<&Frame, ServeError> { self.frames.last().ok_or(ServeError::Missing(\"frame\")) } }\n",
+    );
+    code.push_str("use crate::{NoAnswer, call_refused};\n");
+    code.push_str(&frame(surface)?);
+    code.push_str(include_str!("owner_thread.rs"));
+    let types = &surface.types;
+    code.push_str(
+        "pub fn export_id(owner: &str, name: &str) -> Option<u32> { match (owner,name) {\n",
+    );
+    for (id, m) in surface
+        .methods
+        .iter()
+        .filter(|m| super::exports().contains(&m.owner))
+        .enumerate()
+    {
+        writeln!(code, "({:?},{:?}) => Some({id}),", m.owner, m.name).unwrap();
+    }
+    code.push_str("_ => None } }\n");
+    code.push_str(
+        "pub fn import_id(owner: &str, name: &str) -> Option<u32> { match (owner,name) {\n",
+    );
+    for (id, m) in imports(&surface.methods).iter().enumerate() {
+        writeln!(code, "({:?},{:?}) => Some({id}),", m.owner, m.name).unwrap();
+    }
+    code.push_str("_ => None } }\n");
+    code.push_str("pub unsafe fn serve(id: u32, cx: *mut Cx, bytes: &[u8], out: &mut Writer) -> Result<(), ServeError> { let mut input = Reader::new(bytes); match id {\n");
+    let imports = imports(&surface.methods);
+    let mut import_gaps = Vec::new();
+    for (id, m) in imports
+        .iter()
+        .copied()
+        .chain(held_methods(&surface.methods))
+        .enumerate()
+    {
+        let is_held = id >= imports.len();
+        if (resource(&m.ret) && !supported_resource(&m.ret))
+            || (has_frame(&m.ret) && !resource(&m.ret))
+            || m.params
+                .iter()
+                .any(|(_, t)| !matches!(t, Ty::Dyn(..)) && has_frame(t) && !supported_resource(t))
+            || m.params.iter().any(|(_, t)| matches!(t, Ty::Ref(_, true)))
+            || m.params.iter().any(|(_, t)| {
+                lifetime_def(types, t)
+                    || has_ref_in_data(t)
+                    || (!matches!(t, Ty::Dyn(..)) && !resource(t) && held(types, t).is_none())
+            })
+        {
+            import_gaps.push(format!(
+                "{}{}::{}",
+                if is_held { "held-" } else { "" },
+                m.owner,
+                m.name
+            ));
+            continue;
+        }
+        let mut body = if is_held {
+            "let held_id: mod_api::wire::Id = input.take()?;".to_string()
+        } else {
+            String::new()
+        };
+        let mut args = Vec::new();
+        for (i, (_, ty)) in m.params.iter().enumerate() {
+            if let Ty::Dyn(name, mutable) = ty {
+                args.push(format!(
+                    "unsafe {{ (&*cx).frame()?.{}{}()? }}",
+                    snake(name),
+                    if *mutable { "_mut" } else { "" }
+                ));
+                continue;
+            }
+            writeln!(
+                body,
+                "let p{i}: {} = {};",
+                if resource(ty) {
+                    rust_ty(types, ty, false)
+                } else {
+                    held(types, ty).unwrap()
+                },
+                take_arg(types, ty)
+            )
+            .unwrap();
+            let arg = match ty {
+                Ty::List(inner, super::ty::List::Slice)
+                    if matches!(**inner, Ty::Str(super::ty::Str::Borrowed)) =>
+                {
+                    format!("&p{i}.iter().map(String::as_str).collect::<Vec<_>>()")
+                }
+                _ if resource(ty) => format!("p{i}"),
+                _ => lend(types, ty, &format!("p{i}")).unwrap().expr,
+            };
+            args.push(arg);
+        }
+        let answer = if matches!(&m.ret,Ty::Result(t,_) if matches!(&**t,Ty::Option(s) if matches!(**s,Ty::Str(super::ty::Str::Borrowed))))
+            || matches!(&m.ret, Ty::Option(t) if matches!(**t,Ty::Option(_)))
+        {
+            import_gaps.push(format!(
+                "{}{}::{}",
+                if is_held { "held-" } else { "" },
+                m.owner,
+                m.name
+            ));
+            continue;
+        } else if resource(&m.ret) {
+            put_resource(&m.ret, "answer")
+        } else if matches!(&m.ret,Ty::Option(t) if matches!(**t,Ty::Str(super::ty::Str::Borrowed | super::ty::Str::Static) | Ty::Ref(..) | Ty::List(_,super::ty::List::Slice)))
+        {
+            "out.put_opt(answer);".into()
+        } else {
+            "out.put(&answer);".into()
+        };
+        let receiver = if is_held {
+            format!(
+                "unsafe {{ (&*cx).held.get(held_id).map_err(|_| ServeError::Stale)?.downcast_ref::<OwnerThread<std::sync::Arc<dyn {}>>>().ok_or(ServeError::Stale)?.get()?.clone() }}",
+                trait_path(m.owner)
+            )
+        } else {
+            format!(
+                "unsafe {{ (&*cx).frame()?.{}{}()? }}",
+                snake(m.owner),
+                if m.receiver == Some(true) { "_mut" } else { "" }
+            )
+        };
+        // Keep decoded values on the selected method's stack, not in the dispatcher's
+        // shared frame: a native import may synchronously re-enter wasm.
+        writeln!(code, "{id} => {{ #[inline(never)] unsafe fn invoke(cx: *mut Cx, input: &mut Reader<'_>, out: &mut Writer) -> Result<(), ServeError> {{ {body} if !input.rest().is_empty() {{ return Err(ServeError::Decode(WireError::Tag(u32::MAX))); }} let receiver = {receiver}; let answer = receiver.{}({}); {answer} Ok(()) }} unsafe {{ invoke(cx, &mut input, out)?; }} }},",m.name,args.join(",")).unwrap();
+    }
+    code.push_str("_ => return Err(ServeError::Unsupported(id)) } Ok(()) }\n");
+    writeln!(
+        code,
+        "pub const UNSUPPORTED_IMPORTS: &[&str] = &{import_gaps:?};"
+    )
+    .unwrap();
+    let mut gaps = Vec::new();
+    for owner in super::exports() {
+        let receiver = if super::mod_receiver(owner).is_some() {
+            "WasmMod"
+        } else {
+            "WasmHandler"
+        };
+        let mut groups = vec![owner.to_string()];
+        for m in surface
+            .methods
+            .iter()
+            .chain(&surface.dropped)
+            .filter(|m| m.owner == *owner)
+        {
+            if let Some(via) = &m.via {
+                if !groups.contains(via) {
+                    groups.push(via.clone());
+                }
+            }
+        }
+        for group in groups {
+            writeln!(code, "impl {} for crate::{receiver} {{", trait_path(&group)).unwrap();
+            for (id, m) in surface
+                .methods
+                .iter()
+                .filter(|m| super::exports().contains(&m.owner))
+                .chain(
+                    surface
+                        .dropped
+                        .iter()
+                        .filter(|m| super::exports().contains(&m.owner)),
+                )
+                .enumerate()
+                .filter(|(_, m)| m.owner == *owner && m.via.as_deref().unwrap_or(m.owner) == group)
+            {
+                let sig = rust_sig(types, m);
+                if super::SUBSCRIBED
+                    .iter()
+                    .any(|(o, n)| *o == m.owner && *n == m.name)
+                {
+                    let body = if receiver == "WasmMod" {
+                        "self.subscribed".to_string()
+                    } else {
+                        format!("self.subscriptions({owner:?}, {id})")
+                    };
+                    writeln!(
+                        code,
+                        "fn {}(&self) -> &'static [Option<mod_api::HookId>] {{ {body} }}",
+                        m.name
+                    )
+                    .unwrap();
+                    continue;
+                }
+                if surface.dropped.iter().any(|d| std::ptr::eq(d, m)) || !dispatchable(types, m) {
+                    gaps.push(format!("{}::{}", m.owner, m.name));
+                    writeln!(code, "{sig} {{ {} }}", fallback(types, m)).unwrap();
+                    continue;
+                }
+                let (mut setup, mut put, mut take, mut apply) =
+                    (String::new(), String::new(), String::new(), String::new());
+                for (i, (_, ty)) in m.params.iter().enumerate() {
+                    match ty {
+                        Ty::Dyn(name, mutable) => {
+                            write!(
+                                setup,
+                                "frame.set_{}{}(p{i});",
+                                snake(name),
+                                if *mutable { "_mut" } else { "" }
+                            )
+                            .unwrap();
+                        }
+                        Ty::Ref(inner, mutable) if matches!(&**inner, Ty::Named(d) if types.defs[*d].lifetimes != 0) =>
+                        {
+                            let Ty::Named(d) = &**inner else {
+                                unreachable!()
+                            };
+                            let Kind::Record(_) = &types.defs[*d].kind else {
+                                unreachable!()
+                            };
+                            event_input(types, *d, &format!("p{i}"), &mut setup, &mut put);
+                            for leaf in
+                                writeback_fields(types, *d, &format!("p{i}"), *mutable).unwrap()
+                            {
+                                let local = format!("b_{}", leaf.local);
+                                write!(take, "let {local}: {} = r.take()?;", leaf.owned).unwrap();
+                                let path = leaf.path;
+                                if leaf.optional {
+                                    write!(take,"if {path}.is_some() != {local}.is_some() {{ return Err(WireError::Tag(u32::MAX)); }}").unwrap();
+                                    write!(apply,"if let (Some(target),Some(value)) = ({path}.as_deref_mut(),{local}) {{ *target=value; }}").unwrap();
+                                } else {
+                                    write!(
+                                        apply,
+                                        "{}{path} = {local};",
+                                        if leaf.reference { "*" } else { "" }
+                                    )
+                                    .unwrap();
+                                }
+                            }
+                        }
+                        _ => {
+                            put.push_str(&self::put(ty, &format!("p{i}")));
+                            if matches!(ty, Ty::Ref(_, true)) {
+                                write!(take, "let b{i}: {} = r.take()?;", held(types, ty).unwrap())
+                                    .unwrap();
+                                write!(apply, "*p{i} = b{i};").unwrap();
+                            }
+                        }
+                    }
+                }
+                let class =
+                    super::call_class(types, m).replace("super::Call::", "crate::CallClass::");
+                writeln!(code,"{sig} {{ let mut frame = Frame::default(); {setup} let mut sent = Writer::new(); {{ let w = &mut sent; {put} }} self{module}.call({class}, frame, {id}, {}, |w| {{ w.put_bytes(sent.bytes()); }}, |r| {{ let answer: {} = r.take()?; {take} if !r.rest().is_empty() {{ return Err(WireError::Tag(u32::MAX)); }} {apply} Ok(answer) }}).unwrap_or_else(|| {}) }}",if receiver=="WasmMod" {"None"} else {"Some(self.index)"},rust_ty(types,&m.ret,true),fallback(types,m),module=if receiver=="WasmMod" {""} else {".module"}).unwrap();
+            }
+            code.push_str("}\n");
+        }
+    }
+    writeln!(code, "pub const UNSUPPORTED_EXPORTS: &[&str] = &{gaps:?};").unwrap();
+    // The API is qualified as crate in the shared signature writer, but lives in mod_api here.
+    Ok(code
+        .replace("crate ::", "mod_api ::")
+        .replace("crate::", "mod_api::")
+        .replace("mod_api::Wasm", "crate::Wasm")
+        .replace("mod_api::CallClass", "crate::CallClass")
+        .replace("mod_api::refused", "crate::refused")
+        .replace("mod_api::NoAnswer", "crate::NoAnswer")
+        .replace(
+            "use mod_api::{NoAnswer, call_refused}",
+            "use crate::{NoAnswer, call_refused}",
+        ))
+}
+
+/// Generate the host boundary from the same source surface as the guest.
+pub fn generate_host(root: &std::path::Path) -> Result<String, String> {
+    let generated = crate::sources(root, crate::FillMode::Require)?;
+    let providers = crate::capability_providers::generate(root, &[])?.0;
+    let included = [
+        ("mod_api_generated.rs", generated.hooks.as_str()),
+        ("mod_api_generated_host.rs", generated.host.as_str()),
+        ("mod_api_host_areas.rs", generated.areas.as_str()),
+        ("capability_providers_generated.rs", providers.as_str()),
+    ];
+    let mut surface = super::surface(root, &included)?;
+    let count = surface
+        .methods
+        .iter()
+        .filter(|m| super::exports().contains(&m.owner))
+        .position(|m| m.owner == "Hooks" && m.name == "subscribed")
+        .ok_or("Hooks::subscribed absent")?;
+    let mut code = generate(&mut surface)?;
+    writeln!(code, "pub const SUBSCRIBED: u32 = {count};").unwrap();
+    code.push_str("pub fn hook_id(name: &str) -> Option<mod_api::HookId> { match name {\n");
+    let ast = syn::parse_file(&generated.hooks).map_err(|e| e.to_string())?;
+    let ids = ast
+        .items
+        .iter()
+        .find_map(|item| match item {
+            syn::Item::Enum(e) if e.ident == "HookId" => Some(
+                e.variants
+                    .iter()
+                    .map(|v| v.ident.to_string())
+                    .collect::<Vec<_>>(),
+            ),
+            _ => None,
+        })
+        .ok_or("HookId absent")?;
+    for hook in crate::Catalog::load(root)?.hooks {
+        if !ids.contains(&crate::hook_id(&hook.name)) {
+            continue;
+        }
+        writeln!(
+            code,
+            "{:?} => Some(mod_api::HookId::{}),",
+            hook.name,
+            crate::hook_id(&hook.name)
+        )
+        .unwrap();
+    }
+    code.push_str("_ => None } } pub fn subscriptions_of(owner: &str, names: Vec<String>) -> &'static [Option<mod_api::HookId>] { names.into_iter().filter_map(|name| { let id = hook_id(&name); if id.is_none() { log::warn!(\"wasm {owner}: unknown hook {name}\"); } id.map(Some) }).collect::<Vec<_>>().leak() }\n");
+    Ok(code)
+}
