@@ -102,6 +102,47 @@ fn borrowed_snapshot_matches_owned_without_clone_allocations() {
     assert!(borrowed.error().is_some());
     assert_eq!(entity.data, [7, 200]);
 }
+#[test]
+fn static_string_id_reply_decodes_without_allocating() {
+    use api::wire::{Reader, guest};
+    use std::rc::Rc;
+    guest::reset_static_strings();
+    let mut definition = Writer::new();
+    definition.put(&1u8);
+    definition.put(&0u32);
+    definition.put("minecraft:overworld");
+    let bytes = definition.into_bytes();
+    guest::set_transport(Some(Rc::new(move |_, _| bytes.clone())));
+    let first = guest::host(0, guest::begin());
+    assert_eq!(first.take_static::<()>().unwrap().0, "minecraft:overworld");
+    drop(first);
+    let mut known = Writer::new();
+    known.put(&0u8);
+    known.put(&0u32);
+    let bytes = known.into_bytes();
+    guest::set_transport(Some(Rc::new(move |_, _| bytes.clone())));
+    let reply = guest::host(0, guest::begin());
+    guest::set_transport(None);
+    let mut old = Writer::new();
+    old.put("minecraft:overworld");
+    api::wire::intern("minecraft:overworld").unwrap();
+    let before = count(|| {
+        for _ in 0..1000 {
+            let text: String = Reader::new(old.bytes()).take().unwrap();
+            std::hint::black_box(api::wire::intern(&text).unwrap());
+        }
+    });
+    let after = count(|| {
+        for _ in 0..1000 {
+            std::hint::black_box(reply.take_static::<()>().unwrap().0);
+        }
+    });
+    assert_eq!(before, 1000);
+    assert_eq!(after, 0);
+    println!(
+        "native static-reply decode allocator calls per 1000: string+intern={before}, id={after}"
+    );
+}
 fn entity_update() -> api::Compound {
     let mut update = api::Compound::new();
     update.insert("visible".into(), horizon_core::nbt::Tag::Int(9));

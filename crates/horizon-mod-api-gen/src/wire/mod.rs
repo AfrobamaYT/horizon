@@ -582,6 +582,7 @@ fn layout(surface: &Surface<'_>) -> u64 {
     );
     // The group's mods share one handler table, which lives in a word of the std member.
     feed("group state: 32 words in the std member's horizon_group_state; 0 handler table, 1 cache budget, 2 eviction guard, 3.. eviction callbacks; members allocate through an evicting global allocator");
+    feed("static replies: bounded acknowledged ids or uncached text");
     for method in &surface.methods {
         feed(&format!("{method:?}"));
     }
