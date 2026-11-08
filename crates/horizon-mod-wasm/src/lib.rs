@@ -333,7 +333,6 @@ pub struct Loaded {
 }
 
 pub fn load(std_member: &[u8], packages: Vec<WasmPackage>) -> Loaded {
-    use mod_api::wire::Reader;
     let (groups, refused) = groups(&packages);
     let mut loaded = Loaded {
         refused,
@@ -403,7 +402,7 @@ pub fn load(std_member: &[u8], packages: Vec<WasmPackage>) -> Loaded {
                         boundary::SUBSCRIBED,
                         None,
                         |_| {},
-                        Reader::take,
+                        |r| r.take(),
                     )
                     .ok_or_else(|| Refusal::Runtime("subscriptions failed".into()))?;
                 module.subscribed = boundary::subscriptions_of("wasm mod", names);
