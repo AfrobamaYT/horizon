@@ -32,6 +32,28 @@ at that ordinal. Ambiguous identities and unlisted source calls are refused; no 
 Unknown places return `E_INJECT_MISSING` naming the target. Invalid kinds, callbacks,
 duplicate ids, or call flags on function kinds leave the manifest untouched.
 
+## Publishing slots to a game checkout
+
+After adding native declarations, request their missing slots in a game source checkout:
+
+```sh
+cargo horizon-mod inject sync --repo /path/to/horizon
+```
+
+This writes `crates/horizon-mod-api-gen/slots/<mod_id>.txt` in that checkout, not in the mod.
+It emits function paths, `at | call | nth | ctx` call rows, and `type <path>` extension rows.
+Places already listed by another mod need no duplicate row. Existing rows in your own list
+are retained; row-only files and tool-written files are regenerated in sorted order.
+A standalone or trailing comment other than the tool's own header prevents rewriting:
+the error names its file and line and asks you to move the comment out first.
+Running the command again makes no change.
+
+The shared slot parser validates every row before writing. Conflicting call contexts are
+refused with both file locations, leaving your file untouched. Invalid mod ids are refused,
+including Windows device names (`con`, `nul`, `com1`–`com9`, `lpt1`–`lpt9`, etc.),
+and `horizon.txt` is reserved for the engine seed. Commit the generated list with the game
+change that supports it; this command does not compile slots or change the mod's build pin.
+
 ## Function-slot declarations
 
 API listeners use `access = "api"` (the default) and the host/API record shown below. Native internals

@@ -363,3 +363,44 @@ Paper API 26.3 (paper-api `26.3.build.244-stable`), public Javadoc only: no Pape
 [paper-PlayerItemConsumeEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerItemConsumeEvent.html
 [paper-PlayerStopUsingItemEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/PlayerStopUsingItemEvent.html
 [paper-EntityRegainHealthEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/EntityRegainHealthEvent.html
+
+## Event counterparts: base/living hooks (#1015)
+
+Paper API 26.3 (paper-api `26.3.build.244-stable`), public Javadoc; Horizon cited by function name; scope = the hooks below.
+Decisions follow the documented moment, side, information and result; only Covered rows get a `paper` key.
+
+| Horizon hook | Paper event / status | Evidence and porting boundary |
+|---|---|---|
+| `living_knockback` | **Partial:** [`EntityKnockbackEvent`][paper-EntityKnockbackEvent] | The server-side knockback moment and cancellable vector cover the push, but the event exposes no damage source, attacker id or held main/off stacks. No key. |
+| `loot_condition` | **Gap:** none (nearest [`LootGenerateEvent`][paper-LootGenerateEvent]) | That event fires when a loot table generates and exposes rolled loot, not when a mod-defined condition type is evaluated; there is no condition kind, JSON or `holds` result. No key. |
+| `loot_drops` | **Partial:** [`BlockDropItemEvent`][paper-BlockDropItemEvent] | It matches only player block breaks and the item list, while the hook also covers mob deaths, explosion/mob breaks, player-use and leash drops and passes table, position, entity, player, tool and explosion context. No key. |
+| `loot_function` | **Gap:** none (nearest [`LootGenerateEvent`][paper-LootGenerateEvent]) | The nearest event fires after table generation; it has no per-function type, JSON, context or mutable stack at the function's evaluation moment. No key. |
+| `loot_table_load` | **Gap:** none (nearest [`LootGenerateEvent`][paper-LootGenerateEvent]) | The hook runs as table JSON loads from data packs, before anything rolls it; `LootGenerateEvent` runs when a table generates in the world and offers generated loot, not the raw table document. No key. |
+| `may_place_on` | **Gap:** none (nearest [`BlockCanBuildEvent`][paper-BlockCanBuildEvent]) | `BlockCanBuildEvent` asks whether a player can place a block at a location; the hook is the server-side `mayPlaceOn` survival answer for a plant state on a ground state, with no player, hand or placement. No key. |
+| `mending_repair` | **Partial:** [`PlayerItemMendEvent`][paper-PlayerItemMendEvent] | The server-side pre-repair event exposes the selected item and mutable repair amount, but also an experience orb, equipment slot, cancellation and a durability-to-XP operation that the hook cannot express; the hook also handles directly granted experience. No key. |
+| `menu_button` | **Gap:** none | No cited event covers a mod container's `clickMenuButton`, including the out-of-world block entity and the mutable carried stack. No key. |
+| `menu_clicked` | **Partial:** [`InventoryClickEvent`][paper-InventoryClickEvent] | The server inventory-click event exposes the player, view, slot and click type, but runs within inventory modification and can cancel or change its outcome; `menu_clicked` only reports clicks that moved nothing after they are queued. No key. |
+| `menu_closed` | **Partial:** [`InventoryCloseEvent`][paper-InventoryCloseEvent] | The non-cancellable server close notification exposes the player and inventory view, with documented PLAYER, OPEN_NEW, DISCONNECT and PLUGIN reasons matching the close causes. It does not expose the protocol window id passed by `menu_closed`, and its reason is absent from the hook. No key. |
+| `menu_quick_move` | **Partial:** [`InventoryClickEvent`][paper-InventoryClickEvent] | `isShiftClick()` identifies server shift-clicks, and cancellation plus manual inventory changes can replace their outcome, but this is the inventory-click transaction rather than the menu's `quickMoveStack` routing call with a mutable out-of-world mod block entity and remaining stack. No key. |
+| `menu_slot_rules` | **Gap:** none | No cited event covers `Slot.mayPlace` or per-slot maximum rules for registered vanilla and mod menus; the both-side hook has no server event counterpart here. No key. |
+| `mob_effect_added` | **Gap:** none (nearest [`EntityPotionEffectEvent`][paper-EntityPotionEffectEvent]) | The Paper event precedes a potion-effect modification and can cancel it or change override behavior; `mob_effect_added` reports every addEffect call for a mod effect, changed or unchanged, after the start callback. Its ADDED/CHANGED actions do not establish that post-call, unchanged-inclusive moment. No key. |
+| `mob_killed` | **Partial:** [`EntityDeathEvent`][paper-EntityDeathEvent] | Death of the living entity is the same after-the-blow moment, and the damage source can identify its causing player, but the event covers all deaths, exposes additional damage/drop/experience information, and is cancellable while the hook cannot cancel. No key. |
+| `mob_spawned` | **Partial:** [`EntityAddToWorldEvent`][paper-EntityAddToWorldEvent] | The non-cancellable server world-add notification exposes the entity, world and position, but includes chunk loading and other additions excluded by the hook and has no spawn reason or `natural` flag. [`CreatureSpawnEvent`][paper-CreatureSpawnEvent] offers a spawn reason but is cancellable before spawning, whereas the hook reports a mob already added. No key. |
+| `mod_container_viewers` | **Gap:** none | No cited event carries the aggregate viewer count and `previous`/`viewers` transition for a mod container; per-player open/close events would not supply it. No key. |
+| `modify_default_components` | **Gap:** none | No cited Paper event modifies per-item default component maps at data-load/registry-freeze time. No key. |
+| `moisture_change` | **Covered:** [`MoistureChangeEvent`][paper-MoistureChangeEvent] | The cancellable soil-moisture change is the same server-side before-change moment; the block's current state and `getNewState()` give from/to, and cancelling keeps the old moisture. Key added. |
+| `neighbor_changed` | **Gap:** none | The hook is the per-block `neighborChanged` delivery; the dossier's player/world/equipment candidates are unrelated, and its own note says `NeighborNotifyEvent` is a different broadcast. No key. |
+| `net_from_client` | **Gap:** none | No cited event carries a player's custom channel payload at the hook's tick-delayed receive point; the listed entity/block events are unrelated. No key. |
+
+[paper-EntityKnockbackEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/entity/EntityKnockbackEvent.html
+[paper-LootGenerateEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/world/LootGenerateEvent.html
+[paper-BlockCanBuildEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/BlockCanBuildEvent.html
+[paper-EntityPotionEffectEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/EntityPotionEffectEvent.html
+[paper-EntityDeathEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/EntityDeathEvent.html
+[paper-CreatureSpawnEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/CreatureSpawnEvent.html
+[paper-MoistureChangeEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/MoistureChangeEvent.html
+
+[paper-PlayerItemMendEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerItemMendEvent.html
+[paper-InventoryClickEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/inventory/InventoryClickEvent.html
+[paper-InventoryCloseEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/inventory/InventoryCloseEvent.html
+[paper-EntityAddToWorldEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/entity/EntityAddToWorldEvent.html
