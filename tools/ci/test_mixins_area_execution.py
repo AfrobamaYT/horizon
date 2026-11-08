@@ -13,6 +13,8 @@ import sys
 import tempfile
 import unittest
 
+from tools import lab
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "tools/ci/mixins_area_execution.py"
 TOOL = os.environ.get("HORIZON_MIXINS_TEST_TOOL")
@@ -56,7 +58,16 @@ if args and args[0] == "build":
 sys.exit(subprocess.call([{self.cargo!r}, *args]))
 ''', encoding="utf-8")
         wrapper.chmod(0o755)
-        env = {**os.environ, "PATH": str(case) + os.pathsep + os.environ["PATH"]}
+        # Inherited homes are deliberate sentinels: the copied script must replace
+        # them with its own fresh homes, resolving lab through --repo even here.
+        inherited = {}
+        for key in ("HORIZON_HOME", "HORIZON_LAUNCHER_HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME",
+                    "HORIZON_LAUNCHER_TRASH", "HORIZON_LAUNCHER_CLIPBOARD", "HORIZON_LAUNCHER_DESKTOP"):
+            home = case / "inherited" / key
+            home.mkdir(parents=True)
+            inherited[key] = home
+        env = lab.game_env(os.environ, **inherited,
+                           PATH=str(case) + os.pathsep + os.environ["PATH"])
         result = subprocess.run([sys.executable, str(script), "--repo", str(ROOT),
                                  "--tool", str(self.tool)], env=env, cwd=ROOT,
                                 text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -74,10 +85,24 @@ sys.exit(subprocess.call([{self.cargo!r}, *args]))
         self.assertFalse((root / "prepared").exists())
         self.assertIn("Finished", (root / "build.log").read_text())
 
+    def assert_environment(self, root):
+        # Written by the compiled Rust executable, not the Python process launcher.
+        observed = dict(line.split("=", 1) for line in (root / "execution-env.txt").read_text().splitlines())
+        homes = {}
+        for key in ("HORIZON_HOME", "HORIZON_LAUNCHER_HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME",
+                    "HORIZON_LAUNCHER_TRASH", "HORIZON_LAUNCHER_CLIPBOARD", "HORIZON_LAUNCHER_DESKTOP"):
+            expected = root / "homes/execute" / key
+            homes[key] = expected
+            self.assertTrue(expected.is_dir())
+        # Use the existing isolation helper's flags, with independently expected
+        # paths: no duplicate hand-maintained audio/self-update flag setters.
+        self.assertEqual(observed, lab.game_env({}, **homes), "Executable inherited caller home")
+
     def test_baseline_preserves_source_and_executes_relocated_output(self):
         result, root, observation = self.execute("baseline")
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assert_relocated(root, observation)
+        self.assert_environment(root)
         self.assertIn("E_TARGET_NOT_FOUND", (root / "raw.log").read_text())
         self.assertEqual((root / "execute.log").read_text().strip(),
                          "AREA_AND_NATIVE_HOOK_HELPERS=211")
@@ -117,6 +142,17 @@ sys.exit(subprocess.call([{self.cargo!r}, *args]))
                 self.assertEqual((root / "execute.log").read_text().strip(),
                                  "AREA_AND_NATIVE_HOOK_HELPERS=211")
                 self.assertIn("Original download source file map was modified", result.stdout)
+
+    def test_environment_observation_rejects_inherited_home_mutant(self):
+        result, root, observation = self.execute(
+            "inherited-env", "        env = lab.game_env(os.environ, **homes, CARGO_TARGET_DIR=build)\n",
+            '        env = {**os.environ, "CARGO_TARGET_DIR": str(build)}\n')
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assert_relocated(root, observation)
+        self.assertEqual((root / "execute.log").read_text().strip(),
+                         "AREA_AND_NATIVE_HOOK_HELPERS=211")
+        with self.assertRaisesRegex(AssertionError, "inherited caller home"):
+            self.assert_environment(root)
 
     def test_relocation_observation_rejects_retained_input_mutant(self):
         result, root, observation = self.execute(

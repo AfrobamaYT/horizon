@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 
 
@@ -20,6 +21,9 @@ def main():
     parser.add_argument("--tool", required=True, type=Path)
     args = parser.parse_args()
     repo, tool = args.repo.resolve(strict=True), args.tool.resolve(strict=True)
+    sys.path.insert(0, str(repo))
+    from tools import lab
+
     target = repo / "target"
     target.mkdir(exist_ok=True)
     root = Path(tempfile.mkdtemp(prefix="mixins-area-execution-", dir=target))
@@ -27,7 +31,6 @@ def main():
     source, prepared, output = (root / name for name in ("source", "prepared", "output"))
     mods, preparer = root / "mods/area_check", root / "preparer"
     build = root / "build"
-    env = {**os.environ, "CARGO_TARGET_DIR": str(build)}
 
     def put(base, name, text):
         path = base / name
@@ -35,7 +38,15 @@ def main():
         path.write_text(text, encoding="utf-8")
 
     def run(name, command, success=True):
-        result = subprocess.run([str(arg) for arg in command], cwd=repo, env=env,
+        homes = {}
+        for key in ("HORIZON_HOME", "HORIZON_LAUNCHER_HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME",
+                    "HORIZON_LAUNCHER_TRASH", "HORIZON_LAUNCHER_CLIPBOARD", "HORIZON_LAUNCHER_DESKTOP"):
+            home = root / "homes" / name / key
+            home.mkdir(parents=True)
+            homes[key] = home
+        env = lab.game_env(os.environ, **homes, CARGO_TARGET_DIR=build)
+        # Any relative saves/options also stay in disposable scratch, never the checkout.
+        result = subprocess.run([str(arg) for arg in command], cwd=root, env=env,
                                 text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         log = root / f"{name}.log"
         log.write_text(result.stdout, encoding="utf-8")
@@ -52,6 +63,11 @@ def main():
     put(client, "src/lib.rs", "pub mod game;\n")
     put(client, "src/main.rs", '''fn main() {
     assert_eq!(horizon_client::game::run(), 211);
+    let keys = ["HORIZON_HOME", "HORIZON_LAUNCHER_HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME",
+                "HORIZON_LAUNCHER_TRASH", "HORIZON_LAUNCHER_CLIPBOARD", "HORIZON_LAUNCHER_DESKTOP",
+                "HORIZON_NO_AUDIO", "HORIZON_LAUNCHER_NO_SELF_UPDATE", "HORIZON_TEST_LOOPBACK"];
+    let observed = keys.map(|key| format!("{key}={}", std::env::var(key).unwrap())).join("\\n");
+    std::fs::write("execution-env.txt", observed).unwrap();
     println!("AREA_AND_NATIVE_HOOK_HELPERS=211");
 }
 ''')
