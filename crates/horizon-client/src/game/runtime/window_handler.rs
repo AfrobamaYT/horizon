@@ -575,6 +575,23 @@ impl Game<'_> {
                         );
                         let previous = self.cursor;
                         self.cursor = (position.x as f32 / b.scale, position.y as f32 / b.scale);
+                        if self.screen == Screen::Playing
+                            && (self.studio_timeline.dragging_playhead
+                                || self.studio_timeline.dragging_keyframe.is_some())
+                        {
+                            let action = self.studio_timeline.handle_mouse_drag(
+                                self.cursor,
+                                b.width,
+                                &mut self.studio_freecam,
+                            );
+                            if matches!(
+                                action,
+                                horizon_client::studio::TimelineAction::KeyframeMoved
+                            ) {
+                                self.studio_camera_track_dirty = true;
+                            }
+                            return Ok(());
+                        }
                         match self.screen_mouse_dragged(previous) {
                             native_hooks::ScreenMousePre::Canceled => return Ok(()),
                             native_hooks::ScreenMousePre::Passed(post) => mouse_post = Some(post),
@@ -622,6 +639,8 @@ impl Game<'_> {
                         }
                     }
                 }
+                WindowEvent::MouseWheel { .. }
+                    if self.screen == Screen::Playing && self.studio_replay.is_some() => {}
                 WindowEvent::MouseWheel { delta, .. } => {
                     let (raw_x, raw_y) = match delta {
                         MouseScrollDelta::LineDelta(x, y) => (f64::from(x), f64::from(y)),
@@ -890,6 +909,94 @@ impl Game<'_> {
                 }
                 WindowEvent::MouseInput { state, button, .. } => {
                     let pressed = state == ElementState::Pressed;
+                    if !pressed && button == MouseButton::Left {
+                        let action = self.studio_timeline.handle_mouse_up();
+                        if !matches!(action, horizon_client::studio::TimelineAction::None) {
+                            self.handle_studio_timeline_action(action);
+                        }
+                    }
+                    if (self.studio_freecam.active || self.studio_replay.is_some())
+                        && button == MouseButton::Right
+                    {
+                        if let Some(renderer) = &self.renderer {
+                            let batch = HudBatch::new(
+                                [renderer.config.width, renderer.config.height],
+                                self.settings.gui_scale_inputs(),
+                            );
+                            if self.studio_timeline.visible
+                                && self.cursor.1 >= batch.height - self.studio_timeline.height()
+                            {
+                                if pressed
+                                    && let Some(index) = self.studio_timeline.keyframe_at_cursor(
+                                        self.cursor,
+                                        batch.width,
+                                        batch.height,
+                                        &self.studio_freecam,
+                                    )
+                                {
+                                    if index < self.studio_freecam.track.keyframes.len() {
+                                        self.studio_freecam.track.keyframes.remove(index);
+                                        self.studio_camera_track_dirty = true;
+                                    }
+                                    self.studio_timeline.selected_keyframe = None;
+                                }
+                                return Ok(());
+                            }
+                        }
+                        if pressed {
+                            self.studio_topbar.close_dropdown();
+                            self.studio_rmb_down = true;
+                            self.capture(true);
+                            return Ok(());
+                        } else if self.studio_rmb_down {
+                            self.studio_rmb_down = false;
+                            self.capture(false);
+                            return Ok(());
+                        }
+                    }
+                    if pressed
+                        && button == MouseButton::Left
+                        && self.screen == Screen::Playing
+                        && (self.studio_replay.is_some() || self.studio_freecam.active)
+                    {
+                        let size = self
+                            .renderer
+                            .as_ref()
+                            .map(|renderer| [renderer.config.width, renderer.config.height])
+                            .unwrap_or([1, 1]);
+                        let batch = HudBatch::new(size, self.settings.gui_scale_inputs());
+                        let had_open_menu = self.studio_topbar.open_menu.is_some();
+                        let topbar_action = self.studio_topbar.handle_mouse_click(
+                            self.cursor,
+                            batch.width,
+                            batch.height,
+                        );
+                        if !matches!(topbar_action, horizon_client::studio::TopBarAction::None) {
+                            self.handle_studio_topbar_action(topbar_action);
+                            return Ok(());
+                        }
+                        if had_open_menu || self.cursor.1 <= self.studio_topbar.height {
+                            return Ok(());
+                        }
+                        if self.studio_timeline.visible {
+                            let action = self.studio_timeline.handle_mouse_down(
+                                self.cursor,
+                                batch.width,
+                                batch.height,
+                                &self.studio_freecam,
+                            );
+                            if !matches!(action, horizon_client::studio::TimelineAction::None) {
+                                self.handle_studio_timeline_action(action);
+                                return Ok(());
+                            }
+                            if self.cursor.1 >= batch.height - self.studio_timeline.height() {
+                                return Ok(());
+                            }
+                        }
+                    }
+                    if self.screen == Screen::Playing && self.studio_replay.is_some() {
+                        return Ok(());
+                    }
                     if matches!(self.screen, Screen::Inventory | Screen::Creative)
                         && let Some(key) = self
                             .settings
@@ -1388,10 +1495,9 @@ impl Game<'_> {
                         let held = |key| f64::from(u8::from(self.keys.raw(&key)));
                         let forward = held(KeyCode::KeyW) - held(KeyCode::KeyS);
                         let strafe = held(KeyCode::KeyD) - held(KeyCode::KeyA);
-                        let vertical = held(KeyCode::Space)
-                            - f64::from(u8::from(self.keys.raw(&KeyCode::ShiftLeft)));
-                        let fast = self.keys.raw(&KeyCode::ControlLeft)
-                            || self.keys.raw(&KeyCode::ControlRight);
+                        let vertical =
+                            held(KeyCode::KeyE) - held(KeyCode::KeyQ) + held(KeyCode::Space);
+                        let fast = self.keys.raw(&KeyCode::ControlRight);
                         self.studio_freecam.update_flight_motion(
                             forward,
                             strafe,
