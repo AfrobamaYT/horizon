@@ -119,6 +119,7 @@ pub struct Brain {
 }
 #[derive(Clone, Debug)]
 struct Entry {
+    prio: i32,
     act: Act,
     b: B,
 }
@@ -129,14 +130,14 @@ fn brain(m: &Mob) -> Option<&Brain> {
 fn brain_mut(m: &mut Mob) -> &mut Brain {
     m.extra.brain.as_deref_mut().expect("brain")
 }
-fn mem(m: &mut Mob) -> &mut Memories {
+pub(super) fn mem(m: &mut Mob) -> &mut Memories {
     &mut brain_mut(m).mem
 }
 /// `CANT_REACH_WALK_TARGET_SINCE`, for `compute_path`.
 fn cant_reach(m: &mut Mob) -> &mut Slot<i64> {
     &mut mem(m).cant_reach_walk_target_since
 }
-fn mem_ref(m: &Mob) -> &Memories {
+pub(super) fn mem_ref(m: &Mob) -> &Memories {
     &brain(m).expect("brain").mem
 }
 /// Whether the species thinks with this brain.
@@ -162,11 +163,20 @@ pub fn init(m: &mut Mob, shuffle_seed: i64) {
         .iter()
         .map(|&k| (k, i64::from(m.random.next_int_bound(20).unwrap_or(0))))
         .collect();
-    let (list, default_activity) = if breeze {
+    let (mut list, default_activity) = if breeze {
         (breeze_packages(shuffle_seed), Act::Fight)
     } else {
         (creaking_packages(shuffle_seed), Act::Idle)
     };
+    // The parts' behaviors join before the sort, so each lands after
+    // vanilla's of its priority (#824); the stable sort keeps vanilla's own
+    // order. Nothing joins a type no part attached to, and nothing is asked
+    // or built then.
+    let before = list.len();
+    attach_behaviors(&m.kind.id, &mut list);
+    if list.len() > before {
+        list.sort_by_key(|e| e.prio);
+    }
     m.extra.brain = Some(Box::new(Brain {
         mem: Memories::default(),
         sensors,
@@ -488,6 +498,8 @@ enum B {
         breeze: bool,
         positives_left: i32,
     },
+    /// A mod's behavior (#824), wrapped by `mod_behaviors`.
+    Mod(super::mod_behaviors::ModBehavior),
     RunOne(Box<RunOne>),
     DoNothing(Timed),
     RandomStroll(bool, f32),
@@ -566,6 +578,7 @@ impl B {
             | B::SetWalkTargetFromLookTarget(r)
             | B::SetWalkTargetFromAttackTarget(r)
             | B::MeleeAttack(r) => *r,
+            B::Mod(e) => e.running(),
             B::RunOne(g) => g.running,
         }
     }
@@ -573,6 +586,7 @@ impl B {
     fn try_start(&mut self, m: &mut Mob, cx: &mut Bx) -> bool {
         match self {
             B::RunOne(g) => g.try_start(m, cx),
+            B::Mod(e) => e.try_start(m, cx.w, cx.level.random(), cx.now),
             B::Swim { t, creaking } => {
                 if *creaking && !super::creaking::can_move(m) || !swim_condition(m) {
                     return false;
@@ -911,6 +925,7 @@ impl B {
         let now = cx.now;
         match self {
             B::RunOne(g) => g.tick_or_stop(m, cx),
+            B::Mod(e) => e.tick_or_stop(m, cx.w, cx.now),
             // OneShots stop in the tick they started.
             B::StartAttacking(r, _)
             | B::StopAttacking { running: r, .. }
@@ -1002,6 +1017,7 @@ impl B {
     fn do_stop(&mut self, m: &mut Mob, cx: &mut Bx) {
         match self {
             B::RunOne(g) => g.do_stop(m, cx),
+            B::Mod(e) => e.do_stop(m, cx.w),
             B::StartAttacking(r, _)
             | B::StopAttacking { running: r, .. }
             | B::RandomStroll(r, _)
@@ -1377,6 +1393,58 @@ fn timed(min: i32, max: i32) -> Timed {
 }
 /// `availableBehaviorsByPriority`'s order: priority, then the activity's
 /// hash slot (core 1, idle 5, fight 14), then insertion order.
+
+// ---- Mod behaviors ------------------------------------------------------
+
+/// The parts' behaviors for this brain (#824): each joins the list with its
+/// activity and priority, refused where this brain has no such activity.
+fn attach_behaviors(mob_id: &str, list: &mut Vec<Entry>) {
+    struct Reg<'a> {
+        list: &'a mut Vec<Entry>,
+        mob_id: &'a str,
+    }
+    impl mod_api::BehaviorRegistrarBackend for Reg<'_> {
+        fn add_behavior(
+            &mut self,
+            r: mod_api::RegisteredBehavior,
+        ) -> Result<(), mod_api::BehaviorRefusal> {
+            let act = act_of(r.activity)?;
+            self.list.push(Entry {
+                prio: r.priority,
+                act,
+                b: B::Mod(super::mod_behaviors::ModBehavior::new(r)),
+            });
+            Ok(())
+        }
+        fn mob_id(&self) -> &str {
+            self.mob_id
+        }
+    }
+    super::mod_behaviors::attach(mob_id, &mut Reg { list, mob_id });
+}
+
+/// This brain's slot for a mod-api activity.
+fn act_of(activity: mod_api::Activity) -> Result<Act, mod_api::BehaviorRefusal> {
+    use mod_api::Activity as A;
+    Ok(match activity {
+        A::Core => Act::Core,
+        A::Idle => Act::Idle,
+        A::Fight => Act::Fight,
+        other => return Err(mod_api::BehaviorRefusal::UnknownActivity(other)),
+    })
+}
+
+/// The list's `(prio, activity, is a mod's)` keys, in `Brain.tick`'s start
+/// order — the inspection the goal selector's `entries` gives goals' tests.
+pub fn entry_keys(m: &Mob) -> Option<Vec<(i32, Act, bool)>> {
+    brain(m).map(|b| {
+        b.list
+            .iter()
+            .map(|e| (e.prio, e.act, matches!(e.b, B::Mod(_))))
+            .collect()
+    })
+}
+
 fn sorted(mut v: Vec<(i32, Act, B)>) -> Vec<Entry> {
     let slot = |a: Act| match a {
         Act::Core => 1,
@@ -1384,7 +1452,9 @@ fn sorted(mut v: Vec<(i32, Act, B)>) -> Vec<Entry> {
         Act::Fight => 14,
     };
     v.sort_by_key(|(p, a, _)| (*p, slot(*a)));
-    v.into_iter().map(|(_, act, b)| Entry { act, b }).collect()
+    v.into_iter()
+        .map(|(prio, act, b)| Entry { prio, act, b })
+        .collect()
 }
 fn run_one(seed: i64, kids: Vec<(B, i32)>) -> B {
     B::RunOne(Box::new(RunOne {

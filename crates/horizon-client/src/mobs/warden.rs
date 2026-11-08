@@ -342,7 +342,12 @@ impl Warden {
 }
 
 pub fn register(m: &mut Mob) {
-    m.extra.warden = Some(Box::default());
+    // The brain at construction, with the mob's own type id so a mod part's
+    // behaviors join it (#824).
+    let id = m.kind.id.clone();
+    let mut st = Warden::default();
+    st.brain = Brain::new(&id, 0);
+    m.extra.warden = Some(Box::new(st));
     m.ai.nav.can_float = true;
     m.set_malus(PathType::UnpassableRail, 0.0);
     m.set_malus(PathType::Damaging, 8.0);
@@ -365,7 +370,8 @@ pub fn delay_sensors(m: &mut Mob) {
 pub fn init_brain(m: &mut Mob, seed: i64) {
     if let Some(st) = m.extra.warden.as_mut() {
         let mem = std::mem::take(&mut st.brain.mem);
-        st.brain = Brain::new(seed);
+        let id = m.kind.id.clone();
+        st.brain = Brain::new(&id, seed);
         st.brain.mem = mem;
     }
     delay_sensors(m);

@@ -173,6 +173,8 @@ enum B {
     Digging(Timed),
     SetRoarTarget(bool),
     TryToSniff(bool),
+    /// A mod's behavior (#824), wrapped by `mod_behaviors`.
+    Mod(super::mod_behaviors::ModBehavior),
     RunOne(Box<Gate>),
     Stroll(bool),
     DoNothing(Timed),
@@ -189,6 +191,7 @@ enum B {
 
 #[derive(Clone, Debug)]
 struct Entry {
+    prio: i32,
     act: Act,
     b: B,
 }
@@ -206,16 +209,28 @@ pub struct Brain {
 }
 impl Default for Brain {
     fn default() -> Self {
-        Self::new(0)
+        // No mob id: nothing attaches (a default brain is the empty shell a
+        // warden's state starts from; `init_brain` builds the real one).
+        Self::new("", 0)
     }
 }
 impl Brain {
-    pub fn new(shuffle_seed: i64) -> Self {
+    pub fn new(mob_id: &str, shuffle_seed: i64) -> Self {
+        let mut list = activities(shuffle_seed);
+        // The parts' behaviors join before the sort, so each lands after
+        // vanilla's of its priority (#824); the stable sort keeps vanilla's
+        // own order. Nothing joins a type no part attached to, and nothing
+        // is asked or built then.
+        let before = list.len();
+        attach_behaviors(mob_id, &mut list);
+        if list.len() > before {
+            list.sort_by_key(|e| e.prio);
+        }
         Self {
             mem: Memories::default(),
             sensors: [0; 2],
             activity: Act::Idle,
-            list: activities(shuffle_seed),
+            list,
             shuffle_seed,
         }
     }
@@ -342,7 +357,7 @@ fn activities(seed: i64) -> Vec<Entry> {
     // A stable sort keeps each activity's own order.
     list.sort_by_key(|(prio, act, _)| (*prio, act.slot(), act.order()));
     list.into_iter()
-        .map(|(_, act, b)| Entry { act, b })
+        .map(|(prio, act, b)| Entry { prio, act, b })
         .collect()
 }
 
@@ -601,6 +616,62 @@ fn sound(m: &Mob, name: &'static str, volume: f32, pitch: f32, events: &mut Vec<
     ));
 }
 
+// ---- Mod behaviors ------------------------------------------------------
+
+/// The parts' behaviors for this brain (#824): each joins the list with its
+/// activity and priority, refused where this brain has no such activity.
+fn attach_behaviors(mob_id: &str, list: &mut Vec<Entry>) {
+    struct Reg<'a> {
+        list: &'a mut Vec<Entry>,
+        mob_id: &'a str,
+    }
+    impl mod_api::BehaviorRegistrarBackend for Reg<'_> {
+        fn add_behavior(
+            &mut self,
+            r: mod_api::RegisteredBehavior,
+        ) -> Result<(), mod_api::BehaviorRefusal> {
+            let act = act_of(r.activity)?;
+            self.list.push(Entry {
+                prio: r.priority,
+                act,
+                b: B::Mod(super::mod_behaviors::ModBehavior::new(r)),
+            });
+            Ok(())
+        }
+        fn mob_id(&self) -> &str {
+            self.mob_id
+        }
+    }
+    super::mod_behaviors::attach(mob_id, &mut Reg { list, mob_id });
+}
+
+/// This brain's slot for a mod-api activity.
+fn act_of(activity: mod_api::Activity) -> Result<Act, mod_api::BehaviorRefusal> {
+    use mod_api::Activity as A;
+    Ok(match activity {
+        A::Core => Act::Core,
+        A::Idle => Act::Idle,
+        A::Fight => Act::Fight,
+        A::Investigate => Act::Investigate,
+        A::Roar => Act::Roar,
+        A::Sniff => Act::Sniff,
+        A::Emerge => Act::Emerge,
+        A::Dig => Act::Dig,
+        other => return Err(mod_api::BehaviorRefusal::UnknownActivity(other)),
+    })
+}
+
+/// The list's `(prio, activity, is a mod's)` keys, in `Brain.tick`'s start
+/// order — the inspection the goal selector's `entries` gives goals' tests.
+pub fn entry_keys(m: &Mob) -> Option<Vec<(i32, Act, bool)>> {
+    brain(m).map(|b| {
+        b.list
+            .iter()
+            .map(|e| (e.prio, e.act, matches!(e.b, B::Mod(_))))
+            .collect()
+    })
+}
+
 // ---- Behaviours -----------------------------------------------------------
 
 impl B {
@@ -616,6 +687,7 @@ impl B {
             | B::Roar(t)
             | B::SonicBoom(t) => t.running,
             B::MoveToTargetSink { t, .. } => t.running,
+            B::Mod(e) => e.running(),
             B::RunOne(g) => g.running,
             B::SetWardenLookTarget(r)
             | B::SetRoarTarget(r)
@@ -633,6 +705,7 @@ impl B {
     /// `BehaviorControl.tryStart`.
     fn try_start(&mut self, m: &mut Mob, cx: &mut Bx) -> bool {
         match self {
+            B::Mod(e) => e.try_start(m, cx.w, cx.level.random(), cx.now),
             B::Swim(t) => {
                 if !swim_condition(m) {
                     return false;
@@ -976,6 +1049,7 @@ impl B {
     fn tick_or_stop(&mut self, m: &mut Mob, cx: &mut Bx) {
         let now = cx.now;
         match self {
+            B::Mod(e) => e.tick_or_stop(m, cx.w, cx.now),
             B::Swim(t) => {
                 if now > t.end || !swim_condition(m) {
                     self.do_stop(m, cx);
@@ -1089,6 +1163,7 @@ impl B {
     /// `BehaviorControl.doStop`.
     fn do_stop(&mut self, m: &mut Mob, cx: &mut Bx) {
         match self {
+            B::Mod(e) => e.do_stop(m, cx.w),
             B::Swim(t) | B::ForceUnmount(t) | B::DoNothing(t) => t.running = false,
             B::LookAtTargetSink(t) => {
                 t.running = false;

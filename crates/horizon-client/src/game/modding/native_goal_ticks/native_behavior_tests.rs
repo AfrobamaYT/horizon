@@ -164,6 +164,8 @@ plan_part!(VillagerBehaviors, "minecraft:villager");
 plan_part!(SnifferBehaviors, "minecraft:sniffer");
 plan_part!(AxolotlBehaviors, "minecraft:axolotl");
 plan_part!(GhastlingBehaviors, "minecraft:happy_ghast");
+plan_part!(BreezeBehaviors, "minecraft:breeze");
+plan_part!(WardenBehaviors, "minecraft:warden");
 struct Mod;
 #[mod_api::__subscriptions]
 impl Hooks for Mod {
@@ -173,6 +175,8 @@ impl Hooks for Mod {
         r.entity_part("minecraft:sniffer", SnifferBehaviors);
         r.entity_part("minecraft:axolotl", AxolotlBehaviors);
         r.entity_part("minecraft:happy_ghast", GhastlingBehaviors);
+        r.entity_part("minecraft:breeze", BreezeBehaviors);
+        r.entity_part("minecraft:warden", WardenBehaviors);
     }
 }
 
@@ -813,5 +817,128 @@ fn grown_up_stops_a_running_ghastling_behavior() {
             ["one/check", "one/start", "one/tick"],
             "nothing more reaches it, and no stop callback runs"
         );
+    });
+}
+
+// ---- The monster and warden brains (the last wiring) ---------------------
+
+/// `monster_brain::tick` once at this time, on the caller's level random.
+fn monster_tick(
+    game: &mut super::super::Game<'_>,
+    id: u32,
+    game_time: i64,
+    day_time: i64,
+    level: &mut DamageLevel<'_>,
+) {
+    with_villager_tick(
+        game,
+        id,
+        game_time,
+        day_time,
+        level,
+        |m, w, level, events| {
+            mobs::monster_brain::tick(m, w, level, events);
+        },
+    );
+}
+
+/// `warden_brain::tick` once at this time, on the caller's level random.
+fn warden_tick(
+    game: &mut super::super::Game<'_>,
+    id: u32,
+    game_time: i64,
+    day_time: i64,
+    level: &mut DamageLevel<'_>,
+) {
+    with_villager_tick(
+        game,
+        id,
+        game_time,
+        day_time,
+        level,
+        |m, w, level, events| {
+            mobs::warden_brain::tick(m, w, level, events);
+        },
+    );
+}
+
+#[test]
+#[ignore = "needs prepared resources"]
+fn a_breeze_behavior_starts_in_fight_and_writes_its_target() {
+    READS.lock().unwrap().clear();
+    ADDS.lock().unwrap().clear();
+    ADDS.lock().unwrap().push(plan("minecraft:breeze", |b| {
+        b.add(Activity::Fight, 99, 60, 60, &[], WalkWriter).unwrap();
+    }));
+    with_game(|game| {
+        install_game_mods();
+        game.resolve_parts().unwrap();
+        mob_of(game, "minecraft:breeze", 8, [3.5, 65.0, 3.5]);
+        zombie(game, 9, [5.5, 65.0, 5.5]);
+        let mut test_level = horizon_client::health::TestLevel::new(0);
+        let mut level = test_level.level();
+        // A breeze's default activity is FIGHT.
+        monster_tick(game, 8, 100, 3000, &mut level);
+        let reads = READS.lock().unwrap().clone();
+        assert_eq!(
+            reads[0], "Some(BrainWalkTarget { at: [7.5, 64.5, 9.5], speed: 0.5, close: 1 })",
+            "the breeze's walk target reads back"
+        );
+        assert_eq!(
+            reads[2], "true",
+            "the breeze brain keeps an attack target, so the write goes through"
+        );
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources"]
+fn warden_behaviors_join_after_vanilla_of_their_priority() {
+    ADDS.lock().unwrap().clear();
+    ADDS.lock().unwrap().push(plan("minecraft:warden", |b| {
+        b.add(Activity::Idle, 10, 60, 60, &[], Probe::still_for(1))
+            .unwrap();
+    }));
+    with_game(|game| {
+        // The vanilla order of a parts-free warden, then the joined one.
+        mob_of(game, "minecraft:warden", 8, [3.5, 65.0, 3.5]);
+        {
+            let mut mobs = game.mobs.lift();
+            mobs::warden::register(&mut mobs[0]);
+            game.mobs = mobs;
+        }
+        let mut test_level = horizon_client::health::TestLevel::new(0);
+        let mut level = test_level.level();
+        warden_tick(game, 8, 100, 3000, &mut level);
+        let bare: Vec<_> =
+            mobs::warden_brain::entry_keys(game.mobs.iter().find(|m| m.id == 8).unwrap()).unwrap();
+        game.mobs.clear();
+
+        install_game_mods();
+        game.resolve_parts().unwrap();
+        mob_of(game, "minecraft:warden", 8, [3.5, 65.0, 3.5]);
+        {
+            let mut mobs = game.mobs.lift();
+            mobs::warden::register(&mut mobs[0]);
+            game.mobs = mobs;
+        }
+        let mut test_level = horizon_client::health::TestLevel::new(0);
+        let mut level = test_level.level();
+        warden_tick(game, 8, 100, 3000, &mut level);
+        let joined =
+            mobs::warden_brain::entry_keys(game.mobs.iter().find(|m| m.id == 8).unwrap()).unwrap();
+        let vanilla: Vec<_> = joined.iter().filter(|k| !k.2).cloned().collect();
+        assert_eq!(vanilla, bare, "vanilla's order stands");
+        let (i, key) = joined
+            .iter()
+            .enumerate()
+            .find(|(_, k)| k.2)
+            .expect("the behavior joined");
+        let before = joined
+            .iter()
+            .take(i)
+            .filter(|k| !k.2 && k.0 == key.0 && k.1 == key.1)
+            .count();
+        assert!(before > 0, "vanilla ({key:?}) comes first");
     });
 }

@@ -180,6 +180,26 @@ fn memory_present(m: &Mob, memory: mod_api::BrainMemory) -> Option<bool> {
             };
             Some(present)
         }
+        // The breeze's and the creaking's brain (its memories are the
+        // villager-shaped ones).
+        Species::Breeze | Species::Creaking => {
+            let mem = super::monster_brain::mem_ref(m);
+            Some(match memory {
+                mod_api::BrainMemory::WalkTarget => mem.walk_target.present(),
+                mod_api::BrainMemory::LookTarget => mem.look_target.present(),
+                mod_api::BrainMemory::AttackTarget => mem.attack_target.present(),
+                _ => return None,
+            })
+        }
+        Species::Warden => {
+            let mem = super::warden_brain::mem_ref(m)?;
+            Some(match memory {
+                mod_api::BrainMemory::WalkTarget => mem.walk_target.present(),
+                mod_api::BrainMemory::LookTarget => mem.look_target.present(),
+                mod_api::BrainMemory::AttackTarget => mem.attack_target.present(),
+                _ => return None,
+            })
+        }
         _ => None,
     }
 }
@@ -191,6 +211,24 @@ pub fn walk_target(m: &Mob, w: &MobWorld<'_>) -> Option<mod_api::BrainWalkTarget
     match m.species() {
         Species::Villager => {
             let walk = super::villager_brain::mem_ref(m)?.walk_target.value()?;
+            let at = walk.target.position(w)?;
+            Some(mod_api::BrainWalkTarget::new(
+                at,
+                f64::from(walk.speed),
+                walk.close,
+            ))
+        }
+        Species::Breeze | Species::Creaking => {
+            let walk = super::monster_brain::mem_ref(m).walk_target.value()?;
+            let at = walk.target.position(w)?;
+            Some(mod_api::BrainWalkTarget::new(
+                at,
+                f64::from(walk.speed),
+                walk.close,
+            ))
+        }
+        Species::Warden => {
+            let walk = super::warden_brain::mem_ref(m)?.walk_target.value()?;
             let at = walk.target.position(w)?;
             Some(mod_api::BrainWalkTarget::new(
                 at,
@@ -231,6 +269,14 @@ pub fn look_target(m: &Mob, w: &MobWorld<'_>) -> Option<[f64; 3]> {
             .look_target
             .value()?
             .position(w),
+        Species::Breeze | Species::Creaking => super::monster_brain::mem_ref(m)
+            .look_target
+            .value()?
+            .position(w),
+        Species::Warden => super::warden_brain::mem_ref(m)?
+            .look_target
+            .value()?
+            .position(w),
         _ => None,
     }
 }
@@ -257,6 +303,26 @@ pub fn set_walk_target(m: &mut Mob, at: [i32; 3], speed: f64, close: i32) {
                     close,
                 });
         }
+        // The breeze's, the creaking's and the warden's memories are the
+        // villager-shaped ones.
+        Species::Breeze | Species::Creaking => {
+            super::monster_brain::mem(m)
+                .walk_target
+                .set(super::villager_brain::WalkTarget::block(
+                    at,
+                    speed as f32,
+                    close,
+                ));
+        }
+        Species::Warden => {
+            super::warden_brain::mem(m)
+                .walk_target
+                .set(super::villager_brain::WalkTarget::block(
+                    at,
+                    speed as f32,
+                    close,
+                ));
+        }
         _ => {}
     }
 }
@@ -274,6 +340,9 @@ pub fn has_brain(s: Species) -> bool {
             | Species::Tadpole
             | Species::HappyGhast
             | Species::Axolotl
+            | Species::Breeze
+            | Species::Creaking
+            | Species::Warden
     )
 }
 
