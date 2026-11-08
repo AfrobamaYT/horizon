@@ -373,6 +373,15 @@ fn delayed_tasks_take_a_server_host(
     (host.schedule_task(20, 7), host.cancel_task(TaskId(1)))
 }
 
+/// Compile-only: a client mod moves the view onto an entity and back through the `&mut dyn ClientHost`
+/// its hooks get.
+#[allow(dead_code)]
+fn camera_entity_takes_a_client_host(host: &mut dyn ClientHost, mob: EntityRef) -> bool {
+    let moved = host.set_camera_entity(mob);
+    let own = host.camera_entity();
+    moved && own.is_some()
+}
+
 /// Compile-only: a client mod reads the open inventory screen's slot boxes through its menu handle.
 #[allow(dead_code)]
 fn menu_slot_boxes_take_a_client_host(
