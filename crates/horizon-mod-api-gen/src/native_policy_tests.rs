@@ -190,3 +190,35 @@ fn staged_helpers_are_callable_from_sibling_modules() {
         }
     }
 }
+
+/// `isize` has no Wire impl, so a whole-value decode of anything holding one is a compile error
+/// in the game; the decoder refuses it, and a patch root of that type takes no patch.
+#[test]
+fn isize_layouts_have_no_decoder_and_take_no_patch() {
+    let rule = Rule::new(&[internal(
+        "horizon_client::Cursor",
+        "struct",
+        "struct Cursor { column: isize }",
+    )]);
+    let cursor = rule.shape("horizon_client", None, &syn::parse_str("Cursor").unwrap());
+    let scalar = rule.shape("horizon_client", None, &syn::parse_str("isize").unwrap());
+    assert!(crate::native_value::decode_call(&rule, &cursor).is_err());
+    assert!(crate::native_value::decode_call(&rule, &scalar).is_err());
+    let mut graph = Graph::default();
+    graph.add(&rule, &cursor);
+    let patch = crate::native_patch::generate_runtime(
+        &rule,
+        "horizon_client",
+        None,
+        &syn::parse_str("isize").unwrap(),
+        quote::quote!(**slot),
+        quote::quote!(&trees[0]),
+        quote::quote!(plan),
+        true,
+        &graph,
+        quote::quote!(policy),
+    )
+    .unwrap()
+    .to_string();
+    assert!(!patch.contains("take"), "{patch}");
+}
