@@ -4,6 +4,7 @@
 //! requested step against the current value and must not store references in locator state.
 use crate::locators::{Locators, Step};
 use crate::native_window::WindowBuilder;
+use crate::snapshot::Window;
 use mod_api::wire::Put;
 use mod_api::{Row, RowError, RowWindow};
 
@@ -33,6 +34,16 @@ pub fn read(
     prefix: u32,
     paths: &mut Locators,
     request: RowWindow,
+) -> Result<Vec<Row>, RowError> {
+    read_checked(root, prefix, paths, Window::try_from(request)?)
+}
+
+/// Like [`read`], for a window already validated at the interface boundary.
+pub fn read_checked(
+    root: &dyn NativeNode,
+    prefix: u32,
+    paths: &mut Locators,
+    request: Window,
 ) -> Result<Vec<Row>, RowError> {
     let prefix = paths.path(prefix)?;
     let (mut out, path) = WindowBuilder::new(paths, request)?;
@@ -112,7 +123,7 @@ pub fn read(
         }
         Ok(())
     }
-    if request.rows == 0 {
+    if request.rows() == 0 {
         return Ok(Vec::new());
     }
     let (parent, step) = out.root_entry()?;
@@ -127,9 +138,9 @@ pub fn read(
         })?;
         descend(
             node,
-            request.node,
-            request.depth,
-            request.start,
+            request.node(),
+            request.depth(),
+            request.start() as u64,
             0,
             &mut out,
         )
