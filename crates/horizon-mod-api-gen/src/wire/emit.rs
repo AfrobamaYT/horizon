@@ -109,7 +109,36 @@ pub(super) fn types(types: &Types<'_>) -> String {
             writeln!(out,"impl crate::wire::Wire for {container}<dyn {path}> {{ const MIN:usize=8; fn put(&self,out:&mut crate::wire::Writer) {{ {put} }} {transfer} fn take(input:&mut crate::wire::Reader<'_>)->Result<Self,crate::wire::WireError> {{ input.take_resource() }} }}").unwrap();
         }
     }
-    for def in &types.defs {
+    for (def_id, def) in types.defs.iter().enumerate() {
+        // Host-side imports must also reconstruct non-exhaustive borrowed records.
+        // A typed constructor generated from public fields keeps this structural, not per-type glue.
+        if def.lifetimes == 1
+            && let Kind::Record(fields) = &def.kind
+            && fields
+                .iter()
+                .all(|f| super::calls::held(types, &f.ty).is_some())
+        {
+            let args = fields
+                .iter()
+                .map(|f| {
+                    format!(
+                        "{}: {}",
+                        f.rust,
+                        super::calls::rust_ty(types, &f.ty, false)
+                            .replace("'_", "'a")
+                            .replace("&", "&'a ")
+                            .replace("&'a 'static", "&'static")
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            let names = fields
+                .iter()
+                .map(|f| f.rust.as_str())
+                .collect::<Vec<_>>()
+                .join(",");
+            writeln!(out, "#[doc(hidden)] pub fn __wire_record_{def_id}<'a>({args}) -> {}<'a> {{ {} {{ {names} }} }}", def.rust, def.rust).unwrap();
+        }
         if let Some(view) = &def.view {
             let path = def.rust.split('<').next().unwrap();
             let snapshot = super::calls::rust_ty(types, &view.snapshot, false);

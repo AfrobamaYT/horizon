@@ -387,12 +387,15 @@ fn import_body(types: &Types<'_>, m: &Method, id: usize, prefix: &str) -> String
                 );
             }
             ty if (has_ref_in_data(ty) && lend(types, ty, "p").is_none())
-                || lifetime_def(types, ty) =>
+                || (lifetime_def(types, ty) && snapshot(types, ty, "p").is_none()) =>
             {
                 return format!(
                     "{sig} {{ {guest}::unsupported(\"{}::{}\") }}",
                     m.owner, m.name
                 );
+            }
+            ty if lifetime_def(types, ty) => {
+                put.push_str(&snapshot(types, ty, &format!("p{i}")).unwrap());
             }
             Ty::Ref(..) | Ty::Str(Str::Borrowed) | Ty::List(_, List::Slice) => {
                 put.push_str(&format!("w.put(p{i});"))
@@ -449,7 +452,17 @@ fn held_in(types: &Types<'_>, ty: &Ty, statics: bool) -> Option<String> {
         Ty::List(item, List::Slice) => format!("Vec<{}>", held_in(types, item, statics)?),
         Ty::Ref(inner, _) => held_in(types, inner, statics)?,
         Ty::Str(Str::Static) if statics => "String".into(),
-        Ty::Named(def) if types.defs[*def].lifetimes != 0 => return None,
+        Ty::Named(def) if types.defs[*def].lifetimes != 0 => {
+            let fields = types.defs[*def].kind.fields()?;
+            format!(
+                "({},)",
+                fields
+                    .iter()
+                    .map(|f| held_in(types, &f.ty, statics))
+                    .collect::<Option<Vec<_>>>()?
+                    .join(",")
+            )
+        }
         Ty::Dyn(..) => return None,
         Ty::Handler(..) => rust_ty(types, ty, false),
         Ty::Tuple(items) => format!(
@@ -490,27 +503,70 @@ pub(super) struct Lent {
     pub(super) mutable: bool,
 }
 
-fn reborrow(ty: &Ty, place: &str) -> Option<String> {
+fn reborrow(types: &Types<'_>, ty: &Ty, place: &str) -> Option<String> {
     Some(match ty {
         Ty::Prim(..) | Ty::Wide(..) | Ty::Unit | Ty::Str(Str::Static) => format!("({place})"),
         Ty::Str(Str::Borrowed) => format!("({place}).as_str()"),
         Ty::Str(Str::Owned) => format!("({place}).clone()"),
-        Ty::Ref(_, false) => format!("&({place})"),
+        Ty::Named(d) if types.defs[*d].lifetimes != 0 => {
+            let fields = types.defs[*d].kind.fields()?;
+            format!(
+                "mod_api::__wire_record_{d}({})",
+                fields
+                    .iter()
+                    .enumerate()
+                    .map(|(i, f)| reborrow(types, &f.ty, &format!("({place}).{i}")))
+                    .collect::<Option<Vec<_>>>()?
+                    .join(",")
+            )
+        }
+        Ty::Ref(_, false) if !lifetime_def(types, ty) => format!("&({place})"),
+        Ty::Array(t, _) => format!(
+            "std::array::from_fn(|i| {})",
+            reborrow(types, t, &format!("({place})[i]"))?
+        ),
         Ty::List(_, List::Slice) => format!("({place}).as_slice()"),
-        Ty::Option(t) => format!("({place}).as_ref().map(|x|{})", reborrow(t, "*x")?),
+        Ty::Option(t) => format!("({place}).as_ref().map(|x|{})", reborrow(types, t, "*x")?),
         Ty::Tuple(v) => format!(
             "({},)",
             v.iter()
                 .enumerate()
-                .map(|(i, t)| reborrow(t, &format!("({place}).{i}")))
+                .map(|(i, t)| reborrow(types, t, &format!("({place}).{i}")))
                 .collect::<Option<Vec<_>>>()?
                 .join(",")
         ),
+        _ if !lifetime_def(types, ty) => format!("({place}).clone()"),
+        _ => return None,
+    })
+}
+/// Writes a borrowed record tree directly in ordinary Wire order, without cloning its data.
+pub(super) fn snapshot(types: &Types<'_>, ty: &Ty, place: &str) -> Option<String> {
+    Some(match ty {
+        Ty::Named(d) if types.defs[*d].lifetimes != 0 => {
+            let fields = types.defs[*d].kind.fields()?;
+            format!(
+                "{}",
+                fields
+                    .iter()
+                    .map(|f| snapshot(types, &f.ty, &format!("({place}).{}", f.rust)))
+                    .collect::<Option<Vec<_>>>()?
+                    .join("")
+            )
+        }
+        Ty::Ref(t, _) => snapshot(types, t, &format!("*({place})"))?,
+        Ty::Option(t) => format!(
+            "match &({place}) {{ Some(x) => {{ w.put(&1u8); {} }}, None => w.put(&0u8) }}",
+            snapshot(types, t, "*x")?
+        ),
+        Ty::Array(t, _) => format!("for x in &({place}) {{ {} }}", snapshot(types, t, "*x")?),
+        Ty::Str(Str::Borrowed) => format!("w.put({place});"),
+        _ if !lifetime_def(types, ty) => format!("w.put(&({place}));"),
         _ => return None,
     })
 }
 pub(super) fn lend(types: &Types<'_>, ty: &Ty, local: &str) -> Option<Lent> {
     let (owned, expr, mutable) = match ty {
+        ty if lifetime_def(types, ty) => (held(types, ty)?, reborrow(types, ty, local)?, false),
         Ty::Ref(inner, m) if !matches!(**inner, Ty::Dyn(..)) => (
             held(types, inner)?,
             format!("&{}{local}", if *m { "mut " } else { "" }),
@@ -521,7 +577,7 @@ pub(super) fn lend(types: &Types<'_>, ty: &Ty, local: &str) -> Option<Lent> {
             held(types, ty)?,
             format!(
                 "&{local}.iter().map(|x|{}).collect::<Vec<_>>()",
-                reborrow(item, "*x")?
+                reborrow(types, item, "*x")?
             ),
             false,
         ),
@@ -536,10 +592,10 @@ pub(super) fn lend(types: &Types<'_>, ty: &Ty, local: &str) -> Option<Lent> {
             Ty::Str(Str::Borrowed) | Ty::List(_, List::Slice) => {
                 (held(types, ty)?, format!("{local}.as_deref()"), false)
             }
-            _ if has_ref_in_data(ty) => (held(types, ty)?, reborrow(ty, local)?, false),
+            _ if has_ref_in_data(ty) => (held(types, ty)?, reborrow(types, ty, local)?, false),
             _ => (held(types, ty)?, local.to_string(), true),
         },
-        _ if has_ref_in_data(ty) => (held(types, ty)?, reborrow(ty, local)?, false),
+        _ if has_ref_in_data(ty) => (held(types, ty)?, reborrow(types, ty, local)?, false),
         _ => (held(types, ty)?, local.to_string(), true),
     };
     Some(Lent {
@@ -606,6 +662,10 @@ pub(super) fn writeback_fields(
                 leaf.path = leaf.path.replacen(&local, &format!("{name}.{}", f.rust), 1);
                 own.push(leaf);
             }
+            continue;
+        }
+        if matches!(&f.ty, Ty::Option(t) if matches!(&**t, Ty::Ref(inner, false) if lifetime_def(types, inner)))
+        {
             continue;
         }
         let lent = lend(types, &f.ty, &local)?;
@@ -706,6 +766,17 @@ fn borrowed(
                 }
             ));
             let _ = send;
+            continue;
+        }
+        // Optional references to borrowed records need a local record before borrowing it.
+        if let Ty::Option(t) = &f.ty
+            && let Ty::Ref(inner, false) = &**t
+            && lifetime_def(types, inner)
+        {
+            let owned = held(types, &f.ty)?;
+            let rebuilt = reborrow(types, inner, "*x")?;
+            write!(read, "let {local}_held: {owned} = input.take()?; let {local} = {local}_held.as_ref().map(|x| {rebuilt});").unwrap();
+            build.push(format!("{}: {local}.as_ref()", f.rust));
             continue;
         }
         let lent = lend(types, &f.ty, &local)?;
