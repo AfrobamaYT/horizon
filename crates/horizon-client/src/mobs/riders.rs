@@ -502,6 +502,25 @@ impl Drop for NavigationLoan<'_> {
     }
 }
 
+/// Read-only view of entities disjoint from the mob currently ticking.
+struct LiveOthers<'a> {
+    before: &'a [Mob],
+    between: &'a [Mob],
+    after: &'a [Mob],
+    vehicle: Option<&'a Mob>,
+}
+
+impl super::LiveMobs for LiveOthers<'_> {
+    fn find(&self, id: u32) -> Option<&Mob> {
+        self.before
+            .iter()
+            .chain(self.between)
+            .chain(self.after)
+            .chain(self.vehicle)
+            .find(|mob| mob.id == id)
+    }
+}
+
 /// Tick a passenger with Mob.getNavigation's recursive vehicle redirection.
 /// Navigation is lent, not copied: goal start/stop/path progress all address
 /// the same object the vehicle ticks. The pathfinder sees the vehicle body.
@@ -530,13 +549,43 @@ pub fn tick(
             owner = vehicle;
         }
     }
-    if owner == index {
-        return mobs[index].tick(w, level, events);
+    if !mod_api::__private::listened(mod_api::HookId::LivingChangeTarget) {
+        if owner == index {
+            return mobs[index].tick(w, level, events);
+        }
+        let [rider, vehicle] = mobs.get_disjoint_mut([index, owner]).unwrap();
+        return NavigationLoan::new(rider, vehicle)
+            .rider
+            .tick(w, level, events);
     }
-    let [rider, vehicle] = mobs.get_disjoint_mut([index, owner]).unwrap();
-    NavigationLoan::new(rider, vehicle)
-        .rider
-        .tick(w, level, events)
+    if owner == index {
+        return mobs
+            .with_one_and_rest(index, |mob, before, after| {
+                let live = LiveOthers {
+                    before,
+                    between: &[],
+                    after,
+                    vehicle: None,
+                };
+                let mut scoped = w.clone();
+                scoped.live_mobs = Some(&live);
+                mob.tick(&scoped, level, events)
+            })
+            .expect("tick index is present");
+    }
+    mobs.with_two_and_rest(index, owner, |rider, vehicle, before, between, after| {
+        let loan = NavigationLoan::new(rider, vehicle);
+        let live = LiveOthers {
+            before,
+            between,
+            after,
+            vehicle: Some(&*loan.vehicle),
+        };
+        let mut scoped = w.clone();
+        scoped.live_mobs = Some(&live);
+        loan.rider.tick(&scoped, level, events)
+    })
+    .expect("rider and vehicle are distinct and present")
 }
 /// `Mob.requiresCustomPersistence`: a passenger never despawns.
 pub fn keeps_alive(m: &Mob) -> bool {

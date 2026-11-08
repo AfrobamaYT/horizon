@@ -12,6 +12,48 @@ pub(super) struct PlayerFacts {
 }
 
 impl Game<'_> {
+    /// Restore a saved anger target after insertion, so the target-change hook
+    /// receives a live actor and a currently resolvable living target. A
+    /// target that is absent or invalid resolves to none, as EntityReference
+    /// does while vanilla loads a neutral mob. Returns false only when the
+    /// actor cannot yet be represented by a native handle.
+    pub(in crate::game) fn native_restore_loaded_target(
+        &mut self,
+        id: u32,
+        uuid: Option<[i32; 4]>,
+    ) -> bool {
+        let Some(mob) = self.entity(id).and_then(|entity| self.mob(entity)) else {
+            return false;
+        };
+        let target = uuid.and_then(|words| {
+            let uuid = horizon_client::lan::playerdata::ints_uuid(words);
+            let entity = self
+                .player(uuid)
+                .map(|player| player.entity())
+                .or_else(|| {
+                    let target = self
+                        .persist
+                        .uuids
+                        .iter()
+                        .find_map(|(&id, found)| (*found == words).then_some(id))?;
+                    self.entity(target)
+                })?;
+            self.living(entity)
+        });
+        let target = target.filter(|target| {
+            let Some(kind) = self.native_entity_target(target.entity()) else {
+                return false;
+            };
+            self.mobs
+                .iter()
+                .find(|state| state.id == id)
+                .is_some_and(|state| self.native_mob_valid_target(state, kind))
+        });
+        // Cancellation leaves the newly loaded mob's target unchanged.
+        let _ = self.mob_set_target(mob, target);
+        true
+    }
+
     /// A player target's game mode, liveness, invulnerability (the ability,
     /// the `Invulnerable` flag or its window) and uuid.
     pub(super) fn native_player_facts(&self, target: Target) -> Option<PlayerFacts> {

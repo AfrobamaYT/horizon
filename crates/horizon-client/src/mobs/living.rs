@@ -2418,6 +2418,7 @@ mod tests {
             }
             let w = MobWorld {
                 goal_host: None,
+                live_mobs: None,
                 teams: Default::default(),
                 loop_context: crate::test_resources::server_loop_context(),
                 world: &world,
@@ -2555,6 +2556,7 @@ mod tests {
         }
         let w = MobWorld {
             goal_host: None,
+            live_mobs: None,
             teams: Default::default(),
             loop_context: crate::test_resources::server_loop_context(),
             world: &world,
@@ -2700,6 +2702,7 @@ mod tests {
                 player_identity: None,
                 mob_hooks: None,
                 goal_host: None,
+                live_mobs: None,
                 asks_animal_tame: false,
                 asks_living_destroy_block: false,
                 asks_baby_spawn: false,
@@ -2918,6 +2921,7 @@ mod tests {
             for (i, bordered) in [false, true].into_iter().enumerate() {
                 let w = MobWorld {
                     goal_host: None,
+                    live_mobs: None,
                     border: bordered.then_some(&border),
                     ..w.clone()
                 };

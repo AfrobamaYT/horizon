@@ -17,6 +17,9 @@ use mod_api::{
     crash::{NativeModCall, enter_native_mod},
 };
 
+#[cfg(test)]
+mod live_read_tests;
+
 /// What a mod goal runs with: the mob in hand, the tick's `MobWorld` (the
 /// [`mobs::part_goals::GoalHost`], the snapshot and the player view ride on
 /// it) and the game host behind the tick, for the reads that are the level's
@@ -34,6 +37,7 @@ pub(super) struct GoalCx<'a, 'w> {
 enum Resolved<'a> {
     Own,
     Player,
+    Live(&'a Mob),
     Seen(&'a Seen),
     Dragon(TargetInfo),
 }
@@ -66,6 +70,9 @@ impl GoalCx<'_, '_> {
         {
             return Some(Resolved::Dragon(info));
         }
+        if let Some(mob) = self.w.live_mobs.and_then(|mobs| mobs.find(id)) {
+            return Some(Resolved::Live(mob));
+        }
         let others = self.w.others;
         let seen = match self.w.others_index {
             Some(index) => index.get(&id).map(|&slot| &others[slot as usize]),
@@ -82,9 +89,11 @@ impl GoalCx<'_, '_> {
         let host = self.w.goal_host?;
         let epoch = host.epoch()?;
         match self.resolve(EntityRef::new(epoch, id))? {
-            Resolved::Own | Resolved::Player | Resolved::Seen(_) | Resolved::Dragon(_) => {
-                Some(EntityRef::new(epoch, id))
-            }
+            Resolved::Own
+            | Resolved::Player
+            | Resolved::Live(_)
+            | Resolved::Seen(_)
+            | Resolved::Dragon(_) => Some(EntityRef::new(epoch, id)),
         }
     }
 
@@ -132,6 +141,7 @@ impl GoalCx<'_, '_> {
     fn position(&self, entity: EntityRef) -> Option<horizon_core::geometry::Vec3> {
         match self.resolve(entity)? {
             Resolved::Own => Some(self.m.position),
+            Resolved::Live(mob) => Some(mob.position),
             Resolved::Player => self.w.player.as_ref().map(|p| p.position),
             Resolved::Seen(seen) => Some(seen.position),
             Resolved::Dragon(info) => Some(info.position),
@@ -152,6 +162,7 @@ impl GoalCx<'_, '_> {
     fn r_entity_velocity(&self, entity: EntityRef) -> Option<[f64; 3]> {
         match self.resolve(entity)? {
             Resolved::Own => Some(self.m.velocity),
+            Resolved::Live(mob) => Some(mob.velocity),
             Resolved::Player => self.w.player.as_ref().map(|p| p.velocity),
             Resolved::Seen(seen) => Some(seen.velocity),
             Resolved::Dragon(_) => None,
@@ -164,6 +175,7 @@ impl GoalCx<'_, '_> {
             // `getYRot` and `getXRot`: the snapshot carries no pitch and a
             // player's view no pitch either, so only the mob in hand answers.
             Resolved::Own => Some([self.m.yaw, self.m.head_pitch]),
+            Resolved::Live(mob) => Some([mob.yaw, mob.head_pitch]),
             _ => None,
         }
     }
@@ -171,6 +183,7 @@ impl GoalCx<'_, '_> {
     fn r_entity_head_yaw(&self, entity: EntityRef) -> Option<f32> {
         match self.resolve(entity)? {
             Resolved::Own => Some(self.m.head_yaw),
+            Resolved::Live(mob) => Some(mob.head_yaw),
             Resolved::Player => self.w.player.as_ref().map(|p| p.yaw),
             // `Seen::yaw` is the body's, not the head's.
             Resolved::Seen(_) | Resolved::Dragon(_) => None,
@@ -180,6 +193,7 @@ impl GoalCx<'_, '_> {
     fn r_entity_bounding_box(&self, entity: EntityRef) -> Option<[[f64; 3]; 2]> {
         let bounds = match self.resolve(entity)? {
             Resolved::Own => self.m.bounds(),
+            Resolved::Live(mob) => mob.bounds(),
             Resolved::Player => self.w.player.as_ref().map(|p| p.bounds)?,
             Resolved::Seen(seen) => seen.bounds,
             Resolved::Dragon(info) => info.bounds,
@@ -191,6 +205,7 @@ impl GoalCx<'_, '_> {
     fn r_entity_eye_height(&self, entity: EntityRef) -> Option<f64> {
         match self.resolve(entity)? {
             Resolved::Own => Some(self.m.eye_y() - self.m.position.y),
+            Resolved::Live(mob) => Some(mob.eye_y() - mob.position.y),
             Resolved::Player => self.w.player.as_ref().map(|p| p.eye[1] - p.position.y),
             Resolved::Seen(seen) => Some(seen.eye_y - seen.position.y),
             Resolved::Dragon(info) => Some(info.eye_y - info.position.y),
@@ -204,6 +219,7 @@ impl GoalCx<'_, '_> {
                 Some([self.m.position.x, y, self.m.position.z])
             }
             Resolved::Player => self.w.player.as_ref().map(|p| p.eye),
+            Resolved::Live(mob) => Some([mob.position.x, mob.eye_y(), mob.position.z]),
             Resolved::Seen(seen) => Some([seen.position.x, seen.eye_y, seen.position.z]),
             Resolved::Dragon(info) => Some([info.position.x, info.eye_y, info.position.z]),
         }
@@ -220,6 +236,7 @@ impl GoalCx<'_, '_> {
     fn r_entity_on_ground(&self, entity: EntityRef) -> Option<bool> {
         match self.resolve(entity)? {
             Resolved::Own => Some(self.m.on_ground),
+            Resolved::Live(mob) => Some(mob.on_ground),
             // Not carried by the snapshot or a player's view.
             _ => None,
         }
@@ -229,6 +246,7 @@ impl GoalCx<'_, '_> {
         match self.resolve(entity)? {
             // The snapshot carries the species, not its type id.
             Resolved::Own => Some(self.m.kind.id.clone()),
+            Resolved::Live(mob) => Some(mob.kind.id.clone()),
             _ => None,
         }
     }
@@ -236,6 +254,7 @@ impl GoalCx<'_, '_> {
     fn r_living_health(&self, living: LivingRef) -> Option<f32> {
         match self.resolve(living.entity())? {
             Resolved::Own => Some(self.m.health),
+            Resolved::Live(mob) => Some(mob.health),
             Resolved::Seen(seen) => Some(seen.health),
             // A player's view carries no health.
             _ => None,
@@ -245,6 +264,7 @@ impl GoalCx<'_, '_> {
     fn r_living_max_health(&self, living: LivingRef) -> Option<f32> {
         match self.resolve(living.entity())? {
             Resolved::Own => Some(self.m.attrs.max_health),
+            Resolved::Live(mob) => Some(mob.attrs.max_health),
             // Not carried by the snapshot.
             _ => None,
         }
@@ -253,6 +273,7 @@ impl GoalCx<'_, '_> {
     fn r_living_alive(&self, living: LivingRef) -> Option<bool> {
         match self.resolve(living.entity())? {
             Resolved::Own => Some(self.m.alive()),
+            Resolved::Live(mob) => Some(mob.alive()),
             Resolved::Player => self.w.player.as_ref().map(|p| p.alive),
             Resolved::Seen(seen) => Some(seen.alive),
             Resolved::Dragon(info) => Some(info.alive),
@@ -362,6 +383,21 @@ impl GoalCxBackend for GoalCx<'_, '_> {
                         return false;
                     }
                     Some(Who::Mob(seen.id))
+                }
+                Some(Resolved::Live(mob)) => {
+                    if !self.m.valid_target(
+                        self.w,
+                        &mobs::goals::TargetFacts::Mob {
+                            id: mob.id,
+                            species: mob.species(),
+                            alive: mob.alive(),
+                            invulnerable: mob.invulnerable_flag,
+                            baby: mob.is_baby(),
+                        },
+                    ) {
+                        return false;
+                    }
+                    Some(Who::Mob(mob.id))
                 }
                 Some(Resolved::Dragon(_)) | None => return false,
             },
@@ -484,6 +520,7 @@ impl Game<'_> {
         match context.resolve(target.entity()) {
             Some(Resolved::Player) => mobs::TargetChange::Set(Some(Who::Player)),
             Some(Resolved::Own) => mobs::TargetChange::Set(Some(Who::Mob(context.m.id))),
+            Some(Resolved::Live(mob)) => mobs::TargetChange::Set(Some(Who::Mob(mob.id))),
             Some(Resolved::Seen(seen)) => mobs::TargetChange::Set(Some(Who::Mob(seen.id))),
             Some(Resolved::Dragon(_)) | None => mobs::TargetChange::Keep,
         }

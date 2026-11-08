@@ -1069,6 +1069,7 @@ impl Game<'_> {
             player,
             player_identity: self.player_identity(),
             others,
+            live_mobs: None,
             dragon: self.dragon_target(),
             leash_boats: &self.leash_boats,
             others_grid: None,

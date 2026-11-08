@@ -1149,7 +1149,17 @@ impl Game<'_> {
         // `Mob.setTarget` -> `asValidTarget`: a player the golem cannot attack
         // (`IronGolem.canAttack`) comes back as no target.
         m.extra.anger = horizon_client::mobs::anger_left(m.extra.anger_end, self.world.game_time);
-        if m.extra.anger > 0 && m.extra.angry_at.is_some() {
+        let restore_anger = m.extra.anger > 0 && m.extra.angry_at.is_some();
+        let anger_uuid = match tag.get("angry_at") {
+            Some(Tag::IntArray(words)) if words.len() == 4 => {
+                Some([words[0], words[1], words[2], words[3]])
+            }
+            _ => None,
+        };
+        let notify_target = restore_anger
+            && mod_api::__private::listened(mod_api::HookId::LivingChangeTarget)
+            && self.native_lifecycle.epoch().is_some();
+        if restore_anger && !notify_target {
             m.ai.target = (!m.built_by_player()).then_some(horizon_client::mobs::Who::Player);
         }
         m.extra.mount = mount;
@@ -1168,6 +1178,14 @@ impl Game<'_> {
         self.remember(id, uuid, tag);
         self.bind_saved_entity_attachments(id, &mut m.attachment_lifetime);
         self.mobs.push(m);
+        if notify_target
+            && !self.native_restore_loaded_target(id, anger_uuid)
+            && let Some(mob) = self.mobs.iter_mut().find(|mob| mob.id == id)
+        {
+            // Handles are not available during some early load paths: keep
+            // the prior behavior until the level can expose them.
+            mob.ai.target = (!mob.built_by_player()).then_some(horizon_client::mobs::Who::Player);
+        }
         for rider in riders {
             if let Some(r) = self.load_mob(rider, Some(id))
                 && let Some(v) = self.mobs.iter_mut().find(|m| m.id == id)

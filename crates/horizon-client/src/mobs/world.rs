@@ -608,6 +608,7 @@ pub(crate) fn with_resource_test_world(
         controlling_player_movement: None,
         nearest_player: None,
         others,
+        live_mobs: None,
         dragon: None,
         leash_boats: &[],
         who_lookup: None,

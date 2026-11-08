@@ -3490,6 +3490,11 @@ pub fn breeding_experience(parent: &mut Mob, mob_drops: bool) -> Option<u32> {
     mob_drops.then(|| 1 + parent.random.next_int_bound(7).unwrap_or(0) as u32)
 }
 
+/// Read-only access to the live mobs outside the actor's current tick loan.
+pub trait LiveMobs {
+    fn find(&self, id: u32) -> Option<&Mob>;
+}
+
 #[derive(Clone)]
 pub struct MobWorld<'a> {
     /// What the motion value hooks are given: the loop context of the side that
@@ -3519,6 +3524,8 @@ pub struct MobWorld<'a> {
     /// player in the level stands, alive or not (the despawn distance).
     pub nearest_player: Option<Vec3>,
     pub others: &'a [Seen],
+    /// Disjoint live mob state, available only while an actor is ticked.
+    pub live_mobs: Option<&'a dyn LiveMobs>,
     /// The separately simulated dragon, visible to revenge and melee goals.
     pub dragon: Option<(u32, TargetInfo)>,
     /// The boats and rafts a lead can hang on (`Holder::Boat`): id and state.
