@@ -1413,6 +1413,9 @@ impl Game<'_> {
         // of coasting on the velocity of the ride that just ended.
         self.boats.update(i, |b| b.velocity = Vec3::ZERO);
         self.boats.update(i, |b| b.delta_rotation = 0.0);
+        if self.dismount_in_portal(self.boats[i].position) {
+            return;
+        }
         let target = self.boat_player_dismount_target(i, self.yaw);
         if let Some(p) = self.player.as_mut() {
             p.position = target;
@@ -1660,7 +1663,21 @@ impl Game<'_> {
         let (kind, id) = (self.boats[i].entity_type(), self.boats[i].id as i32);
         let (damage, scale, _, magic) = self.melee_damage(&kind, false);
         let sweep = self.sweep_before_hit(&kind, false);
+        let chest = self.boats[i].chest;
         let hurt = self.hurt_boat_result(i, damage, self.creative);
+        // AbstractChestBoat.destroy -> ContainerEntity.chestVehicleDestroyed:
+        // with entity_drops on, a player whose hit breaks a chest boat (not a
+        // creative discard) angers the piglins that see it.
+        if chest
+            && hurt == Some(true)
+            && !self.creative
+            && self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS)
+        {
+            self.anger_piglins(true);
+        }
         self.vehicle_attack_sounds(area, sweep, magic.then_some(id));
         if damage > 0.0
             && let Some(destroyed) = hurt
@@ -1782,6 +1799,7 @@ impl Game<'_> {
                 continue;
             }
             let entity_start = out.len();
+            self.mark_motion(entity_start, Self::MOTION_OBJECT | u64::from(b.id));
             let models = if b.chest {
                 &self.boat_models.chest_models
             } else {

@@ -109,8 +109,10 @@ impl Game<'_> {
     /// `ItemStack.canBreakBlockInAdventureMode` / `canPlaceOnBlockInAdventureMode`
     /// for the main-hand stack: some predicate of its `can_break` or
     /// `can_place_on` component (`AdventureModePredicate`: one block predicate
-    /// or a list) matches the block at `pos`. Predicates with `nbt` or
-    /// `components` need the block entity's data and never match.
+    /// or a list) matches the block at `pos`, as `BlockPredicate.matches(BlockInWorld)`
+    /// tests it: the state, then `nbt` against the block entity's
+    /// `saveWithFullMetadata` (no block entity fails). `components` is not
+    /// looked at on this path.
     fn adventure_predicate(&self, component: &str, pos: [i32; 3]) -> bool {
         use horizon_core::nbt::Tag;
         let Some(tag) = self
@@ -129,9 +131,6 @@ impl Game<'_> {
             .state(state)
             .map(|s| &s.properties);
         let matches = |p: &Tag| {
-            if p.get("nbt").is_some() || p.get("components").is_some() {
-                return false;
-            }
             let block_ok = match p.get("blocks") {
                 None => true,
                 Some(Tag::String(id)) => self.block_in_holder_set(&id.to_string_lossy(), name),
@@ -170,7 +169,24 @@ impl Game<'_> {
                 }),
                 Some(_) => false,
             };
-            block_ok && state_ok
+            // NbtPredicate (TagParser.LENIENT_CODEC: SNBT or a compound),
+            // NbtUtils.compareNbt(pattern, data, true).
+            let nbt_ok = || match p.get("nbt") {
+                None => true,
+                Some(Tag::String(snbt)) => horizon_core::nbt::parse_snbt(&snbt.to_string_lossy())
+                    .is_ok_and(|(pattern, _)| {
+                        horizon_client::nbt_path::compare_nbt(
+                            &pattern,
+                            self.block_entity_nbt(pos).as_ref(),
+                        )
+                    }),
+                Some(pattern @ Tag::Compound(_)) => horizon_client::nbt_path::compare_nbt(
+                    pattern,
+                    self.block_entity_nbt(pos).as_ref(),
+                ),
+                Some(_) => false,
+            };
+            block_ok && state_ok && nbt_ok()
         };
         match tag {
             Tag::List(list) => list.iter().any(matches),

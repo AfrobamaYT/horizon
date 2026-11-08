@@ -805,21 +805,12 @@ impl MobTypes {
     }
 }
 pub use horizon_client_core::who::Who;
-impl From<mod_api::NativeEffectDamage> for DamageKind {
-    fn from(damage: mod_api::NativeEffectDamage) -> Self {
-        match damage {
-            mod_api::NativeEffectDamage::Magic => Self::Magic,
-            mod_api::NativeEffectDamage::Wither => Self::Wither,
-            _ => unreachable!("NativeEffectDamage: unhandled variant"),
-        }
-    }
-}
-
 /// A native damage type's registry name and the tags consumed by mob combat.
 ///
-/// Native code supplies a static name (no interning or leaked runtime strings)
-/// and flags matching its data-pack damage tags. Register the same name/data for
-/// player damage, death messages and loot predicates. Unset tags are false.
+/// Native code supplies a static name and flags matching its data-pack damage
+/// tags; `NamedDamage::registered` builds both from a damage registry entry,
+/// interning its name. Register the same name/data for player damage, death
+/// messages and loot predicates. Unset tags are false.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NamedDamage {
     pub name: &'static str,
@@ -838,8 +829,54 @@ impl NamedDamage {
     pub const IS_FALL: u32 = 1 << 9;
     pub const BYPASSES_ENCHANTMENTS: u32 = 1 << 10;
 
+    /// Each flag with the damage tag it stands for.
+    const TAG_FLAGS: [(u32, &'static str); 11] = [
+        (Self::IS_FIRE, "minecraft:is_fire"),
+        (Self::BYPASSES_ARMOR, "minecraft:bypasses_armor"),
+        (Self::NO_KNOCKBACK, "minecraft:no_knockback"),
+        (
+            Self::BYPASSES_INVULNERABILITY,
+            "minecraft:bypasses_invulnerability",
+        ),
+        (Self::BYPASSES_EFFECTS, "minecraft:bypasses_effects"),
+        (Self::BYPASSES_RESISTANCE, "minecraft:bypasses_resistance"),
+        (Self::PANIC_CAUSES, "minecraft:panic_causes"),
+        (Self::IS_PROJECTILE, "minecraft:is_projectile"),
+        (Self::IS_EXPLOSION, "minecraft:is_explosion"),
+        (Self::IS_FALL, "minecraft:is_fall"),
+        (
+            Self::BYPASSES_ENCHANTMENTS,
+            "minecraft:bypasses_enchantments",
+        ),
+    ];
+
     pub const fn new(name: &'static str, tags: u32) -> Self {
         Self { name, tags }
+    }
+
+    /// The registered damage type `name` with the tags `catalog` gives it,
+    /// or None when the registry has no such type. The name is interned: the
+    /// registries hold a handful of ids, so one copy of each is kept for the
+    /// rest of the run.
+    pub fn registered(catalog: &horizon_world::damage_source::Catalog, name: &str) -> Option<Self> {
+        use std::{collections::HashSet, sync::Mutex};
+        static NAMES: Mutex<Option<HashSet<&'static str>>> = Mutex::new(None);
+        let id = catalog.id(name)?;
+        let mut names = NAMES.lock().unwrap_or_else(|e| e.into_inner());
+        let names = names.get_or_insert_with(HashSet::new);
+        let name = match names.get(name) {
+            Some(&found) => found,
+            None => {
+                let leaked: &'static str = Box::leak(name.to_owned().into_boxed_str());
+                names.insert(leaked);
+                leaked
+            }
+        };
+        let tags = Self::TAG_FLAGS
+            .iter()
+            .filter(|(_, tag)| catalog.in_tag(id, tag))
+            .fold(0, |tags, (flag, _)| tags | flag);
+        Some(Self { name, tags })
     }
     pub const fn has(self, tag: u32) -> bool {
         self.tags & tag != 0
@@ -1357,6 +1394,9 @@ pub struct Extra {
     /// Species scratch values (the wither's head targets and clocks).
     pub ints: [i32; 6],
     pub counter: i32,
+    /// Nautilus ATTACK_TARGET_COOLDOWN saved slot: None is absent,
+    /// Some(MAX) is permanent, otherwise the remaining lifetime. The value is `counter`.
+    pub nautilus_attack_cooldown_ttl: Option<i64>,
     pub counter2: i32,
     pub home: Option<[i32; 3]>,
     /// A copper golem's `openedChestPos`.
@@ -1688,6 +1728,9 @@ pub struct Mob {
     /// `Entity.needsSync`: knocked back, pushed or jumped since its server
     /// last sent it, so the next update goes out at once.
     pub needs_sync: bool,
+    /// `Entity.syncPosition`: it bounced this tick (`restituteMovementAfterCollisions`),
+    /// so its tracker keeps this position as a step of the next move it sends.
+    pub sync_position: bool,
     /// `getAttributeValue(KNOCKBACK_RESISTANCE)` with the modifiers of the
     /// items it wears or holds (`Extra::gear_knockback`), which the game
     /// works out each tick for a mob that has any (the mob itself knows no
@@ -1963,6 +2006,8 @@ pub enum MobEvent {
     ChestOpen {
         chest: [i32; 3],
         open: bool,
+        /// The golem, the source of the container's game event.
+        mob: u32,
     },
     /// `BeeEnterHiveGoal.start`: the bee goes into its hive (the host stores
     /// its tag with `BeehiveBlockEntity.addOccupant` and discards it).
@@ -2521,6 +2566,12 @@ pub enum MobEvent {
     /// A horse throws its rider off.
     Buck {
         mob: u32,
+    },
+    /// `Entity.unRide`'s `ejectPassengers` before a move (a shulker's
+    /// teleport): whoever rides `mob` gets off where it stood, `from`.
+    EjectPassengers {
+        mob: u32,
+        from: Vec3,
     },
     /// A piglin's admiring is over: barter or keep the item.
     FinishAdmiring {
@@ -3679,6 +3730,7 @@ impl Mob {
             horizontal_collision: false,
             vertical_collision_below: false,
             needs_sync: false,
+            sync_position: false,
             gear_knockback_resistance: None,
             hurt_time: 0,
             invulnerable: 0,
@@ -4552,8 +4604,10 @@ impl Mob {
     /// Removes effects and schedules the effect-status update when needed.
     pub fn retain_effects(&mut self, mut keep: impl FnMut(&StoredEffect) -> bool) -> bool {
         let before = self.extra.effects.len();
+        let mut boost_removed = false;
         self.extra.effects.retain(|e| {
             let keep = keep(e);
+            boost_removed |= !keep && e.id == "minecraft:health_boost";
             if !keep && e.id == "minecraft:absorption" {
                 self.absorption = (self.absorption - 4.0 * (e.amplifier + 1) as f32).max(0.0);
             }
@@ -4571,6 +4625,9 @@ impl Mob {
             self.extra
                 .ambient_effects
                 .retain(|e| effects.iter().any(|x| x.id == *e));
+        }
+        if boost_removed {
+            finalize::health_boost_changed(self);
         }
         self.effects_dirty |= changed;
         changed
@@ -4656,6 +4713,9 @@ impl Mob {
         }
         if effect == "minecraft:absorption" {
             self.absorption = self.absorption.max(4.0 * (incoming.amplifier + 1) as f32);
+        }
+        if changed && effect == "minecraft:health_boost" {
+            finalize::health_boost_changed(self);
         }
         self.effects_dirty |= changed;
         changed

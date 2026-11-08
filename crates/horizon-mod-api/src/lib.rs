@@ -3417,16 +3417,6 @@ pub struct NativePlayerExperience {
     pub total: i32,
 }
 
-/// Damage sources supported for a mod effect tick.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum NativeEffectDamage {
-    /// Poison's magic damage.
-    Magic,
-    /// The Wither effect's damage.
-    Wither,
-}
-
 /// A change requested by an effect tick, applied after its hooks return.
 // hidden: a game-side type, not part of the mod surface
 #[doc(hidden)]
@@ -3434,7 +3424,7 @@ pub enum NativeEffectDamage {
 #[non_exhaustive]
 pub enum EffectTickChange {
     Heal(f32),
-    Hurt(NativeEffectDamage, f32),
+    Hurt(String, f32),
     AddExhaustion(f32),
     Eat(i32, f32),
 }
@@ -3445,10 +3435,13 @@ impl ApplyEffectTickEvent<'_> {
         self.changes.push(EffectTickChange::Heal(amount));
     }
 
-    /// Queue damage with a supported source.
-    pub fn hurt(&mut self, damage_type: NativeEffectDamage, amount: f32) {
+    /// Queue damage of a registered damage type on the holder: a vanilla
+    /// one (`minecraft:magic`, `minecraft:wither`) or a datapack's
+    /// (`demo:heat`). It reaches the holder's hurt hooks with that type; an
+    /// unregistered type hurts nothing.
+    pub fn hurt(&mut self, damage_type: &str, amount: f32) {
         self.changes
-            .push(EffectTickChange::Hurt(damage_type, amount));
+            .push(EffectTickChange::Hurt(damage_type.to_owned(), amount));
     }
 
     /// Queue food exhaustion; a non-player holder ignores it.

@@ -783,9 +783,9 @@ pub fn tick(
             super::equine::ai_step(m, w, events);
         }
         // LivingEntity.aiStep ends in the water's hurt with or without AI;
-        // a NoAI enderman's hurts still teleport it (Enderman.hurtServer).
+        // a NoAI enderman's or shulker's hurts still teleport it (hurtServer).
         hurt_by_water(m, w, level, events);
-        enderman_hurt_teleports(m, w, events);
+        hurt_teleports(m, w, events);
         // Ravager.aiStep runs outside serverAiStep: NoAI still advances
         // attack/stun/roar, including the stun-to-roar transition.
         if m.species() == Species::Ravager {
@@ -1376,8 +1376,9 @@ fn base_tick(
     // invulnerable time of that tick has already dropped.
     let was_on_fire = m.fire_ticks > 0;
     block_contact_damage(m, w, level, fire);
-    // Enderman.hurtServer teleports inside the hurt.
-    enderman_hurt_teleports(m, w, events);
+    // Enderman.hurtServer and Shulker.hurtServer teleport inside the hurt
+    // (fire, lava, a block, an effect).
+    hurt_teleports(m, w, events);
     if !m.alive() {
         m.death_time += 1;
     }
@@ -1796,7 +1797,7 @@ fn ai_step(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, events: &mut 
         // Mannequin.isEffectiveAi: an immovable one never travels.
         m.travel(w, level, input, events);
         // A fall's hurt (checkFallDamage) teleports at once.
-        enderman_hurt_teleports(m, w, events);
+        hurt_teleports(m, w, events);
     }
     // LivingEntity.aiStep: applyEffectsFromBlocks follows travel.
     m.apply_effects_from_blocks(w, events);
@@ -1823,15 +1824,19 @@ fn hurt_by_water(
 ) {
     if m.kind.flags.water_sensitive && (m.fluids.in_water || in_rain(m, w)) {
         m.damage(level, 1.0, Damage::of(DamageKind::Drown));
-        enderman_hurt_teleports(m, w, events);
+        hurt_teleports(m, w, events);
     }
 }
-/// The teleport `Enderman.hurtServer` makes inside a hurt, after the hurt's
-/// sound; with or without AI.
-fn enderman_hurt_teleports(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
+/// The teleport `Enderman.hurtServer` or `Shulker.hurtServer` makes inside a
+/// hurt, after the hurt's sound; with or without AI.
+fn hurt_teleports(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     if m.species() == Species::Enderman && m.extra.counter2 > 0 {
         events.append(&mut m.outbox);
         super::enderman::run_pending_teleports(m, w, events);
+    }
+    if m.species() == Species::Shulker && m.extra.flag {
+        events.append(&mut m.outbox);
+        super::shulker::hurt_teleport(m, w, events);
     }
 }
 impl Mob {
@@ -3182,6 +3187,9 @@ pub(crate) fn tick_effects(
                     m.absorption = m.absorption.min(4.0 * (hidden.amplifier + 1) as f32);
                 }
                 m.extra.effects[i] = super::StoredEffect::from_instance(effect, &hidden);
+                if effect == "minecraft:health_boost" {
+                    super::finalize::health_boost_changed(m);
+                }
                 m.extra.ambient_effects.retain(|e| *e != effect);
                 if hidden.ambient {
                     m.extra.ambient_effects.push(effect);
