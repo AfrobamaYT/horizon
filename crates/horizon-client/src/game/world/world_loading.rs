@@ -1090,6 +1090,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         with_game(|game| {
             let request = WorldRequest {
+                owner: None,
                 save_root: dir.clone(),
                 folder: "test".into(),
                 name: Some("test".into()),

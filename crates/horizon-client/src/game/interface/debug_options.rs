@@ -621,13 +621,14 @@ mod tests {
         );
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
             Instant::now(),
             false,
-            true,
+            execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -642,7 +643,9 @@ mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();
@@ -662,7 +665,7 @@ mod tests {
             game.debug,
             "the ordinary F3 toggle already reaches the title"
         );
-        let mut overlay = HudBatch::new([1280, 720]);
+        let mut overlay = HudBatch::new([1280, 720], game.settings.gui_scale_inputs());
         game.draw_debug_overlay_under(&mut overlay, [1280, 720]);
         assert!(
             !overlay.vertices.is_empty(),
@@ -671,7 +674,7 @@ mod tests {
         assert!(game.title.is_some());
         // Gui treats the title as an open screen even when F1 hides the HUD.
         game.ui.hide_gui = true;
-        let mut hidden_hud = HudBatch::new([1280, 720]);
+        let mut hidden_hud = HudBatch::new([1280, 720], game.settings.gui_scale_inputs());
         game.draw_debug_overlay_under(&mut hidden_hud, [1280, 720]);
         assert!(!hidden_hud.vertices.is_empty());
         game.debug_key(KeyCode::F3, KeyAction::Press);

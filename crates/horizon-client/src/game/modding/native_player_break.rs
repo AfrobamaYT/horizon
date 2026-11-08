@@ -82,7 +82,7 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::native_machines::tests::server_game;
+    use super::super::native_entity_refs::tests::with_game;
     use super::*;
     use horizon_client::{command::args::GameMode, items::ItemStack, motion::PlayerMotion};
     use horizon_core::geometry::Vec3;
@@ -117,15 +117,20 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_mod_breaks_stone_as_the_player_with_their_pickaxe() {
-        let mut game = server_game();
-        let uuid = with_player(&mut game, ItemStack::new("minecraft:diamond_pickaxe", 1));
-        let pos = [6, 64, 4];
-        place(&mut game, pos, "minecraft:stone");
-        assert!(game.native_player_break_block(uuid, pos, false));
-        assert_eq!(block(&game, pos), "minecraft:air");
-        assert!(popped(&game, "minecraft:cobblestone"));
-        assert_eq!(game.held().unwrap().damage, 1);
-        assert_eq!(game.stats.get("mined", "minecraft:stone"), 1);
+        with_game(|mut game| {
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            let uuid = with_player(&mut game, ItemStack::new("minecraft:diamond_pickaxe", 1));
+            let pos = [6, 64, 4];
+            place(&mut game, pos, "minecraft:stone");
+            assert!(game.native_player_break_block(uuid, pos, false));
+            assert_eq!(block(&game, pos), "minecraft:air");
+            assert!(popped(&game, "minecraft:cobblestone"));
+            assert_eq!(game.held().unwrap().damage, 1);
+            assert_eq!(game.stats.get("mined", "minecraft:stone"), 1);
+        });
     }
 
     /// Into the inventory: silk touch keeps the stone whole, and a diamond
@@ -133,21 +138,26 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn drops_go_into_the_inventory_rolled_for_the_tools_enchantments() {
-        let mut game = server_game();
-        let mut silk = ItemStack::new("minecraft:diamond_pickaxe", 1);
-        silk.enchant("minecraft:silk_touch", 1);
-        let uuid = with_player(&mut game, silk);
-        let (stone, ore) = ([6, 64, 4], [7, 64, 4]);
-        place(&mut game, stone, "minecraft:stone");
-        assert!(game.native_player_break_block(uuid, stone, true));
-        assert_eq!(carried(&game, "minecraft:stone"), 1);
-        assert!(!popped(&game, "minecraft:stone"));
+        with_game(|mut game| {
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            let mut silk = ItemStack::new("minecraft:diamond_pickaxe", 1);
+            silk.enchant("minecraft:silk_touch", 1);
+            let uuid = with_player(&mut game, silk);
+            let (stone, ore) = ([6, 64, 4], [7, 64, 4]);
+            place(&mut game, stone, "minecraft:stone");
+            assert!(game.native_player_break_block(uuid, stone, true));
+            assert_eq!(carried(&game, "minecraft:stone"), 1);
+            assert!(!popped(&game, "minecraft:stone"));
 
-        game.inventory[game.selected] = Some(ItemStack::new("minecraft:diamond_pickaxe", 1));
-        place(&mut game, ore, "minecraft:diamond_ore");
-        assert!(game.native_player_break_block(uuid, ore, true));
-        assert_eq!(carried(&game, "minecraft:diamond"), 1);
-        assert!(!game.orbs.is_empty(), "the ore's experience");
+            game.inventory[game.selected] = Some(ItemStack::new("minecraft:diamond_pickaxe", 1));
+            place(&mut game, ore, "minecraft:diamond_ore");
+            assert!(game.native_player_break_block(uuid, ore, true));
+            assert_eq!(carried(&game, "minecraft:diamond"), 1);
+            assert!(!game.orbs.is_empty(), "the ore's experience");
+        });
     }
 
     /// The player's own checks hold: an adventure player whose tool has no
@@ -156,18 +166,23 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn the_players_checks_hold() {
-        let mut game = server_game();
-        let uuid = with_player(&mut game, ItemStack::new("minecraft:diamond_pickaxe", 1));
-        let (stone, bedrock, air) = ([6, 64, 4], [7, 64, 4], [8, 64, 4]);
-        place(&mut game, stone, "minecraft:stone");
-        place(&mut game, bedrock, "minecraft:bedrock");
-        assert!(!game.native_player_break_block(uuid, bedrock, false));
-        assert_eq!(block(&game, bedrock), "minecraft:bedrock");
-        assert!(!game.native_player_break_block(uuid, air, false));
-        assert!(!game.native_player_break_block(uuid ^ 1, stone, false));
-        game.set_mode(GameMode::Adventure);
-        assert!(!game.native_player_break_block(uuid, stone, false));
-        assert_eq!(block(&game, stone), "minecraft:stone");
-        assert_eq!(game.held().unwrap().damage, 0, "nothing wore the pickaxe");
+        with_game(|mut game| {
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            let uuid = with_player(&mut game, ItemStack::new("minecraft:diamond_pickaxe", 1));
+            let (stone, bedrock, air) = ([6, 64, 4], [7, 64, 4], [8, 64, 4]);
+            place(&mut game, stone, "minecraft:stone");
+            place(&mut game, bedrock, "minecraft:bedrock");
+            assert!(!game.native_player_break_block(uuid, bedrock, false));
+            assert_eq!(block(&game, bedrock), "minecraft:bedrock");
+            assert!(!game.native_player_break_block(uuid, air, false));
+            assert!(!game.native_player_break_block(uuid ^ 1, stone, false));
+            game.set_mode(GameMode::Adventure);
+            assert!(!game.native_player_break_block(uuid, stone, false));
+            assert_eq!(block(&game, stone), "minecraft:stone");
+            assert_eq!(game.held().unwrap().damage, 0, "nothing wore the pickaxe");
+        });
     }
 }

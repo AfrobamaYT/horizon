@@ -542,7 +542,11 @@ mod tests {
             return;
         }
         let assets = crate::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.clone(),
+            ))
+            .unwrap();
         let facts = crate::blocks::BlockFacts::load(&root, assets.registry).unwrap();
         let fluids = FluidResources::new(&assets, &facts).unwrap();
         let collision = crate::collisions::load(&root, assets.registry).unwrap();
@@ -555,6 +559,7 @@ mod tests {
         }
         let at = Vec3::new(20.5, 4.6, 20.5);
         let mut orb = ExperienceOrb {
+            attachment_lifetime: Default::default(),
             rotation: [0.0, 0.0],
             join: Default::default(),
             no_gravity: false,
@@ -579,6 +584,7 @@ mod tests {
             &mut || 0.0,
             None,
             &fluids,
+            crate::test_resources::server_loop_context(),
             &mut |_, _| {},
         ));
         assert!(

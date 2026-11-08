@@ -2284,9 +2284,12 @@ mod tests {
         let lan =
             crate::lan::Lan::start_with(Arc::new(crate::lan::data::SyncData::empty()), config)
                 .unwrap();
-        let owner = login_profile(Connection::local(lan.connect_local().unwrap()), "Owner");
+        let owner = login_profile(
+            &mut Connection::local(lan.connect_local().unwrap()),
+            "Owner",
+        );
         assert_eq!(owner.uuid, owner_uuid);
-        let guest = login_profile(Connection::local(lan.connect_local().unwrap()), "Alex");
+        let guest = login_profile(&mut Connection::local(lan.connect_local().unwrap()), "Alex");
         assert_eq!(guest.uuid, offline_uuid("Alex"));
     }
 

@@ -15,7 +15,7 @@ impl Game<'_> {
     /// another player or none.
     pub(super) fn orb_target(&mut self, i: usize, followed: &[OrbCandidate]) -> Option<[f64; 3]> {
         let o = &self.orbs[i];
-        let (id, at) = (o.id, o.position);
+        let (id, at, join) = (o.id, o.position, o.join);
         let distance = |feet: &[f64; 3]| -> f64 {
             (feet[0] - at.x).powi(2) + (feet[1] - at.y).powi(2) + (feet[2] - at.z).powi(2)
         };
@@ -42,6 +42,7 @@ impl Game<'_> {
         let found = nearest.and_then(|c| c.2).and_then(|uuid| self.player(uuid));
         let mut following = found;
         self.native_xp_orb_targeting(orb, SCAN_DISTANCE, &mut following);
+        let i = self.orbs.locate(join)?;
         if following == found {
             return nearest.map(|c| c.1);
         }

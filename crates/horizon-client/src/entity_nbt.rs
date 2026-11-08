@@ -2070,7 +2070,7 @@ pub fn mob_from_nbt(
         if m.extra
             .effects
             .iter()
-            .any(|e| e.0 == "minecraft:health_boost")
+            .any(|e| e.id == "minecraft:health_boost")
         {
             crate::mobs::finalize::health_boost_changed(&mut m);
         }

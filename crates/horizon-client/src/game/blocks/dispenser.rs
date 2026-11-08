@@ -1879,13 +1879,12 @@ impl Game<'_> {
                 );
                 for stack in drops {
                     for _ in 0..stack.count {
-                        game.spawn_item(
+                        game.spawn_item_own(
                             ItemStack {
                                 count: 1,
                                 ..stack.clone()
                             },
                             [at.x, at.y + height, at.z],
-                            new_item_motion(),
                             0,
                         );
                     }

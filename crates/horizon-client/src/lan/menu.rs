@@ -1784,14 +1784,13 @@ mod tests {
         own[0] = Some(ItemStack::new("minecraft:oak_log", 1));
         world.block_entities.insert(
             k,
-            BlockEntity::Mod(Box::new(
+            BlockEntity::Mod(Box::new(crate::containers::ModBlockEntity::new(
+                "test:station".into(),
                 ModBlockEntityFields {
-                    id: "test:station".into(),
                     items: own,
                     ..Default::default()
-                }
-                .into(),
-            )),
+                },
+            ))),
         );
         let chest = (1, 64, 0);
         let stick = Some(ItemStack::new("minecraft:stick", 8));
@@ -1813,6 +1812,7 @@ mod tests {
         g.menu = Some(Menu {
             window: 1,
             kind: 0,
+            registry_id: "test:station".into(),
             pos: Some(k),
             slots,
             size: 6,

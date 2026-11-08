@@ -994,7 +994,7 @@ pub struct CreatedWorld {
     /// The world's level data, its name, game type, difficulty, game rules and features.
     pub level: crate::save::Level,
     pub world_gen: crate::save::WorldGen,
-    pub flat_settings: Option<horizon_world::nbt::Tag>,
+    pub flat_settings: Option<horizon_core::nbt::Tag>,
     pub single_biome: Option<String>,
     /// level.dat's `DataPacks`: enabled and disabled ids.
     pub data_packs: (Vec<String>, Vec<String>),
@@ -12544,7 +12544,7 @@ mod tests {
             ..Default::default()
         };
         level.difficulty = "normal".into();
-        level.enabled_features = vec!["minecraft:vanilla".into()];
+        level.enabled_features = vec!["minecraft:vanilla".into()].into();
         level.data_packs = Some((vec!["vanilla".into()], Vec::new()));
         let world = CreatedWorld {
             level,

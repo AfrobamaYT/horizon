@@ -148,6 +148,85 @@ mod tests {
         }
         Some(crate::mobs::MobTypes::load(&root).unwrap())
     }
+
+    struct Level {
+        registries: crate::mobs::finalize::SpawnRegistries,
+        enchantments: crate::enchant::Enchantments,
+        items: crate::items::Items,
+    }
+    impl crate::mobs::finalize::FinalizeLevel for Level {
+        fn biome(&self, _: [i32; 3]) -> String {
+            "minecraft:plains".into()
+        }
+        fn biome_tag(&self, _: &str, _: [i32; 3]) -> bool {
+            false
+        }
+        fn structures_with_piece_at(&self, _: [i32; 3]) -> Vec<String> {
+            Vec::new()
+        }
+        fn moon_phase(&self, _: [i32; 3]) -> usize {
+            0
+        }
+        fn spawning_monsters(&self) -> bool {
+            true
+        }
+        fn no_collision(&self, _: horizon_core::geometry::Aabb) -> bool {
+            true
+        }
+        fn free_chicken(&self, _: horizon_core::geometry::Aabb) -> Option<u32> {
+            None
+        }
+        fn ride_chicken(&mut self, _: u32, _: u32) {}
+        fn game_time(&self) -> i64 {
+            0
+        }
+        fn halloween(&self) -> bool {
+            false
+        }
+        fn create(&mut self, _: &str, _: crate::mobs::spawn_rules::Reason) -> Option<Mob> {
+            None
+        }
+        fn spawn_data(&self) -> crate::mobs::finalize::SpawnData<'_> {
+            crate::mobs::finalize::SpawnData {
+                registries: &self.registries,
+                enchantments: &self.enchantments,
+                items: &self.items,
+                camel_husk_size: (1.0, 1.0),
+            }
+        }
+    }
+    fn run_finalize(m: &mut Mob, difficulty: LocalDifficulty) {
+        static LEVEL: std::sync::OnceLock<std::sync::Mutex<Level>> = std::sync::OnceLock::new();
+        let mut level = LEVEL
+            .get_or_init(|| {
+                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../.local/horizon-client")
+                    .join(horizon_core::VANILLA_VERSION);
+                let defaults = horizon_world::item_defaults::read(&root).unwrap();
+                std::sync::Mutex::new(Level {
+                    registries: crate::mobs::finalize::SpawnRegistries::load(&root),
+                    enchantments: crate::enchant::Enchantments::load(&root, &defaults),
+                    items: crate::items::Items::tags_only(
+                        &root,
+                        &horizon_world::loot::PackOverlay::NONE,
+                        &defaults,
+                    )
+                    .unwrap(),
+                })
+            })
+            .lock()
+            .unwrap();
+        let mut random = m.random.clone();
+        let mut cx = crate::mobs::finalize::Ctx {
+            level: &mut *level,
+            random: &mut random,
+            difficulty,
+            created: Vec::new(),
+            jockey_rider: None,
+        };
+        cx.finalize(m, crate::mobs::spawn_rules::Reason::Natural, None);
+    }
+
     fn spawn(types: &crate::mobs::MobTypes, kind: &str, id: u32) -> Mob {
         let kind = std::sync::Arc::new(types.types.get(kind).unwrap().clone());
         let mut m = Mob::new(
@@ -157,7 +236,7 @@ mod tests {
             0.0,
         );
         let difficulty = LocalDifficulty::new(3, 0, 0, 1.0);
-        finalize(&mut m, &BiomeFacts::default(), &difficulty);
+        run_finalize(&mut m, difficulty);
         m
     }
     /// #2783: `/summon`, eggs, spawners and natural spawns run
@@ -223,8 +302,8 @@ mod tests {
             "minecraft:random_spawn_bonus"
         ));
         assert!(!m.extra.left_handed);
-        assert!(m.extra.head.is_none());
-        assert!(m.extra.main_hand.is_none());
+        assert!(m.equipment_stacks()[5].is_none());
+        assert!(m.equipment_stacks()[0].is_none());
     }
     /// `Zombie` / `AbstractSkeleton` halloween garb: 25% of empty heads, never
     /// on other mobs, and not when it is not Halloween.
@@ -235,10 +314,13 @@ mod tests {
         let mut lanterns = 0;
         for id in 1..=400 {
             let mut m = spawn(&types, "minecraft:skeleton", id);
-            m.extra.head = None;
+            m.set_equipment_stack(5, None);
             let mut random = m.random.clone();
             crate::mobs::finalize::halloween_head(&mut m, &mut random, true);
-            match m.extra.head.as_deref() {
+            match m.equipment_stacks()[5]
+                .as_ref()
+                .map(|stack| stack.item.as_ref())
+            {
                 Some("minecraft:jack_o_lantern") => {
                     pumpkins += 1;
                     lanterns += 1;
@@ -258,14 +340,14 @@ mod tests {
         );
         assert!(lanterns < pumpkins / 2, "{lanterns} lanterns of {pumpkins}");
         let mut m = spawn(&types, "minecraft:skeleton", 1);
-        m.extra.head = None;
+        m.set_equipment_stack(5, None);
         let mut random = m.random.clone();
         crate::mobs::finalize::halloween_head(&mut m, &mut random, false);
-        assert!(m.extra.head.is_none());
+        assert!(m.equipment_stacks()[5].is_none());
         let mut cow = spawn(&types, "minecraft:cow", 1);
-        cow.extra.head = None;
+        cow.set_equipment_stack(5, None);
         let mut random = cow.random.clone();
         crate::mobs::finalize::halloween_head(&mut cow, &mut random, true);
-        assert!(cow.extra.head.is_none());
+        assert!(cow.equipment_stacks()[5].is_none());
     }
 }

@@ -7,7 +7,7 @@ use super::api_values::{TryIntoApi, TryIntoEngine};
 
 use super::level_sounds::LevelSound;
 use super::{
-    Dim, Game, Hand, InteractTarget, dispenser, entity_culling::EntityCullDecision,
+    Dim, Game, Hand, InteractTarget, entity_culling::EntityCullDecision,
     native_mob_draw::NativePlayerRender, native_projectiles::Impact, view_vector,
 };
 use horizon_assets::item_model::DisplayContext;
@@ -2355,7 +2355,7 @@ impl Game<'_> {
             source: hurt,
             recently_hit: player_killed,
         };
-        self.drop_death_items(&dying, stacks, 10, |_| dispenser::new_item_motion());
+        self.drop_death_items(&dying, stacks, 10, |_| None);
         if let Some(reward) = experience {
             let amount = self.living_experience_drop(m.id, &kind, player_uuid, reward);
             self.spawn_orbs(pos, amount as u32);
@@ -2369,12 +2369,19 @@ impl Game<'_> {
         dying: &DyingDrops<'_>,
         stacks: Vec<(ItemStack, [f64; 3])>,
         pickup_delay: u32,
-        mut velocity: impl FnMut(&mut Self) -> [f64; 3],
+        mut velocity: impl FnMut(&mut Self) -> Option<[f64; 3]>,
     ) {
         let Some(source) = &dying.source else {
             for (stack, position) in stacks {
-                let motion = velocity(self);
-                self.spawn_item(stack, position, motion, pickup_delay);
+                let random = super::spill::prepare_item_random(None);
+                let motion = velocity(self).unwrap_or(random.velocity);
+                self.add_item_entity_prepared(
+                    stack,
+                    position,
+                    Some(motion),
+                    pickup_delay,
+                    Some(random),
+                );
             }
             return;
         };
@@ -2382,11 +2389,15 @@ impl Game<'_> {
         // collects the drop, before the event sees the list.
         let mut drops: Vec<super::spill::BlockItemDrop> = stacks
             .into_iter()
-            .map(|(stack, position)| super::spill::BlockItemDrop {
-                stack,
-                position,
-                velocity: velocity(self),
-                pickup_delay,
+            .map(|(stack, position)| {
+                let random = super::spill::prepare_item_random(None);
+                super::spill::BlockItemDrop {
+                    random: Some(random),
+                    stack,
+                    position,
+                    velocity: velocity(self).unwrap_or(random.velocity),
+                    pickup_delay,
+                }
             })
             .filter(|drop| drop.stack.count > 0 && &*drop.stack.item != "minecraft:air")
             .collect();
@@ -2403,7 +2414,10 @@ impl Game<'_> {
                 drops: &mut snapshots,
                 cancel: &mut cancel,
             });
-            if let Ok(next) = snapshots.try_into_engine(self.items()) {
+            if let Ok(mut next) = snapshots.try_into_engine(self.items()) {
+                for (drop, original) in next.iter_mut().zip(&drops) {
+                    drop.random = original.random;
+                }
                 drops = next;
             } else {
                 cancel = false;
@@ -2414,7 +2428,13 @@ impl Game<'_> {
         }
         for drop in drops {
             if drop.stack.count > 0 && &*drop.stack.item != "minecraft:air" {
-                self.spawn_item(drop.stack, drop.position, drop.velocity, drop.pickup_delay);
+                self.add_item_entity_prepared(
+                    drop.stack,
+                    drop.position,
+                    Some(drop.velocity),
+                    drop.pickup_delay,
+                    drop.random,
+                );
             }
         }
     }
@@ -3595,7 +3615,10 @@ impl Game<'_> {
                             .get(old)
                             .name
                             .starts_with("minecraft:infested_")
-                        && self.ui.rules.bool("block_drops")
+                        && self
+                            .ui
+                            .rules
+                            .bool_at(horizon_client::gamerules::vanilla::BLOCK_DROPS)
                     {
                         let at = [
                             f64::from(pos[0]) + 0.5,
@@ -8853,7 +8876,7 @@ fn to_loot(stack: &ItemStack) -> horizon_world::loot::LootStack {
         .custom_data()
         .map(|data| {
             let snbt =
-                horizon_world::snbt_text::to_snbt(&horizon_world::nbt::Tag::Compound(data.clone()));
+                horizon_world::snbt_text::to_snbt(&horizon_core::nbt::Tag::Compound(data.clone()));
             (
                 "minecraft:custom_data".to_owned(),
                 serde_json::Value::String(snbt),

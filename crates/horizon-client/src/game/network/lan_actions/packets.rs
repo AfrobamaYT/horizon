@@ -22,7 +22,12 @@ impl Game<'_> {
         .then_some(radius)
     }
 
-    pub(super) fn spawn_protects(&self, radius: i32, dimension: &str, pos: [i32; 3]) -> bool {
+    pub(in crate::game) fn spawn_protects(
+        &self,
+        radius: i32,
+        dimension: &str,
+        pos: [i32; 3],
+    ) -> bool {
         let Some(spawn) = self.level.world_spawn else {
             return false;
         };

@@ -7398,7 +7398,10 @@ mod hidden_speed_mob_tick_tests {
         m.add_effect("health_boost", 200, 1);
         assert_eq!(m.attrs.max_health, 18.0);
         m.health = 18.0;
-        m.apply_death_effect(&crate::items::ConsumeEffect::ClearAllEffects);
+        m.apply_death_effect(
+            &mut crate::health::TestLevel::new(0).level(),
+            &crate::items::ConsumeEffect::ClearAllEffects,
+        );
         assert_eq!(m.attrs.max_health, 10.0);
         assert_eq!(m.health, 10.0);
     }
@@ -7430,7 +7433,10 @@ mod hidden_speed_mob_tick_tests {
         m0.add_effect("absorption", 600, 0);
         assert_eq!(armor::max_absorption(&m0), 4.0);
         assert_eq!(m0.absorption, 4.0);
-        m0.apply_death_effect(&crate::items::ConsumeEffect::ClearAllEffects);
+        m0.apply_death_effect(
+            &mut crate::health::TestLevel::new(0).level(),
+            &crate::items::ConsumeEffect::ClearAllEffects,
+        );
         assert_eq!(
             m0.absorption, 0.0,
             "base 0 mob loses absorption on ClearAllEffects"
@@ -7447,7 +7453,10 @@ mod hidden_speed_mob_tick_tests {
         m20.add_effect("absorption", 600, 0);
         assert_eq!(armor::max_absorption(&m20), 24.0);
         assert_eq!(m20.absorption, 4.0);
-        m20.apply_death_effect(&crate::items::ConsumeEffect::ClearAllEffects);
+        m20.apply_death_effect(
+            &mut crate::health::TestLevel::new(0).level(),
+            &crate::items::ConsumeEffect::ClearAllEffects,
+        );
         assert_eq!(
             m20.absorption, 4.0,
             "base 20 mob keeps absorption on ClearAllEffects"
@@ -7464,9 +7473,10 @@ mod hidden_speed_mob_tick_tests {
         m20_clamp.extra.armor_attributes = Some(Box::new(attrs3));
         m20_clamp.add_effect("absorption", 600, 0);
         m20_clamp.absorption = 24.0;
-        m20_clamp.apply_death_effect(&crate::items::ConsumeEffect::RemoveEffects(vec![
-            "minecraft:absorption".into(),
-        ]));
+        m20_clamp.apply_death_effect(
+            &mut crate::health::TestLevel::new(0).level(),
+            &crate::items::ConsumeEffect::RemoveEffects(vec!["minecraft:absorption".into()]),
+        );
         assert_eq!(
             m20_clamp.absorption, 20.0,
             "base 20 mob clamps absorption to 20.0 on RemoveEffects"
@@ -7478,9 +7488,10 @@ mod hidden_speed_mob_tick_tests {
         let mut m0_remove = Mob::new(4, kind, Vec3::ZERO, 0.0);
         m0_remove.add_effect("absorption", 600, 0);
         assert_eq!(m0_remove.absorption, 4.0);
-        m0_remove.apply_death_effect(&crate::items::ConsumeEffect::RemoveEffects(vec![
-            "minecraft:absorption".into(),
-        ]));
+        m0_remove.apply_death_effect(
+            &mut crate::health::TestLevel::new(0).level(),
+            &crate::items::ConsumeEffect::RemoveEffects(vec!["minecraft:absorption".into()]),
+        );
         assert_eq!(
             m0_remove.absorption, 0.0,
             "base 0 mob loses absorption on RemoveEffects"

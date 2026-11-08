@@ -198,6 +198,9 @@ impl Game<'_> {
                     };
                     let followed = followed.get_or_insert_with(|| self.orb_followed());
                     let target = self.orb_target(i, followed);
+                    let Some(i) = self.orbs.locate(join) else {
+                        continue;
+                    };
                     // A block of slack around the move: gravity and the pull
                     // towards a player change it before it is made.
                     let o = &self.orbs[i];

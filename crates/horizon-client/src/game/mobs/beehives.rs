@@ -455,7 +455,7 @@ mod honey_overflow_tests {
 mod stay_tests {
     use super::*;
     use horizon_client::beehive::Occupant;
-    use horizon_world::nbt::Compound;
+    use horizon_core::nbt::Compound;
 
     /// `BeehiveBlockEntity.tickOccupants`: every bee whose time is up asks
     /// `releaseOccupant`, which keeps it in at night (`BEES_STAY_IN_HIVE`)
@@ -464,40 +464,46 @@ mod stay_tests {
     #[test]
     #[ignore = "needs prepared resources (HORIZON_TEST_RESOURCES)"]
     fn every_ready_bee_of_a_hive_turn_gets_the_same_answer() {
-        let mut game = super::super::native_machines::tests::server_game();
-        let state = game
-            .pack
-            .assets
-            .registry
-            .default_state("minecraft:beehive")
-            .unwrap();
-        let key = (8, 64, 8);
-        game.world.set(key.0, key.1, key.2, state).unwrap();
-        let bee = || {
-            let mut tag = Compound::new();
-            tag.insert("id".into(), Tag::String("minecraft:bee".into()));
-            Occupant {
-                entity_data: Tag::Compound(tag),
-                ticks_in_hive: 601,
-                min_ticks_in_hive: 600,
-            }
-        };
-        let hive = Beehive {
-            bees: vec![bee(), bee(), bee()],
-            flower: None,
-        };
-        game.world
-            .block_entities
-            .put(key, BlockEntity::Beehive(Box::new(hive)));
-        let inside = |game: &Game<'_>| match game.world.block_entities.get(&key) {
-            Some(BlockEntity::Beehive(h)) => h.bees.len(),
-            _ => panic!("the hive is gone"),
-        };
-        game.world.day_time = 13_000;
-        game.tick_beehive(key);
-        assert_eq!((inside(&game), game.mobs.len()), (3, 0), "night");
-        game.world.day_time = 1_000;
-        game.tick_beehive(key);
-        assert_eq!((inside(&game), game.mobs.len()), (0, 3), "day");
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            let state = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:beehive")
+                .unwrap();
+            let key = (8, 64, 8);
+            game.world.set(key.0, key.1, key.2, state).unwrap();
+            let bee = || {
+                let mut tag = Compound::new();
+                tag.insert("id".into(), Tag::String("minecraft:bee".into()));
+                Occupant {
+                    entity_data: Tag::Compound(tag),
+                    ticks_in_hive: 601,
+                    min_ticks_in_hive: 600,
+                }
+            };
+            let hive = Beehive {
+                bees: vec![bee(), bee(), bee()],
+                flower: None,
+            };
+            game.world
+                .block_entities
+                .put(key, BlockEntity::Beehive(Box::new(hive)));
+            let inside = |game: &Game<'_>| match game.world.block_entities.get(&key) {
+                Some(BlockEntity::Beehive(h)) => h.bees.len(),
+                _ => panic!("the hive is gone"),
+            };
+            game.world.day_time = 13_000;
+            game.tick_beehive(key);
+            assert_eq!((inside(&game), game.mobs.len()), (3, 0), "night");
+            game.world.day_time = 1_000;
+            game.tick_beehive(key);
+            assert_eq!((inside(&game), game.mobs.len()), (0, 3), "day");
+        });
     }
 }

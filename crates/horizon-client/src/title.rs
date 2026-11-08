@@ -1901,7 +1901,7 @@ impl Title {
         level.hardcore = options.hardcore;
         level.difficulty = DIFFICULTIES[options.difficulty()].into();
         level.allow_commands = Some(options.commands(creative));
-        level.enabled_features = enabled_features.clone();
+        level.enabled_features = enabled_features.clone().into();
         level.game_rules = options
             .rules
             .copy_with_features(&enabled_features)
@@ -3792,7 +3792,7 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                         // upload into the Realm's slot instead of a local world.
                         self.realms_create = Some(request);
                         self.create_return_to_main = false;
-                        self.mode = Self::new_world();
+                        self.mode = self.new_world();
                         Action::None
                     }
                     crate::realms::Outcome::None => Action::None,

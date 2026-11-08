@@ -1073,7 +1073,7 @@ mod tests {
     /// one that was named Johnny but is now Bob never started.
     #[test]
     fn a_vindicator_that_was_named_johnny_stays_johnny() {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         let mut m = Mob::new(
             1,
             {

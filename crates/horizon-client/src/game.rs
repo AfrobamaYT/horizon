@@ -4354,7 +4354,7 @@ impl Game<'_> {
             let r = &mut game.world.random;
             let strength = f64::from(r.next_float()) * 0.5;
             let angle = f64::from(r.next_float()) * std::f64::consts::TAU;
-            [-angle.sin() * strength, 0.2, angle.cos() * strength]
+            Some([-angle.sin() * strength, 0.2, angle.cos() * strength])
         });
     }
     /// Item entity `i` leaves the level (`Entity.discard`); mods hear it.
@@ -4402,21 +4402,25 @@ impl Game<'_> {
         velocity: Option<[f64; 3]>,
         pickup_delay: u32,
     ) -> [f64; 3] {
+        self.add_item_entity_prepared(stack, position, velocity, pickup_delay, None)
+    }
+    /// Joins an item only after drop hooks have seen its constructor's motion.
+    fn add_item_entity_prepared(
+        &mut self,
+        stack: ItemStack,
+        position: [f64; 3],
+        velocity: Option<[f64; 3]>,
+        pickup_delay: u32,
+        random: Option<spill::ItemRandom>,
+    ) -> [f64; 3] {
+        let random = random.unwrap_or_else(|| spill::prepare_item_random(velocity));
         let item = stack.item.clone();
         let count = stack.count as i32;
         self.next_entity += 1;
         let p = Vec3::new(position[0], position[1], position[2]);
-        // The item's own random, in vanilla's order: Entity's UUID, ItemEntity's
-        // bobOffs and yaw, then (without a given motion) the constructor's motion.
-        let mut own = random_source::entity();
-        let uuid = horizon_client::save::insecure_uuid(&mut own);
-        self.persist.uuids.insert(self.next_entity, uuid);
-        let bob = own.next_float() * std::f32::consts::PI * 2.0;
-        let yaw = own.next_float() * 360.0;
-        let velocity = velocity.unwrap_or_else(|| {
-            let x = own.next_double() * 0.2 - 0.1;
-            [x, 0.2, own.next_double() * 0.2 - 0.1]
-        });
+        self.persist.uuids.insert(self.next_entity, random.uuid);
+        let (bob, yaw) = (random.bob, random.yaw);
+        let velocity = velocity.unwrap_or(random.velocity);
         self.dropped.push(ItemEntity {
             attachment_lifetime: Default::default(),
             fall_distance: 0.0,
@@ -8535,8 +8539,11 @@ impl Game<'_> {
         }
         if self.screen == Screen::DebugOptions && self.title.is_some() {
             // DebugOptionsScreen replaces the title; no level HUD is behind it.
-            self.draw_debug_options(&mut batch);
-            self.fire_screen_render_post(&mut batch);
+            let drawn = self.draw_screen_with_pre_hook(&mut batch);
+            if drawn {
+                self.draw_debug_options(&mut batch);
+            }
+            self.draw_screen_with_post_hook(&mut batch, drawn);
             self.draw_toasts(&mut batch, false);
             self.draw_tutorial_toasts(&mut batch, false);
             self.draw_pack_toasts(&mut batch, false);
@@ -13177,44 +13184,52 @@ impl Game<'_> {
         self.native_experience_orb_merge(dimension, into, from, from_value, &mut canceled);
         !canceled
     }
-    /// `ExperienceOrb.tick`'s scanForMerges for one orb, in its own turn
-    /// before the move: it absorbs the orbs that `canMerge` within 0.5 blocks
-    /// of its box, adding their counts and keeping the smaller age. Server
-    /// only, as the caller checks. An orb absorbed here is gone before its
-    /// own turn finds it.
+    /// `ExperienceOrb.tick`'s scan before movement, once every twenty ticks.
+    /// Hooks can change the resident list, so retain join identities, not indices.
     fn merge_orb(&mut self, i: usize) {
-        // `tickCount % 20 == 1`, with `tickCount` the increment `tick` adds
-        // later in the turn: at the scan's moment the stored count is one
-        // behind, so the cadence reads `tickCount - 1` a whole 20.
         if !self.orbs[i].ticks.is_multiple_of(20) {
             return;
         }
+        let into_join = self.orbs[i].join;
         let area = self.orbs[i].bounds().inflate(Vec3::new(0.5, 0.5, 0.5));
-        let mut absorbed = Vec::new();
-        for j in 0..self.orbs.len() {
-            if j == i || !self.orbs[j].bounds().intersects(area) {
-                continue;
-            }
-            let (vanilla, into, into_value, from, from_value, count, age) = {
-                let (a, b) = (&self.orbs[i], &self.orbs[j]);
-                (
-                    b.can_merge(a.id, a.value),
-                    a.id,
-                    a.value,
-                    b.id,
-                    b.value,
-                    b.count,
-                    b.age,
-                )
+        let candidates: Vec<_> = self
+            .orbs
+            .iter()
+            .filter(|o| o.join != into_join && o.bounds().intersects(area))
+            .map(|o| o.join)
+            .collect();
+        for from_join in candidates {
+            let Some(i) = self.orbs.locate(into_join) else {
+                return;
             };
+            let Some(j) = self.orbs.locate(from_join) else {
+                continue;
+            };
+            let (a, b) = (&self.orbs[i], &self.orbs[j]);
+            let (into, into_value, from, from_value, vanilla) =
+                (a.id, a.value, b.id, b.value, b.can_merge(a.id, a.value));
             if !self.orb_merges(into, into_value, from, from_value, vanilla) {
                 continue;
             }
+            let Some(i) = self.orbs.locate(into_join) else {
+                return;
+            };
+            let Some(j) = self.orbs.locate(from_join) else {
+                continue;
+            };
+            // Refuse a stale decision rather than merging a changed pair.
+            let (a, b) = (&self.orbs[i], &self.orbs[j]);
+            if a.value != into_value
+                || b.value != from_value
+                || !b
+                    .bounds()
+                    .intersects(a.bounds().inflate(Vec3::new(0.5, 0.5, 0.5)))
+            {
+                continue;
+            }
+            let (count, age) = (b.count, b.age);
             self.orbs[i].count = self.orbs[i].count.saturating_add(count);
             self.orbs[i].age = self.orbs[i].age.min(age);
-            absorbed.push(j);
-        }
-        for j in absorbed.into_iter().rev() {
             self.orbs.remove(j);
         }
     }

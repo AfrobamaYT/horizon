@@ -553,8 +553,13 @@ mod nested_spawn_tests {
                             &mut heart,
                             others,
                             |_, world, _, _, events| {
+                                assert_eq!(world.is_some(), others);
                                 assert_eq!(
-                                    world.others.iter().map(|mob| mob.id).collect::<Vec<_>>(),
+                                    world.map_or_else(Vec::new, |world| world
+                                        .others
+                                        .iter()
+                                        .map(|mob| mob.id)
+                                        .collect::<Vec<_>>()),
                                     if others { vec![70] } else { vec![] }
                                 );
                                 events.push(HeartEvent::SetBlock(at, stone));

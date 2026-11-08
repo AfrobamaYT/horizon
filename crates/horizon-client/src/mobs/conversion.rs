@@ -84,7 +84,7 @@ pub fn common(from: &Mob, to: &mut Mob, preserve_can_pick_up_loot: bool) {
         .extra
         .effects
         .iter()
-        .any(|e| e.0 == "minecraft:health_boost")
+        .any(|e| e.id == "minecraft:health_boost")
     {
         super::finalize::health_boost_changed(to);
     }
