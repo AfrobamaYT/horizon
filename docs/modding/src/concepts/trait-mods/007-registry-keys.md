@@ -71,6 +71,12 @@ the previous snapshot rather than accumulating membership. No membership work is
 that do not call this read. Tags and block mappings belong to their resolving thread; missing
 authoritative context or an unavailable mapping returns `None`, not a stale membership result.
 
+`host.tags().blocks(tag)` reads the current authoritative block members in vanilla order as
+`BlockKey` values, including blocks no mod requested. Resolve `tag` once with `Tags::key` and
+retain it across reloads. Unknown or empty tags return `Some(Vec::new())`; an unavailable
+context or any unresolved member returns `None`, never a partial member list. The same service
+is available through restricted level Hosts, without borrowing an engine registry.
+
 `host.block_state_default(stone)`, `host.block_states().states_of(stone)`,
 `host.block_item(stone)`, `host.block_in_tag(stone, tag)` and restricted-level
 `schedule_block_tick(pos, stone, delay)` use `BlockKey`. Property expressions accepted by
