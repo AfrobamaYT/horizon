@@ -303,7 +303,7 @@ mod tests {
                 }).map(|at| (module, at))
             }).unwrap();
             let original = types.index.modules[module].items[at].clone();
-            for mutation in 0..3 {
+            for mutation in 0..5 {
                 let mut changed = original.clone();
                 let syn::Item::Impl(i) = &mut changed else {
                     unreachable!()
@@ -312,7 +312,11 @@ mod tests {
                     .items
                     .iter_mut()
                     .find_map(|item| match item {
-                        syn::ImplItem::Fn(f) if f.sig.ident == "heal" => Some(f),
+                        syn::ImplItem::Fn(f)
+                            if f.sig.ident == if mutation < 3 { "heal" } else { "hurt" } =>
+                        {
+                            Some(f)
+                        }
                         _ => None,
                     })
                     .unwrap();
@@ -326,6 +330,19 @@ mod tests {
                     2 => {
                         method.block = syn::parse_quote!({
                             self.changes.clear();
+                        })
+                    }
+                    3 => {
+                        method.block = syn::parse_quote!({
+                            self.changes
+                                .push(EffectTickChange::Hurt(damage_type.to_uppercase(), amount));
+                        })
+                    }
+                    4 => {
+                        method.block = syn::parse_quote!({
+                            self.changes.reverse();
+                            self.changes
+                                .push(EffectTickChange::Hurt(damage_type.to_owned(), amount));
                         })
                     }
                     _ => unreachable!(),

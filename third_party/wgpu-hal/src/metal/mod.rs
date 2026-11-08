@@ -41,7 +41,7 @@ use hashbrown::HashMap;
 use naga::FastHashMap;
 use objc2::{
     available,
-    rc::{Retained, autoreleasepool},
+    rc::{autoreleasepool, Retained},
     runtime::ProtocolObject,
 };
 use objc2_foundation::ns_string;
@@ -174,7 +174,7 @@ impl crate::Instance for Instance {
             _ => {
                 return Err(crate::InstanceError::new(format!(
                     "window handle {window_handle:?} is not a Metal-compatible handle"
-                )));
+                )))
             }
         };
 

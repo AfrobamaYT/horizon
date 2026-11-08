@@ -90,10 +90,7 @@ impl Hooks for Planned {
     ) {
         ASKED.lock().unwrap().push(Asked {
             effect: event.effect,
-            state: {
-                use crate::game::api_values::TryIntoEngine;
-                event.state.try_into_engine(&()).unwrap()
-            },
+            state: event.state,
             pos: event.pos,
             partial_tick: event.partial_tick,
             hide_gui: event.hide_gui,
