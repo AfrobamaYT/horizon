@@ -14,10 +14,59 @@ An API point injection names a crate-root `with` function and listens at an admi
 slot ([shape rules](#which-methods-are-points)). The prebuilt game fills those slots at load with the
 mods' listeners, without changing game source.
 
-A `mod.wasm` uses the same declarations with `[wasm]` instead of native build pins. The game fills
-its compiled slots at load without rebuilding the game or invoking the Rust compiler.
-Wasm supports compiled function slots, not source rebuilding or call-site injections
-([Building a mod to `mod.wasm`](how-to/wasm-mods.md#listening-at-points)).
+A `mod.wasm` will listen at points too, once the game's shared-memory wasm boundary lands; until
+then a game refuses every `mod.wasm` ([Building a mod to `mod.wasm`](how-to/wasm-mods.md)). Helper
+injections are native-only.
+
+## Adding a pinned declaration
+
+Run `cargo horizon-mod inject add <at> --kind <kind> --with <listener>` in a native mod's folder.
+The tool appends `[[inject]]`, preserving comments, formatting and permissions. A symlinked
+manifest is preserved; edits atomically replace its referent. Checked `[native].horizon` metadata supplies `hash`.
+`--with` supplies both listener and unique inject id (default `on_inject`); implement it separately.
+Access defaults to `api`; edit it to `internals` when needed. The launcher validates route support.
+Call kinds copy canonical `call`, `nth` and `ctx` from the pinned `points.json`. Use
+`--call <canonical callee> --nth N` (default 0, per callee). Omitting `--call` requires one callee
+at that ordinal. Ambiguous identities and unlisted source calls are refused; no discovery runs.
+Unknown places return `E_INJECT_MISSING` naming the target. Invalid kinds, callbacks,
+duplicate ids, or call flags on function kinds leave the manifest untouched.
+
+## Refreshing pinned declarations
+
+`cargo horizon-mod inject update` checks every declaration against the current game's catalogs;
+it does not change `[native].horizon` (use top-level `update` to change that pin).
+A unique call context that moved reports `E_INJECT_MOVED` and updates only `nth`.
+Missing targets, missing contexts and ambiguous contexts are never retargeted.
+
+Signature changes report `E_INJECT_CHANGED` with old and new hashes and signatures,
+including parameters, return type and flags. Older cached catalogs supply the old signature;
+when unavailable, the report explicitly says so. No hash changes without explicit consent:
+run `cargo horizon-mod inject update --accept <id>` to accept that declaration's new signature.
+Repeat `--accept` for multiple ids. Acceptance cannot override missing or lost targets.
+Any refused entry prevents all writes. Successful edits preserve unrelated fields and comments,
+use atomic replacement, and an exact no-op leaves the file and its modification time untouched.
+
+## Publishing slots to a game checkout
+
+After adding native declarations, request their missing slots in a game source checkout:
+
+```sh
+cargo horizon-mod inject sync --repo /path/to/horizon
+```
+
+This writes `crates/horizon-mod-api-gen/slots/<mod_id>.txt` in that checkout, not in the mod.
+It emits function paths, `at | call | nth | ctx` call rows, and `type <path>` extension rows.
+Places already listed by another mod need no duplicate row. Existing rows in your own list
+are retained; row-only files and tool-written files are regenerated in sorted order.
+A standalone or trailing comment other than the tool's own header prevents rewriting:
+the error names its file and line and asks you to move the comment out first.
+Running the command again makes no change.
+
+The shared slot parser validates every row before writing. Conflicting call contexts are
+refused with both file locations, leaving your file untouched. Invalid mod ids are refused,
+including Windows device names (`con`, `nul`, `com1`–`com9`, `lpt1`–`lpt9`, etc.),
+and `horizon.txt` is reserved for the engine seed. Commit the generated list with the game
+change that supports it; this command does not compile slots or change the mod's build pin.
 
 ## Function-slot declarations
 
@@ -426,38 +475,6 @@ A listed stale call never falls back to source. Use the function hash and statem
 not a site's physical fingerprint, as the declaration identity. `wrap_if` needs unit output.
 These call kinds are not available to wasm mods.
 
-### Wasm raw listeners
-
-A wasm mod uses the same top-level `internals` declarations and `[[inject]]` listeners beside `[wasm]`,
-but omits all three native pins and carries no helper or support-module source. Its generated view
-imports `horizon:mod-internals/view`: roots, path nodes, plain values and declared function calls.
-The compiled declaration includes each manifest internal and every named type whose layout it walks.
-All paths and hashes are checked at load, before any listener registers. A field also requires its
-owner's matching type hash. A missing opt-in entry names
-`crates/horizon-mod-api-gen/wasm-internals/<mod_id>.txt`; a game built without a table refuses declaring mods.
-
-The slot runs API listeners first, then raw listeners in the native/wasm registration order. A raw
-listener has no Host; its only game access is through the view. Nodes last for one listener call:
-keeping one into the next call refuses `gone`. Writes are journaled and reads see those writes.
-Calling a declared game function applies the journal first and invalidates cached paths. A normal
-listener return applies its remaining writes; a trap discards them and stops the group. Writes that
-no longer resolve are dropped and logged. A trap after a game function call does not undo that call
-or the writes already applied before it.
-
-### Closures and callbacks
-
-A declared function that takes a closure (`impl Fn...`, `dyn Fn...`) has no thunk. A synchronous
-callback would have to re-enter the guest from inside that guest's own import, which the component
-model forbids (the runtime refuses it as `Reentered`); a second instance would not see the guest's
-state. The view therefore refuses a closure argument as opaque and reports it in the stage's skipped
-functions.
-
-Use the game's non-closure helper for the operation instead. For `Game::with_level`'s
-`BlockState.canSurvive`, that is `Game::level_can_survive(pos, state)`: it runs the same level rule
-in the same call frame, and its writes follow the journal rules above. A helper that needs another
-level-scoped operation is an API request; it lands as a declared non-closure method rather than as a
-callback.
-
 ## Reference
 
 - A point's methods are `<point>` (its head: the arguments it was called with) and `<point>_return` (after
@@ -470,6 +487,10 @@ callback.
   atomic load and a branch.
 - A point injection's `hook`, bindings and horizon-mixins fields are refused: a hook is its own `Hooks` method,
   and the record carries what the point passes.
-### Syncing wasm internals to a game repository
-
-From a wasm mod directory, run `cargo horizon-mod internals sync --repo <path>` to write its reviewed `crates/horizon-mod-api-gen/wasm-internals/<mod_id>.txt` input in the Horizon repository. Without `--repo`, the command searches upward for the Horizon workspace. It reads only `horizon-mod.toml`, combining declared internal paths and raw injection targets in sorted, deduplicated order; it does not change the manifest or run the launcher. Commit the resulting file to the game repository. The `--repo` option is not valid for native mods.
+- A helper on a `GameLevel` method that takes `&mut self` (`native_random_tick`, `native_tick_block`,
+  `native_perform_bonemeal`, `native_is_bonemeal_success`), bind
+  `{ name = "level", ty = "&mut dyn crate::mod_api::LevelRandomHost", value = "&mut *self" }` for attachments and
+  `random()`. Scheduling and `set_block_property` stay on the `LevelTicksHost` and `LevelWriteHost` the hook points
+  pass.
+- A hook point's contract is versioned: `hook_version` names the contract a mod built against. A contract
+  never changes; an incompatible change adds a version.

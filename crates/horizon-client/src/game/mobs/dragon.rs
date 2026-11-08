@@ -6,6 +6,7 @@
 //! the spikes, its parts (head and neck take full damage, the rest a quarter
 //! plus one), wing knockback, block breaking, the death flight and rays, the
 //! exit portal, the egg and the next gateway; and its rendering and boss bar.
+use super::api_values::TryIntoApi;
 use super::commands::Target;
 use super::{
     Game,
@@ -20,6 +21,7 @@ use horizon_client::{
     mobs::{Damage, DamageKind, Who},
     particles::{ParticleOptions, ParticleType},
     projectiles::{Projectile, ProjectileKind},
+    random_source,
     text::Text,
 };
 use horizon_core::nbt::Tag;
@@ -377,7 +379,7 @@ impl Phase {
         }
     }
 }
-pub(super) struct Dragon {
+pub(in crate::game) struct Dragon {
     pub join: horizon_client::join_seq::JoinSeq,
     /// `Entity.id` once tracked to guests (0 before); its parts take the
     /// eight ids after it (`EnderDragon`'s constructor reserves them).
@@ -669,6 +671,10 @@ impl Dragon {
     fn down(&self) -> bool {
         matches!(self.phase, Phase::Dying { .. }) || !self.alive()
     }
+    /// Where part `i` stands and its box.
+    pub(super) fn part_geometry(&self, i: usize) -> (Vec3, Aabb) {
+        (self.parts[i].0, self.part_box(i))
+    }
     fn part_box(&self, i: usize) -> Aabb {
         let (w, h) = PART_SIZES[i];
         let p = self.parts[i].0;
@@ -794,8 +800,13 @@ impl Dragon {
             if damage <= self.last_hurt {
                 return Hurt::Landed { full: false };
             }
-            container.record_reduction(Reduction::Invulnerability, self.last_hurt);
-            damage - self.last_hurt
+            container.reduce(
+                Reduction::Invulnerability,
+                damage,
+                self.last_hurt,
+                damage - self.last_hurt,
+                true,
+            )
         } else {
             damage
         };
@@ -1521,11 +1532,17 @@ impl Game<'_> {
     /// `ServerLevel.dragonParts`: where the part with that entity id is
     /// and its box.
     pub(super) fn dragon_part(&self, id: u32) -> Option<(Vec3, Aabb)> {
-        let d = self.dragon.as_ref().filter(|d| d.alive() && d.id != 0)?;
-        (d.id + 1..=d.id + 8).contains(&id).then(|| {
-            let i = (id - d.id - 1) as usize;
-            (d.parts[i].0, d.part_box(i))
-        })
+        let (d, i) = self.resident_dragon_part(id)?;
+        d.alive().then(|| d.part_geometry(i))
+    }
+    /// The dragon the level holds and the index (`getSubEntities` order) of
+    /// its part with that entity id, while the dragon is there, dying or
+    /// not: a part is an entity for as long as its parent is.
+    pub(super) fn resident_dragon_part(&self, id: u32) -> Option<(&Dragon, usize)> {
+        let d = self.dragon.as_ref().filter(|d| d.id != 0)?;
+        (d.id + 1..=d.id + 8)
+            .contains(&id)
+            .then(|| (d, (id - d.id - 1) as usize))
     }
     /// Damage to a special id (from projectiles and melee): what the
     /// dragon part or crystal made of it. `direct` is the projectile that hit.
@@ -1570,7 +1587,7 @@ impl Game<'_> {
     /// `by` is the direct entity, `cause` the causing one (`by` without `from`), and `from`
     /// the source position (`at`, else the direct entity's), which `dealDefaultKnockback`
     /// pushes away from for a type not in `#no_knockback`.
-    pub(super) fn command_damage_dragon(
+    pub(in crate::game) fn command_damage_dragon(
         &mut self,
         id: u32,
         amount: f32,
@@ -1590,6 +1607,13 @@ impl Game<'_> {
             Some(Target::Trident(_)) => Some(ProjectileKind::Trident),
             _ => None,
         };
+        // `Entity.isInvulnerableToBase` over the saved flag and window
+        // (#916), with the attacker's creative mode as `isCreativePlayer`,
+        // before the dragon's own borrow of the game.
+        let creative = self.creative_source_of(cause.or(by));
+        if self.saved_refuses_damage(id, ty, creative) {
+            return false;
+        }
         let Some(d) = self.dragon.as_mut().filter(|d| d.id == id) else {
             return false;
         };
@@ -2496,6 +2520,11 @@ impl Game<'_> {
     }
     /// `EnderDragon.aiStep` (and `tickDeath`) for the dragon.
     fn tick_dragon(&mut self) {
+        // Entity.baseTick: the saved invulnerability window counts down
+        // (#916), before the dragon's own borrow of the game.
+        if let Some(id) = self.dragon.as_ref().map(|d| d.id) {
+            self.tick_saved_invulnerable_time(id);
+        }
         let Some(d) = self.dragon.as_mut() else {
             return;
         };
@@ -3295,6 +3324,7 @@ impl Game<'_> {
             else {
                 return true;
             };
+            let bar = bar.try_into_api().unwrap();
             let mut cancel = false;
             self.native_customize_boss_event_progress(
                 &bar,
@@ -4019,6 +4049,8 @@ impl Game<'_> {
             vertical_collision: false,
             horizontal_collision: false,
             needs_sync: false,
+            sync_position: false,
+            stepped: true,
             idle: false,
             bare: false,
             leash: None,
@@ -4100,9 +4132,7 @@ impl Game<'_> {
             return false;
         }
         // EndCrystal's constructor: `this.random.nextInt(100000)`, the crystal's own random.
-        let drawn = super::dispenser::entity_random()
-            .next_int_bound(100_000)
-            .unwrap_or(0);
+        let drawn = random_source::entity().next_int_bound(100_000).unwrap_or(0);
         let at = Vec3::new(x + 0.5, y, z + 0.5);
         let time = Crystal::start_time(at, drawn, self.clock.still());
         // EndCrystal's constructor takes an id from the entity counter, so
@@ -4453,7 +4483,7 @@ impl Game<'_> {
     /// It becomes the fight's dragon (`dragonUUID = dragon.getUUID()`).
     fn create_new_dragon(&mut self) {
         let yaw = self.world.random.next_float() * 360.0;
-        let seed = self.world.random.next_long();
+        let seed = random_source::unique_seed();
         let mut dragon = Dragon::new(Vec3::new(0.0, 128.0, 0.0), yaw, seed);
         dragon.join = horizon_client::join_seq::JoinSeq::next();
         dragon.id = self.next_entity + 1;
@@ -4659,7 +4689,7 @@ impl Game<'_> {
                 self.finalize_spawn_at("minecraft:ender_dragon", at, reason, None)
                     .0
             }
-            SpawnSite::Plain => Finalized::Done,
+            SpawnSite::Plain | SpawnSite::Raw => Finalized::Done,
         };
         match finalized {
             Finalized::Cancelled => return None,
@@ -4673,7 +4703,7 @@ impl Game<'_> {
             }
         }
         // The dragon's own random (`Entity.random`), not the level's.
-        let seed = super::dispenser::entity_random().next_long();
+        let seed = random_source::unique_seed();
         let mut dragon = Dragon::new(position, yaw, seed);
         dragon.join = horizon_client::join_seq::JoinSeq::next();
         dragon.id = self.next_entity + 1;

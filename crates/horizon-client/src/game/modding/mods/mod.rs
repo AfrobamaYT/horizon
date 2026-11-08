@@ -154,15 +154,7 @@ pub(super) fn load_item_data(root: &Path, role: ExecutionRole) -> horizon_client
         mod_api::__private::ModPhase::World
     });
     let _reload = phase.reloading()?;
-    let mut registries: BTreeMap<_, _> = builtin_registries(root)?
-        .registries
-        .into_iter()
-        .map(|(name, ids)| (name, ids.names))
-        .collect();
-    if let Some(types) = registries.get_mut("minecraft:data_component_type") {
-        types.extend(horizon_protocol::item::custom::entries().map(|(_, name)| name.to_owned()));
-    }
-    let inputs = LoadInputs::new(registries, Game::mod_data_root());
+    let inputs = LoadInputs::new(builtin_registry_names(root)?, Game::mod_data_root());
     let inventory = horizon_mod_package::enabled::EnabledMods::read(root)?;
     let ids: Vec<_> = if role.is_logical_server() {
         inventory.server_ids().collect()
@@ -172,6 +164,33 @@ pub(super) fn load_item_data(root: &Path, role: ExecutionRole) -> horizon_client
     let context = LoadContext::new(role.data_load_origin(), Arc::new(inputs), ids);
 
     Ok(ItemData::load(root, context)?)
+}
+
+/// The built-in registries' names in ID order, with Horizon's own data components.
+fn builtin_registry_names(root: &Path) -> horizon_client::Result<BTreeMap<String, Vec<String>>> {
+    let mut registries: BTreeMap<_, _> = builtin_registries(root)?
+        .registries
+        .into_iter()
+        .map(|(name, ids)| (name, ids.names))
+        .collect();
+    if let Some(types) = registries.get_mut("minecraft:data_component_type") {
+        types.extend(horizon_protocol::item::custom::entries().map(|(_, name)| name.to_owned()));
+    }
+    Ok(registries)
+}
+
+/// Capture what registration reads (registries and settings) before the first registration
+/// hook runs, so every step sees the same values.
+pub(super) fn install_registration_data(root: &Path) -> horizon_client::Result<()> {
+    let packages = mod_api::__private::loaded_mods();
+    mod_api::__private::install_registration_data(mod_api::__private::RegistrationData::new(
+        builtin_registry_names(root)?,
+        horizon_world::native_load_context::capture_settings(
+            &Game::mod_data_root(),
+            packages.ids(),
+        ),
+    ));
+    Ok(())
 }
 
 fn builtin_registries(root: &Path) -> horizon_client::Result<horizon_protocol::registry::Builtin> {
@@ -206,9 +225,11 @@ pub(super) fn freeze_declarations() {
 }
 
 struct NativeDeclared {
+    errors: Vec<String>,
     blocks: Vec<horizon_mod_package::content::Block>,
     items: Vec<horizon_mod_package::content::Item>,
     types: Vec<horizon_mod_package::content::BlockEntityType>,
+    fluids: Vec<horizon_mod_package::content::FluidLook>,
 }
 
 /// The same native declarations serve startup and every pack reload.
@@ -219,10 +240,46 @@ fn native_declared() -> &'static NativeDeclared {
         Game::native_blocks(&RegistrationContext::new(), &mut blocks);
         Game::native_items(&RegistrationContext::new(), &mut items);
         let types = super::api_values::block_entity_declarations();
+        use super::api_values::TryIntoEngine;
+        let mut errors = Vec::new();
+        let mut blocks: Vec<horizon_mod_package::content::Block> = blocks
+            .iter()
+            .filter_map(|v| {
+                v.try_into_engine(&())
+                    .map_err(|e| {
+                        errors.push(format!(
+                            "native blocks and items of {}: {e}",
+                            v.id.split(':').next().unwrap_or("")
+                        ))
+                    })
+                    .ok()
+            })
+            .collect();
+        let mut items: Vec<horizon_mod_package::content::Item> = items
+            .iter()
+            .filter_map(|v| {
+                v.try_into_engine(&())
+                    .map_err(|e| {
+                        errors.push(format!(
+                            "native blocks and items of {}: {e}",
+                            v.id.split(':').next().unwrap_or("")
+                        ))
+                    })
+                    .ok()
+            })
+            .collect();
+        let fluids: Vec<_> = mod_api::__private::declared_world_fluids()
+            .iter()
+            .map(|draft| draft.try_into_engine(&()).unwrap())
+            .collect();
+        blocks.extend(fluids.iter().filter_map(|f| f.world_block()));
+        items.extend(fluids.iter().filter_map(|f| f.world_bucket()));
         NativeDeclared {
+            errors,
             blocks,
             items,
             types,
+            fluids,
         }
     })
 }
@@ -232,6 +289,35 @@ pub(super) fn register_standalone_models(role: ExecutionRole) {
     if let Some(names) = collect_standalone_models(role) {
         horizon_client::models::register_standalone(names);
     }
+    register_fluid_models(role);
+}
+
+/// Recollect before each resource bake, retaining registration-phase attribution.
+pub(super) fn register_fluid_models(role: ExecutionRole) {
+    if let Some(models) = collect_fluid_models(role) {
+        horizon_client::fluid_models::register(models);
+    }
+}
+
+fn collect_fluid_models(
+    role: ExecutionRole,
+) -> Option<Vec<horizon_mod_package::content::FluidModel>> {
+    if !role.is_client() {
+        return None;
+    }
+    let mut models = Vec::new();
+    Game::native_register_fluid_models(&RegistrationContext::new(), &mut models);
+    Some(
+        models
+            .into_iter()
+            .map(|model| horizon_mod_package::content::FluidModel {
+                fluid: model.fluid,
+                still: model.still,
+                flowing: model.flowing,
+                overlay: model.overlay,
+            })
+            .collect(),
+    )
 }
 
 fn collect_standalone_models(role: ExecutionRole) -> Option<Vec<String>> {
@@ -267,6 +353,13 @@ pub(super) fn register_debug_entries(role: ExecutionRole) {
     let mut entries = Vec::new();
     Game::native_register_debug_entries(&RegistrationContext::new(), &mut entries);
     horizon_client::debug_entries::register(entries);
+}
+/// The native mods' map decoration types (`native_map_decoration_types`), frozen once at start on
+/// every side.
+pub(super) fn register_map_decoration_types() {
+    let mut types = Vec::new();
+    Game::native_map_decoration_types(&RegistrationContext::new(), &mut types);
+    horizon_client::map_decoration_types::register(types, Game::is_vanilla_decoration_sprite);
 }
 /// The native mods' HUD layers (`native_register_gui_layers`), placed among vanilla's once at
 /// start.
@@ -322,6 +415,16 @@ pub(super) fn register_item_tint_sources(role: ExecutionRole) {
     Game::native_register_item_tint_sources(&RegistrationContext::new(), &mut sources);
     horizon_assets::item_model::register_tint_sources(sources);
 }
+/// Resolve client dimension-transition registrations once, before the first level opens.
+pub(super) fn register_dimension_transition_screens(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut screens = Vec::new();
+    Game::native_register_dimension_transition_screen(&RegistrationContext::new(), &mut screens);
+    horizon_client_render::dimension_transition::register(screens);
+}
+
 /// The native mods' block tint sources (`native_register_block_tint_sources`), kept once at
 /// start, before resources load; every resource load applies them to its mesh tables.
 pub(super) fn register_block_tint_sources(role: ExecutionRole) {
@@ -485,10 +588,15 @@ pub(super) fn content_overlay(
         }
     }
     let NativeDeclared {
+        errors,
         blocks,
         items,
         types,
+        fluids,
     } = native_declared();
+    if !errors.is_empty() {
+        return Err(errors.join("\n").into());
+    }
     if !blocks.is_empty() || !items.is_empty() || !types.is_empty() {
         let known = match &mut known {
             Some(types) => types,
@@ -498,6 +606,7 @@ pub(super) fn content_overlay(
         if !errors.is_empty() {
             return Err(errors.join("\n").into());
         }
+        mod_content::accept_world_fluids(&mut mods, fluids);
         // A file item's remainder named a code-declared item that was refused: that mod
         // alone is left out, not every content mod through the overlay's check.
         for e in mod_content::drop_dangling_remainders(&mut mods) {
@@ -534,6 +643,88 @@ pub(super) fn content_overlay(
     })
 }
 
+fn resolve_particle_providers(
+    source: &horizon_assets::resource_source::ResourceSource,
+) -> Result<(), String> {
+    if mod_api::__private::particles_resolved() {
+        return Ok(());
+    }
+    // Resolve all particle providers once, alongside the other load-owned registries.
+    let mut particles: Vec<String> = horizon_client::particles::ParticleType::ALL
+        .iter()
+        .map(|ty| format!("minecraft:{}", ty.name()))
+        .collect();
+    particles.extend(
+        source
+            .list_under("assets", &["particles"])
+            .into_iter()
+            .filter_map(|path| {
+                let path = path.strip_prefix("assets/")?;
+                let (namespace, path) = path.split_once("/particles/")?;
+                let path = path.strip_suffix(".json")?;
+                let id = format!("{namespace}:{path}");
+                mod_api::Identifier::parse_namespaced(&id)?;
+                // A vanilla-namespace file the game has no particle for is a leftover of an
+                // older resource extraction, not a mod's declaration: skip it, never refuse startup.
+                if namespace == "minecraft"
+                    && horizon_client::particles::ParticleType::from_name(&id).is_none()
+                {
+                    log::warn!("Horizon: ignoring {id}: no such vanilla particle in this version");
+                    return None;
+                }
+                Some(id)
+            }),
+    );
+    mod_api::__private::resolve_particles(particles.iter().map(String::as_str), |id| {
+        horizon_client::particles::ParticleType::from_name(id)
+            .map(|ty| mod_api::__private::ParticleKind::Vanilla(ty as u32))
+            .or_else(|| {
+                (!id.starts_with("minecraft:")).then_some(mod_api::__private::ParticleKind::Custom)
+            })
+    })
+    .map_err(|errors| errors.join("\n"))?;
+    Ok(())
+}
+#[cfg(test)]
+mod particle_registry_reload_tests {
+    #[test]
+    fn an_unlisted_vanilla_provider_file_does_not_refuse_startup() {
+        mod_api::__private::part_tests::install_parts_fixture(&[]).unwrap();
+        let source = horizon_assets::resource_source::ResourceSource::indexed(
+            [(
+                "assets/minecraft/particles/ambient_entity_effect.json".into(),
+                horizon_assets::resource_source::Resource::bytes(Vec::new()),
+            )]
+            .into(),
+        );
+        super::resolve_particle_providers(&source).unwrap();
+    }
+
+    #[test]
+    fn repeated_particle_content_load_keeps_the_published_keys() {
+        mod_api::__private::part_tests::install_parts_fixture(&[]).unwrap();
+        let source = horizon_assets::resource_source::ResourceSource::indexed(
+            [(
+                "assets/invalid namespace/particles/bad name.json".into(),
+                horizon_assets::resource_source::Resource::bytes(Vec::new()),
+            )]
+            .into(),
+        );
+        super::resolve_particle_providers(&source).unwrap();
+        let first = mod_api::__private::particle_vanilla_key(
+            horizon_client::particles::ParticleType::Smoke as u32,
+        )
+        .unwrap();
+        super::resolve_particle_providers(&source).unwrap();
+        assert_eq!(
+            mod_api::__private::particle_vanilla_key(
+                horizon_client::particles::ParticleType::Smoke as u32
+            ),
+            Some(first)
+        );
+    }
+}
+
 /// The content root with everything the mods declare registered against the
 /// process: block entities, mob effects, entity and menu types, fluid looks,
 /// and the protocol's local mod list, each set once.
@@ -543,6 +734,7 @@ pub(super) fn content_root(
 ) -> horizon_client::Result<horizon_assets::resource_source::ResourceRoot> {
     let jar_store = horizon_client::logging::game_home().join("jars");
     let overlay = content_overlay(root, sources, &jar_store)?;
+    let world_fluids = horizon_client::mod_content::register_world_fluids(&overlay.mods)?;
     register_block_entity_types(overlay.root.prepared(), &overlay.mods)?;
     if overlay.announce {
         horizon_protocol::mod_list::set_local(overlay.announced);
@@ -555,6 +747,7 @@ pub(super) fn content_root(
         );
     }
     register_mob_effects(&overlay.mods);
+    resolve_particle_providers(overlay.root.source())?;
     mod_api::__private::resolve_effects(
         horizon_client_core::potions::all_effects()
             .map(|def| horizon_client_core::potions::namespaced(def.id)),
@@ -566,11 +759,16 @@ pub(super) fn content_root(
     let fluids = behavior["fluids"]
         .as_array()
         .ok_or("missing fluid registry")?;
-    let fluids = fluids
+    let mut fluids = fluids
         .iter()
         .map(|value| value.as_str().ok_or("invalid fluid registry entry"))
         .collect::<Result<Vec<_>, _>>()?;
-    mod_api::__private::resolve_fluids(&fluids).map_err(|errors| {
+    fluids.extend(world_fluids.iter().map(String::as_str));
+    mod_api::__private::resolve_fluids(
+        &fluids,
+        &horizon_world::fluid::FluidKind::ALL.map(|kind| kind.name()),
+    )
+    .map_err(|errors| {
         errors
             .into_iter()
             .map(|error| error.to_string())
@@ -604,9 +802,107 @@ fn register_block_entity_types(
                 .map(|block| (block.clone(), kind.id.clone()))
         })
         .collect();
-    let types = BlockEntityTypes::new(membership, names.clone());
+    let mut types = BlockEntityTypes::new(membership, names.clone());
+    let blocks = builtin.get("minecraft:block");
+    for block in blocks
+        .into_iter()
+        .flat_map(|ids| &ids.names)
+        .filter(|name| name.starts_with("minecraft:"))
+    {
+        if let Some(kind) = horizon_client::lan::chunks::block_entity_type(block) {
+            types.template(block.clone(), block.clone(), kind.to_owned());
+        }
+    }
+    for block in mods.iter().flat_map(|m| &m.content.blocks) {
+        if let Some(kind) = horizon_client::lan::chunks::block_entity_type(&block.template) {
+            types.template(block.id.clone(), block.template.clone(), kind.to_owned());
+        }
+    }
     mod_api::__private::resolve_block_entity_types(types.names(), |id| types.key(id))
         .map_err(|errors| errors.join("\n"))?;
+    let additions: Vec<(String, String)> = if let Some(current) = block_entity_types::current() {
+        current
+            .memberships()
+            .map(|(block, kind)| (kind.to_owned(), block.to_owned()))
+            .collect()
+    } else {
+        let keys: Vec<_> = types
+            .names()
+            .filter_map(mod_api::__private::block_entity_type_key)
+            .collect();
+        let mut additions = Vec::new();
+        Game::native_block_entity_type_add_blocks(
+            &RegistrationContext::new(),
+            &keys,
+            &mut additions,
+        );
+        additions
+            .into_iter()
+            .map(|(kind, block)| {
+                Ok((
+                    mod_api::__private::block_entity_type_name(kind)
+                        .ok_or("unknown block entity type key")?
+                        .to_owned(),
+                    mod_api::__private::block_key_id(block)
+                        .ok_or("unknown block key")?
+                        .to_owned(),
+                ))
+            })
+            .collect::<horizon_client::Result<_>>()?
+    };
+    if additions.is_empty() {
+        block_entity_types::install(types)?;
+        return Ok(());
+    }
+    // Empty registration needs no block IDs or class data; requested additions do.
+    let blocks = blocks.ok_or("missing block registry")?;
+    let behavior: serde_json::Value =
+        horizon_world::json_file::read(&root.join("block-behaviours.json"))?;
+    let classes: std::collections::BTreeMap<&str, Vec<&str>> = behavior["blocks"]
+        .as_array()
+        .ok_or("missing block behaviors")?
+        .iter()
+        .filter_map(|entry| {
+            Some((
+                entry["name"].as_str()?,
+                entry["class"]
+                    .as_array()?
+                    .iter()
+                    .filter_map(|v| v.as_str())
+                    .collect(),
+            ))
+        })
+        .collect();
+    // Use the original valid sets for every addition; listener order cannot relax the constraint.
+    let bases: std::collections::BTreeMap<String, String> = types
+        .names()
+        .filter_map(|kind| {
+            let mut valid = types
+                .memberships()
+                .filter(|(_, k)| *k == kind)
+                .filter_map(|(b, _)| classes.get(b));
+            let first = valid.next()?;
+            let rest: Vec<_> = valid.collect();
+            first
+                .iter()
+                .find(|class| rest.iter().all(|chain| chain.contains(class)))
+                .map(|class| (kind.to_owned(), (*class).to_owned()))
+        })
+        .collect();
+    for (kind, block) in additions {
+        let (kind, block) = (kind.as_str(), block.as_str());
+        if blocks.id(block).is_none() {
+            return Err(format!("unknown block {block}").into());
+        }
+        if let Some(base) = bases.get(kind)
+            && !classes
+                .get(block)
+                .is_some_and(|chain| chain.contains(&base.as_str()))
+        {
+            return Err(format!("block {block} must inherit {base} to be valid for {kind}").into());
+        }
+        types.add_valid(block, kind)?;
+    }
     block_entity_types::install(types)?;
     Ok(())
 }
@@ -689,7 +985,23 @@ fn register_menu_types(mods: &[horizon_client::mod_content::ContentMod]) {
     let menus = horizon_client::mod_content::menu_types(mods);
     let set = containers::register_mod_menu_types(menus.iter().map(|m| {
         let results = m.results.iter().map(|&r| usize::from(r)).collect();
-        (m.id.clone(), m.slots.into(), m.data_slots.into(), results)
+        let crafting = m.crafting.map(|c| containers::ModCrafting {
+            grid: c.grid.into(),
+            size: c.size.into(),
+            result: c.result.into(),
+        });
+        let links = m.links.map(|l| containers::ModLinks {
+            from: l.from.into(),
+            count: l.count.into(),
+        });
+        (
+            m.id.clone(),
+            m.slots.into(),
+            m.data_slots.into(),
+            results,
+            crafting,
+            links,
+        )
     }));
     if !set
         && containers::mod_menu_types()
@@ -773,13 +1085,16 @@ fn not_built(
 pub(super) struct PreparedLoopContext {
     game: Arc<horizon_world::native_load_context::LoopContext>,
     audio: Option<horizon_world::native_load_context::LoopContext>,
+    /// A server's context for the features it generates (`alter_ground`).
+    worldgen: Option<horizon_world::native_load_context::WorldgenContext>,
 }
 
 impl Game<'_> {
     /// Build this game's loop context over the loaded registries and the mods'
     /// current settings. Called where a resource generation starts or reloads: a
     /// client at window start and after a resource reload, a server when it starts
-    /// its mods and on `/reload`. A client hands a second one to its audio.
+    /// its mods and on `/reload`. A client hands a second one to its audio; a
+    /// server publishes one for its world generation.
     pub(super) fn refresh_loop_context(&mut self) -> horizon_client::Result<()> {
         let context = self.prepare_loop_context(&self.options.resources)?;
         self.install_loop_context(context);
@@ -803,9 +1118,13 @@ impl Game<'_> {
             .execution_role
             .is_client()
             .then(|| item_data.loop_context(side, ids.iter().copied()));
+        let worldgen = self
+            .is_logical_server()
+            .then(|| item_data.worldgen_context(ids.iter().copied()));
         Ok(PreparedLoopContext {
             game: Arc::new(item_data.loop_context(side, ids.iter().copied())),
             audio,
+            worldgen,
         })
     }
 
@@ -816,6 +1135,9 @@ impl Game<'_> {
         }
         if let Some(audio) = context.audio {
             self.audio.set_loop_context(audio);
+        }
+        if let Some(worldgen) = context.worldgen {
+            horizon_world::native_worldgen_hooks::publish_context(Arc::new(worldgen));
         }
     }
 
@@ -850,6 +1172,7 @@ impl Game<'_> {
         paths.retain(|p| !self.mods.dev.contains(p));
         paths.extend(self.mods.dev.iter().cloned());
         let (mut content_ids, mut live_ids) = Default::default();
+        let mut info = std::collections::BTreeMap::new();
         self.settings.mods.installed = paths
             .iter()
             .map(|path| {
@@ -868,22 +1191,24 @@ impl Game<'_> {
                     }
                 };
                 let m = &package.manifest;
-                let refused = horizon_mod_wasm::refused()
-                    .iter()
-                    .find(|(id, _)| *id == m.id);
+                let refused = horizon_mod_wasm::refusal(&m.id);
                 live_switch_of(path, &package, &mut content_ids, &mut live_ids);
+                info.insert(
+                    m.id.clone(),
+                    mod_list::ModInfo::of(m, package.icon.as_ref()),
+                );
                 Installed {
                     id: m.id.clone(),
                     title: format!("{} {}", m.name, m.version),
                     description: m.description.clone(),
-                    problem: refused.map(|(_, why)| format!("Not loaded: {why}")),
+                    problem: refused.map(|why| format!("Not loaded: {why}")),
                     dev: self.mods.dev.contains(path),
                     native: None,
                 }
             })
             .collect();
+        self.settings.mods.info = info;
         (self.mods.content_ids, self.mods.live_ids) = (content_ids, live_ids);
-        self.ui.options.mods_live = self.mods_live_now();
         if self.mods.applied.is_none() {
             self.mods.applied = Some(self.settings.mods.enabled.clone());
         }
@@ -900,15 +1225,6 @@ impl Game<'_> {
         let unbuilt = not_built(&native_dir, built, &self.settings.mods.installed);
         self.settings.mods.installed.extend(unbuilt);
         self.mods.report_refusals(&mut self.settings.mods.installed);
-    }
-    /// The content mods the Mods page lets the player switch with a world
-    /// open: in single player and on an open LAN world, those with only
-    /// assets and data; none on another server, which owns its data.
-    pub(super) fn mods_live_now(&self) -> std::collections::BTreeSet<String> {
-        match self.integrated.is_some() || self.remote.is_none() {
-            true => self.mods.live_ids.clone(),
-            false => Default::default(),
-        }
     }
     /// The content mods the resources load with: the ones applied, which a
     /// switch that needs a restart doesn't change.
@@ -936,6 +1252,7 @@ impl Game<'_> {
         // worldgen keeps the state it loaded with until a restart.
         let content = &self.mods.content_ids;
         let mut next = wanted.clone();
+
         let mut waiting = Vec::new();
         for id in applied.symmetric_difference(&wanted) {
             if !content.contains(id) || self.mods.live_ids.contains(id) {
@@ -1322,6 +1639,142 @@ mod tests {
         );
     }
 
+    /// A mod that adds an attribute vanilla zombies lack (#846,
+    /// `EntityAttributeModificationEvent`) changes the zombie type's default:
+    /// a zombie spawned after load answers it through the live attribute map
+    /// and carries it in its finalize defaults, while the rest of its row
+    /// and its spawn fields stay the zombie's.
+    #[test]
+    fn a_mods_attribute_addition_reaches_new_vanilla_zombies() {
+        use horizon_client::mobs::Mob;
+        use horizon_core::geometry::Vec3;
+        use horizon_world::attribute_map::ValueKind;
+        use horizon_world::attributes::entity::Catalog;
+        use mod_api::{Hooks, ModEntry, Registrar, RegistrationContext};
+
+        struct Lucky;
+        #[mod_api::__subscriptions]
+        impl Hooks for Lucky {
+            fn register(&self, registrar: &mut dyn Registrar, _: &RegistrationContext) {
+                registrar
+                    .modify_entity_attributes(
+                        "minecraft:zombie",
+                        vec![("minecraft:luck".to_string(), Some(2.5))],
+                    )
+                    .unwrap();
+            }
+        }
+        crate::game::api_values::install_parts(&[ModEntry::new("lucky", Box::new(Lucky))]).unwrap();
+
+        let bits = |n: f64| format!("{:016x}", n.to_bits());
+        let catalog = Arc::new(
+            Catalog::from_json(&serde_json::json!({
+                "data_version": horizon_world::DATA_VERSION,
+                "attributes": [
+                    {"id": "minecraft:max_health", "default": bits(20.0), "min": bits(1.0), "max": bits(1024.0), "syncable": true},
+                    {"id": "minecraft:movement_speed", "default": bits(0.7), "min": bits(0.0), "max": bits(1024.0), "syncable": true},
+                    {"id": "minecraft:luck", "default": bits(0.0), "min": bits(-1024.0), "max": bits(1024.0), "syncable": true}
+                ],
+                "entities": {
+                    "minecraft:zombie": {
+                        "minecraft:max_health": bits(20.0),
+                        "minecraft:movement_speed": bits(0.23000000417232513)
+                    }
+                }
+            }))
+            .unwrap(),
+        );
+        let read = |catalog: &Arc<Catalog>, name: &str| {
+            horizon_client::living_attributes::LivingAttributes::default().read(
+                catalog,
+                "minecraft:zombie",
+                name,
+                ValueKind::Computed,
+                Vec::new,
+            )
+        };
+        assert_eq!(
+            read(&catalog, "minecraft:luck"),
+            None,
+            "vanilla zombies lack it"
+        );
+
+        // core.motion, then rest.mobs, as the resource load runs them.
+        let modifications = mod_api::__private::entity_attribute_modifications();
+        assert_eq!(modifications.len(), 1);
+        let added = Arc::new(
+            super::super::resource_load::with_mod_attribute_additions(&catalog, modifications)
+                .unwrap(),
+        );
+        let mut types: std::collections::HashMap<_, _> = living_mod_types()
+            .into_iter()
+            .map(|(id, kind)| (id, Arc::unwrap_or_clone(kind)))
+            .collect();
+        super::super::resource_load::take_modified_attribute_rows(
+            &mut types,
+            &added,
+            modifications,
+        );
+
+        let zombie = Mob::new(
+            7,
+            Arc::new(types["minecraft:zombie"].clone()),
+            Vec3::ZERO,
+            0.0,
+        );
+        assert_eq!(read(&added, "minecraft:luck"), Some(2.5), "the live map");
+        assert_eq!(
+            zombie.kind.attributes.get("minecraft:luck"),
+            Some(&2.5),
+            "the finalize defaults"
+        );
+        assert_eq!(read(&added, "minecraft:max_health"), Some(20.0));
+        assert_eq!(zombie.health, 20.0, "the spawn's health");
+        assert_eq!(zombie.attrs.speed, 0.23000000417232513);
+        // Types nobody modified keep their rows.
+        assert_eq!(
+            types["minecraft:villager"].attributes.get("minecraft:luck"),
+            None
+        );
+    }
+
+    /// An addition the catalog cannot place (an attribute it does not know,
+    /// or a type with no attribute row) refuses the resource load, naming
+    /// the type.
+    #[test]
+    fn a_mods_attribute_addition_to_an_unknown_row_refuses_the_load() {
+        use horizon_world::attributes::entity::Catalog;
+        use mod_api::__private::EntityAttributeModification;
+
+        let catalog = Catalog::from_json(&serde_json::json!({
+            "data_version": horizon_world::DATA_VERSION,
+            "attributes": [
+                {"id": "minecraft:luck", "default": "0000000000000000", "min": "c090000000000000", "max": "4090000000000000", "syncable": true}
+            ],
+            "entities": {"minecraft:zombie": {}}
+        }))
+        .unwrap();
+        let addition = |entity: &str, attribute: &str| EntityAttributeModification {
+            entity: entity.into(),
+            attributes: vec![(attribute.into(), None)],
+        };
+        let error = super::super::resource_load::with_mod_attribute_additions(
+            &catalog,
+            &[addition("minecraft:zombie", "lucky:magic_resistance")],
+        )
+        .err()
+        .unwrap();
+        assert!(error.contains("minecraft:zombie"), "{error}");
+        assert!(error.contains("lucky:magic_resistance"), "{error}");
+        let error = super::super::resource_load::with_mod_attribute_additions(
+            &catalog,
+            &[addition("ruby:ghoul", "minecraft:luck")],
+        )
+        .err()
+        .unwrap();
+        assert!(error.contains("ruby:ghoul"), "{error}");
+    }
+
     /// A content mod's type from the wandering trader, the neutral template
     /// whose behaviour is all goals: a trader under its own id, with a
     /// trader's goals, that saves what a trader saves and loads back.
@@ -1356,6 +1809,107 @@ mod tests {
         assert_eq!(
             (loaded.kind.id.as_str(), loaded.species()),
             ("ruby:merchant", Species::WanderingTrader)
+        );
+    }
+
+    #[test]
+    fn fluid_models_recollection_changes_model_identifiers() {
+        use mod_api::{FluidModel, Hooks, ModEntry, RegisterFluidModelsEvent, testing::with_mods};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        #[derive(Default)]
+        struct Models(Arc<AtomicUsize>);
+        #[mod_api::horizon_mod]
+        impl Hooks for Models {
+            fn register_fluid_models(
+                &self,
+                _: &RegistrationContext,
+                event: &mut RegisterFluidModelsEvent<'_>,
+            ) {
+                let generation = self.0.load(Ordering::SeqCst);
+                let mut model = FluidModel::default();
+                model.fluid = "reload_fluid:oil".into();
+                model.still = Some(format!("reload_fluid:block/oil_{generation}"));
+                event.models.push(model);
+            }
+        }
+        let generation = Arc::new(AtomicUsize::new(0));
+        with_mods(
+            vec![ModEntry::new(
+                "reload_fluid",
+                Box::new(Models(generation.clone())),
+            )]
+            .into(),
+            || {
+                mod_api::__private::with_test_packages(&["reload_fluid"], || {
+                    horizon_client::fluid_models::set_world_looks([
+                        &horizon_mod_package::content::FluidLook {
+                            id: "reload_fluid:oil".into(),
+                            sprite: None,
+                            tint: None,
+                            world: Some(Default::default()),
+                        },
+                    ]);
+                    register_fluid_models(ExecutionRole::Client);
+                    assert_eq!(
+                        horizon_client::fluid_models::resolved()[0].still,
+                        "reload_fluid:block/oil_0"
+                    );
+                    generation.store(1, Ordering::SeqCst);
+                    register_fluid_models(ExecutionRole::Client);
+                    assert_eq!(
+                        horizon_client::fluid_models::resolved()[0].still,
+                        "reload_fluid:block/oil_1"
+                    );
+                    horizon_client::fluid_models::register(vec![]);
+                    horizon_client::fluid_models::set_world_looks([]);
+                });
+            },
+        );
+    }
+
+    #[test]
+    fn fluid_models_collect_only_on_the_client() {
+        use mod_api::FluidModel;
+        use mod_api::{Hooks, ModEntry, RegisterFluidModelsEvent, testing::with_mods};
+        #[derive(Default)]
+        struct Models;
+        #[mod_api::horizon_mod]
+        impl Hooks for Models {
+            fn register_fluid_models(
+                &self,
+                _: &RegistrationContext,
+                event: &mut RegisterFluidModelsEvent<'_>,
+            ) {
+                let mut model = FluidModel::default();
+                model.fluid = "registration_test:oil".into();
+                model.flowing = Some("registration_test:block/oil_flow".into());
+                model.overlay = Some("registration_test:block/oil_overlay".into());
+                event.models.push(model);
+            }
+        }
+        with_mods(
+            vec![ModEntry::new("registration_test", Box::new(Models))].into(),
+            || {
+                mod_api::__private::with_test_packages(&["registration_test"], || {
+                    for server in [
+                        ExecutionRole::IntegratedServer,
+                        ExecutionRole::DedicatedServer,
+                    ] {
+                        assert_eq!(collect_fluid_models(server), None);
+                    }
+                    let models = collect_fluid_models(ExecutionRole::Client).unwrap();
+                    assert_eq!(models.len(), 1);
+                    assert_eq!(models[0].fluid, "registration_test:oil");
+                    assert_eq!(
+                        models[0].flowing.as_deref(),
+                        Some("registration_test:block/oil_flow")
+                    );
+                    assert_eq!(
+                        models[0].overlay.as_deref(),
+                        Some("registration_test:block/oil_overlay")
+                    );
+                });
+            },
         );
     }
 

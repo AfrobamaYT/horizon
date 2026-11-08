@@ -322,12 +322,28 @@ impl Game<'_> {
             first_person: self.camera_type.is_first_person(),
             scoping: self.scoping(),
             game_time_delta: 0.0,
-            equipment: match &self.armor[0] {
-                Some(stack) if &*stack.item == "minecraft:carved_pumpkin" => {
-                    vec!["misc/pumpkinblur".to_owned()]
+            equipment: [
+                (self.inventory[self.selected].as_ref(), "mainhand"),
+                (self.armor[3].as_ref(), "feet"),
+                (self.armor[2].as_ref(), "legs"),
+                (self.armor[1].as_ref(), "chest"),
+                (self.armor[0].as_ref(), "head"),
+                (self.offhand.as_ref(), "offhand"),
+            ]
+            .into_iter()
+            .filter_map(|(stack, slot)| {
+                let e = horizon_client::item_sync::equippable(stack?, self.res.items())?;
+                if e.slot != slot {
+                    return None;
                 }
-                _ => Vec::new(),
-            },
+                let overlay = e.camera_overlay?;
+                Some(
+                    overlay
+                        .strip_prefix("minecraft:")
+                        .map_or_else(|| overlay.clone(), str::to_owned),
+                )
+            })
+            .collect(),
             ticks_frozen: p.ticks_frozen,
             percent_frozen: p.percent_frozen(),
             partial,
@@ -369,18 +385,20 @@ impl Game<'_> {
                 continue;
             };
             let mut replace_vanilla = false;
-            self.native_block_screen_effect_draw(mod_api::__private::BlockScreenEffectDrawCall {
-                effect,
-                state,
-                pos,
-                partial_tick: partial,
-                hide_gui: self.ui.hide_gui,
-                draw: &mut GameCameraDrawContext {
-                    game: self,
-                    surface: &mut quads,
+            self.native_block_screen_effect_draw(
+                crate::game::native_hooks::BlockScreenEffectDrawCall {
+                    effect,
+                    state,
+                    pos,
+                    partial_tick: partial,
+                    hide_gui: self.ui.hide_gui,
+                    draw: &mut GameCameraDrawContext {
+                        game: self,
+                        surface: &mut quads,
+                    },
+                    replace_vanilla: &mut replace_vanilla,
                 },
-                replace_vanilla: &mut replace_vanilla,
-            });
+            );
             drawn[i] = quads.take();
             if replace_vanilla {
                 match effect {
@@ -858,11 +876,16 @@ mod tests {
                 _: &dyn ClientHost,
                 event: &mut ExtractBlockScreenEffectEvent,
             ) -> Flow {
-                SEEN.lock()
-                    .unwrap()
-                    .push((event.effect, event.state, event.pos));
+                SEEN.lock().unwrap().push((
+                    event.effect,
+                    crate::game::api_values::TryIntoEngine::try_into_engine(&event.state, &())
+                        .unwrap(),
+                    event.pos,
+                ));
                 if event.effect == BlockScreenEffect::Block
-                    && event.state == self.0
+                    && crate::game::api_values::TryIntoEngine::try_into_engine(&event.state, &())
+                        .unwrap()
+                        == self.0
                     && event.pos == BlockPos::new(0, 65, 0)
                 {
                     Flow::Cancel

@@ -65,10 +65,12 @@ fn route(mock: &mut Mock, method: &str, path: &str, auth: &str, body: &str) -> (
         },
         ("POST", "/xbl") => {
             let v: Value = serde_json::from_str(body).unwrap();
-            assert!(v["Properties"]["RpsTicket"]
-                .as_str()
-                .unwrap()
-                .starts_with("d=ms-access-"));
+            assert!(
+                v["Properties"]["RpsTicket"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("d=ms-access-")
+            );
             assert_eq!(v["RelyingParty"], "http://auth.xboxlive.com");
             reply(
                 200,
@@ -435,10 +437,12 @@ fn splitscreen_gets_the_other_accounts_that_still_hold() {
     assert_eq!(list.len(), 3);
     assert_eq!(list[0]["name"], "Bea");
     assert_eq!(list[1]["name"], "Cal");
-    assert!(list[1]["skipped"]
-        .as_str()
-        .unwrap()
-        .contains("Sign in again"));
+    assert!(
+        list[1]["skipped"]
+            .as_str()
+            .unwrap()
+            .contains("Sign in again")
+    );
     assert!(list[1].get("file").is_none());
     assert_eq!(list[2]["name"], "Dan");
     assert!(list[2]["skipped"].as_str().unwrap().contains("ownership"));
@@ -514,10 +518,12 @@ fn splitscreen_never_hands_over_an_account_sent_back_to_sign_in() {
         assert_eq!(list.len(), 1);
         assert_eq!(list[0]["name"], "Eve");
         assert!(list[0].get("file").is_none());
-        assert!(list[0]["skipped"]
-            .as_str()
-            .unwrap()
-            .contains("Sign in again"));
+        assert!(
+            list[0]["skipped"]
+                .as_str()
+                .unwrap()
+                .contains("Sign in again")
+        );
     }
     let written = std::fs::read_dir(&dir).map_or(0, |d| d.count());
     assert_eq!(written, 0, "no session file for it");
@@ -615,20 +621,20 @@ fn a_no_from_the_services_blocks_at_once() {
     assert!(accounts.has_owner(&store));
     assert_eq!(
         launch(&ep, Some("test-client"), &store, &mut accounts).unwrap_err(),
-        NoOwner
+        NoOwner::default()
     );
     // The answer is kept beside the tokens: offline now, it still says no.
     assert!(!kept(&store).owns && !accounts.has_owner(&store));
     assert_eq!(
         launch(&offline(), Some("test-client"), &store, &mut accounts).unwrap_err(),
-        NoOwner
+        NoOwner::default()
     );
     assert_eq!(
-        NoOwner.to_string(),
+        NoOwner::default().to_string(),
         "Sign in with a Microsoft account that owns Minecraft: Java Edition to play."
     );
     assert_eq!(
-        NoOwner::in_window(),
+        NoOwner::default().in_window(),
         "Sign in with a Microsoft account that owns Minecraft: Java Edition to play. Open Settings and sign in under Account."
     );
 }
@@ -675,10 +681,11 @@ fn any_owner_opens_the_gate_and_the_one_who_plays_brings_the_session() {
     accounts.selected = Some("other".into());
     let pass = launch(&ep, Some("test-client"), &store, &mut accounts).unwrap();
     assert!(pass.session.is_none());
-    assert!(pass
-        .offline
-        .unwrap()
-        .starts_with("Alex is no longer signed in"));
+    assert!(
+        pass.offline
+            .unwrap()
+            .starts_with("Alex is no longer signed in")
+    );
     assert_eq!(pass.owner.unwrap().0.name, "Notch");
     // An offline name plays: Notch is asked, and no session goes to the game.
     accounts.selected = None;
@@ -708,9 +715,11 @@ fn offline_names_play_only_beside_an_owner() {
     assert!(!accounts.has_owner(&store));
     let (_, ep) = mock(|_| {});
     assert!(launch(&ep, Some("test-client"), &store, &mut accounts).is_err());
-    assert!(accounts
-        .play_as(&store, Player::Offline("Builder_2".into()))
-        .is_err());
+    assert!(
+        accounts
+            .play_as(&store, Player::Offline("Builder_2".into()))
+            .is_err()
+    );
 }
 
 #[test]
@@ -722,10 +731,10 @@ fn the_developer_option_off_is_the_owner_gate() {
     assert_eq!(accounts, Accounts::default());
     let (_, ep) = mock(|m| m.owns_game = false);
     let refused = launch_for_game(&ep, Some("test-client"), &store, &mut accounts, false);
-    assert_eq!(refused.unwrap_err(), NoOwner);
+    assert_eq!(refused.unwrap_err(), NoOwner::default());
     let mut accounts = signed_in(&store, &secrets("mc-token", true));
     let refused = launch_for_game(&ep, Some("test-client"), &store, &mut accounts, false);
-    assert_eq!(refused.unwrap_err(), NoOwner);
+    assert_eq!(refused.unwrap_err(), NoOwner::default());
 }
 
 #[test]
@@ -765,19 +774,25 @@ fn refusals_have_messages() {
         refresh: "r".into(),
     };
     let (_, ep) = mock(|m| m.xerr = Some(2148916233));
-    assert!(finish_sign_in(&ep, tokens())
-        .unwrap_err()
-        .contains("no Xbox profile"));
+    assert!(
+        finish_sign_in(&ep, tokens())
+            .unwrap_err()
+            .contains("no Xbox profile")
+    );
     let (_, ep) = mock(|m| m.xerr = Some(2148916238));
-    assert!(finish_sign_in(&ep, tokens())
-        .unwrap_err()
-        .contains("child account"));
+    assert!(
+        finish_sign_in(&ep, tokens())
+            .unwrap_err()
+            .contains("child account")
+    );
     let (_, ep) = mock(|m| m.owns_game = false);
     assert_eq!(finish_sign_in(&ep, tokens()).unwrap_err(), DOES_NOT_OWN);
     let (_, ep) = mock(|m| m.no_profile = true);
-    assert!(finish_sign_in(&ep, tokens())
-        .unwrap_err()
-        .contains("no Minecraft profile"));
+    assert!(
+        finish_sign_in(&ep, tokens())
+            .unwrap_err()
+            .contains("no Minecraft profile")
+    );
     assert_eq!(
         oauth_error(&json!({"error": "authorization_declined"})),
         "Sign-in was declined in the browser."
@@ -1241,7 +1256,7 @@ fn the_java_edition_plays_as_an_owner_even_offline() {
     let mut accounts = signed_in(&store, &secrets("mc-token", false));
     assert_eq!(
         java_player_with(&offline(), Some("test-client"), &store, &mut accounts).unwrap_err(),
-        NoOwner.to_string()
+        NoOwner::default().to_string()
     );
 }
 
@@ -1283,9 +1298,11 @@ fn the_secrets_file_keeps_sign_ins_across_starts() {
         (signed_in.minecraft_token, signed_in.refresh_token, true)
     );
     // Never in accounts.json.
-    assert!(!serde_json::to_string(&accounts)
-        .unwrap()
-        .contains("mc-secret"));
+    assert!(
+        !serde_json::to_string(&accounts)
+            .unwrap()
+            .contains("mc-secret")
+    );
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -1388,7 +1405,7 @@ fn the_key_takes_the_install_secret_beside_the_file() {
 
 #[test]
 fn a_file_sealed_under_the_old_key_is_read_and_sealed_again() {
-    use chacha20poly1305::{aead::Aead, KeyInit};
+    use chacha20poly1305::{KeyInit, aead::Aead};
     let path = secrets_file("format1");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     // As launchers before format 2 wrote it.
@@ -1859,6 +1876,149 @@ fn a_dismissed_prompt_is_asked_once_a_run() {
     remove_secrets_dir(&path);
 }
 
+/// A keyring that never answers until the test lets it go: a stuck Secret Service daemon
+/// (#12179).
+struct Silent {
+    hung: Arc<Mutex<()>>,
+    asked: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl Silent {
+    fn answer(&self) {
+        self.asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        drop(self.hung.lock().unwrap());
+    }
+}
+
+impl SecretStore for Silent {
+    fn get(&self, _: &str) -> Result<Option<String>, String> {
+        self.answer();
+        Ok(None)
+    }
+    fn set(&self, _: &str, _: &str) -> Result<(), String> {
+        self.answer();
+        Ok(())
+    }
+    fn delete(&self, _: &str) -> Result<(), String> {
+        self.answer();
+        Ok(())
+    }
+    fn persistent(&self) -> bool {
+        true
+    }
+}
+
+/// How long the tests' keyrings get: short, the behaviour is the same as with [`KEYCHAIN_WAIT`].
+const SILENT_WAIT: Duration = Duration::from_millis(300);
+
+#[test]
+fn a_keyring_that_never_answers_ends_play_with_what_is_wrong() {
+    let path = secrets_file("silent");
+    let hung = Arc::new(Mutex::new(()));
+    let held = hung.lock().unwrap();
+    let asked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let keyring = Silent {
+        hung: hung.clone(),
+        asked: asked.clone(),
+    };
+    let store = Arc::new(Layered::new(
+        Box::new(Bounded::new(keyring, SILENT_WAIT)),
+        FileStore::new(path.clone()),
+    ));
+    let mut accounts = signed_in(&MemoryStore::default(), &secrets("mc-token", true));
+    let started = Instant::now();
+    // The window's sign-in check at start-up asks first, and holds the account lock meanwhile.
+    let checking = {
+        let store = store.clone();
+        std::thread::spawn(move || session::status_with_progress(store.as_ref(), UUID, &|_| {}))
+    };
+    while asked.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    // Then Play, behind it.
+    let (done, played) = std::sync::mpsc::channel();
+    {
+        let store = store.clone();
+        std::thread::spawn(move || {
+            let _ = done.send(launch(
+                &offline(),
+                Some("test-client"),
+                store.as_ref(),
+                &mut accounts,
+            ));
+        });
+    }
+    let refused = played
+        .recv_timeout(Duration::from_secs(10))
+        .expect("Play waited on the keyring forever")
+        .unwrap_err();
+    assert!(started.elapsed() < Duration::from_secs(5));
+    let status = checking.join().unwrap();
+    assert_eq!(status.state, session::State::Retry);
+    // Not "sign in with an account that owns Minecraft": the player is signed in.
+    let said = format!("Can't read Notch's sign-in: {KEYCHAIN_AWAY}");
+    assert_eq!(refused.keyring.as_deref(), Some(said.as_str()));
+    assert_eq!(
+        (refused.to_string(), refused.in_window()),
+        (said.clone(), said)
+    );
+    // The next start asks the keyring again, and says it didn't answer.
+    let restarted = Layered::new(
+        Box::new(Bounded::new(
+            Silent {
+                hung: hung.clone(),
+                asked: asked.clone(),
+            },
+            SILENT_WAIT,
+        )),
+        FileStore::new(path.clone()),
+    );
+    let mut accounts = signed_in(&MemoryStore::default(), &secrets("mc-token", true));
+    let refused = launch(&offline(), Some("test-client"), &restarted, &mut accounts).unwrap_err();
+    assert_eq!(
+        refused.keyring,
+        Some(format!(
+            "Can't read Notch's sign-in: {}",
+            keyring_no_answer(SILENT_WAIT)
+        ))
+    );
+    drop(held);
+    remove_secrets_dir(&path);
+}
+
+#[test]
+fn a_keyring_given_up_on_is_not_asked_again_until_it_answers() {
+    let hung = Arc::new(Mutex::new(()));
+    let held = hung.lock().unwrap();
+    let asked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let keyring = Bounded::new(
+        Silent {
+            hung: hung.clone(),
+            asked: asked.clone(),
+        },
+        SILENT_WAIT,
+    );
+    let started = Instant::now();
+    assert_eq!(keyring.get("A"), Err(keyring_no_answer(SILENT_WAIT)));
+    assert!(started.elapsed() >= SILENT_WAIT);
+    // Still stuck: the next calls fail at once, without a second call piling up behind it.
+    let again = Instant::now();
+    assert_eq!(
+        keyring.set("A", "secret-a"),
+        Err(keyring_no_answer(SILENT_WAIT))
+    );
+    assert!(again.elapsed() < SILENT_WAIT);
+    assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 1);
+    // It answers at last: it is asked again, and its answers come back.
+    drop(held);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while keyring.delete("A").is_err() {
+        assert!(Instant::now() < deadline, "the late answer never counted");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(keyring.get("A"), Ok(None));
+}
+
 #[test]
 fn signing_out_while_the_keychain_is_away_forgets_its_copy() {
     let path = secrets_file("sign-out");
@@ -2037,10 +2197,12 @@ fn expiry_is_refreshable_and_a_missing_credential_needs_sign_in() {
         session::State::NeedsRefresh
     );
     let (_, ep) = mock(|_| {});
-    assert!(launch(&ep, Some("test-client"), &store, &mut accounts)
-        .unwrap()
-        .session
-        .is_some());
+    assert!(
+        launch(&ep, Some("test-client"), &store, &mut accounts)
+            .unwrap()
+            .session
+            .is_some()
+    );
     assert_eq!(session::status(&store, UUID).state, session::State::Ready);
 }
 
@@ -2080,9 +2242,11 @@ fn a_damaged_saved_sign_in_is_not_overwritten_or_exposed() {
         store.get(UUID).unwrap().as_deref(),
         Some("damaged-secret-contents")
     );
-    assert!(!serde_json::to_string(&status)
-        .unwrap()
-        .contains("damaged-secret-contents"));
+    assert!(
+        !serde_json::to_string(&status)
+            .unwrap()
+            .contains("damaged-secret-contents")
+    );
 }
 
 #[test]
@@ -2180,28 +2344,32 @@ fn cancelled_or_removed_targeted_sign_in_keeps_credentials_unchanged() {
     let store = MemoryStore::default();
     let mut accounts = signed_in(&store, &secrets("original", true));
     let before = store.get(UUID).unwrap();
-    assert!(accept_sign_in(
-        &mut accounts,
-        &store,
-        Some(&notch()),
-        notch(),
-        &secrets("new", true),
-        &|| true,
-        &|_| {}
-    )
-    .is_err());
+    assert!(
+        accept_sign_in(
+            &mut accounts,
+            &store,
+            Some(&notch()),
+            notch(),
+            &secrets("new", true),
+            &|| true,
+            &|_| {}
+        )
+        .is_err()
+    );
     assert_eq!(store.get(UUID).unwrap(), before);
     accounts.accounts.clear();
-    assert!(accept_sign_in(
-        &mut accounts,
-        &store,
-        Some(&notch()),
-        notch(),
-        &secrets("new", true),
-        &|| false,
-        &|_| {}
-    )
-    .is_err());
+    assert!(
+        accept_sign_in(
+            &mut accounts,
+            &store,
+            Some(&notch()),
+            notch(),
+            &secrets("new", true),
+            &|| false,
+            &|_| {}
+        )
+        .is_err()
+    );
     assert_eq!(store.get(UUID).unwrap(), before);
 }
 
@@ -2223,7 +2391,9 @@ fn refresh_reports_real_service_steps_in_order() {
     assert_eq!(status.state, session::State::Ready);
     assert_eq!(
         *phases.borrow(),
-        [Queued, Keychain, Microsoft, Xbox, Minecraft, Ownership, Profile, Saving]
+        [
+            Queued, Keychain, Microsoft, Xbox, Minecraft, Ownership, Profile, Saving
+        ]
     );
     let mut accounts = signed_in(&store, &secrets("old", true));
     let (account, secrets) = finish_sign_in_with_progress(
@@ -2290,10 +2460,11 @@ fn a_launch_as_another_account_leaves_the_selected_one() {
     )
     .unwrap();
     assert!(pass.session.is_none());
-    assert!(pass
-        .offline
-        .unwrap()
-        .starts_with("Alex is no longer signed in"));
+    assert!(
+        pass.offline
+            .unwrap()
+            .starts_with("Alex is no longer signed in")
+    );
     assert_eq!(accounts.player(), Player::Microsoft(UUID.into()));
     // An account that isn't in the launcher is refused, and changes nothing either.
     let gone = launch_as(
@@ -2347,10 +2518,12 @@ fn splitscreen_stops_renewing_other_accounts_once_out_of_time() {
         "no request started"
     );
     let list: Vec<Value> = serde_json::from_str(&env[0].1).unwrap();
-    assert!(list[0]["skipped"]
-        .as_str()
-        .unwrap()
-        .contains("Sign in again"));
+    assert!(
+        list[0]["skipped"]
+            .as_str()
+            .unwrap()
+            .contains("Sign in again")
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
