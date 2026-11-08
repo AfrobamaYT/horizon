@@ -35,6 +35,14 @@ mod platform {
         }
         Ok(original)
     }
+    #[cfg(test)]
+    impl Restore {
+        pub(super) fn private_copy(&self) -> bool {
+            self.saved.as_raw_fd() >= 3
+                && unsafe { libc::fcntl(self.saved.as_raw_fd(), libc::F_GETFD) } & libc::FD_CLOEXEC
+                    != 0
+        }
+    }
     impl Drop for Restore {
         fn drop(&mut self) {
             // SAFETY: saved remains owned and target is this guard's standard slot.
@@ -122,6 +130,20 @@ mod platform {
         }
         Ok(original)
     }
+    #[cfg(test)]
+    impl Restore {
+        pub(super) fn private_copy(&self) -> bool {
+            let mut flags = 0;
+            self.saved.0 >= 3
+                && unsafe {
+                    windows_sys::Win32::Foundation::GetHandleInformation(
+                        libc::get_osfhandle(self.saved.0) as _,
+                        &mut flags,
+                    )
+                } != 0
+                && flags & 1 == 0
+        }
+    }
     impl Drop for Restore {
         fn drop(&mut self) {
             // SAFETY: restoring an owned saved CRT stream also provides the new Win32 handle.
@@ -135,3 +157,35 @@ mod platform {
 }
 
 pub(super) use platform::{Restore, redirect};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn saved_copy_never_uses_stdio_or_inherits() {
+        if std::env::var_os("HORIZON_CAPTURE_FD_TEST").is_none() {
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "output::stdio::tests::saved_copy_never_uses_stdio_or_inherits",
+                    "--nocapture",
+                ])
+                .env("HORIZON_CAPTURE_FD_TEST", "1")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success());
+            return;
+        }
+        let (_reader, writer) = os_pipe::pipe().unwrap();
+        unsafe {
+            libc::close(0);
+        }
+        let restore = redirect(1, &writer).unwrap();
+        assert!(
+            restore.private_copy(),
+            "saved copy clobbered a stdio slot or can leak across exec"
+        );
+    }
+}
