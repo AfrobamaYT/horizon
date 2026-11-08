@@ -1156,7 +1156,19 @@ impl Game<'_> {
             }
             _ => None,
         };
-        let notify_target = restore_anger
+        // These are the vanilla NeutralMob implementors; each calls
+        // readPersistentAngerSaveData, which invokes setTarget even when
+        // `angry_at` is absent or cannot resolve to a living entity.
+        let neutral = matches!(
+            m.species(),
+            horizon_client::mobs::Species::Wolf
+                | horizon_client::mobs::Species::IronGolem
+                | horizon_client::mobs::Species::Bee
+                | horizon_client::mobs::Species::PolarBear
+                | horizon_client::mobs::Species::Enderman
+                | horizon_client::mobs::Species::ZombifiedPiglin
+        );
+        let notify_target = neutral
             && mod_api::__private::listened(mod_api::HookId::LivingChangeTarget)
             && self.native_lifecycle.epoch().is_some();
         if restore_anger && !notify_target {
@@ -1180,6 +1192,7 @@ impl Game<'_> {
         self.mobs.push(m);
         if notify_target
             && !self.native_restore_loaded_target(id, anger_uuid)
+            && restore_anger
             && let Some(mob) = self.mobs.iter_mut().find(|mob| mob.id == id)
         {
             // Handles are not available during some early load paths: keep
@@ -2500,6 +2513,43 @@ fn join_saved_team(board: &mut Scoreboard, name: &str, tag: &Tag) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn neutral_mob_load_notifies_target_even_without_saved_anger() {
+        use std::sync::{Arc, Mutex};
+
+        struct Observe(Arc<Mutex<Vec<(u32, bool)>>>);
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for Observe {
+            fn living_change_target(
+                &self,
+                host: &dyn mod_api::Host,
+                event: &mut mod_api::LivingChangeTargetEvent<'_>,
+            ) -> mod_api::Flow {
+                assert!(event.mob.living().health(host).is_some());
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push((event.mob.entity().id(), event.original_target.is_none()));
+                mod_api::Flow::Continue
+            }
+        }
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![mod_api::ModEntry::new(
+            "observe",
+            Box::new(Observe(observed.clone())),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let wolf = game.load_mob(entity("minecraft:wolf"), None).unwrap();
+                let golem = game.load_mob(entity("minecraft:iron_golem"), None).unwrap();
+                game.load_mob(entity("minecraft:pig"), None).unwrap();
+                assert_eq!(*observed.lock().unwrap(), [(wolf, true), (golem, true)]);
+            });
+        });
+    }
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]

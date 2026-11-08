@@ -20,8 +20,12 @@ fn scoped_host_reads_live_other_mob_before_stale_snapshot() {
             .unwrap()
             .clone();
         let mut actor = Mob::new(9001, kind.clone(), Vec3::ZERO, 0.0);
-        let mut other = Mob::new(9002, kind, Vec3::ZERO, 0.0);
-        let snapshot = [crate::game::creatures::seen(&other, game.level.player_uuid)];
+        let mut other = Mob::new(9002, kind.clone(), Vec3::ZERO, 0.0);
+        let stale = Mob::new(9003, kind, Vec3::ZERO, 0.0);
+        let snapshot = [
+            crate::game::creatures::seen(&other, game.level.player_uuid),
+            crate::game::creatures::seen(&stale, game.level.player_uuid),
+        ];
         other.yaw = 37.0;
         other.head_pitch = -12.0;
         other.attrs.max_health = 73.0;
@@ -39,6 +43,7 @@ fn scoped_host_reads_live_other_mob_before_stale_snapshot() {
         assert_eq!(entity.rotation(&context), Some([37.0, -12.0]));
         assert_eq!(LivingRef::new(entity).max_health(&context), Some(73.0));
         assert!(context.lookup_entity(other.id).is_some());
+        assert!(context.lookup_entity(stale.id).is_none());
         assert!(context.lookup_entity(9999).is_none());
     });
 }

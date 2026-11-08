@@ -70,8 +70,10 @@ impl GoalCx<'_, '_> {
         {
             return Some(Resolved::Dragon(info));
         }
-        if let Some(mob) = self.w.live_mobs.and_then(|mobs| mobs.find(id)) {
-            return Some(Resolved::Live(mob));
+        if let Some(mobs) = self.w.live_mobs {
+            // When the tick has a live view, it is authoritative. Falling
+            // back to an older snapshot here would resurrect a stale handle.
+            return mobs.find(id).filter(|mob| !mob.removed).map(Resolved::Live);
         }
         let others = self.w.others;
         let seen = match self.w.others_index {

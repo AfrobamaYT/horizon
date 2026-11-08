@@ -11243,6 +11243,7 @@ mod pearl_tests {
         let lid_openers = std::collections::HashMap::new();
         let w = MobWorld {
             goal_host: None,
+            live_mobs: None,
             teams: Default::default(),
             loop_context: &crate::game::test_server_load()
                 .loop_context(horizon_world::native_load_context::LoopSide::Server, []),
