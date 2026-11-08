@@ -458,10 +458,7 @@ pub fn game_architecture_launch_error(tag: &str) -> Option<String> {
     let selected = label(target);
     Some(crate::i18n::trf(
         "This version has a {installed} game build, but Settings selects {selected}. Install the selected build from Versions before launching.",
-        &[
-            ("installed", &installed),
-            ("selected", &selected),
-        ],
+        &[("installed", &installed), ("selected", &selected)],
     ))
 }
 
@@ -5213,11 +5210,15 @@ pub fn {f}("
     fn native_mod_builds_report_when_the_selected_game_has_no_matching_compiler() {
         assert_eq!(
             native_mod_architecture_message(GameArchitecture::X64, GameArchitecture::Arm64),
-            Some("Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only.")
+            Some(
+                "Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only."
+            )
         );
         assert_eq!(
             native_mod_architecture_message(GameArchitecture::Arm64, GameArchitecture::X64),
-            Some("Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler.")
+            Some(
+                "Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler."
+            )
         );
         assert_eq!(
             native_mod_architecture_message(GameArchitecture::Arm64, GameArchitecture::Arm64),
@@ -5298,9 +5299,10 @@ pub fn {f}("
             .get_envs()
             .find(|(k, _)| *k == "PIPEWIRE_PROPS")
             .and_then(|(_, v)| v);
-        assert!(props.is_some_and(|v| v
-            .to_string_lossy()
-            .contains("application.name = \"Horizon\"")));
+        assert!(props.is_some_and(|v| {
+            v.to_string_lossy()
+                .contains("application.name = \"Horizon\"")
+        }));
     }
 
     #[test]
