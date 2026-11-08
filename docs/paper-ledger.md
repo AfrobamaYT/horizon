@@ -836,3 +836,40 @@ Scope: the 20 entity hooks below. A key is added only where moment, side, inform
 [paper-BlockMultiPlaceEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/BlockMultiPlaceEvent.html
 [paper-EntityZapEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/entity/EntityZapEvent.html
 [paper-PreCreatureSpawnEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/entity/PreCreatureSpawnEvent.html
+
+## Event counterparts: note blocks, spawning, permissions and player events (#1015)
+
+Paper API 26.3 (paper-api `26.3.build.244-stable`), public Javadoc only; Horizon cited by function name.
+Scope = the 20 hooks below; each status applies the moment, side, information and result rule.
+
+| Horizon hook | Paper event / status | Evidence and porting boundary |
+|---|---|---|
+| `note_block_change` | **Gap:** none (nearest [`NotePlayEvent`][paper-NotePlayEvent]) | No Paper event fires while a player tunes a note block: `NotePlayEvent` describes the block playing, after the note changed, and exposes no old note, so the pre-change moment and its `old_note` fact are missing. No key. |
+| `note_block_play` | **Partial:** [`NotePlayEvent`][paper-NotePlayEvent] | Fires at the same "about to play" moment server-side and exposes instrument and note with setters and a cancel, matching `instrument`, `note` and `cancel`; it exposes no acting player (or redstone-versus-player source), the fact `player` and `player_entity_id` carry. No key. |
+| `potential_spawns` | **Gap:** none (nearest [`SpawnChangeEvent`][paper-SpawnChangeEvent]) | No Paper event offers the candidate spawn list at a server position for mods to add or remove entries, or to empty by cancelling; the name-matched event is about a world's spawn point. No key. |
+| `village_siege` | **Gap:** none | No Paper event covers a village siege finding a spawn position, and nothing in the dossier expresses the `canceled` out value for that moment. No key. |
+| `neighbor_notify` | **Gap:** none | No Paper event fires before a block tells its six neighbours it changed, and none can suppress that notification; the dossier gives no candidate. No key. |
+| `on_item_use_first` | **Partial:** [`PlayerInteractEvent`][paper-PlayerInteractEvent] | With `Action.RIGHT_CLICK_BLOCK`, the server event exposes the player, item, block, hand and interaction point. Its separate block/item use results and cancellation do not express the hook's arbitrary `answer`, and its Javadoc does not establish the phase after `use_item_on_block` and before the block's own use. No key. |
+| `permissions_changed` | **Gap:** none | No Paper event fires before the operator list gives a player a new permission level in place of the old one, and the dossier's candidates (world, main-hand and equipment changes) are other moments. No key. |
+| `player_break_speed` | **Gap:** none (nearest [`PlayerItemBreakEvent`][paper-PlayerItemBreakEvent]) | No Paper event exposes or lets mods change a player's destroy speed for a block, or cancel it; the nearest candidate is about a tool breaking, a different moment. No key. |
+| `player_brewed_potion` | **Gap:** none | No Paper event covers a player taking the bottle from a brewing stand's potion slot; the dossier's witch-potion candidates are unrelated. No key. |
+| `player_enchant_item` | **Gap:** none (nearest [`EnchantItemEvent`][paper-EnchantItemEvent]) | The hook reports the enchanted stack and enchantments already given, after levels are paid; Paper documents an item still to be enchanted and mutable enchantments to add, with cancellation. It does not document the hook's completed-enchantment notification moment. No key. |
+| `player_flyable_fall` | **Gap:** none | No Paper event reports a creative or spectator player's landing after a fall where `causeFallDamage` returned early; nothing in the dossier matches. No key. |
+| `player_harvest_check` | **Gap:** none (nearest [`PlayerHarvestBlockEvent`][paper-PlayerHarvestBlockEvent]) | No Paper event exposes the tool-and-state check that decides whether a block can be harvested; `PlayerHarvestBlockEvent` covers a crop harvest that drops items and changes state, a different moment. No key. |
+| `player_item_smithed` | **Gap:** none (nearest [`SmithItemEvent`][paper-SmithItemEvent]) | `SmithItemEvent` describes recipe completion in a smithing table but inherits a cancellable inventory click; its Javadoc does not establish the hook's notification after the take, with consumed inputs preserved as a snapshot. No key. |
+| `player_name_format` | **Gap:** none (nearest [`PlayerNameEntityEvent`][paper-PlayerNameEntityEvent]) | No Paper event formats a player's chat or command display name at this moment; the nearest candidate renames a mob. Paper being server-only would permit a match for the server half of this both-sided hook, but no matching event is documented. No key. |
+| `player_set_spawn` | **Partial:** [`PlayerSetSpawnEvent`][paper-PlayerSetSpawnEvent] | Fires server-side before a player's respawn point is set, exposes the player, nullable location and forced flag, and supports cancellation. Paper additionally exposes a cause and spawn angle and allows changing the location, forced flag and notification; the hook has no matching facts or outputs for these. No key. |
+| `player_spawn_phantoms` | **Gap:** none (nearest [`PhantomPreSpawnEvent`][paper-PhantomPreSpawnEvent]) | No Paper event covers the spawner's attempt decision before its difficulty and rest rolls, and none can set the group size; the nearest candidate fires once a phantom is already spawning. No key. |
+| `player_stays_on_ground_surface` | **Gap:** none | No Paper event documents the vanilla movement check in `staying_on_ground_surface` or replacement of its `staying` value. A server event could cover the server half of the both-sided hook, but no event covers this moment. No key. |
+| `player_tab_list_name_format` | **Gap:** none (nearest [`TabCompleteEvent`][paper-TabCompleteEvent]) | No Paper event supplies or replaces the name shown in the player/Tab list; the name-matched candidates are command tab completion. No key. |
+| `player_xp_change` | **Partial:** [`PlayerExpChangeEvent`][paper-PlayerExpChangeEvent] | Paper exposes the player and mutable amount of experience they will receive naturally, overlapping the hook's pre-grant moment. It is not cancellable, exposes a source entity absent from the hook, and does not document the hook's signed command and advancement grants; setting the amount to zero is not a matching cancel contract. No key. |
+| `player_xp_level_change` | **Gap:** none (nearest [`PlayerLevelChangeEvent`][paper-PlayerLevelChangeEvent]) | Paper reports old and new (current) levels, without a setter or cancellation. It does not document the pre-application `add_experience_levels` moment where the hook can replace the signed level delta or prevent the change. No key. |
+
+[paper-NotePlayEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/NotePlayEvent.html
+[paper-PlayerHarvestBlockEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerHarvestBlockEvent.html
+[paper-PlayerSetSpawnEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/player/PlayerSetSpawnEvent.html
+[paper-PhantomPreSpawnEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/entity/PhantomPreSpawnEvent.html
+
+[paper-SmithItemEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/inventory/SmithItemEvent.html
+
+[paper-PlayerExpChangeEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerExpChangeEvent.html
