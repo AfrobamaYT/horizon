@@ -1598,15 +1598,17 @@ pub(super) const BLOCK_CONTACT_HOOKS: horizon_client::block_contact::Hooks =
         },
         bounce_on: |dimension, level, c, fall_distance, movement| {
             let mut answer = [movement.x, movement.y, movement.z];
-            HitLevel(level.reborrow()).native_bounce_on(mod_api::__private::BounceOnCall {
-                dimension,
-                entity: c.entity,
-                kind: c.kind,
-                state: c.state,
-                pos: c.position,
-                fall_distance,
-                movement: &mut answer,
-            });
+            HitLevel(level.reborrow()).native_bounce_on(
+                crate::game::native_hooks::fire::BounceOnCall {
+                    dimension,
+                    entity: c.entity,
+                    kind: c.kind,
+                    state: c.state,
+                    pos: c.position,
+                    fall_distance,
+                    movement: &mut answer,
+                },
+            );
             *movement = horizon_core::geometry::Vec3::new(answer[0], answer[1], answer[2]);
         },
     };
@@ -2450,14 +2452,8 @@ impl Game<'_> {
             (None, None)
         };
         let (mut successful, mut canceled) = (false, false);
-        let Ok(snapshot) = stack.try_into_api() else {
-            return BonemealAsk {
-                crop: None,
-                check: Some(check),
-            };
-        };
-        let mut snapshot = Some(snapshot);
-        self.native_bonemeal(mod_api::__private::BonemealCall {
+        let mut snapshot = Some(stack.clone());
+        self.native_bonemeal(crate::game::native_hooks::fire::BonemealCall {
             dimension: self.dim.level(),
             player,
             player_entity_id,
@@ -2469,15 +2465,9 @@ impl Game<'_> {
             successful: &mut successful,
             canceled: &mut canceled,
         });
-        match snapshot.try_into_engine(self.items()) {
-            Ok(Some(next)) => *stack = next,
-            Ok(None) => stack.count = 0,
-            Err(_) => {
-                return BonemealAsk {
-                    crop: None,
-                    check: Some(check),
-                };
-            }
+        match snapshot {
+            Some(next) => *stack = next,
+            None => stack.count = 0,
         }
         BonemealAsk {
             crop: canceled.then_some(successful),
@@ -2500,10 +2490,15 @@ impl Game<'_> {
         }
         let placement = match companion {
             None => Placement::Single,
-            Some((at, extra)) => Placement::Multi(Vec::from([
-                BlockPlacement::new(pos, state),
-                BlockPlacement::new(at, extra),
-            ])),
+            Some((at, extra)) => {
+                let (Ok(state), Ok(extra)) = (state.try_into_api(), extra.try_into_api()) else {
+                    return false;
+                };
+                Placement::Multi(Vec::from([
+                    BlockPlacement::new(pos, state),
+                    BlockPlacement::new(at, extra),
+                ]))
+            }
         };
         let placer = self.entity(placer);
         let mut canceled = false;
@@ -2788,6 +2783,9 @@ impl Game<'_> {
             None => self.res.items(),
         };
         let table = items.block_loot_table(self.pack.assets.registry, state);
+        let Ok(state) = state.try_into_api() else {
+            return;
+        };
         let context = NativeLootDrops::from(mod_api::__private::built::NativeLootDrops {
             table: table.as_deref().unwrap_or_default(),
             dimension: self.dim.id(),
@@ -2819,6 +2817,12 @@ impl Game<'_> {
             return;
         }
         let Ok(snapshot) = tool.try_into_api() else {
+            return;
+        };
+        let Ok(block) = block
+            .map(|(pos, state)| state.try_into_api().map(|state| (pos, state)))
+            .transpose()
+        else {
             return;
         };
         let context = NativeLootDrops::from(mod_api::__private::built::NativeLootDrops {

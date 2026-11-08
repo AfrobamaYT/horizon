@@ -1372,7 +1372,7 @@ impl LevelAccess for GameLevel<'_> {
         vanilla: bool,
     ) -> bool {
         let mut connected = vanilla;
-        self.native_connects_to(mod_api::__private::ConnectsToCall {
+        self.native_connects_to(native_hooks::ConnectsToCall {
             dimension: self.dimension,
             pos,
             state,
@@ -1463,7 +1463,7 @@ impl LevelAccess for GameLevel<'_> {
         if self.native_authoritative {
             self.native_update_shape(
                 ticks,
-                mod_api::__private::UpdateShapeCall {
+                native_hooks::UpdateShapeCall {
                     dimension: self.dimension,
                     pos,
                     state,
@@ -8651,7 +8651,7 @@ impl Game<'_> {
             return false;
         }
         let mut cancel = false;
-        self.native_entity_change_block_pre(mod_api::__private::EntityChangeBlockPreCall {
+        self.native_entity_change_block_pre(native_hooks::EntityChangeBlockPreCall {
             player,
             entity: None,
             kind: "minecraft:player",

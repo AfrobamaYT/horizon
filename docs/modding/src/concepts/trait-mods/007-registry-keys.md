@@ -119,8 +119,8 @@ and GUI `item` / `item_model` take `ItemKey`. `block_item`, `fluid_bucket` and
 `NativeHit.block` return block keys; `BlockEntityDrawContext::block` takes one.
 `NativeHeldItem.id` (including use-start/stop events) and `NativeStack.item`
 carry item keys, not names. Unknown incoming slots are refused at the boundary.
-`block_sprites` takes resolved `BlockStateId` values, preserving properties without
-parsing state strings. The pre-change block event carries resolved `from` / `to`
+`block_sprites` takes API-owned `BlockState` values, preserving properties without
+parsing state strings or exposing numeric engine state IDs. The pre-change block event carries resolved `from` / `to`
 states and does not allocate their names. Property names and values in
 `set_block_property` are not block identifiers and remain strings.
 
