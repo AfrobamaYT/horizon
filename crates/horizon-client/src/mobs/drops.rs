@@ -545,7 +545,7 @@ pub fn finish_death(
         allay_load,
         table_rolled,
     } = rolled;
-    let killed_by_player = d.player.is_some();
+    let killed_by_player = d.player_killed;
     let s = m.species();
     if table_rolled {
         // Mob.dropCustomDeathLoot.
