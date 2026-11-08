@@ -23,12 +23,26 @@ pub fn register_block_tint_sources(layers: BTreeMap<String, Arc<[TintLayer]>>) -
 }
 
 /// The mods' colour resolvers, by registration index: set once at start, read by every mesh.
-static RESOLVERS: OnceLock<Arc<[Arc<dyn BiomeColorResolver>]>> = OnceLock::new();
+struct RegisteredResolver {
+    callback: Arc<dyn BiomeColorResolver>,
+    warned: std::sync::atomic::AtomicBool,
+}
+static RESOLVERS: OnceLock<Box<[RegisteredResolver]>> = OnceLock::new();
 
 /// Sets the native mods' colour resolvers (`register_color_resolvers`), once, before the block
 /// tint sources that read them. False when already set.
 pub fn register_color_resolvers(resolvers: Arc<[Arc<dyn BiomeColorResolver>]>) -> bool {
-    RESOLVERS.set(resolvers).is_ok()
+    RESOLVERS
+        .set(
+            resolvers
+                .iter()
+                .map(|callback| RegisteredResolver {
+                    callback: callback.clone(),
+                    warned: std::sync::atomic::AtomicBool::new(false),
+                })
+                .collect(),
+        )
+        .is_ok()
 }
 
 pub(super) fn resolver_exists(index: u32) -> bool {
@@ -41,6 +55,11 @@ pub(super) fn resolve(index: u32, biome: &BiomeInfo, x: f64, z: f64) -> u32 {
     let Some(resolver) = RESOLVERS.get().and_then(|r| r.get(index as usize)) else {
         return 0xFF_FFFF;
     };
+    // A failed resolver stays disabled, avoiding repeated panic-hook output as
+    // subsequent columns and sections are meshed.
+    if resolver.warned.load(std::sync::atomic::Ordering::Relaxed) {
+        return 0xFF_FFFF;
+    }
     let info = ResolverBiome {
         temperature: biome.temperature,
         downfall: biome.downfall,
@@ -51,7 +70,20 @@ pub(super) fn resolve(index: u32, biome: &BiomeInfo, x: f64, z: f64) -> u32 {
             water: biome.water,
         },
     };
-    resolver.color(&biome.name, &info, x, z) & 0xFF_FFFF
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        resolver.callback.color(&biome.name, &info, x, z)
+    })) {
+        Ok(color) => color & 0xFF_FFFF,
+        Err(_) => {
+            if !resolver
+                .warned
+                .swap(true, std::sync::atomic::Ordering::Relaxed)
+            {
+                log::warn!("Horizon: colour resolver {index} panicked; using white");
+            }
+            0xFF_FFFF
+        }
+    }
 }
 
 /// What [`register_block_tint_sources`] set; none before.

@@ -298,6 +298,13 @@ impl BiomeColorResolver for ByColumn {
     }
 }
 
+struct Throwing;
+impl BiomeColorResolver for Throwing {
+    fn color(&self, _: &str, _: &ResolverBiome, _: f64, _: f64) -> u32 {
+        panic!("test resolver failure")
+    }
+}
+
 /// The test resolvers, registered once for the whole test binary.
 fn test_resolvers() -> [ColorResolver; 2] {
     static HANDLES: OnceLock<[ColorResolver; 2]> = OnceLock::new();
@@ -307,6 +314,7 @@ fn test_resolvers() -> [ColorResolver; 2] {
             registry.register(Arc::new(FoliageCopy)),
             registry.register(Arc::new(ByColumn)),
         ];
+        registry.register(Arc::new(Throwing));
         assert!(register_color_resolvers(registry.into_resolvers()));
         handles
     })
@@ -448,7 +456,7 @@ fn a_block_tinted_by_a_mod_resolver_meshes_with_its_colour_and_follows_its_input
     chunk.set(6, MIN_Y + 5, 6, oak.0);
     let mut region = [[None; 3]; 3];
     region[1][1] = Some(&chunk);
-    let colours = |biomes: &Biomes| {
+    let colours = |biomes: &Biomes, tables: &MeshTables| {
         let mut mesher = Mesher {
             nether_shading: false,
             shader_pack_lighting: false,
@@ -456,7 +464,7 @@ fn a_block_tinted_by_a_mod_resolver_meshes_with_its_colour_and_follows_its_input
             shader_pack: false,
             assets: &assets,
             render: &render,
-            tables: &tables,
+            tables,
             biomes,
             visibility: visibility.clone(),
             zoom: BiomeZoom::new(0),
@@ -479,14 +487,34 @@ fn a_block_tinted_by_a_mod_resolver_meshes_with_its_colour_and_follows_its_input
     let packed = |tint: u32| pack_rgb([tint >> 16 & 255, tint >> 8 & 255, tint & 255]);
     let before = biomes.get(forest).foliage & 0xFF_FFFF;
     assert!(
-        colours(&biomes).contains(&packed(before)),
+        colours(&biomes, &tables).contains(&packed(before)),
         "no face tinted {before:06X}"
     );
     biomes.list[usize::from(forest)].foliage = 0x12_3456;
-    let after = colours(&biomes);
+    let after = colours(&biomes, &tables);
     assert!(
         after.contains(&packed(0x12_3456)),
         "the new mesh kept {before:06X}"
     );
     assert!(!after.contains(&packed(before)));
+
+    // A failed native callback must still produce a mesh, and the next mesh of
+    // the same section must complete normally.
+    let mut failing = MeshTables::new(&assets, &render, &facts, visibility.clone(), None).unwrap();
+    let mut registry = ColorResolverRegistry::default();
+    registry.register(Arc::new(FoliageCopy));
+    registry.register(Arc::new(ByColumn));
+    let throwing = registry.register(Arc::new(Throwing));
+    failing
+        .apply_tint_layers(
+            assets.registry,
+            &BTreeMap::from([(
+                "minecraft:oak_leaves".to_string(),
+                Arc::from([TintLayer::Source(Arc::new(Resolved(throwing)))]),
+            )]),
+            Some(tint_values(assets.registry)),
+        )
+        .unwrap();
+    assert!(colours(&biomes, &failing).contains(&packed(0xFF_FFFF)));
+    assert!(colours(&biomes, &tables).contains(&packed(0x12_3456)));
 }
