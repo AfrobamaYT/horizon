@@ -604,6 +604,8 @@ pub mod crossing;
 mod dispatch;
 mod host_param;
 mod index;
+/// Generate codecs for ordinary scoped native callable resources.
+pub mod native_callable;
 pub mod native_value;
 mod wire;
 pub use wire::generate as generate_wire;

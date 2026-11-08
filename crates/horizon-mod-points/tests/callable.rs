@@ -60,3 +60,22 @@ fn scoped_callable_checks_both_leases_input_and_reentrancy() {
     assert!(matches!(escaped.invoke(vec![]), Err(RowError::Stale)));
     drop(scope);
 }
+
+#[test]
+fn expired_call_is_refused_while_value_scope_is_live() {
+    let count = Cell::new(0);
+    let callback = RefCell::new(|n: u32| {
+        count.set(count.get() + 1);
+        n
+    });
+    let scope = unsafe { ResourceScope::native_root(Rc::new(NoResources)) };
+    with_root(&callback, |root| {
+        let source = unsafe { FunctionSource::new(&root, decode, encode) }.unwrap();
+        drop(scope);
+        assert!(matches!(
+            source.invoke(1u32.to_le_bytes().to_vec()),
+            Err(RowError::Stale)
+        ));
+        assert_eq!(count.get(), 0);
+    });
+}
