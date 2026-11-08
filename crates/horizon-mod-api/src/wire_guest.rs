@@ -6,6 +6,7 @@ use crate::wire::{Id, Reader, Slots, Wire, WireError, Writer};
 use std::any::Any;
 use std::cell::RefCell;
 use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 
 mod generated {
     #![allow(clippy::all, unused, dead_code, non_snake_case)]
@@ -89,10 +90,17 @@ thread_local! {
 /// Words in the group's shared state: the std member exports this array as `horizon_group_state`,
 /// zeroed, for every mod of the group to read (one memory, one std, one state). A new word is taken
 /// from the end of this list; the array's length is part of the ABI.
-const GROUP_WORDS: usize = 8;
+const GROUP_WORDS: usize = 32;
 #[cfg(any(target_arch = "wasm32", test))]
 const WORD_HANDLERS: usize = 0;
 const WORD_BUDGET: usize = 1;
+/// Non-zero while the group's eviction callbacks run, so an allocation that fails inside one fails.
+const WORD_EVICTING: usize = 2;
+/// The first of the group's eviction slots: each holds a function-table index (the table is the
+/// group's, so an index a member registered is callable by any member), or zero when free.
+const WORD_EVICT: usize = 3;
+/// How many eviction callbacks a group can register.
+pub const EVICTORS: usize = GROUP_WORDS - WORD_EVICT;
 
 /// What the mods of one group may hold at once in caches the host asked them to keep, in bytes.
 pub const GROUP_BUDGET_BYTES: usize = 256 << 20;
@@ -145,6 +153,102 @@ fn release_budget(state: &[std::sync::atomic::AtomicUsize; GROUP_WORDS], bytes: 
     let _ =
         state[WORD_BUDGET].try_update(Relaxed, Relaxed, |used| Some(used.saturating_sub(bytes)));
 }
+
+/// Registers `evict` to run when an allocation of the group fails, to free what it can. It runs
+/// with the allocator unavailable: it must free memory and must not allocate. Registering the same
+/// function again is a no-op. `false` when the group's [`EVICTORS`] slots are taken.
+pub fn register_eviction(evict: fn()) -> bool {
+    register(group_state(), evict)
+}
+
+fn register(state: &[AtomicUsize; GROUP_WORDS], evict: fn()) -> bool {
+    use std::sync::atomic::Ordering::Relaxed;
+    let entry = evict as usize;
+    for slot in &state[WORD_EVICT..] {
+        match slot.compare_exchange(0, entry, Relaxed, Relaxed) {
+            Ok(_) => return true,
+            Err(held) if held == entry => return true,
+            Err(_) => {}
+        }
+    }
+    false
+}
+
+/// Runs every registered callback, unless one is running already. `true` when any ran.
+fn evict(state: &[AtomicUsize; GROUP_WORDS]) -> bool {
+    use std::sync::atomic::Ordering::Relaxed;
+    if state[WORD_EVICTING].swap(1, Relaxed) != 0 {
+        return false;
+    }
+    let mut ran = false;
+    for slot in &state[WORD_EVICT..] {
+        let entry = slot.load(Relaxed);
+        if entry != 0 {
+            // SAFETY: the value was a `fn()` cast by `register`, a table index the whole group shares.
+            let callback: fn() = unsafe { std::mem::transmute::<usize, fn()>(entry) };
+            callback();
+            ran = true;
+        }
+    }
+    state[WORD_EVICTING].store(0, Relaxed);
+    ran
+}
+
+/// The group's allocator: `inner` first, and when it answers null, the group's eviction callbacks
+/// and `inner` once more. The success path is `inner` and one null check.
+pub struct EvictingAlloc<A> {
+    inner: A,
+    state: fn() -> &'static [AtomicUsize; GROUP_WORDS],
+}
+
+impl<A> EvictingAlloc<A> {
+    /// An allocator over `inner` that evicts the group's caches before it fails.
+    pub const fn new(inner: A, state: fn() -> &'static [AtomicUsize; GROUP_WORDS]) -> Self {
+        Self { inner, state }
+    }
+
+    #[cold]
+    fn retry(&self, again: impl FnOnce() -> *mut u8) -> *mut u8 {
+        if evict((self.state)()) {
+            again()
+        } else {
+            std::ptr::null_mut()
+        }
+    }
+}
+
+// SAFETY: every method answers what `inner` answers, after callbacks that only free memory.
+unsafe impl<A: std::alloc::GlobalAlloc> std::alloc::GlobalAlloc for EvictingAlloc<A> {
+    unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+        let block = unsafe { self.inner.alloc(layout) };
+        if !block.is_null() {
+            return block;
+        }
+        self.retry(|| unsafe { self.inner.alloc(layout) })
+    }
+    unsafe fn alloc_zeroed(&self, layout: std::alloc::Layout) -> *mut u8 {
+        let block = unsafe { self.inner.alloc_zeroed(layout) };
+        if !block.is_null() {
+            return block;
+        }
+        self.retry(|| unsafe { self.inner.alloc_zeroed(layout) })
+    }
+    unsafe fn dealloc(&self, block: *mut u8, layout: std::alloc::Layout) {
+        unsafe { self.inner.dealloc(block, layout) }
+    }
+    unsafe fn realloc(&self, block: *mut u8, layout: std::alloc::Layout, size: usize) -> *mut u8 {
+        let moved = unsafe { self.inner.realloc(block, layout, size) };
+        if !moved.is_null() {
+            return moved;
+        }
+        self.retry(|| unsafe { self.inner.realloc(block, layout, size) })
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[global_allocator]
+static ALLOCATOR: EvictingAlloc<std::alloc::System> =
+    EvictingAlloc::new(std::alloc::System, group_state);
 
 /// Runs `f` on the handlers the game holds for this mod's group. Members of a group share one
 /// memory and one std, so they share one table: a handler a member gave the game is found by
@@ -484,6 +588,114 @@ mod tests {
         fn answer(&self) -> u32 {
             7
         }
+    }
+
+    /// A heap of `CAP` bytes over the system's, as the group's memory is.
+    struct Limited {
+        used: std::sync::atomic::AtomicUsize,
+    }
+    const CAP: usize = 1000;
+    static HEAP: Limited = Limited {
+        used: AtomicUsize::new(0),
+    };
+    unsafe impl std::alloc::GlobalAlloc for Limited {
+        unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+            use std::sync::atomic::Ordering::Relaxed;
+            let taken = self.used.try_update(Relaxed, Relaxed, |used| {
+                (used + layout.size() <= CAP).then_some(used + layout.size())
+            });
+            if taken.is_err() {
+                return std::ptr::null_mut();
+            }
+            unsafe { std::alloc::System.alloc(layout) }
+        }
+        unsafe fn dealloc(&self, block: *mut u8, layout: std::alloc::Layout) {
+            self.used
+                .fetch_sub(layout.size(), std::sync::atomic::Ordering::Relaxed);
+            unsafe { std::alloc::System.dealloc(block, layout) }
+        }
+    }
+
+    /// The shared `HEAP`, as a value the allocator can own.
+    struct Heap;
+    unsafe impl std::alloc::GlobalAlloc for Heap {
+        unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+            unsafe { HEAP.alloc(layout) }
+        }
+        unsafe fn dealloc(&self, block: *mut u8, layout: std::alloc::Layout) {
+            unsafe { HEAP.dealloc(block, layout) }
+        }
+    }
+
+    static EVICT_STATE: [AtomicUsize; GROUP_WORDS] = [const { AtomicUsize::new(0) }; GROUP_WORDS];
+    fn evict_state() -> &'static [AtomicUsize; GROUP_WORDS] {
+        &EVICT_STATE
+    }
+    /// What a cache holds: a block it frees when asked, and how often it was asked.
+    static CACHED: std::sync::Mutex<Option<usize>> = std::sync::Mutex::new(None);
+    static ASKED: std::sync::atomic::AtomicUsize = AtomicUsize::new(0);
+    const BLOCK: std::alloc::Layout = match std::alloc::Layout::from_size_align(800, 1) {
+        Ok(layout) => layout,
+        Err(_) => panic!(),
+    };
+    fn free_the_cache() {
+        ASKED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if let Some(block) = CACHED.lock().unwrap().take() {
+            unsafe { std::alloc::GlobalAlloc::dealloc(&HEAP, block as *mut u8, BLOCK) };
+        }
+    }
+    fn keep_the_cache() {
+        ASKED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    #[test]
+    fn an_allocation_that_fails_succeeds_once_eviction_frees_memory_and_fails_when_it_frees_nothing()
+     {
+        use std::alloc::{GlobalAlloc, Layout};
+        let alloc = EvictingAlloc::new(Heap, evict_state);
+        let want = Layout::from_size_align(500, 1).unwrap();
+        // Nothing registered: a failing allocation fails and runs nothing.
+        let cache = unsafe { HEAP.alloc(BLOCK) };
+        assert!(!cache.is_null());
+        assert!(unsafe { alloc.alloc(want) }.is_null());
+        assert_eq!(ASKED.load(std::sync::atomic::Ordering::Relaxed), 0);
+        // Evicting nothing: asked once, still fails.
+        assert!(register(&EVICT_STATE, keep_the_cache));
+        assert!(
+            register(&EVICT_STATE, keep_the_cache),
+            "registering again is idempotent"
+        );
+        assert!(unsafe { alloc.alloc(want) }.is_null());
+        assert_eq!(ASKED.load(std::sync::atomic::Ordering::Relaxed), 1);
+        // Evicting the cache: the retry succeeds, and a success never asks.
+        *CACHED.lock().unwrap() = Some(cache as usize);
+        assert!(register(&EVICT_STATE, free_the_cache));
+        let block = unsafe { alloc.alloc(want) };
+        assert!(!block.is_null());
+        assert_eq!(ASKED.load(std::sync::atomic::Ordering::Relaxed), 3);
+        let small = unsafe { alloc.alloc(Layout::from_size_align(8, 1).unwrap()) };
+        assert!(!small.is_null());
+        assert_eq!(ASKED.load(std::sync::atomic::Ordering::Relaxed), 3);
+        unsafe {
+            alloc.dealloc(block, want);
+            alloc.dealloc(small, Layout::from_size_align(8, 1).unwrap());
+        }
+    }
+
+    #[test]
+    fn eviction_slots_are_bounded_and_one_callback_runs_at_a_time() {
+        let state = [const { AtomicUsize::new(0) }; GROUP_WORDS];
+        fn a() {}
+        fn b() {}
+        assert!(register(&state, a));
+        for slot in &state[WORD_EVICT + 1..] {
+            slot.store(usize::MAX, std::sync::atomic::Ordering::Relaxed);
+        }
+        assert!(register(&state, a), "an entry already held registers again");
+        assert!(!register(&state, b), "no slot is left");
+        // A callback that runs inside another's run is refused.
+        state[WORD_EVICTING].store(1, std::sync::atomic::Ordering::Relaxed);
+        assert!(!evict(&state));
     }
 
     #[test]
