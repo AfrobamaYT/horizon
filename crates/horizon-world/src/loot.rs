@@ -1941,7 +1941,7 @@ impl<R: RandomSource> Context<'_, R> {
                     } else {
                         // CustomData uses TagParser's lenient codec: an SNBT
                         // string is a compound, not a literal string tag.
-                        let decoded = if id == "minecraft:custom_data" {
+                        let decoded = if id == "minecraft:custom_data" && value.is_string() {
                             nbt_predicate_tag(value)
                         } else {
                             horizon_core::json_nbt::json_to_tag(value).ok()
@@ -3310,7 +3310,11 @@ mod custom_data_predicate_tests {
     /// One pool per pattern: its wool, given `data` by `set_components`,
     /// doubled by `filtered` when the pattern matches. The wools doubled.
     fn doubled(data: Option<&str>) -> Vec<&'static str> {
-        let set = data.map_or(String::new(), |d| {
+        doubled_component(data.map(|s| Value::String(s.to_owned())))
+    }
+
+    fn doubled_component(data: Option<Value>) -> Vec<&'static str> {
+        let set = data.as_ref().map_or(String::new(), |d| {
             let d = serde_json::to_string(d).unwrap();
             format!(r#"{{"type":"minecraft:set_components","components":{{"minecraft:custom_data":{d}}}}},"#)
         });
@@ -3325,7 +3329,7 @@ mod custom_data_predicate_tests {
         let root = std::env::temp_dir().join(format!(
             "loot-custom-data-{}-{}",
             std::process::id(),
-            data.map_or(0, str::len)
+            data.as_ref().map_or(0, |v| v.to_string().len())
         ));
         let _ = std::fs::remove_dir_all(&root);
         let dir = root.join("data/minecraft/loot_table");
@@ -3357,6 +3361,16 @@ mod custom_data_predicate_tests {
     /// by `loot give @s kill`, VanillaCommandExecOracle, #12196): a typed NBT
     /// subset (`NbtUtils.compareNbt`), lists matched element by element, no
     /// custom data read as `{}`, and a JSON pattern's whole numbers as bytes.
+    #[test]
+    fn object_custom_data_keeps_json_ops_numeric_typing() {
+        // JsonOps→NbtOps narrows 1 to Byte, unchanged from json_to_tag.
+        // The int-only orange predicate must not match this object.
+        assert_eq!(
+            doubled_component(Some(serde_json::json!({"h": 1}))),
+            ["white", "light_gray", "cyan"]
+        );
+    }
+
     #[test]
     fn data_file_custom_data_snbt_matches_a_nonempty_predicate() {
         // doubled writes and loads a real loot-table data file, including
