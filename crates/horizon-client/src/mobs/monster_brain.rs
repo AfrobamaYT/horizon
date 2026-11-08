@@ -1393,6 +1393,17 @@ fn timed(min: i32, max: i32) -> Timed {
 }
 /// `availableBehaviorsByPriority`'s order: priority, then the activity's
 /// hash slot (core 1, idle 5, fight 14), then insertion order.
+fn sorted(mut v: Vec<(i32, Act, B)>) -> Vec<Entry> {
+    let slot = |a: Act| match a {
+        Act::Core => 1,
+        Act::Idle => 5,
+        Act::Fight => 14,
+    };
+    v.sort_by_key(|(p, a, _)| (*p, slot(*a)));
+    v.into_iter()
+        .map(|(prio, act, b)| Entry { prio, act, b })
+        .collect()
+}
 
 // ---- Mod behaviors ------------------------------------------------------
 
@@ -1443,18 +1454,6 @@ pub fn entry_keys(m: &Mob) -> Option<Vec<(i32, Act, bool)>> {
             .map(|e| (e.prio, e.act, matches!(e.b, B::Mod(_))))
             .collect()
     })
-}
-
-fn sorted(mut v: Vec<(i32, Act, B)>) -> Vec<Entry> {
-    let slot = |a: Act| match a {
-        Act::Core => 1,
-        Act::Idle => 5,
-        Act::Fight => 14,
-    };
-    v.sort_by_key(|(p, a, _)| (*p, slot(*a)));
-    v.into_iter()
-        .map(|(prio, act, b)| Entry { prio, act, b })
-        .collect()
 }
 fn run_one(seed: i64, kids: Vec<(B, i32)>) -> B {
     B::RunOne(Box::new(RunOne {

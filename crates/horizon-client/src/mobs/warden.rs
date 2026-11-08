@@ -345,8 +345,10 @@ pub fn register(m: &mut Mob) {
     // The brain at construction, with the mob's own type id so a mod part's
     // behaviors join it (#824).
     let id = m.kind.id.clone();
-    let mut st = Warden::default();
-    st.brain = Brain::new(&id, 0);
+    let st = Warden {
+        brain: Brain::new(&id, 0),
+        ..Warden::default()
+    };
     m.extra.warden = Some(Box::new(st));
     m.ai.nav.can_float = true;
     m.set_malus(PathType::UnpassableRail, 0.0);

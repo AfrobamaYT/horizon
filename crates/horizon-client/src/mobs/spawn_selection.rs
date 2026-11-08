@@ -331,10 +331,20 @@ pub type MobType = (Species, f32, f32, Category);
 
 pub trait NaturalLevel: SpawnLevel {
     /// `MobSpawnEvent.PositionCheck`: what server mods answer for the new mob
-    /// of type `entity` at `at`; `Default` leaves the checks to vanilla.
-    fn position_check(&self, _entity: &str, _reason: Reason, _at: [f64; 3]) -> NativeSpawnCheck {
+    /// of type `entity` at `at`, described by `pending`; `Default` leaves the
+    /// checks to vanilla.
+    fn position_check(
+        &self,
+        _entity: &str,
+        _reason: Reason,
+        _at: [f64; 3],
+        _pending: Pending,
+    ) -> NativeSpawnCheck {
         NativeSpawnCheck::Default
     }
+    /// The position check just asked refused the mob: what the level made
+    /// for it is dropped.
+    fn position_refused(&self) {}
     /// Whether server mods hear `potential_spawns`.
     fn spawn_hooks(&self) -> bool {
         false
@@ -593,6 +603,18 @@ pub fn spawn_aabb(s: Species, x: f64, y: f64, z: f64, width: f32, height: f32) -
         Vec3::new(x + half, y + f64::from(scale * height), z + half),
     )
 }
+/// The mob a position check is about, which the site has not created yet
+/// (vanilla creates it before the check).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Pending {
+    /// The yaw the site creates it with, drawn before the check.
+    pub yaw: f32,
+    /// Whether the site creates it fresh from its type (`EntityType.create`):
+    /// natural spawning, and a spawner whose spawn data is the type alone. A
+    /// spawner with entity data loads it, and chunk generation's packs come
+    /// from the generator.
+    pub fresh: bool,
+}
 /// `Mob.checkSpawnRules` and `checkSpawnObstruction` of a freshly created
 /// mob, unless a mod forces the answer (`MobSpawnEvent.PositionCheck`); then
 /// `vanilla` does not run.
@@ -601,13 +623,18 @@ pub fn position_ok<L: NaturalLevel>(
     entity: &str,
     reason: Reason,
     at: [f64; 3],
+    pending: Pending,
     vanilla: impl FnOnce() -> bool,
 ) -> bool {
-    match l.position_check(entity, reason, at) {
+    let ok = match l.position_check(entity, reason, at, pending) {
         NativeSpawnCheck::Succeed => true,
         NativeSpawnCheck::Fail => false,
         _ => vanilla(),
+    };
+    if !ok {
+        l.position_refused();
     }
+    ok
 }
 /// `checkSpawnObstruction` of a freshly created mob with the given box, with
 /// the mobs already `spawned` in the way; None in a generation region, which
@@ -658,25 +685,13 @@ pub struct StructureSpawns {
     pub overrides: FxHashMap<String, FxHashMap<String, Override>>,
 }
 impl StructureSpawns {
-    /// The overrides of the resource root first asked for, loaded once.
-    pub fn shared(root: &Path) -> &'static Self {
-        static SHARED: std::sync::OnceLock<StructureSpawns> = std::sync::OnceLock::new();
-        SHARED.get_or_init(|| Self::load(root))
-    }
+    /// Read a fresh generation, including mod namespaces and nested structure ids.
     pub fn load(root: &Path) -> Self {
-        let mut overrides = FxHashMap::default();
-        let dir = root.join("data/minecraft/worldgen/structure");
-        for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
-            let path = entry.path();
-            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-                continue;
-            };
-            let Some(v) = fs::read(&path)
-                .ok()
-                .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
-            else {
-                continue;
-            };
+        fn insert(
+            overrides: &mut FxHashMap<String, FxHashMap<String, Override>>,
+            id: String,
+            v: &Value,
+        ) {
             let map: FxHashMap<String, Override> = v["spawn_overrides"]
                 .as_object()
                 .into_iter()
@@ -691,8 +706,43 @@ impl StructureSpawns {
                     )
                 })
                 .collect();
-            if !map.is_empty() {
-                overrides.insert(format!("minecraft:{stem}"), map);
+            overrides.insert(id, map);
+        }
+        let mut overrides = FxHashMap::default();
+        if let Some(Value::Object(entries)) = fs::read(root.join("worldgen/structures.json"))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        {
+            for (id, value) in entries {
+                if let Some(value) = value
+                    .as_str()
+                    .and_then(|text| serde_json::from_str::<Value>(text).ok())
+                {
+                    insert(&mut overrides, id, &value);
+                }
+            }
+        }
+        for ns in fs::read_dir(root.join("data"))
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            let dir = ns.path().join("worldgen/structure");
+            let Ok(files) = crate::json_folder::list(&dir) else {
+                continue;
+            };
+            for (name, path) in files {
+                let Some(v) = fs::read(path)
+                    .ok()
+                    .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+                else {
+                    continue;
+                };
+                insert(
+                    &mut overrides,
+                    format!("{}:{}", ns.file_name().to_string_lossy(), name),
+                    &v,
+                );
             }
         }
         Self { overrides }
@@ -1241,6 +1291,7 @@ pub fn spawn_category_for_position<L: NaturalLevel, R: RandomSource>(
                     &entry.entity,
                     Reason::Natural,
                     [xx, f64::from(y), zz],
+                    Pending { yaw, fresh: true },
                     || {
                         mob_spawn_rules(species, l, x, y, z)
                             && spawn_obstruction(species, l, bounds, Some(&spawned), x, y, z)
@@ -1542,6 +1593,7 @@ pub fn spawn_mobs_for_chunk_generation<L: NaturalLevel, R: RandomSource, Q: Rand
                         &entry.entity,
                         Reason::ChunkGeneration,
                         [fx, fy, fz],
+                        Pending { yaw, fresh: false },
                         || {
                             mob_spawn_rules(species, l, bx, pos[1], bz)
                                 && spawn_obstruction(species, l, bounds, None, bx, pos[1], bz)
