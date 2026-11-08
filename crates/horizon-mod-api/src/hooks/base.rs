@@ -729,19 +729,21 @@ pub trait Hooks {
         neoforge = "none (vanilla Item.hurtEnemy; NeoForge adds no event or extension for it); LivingDamageEvent.Post comes later"
     )]
     fn hurt_enemy();
-    /// A server tick of the stack a player carries in `slot`: where
+    /// A server tick of `stack`, the stack a player carries in `slot`: where
     /// `Inventory.tick` calls `Item.inventoryTick`, for every stack, each tick,
     /// `/tick freeze` included (it stops the world, not the player). `slot` is
     /// as `Inventory` saves it (0 to 35; the armour 100 feet to 103 head; -106
     /// the off hand), and `selected` says it is the held slot.
     /// `ItemPlace::PlayerSlot { player, slot }` reads and changes the stack,
     /// which stays in its slot: an emptied one empties the slot, and the
-    /// player's client gets the change. This runs often, so check the item
-    /// first. Server-side, for every living player of the world (the helpers
+    /// player's client gets the change. Only the `ItemPart`s attached to
+    /// `stack`'s item hear it. Server-side, for every living player of the world (the helpers
     /// read the acting one).
     #[hook(
         side = "server",
         contract = "listen",
+        scope = "item",
+        key = "stack",
         neoforge = "none (vanilla Item.inventoryTick; NeoForge adds no event or extension for it); PlayerTickEvent ticks the player, not each stack"
     )]
     fn inventory_tick();
@@ -883,9 +885,10 @@ pub trait Hooks {
     /// where it comes from (`getSourcePosition`). `victim` is where the entity stands and
     /// looks, and `weapon` the direct entity's weapon (`getWeaponItem`) when it is known.
     /// `container` holds the damage before any reduction: change its `new_damage`, or the
-    /// invulnerability ticks a fresh hit leaves (vanilla's 20), or set `canceled` and nothing
-    /// of `hurtServer` happens (no damage, hurt sound, knockback, cooldown, statistics or
-    /// criteria); a canceled hit on the ender dragon still counts as landed (`EnderDragon.hurt`
+    /// invulnerability ticks a fresh hit leaves (vanilla's 20), add a reduction modifier
+    /// (`add_reduction_modifier`) to change what one reduction takes off this hit, or set
+    /// `canceled` and nothing of `hurtServer` happens (no damage, hurt sound, knockback,
+    /// cooldown, statistics or criteria); a canceled hit on the ender dragon still counts as landed (`EnderDragon.hurt`
     /// returns true whatever `reallyHurt` did). It fires on every damage route, for players,
     /// mobs and the ender dragon. The level is the hit's: its blocks, random and own
     /// attachments; the hurt entity is in the middle of its hit.
@@ -4364,17 +4367,6 @@ requires a farmer at work and `mob_griefing` enabled."#]
         neoforge = "none (NeoForge has no such event)"
     )]
     fn player_pickup_arrow();
-    /// A server player is about to travel through a Nether portal, End portal or End gateway. `cause`
-    /// is `nether_portal`, `end_portal` or `end_gateway`. The player's state is not swapped in. Set
-    /// `cancel` to keep them in their current place. Server-side.
-    #[hook(
-        side = "server",
-        contract = "cancel",
-        out = "cancel",
-        neoforge = "EntityTravelToDimensionEvent",
-        cancellable = true
-    )]
-    fn player_portal();
     /// A server player released a drawn bow with `arrow` selected, by the use-item
     /// key or a mod's `LivingRef::release_using_item`. The player's state is swapped in.
     #[hook(
@@ -4561,7 +4553,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "replace",
         out = "result",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        paper = "PrepareItemCraftEvent"
     )]
     fn prepare_item_craft();
     /// Enchanting offers were calculated for a server player at `pos`. Change `costs` before they are sent to the menu.
@@ -4576,7 +4569,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "replace",
         out = "result",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        paper = "PrepareSmithingEvent"
     )]
     fn prepare_smithing();
     /// A server projectile was added to the level. `player` is set only for
@@ -4741,7 +4735,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's WhitelistToggleEvent)"
+        neoforge = "none (NeoForge has no such event; Bukkit's WhitelistToggleEvent)",
+        paper = "WhitelistToggleEvent"
     )]
     fn whitelist_state_update();
     /// A timed world-border size change finished on the server, after its

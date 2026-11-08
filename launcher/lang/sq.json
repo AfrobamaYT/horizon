@@ -1206,5 +1206,9 @@
   "Native mods aren't sandboxed: they run with full access to your computer, like any program. Install only mods whose authors you trust. To play with one, build the game on the Mods page; a build may download Rust and other build tools.": "Native mods aren't sandboxed: they run with full access to your computer, like any program. Install only mods whose authors you trust. To play with one, build the game on the Mods page; a build may download Rust and other build tools.",
   "Native builds may download Rust and other build tools. Source builds compile the game on this computer.": "Native builds may download Rust and other build tools. Source builds compile the game on this computer.",
   "{build} built and selected for its instance.": "{build} built and selected for its instance.",
-  "Found on this computer": "Gjetur në këtë kompjuter"
+  "Found on this computer": "Gjetur në këtë kompjuter",
+  "Your system keyring didn't answer within {seconds} seconds. Make sure it is running and unlocked, then restart the launcher.": "Mbajtësja e çelësave të sistemit nuk u përgjigj brenda {seconds} sekondave. Sigurohu që po punon dhe është e shkyçur, pastaj rinis nisësin.",
+  "Can't read {name}'s sign-in: {why}": "Nuk mund të lexohet hyrja e {name}: {why}",
+  "Horizon runs a data pack's functions, function tags, predicates, item modifiers, recipes, loot tables, advancements, villager trades, damage types, most tags and most worldgen (biomes, features, structures, dimensions). Other files, such as world presets, are not read yet.": "Horizon runs a data pack's functions, function tags, predicates, item modifiers, recipes, loot tables, advancements, villager trades, damage types, most tags and most worldgen (biomes, features, structures, dimensions). Other files, such as world presets, are not read yet.",
+  "{title} would change nothing in Horizon yet: Horizon doesn't read its {files}.": "{title} would change nothing in Horizon yet: Horizon doesn't read its {files}."
 }
