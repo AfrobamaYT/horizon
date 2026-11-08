@@ -12,8 +12,9 @@ use std::{collections::HashMap, fs, path::Path};
 pub fn main() -> horizon_client::Result<()> {
     let args: Vec<_> = crate::args().collect();
     let root = Path::new(&args[1]);
-    let items = Items::catalog(root, &PackOverlay::NONE)?;
-    let enchantments = Enchantments::load(root);
+    let defaults = horizon_world::item_defaults::read(root)?;
+    let items = Items::catalog(root, &PackOverlay::NONE, &defaults)?;
+    let enchantments = Enchantments::load(root, &defaults);
     let trades = Trades {
         trades: HashMap::new(),
         tags: HashMap::new(),

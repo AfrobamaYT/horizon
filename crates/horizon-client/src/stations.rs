@@ -592,13 +592,21 @@ pub(crate) enum ParsedStationRecipe {
 impl ParsedStationRecipe {
     pub(crate) fn parse(id: String, v: &Value, items: &Items) -> Option<Self> {
         match v["type"].as_str().unwrap_or("") {
-            "minecraft:smithing_transform" => Some(Self::Smithing(Smithing::Transform {
-                id,
-                template: v.get("template").map(|v| ingredient(v, items)),
-                base: ingredient(&v["base"], items),
-                addition: v.get("addition").map(|v| ingredient(v, items)),
-                result: crate::crafting::Template::parse(&v["result"])?,
-            })),
+            "minecraft:smithing_transform" => {
+                // Only omitted ingredients mean empty slots; malformed present
+                // ingredients invalidate the recipe rather than becoming optional.
+                let parse_optional = |key: &str| match v.get(key) {
+                    None => Some(None),
+                    Some(value) => Ingredient::parse(value, items).map(Some),
+                };
+                Some(Self::Smithing(Smithing::Transform {
+                    id,
+                    template: parse_optional("template")?,
+                    base: Ingredient::parse(&v["base"], items)?,
+                    addition: parse_optional("addition")?,
+                    result: crate::crafting::Template::parse(&v["result"])?,
+                }))
+            }
             "minecraft:smithing_trim" => Some(Self::Smithing(Smithing::Trim {
                 id,
                 template: ingredient(&v["template"], items),

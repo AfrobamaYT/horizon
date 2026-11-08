@@ -779,7 +779,7 @@ impl Game<'_> {
         // ItemInput.createItemStack validates effective components after count.
         // Materialization currently discards removals, so inspect the validated
         // command patch itself without changing the stack or its saved patch.
-        let components = self.item_validation_components(&id, components.as_deref())?;
+        let components = self.item_validation_components(id, components.as_deref())?;
         if components.get(&"minecraft:max_damage".to_owned()).is_some()
             && horizon_world::datafix::dynamic::as_int(
                 components.get(&"minecraft:max_stack_size".to_owned()),

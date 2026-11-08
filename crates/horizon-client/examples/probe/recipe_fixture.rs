@@ -95,9 +95,20 @@ pub fn main() -> horizon_client::Result<()> {
                     "recipe/test:transform".to_owned(),
                     vec![f[1].as_bytes().to_vec()],
                 )];
-                let stations = StationRecipes::load(root, &items, &PackOverlay { files: &files });
+                let stations = StationRecipes::load(
+                    root,
+                    &items,
+                    &PackOverlay::new(&files),
+                    &crate::test_resources::server_load(),
+                );
                 let (t, b, a) = (stack(2)?, stack(3)?, stack(4)?);
-                match stations.smithing_result(&enchantments, t.as_ref(), b.as_ref(), a.as_ref()) {
+                match stations.smithing_result(
+                    crate::test_resources::server_loop_context(),
+                    &enchantments,
+                    t.as_ref(),
+                    b.as_ref(),
+                    a.as_ref(),
+                ) {
                     None => "none".to_owned(),
                     Some(r) => canon_stack(Some(&r)),
                 }
