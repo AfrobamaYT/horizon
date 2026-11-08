@@ -547,7 +547,8 @@ pub trait Hooks {
         side = "server",
         contract = "cancel",
         out = "canceled",
-        neoforge = "BreakBlockEvent"
+        neoforge = "BreakBlockEvent",
+        paper = "BlockBreakEvent"
     )]
     fn break_block();
     /// A player right clicks a block (NeoForge's
@@ -2866,6 +2867,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
+        paper = "BlockFadeEvent",
         cancellable = true,
         target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_block_fade"
     )]
@@ -2885,6 +2887,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
+        paper = "BlockFormEvent",
         cancellable = true,
         target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_block_form"
     )]
@@ -2898,6 +2901,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event; Bukkit's BlockIgniteEvent)",
+        paper = "BlockIgniteEvent",
         cancellable = true,
         target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_block_ignite"
     )]
@@ -2908,7 +2912,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "cancel",
         out = "locked",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        paper = "BlockLockCheckEvent"
     )]
     fn block_lock_check();
     /// A sculk sensor or shrieker received a vibration for `event` at `pos`.
@@ -2918,6 +2923,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
+        paper = "BlockReceiveGameEvent",
         cancellable = true
     )]
     fn block_receive_game();
@@ -2959,6 +2965,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         out = "cancel",
         host = "read",
         neoforge = "none (NeoForge has no such event; Bukkit's BroadcastMessageEvent)",
+        paper = "BroadcastMessageEvent",
         cancellable = true
     )]
     fn broadcast_message();
@@ -3591,6 +3598,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (vanilla BucketItem.emptyContents; NeoForge has no matching event)",
+        paper = "PlayerBucketEmptyEvent",
         cancellable = true
     )]
     fn bucket_empty();
