@@ -45,7 +45,8 @@ pub(crate) struct State {
 }
 // SAFETY: frames contain borrowed native objects only while the group mutex is held.
 // They are pushed and popped synchronously on that thread; callbacks borrow the same
-// locked store through a thread-local loan. Between threads the frame stack is empty.
+// locked store through a thread-local loan. The module pointer borrows call()'s self
+// under the same scope. Between threads the frame stack is empty and module is null.
 unsafe impl Send for State {}
 impl Default for State {
     fn default() -> Self {
@@ -121,7 +122,7 @@ impl Drop for PoisonOnPanic<'_> {
 }
 struct FrameScope {
     state: *mut State,
-    previous_module: Option<WasmMod>,
+    previous_module: *const WasmMod,
     running: Arc<Running>,
 }
 impl Drop for FrameScope {
@@ -130,7 +131,7 @@ impl Drop for FrameScope {
         // boxed state remains in place until this synchronous call scope ends.
         let state = unsafe { &mut *self.state };
         state.cx.frames.pop();
-        state.cx.module = self.previous_module.take();
+        state.cx.module = self.previous_module;
         state.depth -= 1;
         if std::thread::panicking() {
             self.running.poisoned.store(true, Ordering::Relaxed);
@@ -600,7 +601,10 @@ impl WasmMod {
             store.data_mut().imports.resize_with(depth + 1, Vec::new);
         }
         store.data_mut().cx.frames.push(frame);
-        let previous_module = store.data_mut().cx.module.replace(self.clone());
+        // self remains borrowed until this call returns. FrameScope restores the
+        // enclosing module before this borrow ends, including on error or unwind.
+        let previous_module =
+            std::mem::replace(&mut store.data_mut().cx.module, self as *const Self);
         let scope = FrameScope {
             previous_module,
             state: store.data_mut(),
