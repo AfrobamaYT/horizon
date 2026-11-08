@@ -2774,6 +2774,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no flight toggle event; Bukkit's PlayerToggleFlightEvent)",
+        paper = "PlayerToggleFlightEvent",
         cancellable = true
     )]
     fn player_toggle_flight();
@@ -4561,7 +4562,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "replace",
         out = "result",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        paper = "PrepareItemCraftEvent"
     )]
     fn prepare_item_craft();
     /// Enchanting offers were calculated for a server player at `pos`. Change `costs` before they are sent to the menu.
@@ -4576,7 +4578,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "replace",
         out = "result",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        paper = "PrepareSmithingEvent"
     )]
     fn prepare_smithing();
     /// A server projectile was added to the level. `player` is set only for

@@ -598,3 +598,58 @@ Server side is assumed except for the two `both` tick hooks; a server-half count
 [paper-PlayerStatisticIncrementEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerStatisticIncrementEvent.html
 
 [paper-PlayerItemHeldEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerItemHeldEvent.html
+## Event counterparts: base player hooks (#1015)
+
+Paper API 26.3 (paper-api `26.3.build.244-stable`), public Javadoc; Horizon cited by function
+name; scope = the hooks below.
+
+| Horizon hook | Paper event / status | Evidence and porting boundary |
+|---|---|---|
+| `player_toggle_entity_age_lock` | **Partial:** [`PlayerToggleEntityAgeLockEvent`][paper-PlayerToggleEntityAgeLockEvent] | The age-lock toggle and new `isAgeLocked()` value agree, but the event additionally exposes item and hand and is cancellable, while the hook only reports player, entity and lock state after the lock and item use changed. No key. |
+| `player_toggle_flight` | **Covered:** [`PlayerToggleFlightEvent`][paper-PlayerToggleFlightEvent] | The client-requested change of flying state reaches the player (`isFlying()`), the event is cancellable, and the hook's `cancel` restores the previous state and resyncs abilities exactly as the event's cancel does. Key added. |
+| `player_toggle_sneak` | **Partial:** [`PlayerToggleSneakEvent`][paper-PlayerToggleSneakEvent] | The same sneaking change with `isSneaking()`, but the event is cancellable and the listen-only hook cannot express that cancel, and it runs before the state change where the hook runs after the hub applied it. No key. |
+| `player_totem` | **Partial:** [`EntityResurrectEvent`][paper-EntityResurrectEvent] | The totem-resurrection opportunity overlaps, but the event is cancellable and can run without a totem, initially cancelled; `getHand()` identifies the totem hand. The hook only reports a server player whose save is already decided, just before consumption and effects, and cannot veto it or supply the hand. No key. |
+| `player_trade` | **Partial:** [`PlayerTradeEvent`][paper-PlayerTradeEvent] | The completed trade with a villager or wandering trader and the merchant handle (`getMerchant()`) match, but the event is cancellable and raised as the trade is made, while the hook only listens once the trade completed. No key. |
+| `player_unleash_entity` | **Partial:** [`PlayerUnleashEntityEvent`][paper-PlayerUnleashEntityEvent] | Same player action and entity, but the event is raised prior to the unleash and is cancellable, while the hook listens after the leash was cleared. No key. |
+| `player_velocity` | **Partial:** [`PlayerVelocityEvent`][paper-PlayerVelocityEvent] | The applied velocity is the same fact (`getVelocity()`), but the event is cancellable and exposes `setVelocity`, while the hook only listens to the motion the server syncs to the client. No key. |
+| `portal_create` | **Partial:** [`PortalCreateEvent`][paper-PortalCreateEvent] | Nether portal and End platform creation match (`getBlocks()` gives the placed blocks, `getReason()` says which), but the event is cancellable and runs before the blocks are placed, while the hook fires with the blocks already in the world. No key. |
+| `potion_splash` | **Partial:** [`PotionSplashEvent`][paper-PotionSplashEvent], [`LingeringPotionSplashEvent`][paper-LingeringPotionSplashEvent] | The item and position of the burst match, but splash and lingering arrivals are separate cancellable events: splash exposes affected entities and intensity setters, while lingering exposes the area-effect cloud and its creation policy. The hook only listens after the hit effects applied. No key. |
+| `prepare_hopper_transfer` | **Partial:** [`PrepareHopperTransferEvent`][paper-PrepareHopperTransferEvent] | Both concern preparing a hopper transfer, but the event already exposes source and destination inventories and can exclude source slots with `setSlotAllowed()`. The hook only reports the hopper position once before pushing or pulling, with no slot-selection result. No key. |
+| `prepare_item_craft` | **Covered:** [`PrepareItemCraftEvent`][paper-PrepareItemCraftEvent] | The server crafting-result preparation matches: `getView()` identifies the player and `getInventory()` exposes the result through [`CraftingInventory.setResult()`][paper-CraftingInventory], matching writable `result`. The inventory carries the table location via [`Inventory.getLocation()`][paper-Inventory] (nullable for virtual containers, including the inventory grid), and neither is cancellable. Key added. |
+| `prepare_item_enchant` | **Partial:** [`PrepareItemEnchantEvent`][paper-PrepareItemEnchantEvent] | Same offer-calculation moment with enchanter, table block and offered level costs; [`getOffers()`][paper-PrepareItemEnchantEvent] allows modifying offers, including their costs via [`EnchantmentOffer.setCost()`][paper-EnchantmentOffer], while `getExpLevelCostsOffered()` is deprecated. The event is cancellable and also exposes the item, enchantments and bookshelf bonus, while the hook only supplies player, position and writable costs and cannot cancel. No key. |
+| `prepare_smithing` | **Covered:** [`PrepareSmithingEvent`][paper-PrepareSmithingEvent] | Fired when a smithing-table result is prepared; it is non-cancellable and offers `setResult` inherited from [`PrepareResultEvent`][paper-PrepareResultEvent], matching the hook's writable `result`, with the inventory carrying the player and table. Key added. |
+| `projectile_impact` | **Partial:** [`ProjectileHitEvent`][paper-ProjectileHitEvent] | The projectile and hit entity/block/face match, but the event exposes no exact impact point for the hook's `at`. Its cancellation Javadoc explicitly leaves block collisions and explosions to occur unless their respective events are cancelled, while the hook suppresses the whole impact and lets the projectile fly on. No key. |
+| `projectile_launch` | **Partial:** [`ProjectileLaunchEvent`][paper-ProjectileLaunchEvent] | The same projectile added for a player or another source, but the event is cancellable and raised before the launch completes, while the hook listens after the projectile joined the level. No key. |
+| `raid_spawn_wave` | **Partial:** [`RaidSpawnWaveEvent`][paper-RaidSpawnWaveEvent] | A spawned wave with its raiders and patrol leader (non-cancellable, like the hook) matches, and the inherited raid handle exposes [`Raid.getSpawnedGroups()`][paper-Raid]. However, `Raid.getLocation()` is the raid center, not the wave spawn position passed as `pos`, which the event does not document. No key. |
+| `raid_state_change` | **Partial:** [`RaidStopEvent`][paper-RaidStopEvent], [`RaidFinishEvent`][paper-RaidFinishEvent], [`RaidTriggerEvent`][paper-RaidTriggerEvent] | The hook's four states are split across separate events: trigger is cancellable (the hook cannot veto it), `RaidStopEvent` covers many stop reasons beyond the hook's `stopped`, and no single event carries the `triggered`/`victory`/`loss`/`stopped` value. No key. |
+| `random_tick` | **Gap:** none | No Paper/Bukkit event marks a block's random tick, and the hook's `state`, `pos` and `handled` (skip the vanilla tick) have no Javadoc counterpart, so a port has nothing to listen to. No key. |
+| `register_commands` | **Partial:** [`LifecycleEvents.COMMANDS`][paper-LifecycleEvents] | Paper does have a command-registration lifecycle event, supplying a [`Commands` registrar][paper-Commands] rather than filtering the client command list with `PlayerCommandSendEvent`. Its registration/reload lifecycle and ability to override vanilla command literals differ from the hook's world-opening or explicit refresh collection, which omits vanilla names; the generic `ReloadableRegistrarEvent` alone does not identify this command-specific event. No key. |
+| `release_using` | **Partial:** [`PlayerStopUsingItemEvent`][paper-PlayerStopUsingItemEvent] | The item and `getTicksHeldFor()` match on the server half, but the event is player-only (the hook also fires for mobs) and has no way to set the hook's `used` result. No key. |
+
+[paper-PlayerToggleEntityAgeLockEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/PlayerToggleEntityAgeLockEvent.html
+[paper-PlayerToggleFlightEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerToggleFlightEvent.html
+[paper-PlayerToggleSneakEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerToggleSneakEvent.html
+[paper-PlayerTradeEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/PlayerTradeEvent.html
+[paper-PlayerUnleashEntityEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerUnleashEntityEvent.html
+[paper-PlayerVelocityEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerVelocityEvent.html
+[paper-PortalCreateEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/world/PortalCreateEvent.html
+[paper-PotionSplashEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/PotionSplashEvent.html
+[paper-PrepareHopperTransferEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/inventory/PrepareHopperTransferEvent.html
+[paper-PrepareItemCraftEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/inventory/PrepareItemCraftEvent.html
+[paper-PrepareItemEnchantEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/enchantment/PrepareItemEnchantEvent.html
+[paper-PrepareSmithingEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/inventory/PrepareSmithingEvent.html
+[paper-PrepareResultEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/inventory/PrepareResultEvent.html
+[paper-ProjectileLaunchEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/ProjectileLaunchEvent.html
+[paper-RaidSpawnWaveEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/raid/RaidSpawnWaveEvent.html
+[paper-RaidStopEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/raid/RaidStopEvent.html
+[paper-RaidFinishEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/raid/RaidFinishEvent.html
+[paper-RaidTriggerEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/raid/RaidTriggerEvent.html
+[paper-PlayerCommandSendEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerCommandSendEvent.html
+[paper-EntityResurrectEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/EntityResurrectEvent.html
+[paper-CraftingInventory]: https://jd.papermc.io/paper/26.3/org/bukkit/inventory/CraftingInventory.html
+[paper-Inventory]: https://jd.papermc.io/paper/26.3/org/bukkit/inventory/Inventory.html
+[paper-EnchantmentOffer]: https://jd.papermc.io/paper/26.3/org/bukkit/enchantments/EnchantmentOffer.html
+[paper-LingeringPotionSplashEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/LingeringPotionSplashEvent.html
+[paper-LifecycleEvents]: https://jd.papermc.io/paper/26.3/io/papermc/paper/plugin/lifecycle/event/types/LifecycleEvents.html
+[paper-Commands]: https://jd.papermc.io/paper/26.3/io/papermc/paper/command/brigadier/Commands.html
+[paper-Raid]: https://jd.papermc.io/paper/26.3/org/bukkit/Raid.html
