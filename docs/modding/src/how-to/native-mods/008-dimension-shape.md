@@ -108,7 +108,16 @@ It is false for an unregistered dimension and for an entity that cannot change l
 orb, a projectile); a fake player stays where it is. Nothing builds a platform at the destination, so look for the
 ground first, or place one.
 
+### Saving a level
+
+`level.request_save(host)` asks the server to save a level, as the autosave and `/save-all` do, with its
+chunks on disk when it ends. The save runs at the start of the next server tick, not inside the call (a hook
+may be running in the tick that is saving), and a level asked for twice before then is saved once. The call
+answers whether the request was taken. `level_save` fires with the level's dimension once it was written; a
+save that fails fires nothing and is logged.
+
 ### Chunk generators
+
 
 A chunk generator is a mod's code for a level's terrain: vanilla's `ChunkGenerator`, and
 `build_terrain` its `buildTerrain`. Register it once, at startup, and name it from a dimension,
