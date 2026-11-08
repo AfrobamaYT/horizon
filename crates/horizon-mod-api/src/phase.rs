@@ -1125,14 +1125,15 @@ mod tests {
         ];
         with_test_packages(&["reader", "other"], || {
             with_test_registration_data(data, || {
-                crate::install_parts(&mods, &crate::parts::tests::rule_schema()).unwrap();
+                crate::install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false)
+                    .unwrap();
                 assert_eq!(*registered.lock().unwrap(), expected);
                 let mut types = Vec::new();
                 dispatch_component_types(&RegistrationContext::new(), &mut types);
                 assert_eq!(types, expected, "a later step reads the same snapshot");
             });
             // No engine view: every read is refused, and a bad name or key still says so.
-            crate::install_parts(&mods, &crate::parts::tests::rule_schema()).unwrap();
+            crate::install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
             let refused = registered.lock().unwrap().clone();
             assert_eq!(refused[0], "Err(Unavailable)");
             assert_eq!(refused[2], r#"Err(InvalidRegistryName("item"))"#);
