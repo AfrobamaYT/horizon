@@ -1118,7 +1118,7 @@ impl Game<'_> {
     /// player's weapon hit: the entry says `enchanted` attacker and `affected`
     /// victim, its `requirements` passed, and its `effect` names a `type` in a
     /// namespace outside `minecraft:`. Told the enchantment id, the kind, the
-    /// `effect` JSON, the level and the mob's id (it may have just died). The
+    /// `effect` payload as a borrowed `Tag`, the level and the mob's id (it may have just died). The
     /// acting player is the one whose weapon carries the enchantment. Each
     /// such entry is told once a hit, and once for each mob a sweep lands on.
     /// A hit on a player, and an entry inside `minecraft:all_of`, aren't told
@@ -1127,7 +1127,7 @@ impl Game<'_> {
         &mut self,
         enchantment: &str,
         kind: &str,
-        data: &serde_json::Value,
+        data: &horizon_core::nbt::Tag,
         level: u32,
         victim: u32,
     ) {
@@ -1203,7 +1203,11 @@ impl Game<'_> {
     /// player is the one consuming, and the game's own effects,
     /// sounds, teleports and drops are open. An unclaimed kind does
     /// nothing.
-    pub(in crate::game) fn native_consume_effect(&mut self, kind: &str, data: &serde_json::Value) {
+    pub(in crate::game) fn native_consume_effect(
+        &mut self,
+        kind: &str,
+        data: &horizon_core::nbt::Tag,
+    ) {
         self.fire_consume_effect(kind, data);
     }
     /// What clients get of the block entity at `pos` when its `id` is

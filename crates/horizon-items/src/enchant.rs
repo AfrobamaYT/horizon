@@ -58,6 +58,8 @@ pub struct Enchantment {
     pub exclusive: HashSet<Arc<str>>,
     pub slots: Vec<String>,
     pub effects: Value,
+    /// Mod-owned post-attack payloads, converted once when the definition loads.
+    pub native_post_attack: HashMap<usize, Arc<horizon_core::nbt::Tag>>,
 }
 /// Item components the enchanting, anvil and smithing rules read.
 #[derive(Clone, Debug, Default)]
@@ -153,7 +155,22 @@ fn parse_entry(
     v: &Value,
     tags: &HashMap<String, Vec<Arc<str>>>,
     lang: &HashMap<String, String>,
-) -> Enchantment {
+) -> Option<Enchantment> {
+    let native_post_attack = v["effects"]["minecraft:post_attack"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .enumerate()
+        .filter(|(_, e)| {
+            e["effect"]["type"].as_str().is_some_and(|k| {
+                k.contains(':') && !k.starts_with("minecraft:") && !k.starts_with(':')
+            })
+        })
+        .map(|(i, e)| {
+            horizon_core::json_nbt::json_to_tag(&e["effect"]).map(|tag| (i, Arc::new(tag)))
+        })
+        .collect::<Result<HashMap<_, _>, _>>()
+        .ok()?;
     let exclusive = match &v["exclusive_set"] {
         Value::String(s) if s.starts_with('#') => tags.get(&s[1..]).cloned().unwrap_or_default(),
         other => string_list(other)
@@ -162,7 +179,8 @@ fn parse_entry(
             .collect(),
     };
     let key = v["description"]["translate"].as_str().unwrap_or("");
-    Enchantment {
+    Some(Enchantment {
+        native_post_attack,
         id: Arc::from(id),
         description: lang.get(key).cloned().unwrap_or_else(|| {
             // A data pack's entry may name itself with a literal component
@@ -184,7 +202,7 @@ fn parse_entry(
         exclusive: exclusive.into_iter().collect(),
         slots: string_list(&v["slots"]),
         effects: v["effects"].clone(),
-    }
+    })
 }
 
 impl Enchantments {
@@ -309,7 +327,7 @@ impl Enchantments {
                 .collect();
         let list = files
             .iter()
-            .map(|(id, v)| parse_entry(id, v, &tags, &lang))
+            .filter_map(|(id, v)| parse_entry(id, v, &tags, &lang))
             .collect::<Vec<_>>();
         let index = list
             .iter()
@@ -362,7 +380,9 @@ impl Enchantments {
                 continue;
             }
             let t = table.get_or_insert_with(|| self.clone());
-            let e = parse_entry(id, v, &t.tags, &t.lang);
+            let Some(e) = parse_entry(id, v, &t.tags, &t.lang) else {
+                continue;
+            };
             t.index.insert(e.id.clone(), t.list.len());
             t.list.push(e);
         }
@@ -1007,6 +1027,7 @@ pub mod tests {
                 },
                 slots: vec![],
                 effects: v["effects"].clone(),
+                native_post_attack: HashMap::new(),
             })
             .collect();
         let index = list
@@ -1369,6 +1390,7 @@ mod ignite_tests {
     /// Fire Aspect as the data pack has it: 4 seconds per level.
     fn registry() -> Enchantments {
         let fire_aspect = Enchantment {
+            native_post_attack: HashMap::new(),
             id: Arc::from("minecraft:fire_aspect"),
             description: "fire_aspect".into(),
             description_key: String::new(),

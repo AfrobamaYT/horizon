@@ -1294,7 +1294,7 @@ pub trait Hooks {
     fn block_step_on();
     /// A consumable's effect of a mod's own kind: the item's `on_consume_effects`
     /// entry is of a type in a namespace of its own, and the loader kept it
-    /// for this call. The kind and the JSON the file wrote are here; the acting
+    /// for this call. The kind and the definition payload as a borrowed `Tag` are here; the acting
     /// player is the one consuming, and the game's own effects,
     /// sounds, teleports and drops are open. An unclaimed kind does
     /// nothing. This is the runtime `ConsumeEffect.apply` moment, not effect
@@ -1385,7 +1385,7 @@ pub trait Hooks {
     /// player's weapon hit: the entry says `enchanted` attacker and `affected`
     /// victim, its `requirements` passed, and its `effect` names a `type` in a
     /// namespace outside `minecraft:`. Told the enchantment id, the kind, the
-    /// `effect` JSON, the level and the mob's id (it may have just died). The
+    /// `effect` payload as a borrowed `Tag`, the level and the mob's id (it may have just died). The
     /// acting player is the one whose weapon carries the enchantment. Each
     /// such entry is told once a hit, and once for each mob a sweep lands on.
     /// A hit on a player, and an entry inside `minecraft:all_of`, aren't told

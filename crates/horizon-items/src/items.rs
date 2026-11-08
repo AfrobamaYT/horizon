@@ -70,7 +70,7 @@ pub enum ConsumeEffect {
     /// it silently): the game hands it to `native_consume_effect`.
     Native {
         kind: String,
-        data: serde_json::Value,
+        data: Arc<horizon_core::nbt::Tag>,
     },
 }
 
@@ -78,8 +78,10 @@ pub enum ConsumeEffect {
 pub type ItemConsumable = horizon_world::consumable::Consumable<String, ConsumeEffect>;
 
 /// Decode `Consumable.CODEC` defaults and ordered effects at the component boundary.
-pub(crate) fn parse_consumable(cons: &Value) -> ItemConsumable {
-    ItemConsumable {
+pub(crate) fn parse_consumable(
+    cons: &Value,
+) -> std::result::Result<ItemConsumable, horizon_core::json_nbt::JsonNbtError> {
+    Ok(ItemConsumable {
         seconds: cons["consume_seconds"].as_f64().map_or(1.6, |s| s as f32),
         animation: crate::use_animation::consumable_animation(cons),
         sound: cons["sound"]
@@ -91,9 +93,24 @@ pub(crate) fn parse_consumable(cons: &Value) -> ItemConsumable {
             .as_array()
             .into_iter()
             .flatten()
-            .filter_map(parse_consume_effect)
+            .map(|effect| {
+                if let Some(kind) = effect["type"].as_str().filter(|k| {
+                    k.contains(':') && !k.starts_with("minecraft:") && !k.starts_with(':')
+                }) {
+                    return horizon_core::json_nbt::json_to_tag(effect).map(|data| {
+                        Some(ConsumeEffect::Native {
+                            kind: kind.to_owned(),
+                            data: Arc::new(data),
+                        })
+                    });
+                }
+                Ok(parse_consume_effect(effect))
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()?
+            .into_iter()
+            .flatten()
             .collect(),
-    }
+    })
 }
 
 /// One `on_consume_effects` entry. A bare type name is minecraft's own, as
@@ -158,7 +175,7 @@ fn parse_consume_effect(effect: &serde_json::Value) -> Option<ConsumeEffect> {
             .map(|s| ConsumeEffect::PlaySound(s.to_string())),
         k if !k.starts_with("minecraft:") => Some(ConsumeEffect::Native {
             kind: k.to_owned(),
-            data: effect.clone(),
+            data: Arc::new(horizon_core::json_nbt::json_to_tag(effect).ok()?),
         }),
         _ => None,
     }
@@ -965,7 +982,11 @@ impl Items {
                         .get("minecraft:kinetic_weapon")
                         .and_then(crate::kinetic_weapon::UseTiming::from_json),
                     // Consumable.CODEC's defaults.
-                    consumable: c.get("minecraft:consumable").map(parse_consumable),
+                    consumable: c
+                        .get("minecraft:consumable")
+                        .map(parse_consumable)
+                        .transpose()
+                        .map_err(|e| format!("{name}: {e}"))?,
                     use_remainder: c["minecraft:use_remainder"]["id"]
                         .as_str()
                         .map(str::to_owned),
@@ -2659,13 +2680,30 @@ mod consume_effect_tests {
     }
 
     #[test]
+    fn invalid_native_consume_payload_refuses_component() {
+        let bad =
+            serde_json::json!({"on_consume_effects": [{"type": "mymod:charge", "data": null}]});
+        assert!(parse_consumable(&bad).is_err());
+        let good =
+            serde_json::json!({"on_consume_effects": [{"type": "mymod:charge", "amount": 42}]});
+        let value = parse_consumable(&good).unwrap();
+        let copy = value.clone();
+        let (ConsumeEffect::Native { data: a, .. }, ConsumeEffect::Native { data: b, .. }) =
+            (&value.effects[0], &copy.effects[0])
+        else {
+            panic!("native payload")
+        };
+        assert!(Arc::ptr_eq(a, b));
+    }
+
+    #[test]
     fn a_mods_own_consume_effect_kind_is_kept() {
         let v = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap();
         // A mod's own kind: Native with its JSON.
         let native =
             parse_consume_effect(&v(r#"{"type":"mymod:energy_boost","amount":42}"#)).unwrap();
         assert!(matches!(&native, ConsumeEffect::Native { kind, data }
-            if kind == "mymod:energy_boost" && data["amount"] == 42));
+            if kind == "mymod:energy_boost" && data.get("amount") == Some(&horizon_core::nbt::Tag::Byte(42))));
         // A bare vanilla name and its namespaced form are the same kind.
         let bare = parse_consume_effect(&v(
             r#"{"type":"apply_effects","effects":[{"id":"minecraft:speed","duration":100}]}"#,

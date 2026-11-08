@@ -132,9 +132,10 @@ struct ConsumableComponent {
     value: crate::items::ItemConsumable,
 }
 impl ConsumableComponent {
-    fn new(raw: Tag) -> Arc<Self> {
+    fn new(raw: Tag) -> Option<Arc<Self>> {
         let mut value =
-            crate::items::parse_consumable(&horizon_client_core::scoreboard::tag_to_json(&raw));
+            crate::items::parse_consumable(&horizon_client_core::scoreboard::tag_to_json(&raw))
+                .ok()?;
         value.seconds = raw
             .get("consume_seconds")
             .and_then(crate::properties::component_float)
@@ -143,7 +144,7 @@ impl ConsumableComponent {
             .get("has_consume_particles")
             .and_then(component_bool)
             .unwrap_or(true);
-        Arc::new(Self { raw, value })
+        Some(Arc::new(Self { raw, value }))
     }
 }
 /// The component patch a server sent for a stack, as the creative slot packet
@@ -303,7 +304,7 @@ impl StackData {
             return;
         }
         if id == "minecraft:consumable" {
-            self.consumable = value.map(ConsumableComponent::new);
+            self.consumable = value.and_then(ConsumableComponent::new);
             return;
         }
         if id == "minecraft:custom_name" {
@@ -1331,7 +1332,7 @@ pub fn decode_components(components: Option<&Tag>) -> (u32, Option<Box<StackData
         consumable: c
             .get("minecraft:consumable")
             .cloned()
-            .map(ConsumableComponent::new),
+            .and_then(ConsumableComponent::new),
         kinetic_weapon: c
             .get("minecraft:kinetic_weapon")
             .cloned()
