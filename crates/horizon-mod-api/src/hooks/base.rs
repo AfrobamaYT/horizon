@@ -1011,8 +1011,12 @@ pub trait Hooks {
     /// save: an edit made here to one of them (a neighbour's block entity, say)
     /// is not in that copy, and is dropped with the chunk.
     /// Server-side.
-    #[hook(side = "server", contract = "listen", neoforge = "ChunkEvent.Load",
-paper = "ChunkLoadEvent")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "ChunkEvent.Load",
+        paper = "ChunkLoadEvent"
+    )]
     fn chunk_load();
     /// Chunk `chunk` of `dimension` left the world (NeoForge's
     /// `ChunkEvent.Unload`), with a level that closes for being empty too. Don't
@@ -1020,8 +1024,7 @@ paper = "ChunkLoadEvent")]
     /// this hook aren't saved: as in vanilla, the chunk is saved before it unloads.
     /// Not told when the world closes, which `native_world_lifecycle` tells.
     /// Server-side.
-    #[hook(side = "server", contract = "listen", neoforge = "ChunkEvent.Unload",
-paper = "ChunkUnloadEvent")]
+    #[hook(side = "server", contract = "listen", neoforge = "ChunkEvent.Unload")]
     fn chunk_unload();
     /// `player` (`name`) joined the game (NeoForge's
     /// `PlayerLoggedInEvent`): placed in the world and listed in
@@ -2968,8 +2971,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)",
-        paper = "CampfireStartEvent"
+        neoforge = "none (NeoForge has no such event)"
     )]
     fn campfire_start();
     /// On an authoritative server, a cauldron at `pos` is about to change
@@ -2980,7 +2982,6 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event; Bukkit's CauldronLevelChangeEvent)",
-        paper = "CauldronLevelChangeEvent",
         cancellable = true,
         target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_cauldron_level_changed"
     )]
@@ -3639,8 +3640,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         cancellable = true,
-        neoforge = "none (vanilla ServerGamePacketListenerImpl.handleSetCreativeModeSlot; NeoForge adds no event or extension for it)",
-        paper = "InventoryCreativeEvent"
+        neoforge = "none (vanilla ServerGamePacketListenerImpl.handleSetCreativeModeSlot; NeoForge adds no event or extension for it)"
     )]
     fn creative_slot();
     /// The food level of the server player `player` (`name`) is about to change
