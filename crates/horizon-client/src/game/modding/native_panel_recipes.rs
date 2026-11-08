@@ -423,15 +423,17 @@ impl Game<'_> {
     /// The fluid in the well under the pointer.
     pub(super) fn recipe_fluid_hovered(&self, layout: &Layout) -> Option<mod_api::FluidStack> {
         let pages = self.panel.recipes.as_ref()?;
-        self.recipes_shown(layout).into_iter().find_map(|(i, (x, y))| {
-            let r = pages.recipes.get(i)?;
-            let (wells_in, wells_out, _) = r.fluid_places(layout.width());
-            [(wells_in, &r.fluid_inputs), (wells_out, &r.fluid_outputs)]
-                .into_iter()
-                .flat_map(|(places, wells)| places.into_iter().zip(wells))
-                .find(|&((sx, sy), _)| inside(self.cursor, [x + sx, y + sy, SLOT, SLOT]))
-                .map(|(_, well)| well.stack.clone())
-        })
+        self.recipes_shown(layout)
+            .into_iter()
+            .find_map(|(i, (x, y))| {
+                let r = pages.recipes.get(i)?;
+                let (wells_in, wells_out, _) = r.fluid_places(layout.width());
+                [(wells_in, &r.fluid_inputs), (wells_out, &r.fluid_outputs)]
+                    .into_iter()
+                    .flat_map(|(places, wells)| places.into_iter().zip(wells))
+                    .find(|&((sx, sy), _)| inside(self.cursor, [x + sx, y + sy, SLOT, SLOT]))
+                    .map(|(_, well)| well.stack.clone())
+            })
     }
     /// The recipe slot under the pointer: recipe, slot, and its stack now.
     pub(super) fn recipe_slot_hovered(
