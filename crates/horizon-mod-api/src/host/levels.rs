@@ -487,17 +487,17 @@ pub trait LevelsBackendMut {
         natural_spawning: bool,
     ) -> bool;
     /// Side: server.
-    /// Set a block in the level in place (`Level.setBlock`). Parked levels,
-    /// stale handles, clients and unloaded or out-of-height positions return
-    /// false. Client notification follows the supplied update flags.
+    /// Set a block (`Level.setBlock`). Stale/unavailable levels and invalid states return
+    /// typed errors without mutation. Ok(false) means vanilla refused an unchanged,
+    /// unloaded or out-of-height write. Notification follows the supplied update flags.
     #[access(WorldOnly)]
     fn level_set_block(
         &mut self,
         level: LevelRef,
         pos: [i32; 3],
-        state: BlockStateId,
+        state: BlockState,
         flags: NativeBlockUpdateFlags,
-    ) -> bool;
+    ) -> Result<bool, LevelWriteError>;
     /// Side: server.
     /// Remove a block in place (`Level.removeBlock`), preserving its fluid.
     #[access(WorldOnly)]
@@ -703,28 +703,28 @@ pub trait LevelsBackendMut {
     /// (`updateNeighborsAtExceptFromFacing`: a diode's front) or `OutputSignal`
     /// (`updateNeighbourForOutputSignal`: the comparators beside it, when its comparator output
     /// changes without its state changing). `source` is the state whose block vanilla passes as
-    /// the one that changed. False, with nothing done, off the level in place, for a position
-    /// that isn't loaded, or for a `source` that is no block state.
+    /// the one that changed. Typed errors refuse stale/unavailable levels or invalid states
+    /// without mutation; Ok(false) means an unloaded or out-of-height position.
     #[access(WorldOnly)]
     fn level_update_neighbors(
         &mut self,
         level: LevelRef,
         pos: [i32; 3],
-        source: BlockStateId,
+        source: BlockState,
         update: NeighbourUpdate,
-    ) -> bool;
+    ) -> Result<bool, LevelWriteError>;
     /// Side: server.
     /// Tell the block at `pos` that `source`'s block beside it changed (`Level.neighborChanged`),
-    /// as a diode tells the block in front of it before updating that block's neighbours. False,
-    /// with nothing done, as for `update_neighbors`: off the level in place, for a position that
-    /// isn't loaded, or for a `source` that is no block state.
+    /// as a diode tells the block in front of it before updating that block's neighbours.
+    /// Typed errors refuse stale/unavailable levels or invalid states; Ok(false) means an
+    /// unloaded or out-of-height position. Errors never mutate the level.
     #[access(WorldOnly)]
     fn level_neighbor_changed(
         &mut self,
         level: LevelRef,
         pos: [i32; 3],
-        source: BlockStateId,
-    ) -> bool;
+        source: BlockState,
+    ) -> Result<bool, LevelWriteError>;
     /// Side: server.
     /// Replace the random of the server level `level` names with `random`,
     /// a stream `native_level_random` gave and the mod drew from. False where
