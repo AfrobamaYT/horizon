@@ -518,7 +518,6 @@ mod tests {
 #[cfg(test)]
 mod main_dimension_tests {
     use super::*;
-    use super::*;
 
     #[test]
     fn the_default_settings_are_accepted_and_name_the_overworlds_type() {
