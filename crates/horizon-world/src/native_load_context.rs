@@ -540,6 +540,39 @@ mod tests {
     }
 
     #[test]
+    fn reviewer_whitespace_spends_raw_aggregate_budget() {
+        let root = root("raw-budget");
+        for i in 0..256 {
+            fs::write(root.join(format!("reader/key{i:04}")), vec![b' '; 65536]).unwrap();
+        }
+        fs::write(root.join("reader/z-extra"), "x").unwrap();
+        let captured = capture_settings(&root, ["reader"]);
+        assert_eq!(captured["reader"].len(), 256);
+        assert!(!captured["reader"].contains_key("z-extra"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn reviewer_symlink_replacement_keeps_opened_value() {
+        use std::io::Read;
+        let root = root("symlink-replaced");
+        let path = root.join("reader/value");
+        fs::write(&path, "opened").unwrap();
+        fs::write(root.join("target"), "replacement").unwrap();
+        let entries = snapshot_files_with_hook(&root, "reader", |_| {
+            fs::remove_file(&path).unwrap();
+            std::os::unix::fs::symlink(root.join("target"), &path).unwrap();
+        })
+        .unwrap();
+        let (_, mut file) = entries.into_iter().next().unwrap().unwrap();
+        let mut value = String::new();
+        file.read_to_string(&mut value).unwrap();
+        assert_eq!(value, "opened");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn aggregate_limit() {
         let root = root("aggregate");
         fs::create_dir(root.join("second")).unwrap();
