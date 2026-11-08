@@ -1,3 +1,5 @@
+// Generated fixtures exercise every shape; TODO(#2273): make the generator emit clippy-clean code.
+#![allow(clippy::all, unused_comparisons, unreachable_patterns, dead_code)]
 use mod_api::{
     RowError, RowView,
     wire::{Id, ResourceCodec, ResourceScope, WireError},
@@ -17,6 +19,8 @@ impl ResourceCodec for NoResources {
         Err(WireError::Invalid("unused"))
     }
 }
+// `PageSource::new` takes a reader of `&T` for the `Vec` it pages.
+#[allow(clippy::ptr_arg)]
 fn read(values: &Vec<u32>, window: Window) -> Result<Vec<mod_api::Row>, RowError> {
     let mut out = window.builder();
     if window.node() != 0 || window.start() > values.len() {
