@@ -7830,7 +7830,7 @@ impl Game<'_> {
                     };
                     if let Some(living) = mob {
                         let effect = mod_api::NativeActiveEffect::new(
-                            mod_api::__private::effect_key(def.index)
+                            mod_api::__private::effect_key_by_index(def.index)
                                 .expect("effects resolved at load"),
                             eff.duration,
                             eff.amplifier,
@@ -7861,7 +7861,7 @@ impl Game<'_> {
                 for effect in effects {
                     changed |= match mob {
                         Some(living) => horizon_client::brewing::effect(effect)
-                            .and_then(|def| mod_api::__private::effect_key(def.index))
+                            .and_then(|def| mod_api::__private::effect_key_by_index(def.index))
                             .is_some_and(|key| self.living_remove_effect(living, key)),
                         None => horizon_client::brewing::effect(effect)
                             .is_some_and(|def| self.remove_player_effects(Some(def.index))),
