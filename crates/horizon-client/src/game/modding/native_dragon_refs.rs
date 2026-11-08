@@ -497,21 +497,9 @@ mod tests {
             remote.logged_in = true;
             remote.entity_id = 7;
             remote.profile = 42;
-            remote.tracked.insert(
-                15,
-                super::super::remote::Tracked {
-                    kind: "minecraft:ender_dragon".to_owned(),
-                    position: [0.0; 3],
-                    codec_base: [0.0; 3],
-                    silent: false,
-                    vehicle: None,
-                },
-            );
             game.player =
                 Some(horizon_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
-            let mut dragon = Dragon::new(Vec3::ZERO, 0.0, 0);
-            dragon.id = 15;
-            game.dragon.replace(dragon);
+            game.spawn_entity(15, "minecraft:ender_dragon", [0.0; 3], [0.0; 3]);
             place_parts(game);
             // The server tells this client of the dragon alone; the parts are its copies of it.
             let dragon = game.entity(15).unwrap();
