@@ -364,6 +364,15 @@ fn server_inventory_operations_take_a_server_host(
     )
 }
 
+/// Compile-only: a server mod schedules and cancels a delayed task through the `&mut dyn ServerHost`
+/// its hooks get.
+#[allow(dead_code)]
+fn delayed_tasks_take_a_server_host(
+    host: &mut dyn ServerHost,
+) -> (Result<TaskId, ScheduleError>, bool) {
+    (host.schedule_task(20, 7), host.cancel_task(TaskId(1)))
+}
+
 /// Compile-only: a client mod reads the open inventory screen's slot boxes through its menu handle.
 #[allow(dead_code)]
 fn menu_slot_boxes_take_a_client_host(
