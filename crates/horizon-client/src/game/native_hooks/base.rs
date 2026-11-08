@@ -3455,7 +3455,9 @@ impl Game<'_> {
     }
     /// `DispenserBlock.getDispenseMethod`: choose a behaviour for any item,
     /// including vanilla items, on the authoritative server (not droppers).
-    /// Leave answer None for vanilla. Otherwise answer `(remainder, event)`:
+    /// The block the dispenser faces is asked first (`dispense_method`), and
+    /// its answer keeps this part from being asked. Leave answer None for
+    /// vanilla. Otherwise answer `(remainder, event)`:
     /// a remainder of None empties the slot, `Some(stack)` replaces it (the hook
     /// owns consumption: no extra item is removed afterwards). `event` is the
     /// level event the dispenser plays with its smoke: 1000 the click, 1001 the
