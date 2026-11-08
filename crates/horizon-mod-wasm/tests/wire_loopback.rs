@@ -148,6 +148,7 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
         ) {
             REGISTERED_ITEM.set(Some(registrar.item_key("minecraft:stone")));
             let kind = registrar.block_entity_type("counter").blocks(&[]).build();
+            REGISTERED_KIND.set(Some(kind));
             registrar.block_entity_part(&kind, MachineBlock).unwrap();
         }
         fn subscribed(&self) -> &'static [Option<mod_api::HookId>] {
@@ -483,7 +484,10 @@ fn wire_loopback_nested_tuple_reference_writes_back() {
     assert!(stack.carried.0.is_none());
     assert!(stack.cancellation_result);
 }
-thread_local! { static REGISTERED_ITEM:std::cell::Cell<Option<mod_api::ItemKey>> = const {std::cell::Cell::new(None)}; }
+thread_local! {
+    static REGISTERED_ITEM:std::cell::Cell<Option<mod_api::ItemKey>> = const {std::cell::Cell::new(None)};
+    static REGISTERED_KIND:std::cell::Cell<Option<mod_api::BlockEntityTypeKey>> = const {std::cell::Cell::new(None)};
+}
 fn install_counter() {
     let mods = [mod_api::ModEntry::new(
         "wire_test",
@@ -668,6 +672,147 @@ fn wire_loopback_returned_frame_resource_uses_source_permissions() {
     assert_eq!(start.draws, 1);
     assert!(out.bytes().is_empty());
 }
+#[test]
+fn wire_loopback_provider_queries_return_owned_options_and_atomic_cursor_writeback() {
+    use mod_api::*;
+    struct Table;
+    impl CapabilityProviders for Table {}
+    impl BlockEntitiesCapabilityProviders for Table {
+        fn block_entity_provider(
+            &self,
+            _: &str,
+            _: BlockEntityTypeKey,
+            index: &mut u32,
+        ) -> Option<(BlockProviderOf, &'static str, bool)> {
+            *index += 1;
+            Some((
+                BlockProviderOf::EnergyHandler(Arc::new(|_: &mut dyn ServerHost, _: BlockSide| {
+                    None::<Box<dyn EnergyHandler>>
+                })),
+                "test:block",
+                true,
+            ))
+        }
+    }
+    impl EntitiesCapabilityProviders for Table {
+        fn entity_provider(
+            &self,
+            _: &str,
+            _: &str,
+            index: &mut u32,
+        ) -> Option<(EntityProviderOf, &'static str, bool)> {
+            *index += 2;
+            Some((
+                EntityProviderOf::EnergyHandlerOptionDirection(Arc::new(
+                    |_: &mut dyn ServerHost, _: EntityRef, _: Option<Direction>| {
+                        None::<Box<dyn EnergyHandler>>
+                    },
+                )),
+                "test:entity",
+                false,
+            ))
+        }
+    }
+    impl ItemsCapabilityProviders for Table {
+        fn item_provider(
+            &self,
+            _: &str,
+            _: ItemKey,
+            index: &mut u32,
+        ) -> Option<(ItemProviderOf, &'static str, bool)> {
+            *index += 3;
+            Some((
+                ItemProviderOf::EnergyHandler(Arc::new(|_: &mut dyn ServerHost, _: &ItemPlace| {
+                    None::<Box<dyn EnergyHandler>>
+                })),
+                "test:item",
+                true,
+            ))
+        }
+        fn place_provider(&self, _: &str) -> Option<(Arc<dyn PlaceProvider>, &'static str)> {
+            None
+        }
+    }
+    impl CapabilitiesCapabilityProviders for Table {
+        fn provided(&self, _: ProvidedBy, _: &str) -> bool {
+            true
+        }
+    }
+    struct World;
+    impl Host for World {
+        fn capability_providers(&self) -> &'static dyn CapabilityProviders {
+            &Table
+        }
+    }
+    mod_api::impl_host_areas!(World);
+    install_counter();
+    let world = World;
+    let module = WasmMod {
+        group: 0,
+        subscribed: &[],
+        corrupt: false,
+    };
+    let mut cx = Box::new(boundary::Cx::default());
+    let mut frame = boundary::Frame::default();
+    frame.set_host(&world);
+    cx.frames.push(frame);
+    cx.module = &module;
+    let pointer = &mut *cx as *mut boundary::Cx;
+    let _root = unsafe { boundary::resource_scope(pointer, true) };
+    let _guest = guest::resource_scope();
+    let corrupt = Rc::new(std::cell::Cell::new(false));
+    let flag = corrupt.clone();
+    guest::set_transport(Some(Rc::new(move |id, bytes| {
+        if id == mod_api::wire::HOST_LOG {
+            return Vec::new();
+        }
+        if id == mod_api::wire::HOST_RELEASE {
+            let id = Reader::decode(bytes).unwrap();
+            let released = unsafe { (&mut *pointer).held.remove(id) }.unwrap();
+            drop(released);
+            return Vec::new();
+        }
+        let _scope = unsafe { boundary::resource_scope(pointer, false) };
+        let mut out = Writer::new();
+        unsafe { boundary::serve(id, pointer, bytes, &mut out) }.unwrap();
+        if flag.get() && id != mod_api::wire::HOST_RELEASE {
+            out.put(&0xffu8)
+        }
+        out.into_bytes()
+    })));
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            guest::set_transport(None);
+        }
+    }
+    let _reset = Reset;
+    let mut index = 5;
+    let (block, owner, before) = guest::Guest
+        .block_entity_provider("test:energy", REGISTERED_KIND.get().unwrap(), &mut index)
+        .unwrap();
+    assert!(matches!(block, BlockProviderOf::EnergyHandler(_)));
+    assert_eq!((index, owner, before), (6, "test:block", true));
+    let (_, owner, before) = guest::Guest
+        .entity_provider("test:energy", "test:mob", &mut index)
+        .unwrap();
+    assert_eq!((index, owner, before), (8, "test:entity", false));
+    let (_, owner, before) = guest::Guest
+        .item_provider("test:energy", REGISTERED_ITEM.get().unwrap(), &mut index)
+        .unwrap();
+    assert_eq!((index, owner, before), (11, "test:item", true));
+    corrupt.set(true);
+    index = 42;
+    let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        guest::Guest.item_provider("test:energy", REGISTERED_ITEM.get().unwrap(), &mut index)
+    }));
+    assert!(refused.is_err());
+    assert_eq!(
+        index, 42,
+        "trailing bytes applied the cursor before validating the whole reply"
+    );
+}
+
 #[test]
 fn wire_loopback_panic_hook_without_transport_does_not_panic_again() {
     install_counter();

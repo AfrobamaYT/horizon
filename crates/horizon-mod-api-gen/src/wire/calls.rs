@@ -352,6 +352,11 @@ pub(super) fn has_ref_in_data(ty: &Ty) -> bool {
     }
 }
 
+/// Mutable scalar inputs cross by value and return in the checked reply writebacks.
+pub(super) fn mutable_scalar(ty: &Ty) -> bool {
+    matches!(ty,Ty::Ref(t,true) if matches!(**t,Ty::Prim(..)|Ty::Wide(..)|Ty::Unit|Ty::Duration))
+}
+
 /// The mod's body of import `id`: its arguments encoded, one crossing, the answer decoded. A
 /// frame object it returns is the zero-sized `Guest` itself, and a handler it passes is kept
 /// under every trait it answers as and crosses as its id. What it can't do yet traps.
@@ -367,11 +372,15 @@ fn import_body(types: &Types<'_>, m: &Method, id: usize, prefix: &str) -> String
         return format!("{sig} {{ {body} }}");
     }
     let mut put = String::new();
+    let mut back = Vec::new();
     for (i, (_, ty)) in m.params.iter().enumerate() {
+        if mutable_scalar(ty) {
+            back.push((i, held(types, ty).unwrap()));
+        }
         match ty {
             Ty::Dyn(..) => {}
             Ty::Handler(..) => put.push_str(&format!("w.put_owned(p{i});")),
-            ty if has_frame(ty) || matches!(ty, Ty::Ref(_, true)) => {
+            ty if has_frame(ty) || (matches!(ty, Ty::Ref(_, true)) && !mutable_scalar(ty)) => {
                 return format!(
                     "{sig} {{ {guest}::unsupported(\"{}::{}\") }}",
                     m.owner, m.name
@@ -410,7 +419,21 @@ fn import_body(types: &Types<'_>, m: &Method, id: usize, prefix: &str) -> String
             m.owner, m.name
         );
     };
-    let take = if m.ret == Ty::Unit {
+    let take = if !back.is_empty() {
+        let shape = back
+            .iter()
+            .map(|(_, t)| t.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
+        let apply = back
+            .iter()
+            .enumerate()
+            .map(|(n, (i, _))| format!("*p{i}=back.{n};"))
+            .collect::<String>();
+        format!(
+            "let (answer,back):({owned},({shape},))=r.take().expect(\"the host answered with a value of the wrong type\"); let answer={lent}; {apply} answer"
+        )
+    } else if m.ret == Ty::Unit {
         String::new()
     } else {
         format!(
