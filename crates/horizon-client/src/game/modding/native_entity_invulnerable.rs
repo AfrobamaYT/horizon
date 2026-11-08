@@ -11,6 +11,19 @@ use horizon_client::mobs::Damage;
 use mod_api::EntityRef;
 
 impl Game<'_> {
+    /// Ask listeners about a nonliving entity damage source.
+    pub(in crate::game) fn native_nonliving_invulnerable(
+        &mut self,
+        id: u32,
+        kind: &str,
+        source: horizon_client::health::HurtSource<'_>,
+        vanilla: bool,
+    ) -> bool {
+        crate::game::entity::damage_level_of!(self, scoped).invulnerability_check(
+            horizon_client::health::Hurting::Entity(id as i32, kind, source),
+            vanilla,
+        )
+    }
     /// A player's body, where it is kept now.
     pub(super) fn native_player_body(
         &self,

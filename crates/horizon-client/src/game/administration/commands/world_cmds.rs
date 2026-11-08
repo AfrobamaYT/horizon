@@ -340,7 +340,7 @@ impl Game<'_> {
             }
             Target::Item(id) => self.command_damage_item(id, amount, ty, by, cause.or(by), from),
             Target::Boat(_) | Target::Cart(_) => {
-                self.command_damage_vehicle(target, amount, ty, cause.or(by))
+                self.command_damage_vehicle(target, amount, ty, by, cause.or(by), from)
             }
             Target::Dragon(id) => self.command_damage_dragon(
                 id,
@@ -369,7 +369,9 @@ impl Game<'_> {
         target: Target,
         amount: f32,
         damage_type: &str,
+        direct: Option<Target>,
         causing: Option<Target>,
+        position: Option<[f64; 3]>,
     ) -> bool {
         let registry = &self.motion.health.damage;
         let Some(kind) = registry.id(damage_type) else {
@@ -385,12 +387,47 @@ impl Game<'_> {
             .raw
             .get(&id)
             .is_some_and(|tag| horizon_client::entity_nbt::flag(tag, "Invulnerable"));
-        if invulnerable && !creative && !registry.in_tag(kind, "minecraft:bypasses_invulnerability")
-        {
-            return false;
-        }
+        let vanilla = invulnerable
+            && !creative
+            && !registry.in_tag(kind, "minecraft:bypasses_invulnerability");
         let ignites = registry.in_tag(kind, "minecraft:is_fire")
             || registry.in_tag(kind, "minecraft:is_explosion");
+        let entity_kind = match target {
+            Target::Boat(_) => self
+                .boats
+                .iter()
+                .find(|b| b.id == id)
+                .map(|b| b.entity_type()),
+            Target::Cart(_) => self
+                .carts
+                .iter()
+                .find(|c| c.id == id)
+                .map(|c| c.kind.id().to_owned()),
+            _ => None,
+        };
+        let Some(entity_kind) = entity_kind else {
+            return false;
+        };
+        let entity_id = |target| match target {
+            Some(Target::Player) => self.own_entity_id(),
+            Some(Target::Guest(conn)) => self.command_guest(conn).map_or(0, |g| g.entity_id),
+            Some(target) => {
+                crate::game::native_entities::target_id(target).map_or(0, |id| id as i32)
+            }
+            None => 0,
+        };
+        let source = horizon_client::health::HurtSource {
+            damage_type,
+            causing: entity_id(causing),
+            direct: entity_id(direct),
+            position,
+        };
+        if crate::game::entity::damage_level_of!(self, scoped).invulnerability_check(
+            horizon_client::health::Hurting::Entity(id as i32, &entity_kind, source),
+            vanilla,
+        ) {
+            return false;
+        }
         match target {
             Target::Boat(_) => self
                 .boats

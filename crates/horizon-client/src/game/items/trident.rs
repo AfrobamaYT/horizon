@@ -880,10 +880,40 @@ impl Game<'_> {
                         // ThrownTrident.onHitEntity on a boat or minecart:
                         // VehicleEntity.hurtServer takes the damage.
                         let creative = t.guest.is_none() && self.creative;
+                        let causing = match t.guest {
+                            Some(conn) => self.command_guest(conn).map_or(0, |g| g.entity_id),
+                            None => self.own_entity_id(),
+                        };
+                        let source = horizon_client::health::HurtSource {
+                            damage_type: "minecraft:trident",
+                            causing,
+                            direct: t.id as i32,
+                            position: Some([t.previous.x, t.previous.y, t.previous.z]),
+                        };
                         if let Some(i) = self.boats.iter().position(|b| b.id == id) {
-                            self.hurt_boat(i, damage, creative);
+                            let kind = self.boats[i].entity_type();
+                            if !crate::game::entity::damage_level_of!(self, scoped)
+                                .invulnerability_check(
+                                    horizon_client::health::Hurting::Entity(
+                                        id as i32, &kind, source,
+                                    ),
+                                    false,
+                                )
+                            {
+                                self.hurt_boat(i, damage, creative);
+                            }
                         } else if let Some(i) = self.carts.iter().position(|c| c.id == id) {
-                            self.hurt_cart(i, damage, creative, false);
+                            let kind = self.carts[i].kind.id();
+                            if !crate::game::entity::damage_level_of!(self, scoped)
+                                .invulnerability_check(
+                                    horizon_client::health::Hurting::Entity(
+                                        id as i32, kind, source,
+                                    ),
+                                    false,
+                                )
+                            {
+                                self.hurt_cart(i, damage, creative, false);
+                            }
                         }
                         // ThrownTrident.onHitEntity on another player.
                         if let Some(conn) = self.trident_guest_conn(id) {

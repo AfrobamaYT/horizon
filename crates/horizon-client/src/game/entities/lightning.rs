@@ -684,11 +684,47 @@ impl Game<'_> {
             }
             match h {
                 EntityHandle::Boat(i) => {
-                    self.hurt_boat(i, 5.0, false);
+                    let id = self.boats[i].id;
+                    let kind = self.boats[i].entity_type();
+                    let source = horizon_client::health::HurtSource {
+                        damage_type: "minecraft:lightning_bolt",
+                        causing: bolt as i32,
+                        direct: bolt as i32,
+                        position: Some(at),
+                    };
+                    if !self.native_nonliving_invulnerable(id, &kind, source, false) {
+                        self.hurt_boat(i, 5.0, false);
+                    }
                 }
-                EntityHandle::Cart(i) => self.hurt_cart(i, 5.0, false, false),
-                EntityHandle::Orb(i) if self.orbs[i].hurt(5.0) => {
-                    self.orbs.remove(i);
+                EntityHandle::Cart(i) => {
+                    let (id, kind) = (self.carts[i].id, self.carts[i].kind.id());
+                    let source = horizon_client::health::HurtSource {
+                        damage_type: "minecraft:lightning_bolt",
+                        causing: bolt as i32,
+                        direct: bolt as i32,
+                        position: Some(at),
+                    };
+                    if !self.native_nonliving_invulnerable(id, kind, source, false) {
+                        self.hurt_cart(i, 5.0, false, false);
+                    }
+                }
+                EntityHandle::Orb(i) => {
+                    let id = self.orbs[i].id;
+                    let source = horizon_client::health::HurtSource {
+                        damage_type: "minecraft:lightning_bolt",
+                        causing: bolt as i32,
+                        direct: bolt as i32,
+                        position: Some(at),
+                    };
+                    if !self.native_nonliving_invulnerable(
+                        id,
+                        "minecraft:experience_orb",
+                        source,
+                        false,
+                    ) && self.orbs[i].hurt(5.0)
+                    {
+                        self.orbs.remove(i);
+                    }
                 }
                 _ => {}
             }

@@ -719,6 +719,20 @@ impl Game<'_> {
         let (mut items_kept, mut orbs_kept) = (0, 0);
         let (mut boats_gone, mut carts_gone) = (0, 0);
         let mut destroyed_contents = Vec::new();
+        macro_rules! blocked_damage {
+            ($id:expr, $kind:expr) => {{
+                let source = horizon_client::health::HurtSource {
+                    damage_type,
+                    causing: attacker.as_ref().map_or(0, |(id, _)| *id as i32),
+                    direct: exploding.map_or(0, |id| id as i32),
+                    position: Some(center),
+                };
+                crate::game::entity::damage_level_of!(self, scoped).invulnerability_check(
+                    horizon_client::health::Hurting::Entity($id, $kind, source),
+                    false,
+                )
+            }};
+        }
         for handle in self.entity_handles() {
             let handle = match handle {
                 EntityHandle::Boat(i) => EntityHandle::Boat(i - boats_gone),
@@ -777,8 +791,10 @@ impl Game<'_> {
                     // a blast with a source entity under `mobGriefing` off never
                     // reaches here (`items_ignore`).
                     EntityHandle::Item(i) => {
+                        let id = self.dropped[i].id as i32;
+                        let blocked = blocked_damage!(id, "minecraft:item");
                         let item = &mut self.dropped[i];
-                        if &*item.stack.item != "minecraft:nether_star" {
+                        if !blocked && &*item.stack.item != "minecraft:nether_star" {
                             item.health = (item.health as f32 - amount) as i32;
                             destroyed = item.health <= 0;
                             if destroyed {
@@ -796,20 +812,29 @@ impl Game<'_> {
                     }
                     // `ExperienceOrb.hurtServer` takes the damage off their 5 health.
                     EntityHandle::Orb(i) => {
-                        destroyed = self.orbs[i].hurt(amount);
+                        let id = self.orbs[i].id as i32;
+                        if !blocked_damage!(id, "minecraft:experience_orb") {
+                            destroyed = self.orbs[i].hurt(amount);
+                        }
                     }
                     // `VehicleEntity.hurtServer` (explosions ignite TNT carts);
                     // a destroyed one is gone before the push.
                     EntityHandle::Cart(i) => {
-                        let len = self.carts.len();
-                        self.hurt_cart(i, amount, false, true);
-                        carts_gone += len - self.carts.len();
+                        let (id, kind) = (self.carts[i].id as i32, self.carts[i].kind.id());
+                        if !blocked_damage!(id, kind) {
+                            let len = self.carts.len();
+                            self.hurt_cart(i, amount, false, true);
+                            carts_gone += len - self.carts.len();
+                        }
                     }
                     // `VehicleEntity.hurtServer`: damage * 10, broken past 40.
                     EntityHandle::Boat(i) => {
-                        let len = self.boats.len();
-                        self.hurt_boat(i, amount, false);
-                        boats_gone += len - self.boats.len();
+                        let (id, kind) = (self.boats[i].id as i32, self.boats[i].entity_type());
+                        if !blocked_damage!(id, &kind) {
+                            let len = self.boats.len();
+                            self.hurt_boat(i, amount, false);
+                            boats_gone += len - self.boats.len();
+                        }
                     }
                     // `hurtServer` does nothing to the rest.
                     _ => {}

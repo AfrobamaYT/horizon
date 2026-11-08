@@ -964,10 +964,42 @@ impl Game<'_> {
             // LivingEntity.aiStep calls pushEntities after travel. The stand's
             // own doPush is empty; only this shove runs.
             self.push_rideable_minecarts(i);
-            let a = &mut self.armor_stands[i];
-            if let Some(damage_type) =
-                a.environment_tick(&self.world, self.res.facts(), self.pack.assets.registry)
-            {
+            let id = self.armor_stands[i].id;
+            let saved = ["minecraft:on_fire", "minecraft:in_fire"]
+                .map(|damage| self.saved_refuses_damage(id, damage, false));
+            let tags = world_items!(self);
+            let registry = self.pack.assets.registry;
+            let block_registries = &self.pack.block_registries;
+            let hooks = &self.damage_hooks;
+            if let Some(damage_type) = self.armor_stands[i].environment_tick_with_hook(
+                &mut self.world,
+                self.res.facts(),
+                registry,
+                |world, damage| {
+                    let vanilla = if damage == "minecraft:on_fire" {
+                        saved[0]
+                    } else {
+                        saved[1]
+                    };
+                    let source = horizon_client::health::HurtSource {
+                        damage_type: damage,
+                        causing: 0,
+                        direct: 0,
+                        position: None,
+                    };
+                    horizon_client::health::DamageLevel::of(
+                        world,
+                        registry,
+                        Some(tags),
+                        Some(block_registries),
+                        hooks,
+                    )
+                    .invulnerability_check(
+                        horizon_client::health::Hurting::ArmorStand(id as i32, source),
+                        vanilla,
+                    )
+                },
+            ) {
                 dead.push((i, damage_type));
             }
         }
