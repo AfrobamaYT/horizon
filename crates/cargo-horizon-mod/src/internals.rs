@@ -220,7 +220,7 @@ fn sync(dir: &Path, repo: Option<&Path>) -> Result<(), String> {
     Ok(())
 }
 
-fn atomic_write(path: &Path, contents: String) -> Result<(), String> {
+pub(crate) fn atomic_write(path: &Path, contents: String) -> Result<(), String> {
     let temporary = path.with_extension("toml.sync");
     fs::write(&temporary, contents)
         .and_then(|()| fs::rename(&temporary, path))

@@ -19,6 +19,36 @@ its compiled slots at load without rebuilding the game or invoking the Rust comp
 Wasm supports compiled function slots, not source rebuilding or call-site injections
 ([Building a mod to `mod.wasm`](how-to/wasm-mods.md#listening-at-points)).
 
+## Adding a pinned declaration
+
+For a native mod, run this from the folder containing `horizon-mod.toml`:
+
+```sh
+cargo horizon-mod inject add 'horizon_client::game::Game::tick' --kind head --with before_tick
+```
+
+The tool reads the `[native].horizon` build's checked prebuilt metadata, caching it under
+`target/horizon-mod/prebuilt/<commit>/`. It appends an `[[inject]]` table without reformatting
+existing declarations or comments. `hash` comes from that build's internals catalog; do not
+write it by hand. `--with` names the crate-root listener and also becomes the unique inject id;
+it defaults to `on_inject`. Implement the listener separately. Access defaults to `api`;
+choose `access = "internals"` in the resulting table when needed.
+
+For a call kind, the tool copies the canonical callee, ordinal and context from `points.json`:
+
+```sh
+cargo horizon-mod inject add 'crate_name::Owner::method' --kind before_call \
+  --call 'crate_name::callee' --nth 2 --with before_call
+```
+
+`--nth` defaults to 0 and counts calls to that callee. `--call` can be omitted only when
+one catalogued callee matches the requested ordinal. Ambiguity is refused, never guessed.
+Calls not present in the pinned catalog are refused: this command does not discover unlisted
+source calls. Unknown places produce `E_INJECT_MISSING` naming the target. Invalid kinds,
+callback names, duplicate ids, and call flags on a function kind leave the manifest untouched.
+The command writes identity metadata, not a promise that a given kind/access has a runnable
+route; the launcher still validates that contract.
+
 ## Function-slot declarations
 
 API listeners use `access = "api"` (the default) and the host/API record shown below. Native internals
