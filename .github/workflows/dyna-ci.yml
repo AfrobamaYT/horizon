@@ -290,7 +290,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: steps.rust.outputs.required != 'false' && runner.environment == 'github-hosted'
         with:
-          shared-key: verify
+          # A new key: the dependency-only snapshot under the old one blocked saving this one.
+          shared-key: verify-workspace
           cache-workspace-crates: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # A dyna-large runner has a hard 16 GiB limit and 8 CPUs; horizon-client rustc processes take about 2.6 GB
