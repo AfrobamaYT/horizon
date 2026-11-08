@@ -1401,6 +1401,7 @@ mod tests {
     fn fluid_models_recollection_changes_model_identifiers() {
         use mod_api::{FluidModel, Hooks, ModEntry, RegisterFluidModelsEvent, testing::with_mods};
         use std::sync::atomic::{AtomicUsize, Ordering};
+        #[derive(Default)]
         struct Models(Arc<AtomicUsize>);
         #[mod_api::horizon_mod]
         impl Hooks for Models {
