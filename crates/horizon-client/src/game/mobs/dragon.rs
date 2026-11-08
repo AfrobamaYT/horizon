@@ -510,6 +510,7 @@ struct DragonHitOrigin<'a> {
     direct: Option<&'a ProjectileKind>,
     entity_id: Option<i32>,
     from: Option<Vec3>,
+    invulnerability_checked: bool,
 }
 /// A direct `AbstractArrow` or `WindCharge`, which a perched dragon shrugs off
 /// (`AbstractDragonSittingPhase.onHurt`); a breeze's `BreezeWindCharge` is neither.
@@ -698,7 +699,7 @@ impl Dragon {
         kind: DamageKind,
         direct: Option<&ProjectileKind>,
     ) -> Hurt {
-        self.hurt_part_from(level, part, damage, counts, kind, direct, None)
+        self.hurt_part_from(level, part, damage, counts, kind, direct, None, false)
     }
     /// `hurt_part` with the melee attacker's position (`DamageSource.getSourcePosition`,
     /// the direct entity's feet). `None` for a hit that is not a player's melee.
@@ -711,11 +712,22 @@ impl Dragon {
         kind: DamageKind,
         direct: Option<&ProjectileKind>,
         from: Option<Vec3>,
+        invulnerability_checked: bool,
     ) -> Hurt {
-        if is_fire(kind) {
+        // The game-level invulnerability hook includes the part's fire immunity in
+        // vanilla's answer. Only the standalone test adapter still needs this guard.
+        if is_fire(kind) && !invulnerability_checked {
             return Hurt::Refused;
         }
-        self.hurt_from(level, part, damage, counts, shrugs(direct), from)
+        self.hurt_from(
+            level,
+            part,
+            damage,
+            counts,
+            shrugs(direct),
+            from,
+            invulnerability_checked,
+        )
     }
     /// `EnderDragon.hurt(part, source, damage)`: whether the hit landed
     /// (an arrow is spent, else it turns back). `counts` is the source
@@ -732,7 +744,7 @@ impl Dragon {
         counts: Option<HurtSource>,
         arrow: bool,
     ) -> Hurt {
-        self.hurt_from(level, part, damage, counts, arrow, None)
+        self.hurt_from(level, part, damage, counts, arrow, None, false)
     }
     fn hurt_from(
         &mut self,
@@ -742,6 +754,7 @@ impl Dragon {
         counts: Option<HurtSource>,
         arrow: bool,
         from: Option<Vec3>,
+        invulnerability_checked: bool,
     ) -> Hurt {
         if matches!(self.phase, Phase::Dying { .. }) || !self.alive() {
             return Hurt::Refused;
@@ -759,6 +772,14 @@ impl Dragon {
         let Some(source) = counts else {
             return Hurt::Landed { full: false };
         };
+        if !invulnerability_checked
+            && level.invulnerability_check(
+                horizon_client::health::Hurting::Dragon(self.id as i32, source),
+                false,
+            )
+        {
+            return Hurt::Landed { full: false };
+        }
         let before = self.health;
         // reallyHurt: LivingEntity.hurtServer, past its guards: the hit's damage sequence
         // starts, and `LivingIncomingDamageEvent` may change or cancel it. A canceled hit
@@ -1610,7 +1631,26 @@ impl Game<'_> {
         // (#916), with the attacker's creative mode as `isCreativePlayer`,
         // before the dragon's own borrow of the game.
         let creative = self.creative_source_of(cause.or(by));
-        if self.saved_refuses_damage(id, ty, creative) {
+        let vanilla = self.saved_refuses_damage(id, ty, creative);
+        if self.dragon.as_ref().is_none_or(|d| d.id != id) {
+            return false;
+        }
+        let causing = player.map_or(0, |p| self.fight_entity(p));
+        let direct_entity = match by {
+            Some(Target::Projectile(id) | Target::Trident(id)) => id as i32,
+            _ => causing,
+        };
+        let source = HurtSource {
+            damage_type: ty,
+            causing,
+            direct: direct_entity,
+            position: from.map(|p| [p.x, p.y, p.z]),
+        };
+        let level = super::entity::damage_level_of!(self, scoped);
+        if level.invulnerability_check(
+            horizon_client::health::Hurting::Dragon(id as i32, source),
+            vanilla,
+        ) {
             return false;
         }
         let Some(d) = self.dragon.as_mut().filter(|d| d.id == id) else {
@@ -1618,7 +1658,15 @@ impl Game<'_> {
         };
         if is_fire(kind) {
             let level = super::entity::damage_level_of!(self, scoped);
-            let hurt = d.hurt_from(level, BODY, amount, None, shrugs(direct.as_ref()), None);
+            let hurt = d.hurt_from(
+                level,
+                BODY,
+                amount,
+                None,
+                shrugs(direct.as_ref()),
+                None,
+                true,
+            );
             return matches!(hurt, Hurt::Landed { .. });
         }
         let counts = player.is_some() || is_explosion_type(ty);
@@ -1638,6 +1686,7 @@ impl Game<'_> {
                 direct: direct.as_ref(),
                 entity_id,
                 from: knock,
+                invulnerability_checked: true,
             },
         );
         // A shrugged-off arrow is `onHurt`'s 0: under 0.01, refused.
@@ -1717,6 +1766,7 @@ impl Game<'_> {
                 direct: direct.map(|p| &p.kind),
                 entity_id: direct.map(|p| p.id as i32),
                 from,
+                invulnerability_checked: false,
             },
         )
     }
@@ -1731,7 +1781,27 @@ impl Game<'_> {
         origin: DragonHitOrigin<'_>,
     ) -> Hurt {
         let by_id = by.map(|who| self.fight_entity(who));
-        let source = counts.then(|| hurt_source(kind, by_id, origin.entity_id));
+        let hit_source = hurt_source(kind, by_id, origin.entity_id);
+        let source = counts.then_some(hit_source);
+        if !origin.invulnerability_checked {
+            let Some(id) = self.dragon.as_ref().map(|d| d.id) else {
+                return Hurt::Refused;
+            };
+            let attacker = by.map(|who| match who {
+                FightWho::Host => Target::Player,
+                FightWho::Guest(conn) => Target::Guest(conn),
+            });
+            let creative = self.creative_source_of(attacker);
+            let vanilla =
+                self.saved_refuses_damage(id, hit_source.damage_type, creative) || is_fire(kind);
+            let level = super::entity::damage_level_of!(self, scoped);
+            if level.invulnerability_check(
+                horizon_client::health::Hurting::Dragon(id as i32, hit_source),
+                vanilla,
+            ) {
+                return Hurt::Refused;
+            }
+        }
         let Some(d) = self.dragon.as_mut() else {
             return Hurt::Refused;
         };
@@ -1746,6 +1816,7 @@ impl Game<'_> {
             kind,
             origin.direct,
             origin.from,
+            true,
         );
         // LivingEntity.hurtServer: damage that is applied sets lastHurtByPlayer
         // (100 ticks); a hit the damage cooldown absorbs returns before that.
@@ -5782,26 +5853,26 @@ mod tests {
         let mut perched = dragon(Phase::Scanning { time: 0 });
         perched.velocity = velocity;
         assert_eq!(
-            perched.hurt_from(level, 0, 9.0, HIT, false, Some(from)),
+            perched.hurt_from(level, 0, 9.0, HIT, false, Some(from), false),
             Hurt::Landed { full: true }
         );
         assert_eq!(perched.velocity, velocity);
 
         let mut taking_off = dragon(Phase::Flaming { ticks: 0 });
         taking_off.velocity = velocity;
-        taking_off.hurt_from(level, 0, 60.0, HIT, false, Some(from));
+        taking_off.hurt_from(level, 0, 60.0, HIT, false, Some(from), false);
         assert!(matches!(taking_off.phase, Phase::Takeoff { .. }));
         assert_eq!(taking_off.velocity, velocity);
 
         let mut flying = dragon(flying());
         flying.velocity = velocity;
         assert_eq!(
-            flying.hurt_from(level, 0, 9.0, HIT, false, Some(from)),
+            flying.hurt_from(level, 0, 9.0, HIT, false, Some(from), false),
             Hurt::Landed { full: true }
         );
         assert_eq!(flying.velocity, pushed);
         assert_eq!(
-            flying.hurt_from(level, 0, 20.0, HIT, false, Some(from)),
+            flying.hurt_from(level, 0, 20.0, HIT, false, Some(from), false),
             Hurt::Landed { full: false }
         );
         assert_eq!(flying.velocity, pushed);
@@ -5974,6 +6045,58 @@ mod tests {
         let mut d = dragon(flying());
         d.id = entity;
         d
+    }
+
+    #[test]
+    fn dragon_invulnerability_hook_blocks_the_matching_damage_type() {
+        use horizon_client::health::{DamageHooks, DamageLevel, Hurting};
+        fn hook(_: DamageLevel<'_>, hurting: Hurting<'_>, vanilla: bool) -> bool {
+            match hurting {
+                Hurting::Dragon(9100, source) => source.damage_type == "minecraft:arrow",
+                _ => vanilla,
+            }
+        }
+        let hooks = DamageHooks {
+            invulnerable: Some(hook),
+            ..DamageHooks::NONE
+        };
+        let mut test_level = horizon_client::health::TestLevel::with_hooks(0, hooks);
+        let level = &mut test_level.level();
+        let mut d = dragon_as(9100);
+        let arrow = HurtSource {
+            damage_type: "minecraft:arrow",
+            ..HIT.unwrap()
+        };
+        let generic = HurtSource {
+            damage_type: "minecraft:generic",
+            ..HIT.unwrap()
+        };
+        assert_eq!(
+            d.hurt(level, 0, 4.0, Some(arrow), false),
+            Hurt::Landed { full: false }
+        );
+        assert_eq!(d.health, MAX_HEALTH);
+        assert_eq!(
+            d.hurt(level, 0, 4.0, Some(generic), false),
+            Hurt::Landed { full: true }
+        );
+        assert_eq!(d.health, MAX_HEALTH - 4.0);
+    }
+
+    #[test]
+    fn dragon_part_respects_a_hook_override_of_fire_immunity() {
+        let mut test_level = horizon_client::health::TestLevel::new(0);
+        let level = &mut test_level.level();
+        let mut d = dragon(flying());
+        assert_eq!(
+            d.hurt_part_from(level, 0, 4.0, HIT, DamageKind::OnFire, None, None, false),
+            Hurt::Refused
+        );
+        assert_eq!(
+            d.hurt_part_from(level, 0, 4.0, HIT, DamageKind::OnFire, None, None, true),
+            Hurt::Landed { full: true }
+        );
+        assert_eq!(d.health, MAX_HEALTH - 4.0);
     }
 
     #[test]

@@ -338,7 +338,7 @@ impl Game<'_> {
                     self.command_damage_mob(id, amount, damage)
                 }
             }
-            Target::Item(id) => self.command_damage_item(id, amount, ty, cause.or(by)),
+            Target::Item(id) => self.command_damage_item(id, amount, ty, by, cause.or(by), from),
             Target::Boat(_) | Target::Cart(_) => {
                 self.command_damage_vehicle(target, amount, ty, cause.or(by))
             }
@@ -412,22 +412,45 @@ impl Game<'_> {
         id: u32,
         amount: f32,
         damage_type: &str,
+        direct: Option<Target>,
         causing: Option<Target>,
+        position: Option<[f64; 3]>,
     ) -> bool {
         let Some(index) = self.dropped.iter().position(|item| item.id == id) else {
             return false;
         };
-        let registry = &self.motion.health.damage;
-        let Some(kind) = registry.id(damage_type) else {
+        let Some(kind) = self.motion.health.damage.id(damage_type) else {
             return false;
         };
         let creative = self.creative_source_of(causing);
-        if self.saved_refuses_damage(id, damage_type, creative)
-            || !self
-                .ui
-                .rules
-                .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING)
-                && matches!(causing, Some(Target::Mob(_)))
+        let vanilla = self.saved_refuses_damage(id, damage_type, creative);
+        let entity_id = |target| match target {
+            Some(Target::Player) => self.own_entity_id(),
+            Some(Target::Guest(conn)) => self.command_guest(conn).map_or(0, |g| g.entity_id),
+            Some(target) => {
+                crate::game::native_entities::target_id(target).map_or(0, |id| id as i32)
+            }
+            None => 0,
+        };
+        let causing_id = entity_id(causing);
+        let source = horizon_client::health::HurtSource {
+            damage_type,
+            causing: causing_id,
+            direct: entity_id(direct),
+            position,
+        };
+        if crate::game::entity::damage_level_of!(self, scoped).invulnerability_check(
+            horizon_client::health::Hurting::Entity(id as i32, "minecraft:item", source),
+            vanilla,
+        ) {
+            return false;
+        }
+        let registry = &self.motion.health.damage;
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING)
+            && matches!(causing, Some(Target::Mob(_)))
             || registry.in_tag(kind, "minecraft:is_fall")
                 && self.entity_tag_matches("minecraft:fall_damage_immune", "minecraft:item")
         {

@@ -4042,11 +4042,16 @@ impl Mob {
         // Enderman.hurtServer: past `isInvulnerableTo`, the teleport draw
         // follows `super.hurtServer` whatever it answered (a hurt cooldown, a
         // dead enderman), its hurt sound's pitch included.
-        let enderman = self.species() == Species::Enderman
-            && !self.removed
-            && !(self.invulnerable_flag && !source.kind.bypasses_invulnerability());
-        let hurt = self.hurt_server(level, amount, source, armor_effectiveness);
-        if enderman {
+        let enderman = self.species() == Species::Enderman;
+        let mut passed_invulnerability = false;
+        let hurt = self.hurt_server(
+            level,
+            amount,
+            source,
+            armor_effectiveness,
+            &mut passed_invulnerability,
+        );
+        if enderman && passed_invulnerability {
             enderman::after_hurt(self, &source);
         }
         hurt
@@ -4057,6 +4062,7 @@ impl Mob {
         amount: f32,
         source: Damage,
         armor_effectiveness: Option<&mut dyn FnMut(f32, &mut LegacyRandom) -> f32>,
+        passed_invulnerability: &mut bool,
     ) -> bool {
         axolotl::before_damage(self, amount, &source);
         raider::note_hurt(self);
@@ -4070,12 +4076,28 @@ impl Mob {
             // about, so `Player.attack` goes on with its extra knockback and its aftermath.
             return sulfur_cube::immune_to(&source);
         }
-        if self.refuses_damage(&source) {
+        // Warden and ghast overrides can answer before Entity's base check.
+        let bypasses = source.kind.bypasses_invulnerability();
+        let reflected = self.reflected_fireball(&source);
+        let flagged = self.is_invulnerable() && !bypasses;
+        if self.species() == Species::Warden && warden::digging_or_emerging(self) && !bypasses {
             return false;
         }
-        // Ghast.isReflectedFireball: a fireball a player turned back is
-        // no fire to it, and kills it (Ghast.hurtServer: 1000 damage).
-        let reflected = self.reflected_fireball(&source);
+        let vanilla = self.removed
+            || flagged
+            || (source.is_fire() && self.kind.flags.fire_immune && !reflected);
+        let invulnerable = if self.species() == Species::Ghast && (flagged || reflected) {
+            self.removed || flagged
+        } else {
+            level.invulnerability_check(crate::health::Hurting::Mob(self, &source), vanilla)
+        };
+        if invulnerable {
+            return false;
+        }
+        *passed_invulnerability = true;
+        if !self.alive() {
+            return false;
+        }
         if !ai::accepts_damage(self, &source, amount, level.attack().player_uuid) {
             return false;
         }

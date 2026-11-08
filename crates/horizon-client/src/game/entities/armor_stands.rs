@@ -809,10 +809,18 @@ impl Game<'_> {
         // the saved flag or window refuses the hit — past only for
         // #bypasses_invulnerability damage and a creative player's hit
         // (`DamageSource.isCreativePlayer`).
-        if self.saved_refuses_damage(
-            self.armor_stands[i].id,
-            "minecraft:player_attack",
-            self.creative,
+        let id = self.armor_stands[i].id;
+        let attacker = self.own_entity_id();
+        let vanilla = self.saved_refuses_damage(id, "minecraft:player_attack", self.creative);
+        let source = horizon_client::health::HurtSource {
+            damage_type: "minecraft:player_attack",
+            causing: attacker,
+            direct: attacker,
+            position: None,
+        };
+        if super::entity::damage_level_of!(self, scoped).invulnerability_check(
+            horizon_client::health::Hurting::ArmorStand(id as i32, source),
+            vanilla,
         ) {
             return false;
         }

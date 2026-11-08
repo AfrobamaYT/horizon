@@ -927,6 +927,20 @@ impl Game<'_> {
             if !super::armor_stands::spared_by_blast(a)
                 && blast_reaches(center, diameter, [p.x, p.y, p.z])
             {
+                let id = a.id;
+                let source = horizon_client::health::HurtSource {
+                    damage_type,
+                    causing: causing as i32,
+                    direct: causing as i32,
+                    position: Some(center),
+                };
+                if crate::game::entity::damage_level_of!(self, scoped).invulnerability_check(
+                    horizon_client::health::Hurting::ArmorStand(id as i32, source),
+                    false,
+                ) {
+                    i += 1;
+                    continue;
+                }
                 self.break_armor_stand_by_anything(i, damage_type, causing);
             } else {
                 i += 1;
