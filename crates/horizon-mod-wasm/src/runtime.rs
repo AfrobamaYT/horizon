@@ -89,6 +89,7 @@ struct Running {
 }
 struct FrameScope {
     state: *mut State,
+    previous_module: Option<WasmMod>,
     running: Arc<Running>,
 }
 impl Drop for FrameScope {
@@ -97,6 +98,7 @@ impl Drop for FrameScope {
         // boxed state remains in place until this synchronous call scope ends.
         let state = unsafe { &mut *self.state };
         state.cx.frames.pop();
+        state.cx.module = self.previous_module.take();
         state.depth -= 1;
         if std::thread::panicking() {
             self.running.poisoned.store(true, Ordering::Relaxed);
@@ -442,7 +444,9 @@ impl WasmMod {
             store.data_mut().imports.resize_with(depth + 1, Vec::new);
         }
         store.data_mut().cx.frames.push(frame);
+        let previous_module = store.data_mut().cx.module.replace(self.clone());
         let scope = FrameScope {
+            previous_module,
             state: store.data_mut(),
             running: self.running.clone(),
         };
