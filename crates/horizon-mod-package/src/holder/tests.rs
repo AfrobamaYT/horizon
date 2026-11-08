@@ -247,6 +247,48 @@ fn controller_checks_capability_before_spawn_and_refuses_stale_or_wrong_ack() {
         }
     }
 }
+#[test]
+fn failed_kill_hands_unreaped_child_off_without_exceeding_launch_budget() {
+    use std::sync::mpsc;
+    for budget in [Duration::ZERO, Duration::from_millis(40)] {
+        let mut child = Command::new(actor())
+            .env("HOLDER_TEST_MODE", "unreapable")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut release = child.stdin.take().unwrap();
+        assert!(child.try_wait().unwrap().is_none());
+        let (returned, prompt) = mpsc::channel();
+        let (owned, background) = mpsc::channel();
+        let (reaped, finished) = mpsc::channel();
+        let caller = std::thread::spawn(move || {
+            controller::retire(
+                child,
+                Instant::now() + budget,
+                |_| Err(io::ErrorKind::PermissionDenied.into()),
+                move |mut child| {
+                    owned.send(()).unwrap();
+                    let status = child.wait().unwrap();
+                    reaped.send(status.success()).unwrap();
+                },
+            );
+            returned.send(()).unwrap();
+        });
+        let bounded = prompt.recv_timeout(Duration::from_millis(300)).is_ok();
+        background.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(matches!(
+            finished.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        // Release even when the deadline assertion will fail, so mutants do not strand actors.
+        release.write_all(b"x").unwrap();
+        assert!(finished.recv_timeout(Duration::from_secs(3)).unwrap());
+        caller.join().unwrap();
+        assert!(bounded, "unreaped child blocked launch after its deadline");
+    }
+}
 fn assert_record_owned(data: &Path, expected: bool) {
     let record = fs::read_dir(data.join("run-records"))
         .unwrap()

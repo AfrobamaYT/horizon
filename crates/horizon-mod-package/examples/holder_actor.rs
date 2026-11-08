@@ -83,6 +83,10 @@ fn main() {
                 .exec();
             panic!("closefrom wrapper exec: {error}");
         }
+        Ok("unreapable") => {
+            std::io::stdin().read_exact(&mut [0]).unwrap();
+            return;
+        }
         Ok("late") => std::thread::sleep(Duration::from_secs(4)),
         Ok("wrong-ack" | "stale-ack") => {
             use horizon_mod_package::local_control::{Channel, Marker, connect};

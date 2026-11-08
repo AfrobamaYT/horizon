@@ -116,7 +116,7 @@ pub fn launch(
         ENV,
         serde_json::to_string(marker).map_err(io::Error::other)?,
     );
-    let mut child = holder.spawn()?;
+    let child = holder.spawn()?;
     let handshake = (|| {
         let stream = endpoint.accept(deadline)?;
         let channel =
@@ -129,9 +129,32 @@ pub fn launch(
         channel.send(&Reply::Commit).map(drop)
     })();
     if let Err(error) = handshake {
-        let _ = child.kill();
-        child.wait()?;
+        retire(child, deadline, Child::kill, |mut child| {
+            let _ = child.wait();
+        });
         return Err(error);
     }
     Ok(Started::Holder { child })
+}
+
+// Only the launch path polls within the remaining budget. The background owner only waits:
+// it never signals a PID, and retains the unreaped Child even when termination failed.
+pub(super) fn retire(
+    mut child: Child,
+    deadline: Instant,
+    kill: impl FnOnce(&mut Child) -> io::Result<()>,
+    reap: impl FnOnce(Child) + Send + 'static,
+) {
+    let _ = kill(&mut child);
+    while Instant::now() < deadline {
+        if matches!(child.try_wait(), Ok(Some(_))) {
+            return;
+        }
+        std::thread::park_timeout(
+            deadline
+                .saturating_duration_since(Instant::now())
+                .min(Duration::from_millis(5)),
+        );
+    }
+    std::thread::spawn(move || reap(child));
 }

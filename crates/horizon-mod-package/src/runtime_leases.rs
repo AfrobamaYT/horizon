@@ -226,6 +226,7 @@ pub(crate) fn retained(file: fs::File) -> io::Result<fs::File> {
             if fd < 0 {
                 return Err(io::Error::last_os_error());
             }
+            // SAFETY: successful F_DUPFD_CLOEXEC returned a fresh fd; transfer sole ownership.
             return Ok(unsafe { fs::File::from_raw_fd(fd) });
         }
     }
