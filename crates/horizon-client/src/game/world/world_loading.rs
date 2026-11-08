@@ -301,8 +301,8 @@ impl WorldRequest {
         let mut world = World::new(res.facts().air, level.seed);
         world.attachments = save.load_attachments();
         world.shape = shape;
-        world.fast_lava = horizon_world::dimension_type::DimensionFacts::of_builtin_level(
-            horizon_core::LevelKey::builtin_or_overworld(dim.id()),
+        world.fast_lava = horizon_world::dimension_type::DimensionFacts::of_level(
+            horizon_core::LevelKey::parse(dim.id()).unwrap_or(horizon_core::LevelKey::OVERWORLD),
         )
         .fast_lava;
         world.game_time = level.time;
@@ -740,7 +740,35 @@ fn shapes_of(
         })
         .collect();
     shapes.extra = extra.leak();
+    set_level_types(overrides, &shapes);
     shapes
+}
+
+/// The dimension types the mods and packs changed or added, for the levels `shapes` holds: what
+/// `DimensionFacts::of_level` answers for them. A type the game refuses keeps the level's own.
+fn set_level_types(
+    overrides: &horizon_world::worldgen::overrides::WorldgenOverrides,
+    shapes: &horizon_client::chunk::LevelShapes,
+) {
+    use horizon_core::LevelKey;
+    let levels = [
+        "minecraft:overworld",
+        "minecraft:the_nether",
+        "minecraft:the_end",
+    ]
+    .into_iter()
+    .chain(shapes.extra.iter().map(|level| level.id));
+    let mut facts = Vec::new();
+    for level in levels {
+        match overrides.level_facts(level) {
+            Some(Ok(found)) => facts.extend(LevelKey::parse(level).ok().map(|key| (key, found))),
+            Some(Err(why)) => log::warn!(
+                "Horizon: data pack worldgen: the dimension type of {level} sets a field the game                  refuses ({why}); the level keeps the type it would have without it"
+            ),
+            None => {}
+        }
+    }
+    horizon_world::dimension_type::DimensionFacts::set_levels(facts);
 }
 
 /// The terrain of a level whose stem names a generator a mod registered, the
