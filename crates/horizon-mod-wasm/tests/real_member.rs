@@ -2,6 +2,12 @@
 use horizon_mod_package::manifest::Package;
 use horizon_mod_wasm::{WasmPackage, load};
 
+struct Quiet;
+impl mod_api::Host for Quiet {}
+mod_api::impl_host_areas!(Quiet);
+impl mod_api::ServerHost for Quiet {}
+mod_api::impl_server_host_areas!(Quiet);
+
 #[test]
 fn dump_members() {
     for (name, path) in [
@@ -52,4 +58,7 @@ fn real_member() {
     let loaded = load(&std::fs::read(std).unwrap(), vec![package]);
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
     assert_eq!(loaded.mods.len(), 1);
+    let mut args = mod_points::TickArgs::__new();
+    mod_points::dispatch::tick(mod_api::HostSide::Server(&mut Quiet), &mut args);
+    assert!(args.cancel, "real wasm listener must modify the point record");
 }
