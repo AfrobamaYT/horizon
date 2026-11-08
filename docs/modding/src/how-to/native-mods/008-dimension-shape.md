@@ -114,8 +114,11 @@ ground first, or place one.
 `level.sea_level(host)` reads `Level.getSeaLevel`: 63 in the Overworld, 32 in the Nether, 0 in the End. For a level of
 the noise generator it is the `sea_level` of its noise settings, a data pack's too when it replaces them. A level
 of a chunk generator the mod wrote has no noise settings to read: set `DimensionSettings::sea_level` to give it one
-(a level of the noise generator keeps its noise settings'), else it is 63. It is the sea level the game uses for the level: terrain and
-aquifers, mob spawning and behaviour (drowned, turtles, phantoms), rain and snow, and maps.
+(a level of the noise generator keeps its noise settings'), else it is 63 (-63 for a superflat generator). It is the sea
+level the game uses for the level: mob spawning and behaviour (drowned, turtles, phantoms), rain and snow, and maps.
+Terrain and aquifers are built with the generator's own sea level, which for a noise level is the noise settings' and
+which `DimensionSettings::sea_level` never changes: it only gives `level.sea_level(host)` a value for a generator that has
+none, so it does not move where the water is.
 
 ### Day clocks
 

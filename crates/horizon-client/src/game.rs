@@ -3535,6 +3535,16 @@ impl Dim {
     fn set_extra<'a>(ids: impl Iterator<Item = &'a str>) {
         *EXTRA_DIMS.write().unwrap() = ids.map(mod_api::__private::dimension_key).collect();
     }
+    /// Adds the dimension `id` a remote server sent, which no local world told of, so that
+    /// [`Self::from_id`] finds it.
+    fn add_extra(id: &str) {
+        if !Self::exists(id) {
+            EXTRA_DIMS
+                .write()
+                .unwrap()
+                .push(mod_api::__private::dimension_key(id));
+        }
+    }
     /// The dimension as mods' level handles name it.
     fn key(self) -> mod_api::DimensionKey {
         match self {
