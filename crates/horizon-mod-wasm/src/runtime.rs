@@ -40,12 +40,14 @@ pub(crate) struct State {
     outputs: Vec<Vec<u8>>,
     imports: Vec<Vec<u8>>,
     depth: usize,
+    epoch_budget: u64,
     group: usize,
     lending: Arc<AtomicUsize>,
 }
 // SAFETY: frames contain borrowed native objects only while the group mutex is held.
 // They are pushed and popped synchronously on that thread; callbacks borrow the same
-// locked store through a thread-local loan. Between threads the frame stack is empty.
+// locked store through a thread-local loan. The module pointer borrows call()'s self
+// under the same scope. Between threads the frame stack is empty and module is null.
 unsafe impl Send for State {}
 impl Default for State {
     fn default() -> Self {
@@ -62,6 +64,7 @@ impl Default for State {
             outputs: Vec::new(),
             imports: Vec::new(),
             depth: 0,
+            epoch_budget: 0,
             group: 0,
             lending: Arc::default(),
         }
@@ -121,7 +124,7 @@ impl Drop for PoisonOnPanic<'_> {
 }
 struct FrameScope {
     state: *mut State,
-    previous_module: Option<WasmMod>,
+    previous_module: *const WasmMod,
     running: Arc<Running>,
 }
 impl Drop for FrameScope {
@@ -130,7 +133,7 @@ impl Drop for FrameScope {
         // boxed state remains in place until this synchronous call scope ends.
         let state = unsafe { &mut *self.state };
         state.cx.frames.pop();
-        state.cx.module = self.previous_module.take();
+        state.cx.module = self.previous_module;
         state.depth -= 1;
         if std::thread::panicking() {
             self.running.poisoned.store(true, Ordering::Relaxed);
@@ -573,11 +576,13 @@ impl WasmMod {
             Some(resumed) => resumed.context(),
             None => {
                 let store = &mut locked.as_mut()?.store;
-                store.set_epoch_deadline(if class == CallClass::Load {
+                let budget = if class == CallClass::Load {
                     30_000
                 } else {
                     100
-                });
+                };
+                store.set_epoch_deadline(budget);
+                store.data_mut().epoch_budget = budget;
                 store.as_context_mut()
             }
         };
@@ -587,9 +592,15 @@ impl WasmMod {
             }
             return None;
         }
+        let budget = store.data().epoch_budget;
         let depth = store.data().depth + 1;
         if depth > 64 {
-            self.running.poisoned.store(true, Ordering::Relaxed);
+            if !self.running.poisoned.swap(true, Ordering::Relaxed) {
+                log::error!(
+                    "wasm mod {} stopped its group: {class:?} depth {depth} exceeds budget 64 (active epoch budget {budget})",
+                    self.id
+                );
+            }
             return None;
         }
         store.data_mut().depth = depth;
@@ -600,7 +611,10 @@ impl WasmMod {
             store.data_mut().imports.resize_with(depth + 1, Vec::new);
         }
         store.data_mut().cx.frames.push(frame);
-        let previous_module = store.data_mut().cx.module.replace(self.clone());
+        // self remains borrowed until this call returns. FrameScope restores the
+        // enclosing module before this borrow ends, including on error or unwind.
+        let previous_module =
+            std::mem::replace(&mut store.data_mut().cx.module, self as *const Self);
         let scope = FrameScope {
             previous_module,
             state: store.data_mut(),
@@ -639,16 +653,19 @@ impl WasmMod {
         })();
         store.data_mut().inputs[depth] = w;
         store.data_mut().outputs[depth] = output;
-        if result.is_err() {
-            self.running.poisoned.store(true, Ordering::Relaxed);
-        }
+        let first_failure = result.is_err() && !self.running.poisoned.swap(true, Ordering::Relaxed);
         drop(panic_stop);
         drop(resources);
         drop(scope);
         match result {
             Ok(value) => Some(value),
             Err(e) => {
-                log::error!("wasm mod {} stopped its group: {e:#}", self.id);
+                if first_failure {
+                    log::error!(
+                        "wasm mod {} stopped its group: {class:?}, depth {depth}, active epoch budget {budget}: {e:#}",
+                        self.id
+                    );
+                }
                 None
             }
         }

@@ -890,6 +890,28 @@ fn disable_during_native_import_defers_resource_drop_until_call_returns() {
 }
 
 #[test]
+fn calling_module_borrow_is_cleared_after_success_and_trap() {
+    for (body, expected) in [("i64.const 0", Some(())), ("unreachable", None)] {
+        let module = module(body);
+        assert_eq!(
+            module.call(
+                CallClass::Hook,
+                Frame::default(),
+                0,
+                None,
+                |_| {},
+                |r| r.take::<()>()
+            ),
+            expected
+        );
+        let group = module.running.group.lock().unwrap();
+        assert_eq!(group.store.data().depth, 0);
+        assert!(group.store.data().cx.frames.is_empty());
+        assert!(group.store.data().cx.module.is_null());
+    }
+}
+
+#[test]
 fn native_panic_stops_group_before_held_resources_drop() {
     let id = crate::boundary::import_id("StructureRandom", "next_long").unwrap();
     let module = module(&format!(
@@ -905,6 +927,14 @@ fn native_panic_stops_group_before_held_resources_drop() {
     assert!(result.is_err());
     assert!(dropped.load(Ordering::Relaxed));
     assert_eq!(call(&module), None);
+    let group = module
+        .running
+        .group
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    assert_eq!(group.store.data().depth, 0);
+    assert!(group.store.data().cx.frames.is_empty());
+    assert!(group.store.data().cx.module.is_null());
 }
 
 #[test]
