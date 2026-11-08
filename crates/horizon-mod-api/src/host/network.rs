@@ -40,9 +40,10 @@ pub trait NetworkClientHost {
     /// doesn't hide it (`GuiMessageSource.SYSTEM_CLIENT`), and
     /// `client_chat_received` is not told: vanilla fires that event from
     /// `ChatListener` for lines the server sent, not for lines the client adds
-    /// itself.
+    /// itself. Returns an error if the text exceeds the boundary's size or
+    /// nesting limits; rejected text is not added.
     #[access(WorldOnly)]
-    fn chat_line(&mut self, line: Text);
+    fn chat_line(&mut self, line: Text) -> Result<(), TextFormError>;
     /// Side: client.
     /// A mod's chat line or command (`/` first), sent as `send_chat` sends
     /// it (ClientPacketListener.sendChat / sendCommand), to any server: no

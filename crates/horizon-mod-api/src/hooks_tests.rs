@@ -2,6 +2,16 @@ use super::*;
 use crate::testing::FakeHost;
 
 #[test]
+fn chat_line_exposes_text_conversion_failure() {
+    // This function must type-check for every client host, so callers can
+    // propagate a refused text conversion instead of losing the error.
+    fn add_line(host: &mut dyn ClientHost, line: Text) -> Result<(), TextFormError> {
+        host.chat_line(line)
+    }
+    let _: fn(&mut dyn ClientHost, Text) -> Result<(), TextFormError> = add_line;
+}
+
+#[test]
 #[ignore = "optimized hot-hook microbenchmark"]
 fn subscriber_tick_benchmark() {
     use std::{hint::black_box, time::Instant};

@@ -13344,8 +13344,9 @@ mod tests {
             while reader.recv().is_ok() {}
             mod_api::prelude::NetworkClientHost::chat_line(
                 game,
-                horizon_client::text::Text::literal("local only"),
-            );
+                mod_api::Text::literal("local only"),
+            )
+            .unwrap();
             let history: Vec<_> = game
                 .remote
                 .as_ref()
