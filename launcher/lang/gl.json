@@ -184,7 +184,6 @@
   "Could not read the build log: {error}": "Non se puido ler o rexistro de compilación: {error}",
   "Could not read the saved sign-in.": "Non se puido ler o inicio de sesión gardado.",
   "Could not read the saved sign-in. Sign in again.": "Non se puido ler o inicio de sesión gardado. Inicia sesión de novo.",
-  "Could not read wasm mods in {path}: {error}": "Could not read wasm mods in {path}: {error}",
   "Could not read {name}: {error}": "Non se puido ler {name}: {error}",
   "Could not run {program}: {error}": "Non se puido executar {program}: {error}",
   "Could not save the renewed sign-in.": "Non se puido gardar o inicio de sesión renovado.",
@@ -1206,5 +1205,10 @@
   "Native mods aren't sandboxed: they run with full access to your computer, like any program. Install only mods whose authors you trust. To play with one, build the game on the Mods page; a build may download Rust and other build tools.": "Native mods aren't sandboxed: they run with full access to your computer, like any program. Install only mods whose authors you trust. To play with one, build the game on the Mods page; a build may download Rust and other build tools.",
   "Native builds may download Rust and other build tools. Source builds compile the game on this computer.": "Native builds may download Rust and other build tools. Source builds compile the game on this computer.",
   "{build} built and selected for its instance.": "{build} built and selected for its instance.",
+  "Found on this computer": "Atopados neste ordenador",
+  "Your system keyring didn't answer within {seconds} seconds. Make sure it is running and unlocked, then restart the launcher.": "O chaveiro do sistema non respondeu en {seconds} segundos. Comproba que está en funcionamento e desbloqueado e despois reinicia o lanzador.",
+  "Can't read {name}'s sign-in: {why}": "Non se pode ler o inicio de sesión de {name}: {why}",
+  "Horizon runs a data pack's functions, function tags, predicates, item modifiers, recipes, loot tables, advancements, villager trades, damage types, most tags and most worldgen (biomes, features, structures, dimensions). Other files, such as world presets, are not read yet.": "Horizon runs a data pack's functions, function tags, predicates, item modifiers, recipes, loot tables, advancements, villager trades, damage types, most tags and most worldgen (biomes, features, structures, dimensions). Other files, such as world presets, are not read yet.",
+  "{title} would change nothing in Horizon yet: Horizon doesn't read its {files}.": "{title} would change nothing in Horizon yet: Horizon doesn't read its {files}.",
   "Game cache leases require a supported local filesystem.": "Game cache leases require a supported local filesystem."
 }

@@ -20,12 +20,14 @@
 
 - [Making a content mod](how-to/content-mods.md)
 - [Native mods](how-to/native-mods.md)
+  - [Typed bulk block edits](how-to/native-mods/typed-block-edits.md)
 - [Caching reload-stable recipe definitions](how-to/reload-recipes.md)
 - [Query attachment holders](how-to/attachments.md)
 - [Game rule categories](how-to/game-rule-categories.md)
 - [Declaring a machine's menu data](how-to/block-entities.md)
 - [Controlling spawns](how-to/spawning.md)
 - [Drawing resolved models](how-to/model-drawing.md)
+- [Temporary client sound effects](how-to/client-effects.md)
 - [Slowing or boosting entities on a block](how-to/movement-factors.md)
 - [Building to `mod.wasm`](how-to/wasm-mods.md)
 - [Injections](injections.md)
@@ -38,6 +40,7 @@
 - [The manifest and the package](reference/manifest.md)
 - [The registry index and `.hpack`](reference/registry-index.md)
 - [The mod API (rustdoc)](reference/api.md)
+- [Wasm boundary coverage](wasm-coverage.md)
 - [Legacy native hook API history (frozen)](reference/native-api-history.md)
 <!-- The hook-notes preprocessor supplies this chapter and its published URL from catalog notes. -->
 - [Hook notes]()

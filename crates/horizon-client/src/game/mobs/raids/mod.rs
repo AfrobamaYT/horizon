@@ -13,6 +13,7 @@ use horizon_client::{
     },
     patrol::{GameplayAttributes, Member, PatrolLevel, PatrolSpawner},
     raid::{self, Action, BarName, RaidLevel, RaidPlayer, RaiderInfo, RaiderType, Raids, Spawn},
+    random_source,
 };
 use horizon_core::nbt::Tag;
 use horizon_core::{geometry::Vec3, random::RandomSource};
@@ -131,7 +132,7 @@ impl RaidLevel for Lvl<'_, '_> {
     fn ravager_can_spawn(&self, [x, y, z]: [i32; 3]) -> bool {
         let g = self.game;
         let w = g.mob_world_base(&[]);
-        spawn_rules::is_spawn_position_ok(Species::Ravager, &w, x, y, z)
+        spawn_rules::is_spawn_position_ok("minecraft:ravager", Species::Ravager, &w, x, y, z)
             || w.block_name(x, y - 1, z) == "minecraft:snow"
                 && g.res.facts().is_air(g.world.block(x, y, z))
     }
@@ -301,14 +302,14 @@ impl Game<'_> {
     fn load_raids(&mut self) {
         self.read_raids();
         if let Some(order) = self.raiding.unseeded.take() {
-            let seed = self.world.random.next_long();
+            let seed = random_source::unique_seed();
             self.raiding.raids.seed_loaded(seed, &order);
         }
     }
     /// Reads the raids of the player's dimension from its file (the previous
     /// dimension's saved first), as a level opens (`ServerLevel`'s
-    /// constructor). Their randoms are seeded by `load_raids` on the first
-    /// raid tick, at the same point in the world random as before.
+    /// constructor). Their own randoms are seeded by `load_raids` on the first
+    /// raid tick without drawing from the level's stream.
     pub(super) fn read_raids(&mut self) {
         if self.raiding.loaded == Some(self.dim) {
             return;
@@ -480,7 +481,8 @@ impl Game<'_> {
         }
         self.load_raids();
         let center = raid::raid_center(at, &self.village_pois());
-        let seed = self.world.random.next_long();
+        // The new raid's own random: `RandomSource.create()`, not the level's.
+        let seed = random_source::unique_seed();
         let difficulty = self.difficulty_id();
         let (id, triggered) = self
             .raiding

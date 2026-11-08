@@ -184,7 +184,6 @@
   "Could not read the build log: {error}": "ಬಿಲ್ಡ್ ಲಾಗ್ ಅನ್ನು ಓದಲಾಗಲಿಲ್ಲ: {error}",
   "Could not read the saved sign-in.": "ಉಳಿಸಿದ ಸೈನ್-ಇನ್ ಅನ್ನು ಓದಲಾಗಲಿಲ್ಲ.",
   "Could not read the saved sign-in. Sign in again.": "ಉಳಿಸಿದ ಸೈನ್-ಇನ್ ಅನ್ನು ಓದಲಾಗಲಿಲ್ಲ. ಮತ್ತೆ ಸೈನ್ ಇನ್ ಮಾಡಿ.",
-  "Could not read wasm mods in {path}: {error}": "Could not read wasm mods in {path}: {error}",
   "Could not read {name}: {error}": "{name}: {error} ಅನ್ನು ಓದಲಾಗಲಿಲ್ಲ",
   "Could not run {program}: {error}": "ರನ್ ಆಗಲಿಲ್ಲ {program}: {error}",
   "Could not save the renewed sign-in.": "ನವೀಕರಿಸಿದ ಸೈನ್-ಇನ್ ಅನ್ನು ಉಳಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ.",
@@ -1206,5 +1205,10 @@
   "Native mods aren't sandboxed: they run with full access to your computer, like any program. Install only mods whose authors you trust. To play with one, build the game on the Mods page; a build may download Rust and other build tools.": "Native mods aren't sandboxed: they run with full access to your computer, like any program. Install only mods whose authors you trust. To play with one, build the game on the Mods page; a build may download Rust and other build tools.",
   "Native builds may download Rust and other build tools. Source builds compile the game on this computer.": "Native builds may download Rust and other build tools. Source builds compile the game on this computer.",
   "{build} built and selected for its instance.": "{build} built and selected for its instance.",
+  "Found on this computer": "ಈ ಕಂಪ್ಯೂಟರ್‌ನಲ್ಲಿ ಕಂಡುಬಂದವು",
+  "Your system keyring didn't answer within {seconds} seconds. Make sure it is running and unlocked, then restart the launcher.": "ನಿಮ್ಮ ಸಿಸ್ಟಮ್ ಕೀರಿಂಗ್ {seconds} ಸೆಕೆಂಡುಗಳಲ್ಲಿ ಉತ್ತರಿಸಲಿಲ್ಲ. ಅದು ಚಾಲನೆಯಲ್ಲಿದೆ ಮತ್ತು ಅನ್‌ಲಾಕ್ ಆಗಿದೆ ಎಂದು ಖಚಿತಪಡಿಸಿಕೊಳ್ಳಿ, ನಂತರ ಲಾಂಚರ್ ಅನ್ನು ಮರುಪ್ರಾರಂಭಿಸಿ.",
+  "Can't read {name}'s sign-in: {why}": "{name} ಅವರ ಸೈನ್-ಇನ್ ಓದಲು ಸಾಧ್ಯವಿಲ್ಲ: {why}",
+  "Horizon runs a data pack's functions, function tags, predicates, item modifiers, recipes, loot tables, advancements, villager trades, damage types, most tags and most worldgen (biomes, features, structures, dimensions). Other files, such as world presets, are not read yet.": "Horizon runs a data pack's functions, function tags, predicates, item modifiers, recipes, loot tables, advancements, villager trades, damage types, most tags and most worldgen (biomes, features, structures, dimensions). Other files, such as world presets, are not read yet.",
+  "{title} would change nothing in Horizon yet: Horizon doesn't read its {files}.": "{title} would change nothing in Horizon yet: Horizon doesn't read its {files}.",
   "Game cache leases require a supported local filesystem.": "Game cache leases require a supported local filesystem."
 }
