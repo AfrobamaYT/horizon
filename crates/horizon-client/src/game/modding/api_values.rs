@@ -4,6 +4,8 @@
 use horizon_core::nbt::{Compound, JavaString, Tag};
 use horizon_items::items::{ItemStack as EngineStack, Items};
 use mod_api::item_stack::{ItemStack as ApiStack, StackWriteError};
+#[path = "api_values/aggregates.rs"]
+pub(in crate::game) mod aggregates;
 #[path = "api_values/block_edit.rs"]
 pub(in crate::game) mod block_edit;
 #[path = "api_values/block_state.rs"]

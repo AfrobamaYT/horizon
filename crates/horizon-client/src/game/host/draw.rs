@@ -70,8 +70,13 @@ impl DrawContext for GameDrawContext<'_, '_> {
         self.game.native_fluid(&mut *self.surface, fluid, at, size)
     }
     fn draw_scene(&mut self, rect: [f32; 4], blocks: &[NativeSceneBlock], view: NativeSceneView) {
+        let Ok(blocks) =
+            crate::game::api_values::aggregates::SourceScene(blocks).try_into_engine(&())
+        else {
+            return;
+        };
         self.game
-            .native_draw_scene(&mut *self.surface, rect, blocks, view)
+            .native_draw_scene(&mut *self.surface, rect, &blocks, view)
     }
     fn draw_menu_background(&mut self, rect: [f32; 4], in_world: bool) {
         self.game
