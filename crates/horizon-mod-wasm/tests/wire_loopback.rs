@@ -59,10 +59,13 @@ impl WasmMod {
     ) -> Option<R> {
         let mut cx = Box::new(boundary::Cx::default());
         cx.frames.push(frame);
+        cx.module = Some(self.clone());
         let pointer = &mut *cx as *mut boundary::Cx;
+        let _resources = unsafe { boundary::resource_scope(pointer) };
         // The pointer remains live until this synchronous call finishes; guest callbacks never retain it.
         guest::set_transport(Some(Rc::new(move |id, bytes| {
             let mut out = Writer::new();
+            let _resources = unsafe { boundary::resource_scope(pointer) };
             unsafe { boundary::serve(id, pointer, bytes, &mut out) }.unwrap();
             out.into_bytes()
         })));
@@ -71,6 +74,9 @@ impl WasmMod {
             input.put(&handler);
         }
         encode(&mut input);
+        if input.error().is_some() {
+            return None;
+        }
         let at = guest::input(input.bytes().len());
         unsafe {
             std::ptr::copy_nonoverlapping(input.bytes().as_ptr(), at, input.bytes().len());
@@ -201,6 +207,53 @@ fn wire_loopback_machine_tick_uses_checked_snapshot_writeback() {
     );
     assert_eq!(entity.data, vec![8]);
     assert_eq!(entity.revision().changes(), before);
+}
+#[test]
+fn wire_loopback_owned_box_handlers_inside_result_and_vec() {
+    use mod_api::ReloadApply;
+    let trace = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut out = Writer::new();
+    {
+        let _resources = guest::resource_scope();
+        let trace = trace.clone();
+        let value: Result<Box<dyn ReloadApply>, u32> = Ok(<dyn ReloadApply>::new(move || {
+            trace.lock().unwrap().push(7)
+        }));
+        out.put_owned(value);
+    }
+    assert_eq!(out.error(), None);
+    let mut cx = boundary::Cx::default();
+    cx.module = Some(WasmMod {
+        subscribed: &[],
+        corrupt: false,
+    });
+    {
+        let _resources = unsafe { boundary::resource_scope(&mut cx) };
+        let value = Reader::decode::<Result<Box<dyn ReloadApply>, u32>>(out.bytes())
+            .unwrap()
+            .unwrap();
+        value.apply();
+    }
+    assert_eq!(*trace.lock().unwrap(), vec![7]);
+    out.clear();
+    {
+        let _resources = guest::resource_scope();
+        let values = (0..3)
+            .map(|n| {
+                let trace = trace.clone();
+                <dyn ReloadApply>::new(move || trace.lock().unwrap().push(n))
+            })
+            .collect::<Vec<_>>();
+        out.put_owned(values);
+    }
+    assert_eq!(out.error(), None);
+    {
+        let _resources = unsafe { boundary::resource_scope(&mut cx) };
+        for value in Reader::decode::<Vec<Box<dyn ReloadApply>>>(out.bytes()).unwrap() {
+            value.apply();
+        }
+    }
+    assert_eq!(*trace.lock().unwrap(), vec![7, 0, 1, 2]);
 }
 #[test]
 fn wire_loopback_bad_import_bytes_are_typed_errors() {
