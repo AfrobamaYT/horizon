@@ -94,14 +94,9 @@ impl Game<'_> {
         if !self.native_window() || !view.scale.is_finite() || view.scale <= 0.0 {
             return;
         }
-        // A state the registry doesn't know (a mod's stale id) culls nothing
-        // instead of panicking in the block facts.
-        let registry = &self.pack.assets.registry;
-        let occupied: std::collections::HashMap<[i32; 3], _> = blocks
-            .iter()
-            .filter(|b| registry.state(b.state).is_some())
-            .map(|b| (b.pos, b.state))
-            .collect();
+        // The Game boundary prepared every state before any drawing began.
+        let occupied: std::collections::HashMap<[i32; 3], _> =
+            blocks.iter().map(|b| (b.pos, b.state)).collect();
         let solid = |pos: [i32; 3]| {
             occupied.get(&pos).is_some_and(|&state| {
                 self.res.behaviours().facts(state).flags & state_flags::SOLID_RENDER != 0
