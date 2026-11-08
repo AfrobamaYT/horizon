@@ -308,13 +308,14 @@ pub fn shape(attribute: TokenStream, sig: &syn::Signature) -> syn::Result<Shape>
     let borrowed_return = matches!(&sig.output, syn::ReturnType::Type(_, ty) if borrows(ty));
     // Without a receiver, a borrowed value may borrow an argument: the function must get it as
     // passed, never a listener's copy.
-    if borrowed_return && receiver == Receiver::None {
-        if let Some(arg) = args.iter().find(|arg| arg.pass == Pass::Shared) {
-            refusal.get_or_insert(format!(
-                "the value it returns may borrow argument `{}`",
-                arg.name
-            ));
-        }
+    if borrowed_return
+        && receiver == Receiver::None
+        && let Some(arg) = args.iter().find(|arg| arg.pass == Pass::Shared)
+    {
+        refusal.get_or_insert(format!(
+            "the value it returns may borrow argument `{}`",
+            arg.name
+        ));
     }
     let returns = match &sig.output {
         syn::ReturnType::Default => Returns::Unit,
