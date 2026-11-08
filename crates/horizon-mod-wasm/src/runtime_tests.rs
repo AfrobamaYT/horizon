@@ -52,6 +52,64 @@ fn hook_round_trip_and_malformed_reply_poison() {
     assert_eq!(call(&module), None);
 }
 #[test]
+fn encoding_failure_refuses_partial_arguments() {
+    let module = module("i64.const 2199023255556");
+    assert_eq!(
+        module.call(
+            CallClass::Hook,
+            Frame::default(),
+            0,
+            None,
+            |w| {
+                w.put(&42u32);
+                w.fail(WireError::Invalid("resource refused"));
+            },
+            |r| r.take::<u32>()
+        ),
+        None
+    );
+    assert!(module.is_stopped());
+}
+
+#[test]
+fn nested_handler_decodes_in_scope_and_remains_callable_after_return() {
+    let bounds = crate::boundary::export_id("StructurePiece", "bounding_box").unwrap();
+    let module = module(&format!(
+        r#"
+        local.get 0 i32.const {bounds} i32.eq if (result i64)
+          local.get 1 i64.load i64.const 123 i64.ne if unreachable end
+          i32.const 1024 i32.const 1 i32.store
+          i32.const 1028 i32.const 2 i32.store
+          i32.const 1032 i32.const 3 i32.store
+          i32.const 1036 i32.const 4 i32.store
+          i32.const 1040 i32.const 5 i32.store
+          i32.const 1044 i32.const 6 i32.store
+          i64.const 4398046511128
+        else
+          i64.const 2199023255552 local.get 2 i64.extend_i32_u i64.or
+        end"#
+    ));
+    let found: mod_api::FoundStructure = module
+        .call(
+            CallClass::Hook,
+            Frame::default(),
+            0,
+            None,
+            |w| {
+                w.put(&[9i32, 10, 11]);
+                w.put(&vec![Id(123)]);
+            },
+            |r| r.take(),
+        )
+        .unwrap();
+    assert_eq!(found.position, [9, 10, 11]);
+    let bounds = found.pieces[0].bounding_box();
+    assert_eq!(bounds.min, [1, 2, 3]);
+    assert_eq!(bounds.max, [4, 5, 6]);
+    assert!(!module.is_stopped());
+}
+
+#[test]
 fn calls_do_not_leave_an_active_module_ownership_cycle() {
     let module = module("i64.const 2199023255556");
     let running = Arc::downgrade(&module.running);

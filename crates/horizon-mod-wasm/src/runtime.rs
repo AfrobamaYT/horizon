@@ -245,6 +245,9 @@ fn host(
     let mut reply = std::mem::take(&mut caller.data_mut().replies[depth]);
     reply.clear();
     let cx = &mut *caller.data_mut().cx as *mut Cx;
+    // SAFETY: this import holds the locked/lent store; Cx stays boxed until the
+    // synchronous native dispatch and any nested callbacks have returned.
+    let resources = unsafe { crate::boundary::resource_scope(cx) };
     let mut context = caller.as_context_mut();
     let loan = Loan {
         group: context.data().group,
@@ -270,8 +273,12 @@ fn host(
             .map_err(|e| wasmtime::Error::msg(format!("{e:?}")))
     };
     drop(loan);
+    drop(resources);
     caller.data_mut().imports[depth] = input;
     result?;
+    if let Some(error) = reply.error() {
+        return Err(error.into());
+    }
     let size = u32::try_from(reply.bytes().len())?;
     if size <= cap {
         memory.write(&mut caller, out as usize, reply.bytes())?;
@@ -472,6 +479,9 @@ impl WasmMod {
             state: store.data_mut(),
             running: self.running.clone(),
         };
+        // SAFETY: FrameScope keeps the active module installed and the group
+        // remains exclusively locked/lent until this resource scope is dropped.
+        let resources = unsafe { crate::boundary::resource_scope(&mut *store.data_mut().cx) };
         let mut w = std::mem::take(&mut store.data_mut().inputs[depth]);
         let mut output = std::mem::take(&mut store.data_mut().outputs[depth]);
         let result = (|| -> wasmtime::Result<R> {
@@ -500,6 +510,7 @@ impl WasmMod {
         })();
         store.data_mut().inputs[depth] = w;
         store.data_mut().outputs[depth] = output;
+        drop(resources);
         drop(scope);
         match result {
             Ok(value) => Some(value),
@@ -517,6 +528,9 @@ impl WasmMod {
         input: &Writer,
         output: &mut Vec<u8>,
     ) -> wasmtime::Result<()> {
+        if let Some(error) = input.error() {
+            return Err(error.into());
+        }
         let len = u32::try_from(input.bytes().len())?;
         let ptr = self.input.call(&mut *store, len)?;
         let memory = store
