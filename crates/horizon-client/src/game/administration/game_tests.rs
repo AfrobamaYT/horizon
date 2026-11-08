@@ -1760,7 +1760,7 @@ mod tests {
         options.resources = root.clone();
         options.execution_role = execution_role::ExecutionRole::IntegratedServer;
         let res: &'static _ = Box::leak(Box::new(loaded.resources));
-        let game = Game::new(
+        Game::new(
             res,
             loaded.pack,
             loaded.gui.unwrap(),
@@ -1771,8 +1771,7 @@ mod tests {
             )),
             None,
         )
-        .unwrap();
-        game
+        .unwrap()
     }
 
     fn info(block_based: bool, max_ticks: i32, setup_ticks: i32) -> Info {
