@@ -127,7 +127,9 @@ impl Game<'_> {
             .assets
             .registry
             .state(self.world.block(key.0, key.1, key.2))?;
-        if block.name != "minecraft:trial_spawner" {
+        if horizon_client::block_entity_types::factory_block(&block.name)
+            != "minecraft:trial_spawner"
+        {
             return None;
         }
         let state = block
