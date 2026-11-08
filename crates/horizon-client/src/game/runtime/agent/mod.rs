@@ -1643,7 +1643,7 @@ impl Game<'_> {
                 if text == "\\b" {
                     title.backspace();
                 } else {
-                    title.type_text(text);
+                    self.screen_text_each(text, |game, c| game.title_edit(Some(c), false));
                 }
                 ok(json!({ "ok": true, "menu": self.title_value() }))
             }

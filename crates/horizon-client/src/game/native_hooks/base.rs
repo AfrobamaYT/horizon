@@ -1513,9 +1513,21 @@ impl Game<'_> {
     }
     /// A character was typed at the open screen
     /// (`ScreenEvent.CharacterTyped.Pre`, vanilla's `Screen.charTyped`):
-    /// `screen` is the screen it is, `c` the character, and `modifiers` GLFW's
-    /// bits (shift 1, control 2, alt 4, super 8). Set `canceled` and that one
-    /// character never reaches a text box.
+    /// `screen` is the screen it is, `c` the character, `modifiers` GLFW's
+    /// bits (shift 1, control 2, alt 4, super 8), and `field` a copy of the
+    /// focused text box. Set `canceled` and that one character never reaches
+    /// a text box.
+    ///
+    /// `field` is `None` with no box focused, and for the boxes that keep
+    /// their own validators: Options' and World Options' fields, the game
+    /// rules' and the block editor's. `cursor` and `highlight` count Unicode
+    /// scalar characters, and a character sees the box as the one before it
+    /// left it. Change `value`, `cursor` or `highlight` and the box takes the
+    /// change, cancelled or not, so cancel to replace the character yourself.
+    /// New text goes through the box's own filter and length limit, and what
+    /// follows the box (chat suggestions, a search's results, the anvil's
+    /// name) follows it. `max_length`, `multiline` and whether `field` is
+    /// `None` stay the box's: a change to them does nothing.
     ///
     /// It fires once per printable character of a key press's text and once
     /// per character of the input method's committed text, never for a control
@@ -1538,9 +1550,10 @@ impl Game<'_> {
         screen: &NativeScreenView<'_>,
         c: char,
         modifiers: u32,
+        field: &mut Option<mod_api::widgets::TextEdit>,
         canceled: &mut bool,
     ) {
-        self.fire_screen_char_typed_pre(screen, c, modifiers, canceled);
+        self.fire_screen_char_typed_pre(screen, c, modifiers, field, canceled);
     }
     /// A left or right (`right`) press at `at` (GUI pixels from the screen's
     /// top left, so outside it too) on block `block`'s screen, a mod's, over
