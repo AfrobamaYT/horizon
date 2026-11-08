@@ -115,6 +115,7 @@ pub(super) fn spawner(v: &Value) -> std::result::Result<Spawner, String> {
     let int = |k: &str| {
         o.get(k)
             .and_then(Value::as_i64)
+            .filter(|value| i32::try_from(*value).is_ok())
             .ok_or_else(|| format!("spawner: no {k}"))
     };
     let weight = int("weight")?;

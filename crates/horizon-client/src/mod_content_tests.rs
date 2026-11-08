@@ -6810,6 +6810,60 @@ fn structure_modifiers_reject_malformed_supported_data() {
 }
 
 #[test]
+fn structure_modifiers_and_biome_modifier_reject_out_of_range_spawns() {
+    for spawner in [
+        r#"{"type":"zombie","weight":1,"minCount":1,"maxCount":2147483648}"#,
+        r#"{"type":"zombie","weight":2147483648,"minCount":1,"maxCount":1}"#,
+        r#"{"type":"zombie","weight":1,"minCount":4294967297,"maxCount":4294967297}"#,
+    ] {
+        let structure = format!(
+            r#"{{"type":"neoforge:add_spawns","structures":"minecraft:hut","spawners":{spawner}}}"#
+        );
+        assert!(
+            structures::Modifier::read("zinc", "bad.json", &structure, &mut Vec::new()).is_err()
+        );
+        let biome = format!(
+            r#"{{"type":"neoforge:add_spawns","biomes":"minecraft:plains","spawners":{spawner}}}"#
+        );
+        assert!(biomes::Modifier::read("zinc", "bad.json", &biome, &mut Vec::new()).is_err());
+    }
+}
+
+#[test]
+fn structure_modifiers_boundary_count_samples_through_reader() {
+    use crate::mobs::spawn_selection::{StructureSpawns, sample_count};
+    use horizon_core::random::LegacyRandom;
+
+    let base = structure_modifier_base("structure-modifiers-boundary");
+    let scratch = base.parent().unwrap();
+    let m = structure_modifier_mod(
+        &scratch.join("zinc"),
+        &[(
+            "boundary",
+            r#"{"type":"neoforge:add_spawns","structures":"minecraft:hut","spawners":{"type":"zombie","weight":2147483647,"minCount":1,"maxCount":2147483647}}"#,
+        )],
+    );
+    let out = scratch.join("out");
+    assert!(
+        build_fixture(&base, Path::new(""), &[m], &out)
+            .unwrap()
+            .is_empty()
+    );
+    let loaded = StructureSpawns::load(&out);
+    let entry = loaded
+        .get("minecraft:hut", "monster")
+        .unwrap()
+        .spawns
+        .iter()
+        .find(|entry| entry.weight == 2147483647)
+        .unwrap();
+    assert_eq!((entry.min, entry.max), (1, 2147483647));
+    let mut random = LegacyRandom::new(1);
+    assert_eq!(sample_count(entry, &mut random), 1569548986);
+    fs::remove_dir_all(scratch).unwrap();
+}
+
+#[test]
 fn structure_modifiers_evaluate_conditions_before_required_fields() {
     let base = structure_modifier_base("structure-modifiers-conditions");
     let scratch = base.parent().unwrap();
