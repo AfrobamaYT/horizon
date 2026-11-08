@@ -920,8 +920,7 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "EntityLeaveLevelEvent",
-        paper = "EntityRemoveFromWorldEvent"
+        neoforge = "EntityLeaveLevelEvent"
     )]
     fn entity_leave_level();
     /// Block `block`'s block entity has fluid tanks: set `fluids` when the
