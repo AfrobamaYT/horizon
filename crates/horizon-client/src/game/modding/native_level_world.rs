@@ -176,6 +176,29 @@ impl Game<'_> {
         })
     }
 
+    /// The sea level of the level's terrain: a built-in level's, or the noise settings a mod's
+    /// level names. None as the host call says.
+    pub(super) fn level_sea_level(&self, level: LevelRef) -> Option<i32> {
+        use horizon_core::LevelKey;
+        self.native_level_world(level)?;
+        let key = LevelKey::parse(level.dimension_id()).ok()?;
+        if matches!(key, LevelKey::OVERWORLD | LevelKey::NETHER | LevelKey::END) {
+            return Some(horizon_world::level::vanilla_sea_level(key));
+        }
+        let dimension = horizon_world::worldgen::overrides::mod_dimensions()
+            .iter()
+            .find(|dimension| dimension.id == level.dimension_id())?;
+        let stem: serde_json::Value = serde_json::from_str(&dimension.stem).ok()?;
+        let read = |id: &str| -> Option<serde_json::Value> {
+            let (namespace, path) = id.split_once(':').unwrap_or(("minecraft", id));
+            let file = self.options.resources.join(format!(
+                "data/{namespace}/worldgen/noise_settings/{path}.json"
+            ));
+            serde_json::from_slice(&std::fs::read(file).ok()?).ok()
+        };
+        horizon_world::worldgen::overrides::stem_sea_level(&stem, &read)
+    }
+
     /// The world's seed (`WorldOptions.seed`), as `/seed` shows it.
     pub(super) fn level_seed(&self, level: LevelRef) -> Option<i64> {
         self.native_level_world(level)?;

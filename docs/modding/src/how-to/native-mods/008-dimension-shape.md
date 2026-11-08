@@ -103,7 +103,16 @@ It is false for an unregistered dimension and for an entity that cannot change l
 orb, a projectile); a fake player stays where it is. Nothing builds a platform at the destination, so look for the
 ground first, or place one.
 
+### Sea level
+
+`level.sea_level(host)` reads the Y a level's terrain is generated with its sea at: 63 in the Overworld, 32 in the
+Nether, 0 in the End, and for a mod's level of the noise generator the `sea_level` of its `noise_settings`. It is
+None for a level of a generator the mod wrote (that terrain has no sea level to read) and for noise settings a
+data pack replaced. It is what terrain and aquifers use: mob spawning, weather and maps still read the built-in
+levels' own sea level, so a level with noise settings of another sea level generates one sea and spawns by another.
+
 ### Chunk generators
+
 
 A chunk generator is a mod's code for a level's terrain: vanilla's `ChunkGenerator`, and
 `build_terrain` its `buildTerrain`. Register it once, at startup, and name it from a dimension,
