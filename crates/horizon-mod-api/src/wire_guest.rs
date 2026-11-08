@@ -90,6 +90,7 @@ thread_local! {
 /// zeroed, for every mod of the group to read (one memory, one std, one state). A new word is taken
 /// from the end of this list; the array's length is part of the ABI.
 const GROUP_WORDS: usize = 8;
+#[cfg(any(target_arch = "wasm32", test))]
 const WORD_HANDLERS: usize = 0;
 const WORD_BUDGET: usize = 1;
 
@@ -133,7 +134,7 @@ fn reserve(
 ) -> bool {
     use std::sync::atomic::Ordering::Relaxed;
     state[WORD_BUDGET]
-        .fetch_update(Relaxed, Relaxed, |used| {
+        .try_update(Relaxed, Relaxed, |used| {
             used.checked_add(bytes).filter(|total| *total <= limit)
         })
         .is_ok()
@@ -142,7 +143,7 @@ fn reserve(
 fn release_budget(state: &[std::sync::atomic::AtomicUsize; GROUP_WORDS], bytes: usize) {
     use std::sync::atomic::Ordering::Relaxed;
     let _ =
-        state[WORD_BUDGET].fetch_update(Relaxed, Relaxed, |used| Some(used.saturating_sub(bytes)));
+        state[WORD_BUDGET].try_update(Relaxed, Relaxed, |used| Some(used.saturating_sub(bytes)));
 }
 
 /// Runs `f` on the handlers the game holds for this mod's group. Members of a group share one
