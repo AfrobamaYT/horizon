@@ -591,7 +591,8 @@ impl Goal for CrossbowAttack {
                 }
             }
             Crossbow::Charging => {
-                m.extra.using_item += 1;
+                // A mod may have set the use's ticks left to anything.
+                m.extra.using_item = m.extra.using_item.saturating_add(1);
                 if m.extra.using_item >= charge_ticks(m) {
                     m.extra.using_item = 0;
                     m.extra.flag = false;
