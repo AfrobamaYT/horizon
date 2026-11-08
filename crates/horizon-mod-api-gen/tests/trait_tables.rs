@@ -79,9 +79,10 @@ fn catalog_callbacks_resolve_json_paths_and_name_the_engine_gap() {
     )
     .unwrap_err();
     assert!(gap.contains("argument tuple"), "{gap}");
-    // `fn(&mut Self, PlayerRef)` is callable once the call's receiver is bound.
+    // `fn(&mut Self, PlayerRef)`: the receiver binds (see tests/native_bound.rs), but `PlayerRef` is
+    // a `mod_api` layout, which the rule never widens, so its argument has no codec yet.
     let player = "fn(&mut Self, mod_api::PlayerRef)";
     let module = "horizon_client::game::lan_actions::tick";
-    assert!(callback(module, Some("Game"), player, false).is_err());
-    assert_eq!(callback(module, Some("Game"), player, true), Ok(()));
+    let gap = callback(module, Some("Game"), player, true).unwrap_err();
+    assert!(gap.contains("argument tuple"), "{gap}");
 }
