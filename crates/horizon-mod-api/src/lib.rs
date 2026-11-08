@@ -583,6 +583,29 @@ pub struct ClientAudioOptions {
     pub master_volume: f32,
 }
 
+/// Borrowed humanoid inputs at arm-pose extraction, shared by players and mobs.
+/// Poses are in main/off-hand order, before listeners answer; item declarations
+/// are already included. Model-specific animation may subsequently adjust the arms.
+// exhaustive: the engine builds this read-only view
+pub struct HumanoidRenderState<'a> {
+    /// Stack held in the main hand; empty stacks are absent.
+    pub main_hand: Option<&'a ItemStack>,
+    /// Stack held in the off hand; empty stacks are absent.
+    pub off_hand: Option<&'a ItemStack>,
+    /// Whether the entity's main arm is its left arm.
+    pub main_arm_left: bool,
+    /// Hand currently using an item, absent when no item is in use.
+    pub use_hand: Option<Hand>,
+    /// Elapsed item-use ticks at extraction.
+    pub ticks_using_item: i32,
+    /// Animation of the item currently being used.
+    pub use_animation: UseAnimation,
+    /// Selected main-hand pose before any hook answers.
+    pub main_arm_pose: ArmPose,
+    /// Selected off-hand pose before any hook answers.
+    pub off_arm_pose: ArmPose,
+}
+
 /// Context and adjustable pose for a first-person hand render.
 ///
 /// Translation is in blocks and rotation is in degrees (pitch, yaw, roll).
