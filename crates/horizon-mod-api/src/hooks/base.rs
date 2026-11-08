@@ -3773,7 +3773,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "collect",
         out = "names",
-        neoforge = "none (NeoForge 26.3 has no such event)"
+        neoforge = "none (NeoForge 26.3 has no such event)",
+        paper = "PlayerCommandSendEvent"
     )]
     fn player_commands_sent();
     /// The item `item` of the server player `player` (`name`) broke in `slot`
@@ -4243,7 +4244,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's PlayerInputEvent)"
+        neoforge = "none (NeoForge has no such event; Bukkit's PlayerInputEvent)",
+        paper = "PlayerInputEvent"
     )]
     fn player_input();
     /// An item cooldown is about to start for a server player. `item` is the item id and `ticks` its
