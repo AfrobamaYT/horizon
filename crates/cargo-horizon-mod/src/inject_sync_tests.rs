@@ -7,6 +7,9 @@ struct Fixture {
     repo: PathBuf,
 }
 impl Fixture {
+    fn function(name: &str, id: &str) -> Self {
+        Self::new(name, id, &entry("function", "lower::run", "head", ""))
+    }
     fn new(name: &str, id: &str, declarations: &str) -> Self {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
             "../../target/inject-sync-{name}-{}",
@@ -156,13 +159,26 @@ fn inject_sync_refuses_invalid_fields_and_missing_repository() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn reviewer_inject_does_not_overwrite_symlink_target() {
+    let f = Fixture::function("review-link", "example");
+    let target = f.root.join("user-data.txt");
+    fs::write(&target, "user::slot\n").unwrap();
+    std::os::unix::fs::symlink(&target, f.file("example.txt")).unwrap();
+    f.run().unwrap();
+    assert_eq!(fs::read_to_string(&target).unwrap(), "user::slot\n");
+    assert!(
+        !fs::symlink_metadata(f.file("example.txt"))
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+}
+
 #[test]
 fn reviewer_unchanged_file_keeps_mtime() {
-    let f = Fixture::new(
-        "review-mtime",
-        "example",
-        &entry("function", "lower::run", "head", ""),
-    );
+    let f = Fixture::function("review-mtime", "example");
     f.run().unwrap();
     let output = f.file("example.txt");
     let old = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1000);
@@ -184,11 +200,7 @@ fn reviewer_rejects_non_native() {
 
 #[test]
 fn reviewer_uses_manifest_owner() {
-    let f = Fixture::new(
-        "review-owner",
-        "second",
-        &entry("function", "lower::run", "head", ""),
-    );
+    let f = Fixture::function("review-owner", "second");
     f.run().unwrap();
     assert!(f.file("second.txt").exists());
     assert!(!f.file("example.txt").exists());
@@ -196,11 +208,7 @@ fn reviewer_uses_manifest_owner() {
 
 #[test]
 fn reviewer_preserves_user_comment() {
-    let f = Fixture::new(
-        "review-comment",
-        "example",
-        &entry("function", "lower::run", "head", ""),
-    );
+    let f = Fixture::function("review-comment", "example");
     for text in [
         "# downstream patch\nuser::slot\n",
         "user::slot # keep this reason\n",
