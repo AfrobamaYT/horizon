@@ -373,6 +373,22 @@ fn delayed_tasks_take_a_server_host(
     (host.schedule_task(20, 7), host.cancel_task(TaskId(1)))
 }
 
+/// Compile-only: a mod reads a level's dimension type, and registers a dimension with its own.
+#[allow(dead_code)]
+fn dimension_types_take_a_host(
+    host: &dyn Host,
+    level: LevelRef,
+) -> Option<(f64, bool, DimensionSettings)> {
+    let ty = host.level_dimension_type(level)?;
+    let nether_like = DimensionSettings {
+        coordinate_scale: 8.0,
+        has_fixed_time: true,
+        fast_lava: true,
+        ..Default::default()
+    };
+    Some((ty.coordinate_scale, ty.fast_lava, nether_like))
+}
+
 /// Compile-only: a client mod reads the open inventory screen's slot boxes through its menu handle.
 #[allow(dead_code)]
 fn menu_slot_boxes_take_a_client_host(

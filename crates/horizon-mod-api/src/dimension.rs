@@ -13,7 +13,7 @@ pub(crate) const NOISE_GENERATOR: &str = "minecraft:noise";
 /// What a mod's dimension is made of. The default is the Overworld's shape
 /// and terrain over plains; the parts of a dimension type not named here are
 /// the Overworld's.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 // exhaustive: mods build it themselves as register_dimension's settings
 pub struct DimensionSettings {
     /// The lowest block's y: a multiple of 16, from -2032.
@@ -33,6 +33,44 @@ pub struct DimensionSettings {
     pub noise_settings: String,
     /// The one biome the level has.
     pub biome: String,
+    /// `DimensionType.hasFixedTime`: the sky's time does not advance (the Nether's and the End's).
+    pub has_fixed_time: bool,
+    /// `DimensionType.hasEnderDragonFight`: the level runs the End's dragon fight.
+    pub has_ender_dragon_fight: bool,
+    /// `DimensionType.coordinateScale`: what a portal divides this level's coordinates by (the
+    /// Nether's is 8); above 0 and at most 30,000,000.
+    pub coordinate_scale: f64,
+    /// `DimensionType.ambientLight`: the light every block gets, 0 to 1.
+    pub ambient_light: f32,
+    /// `DimensionType.infiniburn`: the block tag (`#minecraft:infiniburn_overworld`) whose blocks
+    /// burn forever.
+    pub infiniburn: String,
+    /// `DimensionType.monsterSpawnLightTest`: the highest light a monster spawns in is drawn from
+    /// this range, both ends 0 to 15.
+    pub monster_spawn_light_level: (i32, i32),
+    /// `DimensionType.monsterSpawnBlockLightLimit`: the block light above which monsters do not
+    /// spawn, 0 to 15.
+    pub monster_spawn_block_light_limit: i32,
+    /// The sky drawn: `overworld`, `end` or `none` (`DimensionType.skybox`).
+    pub skybox: String,
+    /// How block faces are lit by direction: `default` or `nether` (`DimensionType.cardinalLightType`).
+    pub cardinal_light: String,
+    /// `minecraft:gameplay/water_evaporates`: water placed here boils away, as in the Nether.
+    pub water_evaporates: bool,
+    /// `minecraft:gameplay/fast_lava`: lava flows at the Nether's speed.
+    pub fast_lava: bool,
+    /// `minecraft:gameplay/respawn_anchor_works`: respawn anchors can be charged and used.
+    pub respawn_anchor_works: bool,
+    /// `minecraft:gameplay/nether_portal_spawns_piglin`: nether portals spawn zombified piglins.
+    pub nether_portal_spawns_piglin: bool,
+    /// `minecraft:gameplay/piglins_zombify`: piglins turn into zombified piglins here.
+    pub piglins_zombify: bool,
+    /// `minecraft:gameplay/snow_golem_melts`: snow golems take damage here.
+    pub snow_golem_melts: bool,
+    /// `minecraft:gameplay/can_start_raid`: a bad omen can start a raid here.
+    pub can_start_raid: bool,
+    /// `minecraft:gameplay/sky_light_level`: the sky light that daylight is measured against, 0 to 15.
+    pub sky_light_level: f32,
 }
 
 impl Default for DimensionSettings {
@@ -46,6 +84,23 @@ impl Default for DimensionSettings {
             generator: NOISE_GENERATOR.into(),
             noise_settings: "minecraft:overworld".into(),
             biome: "minecraft:plains".into(),
+            has_fixed_time: false,
+            has_ender_dragon_fight: false,
+            coordinate_scale: 1.0,
+            ambient_light: 0.0,
+            infiniburn: "#minecraft:infiniburn_overworld".into(),
+            monster_spawn_light_level: (0, 7),
+            monster_spawn_block_light_limit: 0,
+            skybox: "overworld".into(),
+            cardinal_light: "default".into(),
+            water_evaporates: false,
+            fast_lava: false,
+            respawn_anchor_works: false,
+            nether_portal_spawns_piglin: true,
+            piglins_zombify: true,
+            snow_golem_melts: false,
+            can_start_raid: true,
+            sky_light_level: 15.0,
         }
     }
 }
@@ -59,12 +114,97 @@ impl DimensionSettings {
             "logical_height": self.logical_height,
             "has_skylight": self.has_skylight,
             "has_ceiling": self.has_ceiling,
+            "has_fixed_time": self.has_fixed_time,
+            "has_ender_dragon_fight": self.has_ender_dragon_fight,
+            "coordinate_scale": self.coordinate_scale,
+            "ambient_light": self.ambient_light,
+            "infiniburn": self.infiniburn,
+            "monster_spawn_light_level": {
+                "type": "minecraft:uniform",
+                "min_inclusive": self.monster_spawn_light_level.0,
+                "max_inclusive": self.monster_spawn_light_level.1,
+            },
+            "monster_spawn_block_light_limit": self.monster_spawn_block_light_limit,
+            "skybox": self.skybox,
+            "cardinal_light": self.cardinal_light,
+            "attributes": {
+                "minecraft:gameplay/water_evaporates": self.water_evaporates,
+                "minecraft:gameplay/fast_lava": self.fast_lava,
+                "minecraft:gameplay/respawn_anchor_works": self.respawn_anchor_works,
+                "minecraft:gameplay/nether_portal_spawns_piglin": self.nether_portal_spawns_piglin,
+                "minecraft:gameplay/piglins_zombify": self.piglins_zombify,
+                "minecraft:gameplay/snow_golem_melts": self.snow_golem_melts,
+                "minecraft:gameplay/can_start_raid": self.can_start_raid,
+                "minecraft:gameplay/sky_light_level": self.sky_light_level,
+            },
         })
+    }
+    /// What the dimension type's codec refuses in the fields besides the build height, if
+    /// anything: a value out of its range, or a name the game has no such sky or lighting for.
+    pub(crate) fn invalid_field(&self) -> Option<String> {
+        let light = |n: i32| (0..=15).contains(&n);
+        let (low, high) = self.monster_spawn_light_level;
+        let reason = if !(self.coordinate_scale > 0.0 && self.coordinate_scale <= 30_000_000.0) {
+            "coordinate_scale must be above 0 and at most 30000000"
+        } else if !(0.0..=1.0).contains(&self.ambient_light) {
+            "ambient_light must be 0 to 1"
+        } else if !(0.0..=15.0).contains(&self.sky_light_level) {
+            "sky_light_level must be 0 to 15"
+        } else if !(light(low) && light(high) && low <= high) {
+            "monster_spawn_light_level must be a range inside 0 to 15"
+        } else if !light(self.monster_spawn_block_light_limit) {
+            "monster_spawn_block_light_limit must be 0 to 15"
+        } else if !matches!(self.skybox.as_str(), "overworld" | "end" | "none") {
+            "skybox must be overworld, end or none"
+        } else if !matches!(self.cardinal_light.as_str(), "default" | "nether") {
+            "cardinal_light must be default or nether"
+        } else if !self.infiniburn.starts_with('#') || self.infiniburn.len() < 2 {
+            "infiniburn must be a block tag, such as #minecraft:infiniburn_overworld"
+        } else {
+            return None;
+        };
+        Some(reason.to_owned())
     }
     /// Whether the dimension type's codec accepts the build height.
     pub(crate) fn valid_shape(&self) -> bool {
         horizon_world::worldgen::overrides::LevelHeight::of_json(&self.dimension_type()).is_some()
     }
+}
+
+/// A level's dimension type as the game uses it (`Level.dimensionType()` and the gameplay attributes
+/// of its environment), as `host.level_dimension_type(level)` reads it: the fields of
+/// [`DimensionSettings`] that apply, plus the type's id.
+#[derive(Clone, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct LevelDimensionType {
+    /// The dimension type's id (`minecraft:the_nether`, or a mod's or pack's).
+    pub id: String,
+    pub min_y: i32,
+    pub height: i32,
+    pub logical_height: i32,
+    pub has_skylight: bool,
+    pub has_ceiling: bool,
+    pub has_fixed_time: bool,
+    pub has_ender_dragon_fight: bool,
+    pub coordinate_scale: f64,
+    pub ambient_light: f32,
+    /// The block tag whose blocks burn forever.
+    pub infiniburn: String,
+    /// The range monsters' spawn light is drawn from, when it is a constant or a uniform range.
+    pub monster_spawn_light_level: Option<(i32, i32)>,
+    pub monster_spawn_block_light_limit: i32,
+    /// `overworld`, `end` or `none`.
+    pub skybox: String,
+    /// `default` or `nether`.
+    pub cardinal_light: String,
+    pub water_evaporates: bool,
+    pub fast_lava: bool,
+    pub respawn_anchor_works: bool,
+    pub nether_portal_spawns_piglin: bool,
+    pub piglins_zombify: bool,
+    pub snow_golem_melts: bool,
+    pub can_start_raid: bool,
+    pub sky_light_level: f32,
 }
 
 /// A registered dimension: its namespaced id (`modid:pocket`), the mod that
@@ -102,4 +242,47 @@ pub fn installed_dimensions() -> Vec<ModDimension> {
         .iter()
         .map(DimensionInfo::entries)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_default_settings_are_accepted_and_name_the_overworlds_type() {
+        let settings = DimensionSettings::default();
+        assert!(settings.valid_shape());
+        assert_eq!(settings.invalid_field(), None);
+        let json = settings.dimension_type();
+        assert_eq!(json["coordinate_scale"], 1.0);
+        assert_eq!(json["infiniburn"], "#minecraft:infiniburn_overworld");
+        assert_eq!(json["monster_spawn_light_level"]["max_inclusive"], 7);
+        assert_eq!(
+            json["attributes"]["minecraft:gameplay/piglins_zombify"],
+            true
+        );
+        assert_eq!(json["attributes"]["minecraft:gameplay/fast_lava"], false);
+    }
+
+    #[test]
+    fn a_field_out_of_range_is_refused_by_name() {
+        let refused = |edit: fn(&mut DimensionSettings)| {
+            let mut settings = DimensionSettings::default();
+            edit(&mut settings);
+            settings.invalid_field().unwrap_or_default()
+        };
+        assert!(refused(|s| s.coordinate_scale = 0.0).contains("coordinate_scale"));
+        assert!(refused(|s| s.coordinate_scale = f64::NAN).contains("coordinate_scale"));
+        assert!(refused(|s| s.ambient_light = 1.5).contains("ambient_light"));
+        assert!(refused(|s| s.sky_light_level = 16.0).contains("sky_light_level"));
+        assert!(
+            refused(|s| s.monster_spawn_light_level = (8, 7)).contains("monster_spawn_light_level")
+        );
+        assert!(refused(|s| s.monster_spawn_block_light_limit = 16).contains("block_light_limit"));
+        assert!(refused(|s| s.skybox = "moon".into()).contains("skybox"));
+        assert!(refused(|s| s.cardinal_light = "up".into()).contains("cardinal_light"));
+        assert!(
+            refused(|s| s.infiniburn = "minecraft:infiniburn_end".into()).contains("infiniburn")
+        );
+    }
 }
