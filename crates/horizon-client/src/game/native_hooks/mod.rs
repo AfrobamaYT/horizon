@@ -9,7 +9,8 @@
 /// Generated dispatch entry points, not hand-written hook implementations.
 mod fire;
 pub(in crate::game) use fire::{
-    BlockDropsCall, ConnectsToCall, ItemAfterVerticalCollisionCall, UpdateShapeCall,
+    BlockDropsCall, ConnectsToCall, EntityChangeBlockPreCall, ItemAfterVerticalCollisionCall,
+    UpdateShapeCall,
 };
 
 use super::native_data_maps::NativeDataMapType;
