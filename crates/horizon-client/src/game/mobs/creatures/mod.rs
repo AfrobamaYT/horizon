@@ -3089,16 +3089,26 @@ impl Game<'_> {
                     }
                 }
                 MobEvent::SetTarget { mob, target } => {
-                    if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
-                        m.ai.target = Some(target);
-                    }
+                    let player = self
+                        .lan
+                        .as_ref()
+                        .and_then(|host| host.mob_players.get(&mob).copied())
+                        .or(self.lan_acting);
+                    self.set_event_ai_target(mob, Some(target), player);
                 }
                 MobEvent::HuntHoglin { mob, target, ticks } => {
+                    let mut acquire = false;
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
                         m.extra.ints[0] = ticks;
-                        if m.ai.target.is_none() {
-                            m.ai.target = Some(Who::Mob(target));
-                        }
+                        acquire = m.ai.target.is_none();
+                    }
+                    if acquire {
+                        let player = self
+                            .lan
+                            .as_ref()
+                            .and_then(|host| host.mob_players.get(&mob).copied())
+                            .or(self.lan_acting);
+                        self.set_event_ai_target(mob, Some(Who::Mob(target)), player);
                     }
                 }
                 MobEvent::Projectile(p) => self.launch_mob_projectile(p),
@@ -3706,8 +3716,13 @@ impl Game<'_> {
                     target,
                     aggressive,
                 } => {
+                    let player = self
+                        .lan
+                        .as_ref()
+                        .and_then(|host| host.mob_players.get(&mob).copied())
+                        .or(self.lan_acting);
+                    self.set_event_ai_target(mob, Some(target), player);
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
-                        m.ai.target = Some(target);
                         m.ai.aggressive |= aggressive;
                     }
                 }
@@ -6800,6 +6815,7 @@ impl Game<'_> {
         let feet = [m.position.x, m.position.y, m.position.z];
         let mut handled = true;
         let mut ignited_creeper = false;
+        let mut clear_wolf_target = false;
         let mut drops: Vec<(String, u32)> = Vec::new();
         // The shearing table rolled, for the mods.
         let mut drops_table = String::new();
@@ -6989,7 +7005,7 @@ impl Game<'_> {
                 m.extra.sitting = !m.extra.sitting;
                 m.ai.jumping = false;
                 m.nav_stop();
-                m.ai.target = None;
+                clear_wolf_target = true;
                 self.world.modified.insert((
                     m.position.x.floor() as i32 >> 4,
                     m.position.z.floor() as i32 >> 4,
@@ -7010,7 +7026,7 @@ impl Game<'_> {
                     m.extra.owner = Some(acting);
                     m.persistent = true;
                     m.nav_stop();
-                    m.ai.target = None;
+                    clear_wolf_target = true;
                     m.extra.sitting = true;
                 }
                 // TamableAnimal.spawnTamingParticles (entity event 7 or 6).
@@ -7296,6 +7312,9 @@ impl Game<'_> {
         }
         if !handled {
             return Ok(false);
+        }
+        if clear_wolf_target {
+            self.set_event_ai_target(mob.0, None, self.lan_acting);
         }
         if ignited_creeper {
             self.native_creeper_ignite(

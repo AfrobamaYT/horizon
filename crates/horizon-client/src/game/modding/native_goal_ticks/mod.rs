@@ -463,8 +463,7 @@ impl Game<'_> {
         };
         let mut new_target = original;
         let mut cancel = false;
-        mod_api::dispatch_living_change_target(
-            &context,
+        super::native_hooks::NativeHookHost { host: &context }.native_living_change_target(
             mod_api::__private::LivingChangeTargetCall {
                 mob: entity,
                 original_target: original,

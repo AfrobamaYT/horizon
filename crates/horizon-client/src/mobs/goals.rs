@@ -3949,27 +3949,31 @@ mod target_change_hook_tests {
     }
 
     #[test]
+    #[ignore = "requires prepared entity resources in .local/horizon-client"]
     fn nearest_target_goal_respects_cancellation() {
-        with_test_world(&[], |world, types| {
-            let hook = Cancel(AtomicUsize::new(0));
-            let mut world = world.clone();
-            world.player = Some(test_player(Vec3::new(1.5, 64.0, 0.5)));
-            world.mob_hooks = Some(&hook);
-            let kind = Arc::new(types.types["minecraft:zombie"].clone());
-            let mut mob = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
-            let mut goal = NearestTarget::player(false);
-            goal.found = Some(Who::Player);
-            let mut level = crate::health::TestLevel::new(0);
-            let mut events = Vec::new();
-            let mut cx = Cx {
-                w: &world,
-                level: &mut level.level(),
-                events: &mut events,
-            };
-            goal.start(&mut mob, &mut cx);
-            assert_eq!(mob.ai.target, None);
-            assert_eq!(hook.0.load(Ordering::Relaxed), 1);
-        });
+        assert!(
+            with_test_world(&[], |world, types| {
+                let hook = Cancel(AtomicUsize::new(0));
+                let mut world = world.clone();
+                world.player = Some(test_player(Vec3::new(1.5, 64.0, 0.5)));
+                world.mob_hooks = Some(&hook);
+                let kind = Arc::new(types.types["minecraft:zombie"].clone());
+                let mut mob = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
+                let mut goal = NearestTarget::player(false);
+                goal.found = Some(Who::Player);
+                let mut level = crate::health::TestLevel::new(0);
+                let mut events = Vec::new();
+                let mut cx = Cx {
+                    w: &world,
+                    level: &mut level.level(),
+                    events: &mut events,
+                };
+                goal.start(&mut mob, &mut cx);
+                assert_eq!(mob.ai.target, None);
+                assert_eq!(hook.0.load(Ordering::Relaxed), 1);
+            }),
+            "prepared entity resources are required"
+        );
     }
 }
 

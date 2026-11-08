@@ -99,6 +99,11 @@ impl Game<'_> {
         {
             return false;
         }
+        let is_brain = self
+            .mobs
+            .iter()
+            .find(|mob| mob.id == id)
+            .is_some_and(|mob| horizon_client::mobs::ai::brain_target(mob).is_some());
         let mut chosen = target;
         let mut redirected = false;
         if self.native_authoritative()
@@ -125,7 +130,7 @@ impl Game<'_> {
                     )))
                 }
             };
-            let Some(result) = self.native_mob_target_event(mob, original, false) else {
+            let Some(result) = self.native_mob_target_event(mob, original, is_brain) else {
                 return false;
             };
             if result != original {
@@ -152,7 +157,9 @@ impl Game<'_> {
         let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id) else {
             return false;
         };
-        mob.set_target(chosen);
+        if !is_brain || !horizon_client::mobs::ai::set_brain_target(mob, chosen) {
+            mob.set_target(chosen);
+        }
         true
     }
     fn hive_with_honey(&self, state: BlockStateId, level: i32) -> Option<BlockStateId> {

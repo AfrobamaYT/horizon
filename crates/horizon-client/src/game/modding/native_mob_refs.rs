@@ -270,13 +270,15 @@ impl Game<'_> {
         }
         let mut new_target = original_target;
         let mut cancel = false;
-        self.native_living_change_target(mod_api::__private::LivingChangeTargetCall {
-            mob,
-            original_target,
-            new_target: &mut new_target,
-            is_brain,
-            cancel: &mut cancel,
-        });
+        super::native_hooks::NativeHookHost { host: self }.native_living_change_target(
+            mod_api::__private::LivingChangeTargetCall {
+                mob,
+                original_target,
+                new_target: &mut new_target,
+                is_brain,
+                cancel: &mut cancel,
+            },
+        );
         (!cancel).then_some(new_target)
     }
 

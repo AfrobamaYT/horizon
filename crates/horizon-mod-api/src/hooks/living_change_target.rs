@@ -14,6 +14,7 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         host = "read",
+        target = "horizon_client::game::native_hooks::living_change_target::NativeHookHost<'_>::native_living_change_target",
         neoforge = "LivingChangeTargetEvent",
         cancellable = true
     )]
