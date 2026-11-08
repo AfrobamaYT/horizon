@@ -6145,6 +6145,19 @@ mod tests {
             ..DamageHooks::NONE
         }
     }
+    #[test]
+    fn base_check_only_receives_qualifying_dragon_hits() {
+        let mut d = dragon(flying());
+        assert!(d.reaches_base_check(0, 1.0, true, true));
+        assert!(!d.reaches_base_check(0, 1.0, false, false));
+        assert!(!d.reaches_base_check(BODY, 0.001, true, false));
+        d.set_phase(Phase::Dying {
+            target: None,
+            time: 0,
+        });
+        assert!(!d.reaches_base_check(0, 1.0, true, false));
+    }
+
     fn dragon_as(entity: u32) -> Dragon {
         let mut d = dragon(flying());
         d.id = entity;

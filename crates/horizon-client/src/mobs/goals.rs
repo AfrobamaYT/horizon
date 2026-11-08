@@ -3979,6 +3979,15 @@ mod target_change_hook_tests {
                 goal.start(&mut mob, &mut cx);
                 assert_eq!(mob.ai.target, None);
                 assert_eq!(hook.0.load(Ordering::Relaxed), 1);
+                mob.ai.target = Some(Who::Player);
+                assert!(target_continue(
+                    &mut goal.target_goal,
+                    false,
+                    &mut mob,
+                    &mut cx
+                ));
+                assert_eq!(hook.0.load(Ordering::Relaxed), 2);
+                assert_eq!(mob.ai.target, Some(Who::Player));
             }),
             "prepared entity resources are required"
         );

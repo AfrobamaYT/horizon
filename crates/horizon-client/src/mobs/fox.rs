@@ -1446,6 +1446,35 @@ mod pickup_tests {
         Mob::new(1, kind, Vec3::ZERO, 0.0)
     }
 
+    #[test]
+    fn carry_crouch_advances_only_after_living_step() {
+        assert!(crate::mobs::world::with_test_world(&[], |w, _| {
+            let mut f = fox();
+            set_flag(&mut f, CROUCHING, true);
+            let mut events = Vec::new();
+            assert!(ai_step_until_consumption(&mut f, w, &mut events).is_none());
+            assert_eq!(f.anim.v[CROUCH_AMOUNT], 0.0);
+            finish_ai_step(&mut f, w, &mut events);
+            assert_eq!(f.anim.v[CROUCH_AMOUNT], 0.2);
+        }));
+    }
+
+    #[test]
+    fn carry_no_ai_keeps_sleeping_in_water_and_animates() {
+        assert!(crate::mobs::world::with_test_world(&[], |w, _| {
+            let mut f = fox();
+            f.no_ai = true;
+            f.fluids.in_water = true;
+            set_flag(&mut f, SLEEPING | SITTING | CROUCHING | FACEPLANTED, true);
+            let mut events = Vec::new();
+            finish_ai_step(&mut f, w, &mut events);
+            assert!(flag(&f, SLEEPING));
+            assert!(flag(&f, SITTING));
+            assert!(events.is_empty());
+            assert_eq!(f.anim.v[CROUCH_AMOUNT], 0.2);
+        }));
+    }
+
     /// `Fox.canHoldItem`: an empty mouth takes anything; a full one only swaps its non-food
     /// for food, and only once the fox has had ticks since it last ate.
     #[test]

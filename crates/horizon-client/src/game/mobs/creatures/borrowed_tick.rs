@@ -44,7 +44,6 @@ fn route_player_events(
     }
 }
 
-
 pub(super) struct BorrowedMobTick<'a> {
     pub(super) mobs: &'a mut horizon_client::join_seq::JoinList<Mob>,
     pub(super) snapshot: &'a mut Vec<Seen>,
@@ -312,45 +311,51 @@ impl Game<'_> {
                         None => base.player_identity,
                         Some(conn) => self.guest_identity(conn),
                     };
-            // A listener can redirect to any real player in this level. Keep
-            // immutable views for this tick so changing selection never
-            // invalidates a view a goal already borrowed. No allocation is
-            // made when nobody listens for target changes.
-            let selection = if mod_api::__private::listened(mod_api::HookId::LivingChangeTarget) {
-                use horizon_client::mobs::player_selection::{PlayerSelection, TickPlayer};
-                let mut players = Vec::new();
-                if let (Some(view), Some((_, entity_id))) = (&active_player, active_identity) {
-                    players.push(TickPlayer {
-                        entity_id,
-                        connection: seen_guest,
-                        view: view.clone(),
-                    });
-                }
-                if seen_guest.is_some()
-                    && let (Some(view), Some((_, entity_id))) = (&base.player, base.player_identity)
-                {
-                    players.push(TickPlayer {
-                        entity_id,
-                        connection: None,
-                        view: view.clone(),
-                    });
-                }
-                for (index, (conn, view)) in guests.iter().enumerate() {
-                    if Some(index) == lent {
-                        continue;
-                    }
-                    if let Some((_, entity_id)) = self.guest_identity(*conn) {
-                        players.push(TickPlayer {
-                            entity_id,
-                            connection: Some(*conn),
-                            view: view.clone(),
-                        });
-                    }
-                }
-                PlayerSelection::new(players, active_identity.map(|(_, id)| id))
-            } else {
-                None
-            };
+                    // A listener can redirect to any real player in this level. Keep
+                    // immutable views for this tick so changing selection never
+                    // invalidates a view a goal already borrowed. No allocation is
+                    // made when nobody listens for target changes.
+                    let selection =
+                        if mod_api::__private::listened(mod_api::HookId::LivingChangeTarget) {
+                            use horizon_client::mobs::player_selection::{
+                                PlayerSelection, TickPlayer,
+                            };
+                            let mut players = Vec::new();
+                            if let (Some(view), Some((_, entity_id))) =
+                                (&active_player, active_identity)
+                            {
+                                players.push(TickPlayer {
+                                    entity_id,
+                                    connection: seen_guest,
+                                    view: view.clone(),
+                                });
+                            }
+                            if seen_guest.is_some()
+                                && let (Some(view), Some((_, entity_id))) =
+                                    (&base.player, base.player_identity)
+                            {
+                                players.push(TickPlayer {
+                                    entity_id,
+                                    connection: None,
+                                    view: view.clone(),
+                                });
+                            }
+                            for (index, (conn, view)) in guests.iter().enumerate() {
+                                if Some(index) == lent {
+                                    continue;
+                                }
+                                if let Some((_, entity_id)) = self.guest_identity(*conn) {
+                                    players.push(TickPlayer {
+                                        entity_id,
+                                        connection: Some(*conn),
+                                        view: view.clone(),
+                                    });
+                                }
+                            }
+                            PlayerSelection::new(players, active_identity.map(|(_, id)| id))
+                        } else {
+                            None
+                        };
 
                     let mut w = MobWorld {
                         others: &snapshot,
@@ -471,7 +476,14 @@ impl Game<'_> {
                         };
                         gone.push((m.id, m.position, width, height, split));
                     }
-                    route_player_events(&mut events, from, seen_guest, &guest_ids, &mut guest_events, m.id);
+                    route_player_events(
+                        &mut events,
+                        from,
+                        seen_guest,
+                        &guest_ids,
+                        &mut guest_events,
+                        m.id,
+                    );
                     // Killed during its own tick (drowning, burning, falling...).
                     if !m.alive() && !m.removed && died.insert(m.id) {
                         dead.push(m.clone());
