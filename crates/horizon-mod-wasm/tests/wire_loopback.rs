@@ -516,6 +516,14 @@ fn wire_loopback_returned_frame_resource_uses_source_permissions() {
     assert!(out.bytes().is_empty());
 }
 #[test]
+fn wire_loopback_panic_hook_without_transport_does_not_panic_again() {
+    install_counter();
+    guest::set_transport(None);
+    let panic = std::panic::catch_unwind(|| panic!("native panic after the guest call ended"));
+    assert!(panic.is_err());
+}
+
+#[test]
 fn wire_loopback_erased_resource_restores_identity_and_refuses_other_groups() {
     struct Capture(std::sync::Mutex<Vec<String>>);
     impl log::Log for Capture {
