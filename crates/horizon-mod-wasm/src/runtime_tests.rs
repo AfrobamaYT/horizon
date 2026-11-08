@@ -1202,10 +1202,11 @@ fn row_window_guest() -> WasmMod {
 
 #[test]
 fn ordinary_row_pages_import_checks_its_native_root_and_returns_owned_rows() {
-    use mod_points::snapshot::{Builder, PageSource, Snapshot, Window, key, with_root};
-    fn read(root: &u32, _: Window, rows: &mut Builder) -> Result<(), mod_api::RowError> {
+    use mod_points::snapshot::{PageSource, Snapshot, Window, key, with_root};
+    fn read(root: &u32, window: Window) -> Result<Vec<mod_api::Row>, mod_api::RowError> {
+        let mut rows = window.builder();
         rows.value(None, 0, const { key("u32") }, root)?;
-        Ok(())
+        Ok(rows.finish().into_rows())
     }
     let module = row_window_guest();
     let root = Box::new(42u32);
@@ -1246,7 +1247,7 @@ fn ordinary_row_pages_import_checks_its_native_root_and_returns_owned_rows() {
 
 #[test]
 fn row_pages_refuses_an_encoded_temporary_dropped_before_the_first_window_fetch() {
-    use mod_points::snapshot::{Builder, PageSource, Window, key, with_root};
+    use mod_points::snapshot::{PageSource, Window, key, with_root};
     struct Encoded<'a> {
         root: Box<u32>,
         dropped: &'a std::cell::Cell<bool>,
@@ -1262,9 +1263,10 @@ fn row_pages_refuses_an_encoded_temporary_dropped_before_the_first_window_fetch(
             // mutation. The value guard, not the call marker, bounds this temporary's borrow.
             with_root(&*self.root, |value| {
                 let pages = unsafe {
-                    PageSource::new(&value, |root, _: Window, rows: &mut Builder| {
+                    PageSource::new(&value, |root, window: Window| {
+                        let mut rows = window.builder();
                         rows.value(None, 0, const { key("u32") }, root)?;
-                        Ok(())
+                        Ok(rows.finish().into_rows())
                     })
                 }
                 .unwrap();

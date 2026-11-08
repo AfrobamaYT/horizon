@@ -83,7 +83,7 @@ impl TryFrom<RowWindow> for Window {
     }
 }
 
-type Read = unsafe fn(*const (), *const (), Window, &mut Builder) -> Result<(), RowError>;
+type Read = unsafe fn(*const (), *const (), Window) -> Result<Rows, RowError>;
 /// A stable native root borrowed only for one marked runtime call. This object owns no root
 /// data: retaining it cannot retain either the engine borrow or per-call locator/cache storage.
 /// Only the owned rows returned by its interface are transferable beyond the call.
@@ -105,7 +105,8 @@ impl PageSource {
     ///
     /// # Safety
     /// The trusted reader must not invoke mutating host operations while it reads. It must
-    /// check schema-local node/range bounds and only emit owned values. If the root contains
+    /// check schema-local node/range bounds and only emit owned values using the common Window
+    /// builder or native_read, preserving all row, depth and value budgets. If the root contains
     /// borrowed engine pointers, their pointees must remain valid throughout `with_root`;
     /// locators must resolve movable elements afresh rather than cache element pointers.
     /// Construct during marked encoding, from a caller's `with_root` handle, not an encoder's
@@ -113,19 +114,18 @@ impl PageSource {
     /// lifetime even if its public handle is forgotten. The call marker alone cannot do so.
     pub unsafe fn new<T>(
         root: &Root<'_, T>,
-        reader: fn(&T, Window, &mut Builder) -> Result<(), RowError>,
+        reader: fn(&T, Window) -> Result<Rows, RowError>,
     ) -> Result<Arc<dyn RowPages>, RowError> {
         unsafe fn read<T>(
             root: *const (),
             reader: *const (),
             request: Window,
-            out: &mut Builder,
-        ) -> Result<(), RowError> {
+        ) -> Result<Rows, RowError> {
             // SAFETY: new paired this reader with exactly T. The caller checks the marker
             // before reaching this shim, and new's contract keeps the root stable until then.
-            let reader: fn(&T, Window, &mut Builder) -> Result<(), RowError> =
+            let reader: fn(&T, Window) -> Result<Rows, RowError> =
                 unsafe { std::mem::transmute(reader) };
-            reader(unsafe { &*root.cast::<T>() }, request, out)
+            reader(unsafe { &*root.cast::<T>() }, request)
         }
         let token = wire::borrow_token()?;
         Ok(Arc::new(Self {
@@ -145,12 +145,8 @@ impl RowPages for PageSource {
         if request.rows() == 0 {
             return Ok(Vec::new());
         }
-        let mut rows = request.builder();
         // SAFETY: the marker is live on this thread; new attests the root's stable address,
         // no overlapping mutable access, and the shim's exact reader/root pairing.
-        unsafe {
-            (self.read)(self.root, self.reader, request, &mut rows)?;
-        }
-        Ok(rows.finish().into_rows())
+        unsafe { (self.read)(self.root, self.reader, request) }
     }
 }
