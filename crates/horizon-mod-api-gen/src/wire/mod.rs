@@ -382,7 +382,7 @@ pub(super) fn surface<'a>(
     }
     // A method the API keeps off wasm (`Not on wasm:`) is gated out of the trait on that target:
     // no table holds it, and a native build of the guest answers that it is unavailable.
-    let (excused_methods, mut methods): (Vec<Method>, Vec<Method>) = methods
+    let (excused_methods, methods): (Vec<Method>, Vec<Method>) = methods
         .into_iter()
         .partition(|m| excused.iter().any(|(o, n)| *o == m.owner && *n == m.name));
     let target = root.join("target");
@@ -581,7 +581,9 @@ fn layout(surface: &Surface<'_>) -> u64 {
         "resource generation zero reserved; Any identity zero is Unsupported/cross-group capability",
     );
     // The group's mods share one handler table, which lives in a word of the std member.
-    feed("group state: 32 words in the std member's horizon_group_state; 0 handler table, 1 cache budget, 2 eviction guard, 3.. eviction callbacks; members allocate through an evicting global allocator");
+    feed(
+        "group state: 32 words in the std member's horizon_group_state; 0 handler table, 1 cache budget, 2 eviction guard, 3.. eviction callbacks; members allocate through an evicting global allocator",
+    );
     feed("static replies: bounded acknowledged ids or uncached text");
     for method in &surface.methods {
         feed(&format!("{method:?}"));

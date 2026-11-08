@@ -96,8 +96,6 @@ fn path_tokens(path: &str) -> TokenStream {
     quote!(#head #(::#rest)*)
 }
 
-/// Whether a value of `shape` can be built from a copy: no borrowed or shared part.
-
 /// Resolve the receiver exactly where its method signature is written.
 pub(crate) fn function_scope(rule: &Rule, internal: &Internal) -> Option<(String, Option<String>)> {
     let path = bare(&internal.path);

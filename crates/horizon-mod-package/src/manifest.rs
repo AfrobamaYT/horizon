@@ -1239,7 +1239,12 @@ capabilities = ["registries"]
 
     #[test]
     fn a_wasm_mod_carries_exactly_its_declared_module() {
-        let module = b"\0asm\x01\0\0\0".to_vec();
+        // A minimal valid shared member: a `dylink.0` section and the three guest exports.
+        let module = wat::parse_str(
+            r#"(module (@custom "dylink.0" "\01\04\00\00\00\00")
+                (func (export "horizon_layout")) (func (export "horizon_in")) (func (export "horizon_hook")))"#,
+        )
+        .unwrap();
         let text = format!(
             "{}\n[wasm]\nsha512 = \"{}\"\ntoolchain = \"1.99.1\"\nbuilt_with = \"test\"\n",
             EXAMPLE.trim_end(),

@@ -1,0 +1,10 @@
+id = "hog"
+name = "Hog"
+version = "1.0.0"
+api = "0.2"
+side = "both"
+capabilities = ["registries"]
+
+[wasm]
+sha512 = "88ea35cf0d31bf64f7c1cc4ee79f59860ce455cd791520ea17854dc6b2796a27ac0269608fbd2f5c346eb6435e16b43c1d011c00262d729b9c770b7c42708845"
+toolchain = "1.99.1 58cf8f9c35b355199727627d07ae34a4e2846d67"

@@ -13,3 +13,7 @@ kind = "head"
 with = "on_tick"
 access = "api"
 hash = "fixture"
+
+[wasm]
+sha512 = "f08175e15298613d093d68d7904ee1d92fc5dc43c079998733aec2d33f4f94bbaa4161882d051cd1273e27033fe04278caf169d5821055119639fd1ed81f5836"
+toolchain = "1.99.1 58cf8f9c35b355199727627d07ae34a4e2846d67"

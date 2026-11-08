@@ -16,3 +16,8 @@ kind = "head"
 with = "on_tick"
 access = "api"
 hash = "fixture"
+
+[wasm]
+sha512 = "22b7251fee92ea315cb6eec5415585097bcec3fdcb947f9334a1b2433389eebcf0cbf0879409d5c9ba5b905600d77e66369ff1f3b5d96af279e54c558ee36409"
+toolchain = "1.99.1 58cf8f9c35b355199727627d07ae34a4e2846d67"
+linked = { wasm_test_library = "1b6c5962fc16f7d53bc4d4dc1c85cc4e1fa70f0ac05c298ecd403b17d6cdc9ef876b2924ba14c54052b85e2f45fa8fc8e29a30b30a0f1ae7056b652c1c437d2f" }

@@ -53,7 +53,7 @@ impl Default for State {
     fn default() -> Self {
         Self {
             limits: wasmtime::StoreLimitsBuilder::new()
-                .trap_on_grow_failure(true)
+                .trap_on_grow_failure(false)
                 .memory_size(256 << 20)
                 .table_elements(1 << 20)
                 .build(),

@@ -63,7 +63,7 @@ jobs:
           tool="$GITHUB_WORKSPACE/target/debug/cargo-horizon-mod"
           groups="$GITHUB_WORKSPACE/crates/horizon-mod-wasm/tests/groups"
           catalog="$GITHUB_WORKSPACE/crates/horizon-mod-wasm/tests/library-fixture/points.json"
-          for member in counter_lib alpha beta gamma; do
+          for member in counter_lib alpha beta gamma hog; do
             (cd "$groups/$member" && "$tool" horizon-mod build --wasm --catalog "$catalog")
           done
       - name: Load the group members

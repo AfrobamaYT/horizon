@@ -7,3 +7,8 @@ capabilities = ["registries"]
 
 [dependencies]
 counter_lib = "^1"
+
+[wasm]
+sha512 = "61dbf2c11aaa74ff88386384a5d09878b06d69ab5d83b90d63bc7daf20569739a4dff6a1230c0aa66b16e839fb8d35bf6c8591c5f9a88ea91746771f86637fa0"
+toolchain = "1.99.1 58cf8f9c35b355199727627d07ae34a4e2846d67"
+linked = { counter_lib = "9896e52e5055b326848be4fea8f2f541ef7f0edc63ddd97db19bff798fed12230a0e4e8658602cfc47c95fa617f6ad8475c22ce3f6458a92c7561085a3c6099a" }

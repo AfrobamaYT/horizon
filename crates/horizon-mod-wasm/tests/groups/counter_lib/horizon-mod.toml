@@ -4,3 +4,7 @@ version = "1.0.0"
 api = "0.2"
 side = "both"
 capabilities = ["registries"]
+
+[wasm]
+sha512 = "9896e52e5055b326848be4fea8f2f541ef7f0edc63ddd97db19bff798fed12230a0e4e8658602cfc47c95fa617f6ad8475c22ce3f6458a92c7561085a3c6099a"
+toolchain = "1.99.1 58cf8f9c35b355199727627d07ae34a4e2846d67"
