@@ -1481,7 +1481,15 @@ pub fn decode_components(components: Option<&Tag>) -> (u32, Option<Box<StackData
             let ominous_part = data.ominous_banner
                 && (matches!(key.as_str(), "minecraft:item_name" | "minecraft:rarity")
                     || (key == "minecraft:tooltip_display" && v == &ominous_tooltip_display()));
-            if !MODELLED.contains(&key.as_str()) && !ominous_part {
+            // An explicitly empty stored_enchantments still counts as present
+            // (`ItemStack.has`); the list is modelled, so keep a marker.
+            if key == "minecraft:stored_enchantments"
+                && data.stored_enchantments.is_empty()
+                && matches!(v, Tag::Compound(_))
+            {
+                data.other
+                    .push((key, Tag::compound(Vec::<(&str, Tag)>::new())));
+            } else if !MODELLED.contains(&key.as_str()) && !ominous_part {
                 let value = canonical_other_component(&key, v);
                 data.other.push((key, value));
             }
@@ -1492,7 +1500,7 @@ pub fn decode_components(components: Option<&Tag>) -> (u32, Option<Box<StackData
 }
 
 /// The `[id=value,...]` component list of an item argument (`ItemParser`)
-/// as a `components` compound; `!id` removals are skipped.
+/// as a `components` compound, retaining `!id` removal patches.
 pub fn command_components(text: &str) -> Result<Tag, String> {
     let inner = text
         .strip_prefix('[')
@@ -1513,6 +1521,16 @@ pub fn command_components(text: &str) -> Result<Tag, String> {
             };
             entries.insert(JavaString::from(id.as_str()), tag);
             rest = &value[used..];
+        } else if let Some(key) = key.strip_prefix('!') {
+            let id = if key.contains(':') {
+                format!("!{key}")
+            } else {
+                format!("!minecraft:{key}")
+            };
+            entries.insert(
+                JavaString::from(id.as_str()),
+                Tag::compound([] as [(&str, Tag); 0]),
+            );
         }
         rest = rest.trim_start();
         rest = rest.strip_prefix(',').unwrap_or(rest).trim_start();

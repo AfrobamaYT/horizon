@@ -923,7 +923,7 @@ impl Mob {
         // EntityFluidInteraction.applyCurrentTo: the flow pushes the mob.
         if (self.fluids.in_water || self.fluids.in_lava) && self.pushed_by_fluid() {
             let (water, lava) = w.fluid_currents(self.bounds());
-            let lava_scale = if w.nether {
+            let lava_scale = if w.dimension_type.fast_lava {
                 0.007
             } else {
                 0.0023333333333333335
@@ -2445,7 +2445,7 @@ mod tests {
                 day_time: 18000,
                 raining: false,
                 thundering: false,
-                nether: false,
+                level: horizon_core::LevelKey::OVERWORLD,
                 block_tags: &items.block_tags,
                 landing: &motion.landing,
                 biomes: &biomes,
@@ -2454,7 +2454,7 @@ mod tests {
                 mob_drops: true,
                 max_entity_cramming: 24,
                 difficulty: super::super::spawning::LocalDifficulty::new(2, 18000, 0, 0.0),
-                end: false,
+                dimension_type: horizon_world::dimension_type::DimensionFacts::overworld(),
                 world_seed: 0,
                 sea_level: 63,
                 items: Some(&items),
@@ -2582,7 +2582,7 @@ mod tests {
             day_time: 18000,
             raining: false,
             thundering: false,
-            nether: false,
+            level: horizon_core::LevelKey::OVERWORLD,
             block_tags: &items.block_tags,
             landing: &motion.landing,
             biomes: &biomes,
@@ -2591,7 +2591,7 @@ mod tests {
             mob_drops: true,
             max_entity_cramming: 24,
             difficulty: super::super::spawning::LocalDifficulty::new(2, 18000, 0, 0.0),
-            end: false,
+            dimension_type: horizon_world::dimension_type::DimensionFacts::overworld(),
             world_seed: 0,
             sea_level: 63,
             items: Some(&items),
@@ -2727,7 +2727,7 @@ mod tests {
                 day_time: 6000,
                 raining: false,
                 thundering: false,
-                nether: false,
+                level: horizon_core::LevelKey::OVERWORLD,
                 block_tags: &items.block_tags,
                 landing: &motion.landing,
                 biomes: &biomes,
@@ -2736,7 +2736,7 @@ mod tests {
                 mob_drops: true,
                 max_entity_cramming: 24,
                 difficulty: super::super::spawning::LocalDifficulty::new(2, 6000, 0, 0.0),
-                end: false,
+                dimension_type: horizon_world::dimension_type::DimensionFacts::overworld(),
                 world_seed: 0,
                 sea_level: 63,
                 items: Some(&items),

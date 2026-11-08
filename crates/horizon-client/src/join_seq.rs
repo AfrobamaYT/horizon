@@ -430,6 +430,12 @@ impl<T, const DIRECT: bool> JoinList<T, DIRECT> {
         }
         taken
     }
+    /// Move a pass already obtained by `lift`, leaving its temporary holder
+    /// empty and unbound. This emits no new marker: consume the moved pass with
+    /// `restore` to close its existing lift. Resident storage must use `lift`.
+    pub fn take_owned_pass(&mut self) -> Self {
+        std::mem::take(self)
+    }
     /// Restore a lifted pass using its established spawn-buffer ordering.
     /// An unbound staged batch is admitted without closing another pass.
     pub fn restore(&mut self, mut taken: Self, order: RestoreOrder) {
@@ -638,14 +644,16 @@ fn checked_edit<T: horizon_mod_runtime::attachments::HasAttachmentLifetime, R>(
     result
 }
 
-/// Carry lifetime authority from a stored owner into its unbound tick clone.
+/// Carry lifetime authority from a stored owner into its unbound replacement.
+/// Return the previous state with an unbound slot, so a decoder replacement
+/// can retain runtime-only state without retiring the resident owner.
 pub fn store_back<T: horizon_mod_runtime::attachments::HasAttachmentLifetime>(
     old: &mut T,
     mut new: T,
-) {
+) -> T {
     debug_assert!(!new.attachment_lifetime().is_bound());
     std::mem::swap(old.attachment_lifetime(), new.attachment_lifetime());
-    *old = new;
+    std::mem::replace(old, new)
 }
 
 impl<T, const DIRECT: bool> Deref for JoinList<T, DIRECT> {
@@ -1113,6 +1121,22 @@ mod tests {
     }
 
     #[test]
+    fn journal_owned_pass_handoff_closes_each_lift_exactly_once() {
+        use residency::Change::{Lifted, Restored};
+        let (mut list, journal) = journal_list();
+        let original: Vec<_> = list.iter().map(key).collect();
+        changes(&journal);
+        let mut pass = list.lift();
+        list.restore(pass.take_owned_pass(), RestoreOrder::SurvivorsFirst);
+        assert!(pass.is_empty());
+        let next = list.lift();
+        list.restore(next, RestoreOrder::SurvivorsFirst);
+        drop(pass);
+        assert_eq!(list.iter().map(key).collect::<Vec<_>>(), original);
+        assert_eq!(changes(&journal), [Lifted, Restored, Lifted, Restored]);
+    }
+
+    #[test]
     fn journal_records_every_permanent_list_operation_and_only_removed_owners() {
         use residency::Change::{Install, Remove};
         let (mut list, journal) = journal_list();
@@ -1549,7 +1573,7 @@ mod tests {
         ));
         slot.discard();
         assert_eq!(slot_lookup(&mut table, &slot, 7), EntityLookup::Missing);
-        table.end_tick();
+        table.end_tick().unwrap();
     }
 
     #[test]
@@ -1581,7 +1605,7 @@ mod tests {
             EntityLookup::Found { value: 9, .. }
         ));
         assert!(changes(&journal).is_empty());
-        table.end_tick();
+        table.end_tick().unwrap();
     }
 
     #[test]

@@ -65,6 +65,12 @@ def predicate_selector_fixtures(group_names):
         except ImportError:
             from mob_effect_predicate_corpus import predicates as effect_predicates
         fixtures.update(effect_predicates())
+    try:
+        from . import player_food_predicate_corpus as player_food
+    except ImportError:
+        import player_food_predicate_corpus as player_food
+    if player_food.GROUP in group_names:
+        fixtures.update(player_food.predicates())
     if 'named smoke predicates' in group_names:
         always = {'type': 'minecraft:all_of', 'terms': []}
         fixtures['command_smoke:always'] = always
@@ -5271,6 +5277,12 @@ def advancement_loot_fixtures(group_names):
                                       {'type': 'minecraft:item', 'name': 'minecraft:diamond'}]}]}
     if 'advancement empty loot reference' in group_names:
         tables['parity:empty_reward'] = {'type': 'minecraft:advancement_reward', 'pools': []}
+    try:
+        from . import player_food_predicate_corpus as player_food
+    except ImportError:
+        import player_food_predicate_corpus as player_food
+    if player_food.GROUP in group_names:
+        advancements.update(player_food.advancements())
     return advancements, tables
 
 
@@ -5942,6 +5954,10 @@ def groups():
     except ImportError:
         from item_health_load_corpus import cases as item_health_load
     try:
+        from .vehicle_kill_corpus import vehicle_kill_contents
+    except ImportError:
+        from vehicle_kill_corpus import vehicle_kill_contents
+    try:
         from .data_literal_corpus import storage_literals
     except ImportError:
         from data_literal_corpus import storage_literals
@@ -5966,6 +5982,10 @@ def groups():
     except ImportError:
         from mob_name_predicate_corpus import cases as mob_name_predicates
     try:
+        from . import player_food_predicate_corpus as player_food
+    except ImportError:
+        import player_food_predicate_corpus as player_food
+    try:
         from .frame_map_corpus import frame_maps, treasure_map_copies
         from .allay_damage_corpus import allay_player_damage
         from .wolf_anger_corpus import groups as wolf_anger_groups
@@ -5975,6 +5995,7 @@ def groups():
         from .carpet_farm_corpus import carpet_farms
         from .passenger_teleport_corpus import passenger_teleports
         from .gateway_passenger_corpus import gateway_passengers
+        from .gateway_item_motion_corpus import gateway_item_motion
         from .item_merge_corpus import stack_limit_merges
     except ImportError:
         from frame_map_corpus import frame_maps, treasure_map_copies
@@ -5986,8 +6007,9 @@ def groups():
         from carpet_farm_corpus import carpet_farms
         from passenger_teleport_corpus import passenger_teleports
         from gateway_passenger_corpus import gateway_passengers
+        from gateway_item_motion_corpus import gateway_item_motion
         from item_merge_corpus import stack_limit_merges
-    return [
+    result = [
         ('setup', group_setup()),
         ('spectral saved duration', spectral_saved_duration(cmd, setup)),
         ('item Health short load', item_health_load(cmd, setup)),
@@ -6071,6 +6093,7 @@ def groups():
         ('mob riding', mob_riding()),
         ('trial spawner passengers', trial_spawner_passengers()),
         ('gateway passengers', gateway_passengers(cmd, setup)),
+        ('gateway item motion', gateway_item_motion(cmd, setup)),
         ('camel riders', camel_riders()),
         ('scores, teams and bossbars', scores()),
         ('bossbar list order', bossbar_list_order()),
@@ -6135,4 +6158,8 @@ def groups():
         ('experience orb stuck', experience_orb_stuck()),
         ('summoned potions', summoned_potions()),
         ('creeper cloud selectors', creeper_cloud_selectors()),
+        # Last: it leaves the player in other food than it found.
+        (player_food.GROUP, player_food.cases(cmd, setup)),
     ]
+    result.insert(1, ('vehicle kill contents', vehicle_kill_contents(cmd)))
+    return result

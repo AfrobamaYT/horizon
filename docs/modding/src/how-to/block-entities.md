@@ -6,6 +6,19 @@ transactional Parts, while internal slots use the handle methods below; integer 
 creation and loading both start with an empty data vector, even when the saved
 payload still contains the machine's progress.
 
+## State-aware creation
+
+Declare the block entity type and its owning blocks during registration. To make
+creation depend on block properties, answer `stateful_block_entity` with true for
+that block. The existing `block_entity` hook then receives the actual placed
+state, not just the block identity. Read its properties through the Host's state
+registry and supply the initial saved compound. The registered declaration owns
+the entity type; an unanswered state-aware creation makes no entity.
+
+Creation runs inside the block write, after placement side effects, on servers
+and clients. Changing properties within the same block preserves an existing
+entity even when a fresh instance of the new state would have no entity.
+
 ## Size the data vector
 
 Call `entity.set_data_slots(host, initial_values)` with the complete initial
