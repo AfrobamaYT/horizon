@@ -310,9 +310,8 @@ fn a_panic_is_contained_and_the_behavior_is_done() {
 #[ignore = "needs prepared resources"]
 fn a_type_with_no_brain_is_refused_at_construction() {
     REFUSALS.lock().unwrap().clear();
+    install_game_mods();
     with_game(|game| {
-        install_game_mods();
-        game.resolve_parts().unwrap();
         zombie(game, 8, [3.5, 65.0, 3.5]);
         assert_eq!(
             *REFUSALS
@@ -346,6 +345,15 @@ impl Behavior for WalkWriter {
         let zombie = cx.host().entity(9).map(mod_api::LivingRef::new);
         read(format!("{}", cx.set_brain_target(zombie)));
     }
+}
+
+/// `with_game` over a phase that answers its random states.
+fn with_game_states(
+    phase: fn(&mut super::super::Game<'_>) -> ((u64, Option<f64>), (u64, Option<f64>)),
+) -> ((u64, Option<f64>), (u64, Option<f64>)) {
+    let mut states = None;
+    with_game(|game| states = Some(phase(game)));
+    states.unwrap()
 }
 
 /// A villager in the game's list, as `Mob::new` builds it.
@@ -436,9 +444,8 @@ fn behaviors_join_after_vanilla_of_their_priority_and_activity() {
         b.add(Activity::Idle, 5, 40, 80, &[], Probe::still_for(1))
             .unwrap();
     }));
+    install_game_mods();
     with_game(|game| {
-        install_game_mods();
-        game.resolve_parts().unwrap();
         villager(game, 8, [3.5, 65.0, 3.5]);
         let mut test_level = horizon_client::health::TestLevel::new(0);
         let mut level = test_level.level();
@@ -472,9 +479,8 @@ fn a_behavior_writes_the_walk_target_and_the_refusals_hold() {
     ADDS.lock().unwrap().push(plan("minecraft:villager", |b| {
         b.add(Activity::Idle, 99, 60, 60, &[], WalkWriter).unwrap();
     }));
+    install_game_mods();
     with_game(|game| {
-        install_game_mods();
-        game.resolve_parts().unwrap();
         villager(game, 8, [3.5, 65.0, 3.5]);
         zombie(game, 9, [5.5, 65.0, 5.5]);
         let mut test_level = horizon_client::health::TestLevel::new(0);
@@ -516,9 +522,8 @@ fn only_an_active_activity_starts_but_core_always_does() {
         b.add(Activity::Core, 50, 60, 60, &[], Probe::named("core", 1))
             .unwrap();
     }));
+    install_game_mods();
     with_game(|game| {
-        install_game_mods();
-        game.resolve_parts().unwrap();
         villager(game, 8, [3.5, 65.0, 3.5]);
         let mut test_level = horizon_client::health::TestLevel::new(0);
         let mut level = test_level.level();
@@ -553,9 +558,8 @@ fn a_running_behavior_keeps_ticking_across_the_activity_change() {
         b.add(Activity::Idle, 99, 1000, 1000, &[], Probe::named("one", 60))
             .unwrap();
     }));
+    install_game_mods();
     with_game(|game| {
-        install_game_mods();
-        game.resolve_parts().unwrap();
         villager(game, 8, [3.5, 65.0, 3.5]);
         let mut test_level = horizon_client::health::TestLevel::new(0);
         let mut level = test_level.level();
@@ -598,9 +602,8 @@ fn refresh_stops_a_running_behavior_and_the_rebuild_is_fresh() {
         b.add(Activity::Idle, 99, 1000, 1000, &[], Probe::named("one", 60))
             .unwrap();
     }));
+    install_game_mods();
     with_game(|game| {
-        install_game_mods();
-        game.resolve_parts().unwrap();
         villager(game, 8, [3.5, 65.0, 3.5]);
         let mut test_level = horizon_client::health::TestLevel::new(0);
         let mut level = test_level.level();
@@ -649,50 +652,38 @@ fn refresh_stops_a_running_behavior_and_the_rebuild_is_fresh() {
 #[test]
 #[ignore = "needs prepared resources"]
 fn a_villager_without_mod_behaviors_draws_what_a_parts_free_one_does() {
-    with_game(|game| {
-        // Phase A: no parts at all.
-        mod_api::__private::install(Vec::new().into());
+    // The 50-tick run of one phase: the same villager spot, the same game
+    // times, one level random of the test's own.
+    fn fifty_ticks(game: &mut super::super::Game<'_>) -> ((u64, Option<f64>), (u64, Option<f64>)) {
         villager(game, 8, [3.5, 65.0, 3.5]);
         let mut test_level = horizon_client::health::TestLevel::new(0);
         let mut level = test_level.level();
         for i in 0..50 {
             villager_tick(game, 8, 100 + i, 3000, &mut level);
         }
-        let bare = random_states(game, 8, &mut level);
+        let states = random_states(game, 8, &mut level);
         game.mobs.clear();
-
-        // Phase B: the mods installed, a part on the villager that adds no
-        // behavior (and one on a zombie besides).
-        ADDS.lock().unwrap().clear();
-        install_game_mods();
-        game.resolve_parts().unwrap();
-        villager(game, 8, [3.5, 65.0, 3.5]);
-        let mut test_level = horizon_client::health::TestLevel::new(0);
-        let mut level = test_level.level();
-        for i in 0..50 {
-            villager_tick(game, 8, 100 + i, 3000, &mut level);
-        }
-        let unadded = random_states(game, 8, &mut level);
-        assert_eq!(bare, unadded, "a part with no behaviors costs nothing");
-        game.mobs.clear();
-
-        // Phase C: one behavior joined — the streams part ways, so the
-        // comparison above can see a change.
-        ADDS.lock().unwrap().clear();
-        ADDS.lock().unwrap().push(plan("minecraft:villager", |b| {
-            b.add(Activity::Core, 0, 60, 60, &[], Probe::still_for(60))
-                .unwrap();
-        }));
-        game.resolve_parts().unwrap();
-        villager(game, 8, [3.5, 65.0, 3.5]);
-        let mut test_level = horizon_client::health::TestLevel::new(0);
-        let mut level = test_level.level();
-        for i in 0..50 {
-            villager_tick(game, 8, 100 + i, 3000, &mut level);
-        }
-        let joined = random_states(game, 8, &mut level);
-        assert_ne!(bare, joined, "a joined behavior shifts the level stream");
-    });
+        states
+    }
+    // Phase A: no parts at all (each game resolves whatever is installed as
+    // it opens, so the phases install between games, as the goal tests do).
+    mod_api::__private::install(Vec::new().into());
+    let bare = with_game_states(fifty_ticks);
+    // Phase B: the mods installed, a part on the villager that adds no
+    // behavior (and one on a zombie besides).
+    ADDS.lock().unwrap().clear();
+    install_game_mods();
+    let unadded = with_game_states(fifty_ticks);
+    assert_eq!(bare, unadded, "a part with no behaviors costs nothing");
+    // Phase C: one behavior joined — the streams part ways, so the
+    // comparison above can see a change.
+    ADDS.lock().unwrap().clear();
+    ADDS.lock().unwrap().push(plan("minecraft:villager", |b| {
+        b.add(Activity::Core, 0, 60, 60, &[], Probe::still_for(60))
+            .unwrap();
+    }));
+    let joined = with_game_states(fifty_ticks);
+    assert_ne!(bare, joined, "a joined behavior shifts the level stream");
 }
 
 // ---- The animal brain (the second wiring) --------------------------------
@@ -734,9 +725,8 @@ fn a_sniffer_behavior_sets_a_walk_target() {
     ADDS.lock().unwrap().push(plan("minecraft:sniffer", |b| {
         b.add(Activity::Idle, 99, 60, 60, &[], WalkWriter).unwrap();
     }));
+    install_game_mods();
     with_game(|game| {
-        install_game_mods();
-        game.resolve_parts().unwrap();
         mob_of(game, "minecraft:sniffer", 8, [3.5, 65.0, 3.5]);
         zombie(game, 9, [5.5, 65.0, 5.5]);
         let mut test_level = horizon_client::health::TestLevel::new(0);
@@ -769,19 +759,25 @@ fn animal_behaviors_join_after_vanilla_of_their_priority() {
         b.add(Activity::Idle, 3, 60, 60, &[], Probe::still_for(1))
             .unwrap();
     }));
+    // The vanilla order of a parts-free sniffer, to prove the sort keeps it
+    // once the behaviors join (the mods install between the games, as the
+    // goal tests install).
+    let bare = {
+        let mut bare = None;
+        with_game(|game| {
+            mob_of(game, "minecraft:sniffer", 8, [3.5, 65.0, 3.5]);
+            let mut test_level = horizon_client::health::TestLevel::new(0);
+            let mut level = test_level.level();
+            animal_tick(game, 8, 100, 3000, &mut level);
+            bare = Some(
+                mobs::animal_brain::entry_keys(game.mobs.iter().find(|m| m.id == 8).unwrap())
+                    .unwrap(),
+            );
+        });
+        bare.unwrap()
+    };
+    install_game_mods();
     with_game(|game| {
-        // The vanilla order of a parts-free sniffer, to prove the sort
-        // keeps it once the behaviors join.
-        mob_of(game, "minecraft:sniffer", 8, [3.5, 65.0, 3.5]);
-        let mut test_level = horizon_client::health::TestLevel::new(0);
-        let mut level = test_level.level();
-        animal_tick(game, 8, 100, 3000, &mut level);
-        let bare: Vec<_> =
-            mobs::animal_brain::entry_keys(game.mobs.iter().find(|m| m.id == 8).unwrap()).unwrap();
-        game.mobs.clear();
-
-        install_game_mods();
-        game.resolve_parts().unwrap();
         mob_of(game, "minecraft:sniffer", 8, [3.5, 65.0, 3.5]);
         let mut test_level = horizon_client::health::TestLevel::new(0);
         let mut level = test_level.level();
@@ -817,9 +813,8 @@ fn grown_up_stops_a_running_ghastling_behavior() {
             b.add(Activity::Idle, 99, 1000, 1000, &[], Probe::named("one", 60))
                 .unwrap();
         }));
+    install_game_mods();
     with_game(|game| {
-        install_game_mods();
-        game.resolve_parts().unwrap();
         mob_of(game, "minecraft:happy_ghast", 8, [3.5, 70.0, 3.5]);
         {
             let mut mobs = game.mobs.lift();
@@ -912,9 +907,8 @@ fn a_breeze_behavior_starts_in_fight_and_writes_its_target() {
     ADDS.lock().unwrap().push(plan("minecraft:breeze", |b| {
         b.add(Activity::Fight, 99, 60, 60, &[], WalkWriter).unwrap();
     }));
+    install_game_mods();
     with_game(|game| {
-        install_game_mods();
-        game.resolve_parts().unwrap();
         mob_of(game, "minecraft:breeze", 8, [3.5, 65.0, 3.5]);
         zombie(game, 9, [5.5, 65.0, 5.5]);
         let mut test_level = horizon_client::health::TestLevel::new(0);
@@ -944,23 +938,29 @@ fn warden_behaviors_join_after_vanilla_of_their_priority() {
         b.add(Activity::Idle, 10, 60, 60, &[], Probe::still_for(1))
             .unwrap();
     }));
+    // The vanilla order of a parts-free warden.
+    let bare = {
+        let mut bare = None;
+        with_game(|game| {
+            mob_of(game, "minecraft:warden", 8, [3.5, 65.0, 3.5]);
+            {
+                let mut mobs = game.mobs.lift();
+                mobs::warden::register(&mut mobs[0]);
+                game.mobs = mobs;
+            }
+            let mut test_level = horizon_client::health::TestLevel::new(0);
+            let mut level = test_level.level();
+            warden_tick(game, 8, 100, 3000, &mut level);
+            bare = Some(
+                mobs::warden_brain::entry_keys(game.mobs.iter().find(|m| m.id == 8).unwrap())
+                    .unwrap(),
+            );
+        });
+        bare.unwrap()
+    };
+    // The joined one (the mods install between the games).
+    install_game_mods();
     with_game(|game| {
-        // The vanilla order of a parts-free warden, then the joined one.
-        mob_of(game, "minecraft:warden", 8, [3.5, 65.0, 3.5]);
-        {
-            let mut mobs = game.mobs.lift();
-            mobs::warden::register(&mut mobs[0]);
-            game.mobs = mobs;
-        }
-        let mut test_level = horizon_client::health::TestLevel::new(0);
-        let mut level = test_level.level();
-        warden_tick(game, 8, 100, 3000, &mut level);
-        let bare: Vec<_> =
-            mobs::warden_brain::entry_keys(game.mobs.iter().find(|m| m.id == 8).unwrap()).unwrap();
-        game.mobs.clear();
-
-        install_game_mods();
-        game.resolve_parts().unwrap();
         mob_of(game, "minecraft:warden", 8, [3.5, 65.0, 3.5]);
         {
             let mut mobs = game.mobs.lift();
@@ -1013,9 +1013,8 @@ fn a_panicking_behavior_leaves_the_rest_of_the_tick_working() {
         )
         .unwrap();
     }));
+    install_game_mods();
     with_game(|game| {
-        install_game_mods();
-        game.resolve_parts().unwrap();
         villager(game, 8, [3.5, 65.0, 3.5]);
         let mut test_level = horizon_client::health::TestLevel::new(0);
         let mut level = test_level.level();

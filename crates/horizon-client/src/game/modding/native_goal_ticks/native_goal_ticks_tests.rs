@@ -1014,14 +1014,17 @@ impl Hooks for GoalsAndFinalize {
 #[test]
 #[ignore = "needs prepared resources"]
 fn a_finalize_spawn_listener_keeps_the_mod_goals() {
+    // The mods install before the game opens: a game that opens resolves
+    // the parts of whatever is installed, and the worker block metadata
+    // with them (installing inside the game leaves it unpublished).
+    let entries = vec![ModEntry::new("finalize-goals", Box::new(GoalsAndFinalize))];
+    mod_api::__private::install(entries.into());
+    crate::game::api_values::install_parts(&[ModEntry::new(
+        "finalize-goals",
+        Box::new(GoalsAndFinalize),
+    )])
+    .unwrap();
     with_game(|game| {
-        let entries = vec![ModEntry::new("finalize-goals", Box::new(GoalsAndFinalize))];
-        mod_api::__private::install(entries.into());
-        crate::game::api_values::install_parts(&[ModEntry::new(
-            "finalize-goals",
-            Box::new(GoalsAndFinalize),
-        )])
-        .unwrap();
         game.resolve_parts().unwrap();
         let kind = game
             .res
