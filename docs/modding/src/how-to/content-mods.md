@@ -276,6 +276,11 @@ table can be used without an outline override, and overrides `thickness` collisi
 
 ### Entity-context shape declarations
 
+Native declarations use the same fields on `mod_api::Block`, with API-owned
+`ShapeEntityKind::{Item, Player, Living, Other}` keys and `BlockShapes` values.
+`interaction_shapes` is an optional `BlockShapes`. The game validates these drafts
+at content admission, just like their JSON counterparts.
+
 `outline_context_shapes` and `collision_context_shapes` independently override
 `shapes` and `collision_shapes` for a captured entity class. Their keys are
 `item`, `player`, `living` (a non-player living entity) and `other`; each value

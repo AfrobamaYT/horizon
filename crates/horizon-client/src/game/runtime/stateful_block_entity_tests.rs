@@ -154,7 +154,7 @@ fn stateful_creation_uses_actual_state_and_preserves_existing_entity() {
                 NativeBlockUpdateFlags::NONE,
             )
         });
-        assert_eq!(written, Ok(true));
+        assert!(written);
         assert_eq!(
             *observed.calls.lock().unwrap(),
             [populated_api, empty_api, populated_api]

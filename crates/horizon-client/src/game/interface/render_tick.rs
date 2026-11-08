@@ -369,18 +369,20 @@ impl Game<'_> {
                 continue;
             };
             let mut replace_vanilla = false;
-            self.native_block_screen_effect_draw(native_hooks::BlockScreenEffectDrawCall {
-                effect,
-                state,
-                pos,
-                partial_tick: partial,
-                hide_gui: self.ui.hide_gui,
-                draw: &mut GameCameraDrawContext {
-                    game: self,
-                    surface: &mut quads,
+            self.native_block_screen_effect_draw(
+                crate::game::native_hooks::BlockScreenEffectDrawCall {
+                    effect,
+                    state,
+                    pos,
+                    partial_tick: partial,
+                    hide_gui: self.ui.hide_gui,
+                    draw: &mut GameCameraDrawContext {
+                        game: self,
+                        surface: &mut quads,
+                    },
+                    replace_vanilla: &mut replace_vanilla,
                 },
-                replace_vanilla: &mut replace_vanilla,
-            });
+            );
             drawn[i] = quads.take();
             if replace_vanilla {
                 match effect {
