@@ -14,7 +14,7 @@ impl Game<'_> {
         if !host.hub.guests[i].dead {
             return;
         }
-        let uuid = host.hub.guests[i].uuid;
+        let (uuid, entity_id) = (host.hub.guests[i].uuid, host.hub.guests[i].entity_id);
         // PlayerList.respawn replaces the player, retaining only opted-in data.
         if let Some(attachments) = self
             .lan
@@ -25,6 +25,8 @@ impl Game<'_> {
             attachments.replace_contents(copy);
         }
         self.reinitialize_server_player(uuid, conn);
+        // The new `ServerPlayer` joins its section untold, in whichever level it comes back to.
+        self.forget_entity_section(entity_id as u32);
         // PlayerList.respawn removes the dead player (Player.remove).
         self.guest_drop_carried(i);
         // AbstractContainerScreen.tick / ServerPlayer.closeContainer: the dead
