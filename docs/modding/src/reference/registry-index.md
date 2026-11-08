@@ -250,3 +250,13 @@ API line are its facts. A new kind gets its own check before it opens.
 - 2026-10-26: the launcher installs `shader` files into `shaderpacks/`; the sample index lists one (`glow`).
 - 2026-10-25: `shader` opens, checked by `horizon_shader_api::check`; its files are `.hshader`.
 - Schema 1 (2026-10-24): kinds `mod`, `modpack`, `resourcepack`, `shader`; `.hpack` format 1.
+
+Each version may list `native_binaries`, an array of records with `build` (the
+exact game build ID), `target` (the canonical Rust target triple), and `file`.
+The file uses the index's existing name, URL, size, SHA-256 and minisign signature
+fields; the signature is required. Records live only in the registry, never in
+`horizon-mod.toml`. Duplicate build/target pairs are rejected. Lookup returns a
+typed absence when the exact pair is unavailable, so source preparation can
+handle it without selecting another build or architecture. These signatures are
+registry-produced metadata; binary trust acceptance belongs to the verifier
+(#804), independently of project package keys.

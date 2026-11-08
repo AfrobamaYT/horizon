@@ -1926,6 +1926,31 @@ fn pipeline(
         )?,
         &wasm_internals,
     );
+    // Resolve distribution metadata before source preparation. Execution still passes
+    // through the binary verifier; finding metadata alone never authorizes loading it.
+    if let Ok(index) = crate::browser::horizon::index() {
+        if let Some(triple) = platform
+            .target
+            .or_else(|| rust_toolchain::host().map(|h| h.target))
+        {
+            for bundle in &mods {
+                if let Some(record) = index
+                    .project(&bundle.manifest.id)
+                    .and_then(|p| {
+                        p.versions
+                            .iter()
+                            .find(|v| v.version == bundle.manifest.version)
+                    })
+                    .and_then(|v| registry_native_binary(v, &revision, triple).ok())
+                {
+                    append_log(&trf(
+                        "Registry native binary for {mod}: {url}",
+                        &[("mod", &bundle.manifest.id), ("url", &record.file.url)],
+                    ))?;
+                }
+            }
+        }
+    }
     let now = Record {
         horizon: revision.clone(),
         mixins: mixins.clone(),
@@ -4476,5 +4501,48 @@ mod tests {
         ]);
         let e = run(cmd, "Compiling the game", |_| {}).unwrap_err();
         assert!(!e.contains("Smart App Control"), "{e}");
+    }
+}
+
+/// Select registry metadata for the installed game's exact build and Rust target.
+/// A miss is returned to source preparation; signature acceptance is a separate step.
+pub fn registry_native_binary<'a>(
+    version: &'a horizon_mod_package::index::Version,
+    build: &str,
+    target: &str,
+) -> Result<
+    &'a horizon_mod_package::index::NativeBinary,
+    horizon_mod_package::index::NativeBinaryAbsent,
+> {
+    version.native_binary(build, target)
+}
+
+#[cfg(test)]
+mod registry_binary_tests {
+    use super::*;
+
+    #[test]
+    fn source_preparation_lookup_requires_exact_build_and_target() {
+        let index = horizon_mod_package::index::Index::parse(include_str!(
+            "../../crates/horizon-mod-package/tests/index/index-v1.json"
+        ))
+        .unwrap();
+        let mut version = index.project("coords_hud").unwrap().versions[0].clone();
+        version.native_binaries = vec![horizon_mod_package::index::NativeBinary {
+            build: "exact-build".into(),
+            target: "aarch64-apple-darwin".into(),
+            file: version.file.clone(),
+        }];
+        assert_eq!(
+            registry_native_binary(&version, "exact-build", "aarch64-apple-darwin")
+                .unwrap()
+                .file
+                .name,
+            "coords_hud-0.1.0.hmod"
+        );
+        assert!(registry_native_binary(&version, "other-build", "aarch64-apple-darwin").is_err());
+        assert!(registry_native_binary(&version, "exact-build", "x86_64-apple-darwin").is_err());
+        version.native_binaries.clear();
+        assert!(registry_native_binary(&version, "exact-build", "aarch64-apple-darwin").is_err());
     }
 }
