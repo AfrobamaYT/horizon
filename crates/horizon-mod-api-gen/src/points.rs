@@ -1265,6 +1265,23 @@ mod tests {
         if let Ok(path) = std::env::var("RETURN_MUTABILITY_FULL") {
             fs::write(path, &full).unwrap();
         }
+        let serialized: serde_json::Value = serde_json::from_slice(&full).unwrap();
+        assert_eq!(serialized, serde_json::to_value(&points).unwrap());
+        for point in serialized.as_array().unwrap() {
+            if let Some(raw) = point.get("raw_shape") {
+                assert!(raw["return_record_mutable"].is_boolean());
+                if raw["return_ty"] != "()" {
+                    assert_eq!(raw["return_record_mutable"], true);
+                }
+            }
+        }
+        let text = std::str::from_utf8(&full).unwrap();
+        for raw in text.split("\"raw_shape\":").skip(1) {
+            assert!(
+                raw.find("\"return_record_mutable\"").unwrap() < raw.find("\"return_ty\"").unwrap()
+            );
+            assert!(raw.find("\"return_ty\"").unwrap() < raw.find("\"return_class\"").unwrap());
+        }
         let mut existing = serde_json::to_value(&points).unwrap();
         let mut added = 0;
         for point in existing.as_array_mut().unwrap() {
