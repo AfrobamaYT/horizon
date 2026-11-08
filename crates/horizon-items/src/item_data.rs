@@ -2386,6 +2386,43 @@ mod carried_component_tests {
     use super::*;
 
     #[test]
+    fn death_payload_is_decoded_once_and_replaced_with_component() {
+        use crate::items::ConsumeEffect;
+        let component = Tag::compound([(
+            "death_effects",
+            Tag::List(vec![Tag::compound([
+                ("type", Tag::String("example:charge".into())),
+                ("amount", Tag::Int(42)),
+            ])]),
+        )]);
+        let patch = Tag::compound([("minecraft:death_protection", component.clone())]);
+        let (_, extra) = decode_components(Some(&patch));
+        let mut stack = ItemStack::new("minecraft:stick", 1);
+        stack.extra = extra;
+        let copied = stack.clone();
+        let (ConsumeEffect::Native { data: a, .. }, ConsumeEffect::Native { data: b, .. }) = (
+            &stack.death_protection(None).unwrap()[0],
+            &copied.death_protection(None).unwrap()[0],
+        ) else {
+            panic!("native effect")
+        };
+        assert!(Arc::ptr_eq(a, b));
+        assert_eq!(a.get("amount"), Some(&Tag::Byte(42)));
+        assert_eq!(components_tag(0, stack.data()), Some(patch));
+        stack
+            .data_mut()
+            .set_other("minecraft:death_protection", Some(component));
+        assert!(matches!(
+            &stack.death_protection(None).unwrap()[0],
+            ConsumeEffect::Native { .. }
+        ));
+        stack
+            .data_mut()
+            .set_other("minecraft:death_protection", None);
+        assert!(stack.death_protection(None).is_none());
+    }
+
+    #[test]
     fn damage_keeps_a_canonical_int_including_explicit_zero() {
         for damage in [0, 5] {
             let original = Tag::compound([("minecraft:damage", Tag::Int(damage))]);

@@ -2557,16 +2557,6 @@ pub fn parse_death_effects(
     parse_consumable(&serde_json::json!({"on_consume_effects": component.get("death_effects").cloned().unwrap_or_else(|| serde_json::json!([]))})).map(|value| value.effects)
 }
 
-pub fn death_effects(component: &Value) -> Vec<ConsumeEffect> {
-    component
-        .get("death_effects")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(parse_consume_effect)
-        .collect()
-}
-
 #[cfg(test)]
 mod death_effects_tests {
     use super::*;
@@ -2580,7 +2570,7 @@ mod death_effects_tests {
                 {"duration": 800, "id": "minecraft:fire_resistance", "show_icon": true}
             ]}
         ]});
-        let effects = death_effects(&totem);
+        let effects = parse_death_effects(&totem).unwrap();
         assert_eq!(effects.len(), 2);
         assert_eq!(effects[0], ConsumeEffect::ClearAllEffects);
         let ConsumeEffect::ApplyEffects {
@@ -2606,7 +2596,11 @@ mod death_effects_tests {
     }
     #[test]
     fn an_empty_component_has_no_effects() {
-        assert!(death_effects(&serde_json::json!({})).is_empty());
+        assert!(
+            parse_death_effects(&serde_json::json!({}))
+                .unwrap()
+                .is_empty()
+        );
     }
 }
 
