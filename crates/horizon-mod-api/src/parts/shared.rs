@@ -71,6 +71,8 @@ pub(crate) fn insert_part<P: ?Sized>(
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct Parts {
     pub(crate) key_mappings: Vec<(&'static str, crate::NativeKeyRegistration)>,
+    /// Settings by owner, in registration order (`Registrar::register_setting`).
+    pub(crate) settings: Vec<(&'static str, crate::SettingSpec)>,
     /// Block parts, and block entity parts as the block parts they also are.
     pub(crate) blocks: HashMap<Box<str>, Vec<Attached<dyn BlockPart>>>,
     /// Block entity parts by block, for the hooks asked by block (`block_entity`, `screen`).
