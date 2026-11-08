@@ -53,7 +53,7 @@ fn hidden_effect_nbt(effect: &crate::effects::EffectInstance) -> Tag {
     if !effect.visible {
         fields.push(("show_particles", Tag::Byte(0)));
     }
-    fields.push(("show_icon", Tag::Byte(i8::from(effect.visible))));
+    fields.push(("show_icon", Tag::Byte(i8::from(effect.show_icon))));
     if let Some(hidden) = &effect.hidden {
         fields.push(("hidden_effect", hidden_effect_nbt(hidden)));
     }
@@ -68,6 +68,7 @@ fn hidden_effect_from_nbt(effect: &'static str, tag: &Tag) -> crate::effects::Ef
     );
     instance.ambient = number(tag.get("ambient")).is_some_and(|v| v != 0);
     instance.visible = number(tag.get("show_particles")) != Some(0);
+    instance.show_icon = number(tag.get("show_icon")).map_or(instance.visible, |v| v != 0);
     instance.hidden = tag
         .get("hidden_effect")
         .map(|hidden| Box::new(hidden_effect_from_nbt(effect, hidden)));

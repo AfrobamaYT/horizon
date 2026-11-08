@@ -4941,7 +4941,21 @@ impl Mob {
         if self.species() == Species::Wither || !self.can_be_affected(effect) {
             return;
         }
+        let had = self.extra.effects.iter().any(|e| e.id == effect);
+        let ambient = self.extra.ambient_effects.contains(&effect);
+        let hidden = self.extra.hidden_effects.contains(&effect);
         self.add_effect_with(effect, ticks, amplifier, false, true);
+        // The basic overload changes the chain, not the existing active flags.
+        if had {
+            self.extra.ambient_effects.retain(|id| *id != effect);
+            if ambient {
+                self.extra.ambient_effects.push(effect);
+            }
+            self.extra.hidden_effects.retain(|id| *id != effect);
+            if hidden {
+                self.extra.hidden_effects.push(effect);
+            }
+        }
     }
     pub fn speed_bonus(&self) -> f64 {
         ai::speed_bonus(self)

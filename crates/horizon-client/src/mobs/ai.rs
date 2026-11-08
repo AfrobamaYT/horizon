@@ -6410,6 +6410,8 @@ mod hidden_speed_causal_tests {
             } else {
                 m.add_effect("h202:cancel", duration, 1);
             }
+            // This fixture stands in for a registered mod effect at slot zero.
+            m.extra.effects[0].registry_index = Some(0);
             let cancel = Cancel(std::cell::Cell::new(0));
             tick_effects(
                 &mut m,
