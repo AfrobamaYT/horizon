@@ -4745,7 +4745,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's WhitelistToggleEvent)"
+        neoforge = "none (NeoForge has no such event; Bukkit's WhitelistToggleEvent)",
+        paper = "WhitelistToggleEvent"
     )]
     fn whitelist_state_update();
     /// A timed world-border size change finished on the server, after its
