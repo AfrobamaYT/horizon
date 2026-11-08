@@ -2,6 +2,12 @@
 use horizon_mod_package::manifest::Package;
 use horizon_mod_wasm::{WasmPackage, load};
 
+struct Quiet;
+impl mod_api::Host for Quiet {}
+mod_api::impl_host_areas!(Quiet);
+impl mod_api::ServerHost for Quiet {}
+mod_api::impl_server_host_areas!(Quiet);
+
 #[test]
 fn dump_members() {
     for (name, path) in [
@@ -44,12 +50,31 @@ fn real_member() {
         return;
     };
     let path = std::path::Path::new(&fixture);
+    let manifest = Package::read(path).unwrap().manifest;
+    let info = mod_api::PackageInfo::new(
+        manifest.id.clone(),
+        manifest.version.clone(),
+        mod_api::PackageKind::Code,
+        mod_api::Side::Both,
+        vec![manifest.id.clone()],
+        manifest.dependencies.keys().cloned().collect(),
+    );
     let package = WasmPackage {
-        manifest: Package::read(path).unwrap().manifest,
+        manifest,
         module: Package::read_wasm(path).unwrap(),
     };
     // load checks the layout and calls Hooks::subscribed through the real host boundary.
     let loaded = load(&std::fs::read(std).unwrap(), vec![package]);
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
     assert_eq!(loaded.mods.len(), 1);
+    loaded
+        .initialize(&[info])
+        .expect("guest initialization and point registration");
+    mod_points::seal();
+    let mut args = mod_points::TickArgs::__new();
+    mod_points::dispatch::tick(mod_api::HostSide::Server(&mut Quiet), &mut args);
+    assert!(
+        args.cancel,
+        "real wasm listener must modify the point record"
+    );
 }
