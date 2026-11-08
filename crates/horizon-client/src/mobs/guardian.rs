@@ -310,7 +310,7 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     {
         let from = [m.position.x, m.position.y, m.position.z];
         match d.attacker {
-            Some(Who::Player) => events.push(w.route_player_event(MobEvent::DamagePlayer {
+            Some(Who::Player) => events.push(w.route_initial_player_event(MobEvent::DamagePlayer {
                 amount: 2.0,
                 from,
                 kind: "minecraft:thorns",
@@ -587,7 +587,10 @@ pub fn attack_scale(m: &Mob) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mobs::world::with_test_world;
+    use crate::mobs::{
+        player_selection::{PlayerSelection, TickPlayer},
+        world::{test_player, with_test_world},
+    };
     use std::sync::Arc;
 
     fn flop(kind: &str, silent: bool) -> Option<(Mob, Vec<MobEvent>)> {
@@ -637,5 +640,46 @@ mod tests {
                 assert_eq!(sounds, heard, "{kind} silent={silent}");
             }
         }
+    }
+
+    #[test]
+    #[ignore = "requires prepared entity resources"]
+    fn thorns_return_to_attacker_after_target_changes() {
+        assert!(with_test_world(&[], |world, types| {
+            let selection = PlayerSelection::new(
+                vec![
+                    TickPlayer {
+                        entity_id: 1,
+                        connection: Some(11),
+                        view: test_player(Vec3::new(1.0, 64.0, 0.0)),
+                    },
+                    TickPlayer {
+                        entity_id: 2,
+                        connection: Some(22),
+                        view: test_player(Vec3::new(2.0, 64.0, 0.0)),
+                    },
+                ],
+                Some(1),
+            )
+            .unwrap();
+            let mut world = world.clone();
+            world.player_selection = Some(&selection);
+            let mut mob = Mob::new(
+                7,
+                Arc::new(types.types["minecraft:guardian"].clone()),
+                Vec3::new(0.0, 64.0, 0.0),
+                0.0,
+            );
+            mob.hurt_time = 10;
+            mob.last_damage = Some((Damage::player([1.0, 64.0, 0.0]), 0));
+            assert!(selection.select(2));
+            let mut events = Vec::new();
+            ai_step(&mut mob, &world, &mut events);
+            assert!(events.iter().any(|event| matches!(
+                event,
+                MobEvent::ForPlayer { conn: Some(11), event }
+                    if matches!(event.as_ref(), MobEvent::DamagePlayer { kind: "minecraft:thorns", .. })
+            )));
+        }));
     }
 }

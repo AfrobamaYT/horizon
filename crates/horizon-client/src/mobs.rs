@@ -3726,6 +3726,22 @@ impl MobWorld<'_> {
         event
     }
 
+    /// An action directed at the player already bound at tick start, such as
+    /// retaliation against the attacker, must not follow a later target change.
+    pub fn route_initial_player_event(&self, event: MobEvent) -> MobEvent {
+        if event.targets_player()
+            && let Some(selection) = self.player_selection
+            && selection.has_switched()
+            && let Some(player) = selection.initial()
+        {
+            return MobEvent::ForPlayer {
+                conn: player.connection,
+                event: Box::new(event),
+            };
+        }
+        event
+    }
+
     /// Keep a mount's rider as the recipient even when a target-change hook
     /// redirects the mount to a different player later in the same tick.
     /// Before any switch the existing allocation-free routing is unchanged.
