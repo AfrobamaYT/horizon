@@ -4,7 +4,7 @@
 //! the launcher's own control endpoint; a game the player started with Agent Control on answers
 //! on the game's default endpoint instead. The child talks to whichever of them answers.
 use horizon_launcher::backend;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
@@ -44,10 +44,13 @@ pub fn control_args() -> Vec<String> {
 /// The endpoint a game listens on when nothing names one, which is where Agent Control opens it.
 /// The launcher runs whichever version is installed, so this is a contract with every game
 /// rather than shared code: `control::default_path` in horizon-client, and `horizon-ctl help`.
+/// `shared_uid` is the user's id when `temp` is shared by every user (`/tmp`): the game then
+/// keeps its socket in a folder of that user's own there, `horizon-<uid>`.
 fn default_endpoint(
     control: Option<OsString>,
     runtime: Option<OsString>,
     temp: PathBuf,
+    shared_uid: Option<u32>,
 ) -> PathBuf {
     if let Some(path) = control {
         return path.into();
@@ -55,9 +58,34 @@ fn default_endpoint(
     if !cfg!(unix) {
         return temp.join("horizon-control.json");
     }
-    runtime
-        .map_or(temp, PathBuf::from)
-        .join("horizon-control.sock")
+    match (runtime, shared_uid) {
+        (Some(runtime), _) => PathBuf::from(runtime),
+        (None, Some(uid)) => temp.join(format!("horizon-{uid}")),
+        (None, None) => temp,
+    }
+    .join("horizon-control.sock")
+}
+
+/// The user's id when the temporary directory is shared by every user (`control::fallback_dir`
+/// in horizon-client): the owner of `/proc/self`, else of the home folder.
+fn shared_temp_uid(temp: &Path) -> Option<u32> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let shared = std::fs::metadata(temp).is_ok_and(|m| m.permissions().mode() & 0o002 != 0);
+        if !shared {
+            return None;
+        }
+        std::fs::metadata("/proc/self")
+            .ok()
+            .or_else(|| std::fs::metadata(std::env::var_os("HOME")?).ok())
+            .map(|m| m.uid())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = temp;
+        None
+    }
 }
 
 /// The endpoint to talk to: the game `play` started, else the game answering on the default
@@ -77,6 +105,7 @@ fn current_endpoint() -> PathBuf {
             std::env::var_os("HORIZON_CONTROL"),
             std::env::var_os("XDG_RUNTIME_DIR"),
             std::env::temp_dir(),
+            shared_temp_uid(&std::env::temp_dir()),
         ),
     )
 }
@@ -369,21 +398,32 @@ mod tests {
         let temp = PathBuf::from("temp");
         let runtime = || Some(OsString::from("run"));
         assert_eq!(
-            default_endpoint(Some("mine.sock".into()), runtime(), temp.clone()),
+            default_endpoint(
+                Some("mine.sock".into()),
+                runtime(),
+                temp.clone(),
+                Some(1000)
+            ),
             PathBuf::from("mine.sock")
         );
         if cfg!(unix) {
             assert_eq!(
-                default_endpoint(None, runtime(), temp.clone()),
+                default_endpoint(None, runtime(), temp.clone(), Some(1000)),
                 Path::new("run").join("horizon-control.sock")
             );
+            // A temporary directory of the user's own, as macOS's.
             assert_eq!(
-                default_endpoint(None, None, temp.clone()),
+                default_endpoint(None, None, temp.clone(), None),
                 temp.join("horizon-control.sock")
+            );
+            // A shared one: the user's own folder in it.
+            assert_eq!(
+                default_endpoint(None, None, temp.clone(), Some(1000)),
+                temp.join("horizon-1000/horizon-control.sock")
             );
         } else {
             assert_eq!(
-                default_endpoint(None, runtime(), temp.clone()),
+                default_endpoint(None, runtime(), temp.clone(), None),
                 temp.join("horizon-control.json")
             );
         }
@@ -398,10 +438,12 @@ mod tests {
         let tools = prefixed(&listed);
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["name"], "game_click_slot");
-        assert!(tools[0]["description"]
-            .as_str()
-            .unwrap()
-            .ends_with("Click a slot"));
+        assert!(
+            tools[0]["description"]
+                .as_str()
+                .unwrap()
+                .ends_with("Click a slot")
+        );
         assert_eq!(tools[0]["inputSchema"], json!({ "type": "object" }));
     }
 
@@ -411,14 +453,18 @@ mod tests {
         let result = explain_unreachable(
             json!({ "content": [{ "type": "text", "text": text }], "isError": true }),
         );
-        assert!(result["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("with play"));
-        assert!(result["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("Agent Control"));
+        assert!(
+            result["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("with play")
+        );
+        assert!(
+            result["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("Agent Control")
+        );
         let other = json!({ "content": [{ "type": "text", "text": "{\"error\":\"no world\"}" }], "isError": true });
         assert_eq!(explain_unreachable(other.clone()), other);
     }

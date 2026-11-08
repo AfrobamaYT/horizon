@@ -4,7 +4,7 @@
 //! and each Java mod it ported into `horizon-mods/`: where it came from, its version and its
 //! checksum. Files the player put there themselves are never touched: the browser only replaces
 //! or removes what it lists.
-use super::{pick, safe_name, Kind, Project, Source, SourceId, Support, Version};
+use super::{Kind, Project, Source, SourceId, Support, Version, pick, safe_name};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -418,11 +418,9 @@ pub fn install_datapack(
     let result = fetched.and_then(|(zip, number)| {
         let coverage = crate::datapacks::coverage(&zip)?;
         if coverage.read.is_empty() {
-            return Err(format!(
-                "{} would change nothing in Horizon yet: it has no functions, predicates or item \
-                 modifiers, and Horizon doesn't read its {} yet.",
-                project.title,
-                coverage.not_read()
+            return Err(crate::i18n::trf(
+                "{title} would change nothing in Horizon yet: Horizon doesn't read its {files}.",
+                &[("title", &project.title), ("files", &coverage.not_read())],
             ));
         }
         let pack = crate::datapacks::add(world, &zip)?;

@@ -41,13 +41,18 @@ mod creative_mining_probe;
 mod creative_search_fixture;
 mod cushion_placement_probe;
 mod emitter_particles_probe;
+mod enchant_durability_fixture;
 mod enchanting_fixture;
 mod entity_anim_fixture;
 mod entity_components_probe;
 mod entity_death_loot_fixture;
 mod entity_particles_probe;
 mod entity_sound_packet_fixture;
+mod environment_attribute_modifier_fixture;
 mod environment_fixture;
+mod environment_system_fixture;
+mod environment_timeline_fixture;
+mod falling_block_fixture;
 mod finalize_spawn_fixture;
 mod fire_starter_sound_probe;
 mod firework_tooltip_fixture;
@@ -65,6 +70,7 @@ mod input_probe;
 mod interaction_input_fixture;
 mod lan_probe;
 mod late_entity_pair_fixture;
+mod lava_cauldron_item_fixture;
 mod light_parity;
 mod lore_tooltip_fixture;
 mod marker_particles_probe;
@@ -83,6 +89,7 @@ mod particle_providers_probe;
 mod pick_block_data_fixture;
 mod place_recipe_fixture;
 mod player_sync_fixture;
+mod portal_tickets_fixture;
 mod raid_fixture;
 mod random_tick_sections_probe;
 mod recipe_book_fixture;
@@ -97,6 +104,7 @@ mod screen_layout_fixture;
 mod section_mesh_fixture;
 mod server_files_probe;
 mod sheep_dye_fixture;
+mod shulker_bullet_probe;
 mod situational_music_fixture;
 mod skin_image_fixture;
 mod sound_engine_fixture;
@@ -144,6 +152,7 @@ probes! {
     stack_mining_probe,
     cushion_placement_probe,
     cauldron_fixture,
+    lava_cauldron_item_fixture,
     chat_screen_fixture,
     chest_pair_fixture,
     chest_load_fixture,
@@ -154,12 +163,17 @@ probes! {
     conversion_tags_fixture,
     creative_search_fixture,
     emitter_particles_probe,
+    enchant_durability_fixture,
     enchanting_fixture,
+    falling_block_fixture,
     entity_anim_fixture,
     entity_components_probe,
     entity_death_loot_fixture,
     entity_particles_probe,
+    environment_attribute_modifier_fixture,
     environment_fixture,
+    environment_system_fixture,
+    environment_timeline_fixture,
     finalize_spawn_fixture,
     fire_starter_sound_probe,
     zombie_cure_sound_probe,
@@ -194,6 +208,7 @@ probes! {
     pick_block_data_fixture,
     place_recipe_fixture,
     player_sync_fixture,
+    portal_tickets_fixture,
     raid_fixture,
     random_tick_sections_probe,
     recipe_book_fixture,
@@ -211,6 +226,7 @@ probes! {
     skin_image_fixture,
     late_entity_pair_fixture,
     sheep_dye_fixture,
+    shulker_bullet_probe,
     allay_interaction_fixture,
     entity_sound_packet_fixture,
     sound_engine_fixture,
