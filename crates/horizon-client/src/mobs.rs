@@ -3144,12 +3144,17 @@ impl Mob {
 /// `events[from..]` into `pending`, which the caller adds to each mob's
 /// velocity before its tick (and to every mob once all have ticked). The
 /// other events keep their order.
-/// The part of `Entity.canUsePortal` a mob's own state decides: it is alive,
+/// The part of `LivingEntity.canUsePortal` a mob's own state decides: it is alive,
+/// not sleeping (including fox sleep, but not bat resting or cat lying),
 /// it is not a boss that never travels, and — over `Monster.canUsePortal` —
 /// it is not a creaking bound to a heart (`Creaking.canUsePortal`). The
 /// rides and the players a side carries are the caller's half.
 pub fn mob_can_use_portal(m: &Mob) -> bool {
-    m.alive() && m.species() != Species::Wither && creaking::can_use_portal(m)
+    m.alive()
+        && !villager::sleeping(m)
+        && !(m.species() == Species::Fox && fox::flag(m, fox::SLEEPING))
+        && m.species() != Species::Wither
+        && creaking::can_use_portal(m)
 }
 pub fn take_mob_pushes(events: &mut Vec<MobEvent>, from: usize, pending: &mut PendingPushes) {
     // One pass: a crowd's tick holds a push per neighbour, and removing each

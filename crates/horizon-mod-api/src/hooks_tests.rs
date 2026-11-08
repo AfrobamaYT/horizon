@@ -373,6 +373,12 @@ fn delayed_tasks_take_a_server_host(
     (host.schedule_task(20, 7), host.cancel_task(TaskId(1)))
 }
 
+/// Compile-only: a client mod reads column heights of the world its window shows.
+#[allow(dead_code)]
+fn client_heights_take_a_client_host(host: &dyn ClientHost) -> Result<Vec<Option<i32>>, String> {
+    host.client_surface_heights(&[(0, 0), (16, -16)], NativeHeightmap::MotionBlocking)
+}
+
 /// Compile-only: a client mod reads the open inventory screen's slot boxes through its menu handle.
 #[allow(dead_code)]
 fn menu_slot_boxes_take_a_client_host(
