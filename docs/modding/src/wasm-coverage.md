@@ -914,6 +914,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Registrar::block_key` | crosses | Wire call |
 | `Registrar::attach_block_part` | crosses | Wire call |
 | `Registrar::attach_block_part_tag` | crosses | Wire call |
+| `Registrar::add_dimension` | crosses | Wire call |
 | `Registrar::effect_key` | crosses | Wire call |
 | `Registrar::provide_entity_capability` | crosses | Wire call |
 | `Registrar::declare_entity_attributes` | crosses | Wire call |
