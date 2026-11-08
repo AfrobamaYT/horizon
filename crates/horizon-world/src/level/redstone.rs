@@ -1100,7 +1100,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     fn note_played_state(&self, state: BlockStateId, a: i32, b: i32) -> BlockStateId {
         let t = &self.b.table;
         let p = &self.b.props;
-        let Some(instrument) = usize::try_from(a - 1)
+        let Some(instrument) = usize::try_from(a.wrapping_sub(1))
             .ok()
             .and_then(|i| super::data::INSTRUMENTS.get(i))
         else {
