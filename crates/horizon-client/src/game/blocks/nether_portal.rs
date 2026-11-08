@@ -1427,6 +1427,19 @@ mod tests {
     }
     #[mod_api::__subscriptions]
     impl mod_api::Hooks for Gate {
+        fn entity_mount(
+            &self,
+            host: &mut dyn mod_api::ServerHost,
+            e: &mut mod_api::EntityMountEvent<'_>,
+        ) -> mod_api::Flow {
+            if self.spare.load(Ordering::Relaxed) == 1004 && !e.mounting && e.entity == 102 {
+                if let Some(sibling) = host.entity(103) {
+                    assert!(sibling.discard(host));
+                }
+            }
+            mod_api::Flow::Continue
+        }
+
         fn entity_travel_to_dimension(
             &self,
             host: &mut dyn mod_api::ServerHost,
@@ -1437,6 +1450,27 @@ mod tests {
                 e.dimension.to_string(),
                 e.cause.to_string(),
             ));
+            let attack = self.spare.load(Ordering::Relaxed);
+            if attack == 1001 && e.entity.id() == 102 {
+                let root = mod_api::EntityRef::new(e.entity.epoch(), 101);
+                assert!(root.start_riding(host, e.entity, true));
+            }
+            if attack == 1001
+                && e.entity.id() == 101
+                && self
+                    .heard
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|e| e.0 == 101)
+                    .count()
+                    > 1
+            {
+                return mod_api::Flow::Cancel; // Bound the broken traversal in this regression.
+            }
+            if attack == 1002 && e.entity.id() == 102 {
+                assert!(mod_api::EntityRef::new(e.entity.epoch(), 103).discard(host));
+            }
             if self.discard {
                 assert!(e.entity.discard(host));
                 return mod_api::Flow::Continue;
@@ -1607,6 +1641,85 @@ mod tests {
                     .map(|e| e.0)
                     .collect::<Vec<_>>(),
                 [101, 102, 103]
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn passenger_callbacks_cannot_revisit_ancestors_or_discarded_siblings() {
+        for attack in [1002, 1001, 1004] {
+            with_gate(|game, spare, heard| {
+                let kind = game.res.mob_types().get("minecraft:camel").unwrap().clone();
+                for id in [101, 102, 103] {
+                    let mut mob = horizon_client::mobs::Mob::new(
+                        id,
+                        kind.clone(),
+                        Vec3::new(0.5, 64.0, 0.5),
+                        0.0,
+                    );
+                    if id != 101 {
+                        mob.extra.mount = Some(101);
+                    }
+                    game.mobs.push(mob);
+                }
+                spare.store(attack, Ordering::Relaxed);
+                assert!(game.entity_may_travel(101, Dim::Nether, TravelCause::Teleport));
+                let ids: Vec<_> = heard.lock().unwrap().iter().map(|e| e.0).collect();
+                assert_eq!(
+                    ids,
+                    if attack == 1001 {
+                        vec![101, 102, 103]
+                    } else {
+                        vec![101, 102]
+                    }
+                );
+                assert!(
+                    !(game.mobs[0].extra.mount == Some(102)
+                        && game.mobs[1].extra.mount == Some(101))
+                );
+            });
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mixed_passengers_follow_boarding_not_connection_order() {
+        with_gate(|game, _, heard| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:happy_ghast")
+                .unwrap()
+                .clone();
+            for id in [101, 102] {
+                let mut mob = horizon_client::mobs::Mob::new(
+                    id,
+                    kind.clone(),
+                    Vec3::new(0.5, 64.0, 0.5),
+                    0.0,
+                );
+                if id == 102 {
+                    mob.extra.mount = Some(101);
+                    mob.extra.vehicle_order = 20;
+                }
+                game.mobs.push(mob);
+            }
+            for (conn, order) in [(12, 30), (13, 10)] {
+                game.lan.as_mut().unwrap().hub.update_guest(conn, |g| {
+                    g.vehicle = Some(101);
+                    g.vehicle_order = order;
+                });
+            }
+            assert!(game.entity_may_travel(101, Dim::Nether, TravelCause::Teleport));
+            assert_eq!(
+                heard
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .map(|e| e.0)
+                    .collect::<Vec<_>>(),
+                [101, 13, 102, 12]
             );
         });
     }

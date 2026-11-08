@@ -417,6 +417,16 @@ impl Game<'_> {
     /// id its handle names) may travel to the level `to`, asked before
     /// anything of it moves. Only a server asks, and only when a mod listens.
     pub(super) fn entity_may_travel(&mut self, id: u32, to: Dim, cause: TravelCause) -> bool {
+        self.entity_tree_may_travel(id, to, cause, &mut Vec::new())
+    }
+
+    fn entity_tree_may_travel(
+        &mut self,
+        id: u32,
+        to: Dim,
+        cause: TravelCause,
+        ancestors: &mut Vec<u32>,
+    ) -> bool {
         if !self.native_authoritative()
             || !mod_api::__private::listened(mod_api::HookId::EntityTravelToDimension)
         {
@@ -425,6 +435,17 @@ impl Game<'_> {
         let Some(epoch) = self.native_lifecycle.epoch() else {
             return true;
         };
+        if ancestors.contains(&id)
+            || (!self.held_out.contains(&id)
+                && self
+                    .native_entity_target(mod_api::EntityRef::new(epoch, id))
+                    .is_none())
+        {
+            return false;
+        }
+        let entity = mod_api::EntityRef::new(epoch, id);
+        ancestors.push(id);
+        let riders = self.entity_passengers(entity).unwrap_or_default();
         let mut cancel = false;
         self.native_entity_travel_to_dimension(
             mod_api::EntityRef::new(epoch, id),
@@ -448,51 +469,28 @@ impl Game<'_> {
         {
             return false;
         }
-        // teleportCrossDimension ejects passengers and teleports each in order.
-        // A refused passenger (and its own subtree) stays in the old level.
-        let mut riders: Vec<_> = self
-            .mobs
-            .iter()
-            .filter(|m| !m.removed && m.extra.mount == Some(id))
-            .map(|m| (m.extra.vehicle_order, m.id))
-            .collect();
-        riders.sort_by_key(|r| r.0);
-        for &(_, rider) in riders.iter().rev() {
-            self.dismount_mob(rider);
-            if let Some(m) = self.mobs.iter_mut().find(|m| m.id == rider) {
-                m.extra.mount = None;
-                m.extra.passenger = false;
+        // One snapshot in the shared player/mob boarding order. Ejection can
+        // itself call mods; refuse changed edges instead of overriding them.
+        for &rider in riders.iter().rev() {
+            if self.entity_vehicle(rider) != Some(entity) {
+                continue;
+            }
+            if !self.entity_stop_riding(rider) && self.entity_vehicle(rider) == Some(entity) {
+                return false;
             }
         }
         let accepted: Vec<_> = riders
             .into_iter()
-            .filter_map(|(_, rider)| self.entity_may_travel(rider, to, cause).then_some(rider))
+            .filter(|rider| {
+                self.entity_is_passenger(*rider) == Some(false)
+                    && self.entity_tree_may_travel(rider.id(), to, cause, ancestors)
+            })
             .collect();
         for rider in accepted {
-            if let Some(m) = self.mobs.iter_mut().find(|m| m.id == rider) {
-                // Retain accepted edges for the destination's NBT tree only.
-                m.extra.mount = Some(id);
-                m.extra.passenger = true;
-            }
-        }
-        if self.riding == Some(id)
-            && let Some(player) = self.network_entity_id(super::commands::Target::Player)
-            && !self.entity_may_travel(player as u32, to, cause)
-        {
-            self.riding = None;
-        }
-        let players: Vec<_> = self
-            .lan
-            .iter()
-            .flat_map(|h| h.hub.guests.iter())
-            .filter(|g| Some(g.conn) != self.lan_acting && g.vehicle == Some(id))
-            .map(|g| (g.conn, g.entity_id as u32))
-            .collect();
-        for (conn, player) in players {
-            if !self.entity_may_travel(player, to, cause)
-                && let Some(host) = self.lan.as_mut()
-            {
-                host.hub.update_guest(conn, |g| g.vehicle = None);
+            if self.entity_is_passenger(rider) == Some(false) {
+                // Reject callback topology changes: the shared mount path
+                // checks live handles, dimension, cycles and vehicle capacity.
+                self.entity_start_riding(rider, entity, true);
             }
         }
         self.native_entity_target(mod_api::EntityRef::new(epoch, id))
