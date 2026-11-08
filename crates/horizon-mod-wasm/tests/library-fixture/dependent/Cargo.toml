@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-horizon-mod-points = { path = "../../../../horizon-mod-points", features = ["wasm-guest"] }
+horizon-mod-points = { path = "../../../../horizon-mod-points" }
 horizon-mod-api = { path = "../../../../horizon-mod-api" }
 wasm-test-library = { path = "../library" }
 

@@ -501,7 +501,7 @@ pub(super) fn build(
         let rlib = std::fs::read(artifacts.join(format!("lib{}.rlib", member.krate)))
             .map_err(|e| e.to_string())?;
         // Included in the module hash checked by the production loader's [wasm.linked].
-        let identity = serde_json::to_vec(&serde_json::json!({"compiler":toolchain.version,"target":TARGET,"flags":FLAGS,"rlib":sha512_of(&rlib), "dependency_rlibs": member.manifest.get("dependencies").and_then(|v| v.as_table_like()).map(|deps| deps.iter().filter_map(|(id, _)| rlibs.get(id).map(|hash| (id, hash))).collect::<BTreeMap<_,_>>()).unwrap_or_default(), "profile":PROFILE, "codegen_units":1, "panic":"abort"})).map_err(|e| e.to_string())?;
+        let identity = serde_json::to_vec(&serde_json::json!({"compiler":toolchain.version,"target":TARGET,"flags":FLAGS,"rlib":sha512_of(&rlib), "dependency_rlibs": member.manifest.get("dependencies").and_then(|v| v.as_table_like()).map(|deps| deps.iter().filter_map(|(id, _)| rlibs.get(id).map(|hash| (id, hash))).collect::<BTreeMap<_,_>>()).unwrap_or_default(), "profile":PROFILE, "member_visibility":"protected", "codegen_units":1, "panic":"abort"})).map_err(|e| e.to_string())?;
         let mut section = Vec::new();
         wasm_encoder::Encode::encode(
             &wasm_encoder::CustomSection {
@@ -642,7 +642,9 @@ pub fn rustc(mut args: Vec<String>) -> Result<(), String> {
             config["stage"].as_str().ok_or("no stage")?,
             config["id"].as_str().ok_or("no id")?
         ));
-        args.push("-Zdefault-visibility=interposable".into());
+        // The group rejects symbol overrides: export this unit without making its own
+        // vtables and statics preemptible through self-imported GOT entries.
+        args.push("-Zdefault-visibility=protected".into());
         args.push(format!(
             "--cfg=horizon_guest_registration=\"{}\"",
             sha512_of(format!("{}{}", config["registrations"], config["points"]).as_bytes())

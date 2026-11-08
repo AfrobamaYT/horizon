@@ -170,6 +170,8 @@ fn cargo_command(
         .env("HORIZON_STD_ARTIFACTS", target_dir.join("std-artifacts"))
         .env("HORIZON_BUILD_ROOT", target_dir)
         .env("RUSTC_BOOTSTRAP", "1")
+        .env_remove("CARGO_ENCODED_RUSTFLAGS")
+        .env_remove("RUSTC_WORKSPACE_WRAPPER")
         .env("RUSTFLAGS", FLAGS)
         .env("CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER", &exe)
         .env(LINK_ENV, role)
@@ -306,6 +308,23 @@ fn member_export(name: &str) -> bool {
             .is_ok_and(|symbol| format!("{symbol:#}").starts_with("__rustc::"))
 }
 
+fn group_export(name: &str, krate: &str) -> bool {
+    if GUEST_EXPORTS.contains(&name) || name == "horizon_layout_ext" || name.starts_with("__wasm_")
+    {
+        return true;
+    }
+    let Ok(symbol) = rustc_demangle::try_demangle(name) else {
+        return false;
+    };
+    let path = format!("{symbol:#}");
+    path.starts_with(&format!("{krate}::"))
+        || (path.starts_with('<')
+            && path
+                .split(">::")
+                .next()
+                .is_some_and(|receiver| receiver.contains(&format!("{krate}::"))))
+}
+
 /// The link step, run by cargo as the linker: rust-lld linking a shared module, then rustc's
 /// own metadata sections dropped.
 pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
@@ -364,6 +383,10 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
             out.push(arg);
         }
     }
+    let explicit_exports: std::collections::BTreeSet<_> = out
+        .iter()
+        .filter_map(|arg| arg.strip_prefix("--export=").map(str::to_owned))
+        .collect();
     out.extend(
         [
             "--shared",
@@ -392,7 +415,17 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
     }
     let output = output.ok_or("rustc gave no -o")?;
     let bytes = std::fs::read(&output).map_err(|e| e.to_string())?;
+    // Core starts execute during instantiation, before the group can fill self GOT entries.
+    // Preserve the real start as an explicit initialization phase instead.
+    let start = wasmparser::Parser::new(0)
+        .parse_all(&bytes)
+        .find_map(|payload| match payload {
+            Ok(wasmparser::Payload::StartSection { func, .. }) => Some(func),
+            _ => None,
+        });
     let mut module = wasm_encoder::Module::new();
+    let mut private_exports = Vec::new();
+    let krate = std::env::var("CARGO_CRATE_NAME").unwrap_or_default();
     for payload in wasmparser::Parser::new(0).parse_all(&bytes) {
         let payload = payload.map_err(|e| e.to_string())?;
         if let wasmparser::Payload::CustomSection(c) = &payload
@@ -400,19 +433,40 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
         {
             continue;
         }
+        if matches!(payload, wasmparser::Payload::StartSection { .. }) {
+            continue;
+        }
         // The hook factory is an implementation detail of this member, not a group symbol.
         // Every mod defines it, so publishing it would make unrelated mods collide.
-        if role == "member"
-            && let wasmparser::Payload::ExportSection(reader) = &payload
-        {
+        if let wasmparser::Payload::ExportSection(reader) = &payload {
             let mut section = wasm_encoder::ExportSection::new();
+            let mut has_start = false;
             for export in reader.clone() {
                 let export = export.map_err(|e| e.to_string())?;
-                if member_export(export.name) {
+                if export.name == "__wasm_start" {
+                    if start.is_some_and(|index| {
+                        export.index != index || export.kind != wasmparser::ExternalKind::Func
+                    }) {
+                        return Err("linker start export does not name its core start".into());
+                    }
+                    has_start = true;
+                }
+                if role == "member"
+                    && !group_export(export.name, &krate)
+                    && !explicit_exports.contains(export.name)
+                {
+                    private_exports.push(export.name.to_owned());
+                }
+                if role != "member" || member_export(export.name) {
                     let kind = wasm_encoder::ExportKind::try_from(export.kind)
                         .map_err(|e| format!("{e:?}"))?;
                     section.export(export.name, kind, export.index);
                 }
+            }
+            if let Some(start) = start
+                && !has_start
+            {
+                section.export("__wasm_start", wasm_encoder::ExportKind::Func, start);
             }
             module.section(&section);
             continue;
@@ -454,6 +508,14 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
                 data: &bytes[range.start as usize..range.end as usize],
             });
         }
+    }
+    if role == "member" {
+        module.section(&wasm_encoder::CustomSection {
+            name: "horizon.private".into(),
+            data: serde_json::to_vec(&private_exports)
+                .map_err(|e| e.to_string())?
+                .into(),
+        });
     }
     std::fs::write(&output, module.finish()).map_err(|e| e.to_string())
 }

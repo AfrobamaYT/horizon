@@ -55,7 +55,9 @@ feature resolution, build scripts and non-mod dependencies. Registration generat
 each package, not to the mod from which the command was launched.
 
 Ordinary Rust calls such as `my_library::function()`, statics, generics and owned Rust types need
-no generated interface or export annotations. Each member records its compiler, target, settings,
+no generated interface or export annotations. Members export their public definitions without
+symbol interposition: duplicate definitions are refused, rather than overriding another mod.
+Each member records its compiler, target, settings,
 rlib digest and dependency artifact identities in `horizon.build` metadata covered by its module
 hash. Mod crate disambiguators use the mod ID, version and resolved Cargo features rather than
 the temporary workspace path. A shared crate disambiguator alone is not an ABI guarantee:

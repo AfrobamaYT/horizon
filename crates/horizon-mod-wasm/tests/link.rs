@@ -178,3 +178,162 @@ fn bytes_that_are_not_a_shared_module_are_refused_without_a_panic() {
         })
     );
 }
+
+const SELF_GOT: &str = r#"(module
+  (@custom "dylink.0" "\01\04\04\02\00\00")
+  (type $get (func (result i32)))
+  (import "env" "memory" (memory 1))
+  (import "env" "__indirect_function_table" (table 1 funcref))
+  (import "env" "__memory_base" (global $base i32))
+  (import "GOT.func" "answer" (global $answer_ptr (mut i32)))
+  (import "GOT.mem" "SELF_DATA" (global $data (mut i32)))
+  (data (global.get $base) "\28\00\00\00")
+  (global (export "SELF_DATA") i32 (i32.const 0))
+  (func $answer (export "answer") (result i32) (i32.const 2))
+  (func $ctor (export "__wasm_call_ctors")
+    (i32.store (global.get $data)
+      (i32.add (i32.load (global.get $data))
+        (call_indirect (type $get) (global.get $answer_ptr)))))
+  (func (export "run") (result i32) (i32.load (global.get $data))))"#;
+
+#[test]
+fn self_got_function_and_data_relocations_are_ready_before_constructors() {
+    let module = bytes(SELF_GOT);
+    let mut group = Group::link(
+        &Engine::default(),
+        &[Member {
+            name: "self",
+            module: &module,
+        }],
+    )
+    .unwrap();
+    assert_eq!(call(&mut group, "self", "run"), 42);
+}
+
+#[test]
+fn self_got_requires_an_actual_export_of_the_right_kind() {
+    for source in [
+        SELF_GOT.replace("(export \"answer\")", ""),
+        SELF_GOT.replace(
+            "(func $answer (export \"answer\")",
+            "(global (export \"answer\") i32 (i32.const 0)) (func $answer",
+        ),
+    ] {
+        let module = bytes(&source);
+        let error = Group::link(
+            &Engine::default(),
+            &[Member {
+                name: "self",
+                module: &module,
+            }],
+        )
+        .err()
+        .unwrap();
+        assert_eq!(
+            error,
+            LinkError::Unresolved {
+                member: "self".into(),
+                symbol: "GOT.func.answer".into()
+            }
+        );
+    }
+    let module = bytes(&SELF_GOT.replace("(global (export \"SELF_DATA\")", "(global"));
+    let error = Group::link(
+        &Engine::default(),
+        &[Member {
+            name: "self",
+            module: &module,
+        }],
+    )
+    .err()
+    .unwrap();
+    assert_eq!(
+        error,
+        LinkError::Unresolved {
+            member: "self".into(),
+            symbol: "GOT.mem.SELF_DATA".into()
+        }
+    );
+}
+
+#[test]
+fn self_got_does_not_allow_a_start_function_to_observe_unrelocated_state() {
+    let module = bytes(&SELF_GOT.replace("(func $ctor", "(start $ctor) (func $ctor"));
+    let error = Group::link(
+        &Engine::default(),
+        &[Member {
+            name: "self",
+            module: &module,
+        }],
+    )
+    .err()
+    .unwrap();
+    assert!(matches!(error, LinkError::Malformed { member, .. } if member == "self"));
+}
+
+#[test]
+fn self_got_delayed_start_runs_after_relocation_and_before_constructors() {
+    let source = SELF_GOT.replace("(func $ctor",
+        "(func (export \"__wasm_start\") (i32.store (global.get $data) (i32.const 50))) (func $ctor");
+    let module = bytes(&source);
+    let mut group = Group::link(
+        &Engine::default(),
+        &[Member {
+            name: "self",
+            module: &module,
+        }],
+    )
+    .unwrap();
+    assert_eq!(call(&mut group, "self", "run"), 52);
+}
+
+#[test]
+fn self_got_private_helpers_and_data_belong_to_each_member() {
+    let source = SELF_GOT.replacen("(type $get", "(@custom \"horizon.private\" \"[\\22answer\\22,\\22SELF_DATA\\22,\\22run\\22]\") (type $get", 1);
+    let first = bytes(&source);
+    let second = bytes(&source.replace("(i32.const 2))", "(i32.const 3))"));
+    let mut group = Group::link(
+        &Engine::default(),
+        &[
+            Member {
+                name: "first",
+                module: &first,
+            },
+            Member {
+                name: "second",
+                module: &second,
+            },
+        ],
+    )
+    .unwrap();
+    assert_eq!(call(&mut group, "first", "run"), 42);
+    assert_eq!(call(&mut group, "second", "run"), 43);
+}
+
+#[test]
+fn self_got_private_function_does_not_bind_an_earlier_public_function() {
+    let first = bytes(&SELF_GOT.replacen(
+        "(type $get",
+        r#"(@custom "horizon.private" "[\22SELF_DATA\22,\22run\22]") (type $get"#,
+        1,
+    ));
+    let second = bytes(&SELF_GOT.replacen("(type $get",
+        r#"(@custom "horizon.private" "[\22answer\22,\22SELF_DATA\22,\22run\22]") (type $get"#, 1)
+        .replace("(i32.const 2))", "(i32.const 3))"));
+    let mut group = Group::link(
+        &Engine::default(),
+        &[
+            Member {
+                name: "first",
+                module: &first,
+            },
+            Member {
+                name: "second",
+                module: &second,
+            },
+        ],
+    )
+    .unwrap();
+    assert_eq!(call(&mut group, "first", "run"), 42);
+    assert_eq!(call(&mut group, "second", "run"), 43);
+}
