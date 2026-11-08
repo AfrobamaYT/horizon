@@ -108,6 +108,7 @@ impl std::fmt::Display for WireError {
 
 impl std::error::Error for WireError {}
 
+// exhaustive: wasm boundary plumbing that generated code builds field by field
 /// A buffer values are written to. Reuse one to keep the allocation.
 #[derive(Default)]
 pub struct Writer {
@@ -259,6 +260,19 @@ pub trait Record {
     fn apply(&mut self, bytes: &[u8]) -> Result<(), WireError>;
 }
 
+// exhaustive: wasm boundary plumbing that generated code builds field by field
+/// A call record refused before it can be encoded, such as an oversized owned snapshot.
+/// It follows the normal Writer error path instead of sending a truncated call.
+pub struct Refused(pub WireError);
+impl Record for Refused {
+    fn encode(&self, out: &mut Writer) {
+        out.fail(self.0);
+    }
+    fn apply(&mut self, _: &[u8]) -> Result<(), WireError> {
+        Err(self.0)
+    }
+}
+
 impl<T: Wire> Record for T {
     fn encode(&self, out: &mut Writer) {
         out.put(self);
@@ -274,13 +288,16 @@ impl<T: Wire> Record for T {
     }
 }
 
+// exhaustive: wasm boundary plumbing that generated code builds field by field
 /// A hook record's writable fields, in declaration order. Sharing these tuple codecs avoids
 /// generating and compiling a separate native codec for every named point record.
 pub struct Fields<T>(pub T);
 
+// exhaustive: wasm boundary plumbing that generated code builds field by field
 /// A field which crosses with a record but is not a declared writeback destination.
 pub struct ReadOnly<T>(pub T);
 
+// hidden: wasm boundary plumbing used by generated code, not a mod's API
 #[doc(hidden)]
 pub trait FieldSet {
     type Value;
@@ -342,6 +359,8 @@ impl<T: FieldSet> Record for Fields<T> {
     }
 }
 
+// exhaustive: wasm boundary plumbing that generated code builds field by field
+// hidden: wasm boundary plumbing used by generated code, not a mod's API
 /// A checked append-only delta. Only the API's type-owned validation can create it.
 #[doc(hidden)]
 pub struct Append<T>(Vec<T>);
@@ -391,6 +410,7 @@ impl<T: Put> Put for [T] {
     }
 }
 
+// exhaustive: wasm boundary plumbing that generated code builds field by field
 /// A buffer values are read from.
 pub struct Reader<'a> {
     data: &'a [u8],
