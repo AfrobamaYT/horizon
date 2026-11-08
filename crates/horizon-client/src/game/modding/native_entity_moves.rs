@@ -29,7 +29,7 @@ impl Game<'_> {
     /// Moves the entity to `pos` in its level (`Entity.teleportTo`), as
     /// `/tp` does: a player is placed there and told, a rider gets off. With
     /// `rotation` (yaw, pitch in degrees) it also turns. False for a position
-    /// outside the world's bounds, for wall-mounted entities, or when the
+    /// outside the world's bounds, for wall-mounted entities or dragon parts, or when the
     /// requested rotation cannot be stored.
     pub(super) fn entity_teleport_to(
         &mut self,
@@ -41,7 +41,10 @@ impl Game<'_> {
             return false;
         };
         if !in_bounds(pos)
-            || matches!(t, Target::Frame(_) | Target::Painting(_))
+            || matches!(
+                t,
+                Target::Frame(_) | Target::Painting(_) | Target::DragonPart(_)
+            )
             || rotation.is_some_and(|r| {
                 !r.iter().all(|v| v.is_finite())
                     || !matches!(

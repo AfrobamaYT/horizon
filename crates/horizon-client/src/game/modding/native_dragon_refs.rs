@@ -449,6 +449,10 @@ mod tests {
             assert_eq!(game.entity_is_multipart(stale), None);
             let stale_dragon = EntityRef::new(stale.epoch(), entity.id());
             assert_eq!(game.entity_parts(stale_dragon), None);
+            // Parts cannot move independently of their parent, even without rotation.
+            let before = game.entity_position(parts[2]);
+            assert!(!game.entity_teleport_to(parts[2], [10.0, 80.0, 10.0], None));
+            assert_eq!(game.entity_position(parts[2]), before);
             // A dragon that is dying still has its parts.
             game.dragon.as_mut().unwrap().health = 0.0;
             assert_eq!(game.entity_position(parts[2]), Some(part_fixture(2).0));
@@ -493,6 +497,16 @@ mod tests {
             remote.logged_in = true;
             remote.entity_id = 7;
             remote.profile = 42;
+            remote.tracked.insert(
+                15,
+                super::super::remote::Tracked {
+                    kind: "minecraft:ender_dragon".to_owned(),
+                    position: [0.0; 3],
+                    codec_base: [0.0; 3],
+                    silent: false,
+                    vehicle: None,
+                },
+            );
             game.player =
                 Some(horizon_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
             let mut dragon = Dragon::new(Vec3::ZERO, 0.0, 0);
