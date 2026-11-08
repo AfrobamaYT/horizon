@@ -70,19 +70,20 @@ use mod_api::GameMode;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
     self, Answered, BlockPlacement, BlockTintSources, ClientAudioOptions, ClientChatOptions,
-    ClientGraphicsOptions, ClientGuiOptions, ClientInputOptions, ClientModifiers,
-    ClientReloadListeners, CommandInvocation, EnchantmentInfo, EntityRef, GameRuleActor,
-    InteractionKey, LayerDefinition, LivingRef, NativeCamera, NativeCommand, NativeDispensed,
-    NativeHandRender, NativeKeyMapping, NativeLifecycleContext, NativeNoteBlockChange,
-    PathComputationType, Placement, PlayerRef, RecipeBookCategory, ScreenId, ScreenOpening,
-    ScreenshotImage, ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
+    ClientGraphicsOptions, ClientGuiOptions, ClientInputOptions, ClientMiningPrediction,
+    ClientModifiers, ClientReloadListeners, CommandInvocation, EnchantmentInfo, EntityRef,
+    GameRuleActor, InteractionAttempt, InteractionKey, LayerDefinition, LivingRef, NativeCamera,
+    NativeCommand, NativeDispensed, NativeHandRender, NativeKeyMapping, NativeLifecycleContext,
+    NativeNoteBlockChange, PathComputationType, Placement, PlayerRef, RecipeBookCategory, ScreenId,
+    ScreenOpening, ScreenshotImage, ServerReloadListeners, ServerTickPhase, TicketController,
+    ToolUse, WorldPhase,
 };
 use mod_api::{
     AttachmentStore, BonemealSource, ChunkRef, FluidStack, LevelRef, LogicalSide,
     NativeActiveEffect, NativeBlockClick, NativeBlockUpdateFlags, NativeInteractionResult,
     NativeItemClick, NativeItemDrop, NativeTriState, NeighbourUpdate, TooltipElement, UsePhase,
 };
-use mod_api::{BlockKey, DebugEntry, DebugRenderer, EffectKey, GuiLayer};
+use mod_api::{BlockKey, DebugEntry, DebugRenderer, EffectKey, GuiLayer, RuntimeSprite};
 use mod_api::{
     CameraType, Identifier, MobRef, NativeDespawn, NativePermissionLevel, NativeSpawnCheck,
     NativeSpawnReason, SoundPlay, SoundRef,
