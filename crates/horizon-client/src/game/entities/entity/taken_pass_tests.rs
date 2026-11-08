@@ -306,7 +306,15 @@ fn lifecycle_fixture_walks_other_owners() {
 /// Run each fixture's complete setup and actual action in both dimensions.
 pub(in crate::game) fn in_both_dimensions(mut test: impl FnMut(&mut Game<'_>, &PassBalance)) {
     for dimension in [crate::game::Dim::Overworld, crate::game::Dim::Nether] {
+        // with_game isolates the initial SaveDir; newly opened dimensions use
+        // world_root instead. Keep that root alive until the Game is dropped.
+        let root = ScratchDirectory(std::env::temp_dir().join(format!(
+            "horizon-caller-balance-{}-{:?}-{dimension:?}",
+            std::process::id(),
+            std::thread::current().id()
+        )));
         crate::game::native_entity_refs::tests::with_game(|game| {
+            game.world_root = root.0.clone();
             game.enter_level(dimension).unwrap();
             use horizon_client::join_seq::residency::{Kind, Owner};
             let balance = PassBalance::bind(
