@@ -45,7 +45,38 @@ fn projectile_type(p: &Projectile) -> &'static str {
     }
 }
 
+/// An owned flight pass restored only if its dispatch unwinds.
+struct ProjectileDispatch<'game, 'resources> {
+    game: &'game mut Game<'resources>,
+    pass: Option<JoinList<Projectile, false>>,
+}
+impl Drop for ProjectileDispatch<'_, '_> {
+    fn drop(&mut self) {
+        if let Some(pass) = self.pass.take() {
+            self.game
+                .creatures
+                .projectiles
+                .restore(pass, horizon_client::join_seq::RestoreOrder::SpawnsFirst);
+        }
+    }
+}
+
 impl Game<'_> {
+    /// Guard just the dispatch: normal completion returns the still-owned pass
+    /// to its caller, which restores explicitly at the established tick boundary.
+    pub(super) fn with_projectile_dispatch(
+        &mut self,
+        pass: &mut JoinList<Projectile, false>,
+        fire: impl FnOnce(&mut Self),
+    ) {
+        let mut guard = ProjectileDispatch {
+            game: self,
+            pass: Some(pass.take_owned_pass()),
+        };
+        fire(&mut *guard.game);
+        *pass = guard.pass.take().unwrap();
+    }
+
     /// Whether this game is a server that flies projectiles for the mods (the
     /// server thread or a dedicated server, never a client) and a mod asked to hear their impacts
     /// (`native_hears_projectile_impacts`). Without one, the tick keeps no copy
@@ -323,6 +354,10 @@ impl Game<'_> {
         (p, keep, events)
     }
 }
+
+#[cfg(test)]
+#[path = "native_projectiles/impact_panic_tests.rs"]
+mod impact_panic_tests;
 
 #[cfg(test)]
 mod nested_spawn_tests {
