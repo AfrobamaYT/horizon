@@ -167,7 +167,10 @@ impl Game<'_> {
         {
             let text: String = text.chars().filter(|c| !c.is_control()).collect();
             if !text.is_empty() && self.text_field_focused() && self.types_text() {
-                let _ = self.type_chars_into_screen(&text);
+                self.screen_text_each(&text, |game, c| {
+                    // Err only says no box of the screen takes it.
+                    let _ = game.type_chars_into_screen(c);
+                });
             }
             return;
         }
@@ -369,17 +372,18 @@ impl Game<'_> {
         // Options keeps its text on the key: its own key path routes a key's
         // text between its boxes and its key-bind capture, and no key that
         // carries text closes that screen or moves its focus. The title's
-        // screens keep theirs for the same reason: their key path types into
-        // the world name, the seed and a server's address.
+        // screens keep theirs while no box has focus: Space presses a button
+        // there, and the box that opens must not take its character.
         let mut typed: Option<String> = None;
         if let WindowEvent::KeyboardInput {
             event: key_event, ..
         } = &mut event
             && key_event.state == ElementState::Pressed
         {
+            let title_text = control::title_owns_text(&self.screen, self.title.is_some());
             if self.screen_hooks_open()
                 && self.screen != Screen::Options
-                && !control::title_owns_text(&self.screen, self.title.is_some())
+                && (!title_text || self.title.as_mut().is_some_and(|t| t.has_caret_field()))
             {
                 typed = key_event.text.take().map(|text| text.to_string());
             }
@@ -387,7 +391,9 @@ impl Game<'_> {
                 PhysicalKey::Code(key) => self.screen_key_pressed(key, key_event.repeat),
                 PhysicalKey::Unidentified(_) => false,
             };
-            if self.screen == Screen::Options && self.screen_hooks_open() {
+            if self.screen_hooks_open()
+                && (self.screen == Screen::Options || (title_text && self.types_text()))
+            {
                 // The hook after the key's own, then the text the key path
                 // types in place (its own routing keeps it).
                 if let Some(text) = key_event.text.as_deref() {
@@ -1375,6 +1381,25 @@ impl Game<'_> {
                     let between = now.saturating_duration_since(self.frame_end);
                     self.frame_ticks = elapsed.as_secs_f32() * 20.0;
                     self.previous = now;
+                    if self.studio_freecam.active
+                        && self.screen == Screen::Playing
+                        && !self.dialog_open()
+                    {
+                        let held = |key| f64::from(u8::from(self.keys.raw(&key)));
+                        let forward = held(KeyCode::KeyW) - held(KeyCode::KeyS);
+                        let strafe = held(KeyCode::KeyD) - held(KeyCode::KeyA);
+                        let vertical = held(KeyCode::Space)
+                            - f64::from(u8::from(self.keys.raw(&KeyCode::ShiftLeft)));
+                        let fast = self.keys.raw(&KeyCode::ControlLeft)
+                            || self.keys.raw(&KeyCode::ControlRight);
+                        self.studio_freecam.update_flight_motion(
+                            forward,
+                            strafe,
+                            vertical,
+                            fast,
+                            elapsed.as_secs_f64().min(0.1),
+                        );
+                    }
                     // Arrow-key camera controls belong to gameplay; chat and
                     // other screens use the same keys for their own navigation.
                     if self.screen == Screen::Playing
@@ -1435,6 +1460,7 @@ impl Game<'_> {
                         self.clock.record(started.elapsed());
                         if let Some(report) = self.clock.take_sprint_report() {
                             self.sprint_report(&report);
+                            self.on_tick_rate_changed();
                         }
                     }
                     self.extras_frame(elapsed);
@@ -1494,6 +1520,28 @@ impl Game<'_> {
                             if let Some(&gpu) = r.gpu_times.last() {
                                 self.gpu_utilization =
                                     f64::from(gpu) * 100.0 / f64::from(ms(cpu).max(0.001));
+                            }
+                            if self.settings.horizon.gpu_culling
+                                == horizon_client::graphics::GpuCullingMode::Auto
+                                && self.screen == Screen::Playing
+                                && !self.streaming.terrain_loading()
+                                && horizon_client::graphics::gpu_culling_offer()
+                                    .reason()
+                                    .is_none()
+                                && let Some(on) = self.gpu_culling_auto.observe(
+                                    ms(cpu),
+                                    r.gpu_times.last().copied(),
+                                    ms(elapsed),
+                                )
+                            {
+                                log::info!(
+                                    "Horizon: GPU Culling Auto turns it {} ({})",
+                                    if on { "on" } else { "off" },
+                                    self.gpu_culling_auto.state()
+                                );
+                                if r.set_gpu_culling(on).is_err() {
+                                    self.gpu_culling_auto.reset();
+                                }
                             }
                             self.frame_stats.record_cpu(ms(cpu));
                             let render = r.last_encode;

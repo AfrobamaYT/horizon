@@ -8,7 +8,16 @@ pub fn routes(home: &Path, base: Option<&str>) -> Result<Routes, Failed> {
     let Some(folder) = stage_installed(home, root().join("installed.routes"))? else {
         return Ok(Routes::default());
     };
-    let found = scan_bundles(&folder)?;
+    classify(&folder, base, &lease)
+}
+
+/// Share classification with an actual build under its existing cache lease.
+pub(super) fn classify(
+    folder: &Path,
+    base: Option<&str>,
+    lease: &crate::native_cache::Cache,
+) -> Result<Routes, Failed> {
+    let found = scan_bundles(folder)?;
     let mut result = Routes::default();
     let mut projects = Vec::new();
     for bundle in &found {
@@ -40,7 +49,7 @@ pub fn routes(home: &Path, base: Option<&str>) -> Result<Routes, Failed> {
     {
         result.unavailable = prebuilt::prebuilt_availability(&revision, Target::Client);
     } else {
-        match prebuilt::planning_catalog(&lease, &revision) {
+        match prebuilt::planning_catalog(lease, &revision) {
             Ok(catalog) => {
                 for (id, route) in prebuilt::slot_routes(&catalog, &projects) {
                     if route != Route::Prebuilt {

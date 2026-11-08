@@ -308,7 +308,7 @@ impl Game<'_> {
         let mut world = World::new(self.res.facts().air, self.level.seed);
         world.attachments = save.load_attachments();
         world.shape = self.level_shapes.get(dim.id());
-        world.fast_lava = dim == Dim::Nether;
+        world.fast_lava = self.dimension_type_of(dim).fast_lava;
         Ok(Parked {
             world,
             streaming,
@@ -362,6 +362,64 @@ impl Game<'_> {
             border: self.load_border(dim),
             border_sent: None,
         })
+    }
+
+    /// `MinecraftServer.prepareLevels`: before the first tick, the chunks the
+    /// open levels' restored tickets hold (forced chunks, a native mod's) are
+    /// loaded (`ChunkLoadCounter`). The first tick then finds them ticking
+    /// and unpacks their saved block and fluid ticks at the game time they
+    /// were saved at (`startTickingChunk`), not at whichever tick they finish
+    /// streaming in.
+    pub(super) fn prepare_levels(&mut self) -> Result<()> {
+        if self.options.execution_role.is_client() {
+            return Ok(());
+        }
+        let deadline = Instant::now() + Duration::from_secs(600);
+        self.wait_for_ticket_chunks(deadline);
+        let back = self.dim;
+        for dim in [Dim::Overworld, Dim::Nether, Dim::End] {
+            if dim != back && self.levels.parked.contains_key(&dim) {
+                self.enter_level(dim)?;
+                self.wait_for_ticket_chunks(deadline);
+            }
+        }
+        if self.dim != back {
+            self.enter_level(back)?;
+        }
+        Ok(())
+    }
+
+    /// Stream the level in place until each chunk its tickets make block
+    /// ticking is a ticking chunk (lit, with its neighbours loaded).
+    fn wait_for_ticket_chunks(&mut self, deadline: Instant) {
+        // A `PORTAL` ticket reaches block ticking two chunks out, a forced one one.
+        const REACH: i32 = 2;
+        loop {
+            self.update_chunk_tickets();
+            let levels = self.tickets.levels();
+            let streaming = &self.streaming;
+            let ready = streaming
+                .forced
+                .iter()
+                .copied()
+                .chain(self.tickets.portal_chunks())
+                .all(|(cx, cz)| {
+                    (cz - REACH..=cz + REACH).all(|z| {
+                        (cx - REACH..=cx + REACH).all(|x| {
+                            !levels.loaded_ticking(x, z) || super::ticking_chunk(&self.world, x, z)
+                        })
+                    })
+                });
+            if ready {
+                return;
+            }
+            if Instant::now() >= deadline {
+                log::warn!("Horizon: the chunks of the saved tickets did not load");
+                return;
+            }
+            self.update_world();
+            self.streaming.wait(Duration::from_millis(5));
+        }
     }
 
     /// Exchange the level in place with `p`.
@@ -541,7 +599,22 @@ impl Game<'_> {
         // (each `ServerLevel.tick` only reads `runsNormally`), and the native
         // `ServerTickStart` before that level work, where NeoForge fires
         // `ServerTickEvent.Pre`. A paused pass and a held server tick nothing.
-        let running = (!paused && !self.agent.hold_server).then(|| self.clock.world_runs());
+        let running = if !paused && !self.agent.hold_server {
+            self.clock.check_sprint_completion();
+            if let Some(report) = self.clock.take_sprint_report() {
+                // ServerTickRateManager.finishTickSprint: the server's sendSuccess.
+                self.console_broadcast = Some(true);
+                self.sprint_report(&report);
+                self.console_broadcast = None;
+                self.send_admin_feedback(None);
+                self.admin_feedback.clear();
+                // Then onTickRateChanged, its mods outside the server's broadcast.
+                self.on_tick_rate_changed();
+            }
+            Some(self.clock.tick_world_runs())
+        } else {
+            None
+        };
         let server = self.serving.is_some() || self.options.dedicated.is_some();
         // A config edited while the server is paused (empty) still reloads.
         // The parts outside every level get spans of their own, so that a slow
@@ -620,10 +693,15 @@ impl Game<'_> {
                         moved = true;
                     }
                 }
-                if moved {
+                if moved && k + 1 < n {
                     self.enter_level(dim)?;
                 }
             }
+        }
+        if let Some(&first) = order.first()
+            && self.dim != first
+        {
+            let _ = self.enter_level(first);
         }
         self.level_pass = Pass::default();
         if result.is_err() {
@@ -698,8 +776,7 @@ impl Game<'_> {
         result
     }
 
-    /// The end of `MinecraftServer.runServer`'s loop for a server thread: a
-    /// finished `/tick sprint` reports to the operators as the server, then
+    /// The end of `MinecraftServer.runServer`'s loop for a server thread:
     /// the next tick starts one tick length after this one, or straight away
     /// while the sprint runs (`checkShouldSprintThisTick`). A server more
     /// than two seconds behind skips the ticks it missed: that returns how far
@@ -709,14 +786,6 @@ impl Game<'_> {
         next: &mut Instant,
         paused: bool,
     ) -> Option<Duration> {
-        if let Some(report) = self.clock.take_sprint_report() {
-            // ServerTickRateManager.finishTickSprint: the server's sendSuccess.
-            self.console_broadcast = Some(true);
-            self.sprint_report(&report);
-            self.console_broadcast = None;
-            self.send_admin_feedback(None);
-            self.admin_feedback.clear();
-        }
         let now = Instant::now();
         if !paused && self.clock.sprinting() {
             *next = now;
