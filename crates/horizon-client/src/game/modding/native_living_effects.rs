@@ -95,7 +95,7 @@ impl Game<'_> {
         effect: &NativeActiveEffect,
     ) -> bool {
         let Some(def) = mod_api::__private::effect_index(effect.id)
-            .and_then(horizon_client::potions::effect_by_index)
+            .and_then(horizon_client_core::potions::effect_by_index)
         else {
             return false;
         };
@@ -149,7 +149,7 @@ impl Game<'_> {
         effect: EffectKey,
     ) -> Option<NativeActiveEffect> {
         let def = mod_api::__private::effect_index(effect)
-            .and_then(horizon_client::potions::effect_by_index)?;
+            .and_then(horizon_client_core::potions::effect_by_index)?;
         match self.native_living_read_target(living)? {
             t @ (Target::Player | Target::Guest(_)) => self
                 .native_living_player_effects(t)?
@@ -190,7 +190,7 @@ impl Game<'_> {
     /// a stale handle or a client.
     pub(super) fn living_potion_affected(&self, living: LivingRef, effect: EffectKey) -> bool {
         let Some(def) = mod_api::__private::effect_index(effect)
-            .and_then(horizon_client::potions::effect_by_index)
+            .and_then(horizon_client_core::potions::effect_by_index)
         else {
             return false;
         };
@@ -231,7 +231,7 @@ impl Game<'_> {
         partial: f32,
     ) -> Option<f32> {
         let def = mod_api::__private::effect_index(effect)
-            .and_then(horizon_client::potions::effect_by_index)?;
+            .and_then(horizon_client_core::potions::effect_by_index)?;
         let Target::Player = self.native_living_read_target(living)? else {
             return None;
         };
@@ -260,7 +260,7 @@ impl Game<'_> {
     /// an armor stand, the dragon, a stale handle or a client.
     pub(super) fn living_remove_effect(&mut self, living: LivingRef, effect: EffectKey) -> bool {
         let Some(def) = mod_api::__private::effect_index(effect)
-            .and_then(horizon_client::potions::effect_by_index)
+            .and_then(horizon_client_core::potions::effect_by_index)
         else {
             return false;
         };
