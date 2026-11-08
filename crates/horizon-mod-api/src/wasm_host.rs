@@ -909,7 +909,7 @@ impl glue::horizon::mod_api::held_handles::Host for State {
 fn refuse_held_hooks(names: &[String]) -> Result<(), LoadError> {
     if names
         .iter()
-        .any(|name| glue::hook_id(name) == Some(HookId::AlterGround))
+        .any(|name| matches!(glue::hook_id(name), Some(HookId::AlterGround)))
     {
         return Err(LoadError::Import {
             import: "alter_ground".to_owned(),
