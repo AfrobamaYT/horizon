@@ -2614,7 +2614,6 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "listen",
         neoforge = "LivingEquipmentChangeEvent",
-        paper = "EntityEquipmentChangedEvent",
         cancellable = false
     )]
     fn living_equipment_change();
