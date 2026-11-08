@@ -84,6 +84,8 @@ impl WasmMod {
         encode: impl FnOnce(&mut Writer),
         decode: impl FnOnce(&mut Reader<'_>) -> Result<R, WireError>,
     ) -> Option<R> {
+        // Each mock Cx models a fresh store; real stores own their guest string table.
+        guest::reset_static_strings();
         let mut cx = Box::new(boundary::Cx::default());
         cx.frames.push(frame);
         cx.module = self as *const Self;
@@ -380,6 +382,201 @@ fn borrowed_view_reply_is_byte_identical_to_owned_snapshot() {
     mod_api::ModBlockEntityView::new(&mut entity).__wire_put_snapshot(&mut reply);
     assert!(reply.error().is_none());
     assert_eq!(reply.bytes(), owned.bytes());
+}
+fn static_reply(
+    tag: u8,
+    id: u32,
+    text: Option<&str>,
+    trailing: bool,
+) -> Result<&'static str, WireError> {
+    let mut out = Writer::new();
+    out.put(&tag);
+    out.put(&id);
+    if let Some(text) = text {
+        out.put(text);
+    }
+    if trailing {
+        out.put(&7u8);
+    }
+    let bytes = out.into_bytes();
+    guest::set_transport(Some(Rc::new(move |_, _| bytes.clone())));
+    let result = guest::host(0, guest::begin())
+        .take_static::<()>()
+        .map(|(text, ())| text);
+    guest::set_transport(None);
+    result
+}
+#[test]
+fn static_reply_definitions_are_checked_before_acknowledgement() {
+    guest::reset_static_strings();
+    assert_eq!(
+        static_reply(0, 0, None, false),
+        Err(WireError::Invalid("unknown static string id"))
+    );
+    assert_eq!(static_reply(1, 1, Some("second"), false).unwrap(), "second");
+    assert_eq!(
+        guest::static_ack(),
+        1,
+        "acknowledge only the exact decoded id, independently of holes"
+    );
+    let first = static_reply(1, 0, Some("first"), false).unwrap();
+    assert_eq!(guest::static_ack(), 0);
+    assert!(std::ptr::eq(
+        first,
+        static_reply(0, 0, None, false).unwrap()
+    ));
+    assert!(std::ptr::eq(
+        first,
+        static_reply(1, 0, Some("first"), false).unwrap()
+    ));
+    assert!(static_reply(1, 0, Some("changed"), false).is_err());
+    assert_eq!(
+        static_reply(1, 2, Some("not admitted"), true),
+        Err(WireError::Trailing)
+    );
+    assert_eq!(guest::static_ack(), 0);
+    assert!(static_reply(0, 2, None, false).is_err());
+    assert_eq!(static_reply(9, 0, None, false), Err(WireError::Tag(9)));
+    assert!(static_reply(1, u32::MAX, Some("bad id"), false).is_err());
+    assert!(static_reply(1, 2, Some(&"x".repeat(257)), false).is_err());
+    for tail in [None, Some(2u8)] {
+        let mut out = Writer::new();
+        out.put(&1u8);
+        out.put(&2u32);
+        out.put("unadmitted scalar tail");
+        if let Some(tail) = tail {
+            out.put(&tail);
+        }
+        let bytes = out.into_bytes();
+        guest::set_transport(Some(Rc::new(move |_, _| bytes.clone())));
+        assert!(
+            guest::host(0, guest::begin())
+                .take_static::<bool>()
+                .is_err()
+        );
+        guest::set_transport(None);
+        assert!(static_reply(0, 2, None, false).is_err());
+    }
+    assert_eq!(
+        static_reply(2, u32::MAX, Some("uncached"), false).unwrap(),
+        "uncached"
+    );
+    assert_eq!(
+        guest::static_ack(),
+        0,
+        "uncached text does not claim a table id"
+    );
+    assert!(static_reply(2, 0, Some("bad marker"), false).is_err());
+    guest::reset_static_strings();
+    assert_eq!(guest::static_ack(), u32::MAX);
+    assert!(
+        static_reply(0, 0, None, false).is_err(),
+        "a fresh instance cannot resolve an old id"
+    );
+}
+#[test]
+fn static_reply_table_is_bounded() {
+    guest::reset_static_strings();
+    for id in 0..4096 {
+        assert_eq!(static_reply(1, id, Some("value"), false).unwrap(), "value");
+    }
+    assert_eq!(guest::static_ack(), 4095);
+    assert!(static_reply(1, 4096, Some("overflow"), false).is_err());
+    assert_eq!(guest::static_ack(), 4095);
+}
+#[test]
+fn native_static_reply_resends_until_guest_acknowledges() {
+    use std::cell::Cell;
+    struct World(Cell<usize>);
+    impl mod_api::Host for World {}
+    mod_api::impl_host_areas!(World, except(config));
+    impl mod_api::prelude::ConfigHost for World {
+        fn dimension(&self) -> &'static str {
+            self.0.set(self.0.get() + 1);
+            "minecraft:overworld"
+        }
+    }
+    let world = World(Cell::new(0));
+    let mut frame = boundary::Frame::default();
+    frame.set_host(&world);
+    let mut cx = boundary::Cx::default();
+    cx.frames.push(frame);
+    let pointer = &mut cx as *mut boundary::Cx;
+    let _resources = unsafe { boundary::resource_scope(pointer, true) };
+    let id = boundary::import_id("Host", "dimension").unwrap();
+    let mut call = |ack: u32| {
+        let mut args = Writer::new();
+        args.put(&ack);
+        let mut out = Writer::new();
+        unsafe { boundary::serve(id, pointer, args.bytes(), &mut out) }?;
+        Ok::<_, boundary::ServeError>(out.into_bytes())
+    };
+    assert!(call(1).is_err());
+    assert_eq!(
+        world.0.get(),
+        0,
+        "invalid acknowledgement must refuse before native invocation"
+    );
+    for ack in [u32::MAX, u32::MAX, 0, u32::MAX] {
+        let bytes = call(ack).unwrap();
+        let mut reader = Reader::new(&bytes);
+        assert_eq!(reader.take::<u8>().unwrap(), u8::from(ack == u32::MAX));
+        assert_eq!(reader.take::<u32>().unwrap(), 0);
+        if ack == u32::MAX {
+            assert_eq!(reader.take::<String>().unwrap(), "minecraft:overworld");
+        }
+        assert!(reader.rest().is_empty());
+    }
+    assert_eq!(world.0.get(), 4);
+    assert!(call(2).is_err());
+    assert_eq!(world.0.get(), 4);
+}
+#[test]
+fn native_static_reply_table_refuses_overflow_without_losing_existing_ids() {
+    use std::cell::Cell;
+    struct World(Cell<&'static str>);
+    impl mod_api::Host for World {}
+    mod_api::impl_host_areas!(World, except(config));
+    impl mod_api::prelude::ConfigHost for World {
+        fn dimension(&self) -> &'static str {
+            self.0.get()
+        }
+    }
+    let world = World(Cell::new(""));
+    let mut frame = boundary::Frame::default();
+    frame.set_host(&world);
+    let mut cx = boundary::Cx::default();
+    cx.frames.push(frame);
+    let pointer = &mut cx as *mut boundary::Cx;
+    let _resources = unsafe { boundary::resource_scope(pointer, true) };
+    let id = boundary::import_id("Host", "dimension").unwrap();
+    let call = |ack: u32| {
+        let mut args = Writer::new();
+        args.put(&ack);
+        let mut out = Writer::new();
+        unsafe { boundary::serve(id, pointer, args.bytes(), &mut out) }?;
+        Ok::<_, boundary::ServeError>(out.into_bytes())
+    };
+    for i in 0..4096 {
+        world
+            .0
+            .set(Box::leak(format!("test:dimension_{i}").into_boxed_str()));
+        assert!(call(u32::MAX).is_ok());
+    }
+    world.0.set("test:overflow");
+    let uncached = call(u32::MAX).unwrap();
+    let mut reader = Reader::new(&uncached);
+    assert_eq!(reader.take::<u8>().unwrap(), 2);
+    assert_eq!(reader.take::<u32>().unwrap(), u32::MAX);
+    assert_eq!(reader.take::<String>().unwrap(), "test:overflow");
+    assert!(reader.rest().is_empty());
+    world.0.set("test:dimension_0");
+    let bytes = call(0).unwrap();
+    assert_eq!(bytes, [0, 0, 0, 0, 0]);
+    assert!(
+        call(4096).is_err(),
+        "overflow must not insert a new table entry"
+    );
 }
 #[test]
 fn wire_loopback_readonly_private_projection() {
