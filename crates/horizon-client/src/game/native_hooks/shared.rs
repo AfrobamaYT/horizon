@@ -2783,6 +2783,9 @@ impl Game<'_> {
             None => self.res.items(),
         };
         let table = items.block_loot_table(self.pack.assets.registry, state);
+        let Ok(state) = state.try_into_api() else {
+            return;
+        };
         let context = NativeLootDrops::from(mod_api::__private::built::NativeLootDrops {
             table: table.as_deref().unwrap_or_default(),
             dimension: self.dim.id(),
@@ -2814,6 +2817,12 @@ impl Game<'_> {
             return;
         }
         let Ok(snapshot) = tool.try_into_api() else {
+            return;
+        };
+        let Ok(block) = block
+            .map(|(pos, state)| state.try_into_api().map(|state| (pos, state)))
+            .transpose()
+        else {
             return;
         };
         let context = NativeLootDrops::from(mod_api::__private::built::NativeLootDrops {
