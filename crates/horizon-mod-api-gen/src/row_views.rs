@@ -52,6 +52,9 @@ pub fn generate(
                         self.0.utf16(max_units)
                     }
                 )),
+                Shape::Scalar(Scalar::Signed("isize")) => {
+                    return Err("isize has no ordinary Wire encoding".into());
+                }
                 Shape::Scalar(_) | Shape::Unit => {
                     let ty = crate::internals_table::spell(shape).ok_or("unsupported scalar")?;
                     methods.push(quote! {
@@ -124,7 +127,11 @@ pub fn generate(
                             syn::Member::Unnamed(n) => format!("field_{}", n.index),
                         };
                         let accessor = if let Some((_, case)) = f.case {
-                            format!("{}_{}", heck::AsSnakeCase(case.to_string()), member)
+                            format!(
+                                "{}_{}",
+                                heck::AsSnakeCase(case.to_string()),
+                                member.trim_start_matches("r#")
+                            )
                         } else {
                             member
                         };
