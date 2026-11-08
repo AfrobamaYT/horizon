@@ -1079,20 +1079,27 @@ pub(crate) mod tests {
             .refs
             .insert("Result".into(), "horizon_client_core::Result".into());
         let rule = Rule::new(&[thing]);
-        let shape = |ty: &str| rule.shape("horizon_client::game", None, &syn::parse_str(ty).unwrap());
+        let shape =
+            |ty: &str| rule.shape("horizon_client::game", None, &syn::parse_str(ty).unwrap());
         let boxed = Shape::Wrapped(Wrapper::Box, Box::new(Shape::DynError));
         let unit = Shape::Unit;
         // The game's alias fixes the error to `Box<dyn Error>`.
         assert_eq!(
             shape("Result<bool>"),
-            Shape::Result(Box::new(Shape::Scalar(Scalar::Bool)), Box::new(boxed.clone()))
+            Shape::Result(
+                Box::new(Shape::Scalar(Scalar::Bool)),
+                Box::new(boxed.clone())
+            )
         );
         assert_eq!(
             shape("std::result::Result<(), Box<dyn std::error::Error + Send + Sync>>"),
             Shape::Result(Box::new(unit), Box::new(boxed))
         );
+        // Written in full, `Result` is the std type.
+        let rule_plain = Rule::new(&[]);
+        let plain = |ty: &str| rule_plain.shape("m", None, &syn::parse_str(ty).unwrap());
         assert_eq!(
-            shape("Result<u8, String>"),
+            plain("Result<u8, String>"),
             Shape::Result(
                 Box::new(Shape::Scalar(Scalar::Unsigned("u8"))),
                 Box::new(Shape::Scalar(Scalar::String))
@@ -1100,15 +1107,15 @@ pub(crate) mod tests {
         );
         // An Err type that does not cross stays a leaf: the Result is still walked.
         assert!(matches!(
-            shape("Result<u8, wgpu::Error>"),
+            plain("Result<u8, wgpu::Error>"),
             Shape::Result(_, err) if matches!(*err, Shape::Opaque(_))
         ));
         assert_eq!(
-            rule.crossing_of(&shape("Result<u8, wgpu::Error>")),
+            rule_plain.crossing_of(&plain("Result<u8, wgpu::Error>")),
             Crossing::Handle
         );
         assert_eq!(
-            rule.crossing_of(&shape("Result<wgpu::A, wgpu::B>")),
+            rule_plain.crossing_of(&plain("Result<wgpu::A, wgpu::B>")),
             Crossing::Opaque
         );
         // A one-argument `Result` that is not the game's alias is some other type.
