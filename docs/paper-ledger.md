@@ -454,3 +454,38 @@ Status is judged on moment, side, information and result; “No key” means no 
 [paper-PlayerChangedWorldEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerChangedWorldEvent.html
 
 [paper-PlayerCommandPreprocessEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerCommandPreprocessEvent.html
+
+## Event counterparts: chunk watching, spawners and misc entity hooks (#1015)
+
+Paper API 26.3 (paper-api `26.3.build.244-stable`), public Javadoc only; Horizon cited by function name, never by line number.
+Scope: the twenty misc-chunk hooks below, from `chunk_unwatch` to `entity_change_block_pre`.
+
+| Horizon hook | Paper event / status | Evidence and porting boundary |
+|---|---|---|
+| `chunk_unwatch` | **Gap:** none (nearest [`ChunkUnloadEvent`][paper-ChunkUnloadEvent]) | `ChunkUnloadEvent` reports a chunk leaving the world (its flag is about saving), not a chunk leaving one player's view; it carries no player, so the per-player moment `chunk_unwatch` reports has no event. No key. |
+| `chunk_watch` | **Gap:** none (nearest [`ChunkLoadEvent`][paper-ChunkLoadEvent]) | `ChunkLoadEvent` reports a chunk loading into the world (and whether it is new), not a chunk being queued to a single player's client; it has no player and fires whether or not anyone watches. No key. |
+| `client_information_updated` | **Gap:** none (nearest [`PlayerChangedMainHandEvent`][paper-PlayerChangedMainHandEvent]) | The nearest event reports only a change of the main-hand client setting; the hook reports the whole client-information packet with old and new values (language, view distance, chat, skin parts, main hand, filtering, listing, particles), even when they are equal. No key. |
+| `clone_item_stack` | **Gap:** none | The pick-block clone stack is computed server-side with no Paper event, so nothing exposes the block, state and `include_data` the hook passes or the stack a mod may replace. No key. |
+| `connects_to` | **Gap:** none (nearest [`BlockCanBuildEvent`][paper-BlockCanBuildEvent]) | `BlockCanBuildEvent` asks whether a block may be built at a position and offers only a buildable flag; it never asks whether a fence, wall or bars connects toward a neighbour and has no kind, direction or `face_solid`. No key. |
+| `contents_changed` | **Gap:** none | No Paper event reports a container's backing block being marked changed after a write; the listed candidates (world change, main hand, equipment) carry none of the level, position and state the hook passes. No key. |
+| `create_fluid_source` | **Partial:** [`FluidLevelChangeEvent`][paper-FluidLevelChangeEvent] | Both sit in the `FlowingFluid.getNewLiquid` computation and both can veto the outcome, but the event is per changed block with new `BlockData`, while the hook is asked per counted neighbouring source with `can_convert` in and out, including spread checks where nothing changes. No key. |
+| `create_spawn_position` | **Gap:** none (nearest [`SpawnChangeEvent`][paper-SpawnChangeEvent]) | `SpawnChangeEvent` fires after a world's spawn changes and offers only the previous location, so there is no pre-selection veto, no rotation change and no position out; the other candidates are per-player spawns. No key. |
+| `crop_grow_post` | **Gap:** none (nearest [`BlockGrowEvent`][paper-BlockGrowEvent]) | `BlockGrowEvent` fires before a block grows (cancelling prevents it) and carries only the new state; no Paper event reports the crop after it grew or the original and current states the hook passes. No key. |
+| `crop_grow_pre` | **Partial:** [`BlockGrowEvent`][paper-BlockGrowEvent] | `BlockGrowEvent` matches the about-to-grow moment and its cancel maps to `result = False`, but it fires only once growth is determined, cannot force growth (`result = True`) and reports the new state rather than the growing state. No key. |
+| `custom_click_action` | **Gap:** none (nearest [`InventoryClickEvent`][paper-InventoryClickEvent]) | `InventoryClickEvent` is an inventory slot click and the recipe-book candidates are recipe clicks; none reports a custom click action's id and optional payload, so the hook's moment has no event. No key. |
+| `custom_spawner_tick` | **Gap:** none (nearest [`PreSpawnerSpawnEvent`][paper-PreSpawnerSpawnEvent]) | `PreSpawnerSpawnEvent` fires only when a block spawner is about to spawn an entity, at the spawner's location; the hook is a per-tick callback for a mod-registered spawner key that runs the spawner's own logic and may spawn nothing. No key. |
+| `modify_custom_spawners` | **Gap:** none | Paper has no event through which a mod adds custom spawner entries to a level's spawner list; the listed spawn events are per spawn and cannot register a spawner. No key. |
+| `effect_particle_modification` | **Gap:** none (nearest [`EntityPotionEffectEvent`][paper-EntityPotionEffectEvent]) | The potion events fire when an effect is added, removed or ticks, not when its particles are chosen for a viewer, and neither [`EntityEffectTickEvent`][paper-EntityEffectTickEvent] nor the other candidates exposes the particle options or the visible flag. No key. |
+| `enchanted_block_loot` | **Partial:** [`BlockDispenseLootEvent`][paper-BlockDispenseLootEvent] | `BlockDispenseLootEvent` concerns a block loot table's output and lets you replace the loot, but it fires after the roll for blocks that dispense loot and exposes no enchantment or level; the hook is asked mid-roll per enchantment level read, with the tool and state. No key. |
+| `enchanted_entity_loot` | **Gap:** none (nearest [`LootGenerateEvent`][paper-LootGenerateEvent]) | `LootGenerateEvent`'s Javadoc says it is not called for an entity's loot table, and no other supplied event exposes the enchantment level read mid-roll with the entity, source and attacker. No key. |
+| `enchantment_level_set` | **Gap:** none | The dossier supplies no Paper event for the enchanting table drawing each row's level; no candidate carries the offer (player, row, power, item, drawn level) or lets a mod change it. No key. |
+| `ender_entity_teleport` | **Gap:** none (nearest [`PlayerTeleportEvent`][paper-PlayerTeleportEvent]) | `PlayerTeleportEvent` is player-only and the other candidates are ender dragon events; no supplied event covers an enderman or shulker teleporting itself, its from/target positions or the cancel. No key. |
+| `enderman_anger` | **Covered:** [`EndermanAttackPlayerEvent`][paper-EndermanAttackPlayerEvent] | The same `isBeingStaredBy` check: its Javadoc pre-cancels for a pumpkin or a look that misses and otherwise lets a listener decide, so enderman, player and the cancel that suppresses the anger all agree on the server side. Key added. |
+| `entity_change_block_pre` | **Partial:** Bukkit's `EntityChangeBlockEvent` (no Javadoc supplied in this dossier) | The hook doc names Bukkit's `EntityChangeBlockEvent` as its model, but the dossier supplies no Javadoc to verify its class or methods, and Bukkit fires that one generic event for every entity block change, not only a landing's trampling. No key. |
+
+[paper-BlockDispenseLootEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/BlockDispenseLootEvent.html
+[paper-BlockGrowEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/BlockGrowEvent.html
+[paper-EndermanAttackPlayerEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/entity/EndermanAttackPlayerEvent.html
+[paper-PlayerChangedMainHandEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerChangedMainHandEvent.html
+[paper-PreSpawnerSpawnEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/entity/PreSpawnerSpawnEvent.html
+[paper-SpawnChangeEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/world/SpawnChangeEvent.html

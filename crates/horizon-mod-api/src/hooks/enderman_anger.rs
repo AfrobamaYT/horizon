@@ -13,6 +13,7 @@ pub trait Hooks {
         out = "cancel",
         host = "read",
         neoforge = "EndermanAngerEvent",
+        paper = "EndermanAttackPlayerEvent",
         cancellable = true
     )]
     fn enderman_anger();
