@@ -27,6 +27,14 @@ pub enum EntityLookup<T> {
     Found { location: Location, value: T },
 }
 
+/// Unfinished operations expired at the tick boundary, never retained as Taken.
+/// `lifts` counts outstanding passes, including nested passes of the same owner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UnbalancedPass {
+    pub extractions: usize,
+    pub lifts: usize,
+}
+
 /// One game's index, shared by active and parked dimensions through the journal.
 /// Runtime ids are allocated by the game's one counter, not per dimension.
 pub struct EntityTable {
@@ -124,15 +132,25 @@ impl EntityTable {
             }
         }
     }
-    /// Expire every open marker before the debug leak assertion. Release builds
-    /// therefore validate a leaked owner as missing, never permanently Taken.
-    /// Work is proportional to open markers, not the number of resident rows.
-    pub fn end_tick(&mut self) {
+    /// Drain and expire open markers before reporting an unfinished operation.
+    /// Log the counts in every build; debug builds then assert, while release
+    /// returns a typed error. Later lookups never remain permanently Taken.
+    /// Valid ticks allocate nothing; work scales with markers, not resident rows.
+    pub fn end_tick(&mut self) -> Result<(), UnbalancedPass> {
         self.drain();
         let leaked = self.extracted.len() + self.lifted.len();
+        let unfinished = (leaked != 0).then(|| UnbalancedPass {
+            extractions: self.extracted.len(),
+            lifts: self.lifted.values().sum(),
+        });
         self.extracted.clear();
         self.lifted.clear();
-        debug_assert_eq!(leaked, 0, "entity residency operation did not finish");
+        if let Some(error) = unfinished {
+            log::error!("entity residency operation did not finish: {error:?}");
+            debug_assert_eq!(leaked, 0, "entity residency operation did not finish");
+            return Err(error);
+        }
+        Ok(())
     }
     /// Clone the current producer authority when binding storage.
     pub fn producer(&self) -> Journal {
@@ -152,6 +170,10 @@ fn forget(map: &mut FxHashMap<NonZeroU32, Location>, id: NonZeroU32, location: L
         map.remove(&id);
     }
 }
+
+#[cfg(test)]
+#[path = "table/completion_tests.rs"]
+mod completion_tests;
 
 #[cfg(test)]
 mod tests {
@@ -248,7 +270,7 @@ mod tests {
             }
         );
         list.restore(taken, RestoreOrder::SurvivorsFirst);
-        table.end_tick();
+        table.end_tick().unwrap();
         assert_eq!(
             table.entity_lookup(&HOME.dimension, 7, |at| locate(&list, at)),
             EntityLookup::Found {
@@ -283,7 +305,7 @@ mod tests {
             table.entity_lookup(&HOME.dimension, 7, |at| locate(&list, at)),
             EntityLookup::Found { value: 0, .. }
         ));
-        table.end_tick();
+        table.end_tick().unwrap();
     }
 
     #[test]
@@ -344,7 +366,7 @@ mod tests {
             matches!(f.entity_lookup(7), EntityLookup::Found { location: at, .. } if at == location)
         );
         f.emit(location, Change::PutBack(identity));
-        f.table.end_tick();
+        f.table.end_tick().unwrap();
         f.source.remove(&location);
         f.emit(location, Change::Lifted);
         let spawned = f.admit(8, HOME);
@@ -358,7 +380,7 @@ mod tests {
         );
         f.source.insert(location, source);
         f.emit(location, Change::Restored);
-        f.table.end_tick();
+        f.table.end_tick().unwrap();
         assert!(
             matches!(f.entity_lookup(7), EntityLookup::Found { location: at, .. } if at == location)
         );
@@ -366,7 +388,7 @@ mod tests {
         f.emit(location, Change::Extract(identity));
         f.emit(location, Change::Remove(identity));
         assert_eq!(f.entity_lookup(7), EntityLookup::Missing);
-        f.table.end_tick();
+        f.table.end_tick().unwrap();
         f.source.remove(&location);
     }
 
@@ -391,7 +413,7 @@ mod tests {
             if lift {
                 f.emit(location, Change::Restored);
             }
-            f.table.end_tick();
+            f.table.end_tick().unwrap();
         }
     }
 
@@ -455,12 +477,21 @@ mod tests {
             let result =
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f.table.end_tick()));
             assert_eq!(result.is_err(), cfg!(debug_assertions));
+            if !cfg!(debug_assertions) {
+                assert_eq!(
+                    result.unwrap(),
+                    Err(UnbalancedPass {
+                        extractions: usize::from(!lift),
+                        lifts: usize::from(lift),
+                    })
+                );
+            }
             let mut leftover = Vec::new();
             f.journal.drain_into(&mut leftover);
             assert!(leftover.is_empty(), "end_tick did not drain the journal");
             assert!(f.table.pending.is_empty());
             assert_eq!(f.entity_lookup(7), EntityLookup::Missing);
-            f.table.end_tick();
+            f.table.end_tick().unwrap();
         }
     }
 
@@ -476,7 +507,7 @@ mod tests {
         f.table.reset();
         assert_eq!(f.entity_lookup(7), EntityLookup::Missing);
         assert_eq!(f.entity_lookup(9), EntityLookup::Missing);
-        f.table.end_tick();
+        f.table.end_tick().unwrap();
         f.admit(8, HOME);
         assert_eq!(f.entity_lookup(8), EntityLookup::Missing);
         f.journal = f.table.producer();

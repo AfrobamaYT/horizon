@@ -791,6 +791,7 @@ pub fn main() -> horizon_client::Result<()> {
             Some(Spawned {
                 bounds,
                 school: true,
+                cluster_size: None,
             })
         };
         let mode = get("mode", "chunk");
