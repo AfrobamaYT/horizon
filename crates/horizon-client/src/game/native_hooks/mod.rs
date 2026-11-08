@@ -106,7 +106,7 @@ use {
     },
     horizon_world::{
         fluid::FluidKind,
-        level::{BlockId, LevelAccess, PlacementContext, Ticks},
+        level::{LevelAccess, PlacementContext, Ticks},
         registry::{BlockRegistry, BlockStateId},
     },
 };
