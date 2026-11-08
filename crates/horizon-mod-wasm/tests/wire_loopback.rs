@@ -822,11 +822,13 @@ fn wire_loopback_resource_load_restores_module_after_cross_group_unwind() {
     let id = guest::add_handler(vec![guest::view::<dyn StructurePiece>(Arc::new(Piece))]);
     let mut first = Box::new(boundary::Cx::default());
     first.module = Some(WasmMod {
+        group: 1,
         subscribed: &[],
         corrupt: false,
     });
     let mut second = Box::new(boundary::Cx::default());
     second.module = Some(WasmMod {
+        group: 2,
         subscribed: &[],
         corrupt: true,
     });
