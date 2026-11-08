@@ -1168,7 +1168,17 @@ impl HudAtlas {
                 }
             }
         }
-        files.retain(|p| !p.contains("title/background") && !p.contains("presets"));
+        files.retain(|p| {
+            let slot_picture = [
+                "textures/gui/title/background/panorama_0.png",
+                "textures/gui/title/background/panorama_2.png",
+                "textures/gui/title/background/panorama_3.png",
+                "textures/gui/presets/isles.png",
+            ]
+            .iter()
+            .any(|kept| p.ends_with(kept));
+            slot_picture || (!p.contains("title/background") && !p.contains("presets"))
+        });
         // OptiFine random entity variants, under the names their scan gives them (those
         // outside `textures/` are `<ns>:optifine/random/...`).
         let random_textures = if folders.contains(&"entity") {
@@ -1304,13 +1314,17 @@ impl HudAtlas {
                     maps.iter().any(Option::is_some).then(|| Box::new(maps))
                 })
                 .flatten();
-            (gw <= 1024 && (gh <= 512 || name.starts_with("font/"))).then_some((
-                (name, w, h, pixels),
-                flags,
-                gui_size,
-                animated,
-                maps,
-            ))
+            (gw <= 1024
+                && (gh <= 512
+                    || matches!(
+                        name.as_str(),
+                        "gui/title/background/panorama_0"
+                            | "gui/title/background/panorama_2"
+                            | "gui/title/background/panorama_3"
+                            | "gui/presets/isles"
+                    )
+                    || name.starts_with("font/")))
+            .then_some(((name, w, h, pixels), flags, gui_size, animated, maps))
         };
         let threads = std::thread::available_parallelism().map_or(2, |n| n.get());
         let chunk = files.len().div_ceil(threads).max(1);

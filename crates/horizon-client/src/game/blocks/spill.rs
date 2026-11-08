@@ -4,7 +4,7 @@
 //! moment vanilla draws them. The item entities they make are added to the
 //! world as soon as the behaviour returns, within the same tick.
 use super::api_values::{TryIntoApi, TryIntoEngine};
-use super::{Game, GameLevel, Screen, dispenser::new_item_motion, storage::is_shulker_box};
+use super::{Game, GameLevel, Screen, storage::is_shulker_box};
 use horizon_client::{
     block_entity_item, block_entity_nbt,
     containers::{Banner, BlockEntity},
@@ -33,7 +33,7 @@ pub(super) struct Pending {
     pub(super) shulker: HashMap<[i32; 3], Vec<(u8, ItemStack)>>,
     pub(super) banner: HashMap<[i32; 3], Banner>,
     /// The block's item and the custom name.
-    pub(super) names: HashMap<[i32; 3], (String, String)>,
+    pub(super) names: HashMap<[i32; 3], (String, Tag)>,
     /// A decorated pot's sherds (back, left, right, front).
     pub(super) pot: HashMap<[i32; 3], [Option<ItemStack>; 4]>,
     /// A head's profile, note block sound and name, or a hive's bees: the
@@ -47,7 +47,7 @@ impl Pending {
         pos: [i32; 3],
         entity: &BlockEntity,
         block: &str,
-        name: Option<String>,
+        name: Option<Tag>,
     ) {
         if let BlockEntity::Banner(banner) = entity {
             self.banner.insert(pos, banner.clone());
@@ -111,8 +111,7 @@ impl Pending {
             .is_some_and(|(item, _)| **item == *stack.item)
             && let Some((_, name)) = self.names.remove(&pos)
         {
-            stack.data_mut().custom_name =
-                Some(horizon_core::nbt::Tag::String(name.as_str().into()));
+            stack.data_mut().custom_name = Some(name);
         }
         if self
             .copied
@@ -210,9 +209,38 @@ impl Pending {
     }
 }
 
+/// Constructor random retained while drop hooks edit a not-yet-joined item.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct ItemRandom {
+    pub uuid: [i32; 4],
+    pub bob: f32,
+    pub yaw: f32,
+    pub velocity: [f64; 3],
+}
+
+/// The one ItemEntity constructor random sequence, shared by immediate and
+/// deferred spawning: UUID, bob offset, yaw, then optional default motion.
+pub(super) fn prepare_item_random(velocity: Option<[f64; 3]>) -> ItemRandom {
+    let mut own = horizon_client::random_source::entity();
+    let uuid = horizon_client::save::insecure_uuid(&mut own);
+    let bob = own.next_float() * std::f32::consts::PI * 2.0;
+    let yaw = own.next_float() * 360.0;
+    let velocity = velocity.unwrap_or_else(|| {
+        let x = own.next_double() * 0.2 - 0.1;
+        [x, 0.2, own.next_double() * 0.2 - 0.1]
+    });
+    ItemRandom {
+        uuid,
+        bob,
+        yaw,
+        velocity,
+    }
+}
+
 /// An item entity to add: where, its motion (None: `new ItemEntity`'s own
 /// random motion) and its pickup delay.
 pub(super) struct Spawn {
+    pub(super) random: Option<ItemRandom>,
     pub(super) stack: ItemStack,
     pub(super) pos: [f64; 3],
     pub(super) motion: Option<[f64; 3]>,
@@ -223,6 +251,7 @@ pub(super) struct Spawn {
 /// Prepared engine item entity; API snapshots exist only while a listener runs.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct BlockItemDrop {
+    pub(super) random: Option<ItemRandom>,
     pub(super) stack: ItemStack,
     pub(super) position: [f64; 3],
     pub(super) velocity: [f64; 3],
@@ -288,6 +317,7 @@ fn retell_runs(
             .into_iter()
             .enumerate()
             .map(|(i, stack)| Spawn {
+                random: run.get(i).and_then(|s| s.random),
                 stack,
                 pos: run.get(i).or(run.last()).map_or(top, |s| s.pos),
                 motion: run.get(i).and_then(|s| s.motion),
@@ -418,6 +448,7 @@ impl GameLevel<'_> {
         self.pending.attach(pos, &mut stack);
         let at = pop_position(&mut self.world.random, pos);
         self.spill.spawns.push(Spawn {
+            random: None,
             stack,
             pos: at,
             motion: None,
@@ -436,6 +467,7 @@ impl GameLevel<'_> {
     pub(super) fn pop_above(&mut self, pos: BlockPos, item: std::sync::Arc<str>) {
         let at = removal::jukebox_pop_position(&mut self.world.random, pos);
         self.spill.spawns.push(Spawn {
+            random: None,
             stack: ItemStack::new(&item, 1),
             pos: at,
             motion: None,
@@ -490,19 +522,32 @@ impl GameLevel<'_> {
             self.pending.record_saved(at, &tag);
         }
         let dynamic = self.pending.dynamic(at);
-        let tool = self.drop_tool.clone();
+        let machine = self
+            .drop_tool
+            .as_ref()
+            .is_some_and(|(target, _)| *target == key);
+        let tool = self
+            .drop_tool
+            .as_ref()
+            .filter(|_| machine)
+            .and_then(|(_, tool)| tool.clone());
         let roll = horizon_client::items::BlockLootRoll {
             held: tool.as_ref(),
             dynamic: &dynamic,
+            breaker: self.drop_breaker_at == Some(pos),
             ..Default::default()
         };
-        let drops = self.roll_block_loot(pos, state, self.drop_entity, roll);
+        let entity = self
+            .drop_entity
+            .filter(|_| self.drop_breaker_at == Some(pos));
+        let drops = self.roll_block_loot(pos, state, entity, roll);
         let dropped = self.block_dropped(pos, state, None, tool.as_ref(), drops, None);
         for item in dropped.items {
-            if let Some(kept) = self.drop_into.as_mut() {
+            if let Some(kept) = self.drop_into.as_mut().filter(|_| machine) {
                 kept.push(item.stack);
             } else {
                 self.spill.spawns.push(Spawn {
+                    random: item.random,
                     stack: item.stack,
                     pos: item.position,
                     motion: Some(item.velocity),
@@ -601,10 +646,12 @@ impl GameLevel<'_> {
     pub(super) fn block_drop_item(&mut self, at: [i32; 3], mut stack: ItemStack) -> BlockItemDrop {
         self.pending.attach(at, &mut stack);
         let position = pop_position(&mut self.world.random, at);
+        let random = prepare_item_random(None);
         BlockItemDrop {
+            random: Some(random),
             stack,
             position,
-            velocity: new_item_motion(),
+            velocity: random.velocity,
             pickup_delay: 10,
         }
     }
@@ -640,7 +687,10 @@ impl GameLevel<'_> {
                 experience: &mut next_experience,
                 cancel: &mut next_canceled,
             });
-            if let Ok(next_items) = snapshots.try_into_engine(self.items) {
+            if let Ok(mut next_items) = snapshots.try_into_engine(self.items) {
+                for (next, original) in next_items.iter_mut().zip(&items) {
+                    next.random = original.random;
+                }
                 items = next_items;
                 experience = next_experience;
                 canceled = next_canceled;
@@ -676,6 +726,11 @@ impl GameLevel<'_> {
         side_effects: bool,
     ) -> u8 {
         let key = (pos.x, pos.y, pos.z);
+        // A replacement is a new block entity, even at the same position.
+        // Headless servers cannot rely on renderer visibility to discard this state.
+        if &*self.facts.get(old).name == "minecraft:end_gateway" {
+            self.gateway_servers.remove(&[pos.x, pos.y, pos.z]);
+        }
         if self.remove_saved_entity(pos, old, side_effects) {
             return 0;
         }
@@ -769,6 +824,7 @@ impl GameLevel<'_> {
                         }
                         let at = removal::jukebox_pop_position(&mut self.world.random, pos);
                         self.spill.spawns.push(Spawn {
+                            random: None,
                             stack: record,
                             pos: at,
                             motion: None,
@@ -793,6 +849,7 @@ impl GameLevel<'_> {
                         && let Some(book) = l.book.clone()
                     {
                         self.spill.spawns.push(Spawn {
+                            random: None,
                             stack: book,
                             pos: removal::lectern_book_position(pos, step),
                             motion: None,
@@ -918,6 +975,7 @@ impl GameLevel<'_> {
         for piece in removal::drop_item_stack(&mut self.world.random, pos, count) {
             let Some(stack) = &stack else { break };
             self.spill.spawns.push(Spawn {
+                random: None,
                 stack: ItemStack {
                     count: piece.count,
                     ..stack.clone()
@@ -961,7 +1019,13 @@ impl Game<'_> {
     /// Apply the shared block-drop event's item entities and experience unchanged.
     pub(super) fn spawn_block_drops(&mut self, pos: [i32; 3], dropped: BlockDrops) {
         for item in dropped.items {
-            self.spawn_item(item.stack, item.position, item.velocity, item.pickup_delay);
+            self.add_item_entity_prepared(
+                item.stack,
+                item.position,
+                Some(item.velocity),
+                item.pickup_delay,
+                item.random,
+            );
         }
         if dropped.experience > 0 {
             self.spawn_orbs(pos.map(|v| f64::from(v) + 0.5), dropped.experience);
@@ -990,8 +1054,7 @@ impl Game<'_> {
             );
         });
         for s in spill.spawns {
-            let motion = s.motion.unwrap_or_else(new_item_motion);
-            self.spawn_item(s.stack, s.pos, motion, s.delay);
+            self.add_item_entity_prepared(s.stack, s.pos, s.motion, s.delay, s.random);
         }
         for (at, value, merge_id) in spill.orbs {
             self.award_orb(at, value, merge_id);
@@ -1236,6 +1299,7 @@ mod tests {
     #[test]
     fn a_used_run_is_retold_in_place() {
         let spawn = |item: &str, x: f64| Spawn {
+            random: None,
             stack: ItemStack::new(item, 1),
             pos: [x, 0.0, 0.0],
             motion: None,
@@ -1360,7 +1424,10 @@ mod crafter_drop_name_tests {
                     &*game.res.facts().get(game.world.block(x, 199, z)).name,
                     "minecraft:stone"
                 );
-                assert_eq!(game.world.block_names.get(&key).map(String::as_str), name);
+                assert_eq!(
+                    game.world.block_names.get(&key),
+                    name.map(|n| Tag::String(n.into())).as_ref()
+                );
                 let entity = game
                     .world
                     .block_entities
