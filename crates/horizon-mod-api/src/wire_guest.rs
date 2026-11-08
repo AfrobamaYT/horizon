@@ -221,6 +221,7 @@ pub fn unsupported(what: &str) -> ! {
 
 /// The game's object the mod holds by `id`: each of its methods is a call to the game, and it
 /// is released when the mod drops it.
+#[derive(Debug)]
 pub struct Held(pub Id);
 
 impl Drop for Held {
@@ -275,10 +276,26 @@ fn dispatch(id: u32, input: &mut Reader<'_>, out: &mut Writer) -> Result<(), Wir
     }
 }
 
+/// Installs the guest's resource registry for a synchronous wire operation.
+#[doc(hidden)]
+pub fn resource_scope() -> crate::wire::ResourceScope {
+    generated::resource_scope()
+}
+
 /// Runs export `id` on the input the game wrote and returns where its reply is: the pointer in
 /// the high half, the length in the low. A refused call answers `u32::MAX` as the length and
 /// its reason, as a string, at the pointer.
 pub fn run(id: u32) -> (*const u8, u32) {
+    static HOOK: std::sync::Once = std::sync::Once::new();
+    // A trap says nothing about why: the game gets the panic's text first.
+    HOOK.call_once(|| {
+        std::panic::set_hook(Box::new(|info| {
+            let mut args = begin();
+            args.put_str(&info.to_string());
+            host(crate::wire::HOST_LOG, args);
+        }));
+    });
+    let _resources = resource_scope();
     let (input, depth, mut reply) = RUNTIME.with(|rt| {
         let mut rt = rt.borrow_mut();
         let depth = rt.keeps.len();
@@ -298,6 +315,7 @@ pub fn run(id: u32) -> (*const u8, u32) {
         crate::wire::RELEASE => reader.take::<Vec<Id>>().map(release),
         id => dispatch(id, &mut reader, &mut reply),
     };
+    let result = result.and_then(|()| reply.error().map_or(Ok(()), Err));
     let result = result.and_then(|()| match reader.rest().is_empty() {
         true => Ok(()),
         false => Err(WireError::Trailing),

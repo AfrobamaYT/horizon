@@ -15,7 +15,7 @@ use std::{
     cell::Cell,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -41,6 +41,7 @@ pub(crate) struct State {
     imports: Vec<Vec<u8>>,
     depth: usize,
     group: usize,
+    lending: Arc<AtomicUsize>,
 }
 // SAFETY: frames contain borrowed native objects only while the group mutex is held.
 // They are pushed and popped synchronously on that thread; callbacks borrow the same
@@ -62,6 +63,7 @@ impl Default for State {
             imports: Vec::new(),
             depth: 0,
             group: 0,
+            lending: Arc::default(),
         }
     }
 }
@@ -86,6 +88,7 @@ pub(crate) fn engine() -> wasmtime::Result<Engine> {
 struct Running {
     group: Mutex<Group<State>>,
     poisoned: AtomicBool,
+    lending: Arc<AtomicUsize>,
 }
 struct FrameScope {
     state: *mut State,
@@ -178,11 +181,13 @@ impl Drop for WasmHandler {
 thread_local! { static LENT: Cell<*const Loan> = const { Cell::new(std::ptr::null()) }; }
 struct Loan {
     group: usize,
+    lending: Arc<AtomicUsize>,
     context: Cell<*mut StoreContextMut<'static, State>>,
     previous: *const Loan,
 }
 impl Drop for Loan {
     fn drop(&mut self) {
+        self.lending.fetch_sub(1, Ordering::Relaxed);
         LENT.set(self.previous);
     }
 }
@@ -245,8 +250,14 @@ fn host(
     let mut reply = std::mem::take(&mut caller.data_mut().replies[depth]);
     reply.clear();
     let cx = &mut *caller.data_mut().cx as *mut Cx;
+    // SAFETY: this import holds the locked/lent store; Cx stays boxed until the
+    // synchronous native dispatch and any nested callbacks have returned.
+    let resources = unsafe { crate::boundary::resource_scope(cx) };
     let mut context = caller.as_context_mut();
+    let lending = context.data().lending.clone();
+    lending.fetch_add(1, Ordering::Relaxed);
     let loan = Loan {
+        lending,
         group: context.data().group,
         context: Cell::new((&mut context as *mut StoreContextMut<'_, State>).cast()),
         previous: LENT.get(),
@@ -270,8 +281,12 @@ fn host(
             .map_err(|e| wasmtime::Error::msg(format!("{e:?}")))
     };
     drop(loan);
+    drop(resources);
     caller.data_mut().imports[depth] = input;
     result?;
+    if let Some(error) = reply.error() {
+        return Err(error.into());
+    }
     let size = u32::try_from(reply.bytes().len())?;
     if size <= cap {
         memory.write(&mut caller, out as usize, reply.bytes())?;
@@ -372,7 +387,9 @@ impl WasmMod {
                 .map_err(load)?;
             exports.push((name, input, hook));
         }
+        let lending = group.store.data().lending.clone();
         let running = Arc::new(Running {
+            lending,
             group: Mutex::new(group),
             poisoned: AtomicBool::new(false),
         });
@@ -409,11 +426,9 @@ impl WasmMod {
             return None;
         }
         let key = Arc::as_ptr(&self.running) as usize;
-        let mut resumed = if class == CallClass::Callback {
-            Resumed::take(key)
-        } else {
-            None
-        };
+        // A synchronous import can call any provider/handler, not just a named
+        // callback trait. Such reentry shares the enclosing call's remaining budget.
+        let mut resumed = Resumed::take(key);
         let mut locked = None;
         if resumed.is_none() {
             let start = Instant::now();
@@ -429,9 +444,10 @@ impl WasmMod {
                     }
                     Err(_)
                         if class != CallClass::Worker
-                            && start.elapsed() >= Duration::from_secs(5) =>
+                            && (self.running.lending.load(Ordering::Relaxed) != 0
+                                || start.elapsed() >= Duration::from_secs(5)) =>
                     {
-                        log::warn!("wasm mod {}: group busy", self.id);
+                        log::warn!("wasm mod {}: {}", self.id, Refusal::Busy);
                         return None;
                     }
                     Err(_) => std::thread::sleep(Duration::from_millis(1)),
@@ -472,6 +488,9 @@ impl WasmMod {
             state: store.data_mut(),
             running: self.running.clone(),
         };
+        // SAFETY: FrameScope keeps the active module installed and the group
+        // remains exclusively locked/lent until this resource scope is dropped.
+        let resources = unsafe { crate::boundary::resource_scope(&mut *store.data_mut().cx) };
         let mut w = std::mem::take(&mut store.data_mut().inputs[depth]);
         let mut output = std::mem::take(&mut store.data_mut().outputs[depth]);
         let result = (|| -> wasmtime::Result<R> {
@@ -500,6 +519,7 @@ impl WasmMod {
         })();
         store.data_mut().inputs[depth] = w;
         store.data_mut().outputs[depth] = output;
+        drop(resources);
         drop(scope);
         match result {
             Ok(value) => Some(value),
@@ -517,6 +537,9 @@ impl WasmMod {
         input: &Writer,
         output: &mut Vec<u8>,
     ) -> wasmtime::Result<()> {
+        if let Some(error) = input.error() {
+            return Err(error.into());
+        }
         let len = u32::try_from(input.bytes().len())?;
         let ptr = self.input.call(&mut *store, len)?;
         let memory = store
