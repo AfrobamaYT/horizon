@@ -122,6 +122,13 @@ fn append(
                 }
         })
         .ok_or_else(missing)?;
+    let item = horizon_mod_package::internals::resolve(
+        internals,
+        &manifest.id,
+        request.at,
+        Some(&item.kind),
+    )
+    .map_err(|e| e.to_string())?;
     let needs_call = matches!(
         request.kind,
         Kind::BeforeCall
@@ -208,6 +215,76 @@ mod tests {
         let (internals, catalog) = fixture();
         append(text, &manifest, &request(&args)?, &internals, &catalog)
     }
+    #[test]
+    fn inject_add_writes_only_validated_manifests() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(format!("../../target/inject-add-{}", std::process::id()));
+        let cache =
+            dir.join("target/horizon-mod/prebuilt/0123456789012345678901234567890123456789");
+        fs::create_dir_all(&cache).unwrap();
+        fs::write(cache.join("internals.json"), r#"[{"path":"game::tick","kind":"method","signature":"fn tick(&mut self)","hash":"signature-fixture"}]"#).unwrap();
+        fs::write(cache.join("points.json"), r#"{"points":[],"sites":[]}"#).unwrap();
+        let path = dir.join(MANIFEST);
+        let args = |text: &str| {
+            text.split_whitespace()
+                .map(String::from)
+                .collect::<Vec<_>>()
+        };
+        fs::write(&path, TEXT).unwrap();
+        add(&dir, &args("add game::tick --kind head --with before_tick")).unwrap();
+        let result = fs::read_to_string(&path).unwrap();
+        assert!(result.starts_with(TEXT));
+        assert_eq!(
+            Manifest::parse(&result).unwrap().inject[0].hash,
+            "signature-fixture"
+        );
+        let invalid = TEXT.replace("id = 'example'", "id = '../escape'");
+        fs::write(&path, &invalid).unwrap();
+        assert!(add(&dir, &args("add game::tick --kind head")).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), invalid);
+        fs::write(&path, &result).unwrap();
+        for command in [
+            "add missing::place --kind head",
+            "add game::tick --kind head --with fn",
+            "add game::tick --kind head --with before_tick",
+        ] {
+            assert!(add(&dir, &args(command)).is_err());
+            assert_eq!(fs::read_to_string(&path).unwrap(), result);
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn inject_add_refuses_gated_or_shape_only_targets() {
+        let args = ["add", "game::tick", "--kind", "head"].map(String::from);
+        let request = request(&args).unwrap();
+        let manifest = Manifest::parse(TEXT).unwrap();
+        let (mut internals, catalog) = fixture();
+        internals[0].cfg = "unix".into();
+        assert!(
+            append(TEXT, &manifest, &request, &internals, &catalog)
+                .unwrap_err()
+                .contains("E_INTERNAL_GATED")
+        );
+        let mut unconditional = internals[0].clone();
+        unconditional.cfg.clear();
+        unconditional.hash = "unconditional".into();
+        internals.push(unconditional);
+        let result = append(TEXT, &manifest, &request, &internals, &catalog).unwrap();
+        assert_eq!(
+            Manifest::parse(&result).unwrap().inject[0].hash,
+            "unconditional"
+        );
+        for item in &mut internals {
+            item.shape_only = true;
+        }
+        assert!(
+            append(TEXT, &manifest, &request, &internals, &catalog)
+                .unwrap_err()
+                .contains("E_INJECT_MISSING")
+        );
+    }
+
     #[test]
     fn inject_add_pins_function_and_preserves_original() {
         let result = edit(TEXT, "add game::tick --kind head --with before_tick").unwrap();
