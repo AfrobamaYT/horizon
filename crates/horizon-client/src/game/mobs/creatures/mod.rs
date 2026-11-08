@@ -2770,13 +2770,13 @@ impl Game<'_> {
                     self.post_game_event(event, at, ctx);
                 }
                 MobEvent::GameEvent {
-                    event: "minecraft:block_place",
+                    event: event @ ("minecraft:block_place" | "minecraft:block_destroy"),
                     at,
                     source,
                     state,
                 } => {
                     let ctx = self.who_context(Some(Who::Mob(source)), Some(state));
-                    self.post_game_event("minecraft:block_place", at, ctx);
+                    self.post_game_event(event, at, ctx);
                 }
                 // The sculk layer tracks steps and bee/bat flaps itself
                 // (`entity_motion_events`, `tick_mob_sculk_events`). Birds
@@ -3118,9 +3118,10 @@ impl Game<'_> {
                             .play(&format!("minecraft:{sound}"), Some(at), 1.0, 1.0);
                     }
                 }
-                MobEvent::Tamed { .. } | MobEvent::Buck { .. } | MobEvent::StabDismount { .. } => {
-                    self.mount_event(&e)
-                }
+                MobEvent::Tamed { .. }
+                | MobEvent::Buck { .. }
+                | MobEvent::StabDismount { .. }
+                | MobEvent::EjectPassengers { .. } => self.mount_event(&e),
                 MobEvent::IronGolemHit {
                     target,
                     amount,
@@ -3172,7 +3173,7 @@ impl Game<'_> {
                         let _ = self.process_level_events();
                     }
                 }
-                MobEvent::ChestOpen { chest, open } => self.golem_chest_open(chest, open),
+                MobEvent::ChestOpen { chest, open, mob } => self.golem_chest_open(chest, open, mob),
                 MobEvent::ChestSlot { chest, slot, stack } => {
                     self.golem_chest_slot(chest, slot, stack)
                 }
@@ -5513,7 +5514,9 @@ impl Game<'_> {
         attack.projectile = Some(p.id as i32);
         let result = self.with_attack(attack, |g| g.projectile_hit_landed(p, hit));
         self.settle_dealt_absorbed(p.owner == Some(Who::Player));
-        result
+        result?;
+        // The hit's hurt teleports an enderman or a shulker now (`hurtServer`).
+        self.settle_hurt_teleports()
     }
     fn projectile_hit_landed(&mut self, p: &Projectile, hit: Hit) -> Result<()> {
         // Projectile.onHitBlock: BlockState.onProjectileHit, for every
@@ -6380,18 +6383,29 @@ impl Game<'_> {
                     }
                 }
                 Who::Mob(id) => {
-                    if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
-                        && m.damage_projectile(
+                    let hurt = if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
+                        let hurt = m.damage_projectile(
                             crate::game::entity::damage_level_of!(self, scoped),
                             4.0,
                             source,
                             aim,
                             [p.velocity.x, p.velocity.z],
-                        )
-                    {
-                        m.add_effect("minecraft:levitation", 200, 0);
-                        // Shulker.hurtServer: a shulker hit by a bullet.
-                        horizon_client::mobs::shulker::hit_by_bullet(m);
+                        );
+                        if hurt {
+                            // Shulker.hurtServer: a shulker hit by a bullet.
+                            horizon_client::mobs::shulker::hit_by_bullet(m);
+                        }
+                        hurt
+                    } else {
+                        false
+                    };
+                    if hurt {
+                        // The hurt's teleport (`teleportSomewhere`,
+                        // `hitByShulkerBullet`) comes before the levitation.
+                        self.settle_hurt_teleports()?;
+                        if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
+                            m.add_effect("minecraft:levitation", 200, 0);
+                        }
                     }
                 }
             },
@@ -6727,7 +6741,7 @@ impl Game<'_> {
             self.swing_arm();
             return Ok(true);
         }
-        if let Some(sheared) = self.shear_pig_saddle(index, &item) {
+        if let Some(sheared) = self.shear_saddle(index, &item) {
             if sheared {
                 self.swing_arm();
             }
@@ -7607,6 +7621,8 @@ impl Game<'_> {
             on_ground,
         );
         self.add_projectile(proj);
+        // SnowballItem.use / EggItem.use / EnderpearlItem.use: awardStat(ITEM_USED).
+        self.award_stat("used", item, 1);
         // ItemStack.use's applyAfterUseComponentSideEffects: the pearl's
         // second is the `use_cooldown` component, as for any thrown item.
         self.apply_use_cooldown(stack);
