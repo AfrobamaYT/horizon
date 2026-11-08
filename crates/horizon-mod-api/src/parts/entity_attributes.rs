@@ -188,9 +188,12 @@ pub trait EntityAttributesRegistrar {
     ) -> Result<(), crate::EntityAttributeError>;
 
     /// Add attributes to an existing entity type's default set (NeoForge's
-    /// `EntityAttributeModificationEvent`): `entity` is any loaded type with
-    /// attributes (`minecraft:zombie`; a bare name is in `minecraft`), a
-    /// vanilla type, another mod's or the mod's own. Each attribute's id
+    /// `EntityAttributeModificationEvent`): `entity` is any type with an
+    /// attribute row (`minecraft:zombie`; a bare name is in `minecraft`): a
+    /// vanilla type, or a mod's type with a declared set. A living type that
+    /// only a content file defines has no row of its own yet; declare its set
+    /// with [`declare_entity_attributes`](Self::declare_entity_attributes)
+    /// first, and the additions apply on top of it. Each attribute's id
     /// (`minecraft:luck`) takes its base, or with none the attribute's own
     /// default, as the event's one-argument `add`. An attribute the type
     /// already has takes the new base. The change is the type's default:
@@ -202,8 +205,8 @@ pub trait EntityAttributesRegistrar {
     /// registration order, so a later addition of the same attribute wins.
     /// An invalid type id, the same attribute twice in one call or a
     /// non-finite base refuses the mods, naming the mod; an attribute the
-    /// game does not know, or a type without attributes, refuses the resource
-    /// load, naming the type.
+    /// game does not know, or a type without an attribute row, refuses the
+    /// resource load, naming the type.
     fn modify_entity_attributes(
         &mut self,
         entity: &str,

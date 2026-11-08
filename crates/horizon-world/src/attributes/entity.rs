@@ -52,7 +52,10 @@ impl fmt::Display for EntityRowError {
                 )
             }
             Self::UnknownEntity { entity } => {
-                write!(f, "entity {entity} has no attribute row to add to")
+                write!(
+                    f,
+                    "entity {entity} has no attribute row to add to (a mod's type needs a declared set first)"
+                )
             }
         }
     }

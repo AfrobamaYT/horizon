@@ -1347,8 +1347,7 @@ mod tests {
                     .unwrap();
             }
         }
-        crate::game::api_values::install_parts(&[ModEntry::new("lucky", Box::new(Lucky))])
-            .unwrap();
+        crate::game::api_values::install_parts(&[ModEntry::new("lucky", Box::new(Lucky))]).unwrap();
 
         let bits = |n: f64| format!("{:016x}", n.to_bits());
         let catalog = Arc::new(
@@ -1377,7 +1376,11 @@ mod tests {
                 Vec::new,
             )
         };
-        assert_eq!(read(&catalog, "minecraft:luck"), None, "vanilla zombies lack it");
+        assert_eq!(
+            read(&catalog, "minecraft:luck"),
+            None,
+            "vanilla zombies lack it"
+        );
 
         // core.motion, then rest.mobs, as the resource load runs them.
         let modifications = mod_api::__private::entity_attribute_modifications();
@@ -1396,7 +1399,12 @@ mod tests {
             modifications,
         );
 
-        let zombie = Mob::new(7, Arc::new(types["minecraft:zombie"].clone()), Vec3::ZERO, 0.0);
+        let zombie = Mob::new(
+            7,
+            Arc::new(types["minecraft:zombie"].clone()),
+            Vec3::ZERO,
+            0.0,
+        );
         assert_eq!(read(&added, "minecraft:luck"), Some(2.5), "the live map");
         assert_eq!(
             zombie.kind.attributes.get("minecraft:luck"),
@@ -1408,9 +1416,7 @@ mod tests {
         assert_eq!(zombie.attrs.speed, 0.23000000417232513);
         // Types nobody modified keep their rows.
         assert_eq!(
-            types["minecraft:villager"]
-                .attributes
-                .get("minecraft:luck"),
+            types["minecraft:villager"].attributes.get("minecraft:luck"),
             None
         );
     }

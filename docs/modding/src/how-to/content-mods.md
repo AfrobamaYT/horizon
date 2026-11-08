@@ -423,7 +423,8 @@ To give an existing type, vanilla or a mod's, an attribute it lacks, a code mod 
 `Registrar::modify_entity_attributes(entity, attributes)` (NeoForge's `EntityAttributeModificationEvent`) during
 registration. Each attribute takes its base, or with `None` the attribute's own default. It changes the type's
 default after every declared set, so entities created after load have it; a later addition of the same attribute
-wins. An attribute the game does not know, or a type without attribute defaults, stops the resource load:
+wins. A mod's type needs its declared set first: one that only a content file defines has no attribute row to add
+to. An attribute the game does not know, or a type without an attribute row, stops the resource load:
 
 ```rust,ignore
 registrar.modify_entity_attributes(
