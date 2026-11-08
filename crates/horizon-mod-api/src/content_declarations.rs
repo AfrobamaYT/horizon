@@ -10,13 +10,13 @@ use std::collections::BTreeMap;
 pub struct BlockProperties {
     /// Destroy time in seconds of hand mining (-1: unbreakable).
     pub hardness: Option<f32>,
-    /// explosion resistance.
+    /// Explosion resistance; unset inherits the template.
     pub explosion_resistance: Option<f32>,
     /// Light emitted, 0 to 15.
     pub light: Option<u8>,
-    /// requires tool.
+    /// Whether drops require the appropriate tool.
     pub requires_tool: Option<bool>,
-    /// friction.
+    /// Surface friction; unset inherits the template.
     pub friction: Option<f32>,
     /// A `MapColor` id, 0 to 61.
     pub map_color: Option<u8>,
@@ -84,11 +84,11 @@ pub enum RandomTicks {
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: declaration drafts mirror the closed content schema and support record construction.
 pub struct BlockShapes {
-    /// properties.
+    /// State property names selecting a shape, in tuple order.
     pub properties: Vec<String>,
-    /// values.
+    /// Comma-separated property-value tuples mapped to boxes in block pixels.
     pub values: BTreeMap<String, Vec<[f64; 6]>>,
-    /// default.
+    /// Boxes used when no tuple matches.
     pub default: Option<Vec<[f64; 6]>>,
 }
 
@@ -105,9 +105,11 @@ pub enum BlockStateProperty {
     },
 }
 
-/// Block in a load-time content declaration.
+/// An unvalidated draft; `Content::declare` validates it at load.
+/// Refused drafts are reported by the content admission path as
+/// `native blocks and items of <namespace>: <reason>`, without admitting part of that namespace.
 #[derive(Clone, Debug, PartialEq, Default)]
-// exhaustive: declaration drafts mirror the closed content schema and support record construction.
+#[non_exhaustive]
 pub struct Block {
     /// `<mod id>:<path>`.
     pub id: String,
@@ -134,7 +136,8 @@ pub struct Block {
     /// it is not a block item of its own: an item of this mod or a vanilla
     /// one, checked to exist when the content loads. Needs `item` false.
     pub block_item: Option<String>,
-    /// Its item's component patch, as an [`Item`]'s.
+    /// Its item's ordered component patch: `Some(tag)` sets a component, `None` removes it.
+    /// Component names do not include the removal prefix `!`.
     pub components: Vec<(String, Option<crate::Tag>)>,
     /// A connecting block (template `minecraft:chorus_plant`, a `PipeBlock`
     /// without the chorus plant's rules): the block tag, without `#`, whose
@@ -175,19 +178,22 @@ pub enum Rarity {
     Epic,
 }
 
-/// Item in a load-time content declaration.
+/// An unvalidated draft; `Content::declare` validates it at load.
+/// Refused drafts are reported by the content admission path as
+/// `native blocks and items of <namespace>: <reason>`, without admitting part of that namespace.
 #[derive(Clone, Debug, PartialEq, Default)]
-// exhaustive: declaration drafts mirror the closed content schema and support record construction.
+#[non_exhaustive]
 pub struct Item {
-    /// id.
+    /// Identifier in the declaring mod's namespace.
     pub id: String,
     /// The vanilla item it copies, `minecraft:<path>`.
     pub template: String,
-    /// max stack size.
+    /// Maximum stack size, validated as 1 to 99 at admission.
     pub max_stack_size: Option<u8>,
-    /// rarity.
+    /// Rarity overriding the template's.
     pub rarity: Option<Rarity>,
-    /// A 26.3 data component patch over the template's: `!minecraft:<type>` removes one.
+    /// An ordered component patch over the template: `Some(tag)` sets, `None` removes.
+    /// Component names are namespaced identifiers, without a removal prefix `!`.
     pub components: Vec<(String, Option<crate::Tag>)>,
     /// What it leaves in the crafting grid (`Item.Properties.craftRemainder`):
     /// a vanilla item or one of the mod's own.
@@ -199,21 +205,26 @@ pub struct Item {
 }
 
 impl Block {
-    /// Start a declaration with explicitly namespaced identifiers.
-    pub fn new(id: crate::Identifier, template: crate::Identifier) -> Self {
+    /// Request a block item with the same identifier.
+    pub fn with_item(mut self, item: bool) -> Self {
+        self.item = item;
+        self
+    }
+    /// Start an unvalidated declaration request; content admission checks both identifiers.
+    pub fn new(id: impl Into<String>, template: impl Into<String>) -> Self {
         Self {
-            id: id.to_string(),
-            template: template.to_string(),
+            id: id.into(),
+            template: template.into(),
             ..Self::default()
         }
     }
 }
 impl Item {
-    /// Start a declaration with explicitly namespaced identifiers.
-    pub fn new(id: crate::Identifier, template: crate::Identifier) -> Self {
+    /// Start an unvalidated declaration request; content admission checks both identifiers.
+    pub fn new(id: impl Into<String>, template: impl Into<String>) -> Self {
         Self {
-            id: id.to_string(),
-            template: template.to_string(),
+            id: id.into(),
+            template: template.into(),
             ..Self::default()
         }
     }

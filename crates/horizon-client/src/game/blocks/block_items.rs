@@ -485,11 +485,10 @@ mod tests {
                     .expect("native type");
             }
             fn blocks(&self, _context: &mod_api::RegistrationContext, event: &mut BlocksEvent<'_>) {
-                event.blocks.push(mod_api::Block {
-                    id: CRATE.into(),
-                    template: "minecraft:white_banner".into(),
-                    item: true,
-                    ..Default::default()
+                event.blocks.push({
+                    let mut draft = mod_api::Block::new(CRATE, "minecraft:white_banner");
+                    draft.item = true;
+                    draft
                 });
             }
         }
