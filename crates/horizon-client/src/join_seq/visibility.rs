@@ -9,6 +9,8 @@ use std::sync::{
 struct Epoch(AtomicUsize);
 
 /// One game's shared visibility signal, including parked dimensions.
+/// Snapshot admission and owner lending must be serialized on the Game thread:
+/// `settled` followed by saving is NOT atomic against a concurrent `enter`.
 #[derive(Clone, Debug, Default)]
 pub struct Visibility(Arc<Mutex<Arc<Epoch>>>);
 impl Visibility {
@@ -21,13 +23,17 @@ impl Visibility {
         epoch.0.fetch_add(1, Ordering::Relaxed);
         Lease(epoch.clone())
     }
-    /// Whether every tracked owner is visible in resident storage.
+    /// Whether this epoch has no tracked outstanding leases. This describes
+    /// visibility only if callers have not expired a still-borrowed owner.
     pub fn settled(&self) -> bool {
         self.0.lock().unwrap().0.load(Ordering::Relaxed) == 0
     }
     /// Expire abandoned markers at a settled tick/epoch boundary. Returns their
     /// count for the caller's existing imbalance reporting; this does not restore
     /// entities. Old leases can subsequently drop without touching the new epoch.
+    /// The caller MUST first establish that no real borrowed owner survives the
+    /// boundary. Never use expiry as a pre-save imbalance reset: it can report
+    /// settled while an old owner still exists outside resident storage.
     pub fn expire(&self) -> usize {
         let mut epoch = self.0.lock().unwrap();
         let count = epoch.0.load(Ordering::Relaxed);

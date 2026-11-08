@@ -63,7 +63,12 @@ impl Hooks for PanicPickup {
 #[test]
 #[ignore = "needs prepared resources and isolated homes"]
 fn visibility_listener_unwind_does_not_block_an_outside_save() {
-    let root = PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap()).join("visibility-unwind");
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap())
+        .join(format!("visibility-unwind-{}-{nonce}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();
     let visibility = horizon_client::join_seq::visibility::Visibility::default();
     let calls = Arc::new(AtomicUsize::new(0));
@@ -93,6 +98,12 @@ fn visibility_listener_unwind_does_not_block_an_outside_save() {
         assert!(
             visibility.settled(),
             "unwind must release, not leave a stuck pass"
+        );
+        // The baseline item pass has no unwind restoration fence. This proves
+        // lease drop/cleanup, NOT retained-row recovery or persisted entities.
+        assert!(
+            !root.join("level.dat").exists(),
+            "no stale metadata can satisfy this proof"
         );
         assert!(game.native_run_command("save-all flush"));
         assert!(
