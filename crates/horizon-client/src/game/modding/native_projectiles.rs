@@ -331,6 +331,9 @@ mod nested_spawn_tests {
     fn impact_handoff_balances_the_pass(park: bool) {
         use horizon_client::join_seq::residency::{Change, Journal, Kind, Owner};
         crate::game::native_entity_refs::tests::with_game(|game| {
+            if park {
+                game.enter_level(crate::game::Dim::Nether).unwrap();
+            }
             let journal = Journal::default();
             let owner = Owner {
                 dimension: game.dim.key(),
@@ -348,6 +351,11 @@ mod nested_spawn_tests {
             game.creatures.projectiles.push(shot);
             let join = game.creatures.projectiles[0].join;
             let mut pass = game.creatures.projectiles.lift();
+            let mut child = pass[0].clone();
+            child.id = 72;
+            child.join = horizon_client::join_seq::JoinSeq::UNJOINED;
+            game.creatures.projectiles.push(child);
+            let child_join = game.creatures.projectiles[0].join;
             game.native_settle_impacts(
                 &mut pass,
                 &mut JoinList::default(),
@@ -356,11 +364,12 @@ mod nested_spawn_tests {
                 &mut Vec::new(),
                 &mut Vec::new(),
             );
+            assert_eq!(pass.iter().map(|p| p.id).collect::<Vec<_>>(), [71, 72]);
             game.creatures
                 .projectiles
                 .restore(pass, horizon_client::join_seq::RestoreOrder::SpawnsFirst);
             if park {
-                game.enter_level(crate::game::Dim::Nether).unwrap();
+                game.enter_level(crate::game::Dim::Overworld).unwrap();
             }
             let mut events = Vec::new();
             journal.drain_into(&mut events);
@@ -375,7 +384,7 @@ mod nested_spawn_tests {
                 .sum();
             assert_eq!(balance, 0, "impact exposure left an unmatched lifted pass");
             if park {
-                game.enter_level(crate::game::Dim::Overworld).unwrap();
+                game.enter_level(crate::game::Dim::Nether).unwrap();
             }
             assert_eq!(
                 game.creatures
@@ -383,7 +392,7 @@ mod nested_spawn_tests {
                     .iter()
                     .map(|p| (p.id, p.join))
                     .collect::<Vec<_>>(),
-                [(71, join)]
+                [(71, join), (72, child_join)]
             );
         });
     }
