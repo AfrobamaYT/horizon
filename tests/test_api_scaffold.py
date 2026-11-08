@@ -90,10 +90,23 @@ class ScaffoldTest(unittest.TestCase):
         self.assertIn('fn boat_is_wet(&self, handle: BoatRef) -> Option<bool>;', (api / 'host/boat.rs').read_text())
         conv = (self.root / 'crates/horizon-client/src/game/modding/api_values/dir.rs').read_text()
         self.assertIn('_ => return Err(UnsupportedDir)', conv)
+        boat = (self.root / 'crates/horizon-client/src/game/modding/api_values/boat.rs').read_text()
+        self.assertIn('pub(crate) fn boat_is_wet(&self, handle: mod_api::BoatRef) -> Option<bool>', boat)
+        self.assertIn('impl crate::wire::Wire for BoatRef', (api / 'boat.rs').read_text())
         values = (self.root / 'crates/horizon-client/src/game/modding/api_values.rs').read_text()
         self.assertIn('mod dir;', values)
         self.assertTrue(values.endswith('\n\nfn tail() {}\n'))
         self.assertLess(values.index('mod a;'), values.index('mod dir;'))
+
+    def test_exhaustive_struct_is_built_by_literal_and_reads_must_be_optional(self):
+        self.config.write_text(CONFIG.replace('fields = ["x: i32", "y: i32"]',
+                                              'fields = ["x: i32", "y: i32"]\nexhaustive = "two ints"'))
+        self.assertEqual(self.run_tool('--apply').returncode, 0)
+        conv = (self.root / 'crates/horizon-client/src/game/modding/api_values/point.rs').read_text()
+        self.assertIn('mod_api::Pt { x: self.x, y: self.y }', conv)
+        self.assertNotIn('pub const fn new', (self.root / 'crates/horizon-mod-api/src/point.rs').read_text())
+        self.config.write_text(CONFIG.replace('ret = "Option<bool>"', 'ret = "bool"'))
+        self.assertIn('returns Option', self.run_tool('--apply').stderr)
 
     def test_second_apply_refuses(self):
         self.assertEqual(self.run_tool('--apply').returncode, 0)

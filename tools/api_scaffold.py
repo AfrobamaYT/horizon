@@ -95,6 +95,17 @@ def backend_source(e, name):
             f'#[doc(hidden)]\n#[horizon_mod_api_macros::host_area]\npub trait {base}Backend {{\n{body}}}\n')
 
 
+def handle_read(e, name, m):
+    """The game's inherent method the generated host forwarder calls: it resolves the handle, and the read is
+    filled in by hand (a stale handle reads None)."""
+    if not m['ret'].startswith('Option<'):
+        raise Refuse(f"{name}.{m['name']}: a handle read returns Option, None for a stale handle")
+    base = snake(name.removesuffix('Ref'))
+    return (f"\nimpl crate::game::Game<'_> {{\n    /// {m['doc']}\n"
+            f"    pub(crate) fn {base}_{m['name']}(&self, handle: mod_api::{name}) -> {m['ret']} {{\n"
+            f"        let _id = {base}_ref_to_engine(self, handle).ok()?;\n        None\n    }}\n}}\n")
+
+
 def conversion_source(e, name):
     eng, leaf = e['engine'], e['engine'].split('::')[-1]
     if e['kind'] == 'handle':
@@ -108,7 +119,7 @@ def conversion_source(e, name):
                 f'    (game.native_lifecycle.epoch() == Some(handle.fields().epoch))\n'
                 f'        .then(|| handle.fields().id)\n        .ok_or(Stale{name})\n}}\n\n'
                 f'/// A handle from a closed world.\n#[derive(Clone, Copy, Debug, PartialEq, Eq)]\n'
-                f'pub(crate) struct Stale{name};\n')
+                f'pub(crate) struct Stale{name};\n' + ''.join(handle_read(e, name, m) for m in e.get('methods', [])))
     if e['kind'] == 'enum':
         up = ''.join(f'            A::{v} => E::{v},\n' for v in e['variants'])
         down = ''.join(f'            E::{v} => A::{v},\n' for v in e['variants'])
@@ -126,12 +137,14 @@ def conversion_source(e, name):
     fields = [split_field(f)[0] for f in e['fields']]
     reads = e.get('engine_read') or [f'self.{f}' for f in fields]  # how to read each field off the engine value
     new_args = ', '.join(reads)
+    api_built = (f'mod_api::{name} {{ ' + ', '.join(f'{f}: {r}' for f, r in zip(fields, reads)) + ' }'
+                 if e.get('exhaustive') else f'mod_api::{name}::new({new_args})')
     built = e['engine_new'].format(**{f: f'self.{f}' for f in fields}) if 'engine_new' in e else (
         f'{eng} {{ ' + ', '.join(f'{f}: self.{f}' for f in fields) + ' }')
     return (f'impl super::TryIntoApi for {eng} {{\n    type Api = mod_api::{name};\n'
             f'    type Error = std::convert::Infallible;\n'
             f'    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {{\n'
-            f'        Ok(mod_api::{name}::new({new_args}))\n    }}\n}}\n\n'
+            f'        Ok({api_built})\n    }}\n}}\n\n'
             f'impl super::TryIntoEngine<()> for mod_api::{name} {{\n    type Engine = {eng};\n'
             f'    type Error = std::convert::Infallible;\n'
             f'    fn try_into_engine(&self, _: &()) -> Result<Self::Engine, Self::Error> {{\n'
