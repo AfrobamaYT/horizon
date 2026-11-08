@@ -164,7 +164,10 @@ mod tests {
         let with_components = {
             use horizon_core::nbt::{Compound, Tag};
             let mut components = Compound::new();
-            components.insert("minecraft:custom_data".into(), Tag::Compound(Compound::new()));
+            components.insert(
+                "minecraft:custom_data".into(),
+                Tag::Compound(Compound::new()),
+            );
             FluidStack {
                 components: Some(Box::new(components.into())),
                 ..stack("minecraft:water", 1000)
@@ -208,12 +211,7 @@ mod tests {
                 Err(FluidBoxError::InvalidBox),
             ),
             // An empty stack is drawn as nothing without its bounds being read.
-            (
-                stack("minecraft:water", 0),
-                [f32::NAN; 6],
-                options,
-                Ok(()),
-            ),
+            (stack("minecraft:water", 0), [f32::NAN; 6], options, Ok(())),
         ];
         for (stack, bounds, options, expected) in cases {
             let (result, vertices) = drawn(&stack, bounds, options);
