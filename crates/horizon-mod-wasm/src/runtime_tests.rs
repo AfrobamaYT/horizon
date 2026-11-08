@@ -145,6 +145,52 @@ fn nested_handler_decodes_in_scope_and_remains_callable_after_return() {
 }
 
 #[test]
+fn guest_panic_text_is_logged_with_mod_id_and_no_reply() {
+    struct Capture(Mutex<Vec<String>>);
+    impl log::Log for Capture {
+        fn enabled(&self, _: &log::Metadata<'_>) -> bool {
+            true
+        }
+        fn log(&self, record: &log::Record<'_>) {
+            self.0.lock().unwrap().push(record.args().to_string());
+        }
+        fn flush(&self) {}
+    }
+    static CAPTURE: Capture = Capture(Mutex::new(Vec::new()));
+    log::set_logger(&CAPTURE).unwrap();
+    log::set_max_level(log::LevelFilter::Error);
+    for trailing in [false, true] {
+        let module = module(&format!(
+            "i32.const {} local.get 1 local.get 2 i32.const -1 i32.const 0 call $host i32.const 0 i32.ne if unreachable end i64.const 0",
+            mod_api::wire::HOST_LOG
+        ));
+        let answer = module.call(
+            CallClass::Hook,
+            Frame::default(),
+            0,
+            None,
+            |w| {
+                w.put(&"guest panic at register");
+                if trailing {
+                    w.put(&1u8);
+                }
+            },
+            |r| r.take::<()>(),
+        );
+        assert_eq!(answer, if trailing { None } else { Some(()) });
+        assert_eq!(module.is_stopped(), trailing);
+    }
+    let messages = CAPTURE.0.lock().unwrap();
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|message| message.as_str() == "wasm mod test: guest panic at register")
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn calls_do_not_leave_an_active_module_ownership_cycle() {
     let module = module("i64.const 2199023255556");
     let running = Arc::downgrade(&module.running);
