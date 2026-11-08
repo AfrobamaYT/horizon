@@ -155,14 +155,8 @@ const LOAD_CONTEXTS: &[&str] = &[
 /// state and get no `Host`.
 const WORKERS: &[&str] = &["StructureType", "StructurePiece", "BlockTintSource"];
 
-/// Predicates that may synchronously borrow the store lent by their triggering import.
-pub(super) const CALLBACKS: &[&str] = &["CriterionTest"];
-
 /// What a call of `method` is to the runtime, for its limits and its wait.
 pub(super) fn call_class(types: &ty::Types<'_>, method: &Method) -> &'static str {
-    if CALLBACKS.contains(&method.owner) {
-        return "super::Call::Callback";
-    }
     if WORKERS.contains(&method.owner) {
         "super::Call::Worker"
     } else if loads(types, method) {
@@ -416,6 +410,28 @@ pub(super) fn surface<'a>(
         .map_err(|e| format!("writing wire report: {e}"))?;
     let mut dropped = dropped;
     dropped.extend(excused_methods);
+    // The type emitter respects checked, hand-written Wire impls even when a shape
+    // becomes derivable after a new generic borrowing/resource rule is added.
+    types.index.module("mod_api", &["wire_types".into()])?;
+    for owner in exports() {
+        let (path, _) = owner_parts(owner)?;
+        let Found::Item(id) = types.index.resolve_path(api, &path)? else {
+            continue;
+        };
+        let Item::Trait(item) = types.index.item(id) else {
+            continue;
+        };
+        let mut list = vec![owner.to_string()];
+        for bound in &item.supertraits {
+            if let syn::TypeParamBound::Trait(t) = bound {
+                let name = t.path.segments.last().unwrap().ident.to_string();
+                if exports().contains(&name.as_str()) {
+                    list.push(name);
+                }
+            }
+        }
+        types.views.push((owner.to_string(), list));
+    }
     Ok(Surface {
         dropped,
         hooks,
