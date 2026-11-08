@@ -1,4 +1,6 @@
 //! Real wasm capability providers within and across dependency groups.
+// Generated fixtures exercise every shape; TODO(#2273): make the generator emit clippy-clean code.
+#![allow(clippy::all, unused_comparisons, unreachable_patterns, dead_code)]
 use mod_api::__private::game::{BackendRefOf, Fields};
 use mod_api::{
     Backend, BackendRef, BlockEntityRef, BlockEntityTypeKey, BoolGameRuleKey, Host, LevelRef,
