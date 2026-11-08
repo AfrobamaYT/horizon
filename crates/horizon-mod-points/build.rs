@@ -153,44 +153,70 @@ impl horizon_mod_api_gen::native_schema::Exposure for OnlyB {
     }
 }
 
-/// A real catalog `&self` point on a stand-in receiver, generated through the whole-catalog
-/// graph, registration policy and once-per-source helpers.
-fn receiver_fixture(out_dir: &std::path::Path) {
-    use horizon_mod_api_gen::{
-        crossing::Rule, internals::Internal, native_patch, native_policy::Graph, native_raw,
-        native_window,
-    };
-    let entry = Internal {
-        path: "horizon_client::model::Loading".into(),
-        kind: "struct",
+/// One stand-in layout of a policy fixture, written as its declaration.
+fn entry(path: &str, signature: &str) -> horizon_mod_api_gen::internals::Internal {
+    horizon_mod_api_gen::internals::Internal {
+        path: path.into(),
+        kind: if signature.contains("enum ") {
+            "enum"
+        } else {
+            "struct"
+        },
         cfg: String::new(),
-        signature: "pub struct Loading { pub hidden: u32, pub size: [u32; 2] }".into(),
+        signature: signature.into(),
         hash: String::new(),
         shape_only: false,
         opaque_reason: None,
         refs: Default::default(),
+    }
+}
+
+/// A real catalog point, on stand-in layouts, generated through the whole-catalog graph,
+/// registration policy and once-per-source helpers. `granted` names the receiver fields the
+/// fixture's manifest declares; the test file includes the output beside its stand-in types.
+struct PolicyFixture<'a> {
+    file: &'a str,
+    entries: Vec<horizon_mod_api_gen::internals::Internal>,
+    module: &'a str,
+    /// The receiver's type, as written in the signature; none for a free function.
+    owner: Option<&'a str>,
+    /// The path the point's `impl` names in the test file.
+    impl_path: &'a str,
+    signature: &'a str,
+    name: &'a str,
+    /// Every field of the receiver, in declaration order, and the declared subset.
+    fields: &'a [&'a str],
+    body: &'a str,
+}
+
+fn policy_fixture(out_dir: &std::path::Path, fixture: PolicyFixture<'_>) {
+    use horizon_mod_api_gen::{
+        crossing::Rule, native_patch, native_policy::Graph, native_raw, native_window,
     };
-    let rule = Rule::new(&[entry]);
-    let module = "horizon_client::model";
-    let owner: syn::Type = syn::parse_str("Loading").unwrap();
-    let signature: syn::Signature = syn::parse_str("fn menu_size(&self) -> [u32; 2]").unwrap();
-    let attribute = quote::quote!(name = "game_startup_menu_loading_menu_size", raw);
+    let rule = Rule::new(&fixture.entries);
+    let module = fixture.module;
+    let owner: Option<syn::Type> = fixture.owner.map(|owner| syn::parse_str(owner).unwrap());
+    let owner = owner.as_ref();
+    let signature: syn::Signature = syn::parse_str(fixture.signature).unwrap();
+    let name = fixture.name;
+    let attribute = if owner.is_some() {
+        quote::quote!(name = #name, raw)
+    } else {
+        quote::quote!(name = #name, raw, free)
+    };
     let shape = point_shape::shape(attribute.clone(), &signature).unwrap();
     let mut graph = Graph::default();
-    let call =
-        native_raw::register(&rule, module, Some(&owner), &signature, &shape, &mut graph).unwrap();
-    let plan = native_raw::generate_runtime(
-        &rule,
-        module,
-        Some(&owner),
-        &signature,
-        &shape,
-        &graph,
-        call,
-    )
-    .unwrap()
-    .attribute();
-    let receiver = graph.id(&rule.shape(module, None, &owner)).unwrap();
+    let call = native_raw::register(&rule, module, owner, &signature, &shape, &mut graph).unwrap();
+    let plan = native_raw::generate_runtime(&rule, module, owner, &signature, &shape, &graph, call)
+        .unwrap()
+        .attribute();
+    let receiver = match owner {
+        Some(owner) => {
+            let id = graph.id(&rule.shape(module, None, owner)).unwrap();
+            quote::quote!(Some(#id))
+        }
+        None => quote::quote!(None),
+    };
     let layouts = graph.tokens();
     let windows = native_window::helpers(&rule, &graph).unwrap();
     let patches = native_patch::helpers(&rule, &graph).unwrap();
@@ -199,34 +225,170 @@ fn receiver_fixture(out_dir: &std::path::Path) {
         call.tail
             .map_or(quote::quote!(None), |t| quote::quote!(Some(#t))),
     );
-    let raw_types = shape.raw_items(&signature, Some(&owner), None);
+    let raw_types = shape.raw_items(&signature, owner, None);
+    let fields = fixture.fields;
+    let prefix = format!("{}::{}", module, fixture.owner.unwrap_or_default());
+    let impl_path: syn::Type = syn::parse_str(if owner.is_some() {
+        fixture.impl_path
+    } else {
+        "()"
+    })
+    .unwrap();
+    let body: syn::Block = syn::parse_str(fixture.body).unwrap();
+    let method = &signature;
+    let wrapped = if owner.is_some() {
+        quote::quote! {
+            impl #impl_path {
+                #[horizon_mod_api_macros::point(#attribute)]
+                #plan
+                #method #body
+            }
+        }
+    } else {
+        quote::quote! {
+            #[horizon_mod_api_macros::point(#attribute)]
+            #plan
+            #method #body
+        }
+    };
     std::fs::write(
-        out_dir.join("native_raw_receiver.rs"),
+        out_dir.join(fixture.file),
         quote::quote! {
             pub mod __horizon_points { #windows #patches }
             fn catalog() -> mod_points::endpoint_policy::SchemaCatalog {
                 use mod_points::endpoint_policy::{InternalField, PointSpec, SchemaCatalog};
                 SchemaCatalog {
                     layouts: #layouts,
-                    points: vec![PointSpec { head_call: #head, tail_call: #tail, receiver: Some(#receiver) }],
-                    fields: ["hidden", "size"].map(|field| InternalField {
-                        path: format!("horizon_client::model::Loading::{field}"),
+                    points: vec![PointSpec { head_call: #head, tail_call: #tail, receiver: #receiver }],
+                    fields: <[&str]>::iter(&[#(#fields),*]).map(|&field| InternalField {
+                        path: format!("{}::{field}", #prefix),
                         kind: "field".into(),
                         hash: field.into(),
-                        receiver: #receiver,
+                        receiver: #receiver.unwrap(),
                         field: field.into(),
-                    }).to_vec(),
+                    }).collect(),
                 }
             }
             const HEAD_CALL: usize = #head;
             #raw_types
-            impl model::Loading {
-                #[horizon_mod_api_macros::point(#attribute)]
-                #plan
-                fn menu_size(&self) -> [u32; 2] { self.size }
-            }
+            #wrapped
         }
         .to_string(),
     )
     .unwrap();
+}
+
+fn receiver_fixture(out_dir: &std::path::Path) {
+    let loading = "pub struct Loading { pub hidden: u32, pub size: [u32; 2] }";
+    policy_fixture(
+        out_dir,
+        PolicyFixture {
+            file: "native_raw_receiver.rs",
+            entries: vec![entry("horizon_client::model::Loading", loading)],
+            module: "horizon_client::model",
+            owner: Some("Loading"),
+            impl_path: "model::Loading",
+            signature: "fn menu_size(&self) -> [u32; 2]",
+            name: "game_startup_menu_loading_menu_size",
+            fields: &["hidden", "size"],
+            body: "{ self.size }",
+        },
+    );
+    // UnitResult: the head carries the bool cancel, the return phase the `Result` slot.
+    policy_fixture(
+        out_dir,
+        PolicyFixture {
+            file: "native_raw_unit_result.rs",
+            entries: vec![entry(
+                "horizon_client::split::Split",
+                "pub struct Split { pub seats: u32 }",
+            )],
+            module: "horizon_client::split",
+            owner: Some("Split"),
+            impl_path: "split::Split",
+            signature: "fn can_join(&self, name: &str) -> Result<(), String>",
+            name: "game_split_players_split_can_join",
+            fields: &["seats"],
+            body: "{ if name == \"ok\" { Ok(()) } else { Err(\"full\".to_owned()) } }",
+        },
+    );
+    // Borrowed returns: a shared `&str` (read-only) and a `&mut` struct (pointee writable).
+    policy_fixture(
+        out_dir,
+        PolicyFixture {
+            file: "native_raw_borrowed_shared.rs",
+            entries: vec![entry(
+                "horizon_client::jigsaw::JigsawEditor",
+                "pub struct JigsawEditor { pub count: u32 }",
+            )],
+            module: "horizon_client::jigsaw",
+            owner: Some("JigsawEditor"),
+            impl_path: "jigsaw::JigsawEditor",
+            signature: "fn value(&self, i: usize) -> &str",
+            name: "game_jigsaw_edit_jigsaw_editor_value",
+            fields: &[],
+            body: "{ [\"zero\", \"one\"][i] }",
+        },
+    );
+    policy_fixture(
+        out_dir,
+        PolicyFixture {
+            file: "native_raw_borrowed_mut.rs",
+            entries: vec![
+                entry(
+                    "horizon_client::maps::MapData",
+                    "pub struct MapData { pub holders: Vec<Holder> }",
+                ),
+                entry(
+                    "horizon_client::maps::Holder",
+                    "pub struct Holder { pub n: u32, pub label: String }",
+                ),
+            ],
+            module: "horizon_client::maps",
+            owner: Some("MapData"),
+            impl_path: "maps::MapData",
+            signature: "fn holder(&mut self, who: u32) -> &mut Holder",
+            name: "game_maps_map_data_holder",
+            fields: &[],
+            body: "{ &mut self.holders[who as usize] }",
+        },
+    );
+    // Argument classes the shape marks `unclassified` and `callback`: opaque leaves.
+    policy_fixture(
+        out_dir,
+        PolicyFixture {
+            file: "native_raw_unclassified.rs",
+            entries: vec![
+                entry(
+                    "horizon_client::startup_menu::Loading",
+                    "pub struct Loading { pub actions: u32 }",
+                ),
+                entry(
+                    "horizon_client::startup_menu::Action",
+                    "pub enum Action { Quit, Options }",
+                ),
+            ],
+            module: "horizon_client::startup_menu",
+            owner: Some("Loading"),
+            impl_path: "startup_menu::Loading",
+            signature: "fn menu_action(&mut self, event_loop: &dyn EventLoopCtl, action: Action)",
+            name: "game_startup_menu_loading_menu_action",
+            fields: &["actions"],
+            body: "{ match action { Action::Quit => event_loop.exit(), Action::Options => self.actions += 1 } }",
+        },
+    );
+    policy_fixture(
+        out_dir,
+        PolicyFixture {
+            file: "native_raw_callback.rs",
+            entries: Vec::new(),
+            module: "horizon_client::test_environments",
+            owner: None,
+            impl_path: "",
+            signature: "fn parse(depth: u32, load: &dyn Fn(&str) -> Option<u32>) -> Option<u32>",
+            name: "game_test_environments_parse",
+            fields: &[],
+            body: "{ load(\"minecraft:overworld\").map(|id| id + depth) }",
+        },
+    );
 }
