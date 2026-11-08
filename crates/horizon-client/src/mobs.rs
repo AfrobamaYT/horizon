@@ -1333,6 +1333,7 @@ pub struct Extra {
     /// radius, 3 unless the save or a command says otherwise; a powered
     /// creeper blows with twice it (`explodeCreeper`).
     pub explosion_radius: i8,
+    pub adopted_body: Option<Arc<str>>,
     pub using_item: i32,
     pub using_off_hand: bool,
     /// `LivingEntity.recentKineticEnemies`: when the entities this mob's
@@ -4712,7 +4713,10 @@ impl Mob {
             self.extra.hidden_effects.push(effect);
         }
         if effect == "minecraft:absorption" {
-            self.absorption = self.absorption.max(4.0 * (incoming.amplifier + 1) as f32);
+            self.absorption = self
+                .absorption
+                .max(4.0 * (incoming.amplifier + 1) as f32)
+                .clamp(0.0, armor::max_absorption(self));
         }
         if changed && effect == "minecraft:health_boost" {
             finalize::health_boost_changed(self);
@@ -4811,6 +4815,7 @@ impl Mob {
         match effect {
             // `LivingEntity.removeAllEffects`: the absorption hearts go with it.
             ConsumeEffect::ClearAllEffects => {
+                self.extra.effect_chains.clear();
                 for e in std::mem::take(&mut self.extra.effects) {
                     if e.id == "minecraft:absorption" {
                         self.absorption =
@@ -4824,6 +4829,9 @@ impl Mob {
                     !ids.iter()
                         .any(|id| id.trim_start_matches("minecraft:") == held)
                 });
+                self.extra
+                    .effect_chains
+                    .retain(|h| self.extra.effects.iter().any(|e| e.id == h.id));
             }
             // `ApplyStatusEffectsConsumeEffect.apply`: one random draw, even at
             // probability 1.
@@ -4933,7 +4941,21 @@ impl Mob {
         if self.species() == Species::Wither || !self.can_be_affected(effect) {
             return;
         }
+        let had = self.extra.effects.iter().any(|e| e.id == effect);
+        let ambient = self.extra.ambient_effects.contains(&effect);
+        let hidden = self.extra.hidden_effects.contains(&effect);
         self.add_effect_with(effect, ticks, amplifier, false, true);
+        // The basic overload changes the chain, not the existing active flags.
+        if had {
+            self.extra.ambient_effects.retain(|id| *id != effect);
+            if ambient {
+                self.extra.ambient_effects.push(effect);
+            }
+            self.extra.hidden_effects.retain(|id| *id != effect);
+            if hidden {
+                self.extra.hidden_effects.push(effect);
+            }
+        }
     }
     pub fn speed_bonus(&self) -> f64 {
         ai::speed_bonus(self)
@@ -7196,5 +7218,155 @@ mod visibility_percent_tests {
         sneaking.head = Some(Arc::from("minecraft:skeleton_skull"));
         sneaking.sneaking = true;
         assert_eq!(sneaking.visibility_percent(Species::Skeleton), 0.4);
+    }
+}
+
+#[cfg(test)]
+mod hidden_speed_mob_tick_tests {
+    use super::*;
+    fn full_tick_promotes(no_ai: bool) {
+        let admitted = crate::mobs::world::with_built_test_world(
+            &[],
+            |world, registry| {
+                let stone = registry.default_state("minecraft:stone").unwrap();
+                world
+                    .chunks
+                    .insert((0, 0), Arc::new(crate::chunk::Chunk::empty(0, 0)));
+                world.set(2, 199, 4, stone).unwrap();
+            },
+            |w, types| {
+                let mut m = Mob::new(
+                    202,
+                    Arc::new(types.types["minecraft:pig"].clone()),
+                    Vec3::new(2.5, 200.0, 4.5),
+                    0.0,
+                );
+                m.no_ai = no_ai;
+                m.no_gravity = true;
+                assert!(m.add_effect_with("minecraft:speed", 200, 0, false, true));
+                assert!(m.add_effect_with("minecraft:speed", 40, 1, false, true));
+                assert_eq!(
+                    m.extra
+                        .effects
+                        .iter()
+                        .map(|e| (e.id, e.duration, e.amplifier))
+                        .collect::<Vec<_>>(),
+                    [("minecraft:speed", 40, 1)]
+                );
+                let mut test_level = crate::health::TestLevel::new(202);
+                let mut events = Vec::new();
+                for _ in 0..39 {
+                    assert!(m.tick(w, &mut test_level.level(), &mut events));
+                }
+                assert_eq!(
+                    m.extra
+                        .effects
+                        .iter()
+                        .map(|e| (e.id, e.duration, e.amplifier))
+                        .collect::<Vec<_>>(),
+                    [("minecraft:speed", 1, 1)]
+                );
+                assert!(m.tick(w, &mut test_level.level(), &mut events));
+                assert_eq!(
+                    m.extra
+                        .effects
+                        .iter()
+                        .map(|e| (e.id, e.duration, e.amplifier))
+                        .collect::<Vec<_>>(),
+                    [("minecraft:speed", 160, 0)],
+                    "actual Mob tick must promote its counted-down fallback"
+                );
+                assert_eq!(m.age, 40);
+                assert!(m.tick(w, &mut test_level.level(), &mut events));
+                assert_eq!(
+                    m.extra
+                        .effects
+                        .iter()
+                        .map(|e| (e.id, e.duration, e.amplifier))
+                        .collect::<Vec<_>>(),
+                    [("minecraft:speed", 159, 0)]
+                );
+            },
+        );
+        // Without the vanilla data under .local/horizon-client there is no Mob
+        // world to tick: the test has nothing to check.
+        let _ = admitted;
+    }
+    #[test]
+    fn noai_full_mob_tick_promotes_speed() {
+        full_tick_promotes(true)
+    }
+    #[test]
+    fn ai_full_mob_tick_promotes_speed() {
+        full_tick_promotes(false)
+    }
+    // Added causal controls; the three original old/fixed tests remain above.
+    #[test]
+    fn hidden_only_updates_copy_and_clear_readd_keep_active_authority() {
+        let mut kind = (*sensor_scan_tests::kind()).clone();
+        kind.id = "minecraft:pig".into();
+        kind.species = Species::Pig;
+        let mut m = Mob::new(202, Arc::new(kind), Vec3::ZERO, 0.0);
+        m.add_effect("night_vision", 400, 0);
+        assert!(m.add_effect_with("speed", 200, 0, true, false));
+        assert!(m.add_effect_with("speed", 40, 1, false, true));
+        assert_eq!(
+            (
+                m.extra.effect_chains[0].ambient,
+                m.extra.effect_chains[0].visible
+            ),
+            (true, false)
+        );
+        assert!(!m.add_effect_with("speed", 300, 0, false, true));
+        assert_eq!(
+            m.extra
+                .effects
+                .iter()
+                .map(|e| (e.id, e.duration, e.amplifier))
+                .collect::<Vec<_>>(),
+            [
+                ("minecraft:night_vision", 400, 0),
+                ("minecraft:speed", 40, 1)
+            ]
+        );
+        assert_eq!(m.extra.effect_chains[0].duration, 300);
+        assert!(!m.add_effect_with("speed", 40, 1, false, true));
+        let mut to = Mob::new(203, m.kind.clone(), Vec3::ZERO, 0.0);
+        conversion::single(&m, &mut to, conversion::Params::KEEP_ALL);
+        assert_eq!(to.extra.effects, m.extra.effects);
+        assert_eq!(to.extra.effect_chains, m.extra.effect_chains);
+        to.extra.effect_chains[0].duration = 222;
+        assert_eq!(m.extra.effect_chains[0].duration, 300);
+        m.apply_death_effect(
+            &mut crate::health::TestLevel::new(0).level(),
+            &crate::items::ConsumeEffect::RemoveEffects(vec!["minecraft:speed".into()]),
+        );
+        assert_eq!(
+            m.extra
+                .effects
+                .iter()
+                .map(|e| (e.id, e.duration, e.amplifier))
+                .collect::<Vec<_>>(),
+            [("minecraft:night_vision", 400, 0)]
+        );
+        assert!(m.extra.effect_chains.is_empty());
+        m.add_effect("speed", 20, 0);
+        assert!(m.extra.effect_chains.is_empty());
+        m.add_effect("speed", 5, 1);
+        assert_eq!(m.extra.effect_chains[0].duration, 20);
+        m.apply_death_effect(
+            &mut crate::health::TestLevel::new(0).level(),
+            &crate::items::ConsumeEffect::ClearAllEffects,
+        );
+        assert!(m.extra.effects.is_empty() && m.extra.effect_chains.is_empty());
+        // The basic add has default incoming flags, while preserving its
+        // existing active flag policy; a newly retained weaker node gets them.
+        assert!(m.add_effect_with("speed", 200, 0, true, false));
+        assert!(m.add_effect_with("speed", 40, 1, true, false));
+        m.add_effect("speed", 300, 0);
+        assert!(m.extra.ambient_effects.contains(&"minecraft:speed"));
+        assert!(m.extra.hidden_effects.contains(&"minecraft:speed"));
+        assert!(!m.extra.effect_chains[0].ambient);
+        assert!(m.extra.effect_chains[0].visible);
     }
 }

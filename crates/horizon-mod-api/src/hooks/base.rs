@@ -4561,7 +4561,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "replace",
         out = "result",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        paper = "PrepareItemCraftEvent"
     )]
     fn prepare_item_craft();
     /// Enchanting offers were calculated for a server player at `pos`. Change `costs` before they are sent to the menu.
@@ -4576,7 +4577,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "replace",
         out = "result",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        paper = "PrepareSmithingEvent"
     )]
     fn prepare_smithing();
     /// A server projectile was added to the level. `player` is set only for
@@ -4741,7 +4743,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's WhitelistToggleEvent)"
+        neoforge = "none (NeoForge has no such event; Bukkit's WhitelistToggleEvent)",
+        paper = "WhitelistToggleEvent"
     )]
     fn whitelist_state_update();
     /// A timed world-border size change finished on the server, after its
