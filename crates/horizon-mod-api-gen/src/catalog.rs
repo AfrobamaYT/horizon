@@ -49,8 +49,6 @@ pub enum PhaseContext {
     DataLoad,
     /// A hook fired inside a menu, recipe or player-list loop of one side.
     Loop,
-    /// A hook fired while a feature generates, on a worldgen worker or the server thread.
-    Worldgen,
 }
 
 /// The kind of thing whose Parts a scoped hook calls.

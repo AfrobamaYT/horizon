@@ -863,16 +863,13 @@ fn not_built(
 pub(super) struct PreparedLoopContext {
     game: Arc<horizon_world::native_load_context::LoopContext>,
     audio: Option<horizon_world::native_load_context::LoopContext>,
-    /// A server's context for the features it generates (`alter_ground`).
-    worldgen: Option<horizon_world::native_load_context::WorldgenContext>,
 }
 
 impl Game<'_> {
     /// Build this game's loop context over the loaded registries and the mods'
     /// current settings. Called where a resource generation starts or reloads: a
     /// client at window start and after a resource reload, a server when it starts
-    /// its mods and on `/reload`. A client hands a second one to its audio; a
-    /// server publishes one for its world generation.
+    /// its mods and on `/reload`. A client hands a second one to its audio.
     pub(super) fn refresh_loop_context(&mut self) -> horizon_client::Result<()> {
         let context = self.prepare_loop_context(&self.options.resources)?;
         self.install_loop_context(context);
@@ -896,13 +893,9 @@ impl Game<'_> {
             .execution_role
             .is_client()
             .then(|| item_data.loop_context(side, ids.iter().copied()));
-        let worldgen = self
-            .is_logical_server()
-            .then(|| item_data.worldgen_context(ids.iter().copied()));
         Ok(PreparedLoopContext {
             game: Arc::new(item_data.loop_context(side, ids.iter().copied())),
             audio,
-            worldgen,
         })
     }
 
@@ -913,9 +906,6 @@ impl Game<'_> {
         }
         if let Some(audio) = context.audio {
             self.audio.set_loop_context(audio);
-        }
-        if let Some(worldgen) = context.worldgen {
-            horizon_world::native_worldgen_hooks::publish_context(Arc::new(worldgen));
         }
     }
 
