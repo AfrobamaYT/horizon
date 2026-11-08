@@ -4190,7 +4190,7 @@ mod tests {
                 LevelWriteHost::set_block(
                     &mut super::super::mod_api_host::LevelTicks { level, ticks },
                     [5, 64, 0],
-                    first,
+                    first.try_into_api().unwrap(),
                     NativeBlockUpdateFlags::NONE,
                 )
             });
