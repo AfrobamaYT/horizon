@@ -3038,6 +3038,68 @@ pub enum NativeSpawnCheck {
     Fail,
 }
 
+/// Where a mod entity type stands to spawn (`SpawnPlacementType`):
+/// `SpawnPlacements.isSpawnPositionOk`'s first check.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NativeSpawnPlacementType {
+    /// `ON_GROUND`: a block that is valid to spawn on below, free room at the feet and the head.
+    OnGround,
+    /// `IN_WATER`: a water block, with no redstone conductor above.
+    InWater,
+    /// `IN_LAVA`: a lava block.
+    InLava,
+    /// `NO_RESTRICTIONS`: anywhere.
+    NoRestrictions,
+}
+
+/// How bright a spot a mod entity type needs to spawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NativeSpawnLight {
+    /// Any light level.
+    Any,
+    /// Dark enough for a monster (`Monster.isDarkEnoughToSpawn`: sky light, block light
+    /// and the dimension's monster light test, which draw from the level's random).
+    Dark,
+    /// Bright enough for an animal (`Animal.isBrightEnoughToSpawn`: light above 8).
+    Bright,
+}
+
+/// A mod entity type's spawn rule, declared with
+/// [`Registrar::declare_spawn_placement`](SpawnPlacementsRegistrar::declare_spawn_placement):
+/// the arguments of NeoForge's `RegisterSpawnPlacementsEvent.register` as data, so one
+/// rule serves native and wasm mods. Every field must hold for a spawn to pass; a trial
+/// spawner ignores `light`, as for vanilla types.
+#[derive(Clone, Debug, PartialEq)]
+// exhaustive: a mod builds it with a literal; the game reads it
+pub struct SpawnPlacementRule {
+    /// Where the type stands (`SpawnPlacementType`).
+    pub placement: NativeSpawnPlacementType,
+    /// The heightmap natural spawning and chunk generation find the surface with.
+    pub heightmap: NativeHeightmap,
+    /// A block tag (`minecraft:animals_spawnable_on`, no `#`) the block below must be in.
+    pub spawnable_on: Option<String>,
+    /// How bright the spot must be.
+    pub light: NativeSpawnLight,
+    /// A biome tag (no `#`) the spot's biome must be in.
+    pub biome_tag: Option<String>,
+}
+
+/// Why a spawn placement declaration was refused
+/// ([`Registrar::declare_spawn_placement`](SpawnPlacementsRegistrar::declare_spawn_placement)).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SpawnPlacementError {
+    /// The entity type's id is invalid, empty, or in a namespace the declaring
+    /// mod does not own.
+    InvalidId,
+    /// A tag is not a namespaced tag name (write it without `#`).
+    InvalidTag,
+    /// Another declaration already covers the entity type.
+    Duplicate,
+}
+
 /// What a mod answers a despawn check (`MobDespawnEvent.Result`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]

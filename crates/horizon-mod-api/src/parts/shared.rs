@@ -141,6 +141,7 @@ pub(crate) struct Installed {
     pub(crate) tags: TagParts,
     pub(crate) block_entity_types: Vec<BlockEntityTypeDecl>,
     pub(crate) entity_attributes: Vec<EntityAttributeDeclaration>,
+    pub(crate) spawn_placements: Vec<SpawnPlacementDeclaration>,
     pub(crate) registry_keys: horizon_mod_runtime::registry_keys::Requests,
     pub(crate) effects: OnceLock<horizon_mod_runtime::registry_keys::Effects>,
     pub(crate) resolved_block_entity_types: OnceLock<horizon_mod_runtime::registry_keys::Names>,
@@ -522,6 +523,7 @@ pub struct PartRegistrar {
     pub(crate) tags: TagParts,
     pub(crate) block_entity_types: Vec<BlockEntityTypeDecl>,
     pub(crate) entity_attributes: Vec<EntityAttributeDeclaration>,
+    pub(crate) spawn_placements: Vec<SpawnPlacementDeclaration>,
     pub(crate) registry_keys: Rc<RefCell<horizon_mod_runtime::registry_keys::Requests>>,
     pub(crate) effects: OnceLock<horizon_mod_runtime::registry_keys::Effects>,
     pub(crate) controllers: Vec<ControllerInfo>,
@@ -543,6 +545,7 @@ impl PartRegistrar {
             tags: TagParts::default(),
             block_entity_types: Vec::new(),
             entity_attributes: Vec::new(),
+            spawn_placements: Vec::new(),
             registry_keys: Default::default(),
             effects: OnceLock::new(),
             controllers: Vec::new(),
@@ -674,6 +677,7 @@ pub(crate) fn install_registrar(
         tags: registrar.tags,
         block_entity_types: registrar.block_entity_types,
         entity_attributes: registrar.entity_attributes,
+        spawn_placements: registrar.spawn_placements,
         resolved_block_entity_types: OnceLock::new(),
         registry_keys: Rc::try_unwrap(registrar.registry_keys)
             .unwrap_or_else(|_| unreachable!("registration scope has ended"))
