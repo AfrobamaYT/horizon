@@ -419,6 +419,19 @@ That declaration starts from the vanilla template's attribute row, replacing the
 Declared bases remain available to base-value reads, but computed values and spawn fields clamp them to each
 attribute's vanilla range (for example, `minecraft:max_health` is clamped to 1–1024).
 
+To give an existing type, vanilla or a mod's, an attribute it lacks, a code mod calls
+`Registrar::modify_entity_attributes(entity, attributes)` (NeoForge's `EntityAttributeModificationEvent`) during
+registration. Each attribute takes its base, or with `None` the attribute's own default. It changes the type's
+default after every declared set, so entities created after load have it; a later addition of the same attribute
+wins. An attribute the game does not know, or a type without attribute defaults, stops the resource load:
+
+```rust,ignore
+registrar.modify_entity_attributes(
+    "minecraft:zombie",
+    vec![("minecraft:luck".to_string(), Some(2.5))],
+)?;
+```
+
 It is a mob of its template's class under its own id, `<id>:<name>`: the template's size, model, texture, sounds and
 behaviour, with its own attributes. It saves what its template's class saves under its own id (a zombie's `IsBaby`,
 `CanBreakDoors` and conversion times) and loads back as itself. Its entity data is its template's class's. Its loot

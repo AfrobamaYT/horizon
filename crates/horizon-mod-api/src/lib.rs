@@ -66,15 +66,16 @@ pub enum GameRuleError {
     Duplicate,
 }
 
-/// Why an entity type's attribute declaration was refused
-/// ([`Registrar::declare_entity_attributes`](EntityAttributesRegistrar::declare_entity_attributes)).
+/// Why an entity type's attribute declaration or addition was refused
+/// ([`Registrar::declare_entity_attributes`](EntityAttributesRegistrar::declare_entity_attributes),
+/// [`Registrar::modify_entity_attributes`](EntityAttributesRegistrar::modify_entity_attributes)).
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum EntityAttributeError {
-    /// The entity type's id is invalid, empty, or in a namespace the declaring
-    /// mod does not own.
+    /// The entity type's id is invalid or empty, or, for a declared set, in a
+    /// namespace the declaring mod does not own.
     InvalidId,
-    /// The set declares the same attribute twice.
+    /// The set names the same attribute twice.
     DuplicateAttribute,
     /// A base value is not finite.
     NotFinite,
