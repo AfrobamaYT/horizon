@@ -393,6 +393,22 @@ mod tests {
         .unwrap();
     }
 
+    #[test]
+    fn crash_out_of_order_tombstones_are_reclaimed() {
+        let _native = runtime("dispatch");
+        let packages = ConvertedPackages::new("runtime", ["guest"]);
+        let package = packages.package("guest").unwrap();
+        for _ in 0..128 {
+            let a = package.enter("a", "site").unwrap();
+            let b = package.enter("b", "site").unwrap();
+            let c = package.enter("c", "site").unwrap();
+            drop(b);
+            drop(a);
+            drop(c);
+            ENDED_SCOPES.with(|ended| assert!(ended.borrow().is_empty()));
+        }
+    }
+
     fn runtime(hook: &'static str) -> NativeModGuard {
         enter_native_mod(NativeModCall {
             id: "runtime",
