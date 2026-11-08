@@ -333,3 +333,52 @@ mod tests {
         );
     }
 }
+
+pub(super) fn validate_decoded_effects(
+    patch: Option<&mod_api::Tag>,
+    stack: &horizon_items::items::ItemStack,
+) -> Result<(), mod_api::StackWriteError> {
+    // The component codec already decoded each supplied value. Check that admission
+    // succeeded rather than parsing untrusted component payloads a second time.
+    if let Some(patch) = patch
+        && ((patch.get("minecraft:consumable").is_some() && stack.consumable(None).is_none())
+            || (patch.get("minecraft:death_protection").is_some()
+                && stack.death_protection(None).is_none()))
+    {
+        return Err(mod_api::StackWriteError::InvalidEffectPayload);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod effect_write_tests {
+    use super::super::{TryIntoEngine, stack_limit_tests::catalog};
+    use horizon_core::nbt::JavaString;
+    use mod_api::{ItemStack, StackWriteError, Tag};
+
+    #[test]
+    fn malformed_effect_override_refuses_typed_stack_write() {
+        let items = catalog();
+        let key = mod_api::__private::item_key("minecraft:stick").unwrap();
+        for (component, effects) in [
+            ("minecraft:consumable", "on_consume_effects"),
+            ("minecraft:death_protection", "death_effects"),
+        ] {
+            let invalid = Tag::compound([(
+                effects,
+                Tag::List(vec![Tag::compound([
+                    ("type", Tag::String("example:charge".into())),
+                    ("bad", Tag::Double(f64::NAN.to_bits())),
+                ])]),
+            )]);
+            let mut draft = ItemStack::of(key);
+            draft
+                .set_components([(JavaString::from(component), invalid)].into())
+                .unwrap();
+            assert_eq!(
+                draft.try_into_engine(&items),
+                Err(StackWriteError::InvalidEffectPayload)
+            );
+        }
+    }
+}

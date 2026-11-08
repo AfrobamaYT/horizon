@@ -237,7 +237,6 @@ pub fn main_with(
 }
 
 pub(crate) fn install_client_hooks() {
-    use game::api_values::TryIntoApi;
     game::api_values::install_stack_hooks();
     if !crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
         menu_slot_rules: game::api_values::menu_slot_rules,

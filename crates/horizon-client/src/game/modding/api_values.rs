@@ -718,10 +718,13 @@ impl TryIntoEngine for mod_api::ItemResource {
 /// The write conversion below adds authoritative registry-dependent validation.
 pub(in crate::game) fn stack_value(value: &ApiStack) -> Result<EngineStack, StackWriteError> {
     let id = mod_api::__private::item_key_id(value.item()).ok_or(StackWriteError::UnknownItem)?;
-    Ok(encode_stack(value, id.into()))
+    encode_stack(value, id.into())
 }
 
-fn encode_stack(value: &ApiStack, item: std::sync::Arc<str>) -> EngineStack {
+fn encode_stack(
+    value: &ApiStack,
+    item: std::sync::Arc<str>,
+) -> Result<EngineStack, StackWriteError> {
     let mut patch = value.components().map(|patch| patch.as_nbt().clone());
     // Let the existing component codec preserve explicit zero versus prototype inheritance.
     if value.damage_component() == Some(0) {
@@ -731,12 +734,14 @@ fn encode_stack(value: &ApiStack, item: std::sync::Arc<str>) -> EngineStack {
     }
     let patch = patch.map(Tag::Compound);
     let (_, extra) = horizon_items::item_data::decode_components(patch.as_ref());
-    EngineStack {
+    let stack = EngineStack {
         item,
         count: value.count(),
         damage: value.damage(),
         extra,
-    }
+    };
+    content_declarations::validate_decoded_effects(patch.as_ref(), &stack)?;
+    Ok(stack)
 }
 
 impl TryIntoEngine for ApiStack {
@@ -750,7 +755,7 @@ impl TryIntoEngine for ApiStack {
             .items
             .get_key_value(id)
             .ok_or(StackWriteError::UnknownItem)?;
-        let stack = encode_stack(self, id.clone());
+        let stack = encode_stack(self, id.clone())?;
         let effective = |name: &str, default: u32| -> Result<u32, StackWriteError> {
             match stack.data().and_then(|data| data.other(name)) {
                 Some(Tag::Int(value)) => {
