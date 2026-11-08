@@ -460,4 +460,7 @@ pub fn fluid_state(
     }
 }
 
+pub mod ingredient_parser;
+pub use ingredient_parser::{WalkedIngredient, dedup_keep_order, resolved_items};
+
 include!(concat!(env!("OUT_DIR"), "/mod_api_exports_private.rs"));
