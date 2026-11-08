@@ -3732,10 +3732,10 @@ impl Game<'_> {
     ) -> &horizon_world::dimension_type::DimensionFacts {
         use horizon_world::dimension_type::DimensionFacts;
         if let Some(remote) = &self.remote {
-            if horizon_core::LevelKey::parse(&remote.level).ok() == Some(key) {
-                if let Some(facts) = remote.level_facts.as_deref() {
-                    return facts;
-                }
+            if horizon_core::LevelKey::parse(&remote.level).ok() == Some(key)
+                && let Some(facts) = remote.level_facts.as_deref()
+            {
+                return facts;
             }
             DimensionFacts::of_builtin_level(key)
         } else {
