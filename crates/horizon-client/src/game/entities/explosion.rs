@@ -727,9 +727,11 @@ impl Game<'_> {
                     direct: exploding.map_or(0, |id| id as i32),
                     position: Some(center),
                 };
+                let creative = self.creative_damage_source_id(source.causing);
+                let vanilla = self.saved_refuses_damage($id as u32, damage_type, creative);
                 crate::game::entity::damage_level_of!(self, scoped).invulnerability_check(
                     horizon_client::health::Hurting::Entity($id, $kind, source),
-                    false,
+                    vanilla,
                 )
             }};
         }
@@ -959,9 +961,11 @@ impl Game<'_> {
                     direct: causing as i32,
                     position: Some(center),
                 };
+                let creative = self.creative_damage_source_id(source.causing);
+                let vanilla = self.saved_refuses_damage(id, damage_type, creative);
                 if crate::game::entity::damage_level_of!(self, scoped).invulnerability_check(
                     horizon_client::health::Hurting::ArmorStand(id as i32, source),
-                    false,
+                    vanilla,
                 ) {
                     i += 1;
                     continue;

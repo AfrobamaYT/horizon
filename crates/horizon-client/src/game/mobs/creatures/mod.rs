@@ -5180,9 +5180,17 @@ impl Game<'_> {
             direct: p.id as i32,
             position: Some([p.position.x, p.position.y, p.position.z]),
         };
+        let creative = match p.owner {
+            Some(Who::Player) => match p.guest {
+                Some(conn) => self.command_guest(conn).is_some_and(|g| g.creative()),
+                None => self.creative,
+            },
+            _ => false,
+        };
+        let vanilla = self.saved_refuses_damage(id, damage_type, creative);
         crate::game::entity::damage_level_of!(self, scoped).invulnerability_check(
             horizon_client::health::Hurting::Entity(id as i32, kind, source),
-            false,
+            vanilla,
         )
     }
     /// `BellBlock.onProjectileHit`: a projectile that strikes the bell proper
@@ -5666,10 +5674,18 @@ impl Game<'_> {
             let burning = p.arrow.as_ref().is_some_and(|a| a.on_fire());
             let creative = p.owner == Some(Who::Player) && self.creative;
             let kind = self.carts[i].kind.id();
-            if !self.vehicle_refuses_projectile(p, id, kind, "minecraft:arrow") {
+            let refused = self.vehicle_refuses_projectile(p, id, kind, "minecraft:arrow");
+            if !refused {
                 self.arrow_hits_cart(i, amount, p.velocity, burning, creative);
             }
-            self.finish_arrow_hit(arrow, EntityHit::Hurt);
+            self.finish_arrow_hit(
+                arrow,
+                if refused {
+                    EntityHit::Refused
+                } else {
+                    EntityHit::Hurt
+                },
+            );
             return Ok(());
         }
         if p.arrow.is_some()
@@ -5684,10 +5700,18 @@ impl Game<'_> {
             let amount = self.shot_damage(&mut arrow, None);
             let creative = p.owner == Some(Who::Player) && self.creative;
             let kind = self.boats[i].entity_type();
-            if !self.vehicle_refuses_projectile(p, id, &kind, "minecraft:arrow") {
+            let refused = self.vehicle_refuses_projectile(p, id, &kind, "minecraft:arrow");
+            if !refused {
                 self.hurt_boat(i, amount, creative);
             }
-            self.finish_arrow_hit(arrow, EntityHit::Hurt);
+            self.finish_arrow_hit(
+                arrow,
+                if refused {
+                    EntityHit::Refused
+                } else {
+                    EntityHit::Hurt
+                },
+            );
             return Ok(());
         }
         let atp = [at.x, at.y, at.z];

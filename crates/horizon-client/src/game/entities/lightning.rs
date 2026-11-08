@@ -692,7 +692,8 @@ impl Game<'_> {
                         direct: bolt as i32,
                         position: Some(at),
                     };
-                    if !self.native_nonliving_invulnerable(id, &kind, source, false) {
+                    let vanilla = self.saved_refuses_damage(id, "minecraft:lightning_bolt", false);
+                    if !self.native_nonliving_invulnerable(id, &kind, source, vanilla) {
                         self.hurt_boat(i, 5.0, false);
                     }
                 }
@@ -704,7 +705,8 @@ impl Game<'_> {
                         direct: bolt as i32,
                         position: Some(at),
                     };
-                    if !self.native_nonliving_invulnerable(id, kind, source, false) {
+                    let vanilla = self.saved_refuses_damage(id, "minecraft:lightning_bolt", false);
+                    if !self.native_nonliving_invulnerable(id, kind, source, vanilla) {
                         self.hurt_cart(i, 5.0, false, false);
                     }
                 }
@@ -716,11 +718,12 @@ impl Game<'_> {
                         direct: bolt as i32,
                         position: Some(at),
                     };
+                    let vanilla = self.saved_refuses_damage(id, "minecraft:lightning_bolt", false);
                     if !self.native_nonliving_invulnerable(
                         id,
                         "minecraft:experience_orb",
                         source,
-                        false,
+                        vanilla,
                     ) && self.orbs[i].hurt(5.0)
                     {
                         self.orbs.remove(i);

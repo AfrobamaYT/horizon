@@ -1317,12 +1317,8 @@ impl Game<'_> {
     /// `VehicleEntity.hurtServer` for fire (`inFire`, `onFire`), which an
     /// `Invulnerable` boat ignores. True when the boat broke.
     fn burn_boat(&mut self, i: usize, damage: f32, damage_type: &str) -> bool {
-        let invulnerable = self
-            .persist
-            .raw
-            .get(&self.boats[i].id)
-            .is_some_and(|tag| horizon_client::entity_nbt::flag(tag, "Invulnerable"));
         let id = self.boats[i].id;
+        let invulnerable = self.saved_refuses_damage(id, damage_type, false);
         let kind = self.boats[i].entity_type();
         let source = horizon_client::health::HurtSource {
             damage_type,
@@ -1370,7 +1366,8 @@ impl Game<'_> {
                 direct: 0,
                 position: None,
             };
-            let broke = !self.native_nonliving_invulnerable(id, &kind, source, false)
+            let vanilla = self.saved_refuses_damage(id, "minecraft:lava", false);
+            let broke = !self.native_nonliving_invulnerable(id, &kind, source, vanilla)
                 && self.hurt_boat(i, 4.0, false);
             self.lava_hurt_sound([p.x, p.y, p.z]);
             if broke {
@@ -1689,10 +1686,12 @@ impl Game<'_> {
             direct: attacker,
             position: None,
         };
+        let vanilla =
+            self.saved_refuses_damage(id as u32, "minecraft:player_attack", self.creative);
         let invulnerable = crate::game::entity::damage_level_of!(self, scoped)
             .invulnerability_check(
                 horizon_client::health::Hurting::Entity(id, &kind, source),
-                false,
+                vanilla,
             );
         let hurt = if invulnerable {
             None

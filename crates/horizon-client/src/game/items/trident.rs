@@ -890,6 +890,12 @@ impl Game<'_> {
                             direct: t.id as i32,
                             position: Some([t.previous.x, t.previous.y, t.previous.z]),
                         };
+                        let source_creative = match t.guest {
+                            Some(conn) => self.command_guest(conn).is_some_and(|g| g.creative()),
+                            None => self.creative,
+                        };
+                        let vanilla =
+                            self.saved_refuses_damage(id, "minecraft:trident", source_creative);
                         if let Some(i) = self.boats.iter().position(|b| b.id == id) {
                             let kind = self.boats[i].entity_type();
                             if !crate::game::entity::damage_level_of!(self, scoped)
@@ -897,7 +903,7 @@ impl Game<'_> {
                                     horizon_client::health::Hurting::Entity(
                                         id as i32, &kind, source,
                                     ),
-                                    false,
+                                    vanilla,
                                 )
                             {
                                 self.hurt_boat(i, damage, creative);
@@ -909,7 +915,7 @@ impl Game<'_> {
                                     horizon_client::health::Hurting::Entity(
                                         id as i32, kind, source,
                                     ),
-                                    false,
+                                    vanilla,
                                 )
                             {
                                 self.hurt_cart(i, damage, creative, false);

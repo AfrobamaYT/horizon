@@ -382,14 +382,7 @@ impl Game<'_> {
             Target::Boat(id) | Target::Cart(id) => id,
             _ => return false,
         };
-        let invulnerable = self
-            .persist
-            .raw
-            .get(&id)
-            .is_some_and(|tag| horizon_client::entity_nbt::flag(tag, "Invulnerable"));
-        let vanilla = invulnerable
-            && !creative
-            && !registry.in_tag(kind, "minecraft:bypasses_invulnerability");
+        let vanilla = self.saved_refuses_damage(id, damage_type, creative);
         let ignites = registry.in_tag(kind, "minecraft:is_fire")
             || registry.in_tag(kind, "minecraft:is_explosion");
         let entity_kind = match target {

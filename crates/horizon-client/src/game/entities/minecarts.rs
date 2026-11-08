@@ -2073,7 +2073,8 @@ impl Game<'_> {
                 direct: 0,
                 position: None,
             };
-            if !self.native_nonliving_invulnerable(id, kind, source, false) {
+            let vanilla = self.saved_refuses_damage(id, "minecraft:lava", false);
+            if !self.native_nonliving_invulnerable(id, kind, source, vanilla) {
                 self.hurt_cart(i, 4.0, false, true);
             }
             self.lava_hurt_sound([p.x, p.y, p.z]);
@@ -2545,9 +2546,11 @@ impl Game<'_> {
             direct: attacker,
             position: None,
         };
+        let vanilla =
+            self.saved_refuses_damage(id as u32, "minecraft:player_attack", self.creative);
         if !crate::game::entity::damage_level_of!(self, scoped).invulnerability_check(
             horizon_client::health::Hurting::Entity(id, kind, source),
-            false,
+            vanilla,
         ) {
             self.hurt_cart(i, damage, self.creative, burning);
         }
