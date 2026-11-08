@@ -1233,7 +1233,7 @@ names the level it means by its `dimension` (`minecraft:overworld`), as `native_
 It names the level it means by its `dimension` (`minecraft:overworld`), as `native_set_block` does.
 
 - `native_edit_blocks(dimension, edit)` makes many blocks at once: `NativeBlockEdit` holds a `palette` of block states and
-  a list of `filters` (block predicates, `#minecraft:logs`), both written as commands write them, and `runs`, each
+  a list of typed `StatePredicate` filters (exact blocks or tags), and `runs`, each
   `height` blocks up column (`x`, `z`) from `y`, set to palette entry `block`, only where filter `only` passes the block
   there. With `surface` (`NativeHeightmap`: `WorldSurface`, `MotionBlocking`, `MotionBlockingNoLeaves` or `OceanFloor`),
   `y` counts from that height of the column, read once a column before anything changes. Runs are made in order, each
@@ -1244,7 +1244,7 @@ It names the level it means by its `dimension` (`minecraft:overworld`), as `nati
   the one `native_set_block` would give it (a mod block's own, included).
 - It answers the number of blocks changed. Runs in chunks that aren't loaded, and the parts of runs outside the level's
   height, are left out. It answers `Err`, changing nothing, on a client, for another dimension, a palette entry or filter
-  that doesn't read or carries NBT (`chest{...}`: refused, set states only), a run naming a palette entry or filter past
+  or predicate that fails validation (NBT is not representable), a run naming a palette entry or filter past
   the end, or more than 65536 filters.
 
 ### Column reads
@@ -1260,7 +1260,7 @@ pieces.
   loaded; at most 65,536 columns a call.
 - `native_read_columns(dimension, columns, heightmap, (below, above))` reads, for each column, the blocks from `below`
   under its height to `above` - 1 over it, bottom first: `NativeColumnBlocks` holds the heights (`bases`), the block
-  names seen (`palette`), the blocks as indexes into it, a column after another, and three biome tints a column (grass,
+  complete `BlockState` values seen (`palette`), the blocks as indexes into it, and three biome tints a column (grass,
   foliage and water, at the column's top). Blocks outside the level's height, and every block of a column not loaded,
   read as air (its tints as 0). `below + above` must be 1 to the level's height, and the read at most 1,048,576 blocks.
   The tints are the biome's own at the column's top, not blended over the biome blend radius as the game draws them, so
@@ -1863,7 +1863,7 @@ or transactions. Declarations still go on each event or registrar.
 - Lead drops to `native_loot_drops`: untying a lead or cutting it with shears (`used`), and the lead a mob a
   player killed while leashed drops on its next tick, naming the killer.
 
-- Native mod particle types to `native_send_particles`: `ParticleOptions::named("mymod:spark")` sends a particle of the mod's own type, drawn by Horizon clients from the sprite set in the mod's `assets/<namespace>/particles/<path>.json` (`"textures": ["mymod:spark/1", ...]`, resolved as `particle/<texture>` in the atlas). The name must be namespaced; a client without that file draws nothing for it, vanilla clients (whose brand isn't Horizon's) aren't sent it, and the call still returns true. The type behaves as vanilla's `SimpleParticleType` with a sprite set: a plain billboard, no tint, 20 to 40 ticks, its motion the game's default spread (the speed sets its direction, not how fast it goes).
+- Native mod particle types to `native_send_particles`: `ParticleOptions::simple(spark_key)` with a load-resolved `ParticleKey` for `mymod:spark` sends a particle of the mod's own type, drawn by Horizon clients from the sprite set in the mod's `assets/<namespace>/particles/<path>.json` (`"textures": ["mymod:spark/1", ...]`, resolved as `particle/<texture>` in the atlas). The name must be namespaced; a client without that file draws nothing for it, vanilla clients (whose brand isn't Horizon's) aren't sent it, and the call still returns true. The type behaves as vanilla's `SimpleParticleType` with a sprite set: a plain billboard, no tint, 20 to 40 ticks, its motion the game's default spread (the speed sets its direction, not how fast it goes).
 
 A mod particle may opt into declarative behaviour in that same particle JSON (no new hook API):
 
@@ -2163,7 +2163,7 @@ registration path.
   grow fuller).
 
 - A server's recipes reach its Horizon clients, as NeoForge's `OnDatapackSyncEvent.sendRecipes` and `RecipesReceivedEvent`: on the server, `native_datapack_sync(recipe_types)` takes the recipe types (`minecraft:smelting`, `mymod:crusher`) a mod's client half needs, asked once per load, the same types for every player (NeoForge asks per joining player); Horizon sends their final recipes (data packs merged, load conditions held) to every Horizon client when it joins and after each `/reload`, in payloads within the clientbound cap, and nothing to a vanilla client. On the client the recipe helpers (`native_recipes`, `native_recipes_of_type`) then give the server's recipes of those types in place of the window's own, single player included, and `native_recipes_received(recipe_types)` says they came. No type asked: nothing is sent and nothing changes; none asked after a load that asked some: the clients go back to their own recipes and `native_recipes_received` comes with no types.
-- `level.craft(host, width, height, &items)` (`RecipeManager.getRecipeFor(CRAFTING, CraftingInput.of(width, height, items), level)`, then `assemble` and `getRemainingItems`) asks what a crafting grid makes, as a mechanical crafter or a compacting press needs: `width` and `height` from 1 to 3, `items` row by row, `None` for an empty slot. It runs the crafting table's own matcher on the world's recipes, data packs' and special ones (fireworks, dyeing, map extending...) included, and answers a `CraftResult`: the `output` stack and the `remainders`, what each slot keeps once the craft takes one item from it (an empty bucket for a milk bucket), in the grid's own order. A grid may sit anywhere in its `width` by `height`, as in the crafting table. `None` when no recipe matches or it makes nothing, for another size, and off the server. A call costs up to one pass over the crafting recipes: 5 to 20 µs on a desktop with vanilla's 1,266 (`benchmarks/craft-match-2026-11-04`), so a mod that asks every tick keeps the answer until its grid changes, as the crafting menu does. Diverges from upstream: new helper.
+- `level.recipe_for(host, &recipe_type, &inputs)` matches through the game's crafting, cooking, stonecutting and smithing matchers, including data-pack recipes of those vanilla types. `RecipeInput` has Crafting, Single and Smithing variants. A `RecipeMatch` carries recipe id, typed output, ordered remainders, experience and processing time. Valid non-matching input is `Ok(None)`; malformed input, invalid items and unavailable levels are typed errors. Mod-owned types return `RecipeLookupError::NotMatchable`: cache `recipes_of_type` once per load/reload and match in mod memory, with no per-tick host crossing. Dynamic custom outputs/contextual predicates stay mod-owned. Lookup does not consume inputs; cache the result until the input changes.
 
 - `native_input_key(key, action, modifiers)` runs after a real window keyboard event finishes handling, including shortcuts, screen consumption and repeats (`InputEvent.Key`). key is vanilla's name for the physical key (`key.keyboard.a`; `key.keyboard.unknown` for one it doesn't name), action is `KeyAction::Press`, `Repeat` or `Release`, and modifiers use the screen hooks' GLFW bits, captured before handling. Not cancellable. Foreign-window and OS synthetic focus events skip it. Window callback only: pad, focus and control-socket input are not window key events.
 

@@ -1313,7 +1313,7 @@ impl Game<'_> {
             // `Level.setBlockAndUpdate`: flag 3, the neighbours and the clients.
             horizon_world::level::LandingWrite::SetBlock(state) => {
                 let flags = NativeBlockUpdateFlags::NEIGHBORS | NativeBlockUpdateFlags::CLIENTS;
-                self.level_set_block(level, at, state, flags);
+                let _ = self.level_set_block(level, at, state, flags);
             }
             horizon_world::level::LandingWrite::DestroyBlock { drop } => {
                 self.level_destroy_block(level, at, drop, None, false);
@@ -1565,16 +1565,22 @@ pub(super) const BLOCK_CONTACT_HOOKS: horizon_client::block_contact::Hooks =
         },
         any_inside: || mod_api::__private::has_scoped_hook(mod_api::HookId::EntityInside),
         inside_listens: |state| {
-            mod_api::__private::block_listens(mod_api::HookId::EntityInside, "entity_inside", state)
+            crate::game::api_values::block_state::block_listens(
+                mod_api::HookId::EntityInside,
+                state,
+            )
         },
         pass_listens: |state| {
-            mod_api::__private::block_listens(mod_api::HookId::MinecartPass, "minecart_pass", state)
+            crate::game::api_values::block_state::block_listens(
+                mod_api::HookId::MinecartPass,
+                state,
+            )
         },
         fall_listens: |state| {
-            mod_api::__private::block_listens(mod_api::HookId::FallOn, "fall_on", state)
+            crate::game::api_values::block_state::block_listens(mod_api::HookId::FallOn, state)
         },
         bounce_listens: |state| {
-            mod_api::__private::block_listens(mod_api::HookId::BounceOn, "bounce_on", state)
+            crate::game::api_values::block_state::block_listens(mod_api::HookId::BounceOn, state)
         },
         fall_on: |dimension, level, c, distance, damage, writes| {
             HitLevel(level.reborrow()).native_fall_on(
@@ -1908,11 +1914,10 @@ impl GameLevel<'_> {
         block: BlockKey,
         delay: i32,
     ) -> bool {
-        let Some(resolved) = mod_api::__private::resolved_block(block) else {
+        let Some(block) = crate::game::api_values::behavior_block(block, self.behaviours) else {
             return false;
         };
         let at = BlockPos::new(pos[0], pos[1], pos[2]);
-        let block = resolved.block;
         let time = self.game_time();
         ticks.schedule_block(time, at, block, delay, TickPriority::Normal)
             != ScheduleResult::MissingChunk
@@ -4117,18 +4122,14 @@ mod tests {
                 (5, "minecraft:chest"),
             ] {
                 let state = game.pack.assets.registry.default_state(block).unwrap();
-                assert!(game.level_set_block(
-                    level,
-                    [x, 63, 0],
-                    stone,
-                    NativeBlockUpdateFlags::NONE
-                ));
-                assert!(game.level_set_block(
-                    level,
-                    [x, 64, 0],
-                    state,
-                    NativeBlockUpdateFlags::NONE
-                ));
+                assert_eq!(
+                    game.level_set_block(level, [x, 63, 0], stone, NativeBlockUpdateFlags::NONE),
+                    Ok(true)
+                );
+                assert_eq!(
+                    game.level_set_block(level, [x, 64, 0], state, NativeBlockUpdateFlags::NONE),
+                    Ok(true)
+                );
                 let pos = (x, 64, 0);
                 let handle = game.block_entity(level, [x, 64, 0]).unwrap();
                 if block == "minecraft:chest" {
@@ -4230,8 +4231,9 @@ mod tests {
             assert!(!mod_api::prelude::ClientInputClientHost::playing(game));
 
             // Vanilla's default bindings: forward is W, attack the left mouse button.
-            let forward =
-                mod_api::prelude::ClientInputClientHost::mapping(game, "key.forward").unwrap();
+            let forward = mod_api::prelude::ClientInputClientHost::mapping(game, "key.forward")
+                .unwrap()
+                .unwrap();
             assert_eq!(
                 (forward.down, forward.label),
                 (false, mod_api::Text::literal("W"))
@@ -4240,13 +4242,17 @@ mod tests {
             assert!(
                 mod_api::prelude::ClientInputClientHost::mapping(game, "key.forward")
                     .unwrap()
+                    .unwrap()
                     .down
             );
-            let attack =
-                mod_api::prelude::ClientInputClientHost::mapping(game, "key.attack").unwrap();
+            let attack = mod_api::prelude::ClientInputClientHost::mapping(game, "key.attack")
+                .unwrap()
+                .unwrap();
             assert_eq!(attack.label, mod_api::Text::literal("Left Button"));
             assert!(
-                mod_api::prelude::ClientInputClientHost::mapping(game, "key.mymod.boost").is_none()
+                mod_api::prelude::ClientInputClientHost::mapping(game, "key.mymod.boost")
+                    .unwrap()
+                    .is_none()
             );
         });
     }
@@ -4543,7 +4549,8 @@ mod tests {
                     mod_api::dispatch_block_highlight(
                         &game,
                         [1, 2, 3],
-                        super::BlockStateId(7),
+                        crate::game::api_values::TryIntoApi::try_into_api(&super::BlockStateId(7))
+                            .unwrap(),
                         0.5,
                         &mut canceled,
                     );

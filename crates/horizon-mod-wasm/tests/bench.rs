@@ -167,33 +167,54 @@ fn a_call_past_its_fuel_stops_its_group() {
     assert_eq!(chat(wasm, "text"), "");
 }
 
-/// A flat world's start context, all the bench's structure type needs.
-struct Flat;
-
-impl horizon_world::worldgen::structure::jigsaw::JigsawContext for Flat {
-    fn min_y(&self) -> i32 {
-        -64
+/// A flat API context. This test exercises generated worker calls, not an engine adapter.
+struct Flat {
+    chunk: mod_api::ChunkPos,
+    config: std::sync::Arc<mod_api::Tag>,
+    random: horizon_core::random::WorldgenRandom<horizon_core::random::LegacyRandom>,
+    metadata: &'static horizon_mod_runtime::block_definitions::Blocks,
+}
+impl mod_api::StructureRandom for Flat {
+    fn next_int_bound(&mut self, bound: i32) -> i32 {
+        horizon_core::random::RandomSource::next_int_bound(&mut self.random, bound).unwrap_or(0)
     }
-    fn max_y(&self) -> i32 {
-        320
+    fn next_long(&mut self) -> i64 {
+        horizon_core::random::RandomSource::next_long(&mut self.random)
     }
-    fn base_height(&mut self, _: i32, _: i32, _: mod_api::HeightmapType) -> i32 {
-        65
+    fn next_float(&mut self) -> f32 {
+        horizon_core::random::RandomSource::next_float(&mut self.random)
     }
-    fn column_has_valid_biome(&mut self, _: i32, _: i32, _: i32, _: i32) -> bool {
-        true
+    fn next_double(&mut self) -> f64 {
+        horizon_core::random::RandomSource::next_double(&mut self.random)
+    }
+    fn next_boolean(&mut self) -> bool {
+        horizon_core::random::RandomSource::next_boolean(&mut self.random)
     }
 }
-
-impl horizon_world::worldgen::structure::start::StartContext for Flat {
+impl mod_api::GenerationContext for Flat {
+    fn metadata(&self) -> &dyn mod_api::BlockMetadata {
+        self.metadata
+    }
+    fn chunk(&self) -> mod_api::ChunkPos {
+        self.chunk
+    }
     fn seed(&self) -> i64 {
         1
     }
     fn sea_level(&self) -> i32 {
         63
     }
-    fn base_column(&mut self, _: i32, _: i32, _: mod_api::HeightmapType) -> Vec<bool> {
-        Vec::new()
+    fn min_y(&self) -> i32 {
+        -64
+    }
+    fn max_y(&self) -> i32 {
+        320
+    }
+    fn random(&mut self) -> &mut dyn mod_api::StructureRandom {
+        self
+    }
+    fn base_height(&mut self, _: i32, _: i32, _: mod_api::HeightmapType) -> i32 {
+        65
     }
     fn base_columns(&mut self, _: i32, _: i32, _: &[mod_api::HeightmapType]) -> Vec<Vec<bool>> {
         Vec::new()
@@ -201,19 +222,15 @@ impl horizon_world::worldgen::structure::start::StartContext for Flat {
     fn noise_column(&mut self, _: i32, _: i32) -> mod_api::NoiseColumn {
         mod_api::NoiseColumn::default()
     }
-    fn cold_enough_to_snow(&mut self, _: mod_api::BiomeId, _: [i32; 3]) -> bool {
-        false
-    }
-    fn generation(&self) -> horizon_world::worldgen::anchor::WorldGenerationContext {
-        horizon_world::worldgen::anchor::WorldGenerationContext::new(-64, 384, 63)
-    }
     fn noise_biome(&mut self, _: [i32; 3]) -> mod_api::BiomeId {
-        mod_api::BiomeId(0)
+        mod_api::__private::biome_id(0)
     }
-    fn noise_biomes(&mut self, quarts: &[[i32; 3]]) -> Vec<mod_api::BiomeId> {
-        vec![mod_api::BiomeId(0); quarts.len()]
+    fn column_has_valid_biome(&mut self, _: i32, _: i32, _: i32, _: i32) -> bool {
+        true
     }
-    fn set_valid_biomes(&mut self, _: Option<&std::collections::BTreeSet<mod_api::BiomeId>>) {}
+    fn config(&self) -> std::sync::Arc<mod_api::Tag> {
+        self.config.clone()
+    }
 }
 
 #[test]
@@ -224,14 +241,25 @@ fn worldgen_workers_sharing_a_wasm_structure_each_get_their_structure() {
     let mut budgets = Budgets::default();
     budgets.wait = Duration::from_millis(1);
     let loaded = load(budgets);
-    mod_api::__private::install_parts(&loaded.mods, &mod_api::__private::part_tests::rule_schema())
-        .unwrap();
-    let types = mod_api::__private::installed_structure_types();
-    let spin = types
-        .get("bench_mod:spin")
-        .cloned()
+    mod_api::__private::install_parts(
+        &loaded.mods,
+        &mod_api::__private::part_tests::rule_schema(),
+        |_| false,
+    )
+    .unwrap();
+    let (_, spin) = mod_api::__private::structure_type_declarations()
+        .into_iter()
+        .find(|(id, _)| id == "bench_mod:spin")
         .expect("the bench mod registers bench_mod:spin");
-    let config = std::sync::Arc::new(serde_json::json!({"type": "bench_mod:spin"}));
+    let config = std::sync::Arc::new(mod_api::Tag::compound([(
+        "type",
+        mod_api::Tag::String("bench_mod:spin".into()),
+    )]));
+    let metadata: &'static _ =
+        Box::leak(Box::new(horizon_mod_runtime::block_definitions::Blocks {
+            names: Default::default(),
+            definitions: Vec::new(),
+        }));
     let workers: Vec<_> = (0..8)
         .map(|i| {
             let (spin, config) = (spin.clone(), config.clone());
@@ -239,8 +267,13 @@ fn worldgen_workers_sharing_a_wasm_structure_each_get_their_structure() {
                 let mut random = WorldgenRandom::new(LegacyRandom::new(0));
                 random.set_large_feature_seed(1, i, 0);
                 let chunk = mod_api::ChunkPos::new(i, 0);
-                spin.find_generation_point(&mut Flat, chunk, &config, &mut random)
-                    .map(|(position, pieces)| (position, pieces.len()))
+                spin.find_generation_point(&mut Flat {
+                    chunk,
+                    config,
+                    random,
+                    metadata,
+                })
+                .map(|found| (found.position, found.pieces.len()))
             })
         })
         .collect();

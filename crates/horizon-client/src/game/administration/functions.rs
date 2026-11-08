@@ -792,7 +792,9 @@ impl Game<'_> {
             .find(|p| p.id == id)
             .map_or_else(|| "Default data pack".to_owned(), |p| p.description());
         let style = text::Style {
-            hover: Some(Box::new(Text::literal(format!("{id}\n{description}")))),
+            hover: Some(std::sync::Arc::new(Text::literal(format!(
+                "{id}\n{description}"
+            )))),
             ..style
         };
         let source = if id == "vanilla" {
@@ -1252,15 +1254,7 @@ mod tests {
             .unwrap();
             let stone = mod_api::__private::part_tests::block_key("minecraft:stone");
             let registry = game.pack.assets.registry;
-            mod_api::__private::resolve_blocks(|id| {
-                let default = registry.default_state(id)?;
-                Some(mod_api::__private::ResolvedBlock {
-                    default,
-                    states: horizon_world::registry::BlockStateRange::new(default, 1),
-                    block: game.res.behaviours().block(default),
-                })
-            })
-            .unwrap();
+            crate::game::api_values::resolve_block_definitions(registry).unwrap();
             let old_tag =
                 super::super::native_world_read::block_in_tag(stone, "reload_test:candidate");
             let old_context = game.loop_context.clone();

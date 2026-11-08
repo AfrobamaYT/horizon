@@ -2419,8 +2419,20 @@ fn apply_loot(
     }
     // `SetComponentsFunction`'s patch: the components the hook changed or
     // added are set, and the ones it dropped (gone from the stack) removed.
-    if after.components != before.components {
-        for (id, value) in &after.components {
+    for (id, value) in &after.components {
+        // Replay changed per-ID sequences in order, not unchanged captured values:
+        // an unrelated patch must not undo a separately edited loot name.
+        let unchanged = before
+            .components
+            .iter()
+            .filter(|(key, _)| key == id)
+            .map(|(_, value)| value)
+            .eq(after
+                .components
+                .iter()
+                .filter(|(key, _)| key == id)
+                .map(|(_, value)| value));
+        if !unchanged {
             stack.data_mut().set_loot_component(id, value);
         }
     }
@@ -3283,6 +3295,68 @@ mod tests {
             Some(&Tag::ByteArray(vec![7]))
         );
         assert_eq!(stack.data().unwrap().other("test:byte"), None);
+    }
+
+    #[test]
+    fn loot_trim_patch_decodes_materializes_captures_and_removes() {
+        use horizon_core::nbt::Tag;
+        let mut stack = ItemStack::new("minecraft:iron_chestplate", 1);
+        let before = loot_of(&stack);
+        let mut after = before.clone();
+        let trim = horizon_core::json_nbt::json_to_tag(
+            &json!({"material": "minecraft:gold", "pattern": "minecraft:sentry"}),
+        )
+        .unwrap();
+        after.components.push(("minecraft:trim".into(), Some(trim)));
+        apply_loot(&before, &after, &mut stack);
+        assert_eq!(
+            stack
+                .data()
+                .unwrap()
+                .trim
+                .as_ref()
+                .map(|(material, pattern)| (material.as_ref(), pattern.as_ref())),
+            Some(("minecraft:gold", "minecraft:sentry"))
+        );
+        let captured = loot_of(&stack);
+        assert_eq!(
+            captured.components,
+            vec![(
+                "minecraft:trim".into(),
+                Some(Tag::Compound(
+                    [
+                        ("material".into(), Tag::String("minecraft:gold".into())),
+                        ("pattern".into(), Tag::String("minecraft:sentry".into())),
+                    ]
+                    .into()
+                ))
+            )]
+        );
+        let mut removed = captured.clone();
+        removed.components.push(("minecraft:trim".into(), None));
+        apply_loot(&captured, &removed, &mut stack);
+        assert!(stack.data().is_none_or(|data| data.trim.is_none()));
+    }
+
+    #[test]
+    fn an_unrelated_loot_patch_does_not_restore_a_captured_name() {
+        let mut stack = ItemStack::new("minecraft:stick", 1);
+        stack
+            .data_mut()
+            .set_loot_name("minecraft:custom_name", &json!("Old"));
+        let before = loot_of(&stack);
+        let mut after = before.clone();
+        after
+            .names
+            .push(("minecraft:custom_name".into(), json!("New")));
+        after
+            .components
+            .push(("test:byte".into(), Some(horizon_core::nbt::Tag::Byte(7))));
+        apply_loot(&before, &after, &mut stack);
+        assert_eq!(
+            stack.data().unwrap().custom_name,
+            Some(horizon_core::nbt::Tag::String("New".into()))
+        );
     }
 
     /// A function that leaves the stack alone keeps its own form: the round

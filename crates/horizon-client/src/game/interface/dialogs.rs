@@ -923,8 +923,13 @@ impl Game<'_> {
                 Some(ClickEvent::SuggestCommand(command)) => Click::SuggestCommand(command),
                 Some(ClickEvent::RunCommand(command)) => Click::RunCommand(command),
                 Some(ClickEvent::CopyToClipboard(value)) => Click::CopyToClipboard(value),
-                Some(ClickEvent::ShowDialog(dialog)) => Click::ShowDialog(dialog),
-                Some(ClickEvent::Custom { id, payload }) => Click::Custom { id, payload },
+                Some(ClickEvent::ShowDialog(dialog)) => {
+                    Click::ShowDialog(std::sync::Arc::unwrap_or_clone(dialog))
+                }
+                Some(ClickEvent::Custom { id, payload }) => Click::Custom {
+                    id,
+                    payload: payload.map(std::sync::Arc::unwrap_or_clone),
+                },
                 Some(ClickEvent::OpenFile(_)) | None => return Ok(()),
             };
             let after = open.dialog.after_action;

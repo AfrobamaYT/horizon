@@ -35,6 +35,13 @@ and call `state.property(&metadata, "facing")` or `state.with(&metadata, "facing
 supplied `StateConstraint`s. Changes return a new value and never mutate the original.
 Unknown keys, ordinals and property combinations return typed `BlockStateError`s.
 
+`NativeSceneBlock::new(pos, state, entity)` and `StructureTemplateBlock::new(pos, state, nbt)`
+use this owned `BlockState`, including all properties. Structure reads preserve vanilla palette
+selection, mirror-then-rotation and placement order; an unavailable state mapping refuses the
+whole snapshot with `None`. `DrawContext::draw_scene` checks the entire scene before drawing:
+an unknown key, invalid ordinal or unavailable mapping draws nothing, never a partial scene or
+a replacement air block. Native and wasm use the same values and refusal rules.
+
 Tint callbacks receive the same immutable metadata resource explicitly, without a `Host`.
 The game prepares their owned state array before constructing mesh tables; renderer workers
 only copy those values and invoke metadata reads. When world numeric state IDs are reordered,
@@ -47,22 +54,44 @@ numeric IDs. `BlockStateRange::new(first, count)` returns a typed error if the s
 exceed the u16 ordinal domain, and decoded transport spans obey the same check. Membership
 checks both the block key and the ordinal. A zero-count span is empty.
 
+A restricted `LevelHost::block_state(pos)` read returns `Option<BlockState>`. A successful
+engine read retains its vanilla result: unloaded or out-of-height reads that produce air return
+`Some(air)`, using the owning registry's real air state. An unavailable owning state index or a
+refused engine-to-API conversion returns `None`; the boundary never fabricates a key or air state
+and never panics to satisfy a mandatory value. Other optional/result read contracts are unchanged;
+in particular, this does not change `LevelRef`'s loaded-position policy.
+
+`LevelRef::set_block`, `update_neighbors` and `neighbor_changed` take owned block states
+and return `Result<bool, LevelWriteError>`. `Stale` identifies a closed or reopened level;
+`Unavailable` identifies the wrong side, phase or nonactive write target; `InvalidState`
+retains the block-state refusal. Errors do not mutate the level. `Ok(false)` is still
+vanilla refusal, such as an unloaded or out-of-height position or an unchanged block,
+not a lost handle or a guessed replacement state. Update flags retain their vanilla effect.
+
 Keys are small, private `u32` registration slots on both native and wasm. `key.id(host)`
 returns an owned canonical `String` through the generated read backend for diagnostics; it
 requires a game-backed host and an invalid slot is a boundary error, not an empty name.
-Normal operations use the slot's resolved numeric mapping instead of looking up its name.
-Block reload rebinds that mapping without changing the key's identity or canonical name;
-a refused rebind clears the old mapping. Effect registration is process-owned and fixed
+Block defaults come from immutable API metadata and cross through the game's sole forward/reverse
+state index. Behavior queries obtain their engine block from the resulting engine state; there is
+no separate per-key numeric block binding. Reload preserves key identity and canonical names.
+A refused resource rebind clears the active index, while failed transactional Parts preparation
+leaves the previously published Parts and index intact. Effect registration is process-owned and fixed
 until restart, matching the engine's effect registry.
 
 Block tag membership is bound from the same merged item/block tag snapshot at world load and
-reload, including worlds without pack overrides. A read maps the slot to a numeric block id,
-looks up the tag name and tests a `BlockSet` bit; it never resolves the block's name. A fully
-namespaced tag needs no allocation (a bare tag adds `minecraft:`). Binding visits each merged
-block-tag member once, resolves its default state and inserts its numeric block id; it replaces
+reload, including worlds without pack overrides. A read checks that the owning state index is
+available, looks up the tag name and tests membership in a prepared API `BlockKey` set; it never
+resolves the block's name. A fully namespaced tag needs no allocation (a bare tag adds `minecraft:`).
+Binding visits each merged block-tag member once and resolves its API key; it replaces
 the previous snapshot rather than accumulating membership. No membership work is added to ticks
 that do not call this read. Tags and block mappings belong to their resolving thread; missing
 authoritative context or an unavailable mapping returns `None`, not a stale membership result.
+
+`host.tags().blocks(tag)` reads the current authoritative block members in vanilla order as
+`BlockKey` values, including blocks no mod requested. Resolve `tag` once with `Tags::key` and
+retain it across reloads. Unknown or empty tags return `Some(Vec::new())`; an unavailable
+context or any unresolved member returns `None`, never a partial member list. The same service
+is available through restricted level Hosts, without borrowing an engine registry.
 
 `host.block_state_default(stone)`, `host.block_states().states_of(stone)`,
 `host.block_item(stone)`, `host.block_in_tag(stone, tag)` and restricted-level
@@ -81,17 +110,68 @@ carry `Option<EffectKey>` for each power; `None` is no selection. Enchantment ef
 names (for example `minecraft:damage` in `has_enchantment_effect`) are a different registry
 and remain strings, as do labels and tags.
 
+### Hot item and block identities
+
+Resolve item and block keys during load and keep them for tick and menu calls.
+`item_burn_time`, `item_compost_chance`, `give`, `enchantment_supports`'s item,
+and GUI `item` / `item_model` take `ItemKey`. `block_item`, `fluid_bucket` and
+`screen_hovered_item` return item keys. `level.block`, `lit_block_name` and
+`NativeHit.block` return block keys; `BlockEntityDrawContext::block` takes one.
+`NativeHeldItem.id` (including use-start/stop events) and `NativeStack.item`
+carry item keys, not names. Unknown incoming slots are refused at the boundary.
+`block_sprites` takes resolved `BlockStateId` values, preserving properties without
+parsing state strings. The pre-change block event carries resolved `from` / `to`
+states and does not allocate their names. Property names and values in
+`set_block_property` are not block identifiers and remain strings.
+
+These calls remove string transport across wasm. Engine metadata reads may still
+hash borrowed registry names; no formatted identifier is built for these inputs.
+
+### Matched recipe lookup
+
+`level.recipe_for(host, &recipe_type, &inputs)` replaces the crafting-only lookup.
+Use `RecipeInput::Crafting { width, height, slots }` for `minecraft:crafting`
+(row-major slots, dimensions 1 through 3), `Single(stack)` for smelting, blasting,
+smoking, campfire cooking and stonecutting, or `Smithing { template, base, addition }`
+for `minecraft:smithing`. Recipe **types** are not serializers: shaped and shapeless
+files both belong to `minecraft:crafting`, and transform/trim both belong to smithing.
+
+The server uses the same engine matchers and assembled outputs as its menus,
+including data-pack overrides of vanilla recipe types. A `RecipeMatch` contains the
+matched recipe identifier, typed output, ordered remaining items, experience and
+processing time. Lookup consumes nothing; the caller applies inventory changes
+transactionally. Keep the result until inputs or the recipe load change.
+
+`Ok(None)` means valid input without a match. Invalid shapes/items and unavailable
+levels are typed errors. A type without an engine matcher returns
+`RecipeLookupError::NotMatchable`, not an empty match. For mod-owned types, retain
+`recipes_of_type` once per load/reload and match that cached data **inside the mod**,
+with zero crossings per tick. Dynamic custom outputs and contextual predicates
+remain mod-owned; the host does not call guest code to match recipes.
+
+At publication, call `ingredient.item_keys(host)` once per ingredient to retain
+`Arc<[ItemKey]>` for local matching. This load-time read returns exactly the plain
+item membership for lists, expanded tags and standard shapes, using the engine
+matcher. It returns `IngredientKeysError::NotEnumerable` if any custom or component
+predicate occurs anywhere in the tree; a displayed item list is not a safe substitute.
+`UnknownItem` refuses a missing registry identity. Do not call this method per tick.
+The sample's `ProcessingRecipes::publish` retains these keys; `result` then checks
+`input.item()` locally, with no `Ingredient::test` host call per candidate.
+
 ### API-owned values: migration table
 
 | Previous engine value | API-owned value | Mod changes |
 | --- | --- | --- |
+| Engine stack in `TooltipDisplay::for_stack` | `mod_api::ItemStack` | Pass the owned API stack supplied to the tooltip event. Its effective tooltip component includes vanilla's implicit defaults. Normal game rendering borrows the engine component without creating an API stack. |
+| Engine loot context and candidate stack | `mod_api::{NativeLootContext, LootStack}` | Contexts own their facts; candidate items are `ItemKey`s. Counts remain signed. Ordered `Option<Tag>` patches preserve removals and NBT types, and names are API `Text` trees. Writeback is atomic. |
+| Engine `ParticleType` and options | `ParticleKey` and API `ParticleOptions` | Retain a key requested through `Registrar::particle_key`. Every parameter-family constructor takes its key; `simple(key)` also replaces string-based custom provider construction. The engine enum is no longer exported. |
 | Engine damage containers | `mod_api::{DamageContainer, DamageValues, Reduction}` | Hooks receive an owned scalar snapshot. Read reductions with `reduction`; edit damage and cooldown through the container setters. Sequencing methods remain game-only. |
 | Engine item property values | `mod_api::{ItemBar, ItemRarity}` | Resource methods retain their signatures; damageability, glint and repair checks use game-owned metadata reads. |
 | Package manifest `Side` | `mod_api::Side` | Match `Client` and `Both` on the package metadata snapshot. This is not `HostSide` or the executing logical side. |
 | Command `Suggestion` | `mod_api::Suggestion` | Construct with `Suggestion::new((start, end), text)`; optional `tooltip` and `int_value` remain writable. Offsets are byte offsets. |
 | Package block entity type storage | `mod_api::BlockEntityTypeDecl` | Existing `r.block_entity_type(...).build()` registration is unchanged. The declaration snapshot no longer exposes the package parser's model; the game converts it once when declarations freeze. |
 | Component protocol vocabulary | `text::{TextContent, TextNbtSource, TextObject, TextClick, TextHover}` | Match these enums exhaustively: their serialized vocabulary is closed. Records remain `non_exhaustive`. |
-| Renderer GUI commands | `mod_api::GuiDraw` | Mods pass API command records to `DrawContext::gui_paint` and HUD hooks. The renderer keeps its own command buffer and engine text; conversion happens at the game boundary. |
+| Renderer GUI commands | `mod_api::GuiDraw` | `DrawContext::gui_paint` returns a typed text-conversion result; handle refusal before drawing. HUD hooks reject invalid writeback as a whole. |
 | File-opening click actions | Not in `text::TextClick` | Mods can neither produce nor round-trip `OpenFile`; untrusted file-opening action metadata is dropped. Part of [per-node origin tracking #1738](https://github.com/arismoko/horizon/issues/1738). |
 
 `mod_api::GameRuleValue` owns the `Bool(bool)` and `Int(i32)` cases, in that order.
@@ -116,27 +196,70 @@ client-core types for these values. Completion edits are copied back after subsc
 listeners run; no listener means no snapshot allocation. Package metadata is copied once
 at startup, retaining declared namespaces and dependencies.
 
+### Opaque NBT metadata
+
+The shared JSON/NBT conversion is iterative and follows vanilla's 512 nested
+list/compound limit; scalars and NBT typed arrays add no recursive container.
+Conversion to JSON intentionally loses numeric tag widths, boolean-as-byte
+identity and typed-array identity. `NonFinite` refuses NaN and infinities:
+`serde_json::Value` cannot hold them, and Gson's strict JSON writer also refuses
+them. `InvalidString` refuses an unpaired UTF-16 surrogate in a Tag string or
+compound key. Neither case is replaced with null, a string or U+FFFD.
+JSON input already uses UTF-8, so valid non-BMP pairs survive; a lone surrogate
+cannot reach this converter through that input representation.
+
 ### Owned component trees
 
 The `text` module defines owned component data: literal and translatable contents,
 style overrides, ordered children, selector and NBT sources, inline objects, and click
 and hover actions. Translation keys and argument components stay unresolved until the
 game displays them. `None` style fields inherit; `Some(false)` overrides an inherited
-decoration. Arbitrary profile and component-patch JSON remains data, never engine state.
+decoration. Metadata, dialog/custom click payloads and hover-item component patches are
+owned `Tag` data, never JSON strings or engine state. `TextProfile` carries an optional
+name and UUID, signed property records and opaque unknown profile/property fields.
+Signed record order and unsigned values within each property name are preserved.
+Player names use U+0021..U+007E and at most 16 characters. Vanilla's unsigned
+property-map form allows at most 16 distinct names; signed or metadata-bearing
+records use a 16-entry list, with UTF-16 limits of 64, 32767 and 1024 units for
+property name, value and signature respectively.
 Inline player and atlas objects use `Option<Box<Text>>` for their fallback: `None`
 keeps the engine-computed default; `Some` preserves a styled or translatable component
 rather than flattening it to a string.
 
-`TextForm` crosses the generated wasm boundary as a flat node table. Conversion
-is iterative, refuses component depth above 512 and rejects malformed tables. Each
-node's JSON metadata is still limited to 100 nested containers; a separate Value
-boundary is planned. Component and style metadata remain intact.
+`TextForm` crosses the generated wasm boundary as a typed, shallow node table:
+`TextNodeContent` selects the content kind, `TextNodeStyle` contains overrides, and
+`TextNodeHover` identifies the hover kind without embedding child components.
+Parent/relation rows carry all children, arguments, separators, fallbacks and hover
+names/text. Conversion is iterative, accepts depth 512 and rejects malformed tables,
+duplicate singleton edges and missing hover-text children. Opaque NBT fields follow
+the 512-container rule above; there is no separate 100-container JSON restriction.
+Unknown fields are retained under the shared NbtOps normalization rules, while typed
+fields remain authoritative and cannot promote untrusted file actions.
+
+The native boundary plans borrowed source topology before cloning payloads. It reads
+source-less spans directly and validates every Tag's JSON representation before building
+an engine component. `Text::validate()` checks tree/payload bounds and profile fields
+without cloning; `validate_depth()` is the component-only preflight. NaN/infinity and
+unpaired UTF-16 remain legal Tag data but cause typed `NonFinite` or `InvalidString`
+refusals when engine emission requires JSON. Nested JSON null is refused as `NestedNull`
+when capturing opaque NBT fields; it is never silently replaced.
+Host methods accepting or returning Text return `Result<_, TextFormError>`; mixed
+item/Text writes preserve the refusal in `StackWriteError::Text`, and unspawned-mob
+reads use `UnspawnedMobError::Text`. `TooDeep` means a component path or opaque NBT
+container path exceeds 512. Unavailable backends are distinct from invalid text or
+unrepresentable payloads.
+A refused hook capture does not dispatch; a refused writeback leaves every field unchanged.
+No subscriber means no conversion or snapshot allocation.
+
+Recursive `Clone`, `Eq` and `Drop` of a tree a mod itself built are ordinary Rust ownership,
+not part of the boundary guarantee. A wasm guest overflowing its own stack on a received
+512-deep tree traps within its dependency group.
 `Text::new(content)` constructs any content kind without exposing an engine value.
 The content, NBT-source, object, click and hover enums are exhaustive protocol enums;
 new cases change the link contract, just as enum-case order does. Mod matches should
 name every case rather than silently treating a new protocol case as an old one.
 Typed content and style fields are authoritative; metadata retains unrecognized
-properties, not overrides of those typed fields. Game-side encoding is infallible
+properties, not overrides of those typed fields. Game-side encoding is fallible
 and reuses the engine's translation-argument and fallback construction rules.
 Capture keeps dynamic contents and metadata rather than flattening the rendered spans.
 It shares the engine's SNBT flag, shadow-colour, click-policy and inline-object parsers.

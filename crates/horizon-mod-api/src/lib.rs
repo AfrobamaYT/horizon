@@ -1245,11 +1245,11 @@ pub struct NativeScreen {
 /// An item the panel shows (`panel_items`): its id
 /// (`minecraft:diamond`), a count (1 draws none) and its components beyond
 /// the item's own, in vanilla's item syntax, or "".
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeStack {
-    /// The item id, such as `minecraft:stick`.
-    pub item: String,
+    /// The item identity, resolved once at load.
+    pub item: ItemKey,
     /// How many are in the stack.
     pub count: u32,
     /// The stack's data components, as the game's JSON form.
@@ -3875,7 +3875,7 @@ impl ScopedActionResult {
 
 /// Why a fake player's `perform_action` did nothing at all: it was refused before any of the
 /// action ran.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ActionRefused {
     /// The handle is a real player's.
@@ -4437,9 +4437,12 @@ host_attachment_store!(
 /// }
 /// ```
 pub trait LevelHost {
-    /// Read a block through `LevelAccess::block_state`.
-    fn block_state(&self, _pos: [i32; 3]) -> BlockStateId {
-        unimplemented!("LevelHost::block_state")
+    /// Read an owned block state through the level's engine read.
+    /// Out-of-height or unloaded engine reads retain vanilla's air as `Some(air)`.
+    /// Returns `None` when the owning state index is unavailable or refuses the state;
+    /// this never substitutes an air state for a failed conversion.
+    fn block_state(&self, _pos: [i32; 3]) -> Option<BlockState> {
+        None
     }
     /// The block `state` is a state of (`BlockState.getBlock()`): `mymod:shaft`. None for an
     /// unknown state.
@@ -4778,7 +4781,9 @@ mod tests {
         impl LevelTicksHost for Empty {}
         impl LevelWriteHost for Empty {}
 
-        let _: &dyn LevelHost = &Empty;
+        let level: &dyn LevelHost = &Empty;
+        assert_eq!(level.block_state([0, 64, 0]), None);
+        assert_eq!(level.block_state([0, i32::MIN, 0]), None);
         let _: &mut dyn LevelRandomHost = &mut Empty;
         let _: &mut dyn LevelTicksHost = &mut Empty;
         let _: &mut dyn LevelWriteHost = &mut Empty;
@@ -4817,8 +4822,10 @@ mod tests {
         let host: &mut dyn ServerHost = &mut server;
         assert!(host.commands().run_command("list"));
         assert!(!host.commands().run_command("missing"));
-        host.commands().feedback(Text::literal("answer"));
-        host.messages().broadcast(Text::literal("everyone"));
+        host.commands().feedback(Text::literal("answer")).unwrap();
+        host.messages()
+            .broadcast(Text::literal("everyone"))
+            .unwrap();
         assert_eq!(host.messages().text_allowed("blocked"), Some(false));
         let player = host.players().acting_player().unwrap();
         assert_eq!(host.players().server_players(), [player]);
@@ -4910,7 +4917,7 @@ mod tests {
         }
         let mods: Mods = vec![ModEntry::new(id, Box::new(StickMod(part)))].into();
         install(mods.clone());
-        install_parts(&mods, &crate::parts::tests::rule_schema()).unwrap();
+        install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
     }
 
     /// Claims a use on stone, after telling the player what the block is.
@@ -4923,8 +4930,11 @@ mod tests {
             let player = host.players().acting_player().expect("a player acts");
             let level = host.level("minecraft:overworld").expect("a loaded level");
             let block = level.block(host, event.pos).expect("a loaded block");
-            player.action_bar(host, Text::literal(block.clone()));
-            if block == "minecraft:stone" {
+            let name = __private::block_key_id(block).unwrap().to_owned();
+            player
+                .action_bar(host, Text::literal(name.clone()))
+                .unwrap();
+            if name == "minecraft:stone" {
                 Flow::Cancel
             } else {
                 Flow::Continue
@@ -5299,7 +5309,7 @@ mod tests {
         mark_game_thread();
         let mods: Mods = vec![ModEntry::new("off-hand-top", Box::new(OffHandTop))].into();
         install(mods.clone());
-        install_parts(&mods, &crate::parts::tests::rule_schema()).unwrap();
+        install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
         let mut host = FakeHost::new();
         let mut claimed = false;
         dispatch_use_on(
@@ -5556,7 +5566,7 @@ mod tests {
     /// which stays whether or not it cancels; a cancel stops later mods.
     #[test]
     fn a_fishing_catch_keeps_the_mods_rod_damage_and_its_cancel() {
-        install_parts(&[], &crate::parts::tests::rule_schema()).unwrap();
+        install_parts(&[], &crate::parts::tests::rule_schema(), |_| false).unwrap();
         let mut host = FakeHost::new();
         let mods: Vec<ModEntry> = vec![
             ModEntry::new("cod-keeper", Box::new(CodKeeper)),

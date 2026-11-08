@@ -1,5 +1,7 @@
 //! Isolated compilation of the actual game Text converter, without linking Game.
 #![allow(dead_code)]
+#[cfg(test)]
+mod typed_payloads;
 trait TryIntoApi {
     type Api;
     type Error;

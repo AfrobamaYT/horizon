@@ -245,6 +245,7 @@ version = "0.1.0"
 dependencies = [
  "libm",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -630,6 +631,7 @@ name = "text-boundary-tests"
 version = "0.0.0"
 dependencies = [
  "horizon-client-core",
+ "horizon-core",
  "horizon-mod-api",
  "serde_json",
 ]

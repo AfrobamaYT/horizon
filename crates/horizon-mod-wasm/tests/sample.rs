@@ -99,7 +99,9 @@ impl mod_api::Backend for Server {}
 mod_api::impl_backend_areas!(Server, except(block_states, keys));
 impl mod_api::prelude::BlockStatesHost for Server {
     fn block_state_default(&self, key: mod_api::BlockKey) -> Option<mod_api::BlockStateId> {
-        Some(mod_api::__private::resolved_block(key)?.default)
+        // This isolated guest fixture has one loaded block and no game registry.
+        (mod_api::__private::block_key_id(key)? == "minecraft:stone")
+            .then_some(mod_api::BlockStateId(17))
     }
 }
 impl mod_api::prelude::TagsHost for Server {
@@ -131,8 +133,10 @@ impl mod_api::ServerHost for Server {}
 mod_api::impl_server_host_areas!(Server, except(services));
 
 impl mod_api::Messages for Server {
-    fn broadcast(&self, line: Text) {
+    fn broadcast(&self, line: Text) -> Result<(), mod_api::text::TextFormError> {
+        line.validate_depth()?;
         self.0.lock().unwrap().push(line);
+        Ok(())
     }
 }
 
@@ -176,8 +180,12 @@ fn the_sample_mod_loads_subscribes_and_registers_its_part() {
         "the sample listens to server_chat"
     );
     // Its `register` runs in the mod and attaches a part to sticks, which listens to use_item.
-    mod_api::__private::install_parts(&loaded.mods, &mod_api::__private::part_tests::rule_schema())
-        .unwrap();
+    mod_api::__private::install_parts(
+        &loaded.mods,
+        &mod_api::__private::part_tests::rule_schema(),
+        |_| false,
+    )
+    .unwrap();
     mod_api::__private::resolve_effects(
         horizon_client_core::potions::all_effects()
             .map(|def| horizon_client_core::potions::namespaced(def.id)),
@@ -203,15 +211,6 @@ fn the_sample_mod_loads_subscribes_and_registers_its_part() {
         },
     );
     assert_eq!(table, mod_api::serde_json::json!({"fluid_guest_ok": true}));
-    mod_api::__private::resolve_blocks(|id| {
-        assert_eq!(id, "minecraft:stone");
-        Some(mod_api::__private::ResolvedBlock {
-            default: mod_api::BlockStateId(17),
-            states: horizon_world::registry::BlockStateRange::new(mod_api::BlockStateId(17), 1),
-            block: horizon_world::level::states::BlockId(1),
-        })
-    })
-    .unwrap();
     assert!(mod_api::__private::has_part_hook(mod_api::HookId::UseItem));
 
     // Its mod.wasm fills the tick point: every 200 server ticks it says so in chat.

@@ -153,7 +153,9 @@ fn borrows(types: &Types<'_>, ty: &Ty) -> bool {
         | Ty::Shared(item) => borrows(types, item),
         Ty::Result(a, b) => borrows(types, a) || borrows(types, b),
         Ty::Tuple(items) => items.iter().any(|item| borrows(types, item)),
-        Ty::Named(def) => types.defs[*def].lifetimes > 0,
+        Ty::Named(def) => {
+            types.defs[*def].lifetimes > 0 && !matches!(types.defs[*def].kind, Kind::Via(_))
+        }
         _ => false,
     }
 }
@@ -239,7 +241,9 @@ pub(super) fn borrowed_record(types: &Types<'_>, ty: &Ty) -> bool {
         | Ty::Shared(item) => borrowed_record(types, item),
         Ty::Result(a, b) => borrowed_record(types, a) || borrowed_record(types, b),
         Ty::Tuple(items) => items.iter().any(|item| borrowed_record(types, item)),
-        Ty::Named(def) => types.defs[*def].lifetimes > 0,
+        Ty::Named(def) => {
+            types.defs[*def].lifetimes > 0 && !matches!(types.defs[*def].kind, Kind::Via(_))
+        }
         _ => false,
     }
 }
@@ -788,11 +792,25 @@ pub(super) fn conversions(
                     .collect();
                 format!("match v {{ {}, {EVERY_CASE} }}", arms.join(", "))
             }
-            Kind::Via(form) => format!(
-                "{{ let f: {} = ::core::convert::TryFrom::try_from(v).map_err(Refused::because)?; {} }}",
-                super::sides::rust_ty(types, form, false),
-                lower(types, form, "(&f)")
-            ),
+            Kind::Via(form) => {
+                let mut carrier = lower(types, form, "(&f)");
+                if rust == "crate::Text" {
+                    // TextForm may validate while its nested Tag carrier refuses.
+                    // Keep that refusal inside Text's typed conversion boundary.
+                    carrier = format!(
+                        "(|| -> Result<_, Refused> {{ Ok({carrier}) }})().map_err(|why| match why {{ Refused::Text(_) => why, _ => Refused::Text(crate::TextFormError::Malformed) }})?"
+                    );
+                }
+                format!(
+                    "{{ let f: {} = ::core::convert::TryFrom::try_from(v).map_err({})?; {carrier} }}",
+                    super::sides::rust_ty(types, form, false),
+                    if rust == "crate::Text" {
+                        "Refused::Text"
+                    } else {
+                        "Refused::because"
+                    },
+                )
+            }
             Kind::Chain { frame, case, link } if case.is_empty() => format!(
                 "{{ let mut frames = Vec::new(); let mut v = v; loop {{ frames.push({}); match &v.{link} {{ Some(next) => v = &**next, None => break frames }} }} }}",
                 lower(types, frame, "v"),
@@ -810,8 +828,10 @@ pub(super) fn conversions(
             writeln!(code, "#[cfg(test)] pub(super) fn block_entity_view(v: &{rust}) -> Result<{wire}, Refused> {{ lower_{id}(v) }}").unwrap();
         }
         // Lifting, for types that own their contents.
-        if def.lifetimes == 0 {
-            let path = rust.as_str();
+        if def.lifetimes == 0 || matches!(def.kind, Kind::Via(_)) {
+            // A via form owns its data and can lift a borrowed view as an owned value.
+            let owned = rust.replace("'_", "'static");
+            let path = owned.as_str();
             let body = match &def.kind {
                 Kind::Record(fields) => {
                     let parts: Vec<String> = fields
@@ -935,12 +955,26 @@ pub(super) fn conversions(
                         .collect();
                     format!("match w {{ {} }}", arms.join(", "))
                 }
-                Kind::Via(form) => format!(
-                    "{{ let f: {} = {}; ::core::convert::TryFrom::try_from(f).map_err(|_| Refused::because(\"a {} that doesn't convert\"))? }}",
-                    super::sides::rust_ty(types, form, false),
-                    lift(types, form, "w"),
-                    path.trim_start_matches("crate::")
-                ),
+                Kind::Via(form) => {
+                    let mut carrier = lift(types, form, "w");
+                    if path == "crate::Text" {
+                        carrier = format!(
+                            "(|| -> Result<_, Refused> {{ Ok({carrier}) }})().map_err(|why| match why {{ Refused::Text(_) => why, _ => Refused::Text(crate::TextFormError::Malformed) }})?"
+                        );
+                    }
+                    format!(
+                        "{{ let f: {} = {carrier}; ::core::convert::TryFrom::try_from(f).map_err({})? }}",
+                        super::sides::rust_ty(types, form, false),
+                        if path == "crate::Text" {
+                            "Refused::Text".into()
+                        } else {
+                            format!(
+                                "|_| Refused::because(\"a {} that doesn't convert\")",
+                                path.trim_start_matches("crate::")
+                            )
+                        }
+                    )
+                }
                 Kind::Chain { frame, case, link } if case.is_empty() => format!(
                     "{{ let mut frames = w.into_iter().rev(); let mut v = {}; for frame in frames {{ let mut outer = {}; outer.{link} = Some(Box::new(v)); v = outer; }} v }}",
                     lift(types, frame, "frames.next().ok_or(Refused::SHAPE)?"),

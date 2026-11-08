@@ -13,6 +13,17 @@ thread_local! {
     static INDEX: RefCell<Option<Arc<Index>>> = const { RefCell::new(None) };
 }
 
+/// Routing reads the precomputed key only: no event value is converted here.
+pub(crate) fn block_listens(hook: mod_api::HookId, state: BlockStateId) -> bool {
+    mod_api::__private::has_scoped_hook(hook)
+        && INDEX.with_borrow(|index| {
+            index
+                .as_ref()
+                .and_then(|index| index.forward.get(state.0 as usize))
+                .is_some_and(|value| mod_api::__private::block_key_listens(hook, value.block()))
+        })
+}
+
 pub(super) fn clear() {
     INDEX.with_borrow_mut(|index| *index = None);
 }
@@ -56,6 +67,65 @@ pub(crate) fn prepare(registry: &BlockRegistry) -> Result<Arc<Index>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn numeric_block_index_routes_only_subscribed_blocks() {
+        struct Part;
+        #[mod_api::horizon_part]
+        impl mod_api::BlockPart for Part {
+            fn analog_output(
+                &self,
+                _: &dyn mod_api::LevelHost,
+                event: &mut mod_api::AnalogOutputEvent,
+            ) {
+                event.output += 1;
+            }
+        }
+        struct Listener;
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for Listener {
+            fn register(
+                &self,
+                registrar: &mut dyn mod_api::Registrar,
+                _: &mod_api::RegistrationContext,
+            ) {
+                let key = registrar.block_key("minecraft:stone");
+                registrar.block_part(key, Part);
+            }
+        }
+        let mods: mod_api::Mods =
+            vec![mod_api::ModEntry::new("routing", Box::new(Listener))].into();
+        mod_api::testing::with_mods(mods.clone(), || {
+            mod_api::__private::part_tests::install_parts_fixture(&mods).unwrap();
+            let facts = r#"{"defaults":{"minecraft:air":2,"minecraft:stone":0,"minecraft:dirt":1},"states":[["s",false,false,"","minecraft:stone"],["d",false,false,"","minecraft:dirt"],["a",true,false,"","minecraft:air"]]}"#;
+            let registry = BlockRegistry::from_facts_json(facts.as_bytes()).unwrap();
+            super::super::resolve_block_definitions(&registry).unwrap();
+            mod_api::__private::resolve_parts(
+                &Default::default(),
+                &Default::default(),
+                mod_api::__private::KnownIds {
+                    block: &|_| true,
+                    item: &|_| false,
+                },
+            )
+            .unwrap();
+            assert!(block_listens(
+                mod_api::HookId::AnalogOutput,
+                BlockStateId(0)
+            ));
+            let start = std::time::Instant::now();
+            for _ in 0..1_000 {
+                assert!(!block_listens(
+                    mod_api::HookId::AnalogOutput,
+                    std::hint::black_box(BlockStateId(1))
+                ));
+            }
+            println!(
+                "actual Index and Parts: 1000 unrelated-block guards in {} ns",
+                start.elapsed().as_nanos()
+            );
+        });
+    }
+
     #[test]
     fn numeric_block_index_prepared_token_activates_only_on_fresh_owner() {
         mod_api::__private::part_tests::install_parts_fixture(&[]).unwrap();

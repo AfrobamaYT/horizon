@@ -1368,7 +1368,9 @@ impl Game<'_> {
             // Screen.defaultHandleGameClickEvent: custom actions retain chat.
             Some(ClickEvent::Custom { id, payload }) => {
                 if let Some(remote) = &self.remote {
-                    remote.session.send_custom_click(&id, payload);
+                    remote
+                        .session
+                        .send_custom_click(&id, payload.map(std::sync::Arc::unwrap_or_clone));
                 }
             }
             // Screen.defaultHandleClickEvent: a page link means nothing in chat.
