@@ -2166,7 +2166,7 @@ mod tests {
             game.level.enabled_features = Default::default();
             std::fs::write(
                 pack.join("pack.mcmeta"),
-                r#"{"features":{"enabled":["test:feature"]}}"#,
+                r#"{"pack":{"description":"Feature fixture"},"features":{"enabled":["test:feature"]}}"#,
             )
             .unwrap();
             let stack = game
