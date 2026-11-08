@@ -76,7 +76,7 @@ fn emit(
             let body = child(to, quote!(*(#place)))?;
             // References and Box are transparent in the reader path; do not consume a step.
             return Ok(if matches!(shape, Shape::Ref { .. }) {
-                quote!({ if __np_tree.value().is_some() { #reject; } #body })
+                body
             } else {
                 quote!({ if let Some(bytes) = __np_tree.value() { #whole } else { #body } })
             });

@@ -76,7 +76,7 @@ mod tests {
         assert_eq!(value.1.len(), 2);
     }
     #[test]
-    fn malformed_values_and_reference_retargeting_refuse() {
+    fn malformed_values_refuse_and_mutable_references_assign_only_pointees() {
         let mut l = Locators::default();
         let root = l.intern(None, Step::Root(12)).unwrap();
         let leaf = path(&mut l, root, &[Step::Field(0), Step::Index(0)]);
@@ -102,15 +102,39 @@ mod tests {
         let mut number = 10u32;
         {
             let mut reference = &mut number;
+            let pointer = std::ptr::from_ref(&*reference);
             let mut plan = PatchPlan::default();
-            assert!(plan_ref(&mut reference, &trees[0], &mut plan).is_err());
+            plan_ref(&mut reference, &trees[0], &mut plan).unwrap();
+            plan.commit().unwrap();
+            assert_eq!(std::ptr::from_ref(&*reference), pointer);
+            assert_eq!(*reference, 99);
         }
         {
             let mut reference = &number;
             let mut plan = PatchPlan::default();
             assert!(plan_shared(&mut reference, &trees[0], &mut plan).is_err());
         }
-        assert_eq!(number, 10);
+        assert_eq!(number, 99);
+        // The shared value codec constructs Data, never an &mut Data. Its ordinary fields
+        // replace the pointee at the transparent reference node without retargeting it.
+        let mut p = RecordPatch::default();
+        p.set(
+            root,
+            &(vec![1u32], (1u32, 2u32), vec![(3u8, 4u32)], vec![5u32]),
+        )
+        .unwrap();
+        let trees = PatchTree::roots(&l, &[root], &p).unwrap();
+        let mut value = data();
+        let mut reference = &mut value;
+        let pointer = std::ptr::from_ref(&*reference);
+        let mut plan = PatchPlan::default();
+        plan_ref_data(&mut reference, &trees[0], &mut plan).unwrap();
+        plan.commit().unwrap();
+        assert_eq!(std::ptr::from_ref(&*reference), pointer);
+        assert_eq!(reference.list, vec![1]);
+        assert_eq!(reference.choice, model::Choice::Value(2));
+        assert_eq!(reference.map[&3], 4);
+        assert!(reference.set.contains(&5));
     }
     #[test]
     fn emitted_edits_are_atomic_and_paths_are_current() {
