@@ -1011,7 +1011,12 @@ pub trait Hooks {
     /// save: an edit made here to one of them (a neighbour's block entity, say)
     /// is not in that copy, and is dropped with the chunk.
     /// Server-side.
-    #[hook(side = "server", contract = "listen", neoforge = "ChunkEvent.Load")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "ChunkEvent.Load",
+        paper = "ChunkLoadEvent"
+    )]
     fn chunk_load();
     /// Chunk `chunk` of `dimension` left the world (NeoForge's
     /// `ChunkEvent.Unload`), with a level that closes for being empty too. Don't
