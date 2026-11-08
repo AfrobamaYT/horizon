@@ -379,7 +379,7 @@ fn dimension_types_take_a_host(
     host: &dyn Host,
     level: LevelRef,
 ) -> Option<(f64, bool, DimensionSettings)> {
-    let ty = host.level_dimension_type(level)?;
+    let ty = level.dimension_type(host)?;
     let nether_like = DimensionSettings {
         coordinate_scale: 8.0,
         has_fixed_time: true,
