@@ -25,6 +25,7 @@ struct Probe {
     family: Family,
     calls: AtomicUsize,
     posts: AtomicUsize,
+    guest_hits: AtomicUsize,
     armed: AtomicBool,
 }
 impl Probe {
@@ -154,6 +155,9 @@ impl mod_api::Hooks for Hooks {
         _: &mut dyn mod_api::LevelRandomHost,
         event: &mut mod_api::LivingIncomingDamageEvent<'_>,
     ) -> mod_api::Flow {
+        if event.kind == "minecraft:player" {
+            self.0.guest_hits.fetch_add(1, Ordering::SeqCst);
+        }
         self.0.hear(Family::Damage, event.entity == 72);
         mod_api::Flow::Continue
     }
@@ -206,6 +210,7 @@ enum Output {
     Quiet,
     Egg,
     Guest,
+    Push,
 }
 fn run(family: Family) {
     run_output(family, Output::Quiet);
@@ -248,6 +253,7 @@ fn run_output(family: Family, output: Output) {
             family,
             calls: AtomicUsize::new(0),
             posts: AtomicUsize::new(0),
+            guest_hits: AtomicUsize::new(0),
             armed: AtomicBool::new(true),
         });
         mod_api::testing::with_mods(
@@ -270,6 +276,8 @@ fn run_output(family: Family, output: Output) {
                         game.load_server_loot();
                     }
                     if output == Output::Guest {
+                        game.world.health_rules.difficulty =
+                            horizon_world::food::Difficulty::Normal;
                         let host = game.lan.as_mut().unwrap();
                         for i in 0..host.hub.guests.len() {
                             host.hub.guests.update(i, |g| {
@@ -280,6 +288,7 @@ fn run_output(family: Family, output: Output) {
                                     [12.0, 80.0, 12.0]
                                 };
                                 g.loaded = true;
+                                g.load_timeout = 0;
                             });
                         }
                     }
@@ -294,15 +303,19 @@ fn run_output(family: Family, output: Output) {
                     };
                     game.mobs
                         .bind_residency(&journal, owner, |m| (m.id, m.join));
-                    for id in [71, 72] {
+                    for id in if output == Output::Push {
+                        vec![70, 71, 72]
+                    } else {
+                        vec![71, 72]
+                    } {
                         let kind = game
                             .res
                             .mob_types()
-                            .get(if id == 71 {
+                            .get(if id <= 71 {
                                 match output {
                                     Output::Egg => "minecraft:chicken",
-                                    Output::Guest => "minecraft:zombie",
-                                    Output::Quiet => "minecraft:pig",
+                                    Output::Guest => "minecraft:slime",
+                                    Output::Quiet | Output::Push => "minecraft:pig",
                                 }
                             } else {
                                 "minecraft:zombie"
@@ -312,6 +325,9 @@ fn run_output(family: Family, output: Output) {
                         let mut mob =
                             Mob::new(id, kind, Vec3::new(f64::from(id - 70), 80.0, 0.5), 0.0);
                         mob.no_ai = true;
+                        if output == Output::Push && id == 70 {
+                            mob.position.x = 1.2;
+                        }
                         if id == 71 {
                             mob.ai.last_hurt_by_player = 5;
                             if output != Output::Quiet {
@@ -322,7 +338,7 @@ fn run_output(family: Family, output: Output) {
                                 mob.extra.egg_time = 1;
                             }
                             if output == Output::Guest {
-                                mob.ai.target = Some(horizon_client::mobs::Who::Player);
+                                horizon_client::mobs::cube::set_size(&mut mob, 2);
                             }
                         }
                         if id == 72 {
@@ -428,28 +444,12 @@ fn run_output(family: Family, output: Output) {
                             "real egg cooldown did not advance"
                         );
                         assert_eq!(eggs(game), 0, "recovery executed egg action");
-                        assert!(
-                            game.creatures.pending[game.dim.id()]
-                                .events
-                                .iter()
-                                .any(|e| matches!(e, MobEvent::LayEgg { .. })),
-                            "real egg action not retained"
-                        );
                     }
                     if output == Output::Guest {
                         assert_eq!(
                             game.lan.as_ref().unwrap().hub.guests[0].health,
                             guest_health,
                             "recovery executed guest action"
-                        );
-                        assert!(
-                            game.creatures.pending[game.dim.id()].guests.iter().any(
-                                |(conn, mob, e)| *conn == 12
-                                    && *mob == 71
-                                    && matches!(e, MobEvent::AttackPlayer(..))
-                            ),
-                            "real guest attack not retained: {:?}",
-                            game.creatures.pending[game.dim.id()].guests
                         );
                     }
                     let mut pending = Vec::new();
@@ -514,12 +514,26 @@ fn run_output(family: Family, output: Output) {
                             "actual native goal selector was lost"
                         );
                     }
+                    if output == Output::Guest {
+                        game.mobs[0].no_ai = true;
+                    }
+                    let before_push = game.mobs[0].velocity.x;
+                    if output == Output::Push {
+                        game.mobs[1].no_ai = true;
+                        game.mobs[1].position.x = 8.0;
+                    }
                     game.tick_creature_entities().unwrap();
                     assert!(
                         probe.posts.load(Ordering::SeqCst) > 0,
                         "real post listener never ran on retry"
                     );
                     table.end_tick().unwrap();
+                    if output == Output::Push {
+                        let pushed = game.mobs[0].velocity.x;
+                        assert!(pushed > before_push, "completed push was lost");
+                        game.tick_creature_entities().unwrap();
+                        assert_eq!(game.mobs[0].velocity.x, pushed, "push replayed");
+                    }
                     if output == Output::Egg {
                         assert_eq!(eggs(game), 1, "retained egg not delivered exactly once");
                         game.tick_creature_entities().unwrap();
@@ -527,6 +541,11 @@ fn run_output(family: Family, output: Output) {
                     }
                     if output == Output::Guest {
                         let health = game.lan.as_ref().unwrap().hub.guests[0].health;
+                        assert_eq!(
+                            probe.guest_hits.load(Ordering::SeqCst),
+                            1,
+                            "guest delivery count"
+                        );
                         assert!(health < guest_health, "retained guest attack not delivered");
                         assert_eq!(
                             game.lan.as_ref().unwrap().hub.guests[1].health,
@@ -543,6 +562,11 @@ fn run_output(family: Family, output: Output) {
                             game.lan.as_ref().unwrap().hub.guests[0].health,
                             health,
                             "guest action replayed"
+                        );
+                        assert_eq!(
+                            probe.guest_hits.load(Ordering::SeqCst),
+                            1,
+                            "guest callback replayed"
                         );
                     }
                 })
@@ -646,4 +670,10 @@ fn retained_consumer_tail() {
             },
         );
     }
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn retained_push() {
+    run_output(Family::Damage, Output::Push);
 }
