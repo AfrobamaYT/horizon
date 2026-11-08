@@ -40,6 +40,7 @@ pub(crate) struct State {
     outputs: Vec<Vec<u8>>,
     imports: Vec<Vec<u8>>,
     depth: usize,
+    epoch_budget: u64,
     group: usize,
     lending: Arc<AtomicUsize>,
 }
@@ -63,6 +64,7 @@ impl Default for State {
             outputs: Vec::new(),
             imports: Vec::new(),
             depth: 0,
+            epoch_budget: 0,
             group: 0,
             lending: Arc::default(),
         }
@@ -574,11 +576,13 @@ impl WasmMod {
             Some(resumed) => resumed.context(),
             None => {
                 let store = &mut locked.as_mut()?.store;
-                store.set_epoch_deadline(if class == CallClass::Load {
+                let budget = if class == CallClass::Load {
                     30_000
                 } else {
                     100
-                });
+                };
+                store.set_epoch_deadline(budget);
+                store.data_mut().epoch_budget = budget;
                 store.as_context_mut()
             }
         };
@@ -588,9 +592,15 @@ impl WasmMod {
             }
             return None;
         }
+        let budget = store.data().epoch_budget;
         let depth = store.data().depth + 1;
         if depth > 64 {
-            self.running.poisoned.store(true, Ordering::Relaxed);
+            if !self.running.poisoned.swap(true, Ordering::Relaxed) {
+                log::error!(
+                    "wasm mod {} stopped its group: {class:?} depth {depth} exceeds budget 64 (active epoch budget {budget})",
+                    self.id
+                );
+            }
             return None;
         }
         store.data_mut().depth = depth;
@@ -643,16 +653,19 @@ impl WasmMod {
         })();
         store.data_mut().inputs[depth] = w;
         store.data_mut().outputs[depth] = output;
-        if result.is_err() {
-            self.running.poisoned.store(true, Ordering::Relaxed);
-        }
+        let first_failure = result.is_err() && !self.running.poisoned.swap(true, Ordering::Relaxed);
         drop(panic_stop);
         drop(resources);
         drop(scope);
         match result {
             Ok(value) => Some(value),
             Err(e) => {
-                log::error!("wasm mod {} stopped its group: {e:#}", self.id);
+                if first_failure {
+                    log::error!(
+                        "wasm mod {} stopped its group: {class:?}, depth {depth}, active epoch budget {budget}: {e:#}",
+                        self.id
+                    );
+                }
                 None
             }
         }
