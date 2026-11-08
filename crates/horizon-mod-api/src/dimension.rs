@@ -71,6 +71,15 @@ pub struct DimensionSettings {
     pub can_start_raid: bool,
     /// `minecraft:gameplay/sky_light_level`: the sky light that daylight is measured against, 0 to 15.
     pub sky_light_level: f32,
+    /// When a player can sleep in a bed here (`BedRule.canSleep`): `always`, `when_dark` or `never`.
+    pub bed_can_sleep: String,
+    /// When a bed sets the player's respawn point here (`BedRule.canSetSpawn`): `always`,
+    /// `when_dark` or `never`.
+    pub bed_can_set_spawn: String,
+    /// Whether a bed explodes when a player tries to use it (`BedRule.explodes`), as in the Nether.
+    pub bed_destroy_on_use: bool,
+    /// Whether a bed is destroyed when the player leaves it (`BedRule.destroyOnLeave`).
+    pub bed_destroy_on_leave: bool,
 }
 
 impl Default for DimensionSettings {
@@ -101,6 +110,10 @@ impl Default for DimensionSettings {
             snow_golem_melts: false,
             can_start_raid: true,
             sky_light_level: 15.0,
+            bed_can_sleep: "when_dark".into(),
+            bed_can_set_spawn: "always".into(),
+            bed_destroy_on_use: false,
+            bed_destroy_on_leave: false,
         }
     }
 }
@@ -136,6 +149,12 @@ impl DimensionSettings {
                 "minecraft:gameplay/snow_golem_melts": self.snow_golem_melts,
                 "minecraft:gameplay/can_start_raid": self.can_start_raid,
                 "minecraft:gameplay/sky_light_level": self.sky_light_level,
+                "minecraft:gameplay/bed_rule": {
+                    "can_sleep": self.bed_can_sleep,
+                    "can_set_spawn": self.bed_can_set_spawn,
+                    "destroy_on_use": self.bed_destroy_on_use,
+                    "destroy_on_leave": self.bed_destroy_on_leave,
+                },
             },
         })
     }
@@ -158,6 +177,11 @@ impl DimensionSettings {
             "skybox must be overworld, end or none"
         } else if !matches!(self.cardinal_light.as_str(), "default" | "nether") {
             "cardinal_light must be default or nether"
+        } else if ![&self.bed_can_sleep, &self.bed_can_set_spawn]
+            .iter()
+            .all(|rule| matches!(rule.as_str(), "always" | "when_dark" | "never"))
+        {
+            "bed_can_sleep and bed_can_set_spawn must be always, when_dark or never"
         } else if !self.infiniburn.starts_with('#') || self.infiniburn.len() < 2 {
             "infiniburn must be a block tag, such as #minecraft:infiniburn_overworld"
         } else {
@@ -223,6 +247,14 @@ pub struct LevelDimensionType {
     pub can_start_raid: bool,
     /// The sky light that daylight is measured against, 0 to 15.
     pub sky_light_level: f32,
+    /// When a player can sleep in a bed: `always`, `when_dark` or `never`.
+    pub bed_can_sleep: String,
+    /// When a bed sets the respawn point: `always`, `when_dark` or `never`.
+    pub bed_can_set_spawn: String,
+    /// Whether a bed explodes when a player tries to use it.
+    pub bed_destroy_on_use: bool,
+    /// Whether a bed is destroyed when the player leaves it.
+    pub bed_destroy_on_leave: bool,
 }
 
 /// A registered dimension: its namespaced id (`modid:pocket`), the mod that
@@ -280,6 +312,34 @@ mod tests {
             true
         );
         assert_eq!(json["attributes"]["minecraft:gameplay/fast_lava"], false);
+    }
+
+    /// The bed rule goes into the dimension type as vanilla's `bed_rule` attribute, and the game's
+    /// facts read it back from there.
+    #[test]
+    fn the_bed_rule_reaches_the_games_facts() {
+        use horizon_world::dimension_type::{BedRuleTest, DimensionFacts};
+        let settings = DimensionSettings {
+            bed_can_sleep: "never".into(),
+            bed_can_set_spawn: "when_dark".into(),
+            bed_destroy_on_use: true,
+            ..Default::default()
+        };
+        assert_eq!(settings.invalid_field(), None);
+        let facts = DimensionFacts::patched(
+            DimensionFacts::overworld(),
+            "test:bedless",
+            &settings.dimension_type(),
+        )
+        .unwrap();
+        assert_eq!(facts.bed_rule.can_sleep, BedRuleTest::Never);
+        assert_eq!(facts.bed_rule.can_set_spawn, BedRuleTest::WhenDark);
+        assert!(facts.bed_rule.destroy_on_use && !facts.bed_rule.destroy_on_leave);
+        let bad = DimensionSettings {
+            bed_can_sleep: "sometimes".into(),
+            ..Default::default()
+        };
+        assert!(bad.invalid_field().unwrap().contains("bed_can_sleep"));
     }
 
     #[test]

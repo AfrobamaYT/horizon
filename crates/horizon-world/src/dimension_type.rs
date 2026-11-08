@@ -40,6 +40,15 @@ impl BedRuleTest {
         }
     }
 
+    /// The name a dimension type's JSON gives it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Always => "always",
+            Self::WhenDark => "when_dark",
+            Self::Never => "never",
+        }
+    }
+
     fn parse(name: &str) -> Result<Self, String> {
         match name {
             "always" => Ok(Self::Always),
