@@ -612,6 +612,7 @@ pub(super) struct Writeback {
     pub(super) reference: bool,
     pub(super) optional: bool,
     pub(super) view: bool,
+    pub(super) append: bool,
 }
 /// Writable leaves in wire order, shared by the guest's reply and host's atomic apply.
 pub(super) fn writeback_fields(
@@ -620,10 +621,10 @@ pub(super) fn writeback_fields(
     name: &str,
     mutable: bool,
 ) -> Option<Vec<Writeback>> {
-    if frame_cases(types, def).is_some() {
+    if frame_cases(types, def).is_some() || types.defs[def].projection.is_some() {
         return Some(Vec::new());
     }
-    let fields = types.defs[def].kind.fields()?;
+    let fields = types.defs[def].borrow_fields()?;
     let mut own = Vec::new();
     let mut refs = Vec::new();
     for (i, f) in fields.iter().enumerate() {
@@ -651,6 +652,7 @@ pub(super) fn writeback_fields(
                     reference: false,
                     optional: false,
                     view: true,
+                    append: false,
                 });
             }
             continue;
@@ -678,6 +680,10 @@ pub(super) fn writeback_fields(
                 reference: matches!(f.ty, Ty::Ref(_, true)),
                 optional: matches!(&f.ty,Ty::Option(t) if matches!(**t,Ty::Ref(_,true))),
                 view: false,
+                append: types.defs[def]
+                    .append
+                    .as_ref()
+                    .is_some_and(|a| a.field == i),
             };
             if by_ref {
                 refs.push(leaf);
@@ -731,7 +737,7 @@ fn borrowed(
             format!("out.put(&{name}.__wire_snapshot());"),
         ));
     }
-    let fields = d.kind.fields()?;
+    let fields = d.borrow_fields()?;
     let (mut read, mut build, mut back) = (String::new(), Vec::new(), String::new());
     for (i, f) in fields.iter().enumerate() {
         let local = format!("{name}_{i}");
@@ -791,7 +797,9 @@ fn borrowed(
         build.push(format!("{}: {}", f.rust, lent.expr));
     }
     for leaf in writeback_fields(types, def, name, mutable)? {
-        if leaf.optional {
+        if leaf.append {
+            write!(back, "out.put({name}.__wire_changes());").unwrap();
+        } else if leaf.optional {
             write!(back, "out.put_opt({}.as_deref());", leaf.path).unwrap();
         } else {
             write!(
@@ -809,11 +817,23 @@ fn borrowed(
         }
     }
     let m = if mutable { "mut " } else { "" };
-    read.push_str(&format!(
-        "let {m}{name} = {} {{ {} }};",
-        d.rust,
-        build.join(", ")
-    ));
+    if d.projection.is_some() {
+        let args = build
+            .iter()
+            .map(|f| f.split_once(": ").unwrap().1)
+            .collect::<Vec<_>>()
+            .join(",");
+        read.push_str(&format!(
+            "let {m}{name} = {}::__wire_from_fields({args});",
+            d.rust
+        ));
+    } else {
+        read.push_str(&format!(
+            "let {m}{name} = {} {{ {} }};",
+            d.rust,
+            build.join(", ")
+        ));
+    }
     Some((read, format!("{name}"), back))
 }
 
