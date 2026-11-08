@@ -493,7 +493,7 @@ mod stay_tests {
             };
             game.world
                 .block_entities
-                .put(key, BlockEntity::Beehive(Box::new(hive)));
+                .insert(key, BlockEntity::Beehive(Box::new(hive)));
             let inside = |game: &Game<'_>| match game.world.block_entities.get(&key) {
                 Some(BlockEntity::Beehive(h)) => h.bees.len(),
                 _ => panic!("the hive is gone"),

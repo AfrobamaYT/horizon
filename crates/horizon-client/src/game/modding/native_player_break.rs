@@ -3,6 +3,10 @@
 //! (docs/native-mods.md, "Breaking as a player").
 use super::Game;
 
+#[allow(
+    dead_code,
+    reason = "public API exposure deferred under the component-model hold"
+)]
 impl Game<'_> {
     /// Breaks the block at `pos` as the player `uuid` breaks it, through the
     /// game's own `ServerPlayerGameMode.destroyBlock`, as FTB Ultimine does:

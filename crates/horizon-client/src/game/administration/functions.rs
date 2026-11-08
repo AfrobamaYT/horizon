@@ -2101,18 +2101,17 @@ mod tests {
         )
         .unwrap();
         with_game(|game| {
-            game.load_world(WorldRequest {
-                rule_registry: std::sync::Arc::new(
-                    horizon_client::gamerules::RuleRegistry::vanilla(),
-                ),
-                save_root: root.clone(),
-                folder: "test".into(),
-                name: Some("test".into()),
-                seed: Some(1),
-                creative: true,
-                create: None,
-            })
+            let mut request = WorldRequest::new(
+                "test",
+                Some("test"),
+                Some(1),
+                true,
+                None,
+                std::sync::Arc::new(horizon_client::gamerules::RuleRegistry::vanilla()),
+            )
             .unwrap();
+            request.save_root = root.clone();
+            game.load_world(request).unwrap();
             assert!(game.fns.store.functions.contains_key("test:start"));
             assert_eq!(
                 game.fns.store.tag_functions("minecraft:load"),

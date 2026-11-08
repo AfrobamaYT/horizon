@@ -697,7 +697,7 @@ mod tests {
             };
             game.world
                 .block_entities
-                .put(key, BlockEntity::Spawner(Box::new(spawner)));
+                .insert(key, BlockEntity::Spawner(Box::new(spawner)));
             let delay = |game: &Game<'_>| match game.world.block_entities.get(&key) {
                 Some(BlockEntity::Spawner(s)) => s.spawn_delay,
                 _ => panic!("the spawner is gone"),
