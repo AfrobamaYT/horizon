@@ -133,7 +133,8 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn fresh_game_lifetimes_keep_worker_and_generator_snapshots_separate() {
         use crate::game::native_entity_refs::tests::with_game;
-        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap())
+            .join("worldgen");
         let mut first = None;
         with_game(|game| {
             let registry = game.pack.assets.registry;
