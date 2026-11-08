@@ -41,6 +41,30 @@ pub fn plain_path(path: &str) -> String {
 /// for example `mod_0::` in the native launcher or `original_mod::` in a wasm wrapper.
 /// Call-site injections and internals listeners are emitted by their own slot routes.
 pub fn api(manifest: &Manifest, points: &[Point], prefix: &str) -> Result<Vec<String>, String> {
+    Ok(resolve(manifest, points)?
+        .into_iter()
+        .map(|(place, entry)| {
+            format!(
+                "mod_points::listeners::{place}({:?}, {}, {:?}, {prefix}{})",
+                manifest.id, entry.priority, entry.id, entry.with
+            )
+        })
+        .collect())
+}
+
+/// Place names selected by the same resolver as constructor emission. The wasm build passes
+/// these to the points crate so it compiles only the guest record codecs and exports it uses.
+pub fn places(manifest: &Manifest, points: &[Point]) -> Result<Vec<String>, String> {
+    Ok(resolve(manifest, points)?
+        .into_iter()
+        .map(|(place, _)| place)
+        .collect())
+}
+
+fn resolve<'a>(
+    manifest: &'a Manifest,
+    points: &[Point],
+) -> Result<Vec<(String, &'a horizon_mod_package::manifest::inject::Inject)>, String> {
     manifest
         .inject
         .iter()
@@ -64,10 +88,7 @@ pub fn api(manifest: &Manifest, points: &[Point], prefix: &str) -> Result<Vec<St
             } else {
                 point.name.clone()
             };
-            Ok(format!(
-                "mod_points::listeners::{place}({:?}, {}, {:?}, {prefix}{})",
-                manifest.id, entry.priority, entry.id, entry.with
-            ))
+            Ok((place, entry))
         })
         .collect()
 }

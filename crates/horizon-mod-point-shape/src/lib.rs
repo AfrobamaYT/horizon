@@ -481,6 +481,33 @@ impl Shape {
         }
     }
 
+    /// Whether the initial raw snapshot reader can encode every argument without engine layout.
+    /// Nominal receiver/argument readers are supplied by the staged internals catalog separately.
+    pub fn snapshot_able(&self, sig: &syn::Signature) -> bool {
+        self.raw
+            && !self.raw_only
+            && self.receiver == Receiver::None
+            && raw_fields(sig).iter().all(|field| scalar(&field.ty))
+            && matches!(
+                &self.returns,
+                Returns::Unit | Returns::UnitResult | Returns::Value(_)
+            )
+    }
+
+    /// The record fields as a shared shape codec's nested mutable field list.
+    pub fn wire_fields(&self, args: TokenStream) -> TokenStream {
+        let mut fields: Vec<_> = self.args.iter().map(|arg| arg.name.clone()).collect();
+        match self.returns {
+            Returns::Unit | Returns::UnitResult => fields.push(format_ident!("cancel")),
+            Returns::Value(_) => fields.push(format_ident!("result")),
+            Returns::Opaque => {}
+        }
+        fields
+            .iter()
+            .rev()
+            .fold(quote!(()), |tail, field| quote!((&mut #args.#field, #tail)))
+    }
+
     /// Typed API function constructors, dispatchers and place ids for this point.
     pub fn api_items(&self, target: &str) -> ApiItems {
         let record = self.record();
@@ -521,16 +548,7 @@ impl Shape {
             }
             (_, Some(_)) => quote!(crate::__private::PointHost::Read(host)),
         };
-        let mut wire_fields: Vec<_> = self.args.iter().map(|arg| arg.name.clone()).collect();
-        match self.returns {
-            Returns::Unit | Returns::UnitResult => wire_fields.push(format_ident!("cancel")),
-            Returns::Value(_) => wire_fields.push(format_ident!("result")),
-            Returns::Opaque => {}
-        }
-        let wire_fields = wire_fields
-            .iter()
-            .rev()
-            .fold(quote!(()), |tail, field| quote!((&mut args.#field, #tail)));
+        let wire_fields = self.wire_fields(quote!(args));
         let mut places = vec![(self.name.clone(), "head")];
         if self.has_return() {
             places.push((format!("{}_return", self.name), "return"));
