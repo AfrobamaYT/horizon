@@ -275,6 +275,89 @@ mod tests {
         assert_eq!(result, multi);
         assert!(check(&text, &items, &catalog, &["unknown"]).2);
     }
+    fn disk_fixture(label: &str, text: &str, hash: &str, sites: &str) -> std::path::PathBuf {
+        let dir = reviewer_directory(label);
+        fs::write(dir.join(MANIFEST), text).unwrap();
+        disk_catalog(&dir, hash, sites);
+        dir
+    }
+    fn disk_catalog(dir: &Path, hash: &str, sites: &str) {
+        let cache =
+            dir.join("target/horizon-mod/prebuilt/0123456789012345678901234567890123456789");
+        fs::write(cache.join("internals.json"), format!(r#"[{{"path":"game::tick","kind":"method","signature":"unsafe fn tick(&self, value: bool) -> bool","hash":"{hash}"}}]"#)).unwrap();
+        fs::write(cache.join("points.json"), format!(r#"{{"sites":{sites}}}"#)).unwrap();
+    }
+    const MOVED: &str =
+        r#"[{"target":"game::tick","call":"game::first","ordinal":7,"ctx":"context-zero"}]"#;
+    #[test]
+    fn inject_update_disk_movement_preserves_comments() {
+        let text = pinned().replace("nth = 0", "nth = 0 # ordinal");
+        let dir = disk_fixture("update-moved", &text, "signature-fixture", MOVED);
+        run(&dir, &[]).unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.join(MANIFEST)).unwrap(),
+            text.replace("nth = 0", "nth = 7")
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn inject_update_disk_accept_and_unsafe_rewrite_refusal() {
+        let text = pinned();
+        let dir = disk_fixture("update-accept", &text, "new-signature", MOVED);
+        assert!(run(&dir, &[]).is_err());
+        assert_eq!(fs::read_to_string(dir.join(MANIFEST)).unwrap(), text);
+        run(&dir, &["--accept".into(), "wrap".into()]).unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.join(MANIFEST)).unwrap(),
+            text.replace("signature-fixture", "new-signature")
+                .replace("nth = 0", "nth = 7")
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn inject_update_disk_accept_never_retargets_or_creates() {
+        let text = pinned();
+        let dir = disk_fixture("update-lost", &text, "new-signature", "[]");
+        for sites in [
+            "[]",
+            r#"[{"target":"game::tick","call":"game::first","ordinal":0,"ctx":"other-context"}]"#,
+            r#"[{"target":"game::tick","call":"game::first","ordinal":0,"ctx":"context-zero"},{"target":"game::tick","call":"game::first","ordinal":2,"ctx":"context-zero"}]"#,
+        ] {
+            disk_catalog(&dir, "new-signature", sites);
+            assert!(run(&dir, &["--accept".into(), "wrap".into()]).is_err());
+            assert_eq!(fs::read_to_string(dir.join(MANIFEST)).unwrap(), text);
+        }
+        disk_catalog(&dir, "new-signature", MOVED);
+        assert!(run(&dir, &["--accept".into(), "unknown".into()]).is_err());
+        assert_eq!(fs::read_to_string(dir.join(MANIFEST)).unwrap(), text);
+        let cache =
+            dir.join("target/horizon-mod/prebuilt/0123456789012345678901234567890123456789");
+        fs::write(cache.join("internals.json"), "[]").unwrap();
+        assert!(run(&dir, &["--accept".into(), "wrap".into()]).is_err());
+        assert_eq!(fs::read_to_string(dir.join(MANIFEST)).unwrap(), text);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn inject_update_disk_refused_second_entry_blocks_first() {
+        let text = edit(&pinned(), "add game::tick --kind head --with second").unwrap();
+        let dir = disk_fixture("update-partial", &text, "new-signature", MOVED);
+        assert!(run(&dir, &["--accept".into(), "wrap".into()]).is_err());
+        assert_eq!(fs::read_to_string(dir.join(MANIFEST)).unwrap(), text);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn inject_update_unavailable_old_signature_is_explicit() {
+        let text = pinned();
+        let (mut items, catalog) = fixture();
+        items[0].hash = "new-signature".into();
+        let (_, reports, refused) = check(&text, &items, &catalog, &[]);
+        assert!(refused);
+        assert!(reports[0].contains("signature unavailable in cached snapshots"));
+        let dir = disk_fixture("update-unavailable", &text, "new-signature", MOVED);
+        assert!(run(&dir, &[]).is_err());
+        assert_eq!(fs::read_to_string(dir.join(MANIFEST)).unwrap(), text);
+        fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     fn inject_update_noop_leaves_inode_and_mtime() {
         let dir = reviewer_directory("update-noop");
