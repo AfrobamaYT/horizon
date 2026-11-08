@@ -20,6 +20,33 @@ struct Layer {
     height: IntProvider,
     provider: BlockStateProvider,
 }
+impl Layer {
+    fn decode_list(
+        json: &str,
+        providers: &super::state_provider::StateProviderBindings<'_>,
+        catalog: &super::state_provider::StateProviderCatalog,
+        depth: usize,
+        remaining: &mut usize,
+    ) -> Result<Vec<Self>, DecodeError> {
+        let values: Vec<Box<RawValue>> = serde_json::from_str(json)?;
+        let mut layers = Vec::with_capacity(values.len());
+        for raw in values {
+            let layer: Object = serde_json::from_str(raw.get())?;
+            let height = IntProvider::decode(required(&layer, "height")?, depth + 1, remaining)?;
+            if height.bounds()[0] < 0 {
+                return Err(DecodeError::Field("negative block column height"));
+            }
+            let provider = catalog.provider_with_budget(
+                required(&layer, "provider")?.get(),
+                providers,
+                depth + 1,
+                remaining,
+            )?;
+            layers.push(Layer { height, provider });
+        }
+        Ok(layers)
+    }
+}
 #[derive(Clone, Debug)]
 pub struct BlockColumnFeature {
     layers: Vec<Layer>,
@@ -62,29 +89,22 @@ impl BlockColumnFeature {
         }
         *remaining -= 1;
         let object: Object = serde_json::from_str(json)?;
-        let values: Vec<Box<RawValue>> = serde_json::from_str(required(&object, "layers")?.get())?;
-        if values.len() > 8192 {
-            return Err(DecodeError::Field("block column layer count"));
-        }
-        let mut layers = Vec::with_capacity(values.len());
-        for raw in values {
-            let layer: Object = serde_json::from_str(raw.get())?;
-            let height = IntProvider::decode(required(&layer, "height")?, depth + 1, remaining)?;
-            if height.bounds()[0] < 0 {
-                return Err(DecodeError::Field("negative block column height"));
-            }
-            let (providers, catalog, _) = bindings
-                .simple_blocks
-                .as_ref()
-                .ok_or(DecodeError::Field("block column provider bindings"))?;
-            let provider = catalog.provider_with_budget(
-                required(&layer, "provider")?.get(),
+        let layers = if let Some((providers, catalog, _)) = &bindings.simple_blocks {
+            Layer::decode_list(
+                required(&object, "layers")?.get(),
                 providers,
-                depth + 1,
+                catalog,
+                depth,
                 remaining,
-            )?;
-            layers.push(Layer { height, provider });
-        }
+            )?
+        } else {
+            let values: Vec<Box<RawValue>> =
+                serde_json::from_str(required(&object, "layers")?.get())?;
+            if !values.is_empty() {
+                return Err(DecodeError::Field("block column provider bindings"));
+            }
+            Vec::new()
+        };
         let name: String = serde_json::from_str(required(&object, "direction")?.get())?;
         let direction = match name.as_str() {
             "down" => Direction::Down,
@@ -182,5 +202,45 @@ fn truncate(heights: &mut [i32], total: i32, allowed: i32, prioritize_tip: bool)
         let count = heights[index].min(remove);
         remove = remove.wrapping_sub(count);
         heights[index] = heights[index].wrapping_sub(count);
+    }
+}
+
+#[cfg(test)]
+mod ceiling_tests {
+    use super::*;
+    use crate::registry::BlockRegistry;
+    use horizon_core::nbt::Tag;
+    use std::collections::{BTreeMap, BTreeSet};
+    #[test]
+    fn column_layer_ceiling() {
+        let registry = BlockRegistry::from_nbt(&Tag::compound([
+            ("DataVersion", Tag::Int(crate::DATA_VERSION)),
+            (
+                "states",
+                Tag::List(vec![Tag::compound([(
+                    "id",
+                    Tag::String("minecraft:stone".into()),
+                )])]),
+            ),
+            (
+                "defaults",
+                Tag::compound([("minecraft:stone", Tag::Int(0))]),
+            ),
+        ]))
+        .unwrap();
+        let providers = super::super::state_provider::StateProviderBindings::new(
+            &registry,
+            BTreeSet::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let catalog =
+            super::super::state_provider::StateProviderCatalog::from_resources(&BTreeMap::new())
+                .unwrap();
+        let layer = r#"{"height":0,"provider":{"id":"minecraft:stone"}}"#;
+        let json = format!("[{}]", vec![layer; 8193].join(","));
+        let layers = Layer::decode_list(&json, &providers, &catalog, 0, &mut 65536).unwrap();
+        assert_eq!(layers.len(), 8193);
+        assert_eq!(layers.last().unwrap().height.bounds(), [0, 0]);
     }
 }
