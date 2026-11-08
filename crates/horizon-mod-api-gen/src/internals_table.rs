@@ -49,6 +49,11 @@ pub(crate) fn spell(shape: &Shape) -> Option<TokenStream> {
             let inner = spell(inner)?;
             quote!(::std::option::Option<#inner>)
         }
+        Shape::Result(ok, err) => {
+            let (ok, err) = (spell(ok)?, spell(err)?);
+            quote!(::std::result::Result<#ok, #err>)
+        }
+        Shape::DynError => quote!(dyn ::std::error::Error),
         Shape::Wrapped(wrapper, inner) => {
             let inner = spell(inner)?;
             match wrapper {

@@ -131,6 +131,10 @@ impl Graph {
             Shape::Array(p, _) | Shape::Slice(p) | Shape::Option(p) => {
                 children.push(self.add(rule, p))
             }
+            Shape::Result(ok, err) => {
+                children.push(self.add(rule, ok));
+                children.push(self.add(rule, err));
+            }
             Shape::Collection(kind, args) => {
                 let count = if matches!(kind, Collection::HashMap | Collection::BTreeMap) {
                     2
@@ -157,6 +161,7 @@ impl Graph {
         if matches!(
             shape,
             Shape::Scalar(crate::crossing::Scalar::String | crate::crossing::Scalar::Str)
+                | Shape::DynError
         ) {
             let unit = self.add(
                 rule,
@@ -171,6 +176,11 @@ impl Graph {
             Shape::Option(_) => {
                 auxiliaries.push(("variant(0)".to_string(), Vec::new()));
                 auxiliaries.push(("variant(1)".to_string(), self.layouts[id].children.clone()));
+            }
+            Shape::Result(..) => {
+                let children = self.layouts[id].children.clone();
+                auxiliaries.push(("variant(0)".to_string(), vec![children[0]]));
+                auxiliaries.push(("variant(1)".to_string(), vec![children[1]]));
             }
             Shape::Collection(Collection::HashMap | Collection::BTreeMap, _) => {
                 auxiliaries.push(("pair".to_string(), self.layouts[id].children.clone()))
