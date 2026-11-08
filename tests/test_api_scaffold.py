@@ -1,4 +1,4 @@
-import json
+import importlib.util
 import subprocess
 import sys
 import tempfile
@@ -7,8 +7,11 @@ import unittest
 from pathlib import Path
 
 TOOLS = Path(__file__).resolve().parent.parent / 'tools'
-sys.path.insert(0, str(TOOLS))
-import api_scaffold as scaffold  # noqa: E402
+# Loaded by path: putting tools/ on sys.path would shadow same-named test modules in tests/ during discovery.
+_spec = importlib.util.spec_from_file_location('api_scaffold', TOOLS / 'api_scaffold.py')
+scaffold = importlib.util.module_from_spec(_spec)
+sys.modules['api_scaffold'] = scaffold
+_spec.loader.exec_module(scaffold)
 
 CONFIG = textwrap.dedent('''
     [[type]]
