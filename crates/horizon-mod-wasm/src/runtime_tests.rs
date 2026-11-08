@@ -9,8 +9,10 @@ fn guest(layout: u64, body: &str) -> Vec<u8> {
       (import "horizon" "host" (func $host (param i32 i32 i32 i32 i32) (result i32)))
       (import "horizon" "host_reply" (func $reply (param i32)))
       (func (export "horizon_layout") (result i64) i64.const {layout})
-      (func (export "horizon_in") (param i32) (result i32) i32.const 512)
-      (func (export "horizon_hook") (param i32 i32 i32) (result i64) {body})
+      (global $in_len (mut i32) (i32.const 0))
+      (func (export "horizon_in") (param i32) (result i32) local.get 0 global.set $in_len i32.const 512)
+      (func (export "horizon_hook") (param i32) (result i64) (local i32 i32)
+        i32.const 512 local.set 1 global.get $in_len local.set 2 {body})
     )"#
     ))
     .unwrap()
@@ -77,6 +79,74 @@ fn a_member_cannot_bypass_group_limits_with_private_memories() {
 }
 
 #[test]
+fn real_members_link_when_built() {
+    let Some(dir) = std::env::var_os("HORIZON_WASM_TEST_MEMBERS") else {
+        return;
+    };
+    let dir = std::path::Path::new(&dir);
+    let (Ok(std), Ok(fixture)) = (
+        std::fs::read(dir.join("std.wasm")),
+        std::fs::read(dir.join("fixture.wasm")),
+    ) else {
+        return;
+    };
+    let engine = engine().unwrap();
+    let modules = WasmMod::instantiate(
+        &engine,
+        &[
+            Member {
+                name: "std",
+                module: &std,
+            },
+            Member {
+                name: "fixture",
+                module: &fixture,
+            },
+        ],
+    );
+    let modules = modules.unwrap_or_else(|why| panic!("real shared members did not load: {why}"));
+    assert_eq!(modules.len(), 1);
+}
+
+#[test]
+fn linker_heap_symbols_follow_all_members_static_data() {
+    let first = wat::parse_str(r#"(module (@custom "dylink.0" "\01\04\10\00\00\00"))"#).unwrap();
+    let second = wat::parse_str(
+        r#"(module (@custom "dylink.0" "\01\04\20\00\00\00")
+        (import "GOT.mem" "__heap_base" (global $heap (mut i32)))
+        (import "GOT.mem" "__data_end" (global $end (mut i32)))
+        (import "GOT.mem" "__heap_end" (global $limit (mut i32)))
+        (func (export "heap") (result i32) global.get $heap)
+        (func (export "data") (result i32) global.get $end)
+        (func (export "limit") (result i32) global.get $limit))"#,
+    )
+    .unwrap();
+    let engine = wasmtime::Engine::default();
+    let mut group = Group::link(
+        &engine,
+        &[
+            Member {
+                name: "first",
+                module: &first,
+            },
+            Member {
+                name: "second",
+                module: &second,
+            },
+        ],
+    )
+    .unwrap();
+    for symbol in ["heap", "data"] {
+        let mut output = [wasmtime::Val::I32(0)];
+        group.call("second", symbol, &[], &mut output).unwrap();
+        assert_eq!(output[0].i32(), Some(262192)); // 256 KiB stack + 16 + 32 bytes.
+    }
+    let mut output = [wasmtime::Val::I32(0)];
+    group.call("second", "limit", &[], &mut output).unwrap();
+    assert_eq!(output[0].i32(), Some(327680)); // Five initial memory pages.
+}
+
+#[test]
 fn boundary_exports_are_per_member_but_other_horizon_symbols_are_not() {
     let bytes = guest(mod_api::wire::LAYOUT, "i64.const 0");
     let engine = engine().unwrap();
@@ -138,7 +208,7 @@ fn loader_initializes_and_installs_a_wasm_entry() {
             i64.const 8796093022208 i32.const 4096 i32.load i64.extend_i32_u i64.or
           else i64.const 4398046511108 end end"#,
     );
-    let manifest = horizon_mod_package::manifest::Manifest::parse(&format!("id = 'roundtrip'\nname = 'Roundtrip'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = []\n[wasm]\nsha512 = '{}'\ntoolchain = 'test'\nbuilt_with = 'test'\n", "a".repeat(128))).unwrap();
+    let manifest = horizon_mod_package::manifest::Manifest::parse(&format!("id = 'roundtrip'\nname = 'Roundtrip'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = ['registries']\n[wasm]\nsha512 = '{}'\ntoolchain = 'test'\nbuilt_with = 'test'\n", "a".repeat(128))).unwrap();
     let loaded = crate::load(&std, vec![crate::WasmPackage { manifest, module }]);
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
     assert_eq!(loaded.mods.len(), 1);
