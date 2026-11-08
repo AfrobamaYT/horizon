@@ -3708,8 +3708,13 @@ impl Game<'_> {
     /// The level's dimension type: a mod's or a data pack's own when it has one, else the
     /// built-in level's.
     fn dimension_type(&self) -> &'static horizon_world::dimension_type::DimensionFacts {
-        // A client of a server is in the level the server named, whether or not it has the mod
-        // that registered it (`self.dim` is then the Overworld).
+        // A client of a server has the facts its server sent for the level, which are its own,
+        // not the table the server's levels (in this process, for an integrated server) read.
+        if let Some(facts) = self.remote.as_ref().and_then(|r| r.level_facts) {
+            return facts;
+        }
+        // Else the level the server named, whether or not the client has the mod that
+        // registered it (`self.dim` is then the Overworld).
         let level = self
             .remote
             .as_ref()
