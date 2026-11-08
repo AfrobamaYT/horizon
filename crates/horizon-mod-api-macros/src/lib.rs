@@ -514,8 +514,11 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
                 (point_shape::RawOutcome::Result(_), false) => {
                     inputs.push(quote!(&mut #result_place,))
                 }
-                (point_shape::RawOutcome::Result(_), true) => inputs.push(quote!(&mut __result,)),
                 _ => {}
+            }
+            // The return phase's one root is the returned slot, whatever the head's outcome was.
+            if at_return && matches!(function.sig.output, syn::ReturnType::Type(..)) {
+                inputs.push(quote!(&mut __result,));
             }
             if inputs.len() != roots {
                 return syn::Error::new_spanned(

@@ -1165,12 +1165,16 @@ pub(crate) fn records_selected(
         });
         }
         for name in std::iter::once(point.name.clone())
-            .chain(point.at_return.then(|| format!("{}_return", point.name)))
+            .chain((point.at_return || point.snapshot).then(|| format!("{}_return", point.name)))
         {
             let variant = quote::format_ident!("{}", point_shape::camel(&name));
             let target = &point.target;
             let at_return = name.ends_with("_return") && name != point.name;
-            api_places.extend(quote! { (PointId::#variant, #target, #at_return), });
+            // A borrowed return has a raw return place only: the API has no such listener.
+            let raw_only = at_return && !point.at_return;
+            if !raw_only {
+                api_places.extend(quote! { (PointId::#variant, #target, #at_return), });
+            }
             if point.snapshot {
                 raw_places.extend(quote! { (PointId::#variant, #target, #at_return), });
                 if enabled(point) {
@@ -1189,9 +1193,11 @@ pub(crate) fn records_selected(
             if point.snapshot {
                 raw_entries.extend(quote! { table[PointId::#variant as usize] = Some((PointId::#variant, raw_dispatch as Dispatch)); });
             }
-            guest_entries.extend(quote! {
-                table[PointId::#variant as usize] = Some((PointId::#variant, #function as Dispatch));
-            });
+            if !raw_only {
+                guest_entries.extend(quote! {
+                    table[PointId::#variant as usize] = Some((PointId::#variant, #function as Dispatch));
+                });
+            }
         }
     }
     let private_variants = sources.iter().map(|point| {
@@ -1388,6 +1394,25 @@ mod tests {
                 .filter(|arg| arg.class == class)
                 .count();
             println!("argument class {class}: {functions} functions; {arguments} arguments");
+            if class != "plain" {
+                let mut admitted = 0;
+                let mut refused = std::collections::BTreeMap::<&str, usize>::new();
+                for point in points.iter().filter(|point| {
+                    point
+                        .raw_shape
+                        .as_ref()
+                        .is_some_and(|shape| shape.args.iter().any(|arg| arg.class == class))
+                }) {
+                    match point.runtime_refusal.as_deref() {
+                        None => admitted += 1,
+                        Some(reason) => *refused.entry(reason).or_default() += 1,
+                    }
+                }
+                println!("argument class {class} as opaque leaf: {admitted} admitted functions");
+                for (reason, count) in refused {
+                    println!("argument class {class} refused {count}: {reason}");
+                }
+            }
         }
         for class in ["plain", "borrowed_return", "callback", "unclassified"] {
             let functions = points
