@@ -145,16 +145,47 @@ impl Wasm {
                     ..
                 } => return Err(WasmError::InvalidMember),
                 wasmparser::Payload::CustomSection(section) if section.name() == "dylink.0" => {
-                    shared = true
+                    if shared {
+                        return Err(WasmError::InvalidMember);
+                    }
+                    let wasmparser::KnownCustom::Dylink0(subsections) = section.as_known() else {
+                        return Err(WasmError::InvalidMember);
+                    };
+                    let mut memory_info = false;
+                    for subsection in subsections {
+                        if let wasmparser::Dylink0Subsection::MemInfo(_) =
+                            subsection.map_err(|_| WasmError::InvalidMember)?
+                        {
+                            if memory_info {
+                                return Err(WasmError::InvalidMember);
+                            }
+                            memory_info = true;
+                        }
+                    }
+                    if !memory_info {
+                        return Err(WasmError::InvalidMember);
+                    }
+                    shared = true;
                 }
                 wasmparser::Payload::ImportSection(section) => {
                     for import in section.into_imports() {
                         let import = import.map_err(|_| WasmError::InvalidMember)?;
-                        if !(import.module == "env"
-                            || import.module.starts_with("GOT.")
-                            || (import.module == "horizon"
-                                && matches!(import.name, "host" | "host_reply")))
-                        {
+                        let allowed = match (import.module, import.name, import.ty) {
+                            ("env", "memory", wasmparser::TypeRef::Memory(_))
+                            | ("env", "__indirect_function_table", wasmparser::TypeRef::Table(_))
+                            | (
+                                "env",
+                                "__stack_pointer" | "__memory_base" | "__table_base",
+                                wasmparser::TypeRef::Global(_),
+                            )
+                            | ("env", _, wasmparser::TypeRef::Func(_))
+                            | ("GOT.mem" | "GOT.func", _, wasmparser::TypeRef::Global(_))
+                            | ("horizon", "host" | "host_reply", wasmparser::TypeRef::Func(_)) => {
+                                true
+                            }
+                            _ => false,
+                        };
+                        if !allowed {
                             return Err(WasmError::InvalidMember);
                         }
                     }
@@ -221,6 +252,14 @@ mod tests {
         assert_eq!(section(&good).check(&good), Ok(()));
         for bad in [
             module(imports, exports, ""),
+            module(imports, exports, r#"(@custom "dylink.0" "\01\01\00")"#),
+            module(imports, exports, r#"(@custom "dylink.0" "")"#),
+            module(
+                r#"(import "GOT.other" "thing" (global i32))"#,
+                exports,
+                dylink,
+            ),
+            module(r#"(import "env" "unknown" (global i32))"#, exports, dylink),
             module(imports, "", dylink),
             module(
                 r#"(import "wasi_snapshot_preview1" "fd_write" (func))"#,

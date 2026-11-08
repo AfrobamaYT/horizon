@@ -4,6 +4,38 @@ use horizon_mod_wasm::link::{Group, Member};
 use wasmtime::{Engine, Val};
 
 #[test]
+fn dump_members() {
+    for (name, path) in [
+        ("std", "HORIZON_WASM_STD"),
+        ("fixture", "HORIZON_WASM_FIXTURE_RAW"),
+    ] {
+        let Ok(path) = std::env::var(path) else {
+            return;
+        };
+        let bytes = std::fs::read(path).unwrap();
+        println!("=== {name} ===");
+        for payload in wasmparser::Parser::new(0).parse_all(&bytes) {
+            match payload.unwrap() {
+                wasmparser::Payload::CustomSection(s) if s.name() == "dylink.0" => {
+                    println!("dylink.0: {:02x?}", s.data())
+                }
+                wasmparser::Payload::ImportSection(s) => {
+                    for i in s.into_imports() {
+                        println!("import: {:?}", i.unwrap());
+                    }
+                }
+                wasmparser::Payload::ExportSection(s) => {
+                    for e in s {
+                        println!("export: {:?}", e.unwrap());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+#[test]
 fn real_member() {
     let (Ok(fixture), Ok(std)) = (
         std::env::var("HORIZON_WASM_FIXTURE"),

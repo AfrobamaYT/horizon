@@ -452,6 +452,23 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
         {
             continue;
         }
+        // The hook factory is an implementation detail of this member, not a group symbol.
+        // Every mod defines it, so publishing it would make unrelated mods collide.
+        if role == "member"
+            && let wasmparser::Payload::ExportSection(reader) = &payload
+        {
+            let mut section = wasm_encoder::ExportSection::new();
+            for export in reader.clone() {
+                let export = export.map_err(|e| e.to_string())?;
+                if export.name != "__horizon_mod_hooks" {
+                    let kind = wasm_encoder::ExportKind::try_from(export.kind)
+                        .map_err(|e| format!("{e:?}"))?;
+                    section.export(export.name, kind, export.index);
+                }
+            }
+            module.section(&section);
+            continue;
+        }
         // A member imports the host ABI (`horizon`) and its group (`env`, `GOT.*`).
         // Any other import a crate declared (a JS runtime's, from `getrandom` under `zip`,
         // some under `env` itself) is never called in the game: it becomes a group import the
