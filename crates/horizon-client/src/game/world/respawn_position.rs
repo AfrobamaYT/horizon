@@ -37,6 +37,8 @@ impl Dim {
             LevelDimension::Overworld => Self::Overworld,
             LevelDimension::Nether => Self::Nether,
             LevelDimension::End => Self::End,
+            // A level the world does not have is the Overworld, as `from_id` takes it.
+            LevelDimension::Custom(key) => Self::from_id(key.id()),
         }
     }
 }

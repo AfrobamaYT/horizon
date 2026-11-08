@@ -896,6 +896,7 @@ mod tests {
         for phase in [Packages, Registration, Setup, Config, Reloading, World] {
             let _owner = PhaseOwner::new(phase);
             for operation in [
+                "fluid_legacy_block",
                 "fluid_state_definition",
                 "fluid_state_validate",
                 "fluid_type_properties",

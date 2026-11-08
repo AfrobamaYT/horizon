@@ -1105,7 +1105,7 @@ impl Game<'_> {
                 .int_at(horizon_client::gamerules::vanilla::MAX_ENTITY_CRAMMING),
             dimension_type: self.dimension_type(),
             world_seed: self.level.seed,
-            sea_level: if self.dim == Dim::Nether { 32 } else { 63 },
+            sea_level: self.dim.sea_level(),
             teams: std::sync::Arc::new(self.mob_teams()),
             items: Some(self.items()),
             lid_openers: &self.lid_openers,
