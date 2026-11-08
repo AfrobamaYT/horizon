@@ -414,6 +414,9 @@ pub fn before_living_ai_step(m: &mut Mob, w: &MobWorld) {
 #[inline]
 pub fn finish_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     client_tick(m);
+    if m.no_ai {
+        return;
+    }
     let in_water = m.fluids.in_water;
     if in_water || m.ai.target.is_some() || w.thundering {
         set_flag(m, SLEEPING, false);
