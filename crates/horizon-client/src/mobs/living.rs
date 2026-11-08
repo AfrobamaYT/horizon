@@ -195,7 +195,8 @@ impl MobWorld<'_> {
                                 out.lava = out.lava.max(depth);
                                 out.in_lava = true;
                             }
-                            Fluid::None => {}
+                            // A mod's fluid is in neither tag: no entity swims in it.
+                            Fluid::None | Fluid::Modded => {}
                         }
                     }
                 }
@@ -242,7 +243,8 @@ impl MobWorld<'_> {
                     let p = BlockPos::new(x, y, z);
                     let state = self.fluid_tables.fluid(self.world.block(x, y, z));
                     let current = match state.kind() {
-                        FluidKind::Empty => continue,
+                        // A mod's fluid is in neither tag, so it pushes no entity.
+                        FluidKind::Empty | FluidKind::Mod(_) | FluidKind::ModFlowing(_) => continue,
                         FluidKind::Water | FluidKind::FlowingWater => &mut water,
                         FluidKind::Lava | FluidKind::FlowingLava => &mut lava,
                     };
@@ -2115,9 +2117,11 @@ impl RestitutionWorld for MobRestitution<'_, '_, '_> {
     fn bounce_event(&mut self) -> Result<(), ()> {
         Ok(())
     }
-    /// Nothing to mark: the bounce is already the velocity of this tick, and
-    /// the mob tracker sends the position and velocity it reads.
-    fn mark_position_for_sync(&mut self) {}
+    /// `Entity.syncPosition`: the tracker keeps where the mob bounced as a
+    /// step of its next move (`SteppedInterpolationTracker.updateTracking`).
+    fn mark_position_for_sync(&mut self) {
+        self.mob.sync_position = true;
+    }
     fn set_velocity(&mut self, velocity: Vec3) -> Result<(), ()> {
         self.mob.velocity = velocity;
         Ok(())

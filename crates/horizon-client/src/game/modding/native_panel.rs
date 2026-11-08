@@ -517,6 +517,8 @@ impl Game<'_> {
             self.draw_carried(batch);
         } else if let Some(stack) = self.browser_pointed_stack(&layout) {
             self.draw_stack_tooltip(batch, &stack.1, cursor.0, cursor.1);
+        } else if let Some(fluid) = self.recipe_fluid_hovered(&layout) {
+            self.draw_fluid_tooltip(batch, &fluid, cursor.0, cursor.1);
         } else {
             self.draw_slot_tooltip(batch);
         }
@@ -704,7 +706,7 @@ impl Game<'_> {
             }
         };
         Some(BrowserStack {
-            item: stack.item.to_string(),
+            item: mod_api::__private::item_key(&stack.item)?,
             count: stack.count,
             components: super::native_recipes::components(&stack),
         })
@@ -734,7 +736,8 @@ pub(super) fn browser_stack(
     items: &horizon_client::items::Items,
     s: &BrowserStack,
 ) -> Option<ItemStack> {
-    items.get(&s.item)?;
+    let item = mod_api::__private::item_key_id(s.item)?;
+    items.get(item)?;
     let (damage, extra) = if s.components.is_empty() {
         (0, None)
     } else {
@@ -743,7 +746,7 @@ pub(super) fn browser_stack(
         })
     };
     Some(ItemStack {
-        item: s.item.as_str().into(),
+        item: item.into(),
         count: s.count.clamp(1, 99),
         damage,
         extra,
@@ -756,9 +759,26 @@ mod tests {
     use crate::game::native_hooks::{NativeRecipeLayout, NativeRecipeResult, NativeRecipeView};
     use mod_api::FluidStack;
 
+    fn keys() {
+        mod_api::__private::part_tests::install_parts_fixture(&[]).unwrap();
+        mod_api::__private::resolve_items([
+            "minecraft:oak_log",
+            "minecraft:oak_planks",
+            "minecraft:stone",
+            "minecraft:dirt",
+            "minecraft:crafting_table",
+            "recipe_pilot:pressed_fragment",
+        ])
+        .unwrap();
+        mod_api::__private::resolve_fluids(
+            &["minecraft:water", "minecraft:lava"],
+            &horizon_world::fluid::FluidKind::ALL.map(|kind| kind.name()),
+        )
+        .unwrap();
+    }
     fn stack(item: &str) -> BrowserStack {
         BrowserStack {
-            item: item.into(),
+            item: mod_api::__private::item_key(item).unwrap(),
             count: 1,
             components: String::new(),
         }
@@ -767,7 +787,6 @@ mod tests {
         FluidStack::new(mod_api::__private::fluid_key(id).unwrap(), amount)
     }
     fn view() -> NativeRecipeView {
-        mod_api::__private::part_tests::game_thread();
         NativeRecipeView {
             layout: NativeRecipeLayout::Grid,
             width: 5,
@@ -790,6 +809,7 @@ mod tests {
     /// its owner (who hears the panel's events) is that mod.
     #[test]
     fn native_owner_holds_the_panel() {
+        keys();
         let mut panel = Panel::default();
         let items = vec![stack("minecraft:stone"), stack("minecraft:dirt")];
         panel.show_items("recipes", items.clone());
@@ -838,6 +858,7 @@ mod tests {
 
     #[test]
     fn empty_search_can_be_edited_and_an_explicit_clear_still_hides_the_panel() {
+        keys();
         let mut panel = Panel::default();
         let items = vec![stack("recipe_pilot:pressed_fragment")];
         panel.show_items("recipes", items.clone());

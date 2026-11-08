@@ -245,6 +245,7 @@ fn replay(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
         settings.fxaa,
         settings.taa,
         settings.upscale,
+        0.85,
     );
     let mut notes = Vec::new();
     let mut note = |what: &str, result: horizon_client_render::Result<()>| {
@@ -563,7 +564,7 @@ fn remesh(
 ) -> Result<FxHashMap<[i32; 3], SectionMesh>, Box<dyn std::error::Error>> {
     let facts = BlockFacts::load(root, assets.registry)?;
     let visibility = models::load_visibility(root, assets.registry)?;
-    let tables = MeshTables::new(assets, render, &facts, visibility)?;
+    let tables = MeshTables::new(assets, render, &facts, visibility, None)?;
     let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
         root.to_path_buf(),
     ))?;
@@ -666,6 +667,7 @@ fn remesh(
                         blend_radius,
                         smooth_lighting,
                         cutout_leaves,
+                        opaque_ice: false,
                         translucent_layers: &[],
                         leaf_culling,
                         hidden_states: &[],
