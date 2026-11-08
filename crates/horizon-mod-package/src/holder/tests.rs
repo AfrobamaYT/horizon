@@ -57,12 +57,9 @@ impl Scene {
         fs::copy(actor(), &image).unwrap();
         let claims = snapshots
             .iter()
-            .map(|snapshot| {
-                registry
-                    .lock(&snapshot.directory, LockMode::Shared)
-                    .unwrap()
-            })
-            .collect();
+            .map(|snapshot| registry.lock(&snapshot.directory, LockMode::Shared))
+            .collect::<Result<_, _>>()
+            .unwrap();
         let entry = Entry {
             version: crate::local_control::VERSION,
             data,

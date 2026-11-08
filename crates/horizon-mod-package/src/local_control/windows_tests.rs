@@ -133,13 +133,8 @@ fn descriptor_has_exactly_one_allow_ace_for_the_current_token_user() {
             0
         );
         let own = &*storage.as_ptr().cast::<TOKEN_USER>();
-        assert_ne!(
-            EqualSid(
-                (&ace.SidStart as *const u32).cast_mut().cast(),
-                own.User.Sid
-            ),
-            0
-        );
+        let allowed_sid = (&ace.SidStart as *const u32).cast_mut().cast();
+        assert_ne!(EqualSid(allowed_sid, own.User.Sid), 0);
     }
 }
 fn open_remote(marker: &Marker) -> HANDLE {

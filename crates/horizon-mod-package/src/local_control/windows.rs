@@ -105,13 +105,29 @@ impl Stream {
 }
 impl Read for Stream {
     fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
-        self.0.read(bytes).map_err(|error| {
-            if error.raw_os_error() == Some(ERROR_NO_DATA as i32) {
-                io::ErrorKind::WouldBlock.into()
+        let mut count = 0;
+        let ok = unsafe {
+            ReadFile(
+                self.0.as_raw_handle(),
+                bytes.as_mut_ptr(),
+                bytes.len().min(u32::MAX as usize) as u32,
+                &mut count,
+                null_mut(),
+            )
+        };
+        if ok != 0 {
+            return if count == 0 && !bytes.is_empty() {
+                Err(io::ErrorKind::WouldBlock.into())
             } else {
-                error
-            }
-        })
+                Ok(count as usize)
+            };
+        }
+        let error = io::Error::last_os_error();
+        match error.raw_os_error() {
+            Some(code) if code == ERROR_NO_DATA as i32 => Err(io::ErrorKind::WouldBlock.into()),
+            Some(code) if code == ERROR_BROKEN_PIPE as i32 => Ok(0),
+            _ => Err(error),
+        }
     }
 }
 impl Write for Stream {
