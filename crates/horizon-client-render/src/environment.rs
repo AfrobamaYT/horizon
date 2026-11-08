@@ -5,6 +5,7 @@ use crate::Result;
 use horizon_assets::resource_source::ResourceSource;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::{LazyLock, OnceLock, RwLock};
 
 #[derive(Clone, Copy, Debug)]
 enum Easing {
@@ -116,6 +117,7 @@ impl Track {
         std::array::from_fn(|i| from[i] + (to[i] - from[i]) * alpha)
     }
 }
+#[derive(Clone)]
 pub struct Environment {
     period: i64,
     tracks: HashMap<String, Track>,
@@ -145,7 +147,48 @@ pub struct Sky {
     /// `visual/cloud_height`.
     pub cloud_height: f32,
 }
+/// The attributes a mod or a data pack set in the dimension types of the levels it added, by level
+/// id, and the environment each makes over the Overworld's the first time it is asked for.
+type LevelAttributes = HashMap<String, &'static (Value, OnceLock<Environment>)>;
+static LEVELS: LazyLock<RwLock<LevelAttributes>> = LazyLock::new(Default::default);
+
 impl Environment {
+    /// Replaces the levels' own attributes (a dimension type's `attributes` object), at a world's
+    /// load. The table is leaked: one small entry per level and world load.
+    pub fn set_level_attributes(levels: Vec<(String, Value)>) {
+        let table = levels
+            .into_iter()
+            .map(|(id, attributes)| {
+                let entry = Box::leak(Box::new((attributes, OnceLock::new())));
+                (id, &*entry)
+            })
+            .collect();
+        *LEVELS.write().unwrap_or_else(|e| e.into_inner()) = table;
+    }
+    /// `base` with the attributes a level's dimension type set over it, for a level a mod or a
+    /// data pack added; `base` itself for any other.
+    pub fn for_level<'a>(level: &str, base: &'a Environment) -> &'a Environment {
+        let entry = LEVELS
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(level)
+            .copied();
+        match entry {
+            Some((attributes, made)) => made.get_or_init(|| base.with_attributes(attributes)),
+            None => base,
+        }
+    }
+    /// This environment with the attributes in `attributes` (a dimension type's `attributes`
+    /// object) over its own; one that is not a number, colour or boolean is left out.
+    pub fn with_attributes(&self, attributes: &Value) -> Self {
+        let mut out = self.clone();
+        for (k, v) in attributes.as_object().into_iter().flatten() {
+            if let Some(v) = parse_value(v) {
+                out.base.insert(k.clone(), v);
+            }
+        }
+        out
+    }
     pub fn load(root: &ResourceSource) -> Result<Self> {
         Self::load_dimension(root, "overworld", true)
     }
@@ -461,5 +504,54 @@ mod tests {
         assert!(dark(6000, 1.0, 1.0), "thunderstorm at noon");
         assert!(dark(18000, 0.0, 0.0), "clear midnight");
         assert!(!dark(1000, 0.0, 0.0), "clear morning");
+    }
+}
+
+#[cfg(test)]
+mod level_attribute_tests {
+    use super::*;
+
+    fn overworld() -> Environment {
+        Environment {
+            period: 24000,
+            tracks: HashMap::new(),
+            base: HashMap::from([(
+                "minecraft:visual/sky_color".to_owned(),
+                [0.1, 0.2, 0.3, 1.0],
+            )]),
+        }
+    }
+
+    #[test]
+    fn a_levels_attributes_go_over_the_overworlds_one_by_one() {
+        let base = overworld();
+        let own = base.with_attributes(&serde_json::json!({
+            "minecraft:visual/fog_color": "#ff0000",
+            "minecraft:gameplay/water_evaporates": true,
+            "minecraft:visual/not_a_value": {"x": 1},
+        }));
+        assert_eq!(own.base_rgb("minecraft:visual/sky_color"), [0.1, 0.2, 0.3]);
+        assert_eq!(own.base_rgb("minecraft:visual/fog_color"), [1.0, 0.0, 0.0]);
+        assert!(!own.base.contains_key("minecraft:visual/not_a_value"));
+    }
+
+    #[test]
+    fn only_a_registered_level_gets_its_own_environment() {
+        let base = overworld();
+        let id = "test:env_pocket";
+        assert!(std::ptr::eq(Environment::for_level(id, &base), &base));
+        Environment::set_level_attributes(vec![(
+            id.to_owned(),
+            serde_json::json!({"minecraft:visual/sky_color": "#00ff00"}),
+        )]);
+        let own = Environment::for_level(id, &base);
+        assert!(!std::ptr::eq(own, &base));
+        assert_eq!(own.base_rgb("minecraft:visual/sky_color"), [0.0, 1.0, 0.0]);
+        assert!(std::ptr::eq(
+            Environment::for_level("test:other", &base),
+            &base
+        ));
+        Environment::set_level_attributes(Vec::new());
+        assert!(std::ptr::eq(Environment::for_level(id, &base), &base));
     }
 }
