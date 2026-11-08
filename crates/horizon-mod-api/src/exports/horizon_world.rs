@@ -17,7 +17,6 @@ pub use {
         AttachmentCodec, AttachmentError, AttachmentForm, AttachmentPolicy, AttachmentStore,
         AttachmentType, AttachmentValue, AttachmentWrite, Holder,
     },
-    horizon_world::{level::BlockId, registry::BlockStateId},
 };
 // hidden: the game's maps behind the store, not part of the mod surface
 #[doc(hidden)]

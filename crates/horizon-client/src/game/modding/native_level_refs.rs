@@ -9,10 +9,11 @@ use horizon_core::{
     position::{BlockPos, ChunkPos},
 };
 use horizon_items::items::ItemStack;
+use horizon_world::registry::BlockStateId;
 use mod_api::mod_chunk_tickets::ModTicket;
 use mod_api::{
-    BlockHit, BlockStateId, BlockTransformPreview, ChunkRef, ChunkStatus, Hand, LevelRef,
-    LightLayer, NativeTicketOwner, PlayerRef, TicketController, Vec3,
+    BlockHit, BlockTransformPreview, ChunkRef, ChunkStatus, Hand, LevelRef, LightLayer,
+    NativeTicketOwner, PlayerRef, TicketController, Vec3,
 };
 
 fn block_pos([x, y, z]: [i32; 3]) -> BlockPos {
@@ -453,8 +454,13 @@ impl Game<'_> {
                 simulated: true,
             },
         )?;
+        use crate::game::api_values::TryIntoApi;
         Some(BlockTransformPreview::new(
-            state, sound, loot, durability, particle,
+            state.try_into_api().ok()?,
+            sound,
+            loot,
+            durability,
+            particle,
         ))
     }
     /// `FluidState.getFlow` at `pos`: the current that pushes an entity there, after the
@@ -753,7 +759,7 @@ mod tests {
                     .registry
                     .default_state("minecraft:stripped_oak_log")
                     .unwrap();
-                assert_eq!(preview.state, stripped);
+                assert_eq!(preview.state, stripped.try_into_api().unwrap());
                 assert_eq!(preview.durability, 1);
                 assert_eq!(game.world.block(pos[0], pos[1], pos[2]), log);
                 assert_eq!(
@@ -1013,9 +1019,15 @@ mod tests {
             let air = registry.default_state("minecraft:air").unwrap();
             for (pos, expected) in [([0, bottom, 0], stone), ([15, top - 1, 15], stairs)] {
                 game.world.set(pos[0], pos[1], pos[2], expected).unwrap();
-                assert_eq!(level.block_state(game, pos), Some(expected));
+                assert_eq!(
+                    level.block_state(game, pos),
+                    Some(expected.try_into_api().unwrap())
+                );
             }
-            assert_eq!(level.block_state(game, [1, bottom, 1]), Some(air));
+            assert_eq!(
+                level.block_state(game, [1, bottom, 1]),
+                Some(air.try_into_api().unwrap())
+            );
             assert_eq!(level.block_state(game, [16, bottom, 0]), None);
             assert_eq!(level.block_state(game, [0, bottom - 1, 0]), None);
             assert_eq!(level.block_state(game, [0, top, 0]), None);

@@ -137,7 +137,7 @@ impl GameLevel<'_> {
         dimension: LevelDimension,
         pos: BlockPos,
         state: BlockStateId,
-        changed: BlockId,
+        changed: mod_api::BlockKey,
         moved: bool,
     ) {
         self.fire_neighbor_changed(ticks, dimension, pos, state, changed, moved);
@@ -342,7 +342,7 @@ impl GameLevel<'_> {
     pub(in crate::game) fn native_update_shape(
         &self,
         ticks: &mut Ticks,
-        call: mod_api::__private::UpdateShapeCall<'_>,
+        call: super::fire::UpdateShapeCall<'_>,
     ) {
         self.fire_update_shape(ticks, call);
     }

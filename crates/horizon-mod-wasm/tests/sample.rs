@@ -98,15 +98,19 @@ impl mod_api::prelude::KeysBackend for Server {
 impl mod_api::Backend for Server {}
 mod_api::impl_backend_areas!(Server, except(block_states, keys));
 impl mod_api::prelude::BlockStatesHost for Server {
-    fn block_state_default(&self, key: mod_api::BlockKey) -> Option<mod_api::BlockStateId> {
-        // This isolated guest fixture has one loaded block and no game registry.
+    fn block_state_default(&self, key: mod_api::BlockKey) -> Option<mod_api::BlockState> {
+        // This isolated guest fixture has one requested block and no game registry.
+        // 17 and 18 are canned local ordinals, not engine state identifiers.
         (mod_api::__private::block_key_id(key)? == "minecraft:stone")
-            .then_some(mod_api::BlockStateId(17))
+            .then_some(mod_api::BlockStateRecord::new(key, 17).into())
     }
 }
 impl mod_api::prelude::TagsHost for Server {
-    fn state_fluid_state(&self, state: mod_api::BlockStateId) -> Option<mod_api::FluidState> {
-        let engine = if state == mod_api::BlockStateId(17) {
+    fn state_fluid_state(&self, state: mod_api::BlockState) -> Option<mod_api::FluidState> {
+        if mod_api::__private::block_key_id(state.block())? != "minecraft:stone" {
+            return None;
+        }
+        let engine = if state.ordinal() == 17 {
             horizon_world::fluid::FluidState::EMPTY
         } else {
             horizon_world::fluid::FluidState::new(horizon_world::fluid::FluidKind::Water, 8, true)
@@ -223,8 +227,12 @@ fn the_sample_mod_loads_subscribes_and_registers_its_part() {
             .load(std::sync::atomic::Ordering::Acquire)
     );
     let mut server = Server::default();
-    let falling_source =
-        mod_api::prelude::TagsHost::state_fluid_state(&server, mod_api::BlockStateId(18)).unwrap();
+    let stone = mod_api::__private::block_key("minecraft:stone").expect("requested stone key");
+    let falling_source = mod_api::prelude::TagsHost::state_fluid_state(
+        &server,
+        mod_api::BlockStateRecord::new(stone, 18).into(),
+    )
+    .unwrap();
     assert!(falling_source.falling && falling_source.is_source() && !falling_source.is_empty());
     for _ in 0..400 {
         let mut args = mod_points::TickArgs::__new();

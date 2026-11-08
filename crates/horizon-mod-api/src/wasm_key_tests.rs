@@ -42,10 +42,10 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
                 buffers: HashMap::new(),
             };
             use glue::horizon::mod_api::host::Host as Reads;
-            assert_eq!(
-                Reads::block_state_default(&mut state, block.0).unwrap(),
-                Some(19)
-            );
+            let record = Reads::block_state_default(&mut state, block.0)
+                .unwrap()
+                .unwrap();
+            assert_eq!((record.block, record.state), (block.0, 19));
             assert!(
                 Reads::block_state_default(&mut state, block.0 + 1)
                     .unwrap_err()
@@ -104,10 +104,10 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
         }
     }
     impl mod_api::prelude::BlockStatesHost for Table {
-        fn block_state_default(&self, block: BlockKey) -> Option<crate::BlockStateId> {
+        fn block_state_default(&self, block: BlockKey) -> Option<crate::BlockState> {
             assert_eq!(block.0, 0);
             self.0.set(self.0.get() + 1);
-            Some(crate::BlockStateId(19))
+            Some(crate::BlockStateRecord::new(block, 19).into())
         }
     }
     impl Host for Table {

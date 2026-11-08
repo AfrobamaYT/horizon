@@ -612,7 +612,6 @@ fn menu_holds(menu: &Menu, key: (i32, i32, i32)) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::api_values::TryIntoApi;
     use horizon_client::chunk::Chunk;
     use horizon_world::registry::BlockStateId;
     use mod_api::HostTransaction;
@@ -753,12 +752,7 @@ mod tests {
                 for block in ["minecraft:stone", "minecraft:chest"] {
                     let state = host.block_state_id(block).unwrap();
                     assert_eq!(
-                        level.set_block(
-                            host,
-                            [0, 64, 0],
-                            state.try_into_api().unwrap(),
-                            NativeBlockUpdateFlags::NEIGHBORS
-                        ),
+                        level.set_block(host, [0, 64, 0], state, NativeBlockUpdateFlags::NEIGHBORS),
                         Ok(true)
                     );
                 }
@@ -1335,7 +1329,7 @@ mod tests {
         fn write(
             game: &mut Game<'_>,
             pos: [i32; 3],
-            state: BlockStateId,
+            state: mod_api::BlockState,
             flags: NativeBlockUpdateFlags,
         ) -> bool {
             game.with_level(|_, level, ticks| {
@@ -1363,32 +1357,42 @@ mod tests {
             let chest = state("minecraft:chest", None);
             let young = state("minecraft:wheat", Some("0"));
             let grown = state("minecraft:wheat", Some("7"));
+            use crate::game::api_values::TryIntoApi;
+            let api_stone = stone.try_into_api().unwrap();
+            let api_chest = chest.try_into_api().unwrap();
+            let api_young = young.try_into_api().unwrap();
+            let api_grown = grown.try_into_api().unwrap();
             let flags = NativeBlockUpdateFlags::NEIGHBORS | NativeBlockUpdateFlags::KNOWN_SHAPE;
             let key = (0, 64, 0);
 
-            assert!(write(game, [0, 64, 0], stone, flags));
+            assert!(write(game, [0, 64, 0], api_stone, flags));
             assert!(game.world.block_entities.get(&key).is_none());
-            assert!(write(game, [0, 64, 0], chest, flags));
+            assert!(write(game, [0, 64, 0], api_chest, flags));
             assert!(matches!(
                 game.world.block_entities.get(&key),
                 Some(BlockEntity::Chest(_))
             ));
-            assert!(write(game, [0, 64, 0], stone, flags));
+            assert!(write(game, [0, 64, 0], api_stone, flags));
             assert_eq!(game.world.block(0, 64, 0), stone);
             assert!(game.world.block_entities.get(&key).is_none());
 
             // A crop's whole-state growth: no block entity, and a repeat changes nothing.
-            assert!(write(game, [0, 64, 0], young, flags));
-            assert!(write(game, [0, 64, 0], grown, flags));
+            assert!(write(game, [0, 64, 0], api_young, flags));
+            assert!(write(game, [0, 64, 0], api_grown, flags));
             assert_eq!(game.world.block(0, 64, 0), grown);
             assert!(game.world.block_entities.get(&key).is_none());
-            assert!(!write(game, [0, 64, 0], grown, flags));
+            assert!(!write(game, [0, 64, 0], api_grown, flags));
 
             // Unloaded, outside the build height and invalid: refused, nothing loaded.
             let chunks = game.world.chunks.len();
-            assert!(!write(game, [16, 64, 0], stone, flags));
-            assert!(!write(game, [0, 10000, 0], stone, flags));
-            assert!(!write(game, [0, 64, 0], BlockStateId(u32::MAX), flags));
+            assert!(!write(game, [16, 64, 0], api_stone, flags));
+            assert!(!write(game, [0, 10000, 0], api_stone, flags));
+            assert!(!write(
+                game,
+                [0, 64, 0],
+                mod_api::BlockStateRecord::new(api_stone.block(), u16::MAX).into(),
+                flags
+            ));
             assert_eq!(game.world.chunks.len(), chunks);
             assert_eq!(game.world.block(0, 64, 0), grown);
 
@@ -1401,7 +1405,7 @@ mod tests {
 
             // A client's copy of the level is not the server's.
             game.options.dedicated = None;
-            assert!(!write(game, [0, 64, 0], stone, flags));
+            assert!(!write(game, [0, 64, 0], api_stone, flags));
             assert_eq!(game.world.block(0, 64, 0), grown);
         });
     }

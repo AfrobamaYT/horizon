@@ -205,11 +205,11 @@ pub trait Hooks {
     fn update_shape(
         dimension: LevelDimension,
         pos: BlockPos,
-        state: BlockStateId,
+        state: BlockState,
         direction: Direction,
         neighbour_pos: BlockPos,
-        neighbour: BlockStateId,
-        new: &mut Option<BlockStateId>,
+        neighbour: BlockState,
+        new: &mut Option<BlockState>,
     );
     /// A command the local player typed or clicked in chat, without its
     /// slash, before the server and Horizon's commands see it: set `ran`

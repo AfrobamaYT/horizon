@@ -22,8 +22,8 @@ pub trait Hooks {
         entity: Option<u32>,
         kind: &str,
         pos: [i32; 3],
-        from: BlockStateId,
-        to: BlockStateId,
+        from: BlockState,
+        to: BlockState,
         cancel: &mut bool,
     );
 }

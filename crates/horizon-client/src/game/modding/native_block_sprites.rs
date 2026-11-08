@@ -16,7 +16,7 @@ impl Game<'_> {
     /// 380.
     pub(super) fn block_sprites(
         &self,
-        blocks: &[mod_api::BlockStateId],
+        blocks: &[horizon_world::registry::BlockStateId],
     ) -> Vec<Option<BlockSprites>> {
         let lookup = self.native_sprite_lookup();
         blocks

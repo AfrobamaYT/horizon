@@ -1028,19 +1028,20 @@ pub mod tests {
         fn block_state(&self, _: [i32; 3]) -> Option<crate::BlockState> {
             None
         }
-        fn state_with_property(&self, _: BlockStateId, _: &str, _: &str) -> Option<BlockStateId> {
+        fn state_with_property(&self, _: BlockState, _: &str, _: &str) -> Option<BlockState> {
             None
         }
-        fn state_block(&self, state: BlockStateId) -> Option<&str> {
-            [
-                "minecraft:air",
-                "test:gauge",
-                "test:other",
-                "test:connector",
-                "test:press",
-            ]
-            .get(state.0 as usize)
-            .copied()
+        fn state_block(&self, state: BlockState) -> Option<&str> {
+            let metadata = crate::__private::block_definitions()?;
+            let slot = state.block().0 as usize;
+            if u32::from(state.ordinal()) >= metadata.definitions.get(slot)?.state_count() {
+                return None;
+            }
+            metadata
+                .names
+                .entries
+                .get(slot)
+                .map(|entry| entry.id.as_str())
         }
     }
 

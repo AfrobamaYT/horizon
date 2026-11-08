@@ -557,6 +557,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn cauldron_stat_listener_observes_committed_state_and_can_cancel() {
         use super::super::native_entity_refs::tests::run_fresh_cases;
+        use crate::game::api_values::TryIntoApi;
         use mod_api::{
             Flow, Hooks, ItemSpawnEvent, ItemTossEvent, ModEntry, Mods, PlayerStatAwardEvent,
         };
@@ -569,8 +570,8 @@ mod tests {
             return;
         }
         struct Listener {
-            seen: Arc<Mutex<Vec<(Option<mod_api::BlockStateId>, Option<String>)>>>,
-            drops: Arc<Mutex<Vec<(&'static str, Option<mod_api::BlockStateId>)>>>,
+            seen: Arc<Mutex<Vec<(Option<mod_api::BlockState>, Option<String>)>>>,
+            drops: Arc<Mutex<Vec<(&'static str, Option<mod_api::BlockState>)>>>,
         }
         #[mod_api::__subscriptions]
         impl Hooks for Listener {
@@ -661,7 +662,10 @@ mod tests {
                 assert!(game.use_on_cauldron(pos).unwrap());
                 assert_eq!(
                     seen.lock().unwrap().as_slice(),
-                    &[(Some(empty), Some("minecraft:bucket".into()))]
+                    &[(
+                        Some(empty.try_into_api().unwrap()),
+                        Some("minecraft:bucket".into())
+                    )]
                 );
                 game.world.set(pos[0], pos[1], pos[2], empty).unwrap();
                 game.inventory[0] = Some(ItemStack::new("minecraft:water_bucket", 1));
@@ -674,8 +678,14 @@ mod tests {
             assert_eq!(
                 *seen.lock().unwrap(),
                 vec![
-                    (Some(empty), Some("minecraft:bucket".into())),
-                    (Some(full), Some("minecraft:bucket".into()))
+                    (
+                        Some(empty.try_into_api().unwrap()),
+                        Some("minecraft:bucket".into())
+                    ),
+                    (
+                        Some(full.try_into_api().unwrap()),
+                        Some("minecraft:bucket".into())
+                    )
                 ]
             );
             let level2 = game
@@ -700,7 +710,10 @@ mod tests {
                 assert!(game.use_on_cauldron(pos).unwrap());
                 assert_eq!(
                     drops.lock().unwrap().as_slice(),
-                    &[("toss", Some(full)), ("spawn", Some(full))]
+                    &[
+                        ("toss", Some(full.try_into_api().unwrap())),
+                        ("spawn", Some(full.try_into_api().unwrap()))
+                    ]
                 );
                 drops.lock().unwrap().clear();
                 setup(game);
@@ -714,7 +727,10 @@ mod tests {
                 game.close_storage_transaction(true);
                 assert_eq!(
                     drops.lock().unwrap().as_slice(),
-                    &[("toss", Some(level2)), ("spawn", Some(level2))]
+                    &[
+                        ("toss", Some(level2.try_into_api().unwrap())),
+                        ("spawn", Some(level2.try_into_api().unwrap()))
+                    ]
                 );
             })
             .unwrap();
