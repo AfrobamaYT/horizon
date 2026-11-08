@@ -462,25 +462,31 @@ fn reserved(key: &str) -> bool {
     ]
     .contains(&key)
 }
-fn event_reserved(key: &str) -> bool {
-    [
-        "action",
-        "url",
-        "page",
-        "command",
-        "value",
-        "contents",
-        "dialog",
-        "id",
-        "payload",
-        "path",
-        "count",
-        "components",
-        "uuid",
-        "name",
-        "text",
-    ]
-    .contains(&key)
+fn click_kind(click: &TextClick) -> &'static str {
+    match click {
+        TextClick::OpenUrl(_) => "open_url",
+        TextClick::ChangePage(_) => "change_page",
+        TextClick::SuggestCommand(_) => "suggest_command",
+        TextClick::RunCommand(_) => "run_command",
+        TextClick::CopyToClipboard(_) => "copy_to_clipboard",
+        TextClick::ShowDialog(_) => "show_dialog",
+        TextClick::Custom { .. } => "custom",
+    }
+}
+fn event_reserved(kind: &str, key: &str) -> bool {
+    key == "action"
+        || match kind {
+            "open_url" => ["url", "value"].contains(&key),
+            "change_page" => ["page", "value"].contains(&key),
+            "suggest_command" | "run_command" => ["command", "value"].contains(&key),
+            "copy_to_clipboard" => key == "value",
+            "show_dialog" => key == "dialog",
+            "custom" => ["id", "payload"].contains(&key),
+            "show_text" => ["value", "contents", "text"].contains(&key),
+            "show_item" => ["id", "count", "components"].contains(&key),
+            "show_entity" => ["id", "uuid", "name"].contains(&key),
+            _ => false,
+        }
 }
 fn profile(value: &Value) -> Result<TextProfile, Error> {
     fn name(value: &str) -> Result<String, Error> {
@@ -682,12 +688,25 @@ fn captured_style(node: &Node<'_>) -> Result<TextStyle, Error> {
     let Tag::Compound(extra) = &mut style.metadata else {
         unreachable!()
     };
-    for (key, fields) in [("click_event", click_fields), ("hover_event", hover_fields)] {
+    let hover_kind = match &node.hover {
+        Some(Hover::Text(_)) => "show_text",
+        Some(Hover::Item { .. }) => "show_item",
+        Some(Hover::Entity { .. }) => "show_entity",
+        None => "",
+    };
+    for (key, fields, kind) in [
+        (
+            "click_event",
+            click_fields,
+            style.click.as_ref().map(click_kind).unwrap_or(""),
+        ),
+        ("hover_event", hover_fields, hover_kind),
+    ] {
         if let Some(fields) = fields {
             let tag = metadata(
                 fields
                     .iter()
-                    .filter(|(k, _)| !event_reserved(k))
+                    .filter(|(k, _)| !event_reserved(kind, k))
                     .map(|(k, v)| (k.as_str(), v)),
                 1,
             )?;
@@ -1069,14 +1088,8 @@ fn emitted_style<'a>(
     take: &mut impl FnMut(&'a Text) -> Value,
 ) -> Map<String, Value> {
     let mut metadata = payloads.object(&style.metadata);
-    let click = filter_metadata(
-        object_or_empty(metadata.remove("click_event")),
-        event_reserved,
-    );
-    let hover = filter_metadata(
-        object_or_empty(metadata.remove("hover_event")),
-        event_reserved,
-    );
+    let click = object_or_empty(metadata.remove("click_event"));
+    let hover = object_or_empty(metadata.remove("hover_event"));
     let mut out = filter_metadata(metadata, reserved);
     for (key, value) in [
         ("color", style.color.clone().map(Value::String)),
@@ -1097,7 +1110,8 @@ fn emitted_style<'a>(
         }
     }
     if let Some(value) = &style.click {
-        let mut fields = click;
+        let kind = click_kind(value);
+        let mut fields = filter_metadata(click, |key| event_reserved(kind, key));
         fields.extend(match value {
             TextClick::OpenUrl(v) => action("open_url", "url", v.clone().into()),
             TextClick::ChangePage(v) => action("change_page", "page", (*v).into()),
@@ -1118,7 +1132,12 @@ fn emitted_style<'a>(
         component::discard_component(Value::Object(click));
     }
     if let Some(value) = &style.hover {
-        let mut fields = hover;
+        let kind = match value {
+            TextHover::Text(_) => "show_text",
+            TextHover::Item { .. } => "show_item",
+            TextHover::Entity { .. } => "show_entity",
+        };
+        let mut fields = filter_metadata(hover, |key| event_reserved(kind, key));
         match value {
             TextHover::Text(text) => {
                 fields.insert("action".into(), "show_text".into());

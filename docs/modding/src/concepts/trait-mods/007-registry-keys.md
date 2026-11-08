@@ -192,20 +192,40 @@ The `text` module defines owned component data: literal and translatable content
 style overrides, ordered children, selector and NBT sources, inline objects, and click
 and hover actions. Translation keys and argument components stay unresolved until the
 game displays them. `None` style fields inherit; `Some(false)` overrides an inherited
-decoration. Arbitrary profile and component-patch JSON remains data, never engine state.
+decoration. Metadata, dialog/custom click payloads and hover-item component patches are
+owned `Tag` data, never JSON strings or engine state. `TextProfile` carries an optional
+name and UUID, signed property records and opaque unknown profile/property fields.
+Signed record order and unsigned values within each property name are preserved.
+Player names use U+0021..U+007E and at most 16 characters. Vanilla's unsigned
+property-map form allows at most 16 distinct names; signed or metadata-bearing
+records use a 16-entry list, with UTF-16 limits of 64, 32767 and 1024 units for
+property name, value and signature respectively.
 Inline player and atlas objects use `Option<Box<Text>>` for their fallback: `None`
 keeps the engine-computed default; `Some` preserves a styled or translatable component
 rather than flattening it to a string.
 
-`TextForm` crosses the generated wasm boundary as a flat node table. Conversion
-is iterative, refuses component depth above 512 and rejects malformed tables. Each
-node's JSON metadata is still limited to 100 nested containers pending the typed-node
-replacement. Component and style metadata remain intact. The game boundary also uses
-this flat form and validates component depth before cloning payloads or applying writes.
+`TextForm` crosses the generated wasm boundary as a typed, shallow node table:
+`TextNodeContent` selects the content kind, `TextNodeStyle` contains overrides, and
+`TextNodeHover` identifies the hover kind without embedding child components.
+Parent/relation rows carry all children, arguments, separators, fallbacks and hover
+names/text. Conversion is iterative, accepts depth 512 and rejects malformed tables,
+duplicate singleton edges and missing hover-text children. Opaque NBT fields follow
+the 512-container rule above; there is no separate 100-container JSON restriction.
+Unknown fields are retained under the shared NbtOps normalization rules, while typed
+fields remain authoritative and cannot promote untrusted file actions.
+
+The native boundary plans borrowed source topology before cloning payloads. It reads
+source-less spans directly and validates every Tag's JSON representation before building
+an engine component. `Text::validate()` checks tree/payload bounds and profile fields
+without cloning; `validate_depth()` is the component-only preflight. NaN/infinity and
+unpaired UTF-16 remain legal Tag data but cause typed `NonFinite` or `InvalidString`
+refusals when engine emission requires JSON. Nested JSON null is refused as `NestedNull`
+when capturing opaque NBT fields; it is never silently replaced.
 Host methods accepting or returning Text return `Result<_, TextFormError>`; mixed
 item/Text writes preserve the refusal in `StackWriteError::Text`, and unspawned-mob
-reads use `UnspawnedMobError::Text`. `TooDeep` means a component exceeds 512 nodes
-along a recursive path. Unavailable backends are distinct from over-depth text.
+reads use `UnspawnedMobError::Text`. `TooDeep` means a component path or opaque NBT
+container path exceeds 512. Unavailable backends are distinct from invalid text or
+unrepresentable payloads.
 A refused hook capture does not dispatch; a refused writeback leaves every field unchanged.
 No subscriber means no conversion or snapshot allocation.
 

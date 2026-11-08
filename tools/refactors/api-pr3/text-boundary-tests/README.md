@@ -11,9 +11,11 @@ cargo test --manifest-path tools/refactors/api-pr3/text-boundary-tests/Cargo.tom
 The 256 KiB tests use the real conversion traits, including final engine span construction. They cover
 512-node round trips and typed `TextFormError::TooDeep` refusals at 513 through children, translation
 arguments, selector and NBT separators, atlas and player fallbacks, hover text and hover entity names.
-An empty parent with a deep entity-hover name covers disposal of unused styles. Span-only hover
-sources are validated before their iterative materialization. A separate test puts 4,096-container
-opaque metadata beside an over-depth component to prove refusal precedes metadata cloning.
+An empty parent with a deep entity-hover name covers disposal of unused styles. Source-less spans
+are captured directly, preserving opaque native Tags without a JSON materialization step. A separate
+test puts 4,096-container opaque metadata beside an over-depth component to prove component refusal
+precedes metadata cloning. The typed-payload tests additionally cover late capture cleanup,
+representation refusals across eight payload locations, and source-less mixed Tags at 512 and 513.
 Comparisons use flat `TextForm` values; recursive trees are deliberately forgotten on the small stack.
 
 The core component tests additionally cover callback order and lazy content selection, hover resolver
@@ -27,10 +29,30 @@ host methods return `Result<_, TextFormError>`; existing mixed error channels re
 A wasm Text form refusal remains typed through guest lowering and host lifting; unrelated malformed
 transport values remain transport refusals.
 
-The per-node shallow JSON carrier and its 100-container restriction remain pending the typed-node
-replacement. Component-depth preflight runs before payload cloning, and production conversion uses
-`TextForm` as its crossing representation. Dynamic content, styles, metadata, object fallback and the
-untrusted file-action policy have focused fidelity tests in this probe.
+## Typed nodes and opaque data
+
+`TextForm` contains shallow `TextNodeContent`, `TextNodeStyle` and `TextNodeHover` records, not JSON
+strings. All component recursion is represented by parent/relation rows. A Text hover marker requires
+one hover-text child; singleton separators, fallbacks and entity names reject duplicates. The public
+Text API has no JSON carriers and no 100-container gap. Metadata, dialog/custom payloads and hover
+item component data use `Tag`; profiles use `TextProfile` and ordered signed properties with opaque
+unknown fields.
+
+Native capture first plans the entire borrowed component topology. Native emission validates the API
+tree without cloning it, then creates borrowed JSON-representation proofs for every opaque payload
+before constructing any JSON. Only the engine-side codec uses JSON, through the shared core converter.
+`NonFinite` and `InvalidString` remain typed refusals, never null or replacement-character clamps.
+Dynamic contents, styles, metadata, object fallback and the untrusted file-action policy have focused
+fidelity tests. Event metadata is filtered by the actual action, not by fields belonging to other kinds.
+
+### Existing component-model Tag wire limit
+
+Native Tags retain the semantic 512-container bound. The existing wasm Tag byte codec can refuse a
+mixed-type list near that bound: network NBT inserts synthetic compounds which consume additional
+encoded nesting. A 512-list payload ending in `[Byte(1), Short(128)]` demonstrates this distinction.
+This is a known wasm-only wire limit, not a reason to tighten native Text. No new carrier or separate
+encoded-wire budget is installed here; the replacement derived `Wire` path in #1909 handles it without
+synthetic wrappers. The current boundary must return a typed refusal rather than panic or trap.
 
 ## Ownership versus crossing safety
 

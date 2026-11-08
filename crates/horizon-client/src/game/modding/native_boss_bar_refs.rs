@@ -514,6 +514,41 @@ mod tests {
             ));
             assert_eq!(game.boss_bars(), before);
             assert_eq!(bar.name(game).unwrap().unwrap(), name);
+
+            use mod_api::{Tag, text::TextFormError};
+            let bad_key =
+                Tag::Compound([(horizon_core::nbt::JavaString(vec![0xd800]), Tag::Byte(1))].into());
+            for (index, (data, expected)) in [
+                (Tag::Float(f32::NAN.to_bits()), TextFormError::NonFinite),
+                (
+                    Tag::Double(f64::INFINITY.to_bits()),
+                    TextFormError::NonFinite,
+                ),
+                (
+                    Tag::String(horizon_core::nbt::JavaString(vec![0xd800])),
+                    TextFormError::InvalidString,
+                ),
+                (bad_key, TextFormError::InvalidString),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let bad_text = || {
+                    let mut text = mod_api::Text::literal("Unwritten");
+                    text.metadata = Tag::compound([("test:bad", data.clone())]);
+                    text
+                };
+                let id = format!("mod:refused_opaque_{index}");
+                assert_eq!(
+                    mod_api::prelude::BossBarsServerHost::create_boss_bar(game, &id, bad_text())
+                        .err(),
+                    Some(expected.clone())
+                );
+                assert!(game.boss_bar(&id).is_none());
+                assert_eq!(bar.set_name(game, bad_text()).err(), Some(expected));
+                assert_eq!(game.boss_bars(), before);
+                assert_eq!(bar.name(game).unwrap().unwrap(), name);
+            }
         });
     }
 

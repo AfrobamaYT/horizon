@@ -239,11 +239,11 @@ impl Text {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct TextProfile {
-    /// Printable ASCII player name, at most 16 characters (ExtraCodecs.PLAYER_NAME).
+    /// Player name in U+0021..U+007E, at most 16 characters (ExtraCodecs.PLAYER_NAME).
     pub name: Option<String>,
     /// UUID as high and low halves.
     pub id: Option<[u64; 2]>,
-    /// Ordered profile properties; unsigned values can use vanilla's map codec.
+    /// Ordered signed records; unsigned map values retain their order within each name.
     pub properties: Vec<TextProfileProperty>,
     /// Unknown profile fields, as a compound.
     pub metadata: Tag,
@@ -1188,6 +1188,62 @@ mod tests {
     }
     fn nested_tag(depth: usize) -> Tag {
         (0..depth).fold(Tag::Byte(7), |t, _| Tag::List(vec![t]))
+    }
+    #[test]
+    fn every_opaque_slot_obeys_the_512_container_boundary() {
+        for depth in [512, 513] {
+            for slot in 0..7 {
+                let mut text = Text::literal("root");
+                let metadata = || Tag::compound([("test:deep", nested_tag(depth - 1))]);
+                match slot {
+                    0 => text.metadata = metadata(),
+                    1 => text.style.metadata = metadata(),
+                    2 | 3 => {
+                        let mut profile = named("Test");
+                        if slot == 2 {
+                            profile.metadata = metadata();
+                        } else {
+                            let mut property = TextProfileProperty::default();
+                            property.name = "textures".into();
+                            property.value = "value".into();
+                            property.metadata = metadata();
+                            profile.properties.push(property);
+                        }
+                        text.content = TextContent::Object(TextObject::Player {
+                            profile,
+                            hat: true,
+                            fallback: None,
+                        });
+                    }
+                    4 => {
+                        text.style.click = Some(TextClick::Custom {
+                            id: "test:x".into(),
+                            payload: Some(nested_tag(depth)),
+                        })
+                    }
+                    5 => text.style.click = Some(TextClick::ShowDialog(nested_tag(depth))),
+                    _ => {
+                        text.style.hover = Some(TextHover::Item {
+                            id: "minecraft:stone".into(),
+                            count: 1,
+                            components: Some(nested_tag(depth)),
+                        })
+                    }
+                }
+                let form = TextForm::try_from(&text);
+                if depth == 512 {
+                    assert_eq!(Text::try_from(form.unwrap()).unwrap(), text, "slot {slot}");
+                } else {
+                    assert_eq!(form, Err(TextFormError::TooDeep), "slot {slot}");
+                }
+            }
+        }
+        let mut row = TextNode::new(TextNodeContent::Literal("root".into()));
+        row.metadata = Tag::compound([("test:deep", nested_tag(512))]);
+        assert_eq!(
+            Text::try_from(TextForm { nodes: vec![row] }),
+            Err(TextFormError::TooDeep)
+        );
     }
     #[test]
     fn mixed_component_and_tag_depths_have_no_100_container_gap() {
