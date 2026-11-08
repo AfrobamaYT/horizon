@@ -2288,6 +2288,9 @@ struct Game<'a> {
     /// This world's frozen damage definitions and reloadable tag snapshot.
     pub(super) health_resources: horizon_client::health::HealthResources,
     damage_tag_generation: u64,
+    /// The registries native mods registered data map types for, as of the
+    /// server tables' last build: what `data_maps_updated` fires for.
+    data_map_registries: Vec<&'static str>,
     /// This game's resource packs (`reload_packs` replaces them).
     pack: PackResources,
     /// The title and menu bundle (GUI atlas, font and panorama).
@@ -11246,6 +11249,7 @@ impl Game<'_> {
             self.read_raids();
         }
         self.native_tags_updated(mod_api::TagsUpdateCause::ServerDataLoad { reload: false });
+        self.announce_data_maps_updated(mod_api::DataMapsUpdateCause::ServerReload);
         self.sync_recipe_content();
         reset_world_progress(&mut self.adv, &mut self.stats);
         self.prefetch_advancement_tree(&stack);
@@ -15606,6 +15610,7 @@ impl<'a> Game<'a> {
             motion: res.motion(),
             health_resources: res.motion().health.clone(),
             damage_tag_generation: 1,
+            data_map_registries: Vec::new(),
             pack,
             gui,
             instance_groups: Default::default(),

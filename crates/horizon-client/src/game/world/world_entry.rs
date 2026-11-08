@@ -239,6 +239,7 @@ impl Game<'_> {
         };
         let mut data_map_types = Vec::new();
         self.native_data_map_types(&mut data_map_types);
+        self.data_map_registries = native_data_maps::registries_of(&data_map_types);
         let base = if reload {
             &self.health_resources
         } else {
@@ -385,6 +386,7 @@ impl Game<'_> {
         ));
         self.adv.reset_tree();
         self.native_tags_updated(mod_api::TagsUpdateCause::ServerDataLoad { reload: true });
+        self.announce_data_maps_updated(mod_api::DataMapsUpdateCause::ServerReload);
     }
 
     pub(super) fn join_world_rest(&mut self) -> Result<()> {
