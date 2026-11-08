@@ -99,7 +99,9 @@ impl mod_api::Backend for Server {}
 mod_api::impl_backend_areas!(Server, except(block_states, keys));
 impl mod_api::prelude::BlockStatesHost for Server {
     fn block_state_default(&self, key: mod_api::BlockKey) -> Option<mod_api::BlockStateId> {
-        Some(mod_api::__private::resolved_block(key)?.default)
+        // This isolated guest fixture has one loaded block and no game registry.
+        (mod_api::__private::block_key_id(key)? == "minecraft:stone")
+            .then_some(mod_api::BlockStateId(17))
     }
 }
 impl mod_api::prelude::TagsHost for Server {
@@ -209,15 +211,6 @@ fn the_sample_mod_loads_subscribes_and_registers_its_part() {
         },
     );
     assert_eq!(table, mod_api::serde_json::json!({"fluid_guest_ok": true}));
-    mod_api::__private::resolve_blocks(|id| {
-        assert_eq!(id, "minecraft:stone");
-        Some(mod_api::__private::ResolvedBlock {
-            default: mod_api::BlockStateId(17),
-            states: horizon_world::registry::BlockStateRange::new(mod_api::BlockStateId(17), 1),
-            block: horizon_world::level::states::BlockId(1),
-        })
-    })
-    .unwrap();
     assert!(mod_api::__private::has_part_hook(mod_api::HookId::UseItem));
 
     // Its mod.wasm fills the tick point: every 200 server ticks it says so in chat.

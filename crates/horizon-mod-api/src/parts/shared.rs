@@ -105,8 +105,7 @@ pub struct Parts {
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct HookParts {
     pub(crate) blocks: HashMap<Box<str>, Vec<Attached<dyn BlockPart>>>,
-    pub(crate) block_states: Vec<Option<NonZeroU32>>,
-    pub(crate) block_slices: Vec<Arc<[Attached<dyn BlockPart>]>>,
+    pub(crate) block_keys: HashMap<crate::BlockKey, Vec<Attached<dyn BlockPart>>>,
     pub(crate) block_entities: HashMap<Box<str>, Vec<Attached<dyn BlockEntityPart>>>,
     pub(crate) block_entity_kinds: HashMap<Box<str>, Vec<Attached<dyn BlockEntityPart>>>,
     pub(crate) items: HashMap<Box<str>, Vec<Attached<dyn ItemPart>>>,
@@ -301,7 +300,7 @@ pub fn mark_game_thread() {
 pub enum ResolvePartsError {
     /// An item key names no loaded item.
     ItemKeys(Vec<ItemKeyError>),
-    /// Legacy block or item Part registration refusals.
+    /// Block or item Part resolution refusals, including unavailable block metadata.
     Parts(Vec<String>),
 }
 
@@ -312,10 +311,6 @@ pub struct KnownIds<'a> {
     pub block: &'a dyn Fn(&str) -> bool,
     /// Whether an item id is known.
     pub item: &'a dyn Fn(&str) -> bool,
-    /// How many block states the game has.
-    pub state_count: usize,
-    /// The block id of a block state, by state index.
-    pub state_block: &'a dyn Fn(usize) -> &'a str,
 }
 
 /// Resolve this thread's game's parts against its tags (`block_tags`, `item_tags`: flattened,
@@ -359,17 +354,19 @@ pub fn prepare_parts(
         if table.blocks.is_empty() {
             continue;
         }
-        let mut names = HashMap::with_capacity(table.blocks.len());
-        for (name, attached) in &table.blocks {
-            names.insert(
-                name.as_ref(),
-                NonZeroU32::new(table.block_slices.len() as u32 + 1).unwrap(),
-            );
-            table.block_slices.push(Arc::from(attached.clone()));
-        }
-        table.block_states = (0..known.state_count)
-            .map(|state| names.get((known.state_block)(state)).copied())
-            .collect();
+        table.block_keys = table
+            .blocks
+            .iter()
+            .map(|(name, attached)| {
+                crate::registry_keys::block_key(name)
+                    .map(|key| (key, attached.clone()))
+                    .ok_or_else(|| {
+                        ResolvePartsError::Parts(vec![format!(
+                            "block metadata unavailable for {name}"
+                        )])
+                    })
+            })
+            .collect::<Result<_, _>>()?;
     }
     Ok(Some(parts))
 }
@@ -846,7 +843,8 @@ pub mod tests {
         )
         .unwrap();
         assert_eq!(
-            crate::registry_keys::resolve_blocks(|_| None).unwrap_err(),
+            crate::registry_keys::resolve_block_keys(std::iter::empty(), |_| unreachable!())
+                .unwrap_err(),
             ["mod lookup requested unknown block absent:block"]
         );
         assert_eq!(
@@ -1027,16 +1025,22 @@ pub mod tests {
     pub(crate) struct Level;
     #[cfg(test)]
     impl LevelHost for Level {
-        fn block_state(&self, _: [i32; 3]) -> BlockStateId {
-            unimplemented!()
+        fn block_state(&self, _: [i32; 3]) -> Option<crate::BlockState> {
+            None
         }
         fn state_with_property(&self, _: BlockStateId, _: &str, _: &str) -> Option<BlockStateId> {
             None
         }
         fn state_block(&self, state: BlockStateId) -> Option<&str> {
-            ["test:gauge", "test:other"]
-                .get(state.0 as usize - 1)
-                .copied()
+            [
+                "minecraft:air",
+                "test:gauge",
+                "test:other",
+                "test:connector",
+                "test:press",
+            ]
+            .get(state.0 as usize)
+            .copied()
         }
     }
 
@@ -1082,6 +1086,24 @@ pub mod tests {
             "minecraft:flowing_lava",
             "minecraft:empty",
         ])
+        .unwrap();
+        crate::registry_keys::resolve_block_keys(
+            [
+                "minecraft:air",
+                "minecraft:granite",
+                "test:gauge",
+                "test:other",
+                "test:connector",
+                "test:press",
+            ],
+            |_| {
+                horizon_mod_runtime::block_definitions::BlockDefinition::new(
+                    &[&Default::default()],
+                    0,
+                )
+                .map_err(|e| format!("{e:?}"))
+            },
+        )
         .unwrap();
         mark_game_thread();
         mods

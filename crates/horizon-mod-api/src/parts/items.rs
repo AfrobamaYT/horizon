@@ -237,8 +237,6 @@ pub mod tests {
                 KnownIds {
                     block: &|_| false,
                     item: known,
-                    state_count: 0,
-                    state_block: &|_| unreachable!(),
                 },
             )
         };

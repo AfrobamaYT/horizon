@@ -4437,9 +4437,12 @@ host_attachment_store!(
 /// }
 /// ```
 pub trait LevelHost {
-    /// Read a block through `LevelAccess::block_state`.
-    fn block_state(&self, _pos: [i32; 3]) -> BlockStateId {
-        unimplemented!("LevelHost::block_state")
+    /// Read an owned block state through the level's engine read.
+    /// Out-of-height or unloaded engine reads retain vanilla's air as `Some(air)`.
+    /// Returns `None` when the owning state index is unavailable or refuses the state;
+    /// this never substitutes an air state for a failed conversion.
+    fn block_state(&self, _pos: [i32; 3]) -> Option<BlockState> {
+        None
     }
     /// The block `state` is a state of (`BlockState.getBlock()`): `mymod:shaft`. None for an
     /// unknown state.
@@ -4778,7 +4781,9 @@ mod tests {
         impl LevelTicksHost for Empty {}
         impl LevelWriteHost for Empty {}
 
-        let _: &dyn LevelHost = &Empty;
+        let level: &dyn LevelHost = &Empty;
+        assert_eq!(level.block_state([0, 64, 0]), None);
+        assert_eq!(level.block_state([0, i32::MIN, 0]), None);
         let _: &mut dyn LevelRandomHost = &mut Empty;
         let _: &mut dyn LevelTicksHost = &mut Empty;
         let _: &mut dyn LevelWriteHost = &mut Empty;

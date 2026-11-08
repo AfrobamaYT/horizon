@@ -500,6 +500,7 @@ fn boundary_arguments(
         })
         .collect::<Vec<_>>();
     let checked_write = mutable
+        && result_error(&sig.output).is_some()
         && typed
             .iter()
             .any(|arg| boundary_value(&arg.ty) && !contains_value(&arg.ty, &["ParticleOptions"]));
@@ -923,6 +924,10 @@ impl Impls {
             .collect()
     }
 }
+
+#[cfg(test)]
+#[path = "host/state_write_tests.rs"]
+mod state_write_tests;
 
 #[cfg(test)]
 mod tests {

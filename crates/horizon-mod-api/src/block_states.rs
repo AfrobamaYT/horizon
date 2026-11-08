@@ -1,8 +1,8 @@
-//! Facts about block states that need no world (`host.block_states()`): a `BlockStateId` is a
-//! registry value, not a live object, so these are a read-only service reached from the host
-//! rather than handle methods. Both sides read the game's tables; definitions are copied out.
+//! Immutable block metadata and registry facts (`host.block_states()`).
+//! Queries consume owned API block states, never world numeric IDs. Both sides read the
+//! game's published tables; definitions are copied out and property values are borrowed.
 use super::{
-    Backend, BackendRef, BlockKey, BlockMetadata, BlockSoundType, BlockStateError, BlockStateId,
+    Backend, BackendRef, BlockKey, BlockMetadata, BlockSoundType, BlockState, BlockStateError,
     BlockStateRange, BlockStateRecord, Host,
 };
 
@@ -112,21 +112,21 @@ impl BlockMetadata for BlockStates<'_> {
 impl BlockStates<'_> {
     /// `BlockState.canBeReplaced()`: whether placing a block where `state` stands replaces it
     /// (air, grass, water, snow layers). None for an unknown state, or a host without a game.
-    pub fn replaceable(&self, state: BlockStateId) -> Option<bool> {
+    pub fn replaceable(&self, state: BlockState) -> Option<bool> {
         self.backend?.block_state_replaceable(state)
     }
     /// How hard `state` is to break (`BlockBehaviour.Properties.destroyTime`, as
     /// `BlockState.getDestroySpeed` reads it): stone 1.5, obsidian 50, -1 for a block that
     /// can't be broken. None as for `replaceable`.
-    pub fn destroy_speed(&self, state: BlockStateId) -> Option<f32> {
+    pub fn destroy_speed(&self, state: BlockState) -> Option<f32> {
         self.backend?.block_state_destroy_speed(state)
     }
     /// `state`'s sounds (`BlockState.getSoundType()`). None as for `replaceable`.
-    pub fn sound(&self, state: BlockStateId) -> Option<BlockSoundType> {
+    pub fn sound(&self, state: BlockState) -> Option<BlockSoundType> {
         self.backend?.block_state_sound(state)
     }
     /// `BlockState.hasBlockEntity()`. None as for `replaceable`.
-    pub fn has_block_entity(&self, state: BlockStateId) -> Option<bool> {
+    pub fn has_block_entity(&self, state: BlockState) -> Option<bool> {
         self.backend?.block_state_has_block_entity(state)
     }
     /// The block's property names and legal serialized values. None without resolved tables.
@@ -139,7 +139,7 @@ impl BlockStates<'_> {
     /// owning thread has no resolved tables or the state is unknown.
     pub fn matches(
         &self,
-        state: BlockStateId,
+        state: BlockState,
         block: crate::BlockKey,
         constraints: &[StateConstraint],
     ) -> Option<Result<bool, StateMatchError>> {
@@ -166,10 +166,11 @@ mod tests {
     #[test]
     fn a_host_without_a_game_answers_none() {
         let facts = Double.block_states();
-        assert_eq!(facts.replaceable(BlockStateId(1)), None);
-        assert_eq!(facts.destroy_speed(BlockStateId(1)), None);
-        assert_eq!(facts.sound(BlockStateId(1)), None);
-        assert_eq!(facts.has_block_entity(BlockStateId(1)), None);
+        let state: BlockState = BlockStateRecord::new(crate::BlockKey(0), 0).into();
+        assert_eq!(facts.replaceable(state), None);
+        assert_eq!(facts.destroy_speed(state), None);
+        assert_eq!(facts.sound(state), None);
+        assert_eq!(facts.has_block_entity(state), None);
         assert_eq!(facts.states_of(crate::BlockKey(0)), None);
     }
 }

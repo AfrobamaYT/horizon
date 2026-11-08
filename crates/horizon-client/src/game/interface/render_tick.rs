@@ -768,11 +768,16 @@ mod tests {
                 _: &dyn ClientHost,
                 event: &mut ExtractBlockScreenEffectEvent,
             ) -> Flow {
-                SEEN.lock()
-                    .unwrap()
-                    .push((event.effect, event.state, event.pos));
+                SEEN.lock().unwrap().push((
+                    event.effect,
+                    crate::game::api_values::TryIntoEngine::try_into_engine(&event.state, &())
+                        .unwrap(),
+                    event.pos,
+                ));
                 if event.effect == BlockScreenEffect::Block
-                    && event.state == self.0
+                    && crate::game::api_values::TryIntoEngine::try_into_engine(&event.state, &())
+                        .unwrap()
+                        == self.0
                     && event.pos == BlockPos::new(0, 65, 0)
                 {
                     Flow::Cancel

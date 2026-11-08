@@ -34,6 +34,19 @@ post-conversion raw-state validator in the neighbor methods. Entity write contra
 write contract. All changes in this cut remain labelled hand-written, separate from the final
 compiler-guided API type swap.
 
+## Boolean entity/display write contracts
+
+A separate handwritten generator follow-on keeps non-Result writes boolean when their state
+input crosses the boundary. Checked Result wrapping is selected only for a Result signature;
+invalid input on a boolean write returns false before calling the engine. This preserves the
+entity write contract rather than changing its signature to fit a conversion helper.
+
+The focused generator test `boolean_state_writes_refuse_before_mutation_without_changing_the_bool_contract`
+compiles and executes the production-emitted argument code for scalar and optional states.
+Invalid inputs preserve a sentinel state and zero writes; valid scalar, None and Some inputs
+produce their independently expected states and counts. Replacing refusal with a default engine
+value was killed by the executed fixture's assertion, and the restored test passed again.
+
 ## Hot-path effect
 
 State conversion is an allocation-free forward/reverse index lookup. Typed phase refusal

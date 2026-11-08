@@ -167,6 +167,33 @@ pub(super) fn emit<'a>(
         if ticks {
             args.retain(|(name, _)| name != "ticks");
         }
+        // Engine-inferred state types become owned API values at the checked crossing.
+        // Explicit catalog declarations remain authoritative.
+        let inferred_types: Vec<Type> = args
+            .iter()
+            .map(|(_, ty)| {
+                let mut ty = (*ty).clone();
+                if declared.is_empty() {
+                    use syn::visit_mut::VisitMut;
+                    struct ApiState;
+                    impl VisitMut for ApiState {
+                        fn visit_type_path_mut(&mut self, ty: &mut syn::TypePath) {
+                            if ty.path.segments.len() == 1 && ty.path.is_ident("BlockStateId") {
+                                ty.path = syn::parse_quote!(BlockState);
+                            }
+                            syn::visit_mut::visit_type_path_mut(self, ty);
+                        }
+                    }
+                    ApiState.visit_type_mut(&mut ty);
+                }
+                ty
+            })
+            .collect();
+        args = args
+            .into_iter()
+            .zip(&inferred_types)
+            .map(|((name, _), ty)| (name, ty))
+            .collect();
         let carried = args.clone();
         let mut used: HashSet<_> = args.iter().map(|(name, _)| name.clone()).collect();
         let mod_item = fresh_name("mod_hook", &mut used);
@@ -251,7 +278,21 @@ pub(super) fn emit<'a>(
                     "BlockState" => {
                         format!("{table}(|| super::registry_keys::block_id({key}.block()))")
                     }
-                    "BlockStateId" if table == "block" => format!("block_state({key})"),
+                    "BlockStateId" if table == "block" => {
+                        let Some((level, _)) = host.as_ref().filter(|_| is_level) else {
+                            return Err(format!("{name} has no level to name {key}'s block"));
+                        };
+                        let state_name = if hook.side == Side::Both {
+                            format!(
+                                "match &{level} {{ LevelSide::Server({level}) | LevelSide::Client({level}) => {level}.state_block({key}), }}"
+                            )
+                        } else {
+                            format!("{level}.state_block({key})")
+                        };
+                        format!(
+                            "block_key(({state_name}).and_then(super::registry_keys::block_key))"
+                        )
+                    }
                     "BlockStateId" => {
                         let Some((level, _)) = host.as_ref().filter(|_| is_level) else {
                             return Err(format!("{name} has no level to name {key}'s block"));
@@ -496,11 +537,15 @@ pub(super) fn emit<'a>(
                 }
             }
             let crossing = if declared.is_empty() || block_carrier {
-                stack_crossing(
+                stack_crossing_routed(
                     &args,
                     output.as_ref(),
                     hook_id,
                     scoped.is_some(),
+                    hook.scope.as_ref().and_then(|scope| match scope.kind {
+                        PartKind::Block => Some(scope.key.as_str()),
+                        _ => None,
+                    }),
                     &surface_calls,
                 )
             } else {
@@ -719,11 +764,23 @@ struct StackCrossing {
 
 /// Declared owned-value arguments select this guarded conversion seam. Event records
 /// are built explicitly at their game call sites, not inferred from game bodies.
+#[cfg(test)]
 fn stack_crossing(
     args: &[(String, &Type)],
     output: Option<&(String, &Type)>,
     hook_id: &str,
     scoped: bool,
+    surfaces: &std::collections::HashMap<&str, String>,
+) -> Option<StackCrossing> {
+    stack_crossing_routed(args, output, hook_id, scoped, None, surfaces)
+}
+
+fn stack_crossing_routed(
+    args: &[(String, &Type)],
+    output: Option<&(String, &Type)>,
+    hook_id: &str,
+    scoped: bool,
+    block_scope: Option<&str>,
     surfaces: &std::collections::HashMap<&str, String>,
 ) -> Option<StackCrossing> {
     const STACK_VALUES: &[&str] = &[
@@ -773,9 +830,12 @@ fn stack_crossing(
         return None;
     }
     let guard = if scoped { "has_part_hook" } else { "listened" };
-    let mut before = format!(
-        "if !mod_api::__private::{guard}(mod_api::HookId::{hook_id}) {{ return; }} use crate::game::api_values::TryIntoApi; "
-    );
+    let mut before =
+        format!("if !mod_api::__private::{guard}(mod_api::HookId::{hook_id}) {{ return; }} ");
+    if let Some(key) = block_scope {
+        before.push_str(&format!("if !crate::game::api_values::block_state::block_listens(mod_api::HookId::{hook_id}, {key}) {{ return; }} "));
+    }
+    before.push_str("use crate::game::api_values::TryIntoApi; ");
     if parameters.iter().any(|(_, ty)| {
         (contains_boundary(ty, STACK_VALUES)
             || contains_boundary(ty, INFALLIBLE_VALUES)
@@ -861,6 +921,136 @@ mod stack_crossing_tests {
     use super::*;
 
     #[test]
+    fn level_block_read_refusal_runtime_and_mutants() {
+        let mut implementations = String::new();
+        for source in [
+            include_str!("../../horizon-client/src/game/modding/mod_api_host.rs"),
+            include_str!("../../horizon-client/src/game/modding/native_level_signals.rs"),
+        ] {
+            for item in syn::parse_file(source).unwrap().items {
+                let syn::Item::Impl(item) = item else {
+                    continue;
+                };
+                if !item
+                    .trait_
+                    .as_ref()
+                    .is_some_and(|(_, path, _)| path.segments.last().unwrap().ident == "LevelHost")
+                {
+                    continue;
+                }
+                let target = item.self_ty.to_token_stream().to_string();
+                let target = if target.contains("GameLevel") && !target.contains("LevelTicks") {
+                    "GameLevel"
+                } else if target.contains("HitLevel") {
+                    "HitLevel"
+                } else if target.contains("ReadLevel") {
+                    "ReadLevel"
+                } else if target.contains("LevelTicks") {
+                    "LevelTicks<'_>"
+                } else {
+                    continue;
+                };
+                let method = item
+                    .items
+                    .iter()
+                    .find_map(|item| match item {
+                        syn::ImplItem::Fn(method) if method.sig.ident == "block_state" => {
+                            Some(method.to_token_stream().to_string())
+                        }
+                        _ => None,
+                    })
+                    .unwrap()
+                    .replace("use super :: api_values :: TryIntoApi ;", "");
+                implementations.push_str(&format!(
+                    "impl crate::LevelHost for {target} {{ {method} }}\n"
+                ));
+            }
+        }
+        assert_eq!(implementations.matches("impl crate::LevelHost").count(), 4);
+        let root = r#"
+struct BlockPos([i32;3]); impl BlockPos { fn new(x:i32,y:i32,z:i32)->Self {Self([x,y,z])} }
+trait LevelHost { fn block_state(&self,pos:[i32;3])->Option<BlockState>; }
+mod level { pub trait LevelAccess { fn block_state(&self,pos:crate::BlockPos)->crate::registry::BlockStateId; } }
+"#;
+        let directory =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/level-read-proof");
+        std::fs::create_dir_all(&directory).unwrap();
+        let index = directory.join("index.rs");
+        std::fs::write(
+            &index,
+            include_str!("../../horizon-client/src/game/modding/api_values/block_state.rs"),
+        )
+        .unwrap();
+        for (name, methods, success) in [
+            ("baseline", implementations.clone(), true),
+            (
+                "fabricated_air",
+                implementations.replace(
+                    ". ok ()",
+                    ". ok () . or (Some(crate::BlockState(crate::BlockKey(0),0)))",
+                ),
+                false,
+            ),
+            (
+                "panic_on_refusal",
+                implementations
+                    .replace(". ok ()", ". ok () . or_else(|| panic!(\"missing index\"))"),
+                false,
+            ),
+        ] {
+            if !success {
+                assert_ne!(methods, implementations);
+            }
+            let proof = include_str!("../../../tools/refactors/api-pr3b/level_read.rs")
+                .replace("/* READ_IMPLS */", &methods);
+            let fixture = include_str!("../../../tools/refactors/api-pr3b/hook_index.rs")
+                .replace("INDEX_PATH", index.to_str().unwrap())
+                .replace(
+                    "pub fn run() {",
+                    &format!("{proof}\npub fn original_index_proof() {{"),
+                )
+                + root;
+            let source = directory.join(format!("{name}.rs"));
+            let binary = directory.join(name);
+            std::fs::write(&source, fixture).unwrap();
+            let compiler = std::process::Command::new("rustc")
+                .args(["--edition=2024", "-O"])
+                .arg(source)
+                .arg("-o")
+                .arg(&binary)
+                .output()
+                .unwrap();
+            assert!(
+                compiler.status.success(),
+                "{name}: {}",
+                String::from_utf8_lossy(&compiler.stderr)
+            );
+            let result = std::process::Command::new(binary).output().unwrap();
+            std::fs::write(
+                directory.join(format!("{name}.log")),
+                format!(
+                    "exit: {}\nstdout:\n{}\nstderr:\n{}",
+                    result.status,
+                    String::from_utf8_lossy(&result.stdout),
+                    String::from_utf8_lossy(&result.stderr)
+                ),
+            )
+            .unwrap();
+            assert_eq!(
+                result.status.success(),
+                success,
+                "{name}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            println!(
+                "{name}: {}{}",
+                String::from_utf8_lossy(&result.stdout),
+                if success { "passed" } else { "mutant killed" }
+            );
+        }
+    }
+
+    #[test]
     fn block_numeric_index_runtime_and_mutants() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let directory = root.join("target/hook-index-proof");
@@ -918,6 +1108,122 @@ mod stack_crossing_tests {
             );
         }
     }
+    #[test]
+    fn per_block_routing_runtime_and_mutants() {
+        let state: Type = syn::parse_quote!(BlockState);
+        let writes: Type = syn::parse_quote!(&mut Vec<LandingWrite>);
+        let crossing = stack_crossing_routed(
+            &[
+                ("state".into(), &state),
+                ("secondary".into(), &state),
+                ("writes".into(), &writes),
+            ],
+            None,
+            "Proof",
+            true,
+            Some("state"),
+            &Default::default(),
+        )
+        .unwrap();
+        let global = stack_crossing_routed(
+            &[
+                ("state".into(), &state),
+                ("secondary".into(), &state),
+                ("writes".into(), &writes),
+            ],
+            None,
+            "Proof",
+            false,
+            None,
+            &Default::default(),
+        )
+        .unwrap();
+        let global = format!(
+            "{} callback(__api_state, __api_secondary, &mut __api_writes); {}",
+            global.before, global.after
+        );
+        let guard = "if !crate::game::api_values::block_state::block_listens(mod_api::HookId::Proof, state) { return; }";
+        let body = format!(
+            "{} callback(__api_state, __api_secondary, &mut __api_writes); {}",
+            crossing.before, crossing.after
+        );
+        let unguarded = body.replace(guard, "");
+        let late = unguarded.replace("callback(", &format!("{guard} callback("));
+        let after_scalar = unguarded.replace(
+            "let __api_secondary",
+            &format!("{guard} let __api_secondary"),
+        );
+        assert_ne!(body, unguarded);
+        let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/block-routing-proof");
+        std::fs::create_dir_all(&directory).unwrap();
+        let index = directory.join("index.rs");
+        std::fs::write(
+            &index,
+            // Count actual scalar crossings as well as collection conversions. The
+            // routing helper itself must not trigger this conversion observer.
+            include_str!("../../horizon-client/src/game/modding/api_values/block_state.rs").replace(
+                "pub(crate) fn to_api(&self, state: BlockStateId) -> Result<BlockState, BlockStateError> {",
+                "pub(crate) fn to_api(&self, state: BlockStateId) -> Result<BlockState, BlockStateError> { crate::CONVERSIONS.fetch_add(1, crate::Ordering::Relaxed);",
+            ),
+        )
+        .unwrap();
+        for (name, body, success) in [
+            ("baseline", body, true),
+            ("no_guard", unguarded, false),
+            ("late_guard", late, false),
+            ("after_scalar_guard", after_scalar, false),
+            ("global_listener", global, true),
+        ] {
+            let source = directory.join(format!("{name}.rs"));
+            let binary = directory.join(name);
+            let mut fixture = include_str!("../../../tools/refactors/api-pr3b/block_routing.rs")
+                .replace("INDEX_PATH", index.to_str().unwrap())
+                .replace("FIRE_BODY", &body);
+            if name == "global_listener" {
+                fixture = fixture.replace("fn main()", "fn routing_main()");
+                fixture.push_str(
+                    r#"
+fn main() {
+    let b = BlockState(BlockKey(8), 0);
+    game::api_values::bind(&registry::BlockRegistry(vec![Ok(b)]));
+    let mut writes = vec![42];
+    Game.fire(registry::BlockStateId(0), registry::BlockStateId(0), &mut writes);
+    assert_eq!(CALLS.load(Ordering::Relaxed), 1);
+    assert_eq!(writes, vec![42,99]);
+    println!("ordinary global listener sees unrelated block B");
+}
+"#,
+                );
+            }
+            std::fs::write(&source, fixture).unwrap();
+            let compiled = std::process::Command::new("rustc")
+                .args(["--edition=2024", "-O"])
+                .arg(source)
+                .arg("-o")
+                .arg(&binary)
+                .output()
+                .unwrap();
+            assert!(
+                compiled.status.success(),
+                "{}",
+                String::from_utf8_lossy(&compiled.stderr)
+            );
+            let result = std::process::Command::new(binary).output().unwrap();
+            assert_eq!(
+                result.status.success(),
+                success,
+                "{name}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            println!(
+                "{name}: {} {}",
+                String::from_utf8_lossy(&result.stdout),
+                if success { "passed" } else { "mutant killed" }
+            );
+        }
+    }
+
     #[test]
     fn block_crossing_runtime_and_mutants() {
         let state: Type = syn::parse_quote!(&mut BlockState);
