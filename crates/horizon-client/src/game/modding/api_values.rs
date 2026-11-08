@@ -117,10 +117,8 @@ pub(in crate::game) fn resolve_block_definitions(
 fn bind_worker_blocks(registry: &horizon_world::registry::BlockRegistry) -> Result<(), String> {
     block_state::bind(registry)?;
     let index = block_state::current().map_err(|error| format!("worker index: {error:?}"))?;
-    let retained = super::native_worldgen::retain(registry, index).map_err(|error| {
-        block_state::clear();
-        error
-    })?;
+    let retained =
+        super::native_worldgen::retain(registry, index).inspect_err(|_| block_state::clear())?;
     block_state::install(retained);
     Ok(())
 }
