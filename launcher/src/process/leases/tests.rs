@@ -96,6 +96,9 @@ fn child_keeps_gate_and_tree_after_creator_closes_its_copies() {
     gate.unlock().unwrap();
 }
 
+#[cfg(windows)]
+mod windows_tests;
+
 #[test]
 fn bridge_actor() {
     if std::env::var_os("HORIZON_LEASE_BRIDGE_ACTOR").is_none() {
@@ -153,4 +156,26 @@ fn creator_flags_remain_cloexec_until_child_callback() {
         "creator cleared CLOEXEC before its child's callback"
     );
     assert!(child.unwrap().wait().unwrap().success());
+}
+
+#[cfg(unix)]
+#[test]
+fn failed_exec_leaves_no_tree_or_gate_owner() {
+    let root = tempfile::tempdir().unwrap();
+    let data = root.path().join("data");
+    let trees = [directory(&root.path().join("tree"))];
+    let claims = ChildLeases::acquire(&data, &trees).unwrap();
+    assert!(claims
+        .spawn(Command::new(root.path().join("missing-program")))
+        .is_err());
+    let registry = Registry::with_release(&data, Release::Unlock).unwrap();
+    released(&registry, &trees[0]);
+    drop(registry);
+    let gate = File::options()
+        .read(true)
+        .write(true)
+        .open(data.join("run-leases/gate"))
+        .unwrap();
+    gate.try_lock().unwrap();
+    gate.unlock().unwrap();
 }
