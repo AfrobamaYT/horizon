@@ -31,6 +31,8 @@ pub struct ModBlockEntityFields {
 }
 /// Which contents a `ModBlockEntity` has had: one per entity made (a clone
 /// is another), counted on by each change. Equal revisions, equal contents.
+/// Rejected callback writebacks also advance the engine revision to invalidate stale copies;
+/// this may cause one extra client redraw even though the fields were retained.
 /// Neither saved nor compared.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
