@@ -166,45 +166,26 @@ A chunk generator is a mod's code for a level's terrain: vanilla's `ChunkGenerat
 or from a data pack's level stem as `"generator": {"type": "mymod:void"}`:
 
 ```rust,ignore
-struct Floor;
-
-impl ChunkGenerator for Floor {
-    fn build_terrain(&self, chunk: &mut dyn ChunkAccess) {
-        let stone = chunk.state("stone");
-        let [x, z] = [chunk.pos().x * 16, chunk.pos().z * 16];
-        for (dx, dz) in (0..16).flat_map(|dx| (0..16).map(move |dz| (dx, dz))) {
-            chunk.set_block([x + dx, chunk.min_y(), z + dz], stone);
-        }
-    }
-}
-
-#[mod_api::horizon_mod]
-impl Hooks for MyMod {
-    fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
-        r.register_chunk_generator("void", Floor);
-        r.register_dimension(
-            "void",
-            DimensionSettings { generator: "mymod:void".into(), ..Default::default() },
-        );
-    }
-}
+{{#include ../../../examples/src/worldgen.rs:terrain}}
 ```
 
 There is no `Host` in world generation: chunks fill on the worker threads, so a generator sees only
 the `ChunkAccess` of the chunk it fills, is `Send + Sync`, and keeps no mutable state, because two
 workers can fill neighbouring chunks at once. The same seed and chunk give the same blocks.
-`ChunkAccess` has the chunk's `pos`, the world's `seed`, the level's `min_y` and `height`, `state`
-and `state_with` to resolve a block by name into a `TerrainState` (the handle `set_block` takes),
-and `set_block`, which skips a position outside the chunk or the build height and answers whether
-it wrote. The chunk starts as air.
+`ChunkAccess` has the chunk's `pos`, the world's `seed`, the level's `min_y` and `height`, and
+borrowed immutable `metadata()`. Resolve `BlockKey`s at registration, then use `state` or
+`state_with` to construct API-owned `BlockState`s before the terrain-writing loop, never once per
+placed block. `set_block` skips a position outside the chunk or build height and answers whether
+it wrote. The chunk starts as air; invalid state ordinals are refused rather than written.
 
 The generator gives terrain only. The level has no surface, carvers or features, and every chunk
 has the stem's one biome. `noise_settings` means nothing to it.
 
 A generator in another mod's namespace, an empty name, a name that is not a folder of the world (as
 for a dimension), an id registered twice and `minecraft:noise` stop the game at startup with a
-message naming the mod. It is native only: a mod built to `mod.wasm` that calls
-`register_chunk_generator` fails when it registers, with a message saying why.
+message naming the mod. ChunkGenerator and ChunkAccess are not yet bound by the generated wasm worker interface; a wasm
+mod can register dimensions naming an already installed generator, but cannot register its own
+chunk generator. Structure types use the existing generated worker binding instead.
 
 A level stem naming a generator nobody registered, say after its mod was removed, is an error for
 whoever opens that level, not for the world: a teleport there fails and is logged, and a player
