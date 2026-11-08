@@ -44,7 +44,6 @@ horizon-client-render gfx::pack_post::destination_tests::clear_budget_tests::siz
 horizon-client-render gfx::pack_post::destination_tests::clear_budget_tests::sized_hdr_clear_respects_byte_budget horizon-rust/horizon#9303 flaky
 
 # Client failures exposed after enforcing target completion (#2137).
-horizon-client game::commands::execute::passenger_relation_tests::h150_actual_registered_passengers_select_direct_live_mob_and_boat_children #2175
 horizon-client game::persist::summon_uuid_conflict_tests::summon_skips_a_uuid_taken_earlier_in_the_same_tree #2175
 horizon-client game::explosion::tests::explosion_and_mob_breaks_apply_block_drops #2176
 horizon-client game::explosion::tests::explosion_items_parity_fixture #2177 harness
