@@ -174,6 +174,18 @@ client-core types for these values. Completion edits are copied back after subsc
 listeners run; no listener means no snapshot allocation. Package metadata is copied once
 at startup, retaining declared namespaces and dependencies.
 
+### Opaque NBT metadata
+
+The shared JSON/NBT conversion is iterative and follows vanilla's 512 nested
+list/compound limit; scalars and NBT typed arrays add no recursive container.
+Conversion to JSON intentionally loses numeric tag widths, boolean-as-byte
+identity and typed-array identity. `NonFinite` refuses NaN and infinities:
+`serde_json::Value` cannot hold them, and Gson's strict JSON writer also refuses
+them. `InvalidString` refuses an unpaired UTF-16 surrogate in a Tag string or
+compound key. Neither case is replaced with null, a string or U+FFFD.
+JSON input already uses UTF-8, so valid non-BMP pairs survive; a lone surrogate
+cannot reach this converter through that input representation.
+
 ### Owned component trees
 
 The `text` module defines owned component data: literal and translatable contents,
