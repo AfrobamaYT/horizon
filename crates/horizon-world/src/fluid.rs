@@ -607,6 +607,16 @@ mod mod_fluid_tests {
                 assert_eq!(FluidKind::from_name(kind.name()), Some(kind));
             }
         }
+        // The last representable id is valid, and replacement works at capacity.
+        let mut almost_full = vec![a; usize::from(u16::MAX)];
+        let mut last = a.clone();
+        last.id = "refusal:last".into();
+        last.flowing_id = "refusal:flowing_last".into();
+        assert_eq!(
+            register_in(&mut almost_full, last.clone()),
+            Ok(ModFluid(u16::MAX))
+        );
+        assert_eq!(register_in(&mut almost_full, last), Ok(ModFluid(u16::MAX)));
         // A full process-lifetime table, even if only one fluid is live now.
         let mut table = vec![a; 65536];
         let snapshot = table.clone();

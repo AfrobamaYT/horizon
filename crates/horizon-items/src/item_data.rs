@@ -1008,6 +1008,21 @@ pub fn encode_extra_components(stack: &ItemStack) -> Option<Tag> {
 
 fn encode_stack_components(stack: &ItemStack, include_damage: bool) -> Option<Tag> {
     let mut components = components_tag_inner(stack.damage, stack.data(), include_damage)?;
+    // MobEffectInstance.Details' codec always saves the resolved icon flag.
+    // An omitted icon follows show_particles, whose default is true.
+    if let Some(Tag::List(effects)) = components
+        .get_mut("minecraft:potion_contents")
+        .and_then(|potion| potion.get_mut("custom_effects"))
+    {
+        for effect in effects {
+            let shown = effect.get("show_particles").and_then(int).unwrap_or(1) != 0;
+            if let Tag::Compound(fields) = effect {
+                fields
+                    .entry(JavaString::from("show_icon"))
+                    .or_insert(Tag::Byte(i8::from(shown)));
+            }
+        }
+    }
     // LodestoneTracker.CODEC: optionalFieldOf("tracked", true).
     if let Some(Tag::Compound(tracker)) = components.get_mut("minecraft:lodestone_tracker")
         && tracker.get(&JavaString::from("tracked")) == Some(&Tag::Byte(1))
@@ -1714,6 +1729,68 @@ mod tests {
             fresh.data_mut().damage_set = expected == 0 && raw.is_some();
             assert_eq!(crate::item_nbt::item_to_nbt(&fresh), saved);
         }
+    }
+
+    #[test]
+    fn potion_custom_effect_icons_save_the_codec_default() {
+        let parse = |text: &str| horizon_core::nbt::parse_snbt(text).unwrap().0;
+        for (flags, icon) in [
+            ("", 1),
+            (",show_icon:0b", 0),
+            (",show_icon:1b", 1),
+            (",show_particles:0b", 0),
+            (",show_particles:0b,show_icon:0b", 0),
+            (",show_particles:0b,show_icon:1b,ambient:1b", 1),
+        ] {
+            let contents = |suffix: &str| {
+                format!(
+                    r#"{{potion:"minecraft:water",custom_color:123456,custom_effects:[{{id:"minecraft:speed",duration:100,amplifier:2{suffix}}}]}}"#
+                )
+            };
+            let input = parse(&format!(
+                r#"{{"minecraft:potion_contents":{},"minecraft:custom_data":{{keep:7}}}}"#,
+                contents(flags)
+            ));
+            let expected = parse(&format!(
+                r#"{{"minecraft:potion_contents":{},"minecraft:custom_data":{{keep:7}}}}"#,
+                contents(&format!("{flags},show_icon:{icon}b"))
+            ));
+            let (damage, extra) = decode_components(Some(&input));
+            let decoded = ItemStack {
+                damage,
+                extra,
+                ..ItemStack::new("minecraft:potion", 1)
+            };
+            assert_eq!(
+                encode_components(&decoded),
+                Some(expected.clone()),
+                "decoded {flags}"
+            );
+            // Build a model directly, without decoded input or a retained raw patch.
+            let mut fresh = ItemStack::new("minecraft:potion", 1);
+            fresh.data_mut().potion = Some(Arc::from("minecraft:water"));
+            let potion = input.get("minecraft:potion_contents").unwrap();
+            for name in ["custom_color", "custom_effects"] {
+                fresh
+                    .data_mut()
+                    .potion_extra
+                    .push((name.into(), potion.get(name).unwrap().clone()));
+            }
+            fresh.data_mut().set_other(
+                "minecraft:custom_data",
+                input.get("minecraft:custom_data").cloned(),
+            );
+            assert_eq!(encode_components(&fresh), Some(expected), "modeled {flags}");
+        }
+        assert!(encode_components(&ItemStack::new("minecraft:potion", 1)).is_none());
+        let mut base = ItemStack::new("minecraft:potion", 1);
+        base.data_mut().potion = Some(Arc::from("minecraft:water"));
+        assert_eq!(
+            encode_components(&base),
+            Some(parse(
+                r#"{"minecraft:potion_contents":{potion:"minecraft:water"}}"#
+            ))
+        );
     }
 
     #[test]

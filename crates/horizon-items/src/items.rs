@@ -1174,21 +1174,17 @@ impl Items {
             )),
         })
     }
-    /// An item table with only tags, for unit tests of item rules.
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn for_tests(item_tags: HashMap<String, HashSet<String>>) -> Self {
+    /// A table with nothing in it: the tags a client was sent go in with `set_tags`.
+    pub fn empty() -> Self {
         Self {
             items: HashMap::new(),
             mob_visibility: HashMap::new(),
             order: Vec::new(),
             registry_order: Vec::new(),
             block_tags: HashMap::new(),
+            item_tags: HashMap::new(),
             fluid_tags: HashMap::new(),
-            item_tag_order: item_tags
-                .iter()
-                .map(|(k, v)| (k.clone(), v.iter().cloned().collect()))
-                .collect(),
-            item_tags,
+            item_tag_order: HashMap::new(),
             block_tag_order: HashMap::new(),
             fluid_tag_order: HashMap::new(),
             loot: Default::default(),
@@ -1196,6 +1192,31 @@ impl Items {
             instruments: HashMap::new(),
             enchantments: Arc::new(crate::enchant::Enchantments::default()),
         }
+    }
+    /// An item table with only tags, for unit tests of item rules.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn for_tests(item_tags: HashMap<String, HashSet<String>>) -> Self {
+        Self {
+            item_tag_order: item_tags
+                .iter()
+                .map(|(k, v)| (k.clone(), v.iter().cloned().collect()))
+                .collect(),
+            item_tags,
+            ..Self::empty()
+        }
+    }
+    /// Replace one registry's tags with `tags`, each tag's members in order.
+    pub fn set_tags(&mut self, registry: TagRegistry, tags: HashMap<String, Vec<String>>) {
+        let (sets, order) = match registry {
+            TagRegistry::Block => (&mut self.block_tags, &mut self.block_tag_order),
+            TagRegistry::Item => (&mut self.item_tags, &mut self.item_tag_order),
+            TagRegistry::Fluid => (&mut self.fluid_tags, &mut self.fluid_tag_order),
+        };
+        *sets = tags
+            .iter()
+            .map(|(tag, members)| (tag.clone(), members.iter().cloned().collect()))
+            .collect();
+        *order = tags;
     }
     /// Whether `block` is in the block tag `tag` (`minecraft:fire`, no `#`).
     pub fn block_in_tag(&self, tag: &str, block: &str) -> bool {

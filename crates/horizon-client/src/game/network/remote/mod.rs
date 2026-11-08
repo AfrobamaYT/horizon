@@ -515,6 +515,9 @@ pub(super) struct Remote {
     pub(super) builtin: Arc<Builtin>,
     lang: Arc<Language>,
     pub(super) registries: Arc<Dynamic>,
+    /// The block, item and fluid tags of `registries` by name, as native mods read them
+    /// (`install_remote_tags`).
+    pub(super) tags: Option<horizon_client::items::Items>,
     /// The game's enchantments and the server's that it lacks (a data
     /// pack's), from their synced data; `None` when the server has none.
     pub(super) enchantments: Option<Arc<horizon_client::enchant::Enchantments>>,
@@ -1111,6 +1114,7 @@ impl Game<'_> {
                 .unwrap_or_else(|| "Connecting to the server...".into()),
             lang,
             registries: Arc::new(Dynamic::default()),
+            tags: None,
             enchantments: None,
             joined: false,
             reconfiguring: None,
@@ -1349,6 +1353,7 @@ impl Game<'_> {
             status: "Playing Studio Replay".into(),
             lang,
             registries: Arc::new(Dynamic::default()),
+            tags: None,
             enchantments: None,
             joined: false,
             reconfiguring: None,
@@ -3706,6 +3711,8 @@ impl Game<'_> {
                 if let Err(e) = self.resolve_parts() {
                     log::warn!("Horizon: {e}");
                 }
+                // Configuration's tags, over the block ids the parts just bound.
+                self.install_remote_tags();
                 self.refresh_render_visibility();
                 self.test_highlights.clear();
                 self.forget_synced_recipes();
@@ -5204,6 +5211,7 @@ impl Game<'_> {
                     self.ui.registries.custom_completions = r.custom_completions.clone();
                 }
             }
+            C::UpdateTags(p) => self.remote_update_tags(&p),
             C::Commands(p) => {
                 let tree = horizon_client::command::network::from_packet(
                     &p,
@@ -5577,8 +5585,26 @@ impl Game<'_> {
                 let [x, y, z] = p.pos.pos;
                 self.spawn = (p.pos.dimension == "minecraft:overworld")
                     .then(|| Vec3::new(f64::from(x) + 0.5, f64::from(y), f64::from(z) + 0.5));
+                // 1.20.2 handleSetSpawn notified ReceivingLevelScreen here; the later
+                // LEVEL_CHUNKS_LOAD_START game event did not exist yet.
+                if let Some(r) = self.remote.as_mut()
+                    && r.session
+                        .server_version()
+                        .at_most(horizon_protocol::adapter::ServerVersion::V1_20_2)
+                {
+                    r.level_load.loading_packets_received();
+                }
             }
-            C::ServerData(p) => self.remote_server_data(p.icon.as_deref()),
+            C::ServerData(p) => {
+                if let Some(r) = self.remote.as_mut()
+                    && let Some(enforced) = r.session.legacy_secure_chat_enforcement()
+                    && r.enforces_secure_chat != enforced
+                {
+                    r.enforces_secure_chat = enforced;
+                    r.chat_validators.clear();
+                }
+                self.remote_server_data(p.icon.as_deref());
+            }
             C::MapItemData(p) => self.remote_map_item_data(&p),
             // handleTickingState / handleTickingStep: the level's TickRateManager.
             C::TickingState(p) => {
@@ -6285,11 +6311,28 @@ impl Game<'_> {
             .iter()
             .position(|p| p.id == id as u32)
         {
-            self.creatures.projectiles.update(i, |p| p.velocity = v);
+            self.creatures.projectiles.update(i, |p| {
+                p.velocity = v;
+                // AbstractArrow.lerpMotion: the stuck timer restarts, and an
+                // arrow the server set moving leaves the block it was stuck in.
+                if let Some(st) = p.arrow.as_mut() {
+                    st.life = 0;
+                    if st.in_ground && v.length_squared() > 0.0 {
+                        st.in_ground = false;
+                        p.stuck = false;
+                    }
+                }
+            });
         } else if let Some(b) = self.dragon_fireballs.iter_mut().find(|b| b.id == id as u32) {
             b.velocity = v;
         } else if let Some(t) = self.tridents.iter_mut().find(|t| t.id == id as u32) {
             t.velocity = v;
+            // AbstractArrow.lerpMotion (ThrownTrident keeps it): `life`
+            // restarts, and a trident set moving leaves its block.
+            t.in_ground_time = 0;
+            if t.in_ground && v.length_squared() > 0.0 {
+                t.in_ground = false;
+            }
         } else if let Some(r) = self.rockets.iter_mut().find(|r| r.id == id as u32) {
             r.velocity = v;
         } else if self.remote_hook_motion(id as u32, v) {
@@ -8093,7 +8136,7 @@ impl Game<'_> {
     }
 
     /// MultiPlayerGameMode.startDestroyBlock / continueDestroyBlock.
-    fn remote_mining(&mut self, start: bool) {
+    fn remote_mining(&mut self, start: bool) -> bool {
         let debug_stick = self
             .held()
             .is_some_and(|stack| &*stack.item == "minecraft:debug_stick");
@@ -8104,30 +8147,33 @@ impl Game<'_> {
         {
             self.stop_remote_mining();
             self.mining = None;
-            return;
+            return true;
         }
         let Some(r) = self.remote.as_mut() else {
-            return;
+            return true;
         };
         if !start && r.destroy_delay > 0 {
             r.destroy_delay -= 1;
-            return;
+            return true;
         }
         let Some(hit) = self.pick() else {
             self.mining = None;
-            return;
+            return true;
         };
         let face = face_direction(hit.face);
         let state = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
         if self.res.facts().is_air(state) {
-            return;
+            return true;
         }
         // startDestroyBlock refuses a restricted break before predicting it.
         if self.remote_break_restricted() {
             self.mining = None;
-            return;
+            return true;
         }
         if self.creative {
+            if self.veto_mining_prediction(hit.pos, hit.face, true, 1.0) {
+                return false;
+            }
             let seq = self.next_sequence();
             // DebugStickItem.canDestroyBlock never lets the client break the
             // block; the server only selects the property on this START.
@@ -8143,7 +8189,7 @@ impl Game<'_> {
             if let Some(r) = self.remote.as_mut() {
                 r.destroy_delay = 5;
             }
-            return;
+            return true;
         }
         // sameDestroyTarget: the same block and still the item the break began with.
         let held = self.main_hand_key();
@@ -8156,13 +8202,17 @@ impl Game<'_> {
         // one keeps the clock (#4124).
         let running = self.remote.as_ref().is_some_and(|r| r.is_destroying);
         if start && same && running {
-            return;
+            return true;
         }
         // The server's own getDestroyProgress: under water, off the ground,
         // with haste, fatigue and efficiency, so the client stops digging
         // when the server is done too (#1254).
         let progress = self.destroy_progress(hit.pos);
         if !same || start {
+            let proposed = if progress >= 1.0 { 1.0 } else { 0.0 };
+            if self.veto_mining_prediction(hit.pos, hit.face, true, proposed) {
+                return false;
+            }
             // startDestroyBlock aborts only a break that is running; a target left by a stop that
             // ended one is just replaced by the START below.
             let aborted = self.remote.as_mut().and_then(|r| {
@@ -8197,7 +8247,7 @@ impl Game<'_> {
                 if !debug_stick {
                     self.predict_break(hit.pos, state, seq);
                 }
-                return;
+                return true;
             }
             if let Some(r) = self.remote.as_mut() {
                 r.destroying = Some((hit.pos, face, 0.0));
@@ -8212,12 +8262,15 @@ impl Game<'_> {
                 progress: 0.0,
                 ticks: 0,
             });
-            return;
+            return true;
         }
         let Some((pos, last_face, done)) = self.remote.as_ref().and_then(|r| r.destroying) else {
-            return;
+            return true;
         };
         let done = done + progress;
+        if self.veto_mining_prediction(pos, hit.face, false, done) {
+            return false;
+        }
         self.tutorial_destroy(state, done.clamp(0.0, 1.0));
         let ticks = self.mining.as_ref().map_or(0, |m| m.ticks) + 1;
         if done >= 1.0 {
@@ -8260,6 +8313,30 @@ impl Game<'_> {
                 ticks,
             });
         }
+        true
+    }
+
+    fn veto_mining_prediction(
+        &self,
+        pos: [i32; 3],
+        face: [i32; 3],
+        starting: bool,
+        progress: f32,
+    ) -> bool {
+        if !mod_api::__private::listened(mod_api::HookId::ClientMiningPredict) {
+            return false;
+        }
+        let mut canceled = false;
+        self.native_client_mining_predict(
+            mod_api::ClientMiningPrediction {
+                pos,
+                face,
+                starting,
+                progress: progress.clamp(0.0, 1.0),
+            },
+            &mut canceled,
+        );
+        canceled
     }
     /// MultiPlayerGameMode.destroyBlock: the predicted break.
     fn predict_break(&mut self, pos: [i32; 3], state: BlockStateId, sequence: i32) {
@@ -8316,7 +8393,7 @@ impl Game<'_> {
                     .is_some_and(|p| WirePatch::adds(&p, CAN_BREAK)))
     }
     /// Minecraft.startUseItem: use one crosshair target, then the item itself.
-    fn remote_use(&mut self) {
+    fn remote_use(&mut self, attempt: mod_api::InteractionAttempt) {
         // Minecraft.startUseItem returns before resetting rightClickDelay
         // while a survival block break is active.
         if self.remote.as_ref().is_some_and(|r| r.is_destroying) {
@@ -8329,7 +8406,7 @@ impl Game<'_> {
         }
         // InputEvent.InteractionKeyMappingTriggered for the main hand: a cancel
         // ends the whole click, the off hand gets no turn.
-        if let Some(swing) = self.native_interaction(InteractionKey::Use, Hand::Main) {
+        if let Some(swing) = self.native_interaction(InteractionKey::Use, Hand::Main, attempt) {
             if swing {
                 self.swing_hand(Hand::Main, SwingAnimation::DEFAULT);
             }
@@ -8342,7 +8419,10 @@ impl Game<'_> {
         // Resolve the crosshair once. A passing entity interaction keeps
         // that target and may only fall back to using the item itself.
         let entity = self.remote_use_targets_entity();
-        horizon_client::interaction_input::use_on_target(&mut RemoteUseWorld(self), entity);
+        horizon_client::interaction_input::use_on_target(
+            &mut RemoteUseWorld(self, attempt),
+            entity,
+        );
     }
 
     /// `Minecraft.startUseItem`'s entity turn for `hand`: Interact goes to
@@ -9548,7 +9628,7 @@ impl Game<'_> {
     /// The rest of Minecraft.startUseItem once the main hand's target passed:
     /// the main hand's item, then the off hand's turn (its block, its item).
     /// The server does each packet's part with that packet's hand only.
-    fn remote_use_hands(&mut self) {
+    fn remote_use_hands(&mut self, attempt: mod_api::InteractionAttempt) {
         // Nothing in the crosshair: an empty hand's click is heard, by mods only.
         let miss = mod_api::__private::listened(mod_api::HookId::RightClickEmpty)
             && !self.entity_targeted()
@@ -9562,7 +9642,7 @@ impl Game<'_> {
             return;
         }
         // The off hand's turn: the event again, then the entity or the block.
-        if let Some(swing) = self.native_interaction(InteractionKey::Use, Hand::Off) {
+        if let Some(swing) = self.native_interaction(InteractionKey::Use, Hand::Off, attempt) {
             if swing {
                 self.swing_hand(Hand::Off, SwingAnimation::DEFAULT);
             }
@@ -9876,7 +9956,11 @@ impl Game<'_> {
         }
         // InputEvent.InteractionKeyMappingTriggered, after the checks that stop
         // an attack: a cancel ends it there, swinging unless the mod said not to.
-        if let Some(swing) = self.native_interaction(InteractionKey::Attack, Hand::Main) {
+        if let Some(swing) = self.native_interaction(
+            InteractionKey::Attack,
+            Hand::Main,
+            mod_api::InteractionAttempt::Press,
+        ) {
             if swing {
                 let animation = spear.map_or(SwingAnimation::DEFAULT, |k| k.attack_animation());
                 self.swing_hand(Hand::Main, animation);
@@ -9957,7 +10041,9 @@ impl Game<'_> {
             {
                 self.native_left_click_empty();
             }
-            self.remote_mining(true);
+            if !self.remote_mining(true) {
+                return false;
+            }
             instant = self
                 .res
                 .facts()
@@ -10116,7 +10202,11 @@ impl Game<'_> {
             let canceled = if air {
                 None
             } else {
-                self.native_interaction(InteractionKey::Attack, Hand::Main)
+                self.native_interaction(
+                    InteractionKey::Attack,
+                    Hand::Main,
+                    mod_api::InteractionAttempt::Held,
+                )
             };
             if canceled.is_none() && !air {
                 // MultiPlayerGameMode.continueDestroyBlock starts with ensureHasSentCarriedItem.
@@ -10130,9 +10220,10 @@ impl Game<'_> {
             } else if self.remote_break_restricted() {
                 // continueDestroyBlock returned false: no swing.
             } else if !air {
-                self.remote_mining(false);
-                self.swing_arm();
-                self.send(S::Punch(Empty));
+                if self.remote_mining(false) {
+                    self.swing_arm();
+                    self.send(S::Punch(Empty));
+                }
             } else {
                 if let Some(r) = self.remote.as_mut() {
                     r.destroying = None;
@@ -11720,7 +11811,7 @@ fn synced_local_use(
 /// The game as the tick's input sees it.
 struct RemoteInputWorld<'g, 'a>(&'g mut Game<'a>);
 
-struct RemoteUseWorld<'g, 'a>(&'g mut Game<'a>);
+struct RemoteUseWorld<'g, 'a>(&'g mut Game<'a>, mod_api::InteractionAttempt);
 
 impl horizon_client::interaction_input::TargetUseWorld for RemoteUseWorld<'_, '_> {
     fn use_entity(&mut self) -> bool {
@@ -11730,7 +11821,7 @@ impl horizon_client::interaction_input::TargetUseWorld for RemoteUseWorld<'_, '_
         self.0.remote_use_block(Hand::Main)
     }
     fn use_item(&mut self) {
-        self.0.remote_use_hands();
+        self.0.remote_use_hands(self.1);
     }
 }
 
@@ -11755,8 +11846,13 @@ impl horizon_client::interaction_input::InteractionWorld for RemoteInputWorld<'_
     fn start_attack(&mut self) -> bool {
         self.0.remote_start_attack()
     }
-    fn start_use(&mut self) {
-        self.0.remote_use();
+    fn start_use(&mut self, held: bool) {
+        let attempt = if held {
+            mod_api::InteractionAttempt::Held
+        } else {
+            mod_api::InteractionAttempt::Press
+        };
+        self.0.remote_use(attempt);
     }
     fn pick(&mut self) {
         // Minecraft.pickBlockOrEntity: an entity before the block is asked
@@ -11765,7 +11861,11 @@ impl horizon_client::interaction_input::InteractionWorld for RemoteInputWorld<'_
             if let Some(id) = entity {
                 if self
                     .0
-                    .native_interaction(InteractionKey::PickBlock, Hand::Main)
+                    .native_interaction(
+                        InteractionKey::PickBlock,
+                        Hand::Main,
+                        mod_api::InteractionAttempt::Press,
+                    )
                     .is_some()
                 {
                     return;
@@ -11778,7 +11878,11 @@ impl horizon_client::interaction_input::InteractionWorld for RemoteInputWorld<'_
         } else if let Some(hit) = self.0.pick() {
             if self
                 .0
-                .native_interaction(InteractionKey::PickBlock, Hand::Main)
+                .native_interaction(
+                    InteractionKey::PickBlock,
+                    Hand::Main,
+                    mod_api::InteractionAttempt::Press,
+                )
                 .is_some()
             {
                 return;
@@ -12102,6 +12206,107 @@ mod attachment_query_tests;
 #[cfg(test)]
 mod tests {
     use super::super::api_values::TryIntoApi;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn stopping_a_retained_client_dig_aborts_only_once() {
+        use crate::game::{Hit, native_entity_refs::tests::with_client_game};
+        use horizon_client::{chunk::Chunk, motion::PlayerMotion};
+        use horizon_core::geometry::Vec3;
+        use horizon_protocol::connection::Pipe;
+        use mod_api::{
+            ClientHost, ClientMiningPredictEvent, ClientPacketSendEvent, Flow, Hooks, ModEntry,
+            testing::with_mods,
+        };
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+
+        struct CountActions {
+            packets: Arc<AtomicUsize>,
+            vetoes: Arc<AtomicUsize>,
+        }
+        #[mod_api::__subscriptions]
+        impl Hooks for CountActions {
+            fn client_mining_predict(
+                &self,
+                _: &dyn ClientHost,
+                event: &mut ClientMiningPredictEvent,
+            ) -> Flow {
+                assert!(!event.prediction.starting);
+                assert_eq!(event.prediction.pos, [0, 64, 0]);
+                assert!(event.prediction.progress > 0.5);
+                self.vetoes.fetch_add(1, Ordering::Relaxed);
+                Flow::Cancel
+            }
+
+            fn client_packet_send(
+                &self,
+                _: &dyn ClientHost,
+                event: &mut ClientPacketSendEvent<'_>,
+            ) -> Flow {
+                if event.packet.id.path() == "player_action" {
+                    self.packets.fetch_add(1, Ordering::Relaxed);
+                }
+                Flow::Continue
+            }
+        }
+        let count = Arc::new(AtomicUsize::new(0));
+        let vetoes = Arc::new(AtomicUsize::new(0));
+        let mods = vec![ModEntry::new(
+            "count_actions",
+            Box::new(CountActions {
+                packets: count.clone(),
+                vetoes: vetoes.clone(),
+            }),
+        )]
+        .into();
+        with_mods(mods, || {
+            with_client_game(|game| {
+                let (client, _server) = Pipe::pair();
+                game.connect_local(client, "MiningTest").unwrap();
+                let pos = [0, 64, 0];
+                game.set_mode_id(0);
+                game.player =
+                    Some(PlayerMotion::new(game.motion, Vec3::new(0.5, 64.0, 3.5)).unwrap());
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                let stone = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:stone")
+                    .unwrap();
+                game.world.set(0, 64, 0, stone).unwrap();
+                game.tick_hit = Some(Some(Hit {
+                    pos,
+                    face: [0, 1, 0],
+                    point: [0.5, 65.0, 0.5],
+                    inside: false,
+                }));
+                let held = game.main_hand_key();
+                let remote = game.remote.as_mut().unwrap();
+                remote.destroying = Some((pos, 1, 0.5));
+                remote.destroying_item = held;
+                remote.is_destroying = true;
+                game.remote_continue_attack(true);
+                assert_eq!(vetoes.load(Ordering::Relaxed), 1);
+                let remote = game.remote.as_ref().unwrap();
+                assert!(remote.is_destroying);
+                assert_eq!(remote.destroying, Some((pos, 1, 0.5)));
+                assert_eq!(count.load(Ordering::Relaxed), 0);
+                game.remote_continue_attack(false);
+                game.remote_continue_attack(false);
+                assert_eq!(
+                    game.remote.as_ref().unwrap().destroying,
+                    Some((pos, 1, 0.0))
+                );
+            })
+        });
+        assert_eq!(count.load(Ordering::Relaxed), 1);
+    }
     /// The remote player animation uses the scoped item answer once per tick.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
@@ -14440,6 +14645,121 @@ mod tests {
         items::ItemStack,
     };
     use horizon_core::nbt::Tag;
+
+    /// #12040: a server's client moves at the speed the server's attributes give it, never its
+    /// effects' own. Vanilla's server removes a Speed that runs out in ServerPlayer.doTick, after
+    /// the tick's sendDirtyEntityData: ClientboundRemoveMobEffectPacket goes out at once and the
+    /// movement speed without the effect's modifier a tick later, so for that tick the client still
+    /// runs fast (a potion drunk starts the same way). A client a tick off is what GrimAC's
+    /// Simulation flagged.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_servers_client_takes_its_speed_from_the_attributes_not_the_effect() {
+        use crate::game::{Audio, Game, Options, Progress, Settings, load_resources};
+        use horizon_client::motion::PlayerMotion;
+        use horizon_core::geometry::Vec3;
+        use horizon_protocol::packets::play::{
+            AttributeModifier, AttributeSnapshot, Clientbound as C, RemoveMobEffect,
+            UpdateAttributes, UpdateMobEffect,
+        };
+        let root = std::path::PathBuf::from(
+            std::env::var_os("HORIZON_TEST_RESOURCES").expect("prepared resources required"),
+        );
+        let settings = Settings::default();
+        let loaded = load_resources(
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            crate::game::execution_role::ExecutionRole::Client,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
+            None,
+        )
+        .unwrap();
+        game.init_remote_for_replay().unwrap();
+        game.player = Some(PlayerMotion::new(game.motion, Vec3::new(0.5, 64.0, 0.5)).unwrap());
+        let me = game.remote.as_ref().unwrap().entity_id;
+        let speed = game.remote_effect_network_id("speed").unwrap();
+        let attribute = {
+            let p = game.player.as_ref().unwrap();
+            let key = p.attributes.key("minecraft:movement_speed").unwrap();
+            key.attribute().registry_id()
+        };
+        // Player.createAttributes: 0.1F.
+        let walking = f64::from(0.1f32);
+        // Speed II: 0.2 (a float) a level, multiplying the total.
+        let amount = f64::from(0.2f32) * 2.0;
+        let attributes = |sped: bool| {
+            C::UpdateAttributes(UpdateAttributes {
+                id: me,
+                values: vec![AttributeSnapshot {
+                    attribute,
+                    base: walking,
+                    modifiers: sped
+                        .then(|| AttributeModifier {
+                            id: "minecraft:effect.speed".into(),
+                            amount,
+                            operation: 2,
+                        })
+                        .into_iter()
+                        .collect(),
+                }],
+            })
+        };
+        // Each step: the packets of one server tick, then a client tick.
+        let mut step = |packets: Vec<C>| {
+            for packet in packets {
+                game.handle_packet(packet).unwrap();
+            }
+            game.tick_client_effects();
+            game.player
+                .as_mut()
+                .unwrap()
+                .attribute("minecraft:movement_speed")
+                .unwrap()
+        };
+        let effect = C::UpdateMobEffect(UpdateMobEffect {
+            id: me,
+            effect: speed,
+            amplifier: 1,
+            duration: 60,
+            flags: 2 | 4,
+        });
+        let fast = walking * (1.0 + amount);
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        let seen = [
+            step(vec![effect]),
+            step(vec![attributes(true)]),
+            step(Vec::new()),
+            step(vec![C::RemoveMobEffect(RemoveMobEffect {
+                id: me,
+                effect: speed,
+            })]),
+            step(vec![attributes(false)]),
+        ];
+        let expected = [walking, fast, fast, fast, walking];
+        assert!(
+            seen.iter().zip(expected).all(|(&s, e)| close(s, e)),
+            "speed on each tick: {seen:?}, vanilla's client: {expected:?}"
+        );
+    }
 
     /// `ItemFrame.interact`, `AbstractBoat.interact`, and `Minecart.interact`:
     /// interactions that pass leave the click to the held item without swinging;

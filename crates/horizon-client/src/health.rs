@@ -841,6 +841,8 @@ impl PlayerMotion {
     ) -> Result<PausedHurt> {
         let mut hit = PausedHurt {
             pending: None,
+            selected: None,
+            inner: None,
             source,
             source_name: String::new(),
             amount,
@@ -873,6 +875,33 @@ impl PlayerMotion {
         })?;
         Ok(hit)
     }
+    /// Select the inner hit before synchronous ordinary equipment wear.
+    pub fn select_equipment_hurt(
+        &mut self,
+        level: &mut DamageLevel<'_>,
+        resources: &HealthResources,
+        rules: HealthRules,
+        hit: &mut PausedHurt,
+    ) -> Result<Option<f32>> {
+        let Some(pending) = hit.pending.take() else {
+            return Ok(None);
+        };
+        hit.selected = self.in_combat(level, resources, rules, hit, |combat, state| {
+            Ok(horizon_world::living_hurt::select_equipment_hurt(
+                state, combat, pending,
+            )?)
+        })?;
+        if let Some(selected) = &hit.selected {
+            let damage = selected.damage;
+            hit.inner = self.in_combat(level, resources, rules, hit, |combat, _| {
+                Ok(combat.prepare_equipment_inner()?)
+            })?;
+            if hit.inner == Some(false) {
+                return Ok(Some(damage));
+            }
+        }
+        Ok(None)
+    }
     /// The rest of a hit from `hurtHelmet` on, against the player as the helmet's wear left
     /// them: its armor and protection, and whatever a listener changed.
     pub fn finish_hurt(
@@ -885,13 +914,20 @@ impl PlayerMotion {
         if self.client_side {
             return Ok(BlockOutcome::default());
         }
-        let hurt = match hit.pending.take() {
-            Some(pending) => {
-                self.in_combat(level, resources, rules, &mut hit, |combat, state| {
-                    Ok(combat.hurt_after_helmet(state, pending)?)
-                })?
+        let hurt = if let Some(selected) = hit.selected.take() {
+            let inner = hit.inner;
+            self.in_combat(level, resources, rules, &mut hit, |combat, state| {
+                Ok(combat.finish_selected_equipment(state, selected, inner)?)
+            })?
+        } else {
+            match hit.pending.take() {
+                Some(pending) => {
+                    self.in_combat(level, resources, rules, &mut hit, |combat, state| {
+                        Ok(combat.hurt_after_helmet(state, pending)?)
+                    })?
+                }
+                None => false,
             }
-            None => false,
         };
         let h = &mut self.health;
         let outcome = BlockOutcome {
@@ -1089,6 +1125,8 @@ pub(crate) struct Environment<'a> {
 #[derive(Debug)]
 pub struct PausedHurt {
     /// None for a hit refused before `hurtHelmet`.
+    selected: Option<horizon_world::living_hurt::SelectedHurt<()>>,
+    inner: Option<bool>,
     pending: Option<PendingHurt<()>>,
     source: DamageTypeId,
     source_name: String,

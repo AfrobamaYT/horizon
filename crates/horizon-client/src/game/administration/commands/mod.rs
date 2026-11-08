@@ -9,6 +9,7 @@ pub(super) mod execute;
 pub(super) mod extra;
 pub(in crate::game) mod items;
 mod misc;
+mod modprofile;
 mod place;
 mod players;
 pub(super) mod pregen;
@@ -1190,6 +1191,7 @@ impl Game<'_> {
             "fetchprofile" => self.cmd_fetchprofile(ctx),
             "publish" => self.cmd_publish(ctx),
             "unpublish" => self.cmd_unpublish(),
+            id if id.starts_with("modprofile.") => self.cmd_modprofile(id),
             "debug" => self.cmd_debug(ctx),
             "jfr" => self.cmd_jfr(ctx),
             "version" => self.cmd_version(),
