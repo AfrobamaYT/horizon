@@ -24,7 +24,8 @@ gameplay attributes) as a `LevelDimensionType`: the build range, `coordinate_sca
 level on a vanilla type returns that type's values, a registered dimension returns what its
 `DimensionSettings` set, and a data pack's dimension type counts the same way. It returns `None` for
 a stale handle, and on a client it reads the level that window shows; a client of another server
-reads the Overworld's values for a level that server's mods added.
+reads the Overworld's values for a level that server's mods added (the game itself plays that level
+by the type the server sent).
 
 ### Registering a dimension
 
@@ -64,8 +65,8 @@ range: the level's fluids, mobs, beds and time follow the type the server sent, 
 whether or not the client has the mod that registered the level.
 
 `sky_color`, `fog_color` (`#rrggbb`) and `cloud_height` set the sky overhead, the fog at the
-horizon and the clouds' height; left as None they are the Overworld's. They apply to the host's own
-world: a client of another server that has the mod's dimension shows the Overworld's sky there.
+horizon and the clouds' height; left as None they are the Overworld's. A client of a server draws a
+level of a mod or a pack with the sky the server's type gives it, as the host does.
 
 `day_cycle` picks the timelines and the clock the dimension type names: `overworld` (the day and moon
 cycles, the villagers' schedule and the Overworld's clock, the default), `nether` (the schedule only,
