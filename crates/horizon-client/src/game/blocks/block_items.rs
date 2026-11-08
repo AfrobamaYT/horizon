@@ -648,7 +648,12 @@ mod tests {
                 .chunks
                 .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
             let level = game.level(game.dim.id()).unwrap();
-            let blocks = ["pick_test:crop", "pick_test:gold", "pick_test:plain", "pick_test:ghost"];
+            let blocks = [
+                "pick_test:crop",
+                "pick_test:gold",
+                "pick_test:plain",
+                "pick_test:ghost",
+            ];
             for (x, block) in (1..).zip(blocks) {
                 let state = game.pack.assets.registry.default_state(block).unwrap();
                 assert!(
