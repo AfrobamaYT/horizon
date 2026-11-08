@@ -517,7 +517,7 @@ impl WasmMod {
         // Dispatch-owned native receivers can unwind before our outer call
         // guards. Their destructors must not reenter the still-lent guest.
         if std::thread::panicking() {
-            self.running.poisoned.store(true, Ordering::Relaxed);
+            self.disable();
             return None;
         }
         if self.running.poisoned.load(Ordering::Relaxed) {

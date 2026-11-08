@@ -980,61 +980,6 @@ fn returned_builtin_proxy_does_not_keep_its_group_alive() {
 }
 
 #[test]
-fn returned_builtin_proxy_does_not_keep_its_group_alive() {
-    use mod_api::EnergyHandler;
-    struct World;
-    impl mod_api::Host for World {}
-    mod_api::impl_host_areas!(World);
-    impl mod_api::ServerHost for World {}
-    mod_api::impl_server_host_areas!(World);
-    let amount = crate::boundary::export_id("EnergyHandler", "amount").unwrap();
-    let module = module(&format!(
-        r#"
-        local.get 0 i32.const {amount} i32.eq if (result i64)
-          i32.const 1024 i32.const 17 i32.store
-          i64.const 4398046511108
-        else
-          i64.const 2199023255552 local.get 2 i64.extend_i32_u i64.or
-        end"#
-    ));
-    let proxy: Arc<dyn EnergyHandler> = module
-        .call(
-            CallClass::Hook,
-            Frame::default(),
-            0,
-            None,
-            |w| w.put(&Id(123)),
-            |r| r.take(),
-        )
-        .unwrap();
-    assert_eq!(proxy.amount(&mut World), 17);
-    // Sending this proxy back makes Cx.held retain it. The retained guest proxy
-    // must not create Running -> Cx.held -> WasmHandler -> Running ownership.
-    let _: Id = module
-        .call(
-            CallClass::Hook,
-            Frame::default(),
-            0,
-            None,
-            |w| w.put(&proxy),
-            |r| r.take(),
-        )
-        .unwrap();
-    let running = Arc::downgrade(&module.running);
-    drop(module);
-    assert_eq!(
-        running.strong_count(),
-        0,
-        "a retained guest proxy kept its own group alive"
-    );
-    assert_eq!(
-        proxy.amount(&mut World),
-        0,
-        "an unavailable proxy did not take the call-refused path"
-    );
-}
-
-#[test]
 fn memory_growth_limit_traps_and_poison_is_shared_by_proxies() {
     let module = module("i32.const 4096 memory.grow drop i64.const 0");
     let other = module.clone();
