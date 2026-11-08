@@ -784,7 +784,7 @@ impl Sprites {
 fn read_rgba(source: &ResourceSource, path: &str) -> Result<(u32, u32, Vec<u8>)> {
     decode_rgba(&source.read(path)?)
 }
-fn decode_rgba(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
+pub(crate) fn decode_rgba(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
     let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     decoder.ignore_checksums(true);
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);

@@ -1396,7 +1396,11 @@ impl Mob {
     }
     /// `LivingEntity.getFlyingSpeed`, through the `living_flying_speed` hook.
     fn flying_speed(&self, w: &MobWorld) -> f32 {
-        let mut speed = 0.02;
+        let mut speed = if super::equine::controlled(self) {
+            self.ai.speed * 0.1
+        } else {
+            0.02
+        };
         crate::motion::native_living_flying_speed(
             w.loop_context,
             self.id,
@@ -3450,6 +3454,24 @@ mod tests {
                 (magma_honey.velocity.y - 0.41).abs() < 1.0e-5,
                 "magma cube jump on honey"
             );
+        });
+        assert!(ran, "built test world ran");
+    }
+
+    /// `LivingEntity.getFlyingSpeed`: a horse its player steers (saddled, ridden) moves
+    /// through the air at a tenth of its speed; riderless or unsaddled at 0.02.
+    #[test]
+    fn a_steered_mount_moves_through_the_air_at_a_tenth_of_its_speed() {
+        let mut kind = crate::mobs::sensor_scan_tests::kind();
+        std::sync::Arc::make_mut(&mut kind).species = super::super::Species::Horse;
+        let mut m = Mob::new(1, kind, Vec3::ZERO, 0.0);
+        let ran = crate::mobs::world::with_test_world(&[], |w, _| {
+            m.ai.speed = 0.3;
+            assert_eq!(m.flying_speed(w), 0.02, "no rider");
+            m.rider = Some(super::super::equine::Rider::default());
+            assert_eq!(m.flying_speed(w), 0.02, "unsaddled");
+            m.extra.saddled = true;
+            assert_eq!(m.flying_speed(w), 0.3_f32 * 0.1);
         });
         assert!(ran, "built test world ran");
     }
