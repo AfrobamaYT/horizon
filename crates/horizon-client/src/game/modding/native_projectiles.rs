@@ -213,8 +213,10 @@ impl Game<'_> {
         arrow_events: &mut Vec<(Vec3, ArrowEvent)>,
     ) {
         // The mods see the projectiles where they will be, as `projectile_hit` does.
+        // Move the already-lifted pass: lifting it again would leave its outer
+        // pass unpaired when the empty original batch is replaced below.
         self.creatures.projectiles.restore(
-            projectiles.lift(),
+            std::mem::take(projectiles),
             horizon_client::join_seq::RestoreOrder::SurvivorsFirst,
         );
         let canceled = self.native_projectile_impacts(&impacts);
@@ -325,6 +327,79 @@ impl Game<'_> {
 #[cfg(test)]
 mod nested_spawn_tests {
     use super::*;
+
+    fn impact_handoff_balances_the_pass(park: bool) {
+        use horizon_client::join_seq::residency::{Change, Journal, Kind, Owner};
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            let journal = Journal::default();
+            let owner = Owner {
+                dimension: game.dim.key(),
+                kind: Kind::Projectile,
+            };
+            game.creatures
+                .projectiles
+                .bind_residency(&journal, owner, |p| (p.id, p.join));
+            let mut shot = Projectile::new(
+                horizon_client::projectiles::ProjectileKind::Egg,
+                Vec3::new(3.5, 80.0, 3.5),
+                None,
+            );
+            shot.id = 71;
+            game.creatures.projectiles.push(shot);
+            let join = game.creatures.projectiles[0].join;
+            let mut pass = game.creatures.projectiles.lift();
+            game.native_settle_impacts(
+                &mut pass,
+                &mut JoinList::default(),
+                &[],
+                Vec::new(),
+                &mut Vec::new(),
+                &mut Vec::new(),
+            );
+            game.creatures
+                .projectiles
+                .restore(pass, horizon_client::join_seq::RestoreOrder::SpawnsFirst);
+            if park {
+                game.enter_level(crate::game::Dim::Nether).unwrap();
+            }
+            let mut events = Vec::new();
+            journal.drain_into(&mut events);
+            assert!(events.iter().all(|event| event.owner == owner));
+            let balance: i32 = events
+                .iter()
+                .map(|event| match event.change {
+                    Change::Lifted => 1,
+                    Change::Restored => -1,
+                    _ => 0,
+                })
+                .sum();
+            assert_eq!(balance, 0, "impact exposure left an unmatched lifted pass");
+            if park {
+                game.enter_level(crate::game::Dim::Overworld).unwrap();
+            }
+            assert_eq!(
+                game.creatures
+                    .projectiles
+                    .iter()
+                    .map(|p| (p.id, p.join))
+                    .collect::<Vec<_>>(),
+                [(71, join)]
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn impact_handoff_balances_the_active_owner() {
+        impact_handoff_balances_the_pass(false);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn impact_handoff_balances_the_parked_owner() {
+        impact_handoff_balances_the_pass(true);
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn impact_exposure_retains_the_existing_spawn_buffer_for_the_next_pass() {
