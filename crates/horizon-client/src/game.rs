@@ -4945,8 +4945,9 @@ impl Game<'_> {
         );
         let feet = [p.position.x, p.position.y, p.position.z];
         let own = self.level.ensure_player_uuid();
-        let mut kept = horizon_client::join_seq::JoinList::with_capacity(items.len());
-        for mut item in items {
+        let mut i = 0;
+        while i < items.len() {
+            let item = &items[i];
             let b = item.bounds();
             let touching = b.min_position().x < max[0]
                 && b.max_position().x > min[0]
@@ -4957,8 +4958,8 @@ impl Game<'_> {
             // ItemEntity.playerTouch: no pickup delay, and the target (if any) is this player.
             if touching && item.pickup_delay == 0 && item.target.is_none_or(|t| t == own) {
                 if self.native_pickup_refused(&item.stack) {
-                    item.pickup_delay = 10;
-                    kept.push(item);
+                    items[i].pickup_delay = 10;
+                    i += 1;
                     continue;
                 }
                 let before = item.stack.count;
@@ -4968,10 +4969,10 @@ impl Game<'_> {
                     None => {
                         self.award_stat("picked_up", &kind, before as i32);
                         if let Some(thrower) = thrower {
-                            self.trigger_thrown_picked_up_by_player(&item.stack, thrower);
+                            self.trigger_thrown_picked_up_by_player(&items[i].stack, thrower);
                         }
                         self.add_pickup(
-                            pickups::Taken::Item(Box::new(item)),
+                            pickups::Taken::Item(Box::new(items.remove(i))),
                             pickups::Collector::Player,
                         );
                         let pitch = ((self.world.random.next_float()
@@ -4990,7 +4991,7 @@ impl Game<'_> {
                                 self.trigger_thrown_picked_up_by_player(&rest, thrower);
                             }
                             self.add_pickup(
-                                pickups::Taken::Item(Box::new(item.clone())),
+                                pickups::Taken::Item(Box::new(items[i].clone())),
                                 pickups::Collector::Player,
                             );
                             // handleTakeItemEntity: the random pitch of a full pickup.
@@ -5002,13 +5003,13 @@ impl Game<'_> {
                             self.audio
                                 .play("minecraft:entity.item.pickup", Some(feet), 0.2, pitch);
                         }
-                        item.stack = rest;
+                        items[i].stack = rest;
                     }
                 }
             }
-            kept.push(item);
+            i += 1;
         }
-        self.put_back_dropped(kept);
+        self.put_back_dropped(items);
         self.spawn_destroyed_contents(destroyed);
     }
     /// The item entities `tick_dropped_items` took out, back in the level,
