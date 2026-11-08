@@ -332,6 +332,13 @@ impl Game<'_> {
     /// Reload the content tables with the world's packs, as
     /// `/reload` reloads a server's (`ReloadableServerResources`).
     pub(super) fn reload_world_tables(&mut self, prepared: PreparedWorldReload) {
+        self.install_world_tables(prepared);
+        self.run_native_advancement_grants();
+    }
+
+    /// Publish tables before function admission, leaving advancement rewards queued
+    /// until the reload's new function store is available.
+    pub(super) fn install_world_tables(&mut self, prepared: PreparedWorldReload) {
         let PreparedWorldReload {
             tables,
             health,
@@ -376,7 +383,6 @@ impl Game<'_> {
             && let Some(sync) = wire
         {
             self.with_advancement_hub(|hub, owners| hub.reload_resources(sync, owners));
-            self.run_native_advancement_grants();
         }
         let overlay = pack_files(&self.world_tables);
         self.adv.tree = Arc::new(horizon_client::advancements::Tree::load_with(

@@ -242,9 +242,10 @@ impl Game<'_> {
         // content tables, as `ReloadableServerResources` does; on world open
         // `finish_open_world` builds them right after this.
         if let Some(world) = world {
-            self.reload_world_tables(world);
+            self.install_world_tables(world);
         }
         self.apply_server_reload(prepared, &stack, enabled_features);
+        self.run_native_advancement_grants();
         if self.fns.schedule.is_empty() {
             self.load_schedule();
         }
@@ -1187,8 +1188,9 @@ impl Game<'_> {
         self.pack.additional_data = additional.into();
         self.save_datapack_settings();
         self.fns.load_pending = true;
-        self.reload_world_tables(world);
+        self.install_world_tables(world);
         self.apply_server_reload(prepared, &stack, &self.level.enabled_features.clone());
+        self.run_native_advancement_grants();
         Ok(())
     }
 
