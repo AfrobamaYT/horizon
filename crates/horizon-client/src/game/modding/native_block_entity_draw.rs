@@ -2196,7 +2196,10 @@ mod tests {
             };
             take_spans(game);
             let (plain, plain_spans) = batch(game);
-            assert!(!plain.is_empty() && plain_spans.is_empty(), "no pack, no run");
+            assert!(
+                !plain.is_empty() && plain_spans.is_empty(),
+                "no pack, no run"
+            );
 
             game.pack_ids = Some(Default::default());
             // What `mod_block_entity_geometry` does around a mod's `model()` call.
@@ -2226,8 +2229,15 @@ mod tests {
             };
             let reference = pixels(&per_copy.vertices, &per_copy_spans);
             let painted: Vec<_> = reference.iter().filter(|p| p[..3] != [0; 3]).collect();
-            assert!(painted.len() > 20, "the probe pack drew {} pixels", painted.len());
-            assert!(painted.iter().all(|p| **p == PACK_COLOURS[1]), "gbuffers_block");
+            assert!(
+                painted.len() > 20,
+                "the probe pack drew {} pixels",
+                painted.len()
+            );
+            assert!(
+                painted.iter().all(|p| **p == PACK_COLOURS[1]),
+                "gbuffers_block"
+            );
             let batch = pixels(&copies, &copy_spans);
             let differing = batch.iter().zip(&reference).filter(|(a, b)| a != b).count();
             assert_eq!(differing, 0, "batch pixels differ from per-copy ones");
