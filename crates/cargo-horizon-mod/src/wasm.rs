@@ -163,6 +163,7 @@ fn cargo_member(
     provided: &[String],
     features: &[String],
     registrations: &str,
+    point_names: &str,
 ) -> Result<Vec<u8>, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let mut command = pinned("cargo");
@@ -197,6 +198,7 @@ fn cargo_member(
             "-Crelocation-model=pic -Zshare-generics=n -Zdefault-visibility=hidden",
         )
         .env("HORIZON_GUEST_REGISTRATIONS", registrations)
+        .env("HORIZON_POINT_NAMES", point_names)
         .env("CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER", exe)
         .env(LINK_ENV, role)
         .env(LLD_ENV, &toolchain.lld)
@@ -252,7 +254,7 @@ fn std_member(target_dir: &Path, toolchain: &Toolchain) -> Result<Vec<u8>, Strin
         "// The group's one std: linked whole and exported.\n",
     )
     .map_err(|e| e.to_string())?;
-    cargo_member(&dir, target_dir, toolchain, "std", &[], &[], "")
+    cargo_member(&dir, target_dir, toolchain, "std", &[], &[], "", "[]")
 }
 
 /// `wasm-std <out>`: the std member the game ships beside its executable.
@@ -381,8 +383,8 @@ pub fn build(root: &Path, catalog: Option<&Path>) -> Result<(), String> {
         parsed["wasm"] = toml_edit::Item::Table(wasm);
     }
     let parsed = horizon_mod_package::Manifest::parse(&parsed.to_string())?;
-    let registrations = if parsed.inject.is_empty() {
-        String::new()
+    let (registrations, point_names) = if parsed.inject.is_empty() {
+        (String::new(), "[]".to_owned())
     } else {
         let std_member = std::env::var_os("HORIZON_WASM_STD")
             .map(std::path::PathBuf::from)
@@ -406,12 +408,17 @@ pub fn build(root: &Path, catalog: Option<&Path>) -> Result<(), String> {
         if expressions.len() != parsed.inject.len() {
             return Err("wasm supports API head and return injections only".into());
         }
-        expressions
+        let names = horizon_mod_point_emit::places(&parsed, &points)?;
+        let registrations = expressions
             .iter()
             .map(|e| {
                 format!("mod_points::register(&{e}).expect(\"validated guest API listener\");\n")
             })
-            .collect()
+            .collect();
+        (
+            registrations,
+            serde_json::to_string(&names).map_err(|e| e.to_string())?,
+        )
     };
     let module = cargo_member(
         root,
@@ -421,6 +428,7 @@ pub fn build(root: &Path, catalog: Option<&Path>) -> Result<(), String> {
         &provided,
         &features,
         &registrations,
+        &point_names,
     )?;
     std::fs::write(root.join(WASM), &module).map_err(|e| format!("{WASM}: {e}"))?;
     let mut wasm = toml_edit::Table::new();
