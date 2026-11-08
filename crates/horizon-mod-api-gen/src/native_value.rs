@@ -61,7 +61,7 @@ pub fn decoders<'a>(rule: &Rule, paths: impl Iterator<Item = &'a str>) -> TokenS
         )
         .expect("a decodable layout has a path");
         let decode = codec.decode;
-        out.push(quote!(fn #name(input: &mut mod_api::wire::Reader<'_>) -> Result<#native, mod_api::wire::WireError> { Ok(#decode) }));
+        out.push(quote!(pub(crate) fn #name(input: &mut mod_api::wire::Reader<'_>) -> Result<#native, mod_api::wire::WireError> { Ok(#decode) }));
     }
     quote!(#(#out)*)
 }

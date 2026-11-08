@@ -152,3 +152,41 @@ fn opaque_hidden_fields_are_not_reached_and_enum_ordinals_are_local() {
     assert!(plan.field(choice, Some(1), 0));
     assert!(!plan.field(choice, Some(0), 0));
 }
+
+/// Helpers live in `crate::__horizon_points` and are called from the game's other modules, so each
+/// emitted fn must be `pub(crate)`: a private helper is E0603 at every call site.
+#[test]
+fn staged_helpers_are_callable_from_sibling_modules() {
+    let rule = Rule::new(&[internal(
+        "horizon_client::Game",
+        "struct",
+        "struct Game { a: u16 }",
+    )]);
+    let mut graph = Graph::default();
+    graph.add(
+        &rule,
+        &rule.shape("horizon_client", None, &syn::parse_str("Game").unwrap()),
+    );
+    for emitted in [
+        crate::native_window::helpers(&rule, &graph).unwrap(),
+        crate::native_patch::helpers(&rule, &graph).unwrap(),
+    ] {
+        let file: syn::File = syn::parse2(emitted).unwrap();
+        let fns: Vec<_> = file
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                syn::Item::Fn(item) => Some(item),
+                _ => None,
+            })
+            .collect();
+        assert!(!fns.is_empty());
+        for item in fns {
+            assert!(
+                matches!(item.vis, syn::Visibility::Restricted(_)),
+                "{} is not pub(crate)",
+                item.sig.ident
+            );
+        }
+    }
+}

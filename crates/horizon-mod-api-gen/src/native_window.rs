@@ -378,7 +378,7 @@ pub fn helpers(rule: &Rule, graph: &crate::native_policy::Graph) -> Result<Token
             &native_schema::All,
             Some((graph, quote!(__policy))),
         )?;
-        helpers.push(quote!(fn #helper<'a>(__value: &'a #native, __policy: &'a mod_points::exposure::Plan) -> impl mod_points::native_read::NativeNode + 'a { #inner }));
+        helpers.push(quote!(pub(crate) fn #helper<'a>(__value: &'a #native, __policy: &'a mod_points::exposure::Plan) -> impl mod_points::native_read::NativeNode + 'a { #inner }));
     }
     Ok(quote!(#(#helpers)*))
 }

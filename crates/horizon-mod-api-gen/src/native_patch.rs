@@ -138,7 +138,9 @@ fn emit(
         && graph.layouts[id].opaque.is_none()
     {
         let helper = quote::format_ident!("__horizon_patch_{id}");
-        return Ok(quote!(crate::__horizon_points::#helper(&mut (#place), __np_tree, __np_plan, &(#policy))?;));
+        return Ok(
+            quote!(crate::__horizon_points::#helper(&mut (#place), __np_tree, __np_plan, &(#policy))?;),
+        );
     }
     let child = |s: &Shape, p| {
         emit(rule, s, p, exposure, runtime, depth + 1)
@@ -351,7 +353,7 @@ pub fn helpers(rule: &Rule, graph: &crate::native_policy::Graph) -> Result<Token
                 "unsupported native patch layout"
             ));)
         });
-        helpers.push(quote!(fn #helper<'p>(__np_value: &'p mut #native, __np_tree: &mod_points::native_patch::PatchTree<'_>, __np_plan: &mut mod_api::wire::PatchPlan<'p>, __policy: &mod_points::exposure::Plan) -> Result<(), mod_api::wire::WireError> { #body; Ok(()) }));
+        helpers.push(quote!(pub(crate) fn #helper<'p>(__np_value: &'p mut #native, __np_tree: &mod_points::native_patch::PatchTree<'_>, __np_plan: &mut mod_api::wire::PatchPlan<'p>, __policy: &mod_points::exposure::Plan) -> Result<(), mod_api::wire::WireError> { #body; Ok(()) }));
     }
     let decoders = native_value::decoders(
         rule,
