@@ -65,4 +65,13 @@ fn real_member() {
         .call("fixture", "horizon_layout", &[], &mut result)
         .unwrap();
     assert_ne!(result[0].unwrap_i64(), 0);
+    // Hooks::subscribed has no arguments. An empty fixture returns an empty vector.
+    group
+        .call("fixture", "horizon_in", &[Val::I32(0)], &mut [Val::I32(0)])
+        .unwrap();
+    let mut reply = [Val::I64(0)];
+    group
+        .call("fixture", "horizon_hook", &[Val::I32(0)], &mut reply)
+        .unwrap();
+    assert_eq!(reply[0].unwrap_i64() as u32, 4);
 }
