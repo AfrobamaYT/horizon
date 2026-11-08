@@ -19,7 +19,8 @@ use horizon_core::{
     random::{LegacyRandom, RandomSource},
 };
 use horizon_world::block_collision::BlockCollisionRegistry;
-pub use mod_api::particles::ParticleOptions;
+mod options;
+pub use options::ParticleOptions;
 use std::{
     array,
     collections::{HashMap, HashSet},
@@ -1965,7 +1966,7 @@ impl ParticleEngine {
         // A native mod's SimpleParticleType: vanilla's TextureSheetParticle with
         // the sprite set its particles/<name>.json names, no tint, 20..40 ticks.
         if let Some(name) = &o.mod_particle {
-            let (set, behaviour) = *self.mod_sets.get(name)?;
+            let (set, behaviour) = *self.mod_sets.get(name.as_ref())?;
             let mut r = LegacyRandom::new(seed);
             let mut q = Particle::moving(&mut r, ParticleType::Smoke, p, v);
             q.ty = ParticleType::Smoke;
@@ -3365,9 +3366,7 @@ impl ParticleEngine {
                     scaled(o.color[2], jb),
                 );
                 q.size = 0.26;
-                // The older-server adapter marks pre-1.21.4 TargetColorParticleOption with -1.
-                // Its TrailParticle.Provider chose nextInt(40) + 10 after constructing the particle.
-                q.lifetime = if duration == -1 {
+                q.lifetime = if o.legacy_trail_lifetime {
                     self.level_random.next_int_bound(40).unwrap_or(0) + 10
                 } else {
                     duration
@@ -6084,12 +6083,12 @@ mod tests {
             &HashSet::new(),
         );
         engine.seed_randoms(1, 42, 2);
+        let legacy = ParticleOptions {
+            legacy_trail_lifetime: true,
+            ..ParticleOptions::trail([1.0, 2.0, 3.0], 0x7f3f1f, -1)
+        };
         for _ in 0..5 {
-            engine.create(
-                &ParticleOptions::trail([1.0, 2.0, 3.0], 0x7f3f1f, -1),
-                [0.0; 3],
-                [0.0; 3],
-            );
+            engine.create(&legacy, [0.0; 3], [0.0; 3]);
         }
         // java.util.Random(42).nextInt(40) + 10, as vanilla 1.21.3 TrailParticle.Provider does.
         assert_eq!(
@@ -6117,6 +6116,16 @@ mod tests {
                 .expect("trail is an ordinary particle")
                 .lifetime,
             37
+        );
+        // A current server's -1 is a lifetime, not the old protocol marker.
+        engine.create(
+            &ParticleOptions::trail([1.0, 2.0, 3.0], 0x7f3f1f, -1),
+            [0.0; 3],
+            [0.0; 3],
+        );
+        assert_eq!(
+            engine.pending.last().unwrap().ordinary().unwrap().lifetime,
+            -1
         );
     }
     #[test]

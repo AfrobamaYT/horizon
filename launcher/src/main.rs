@@ -83,10 +83,10 @@ mod while_playing;
 mod worlds_page;
 
 use gpui::{
-    actions, div, ease_out_quint, prelude::*, px, relative, size, Animation, AnimationExt,
-    AnyElement, App, Bounds, ClickEvent, Context, Div, ElementId, FocusHandle, FontWeight, Hsla,
-    KeyBinding, KeyDownEvent, Menu, MenuItem, MouseDownEvent, PathPromptOptions, Pixels, Point,
-    SharedString, Stateful, Subscription, Window, WindowBounds, WindowOptions,
+    Animation, AnimationExt, AnyElement, App, Bounds, ClickEvent, Context, Div, ElementId,
+    FocusHandle, FontWeight, Hsla, KeyBinding, KeyDownEvent, Menu, MenuItem, MouseDownEvent,
+    PathPromptOptions, Pixels, Point, SharedString, Stateful, Subscription, Window, WindowBounds,
+    WindowOptions, actions, div, ease_out_quint, prelude::*, px, relative, size,
 };
 use horizon_launcher::account::{self, Accounts, SignIn, SignInState};
 use horizon_launcher::backend::{self, Job, Msg, Release, Running, Settings, Updates};
@@ -98,9 +98,9 @@ use horizon_launcher::native_status;
 use scrollbar::Scrollbar;
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::Ordering;
-use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Mutex;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 use theme::Theme;
 
@@ -427,6 +427,10 @@ struct Launcher {
     pack_busy: bool,
     pack_log: VecDeque<String>,
     pack_error: Option<String>,
+    /// Other launchers' modpacks on this computer, offered above the imported ones, and whether
+    /// the scan for them runs now.
+    found_packs: Vec<horizon_launcher::other_launchers::Found>,
+    found_scanning: bool,
     /// The game starting now plays this pack's profile (its work folder).
     starting_pack: Option<std::path::PathBuf>,
     /// The Mods page: the browser's search, installs and updates (`mods_page.rs`).
@@ -476,15 +480,17 @@ impl Launcher {
             cx.notify();
         });
         let window_handle = window.window_handle();
-        cx.spawn(async move |this, cx| loop {
-            cx.background_executor()
-                .timer(Duration::from_millis(80))
-                .await;
-            if this
-                .update(cx, |this, cx| this.drain(window_handle, cx))
-                .is_err()
-            {
-                break;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(80))
+                    .await;
+                if this
+                    .update(cx, |this, cx| this.drain(window_handle, cx))
+                    .is_err()
+                {
+                    break;
+                }
             }
         })
         .detach();
@@ -662,6 +668,8 @@ impl Launcher {
             pack_busy: false,
             pack_log: VecDeque::new(),
             pack_error: None,
+            found_packs: Vec::new(),
+            found_scanning: false,
             starting_pack: None,
             mods: mods_page::Mods::new(cx),
             github: github_mods_page::Github::new(cx),
@@ -1088,10 +1096,10 @@ impl Launcher {
                             self.step_aside(cx);
                         }
                         Err(e) => {
-                            if e == account::NoOwner.to_string() {
+                            if e == account::NoOwner::default().to_string() {
                                 self.owner = Some(false);
                                 self.owner_screen_open = true;
-                                self.client_error = Some(account::NoOwner::in_window());
+                                self.client_error = Some(account::NoOwner::default().in_window());
                             } else {
                                 self.client_error = Some(e);
                             }
@@ -1104,10 +1112,13 @@ impl Launcher {
                         let mut cmd = backend::client_command(&tag);
                         let account::GameSession { file, offline, env } = match session {
                             Ok(pass) => pass,
-                            Err(account::NoOwner) => {
-                                self.owner = Some(false);
-                                self.owner_screen_open = true;
-                                self.client_error = Some(account::NoOwner::in_window());
+                            Err(refused) => {
+                                // A keyring that didn't answer isn't a missing owner (#12179).
+                                if refused.keyring.is_none() {
+                                    self.owner = Some(false);
+                                    self.owner_screen_open = true;
+                                }
+                                self.client_error = Some(refused.in_window());
                                 self.starting_pack = None;
                                 self.joining = None;
                                 self.quick_play = None;
@@ -1341,6 +1352,10 @@ impl Launcher {
                     }
                 }
                 Msg::PackDone(result) => self.pack_done(result),
+                Msg::FoundPacks(found) => {
+                    self.found_scanning = false;
+                    self.found_packs = found;
+                }
                 // Old versions log their session; it never reaches the window.
                 Msg::Line(_, line) if line.contains("Session ID is") => {}
                 Msg::Line(job, line) => {
@@ -1786,14 +1801,19 @@ impl Launcher {
         let mods_tx = self.mods.tx.clone();
         let auto_enabled = self.settings.auto_updates_mods();
         std::thread::spawn(move || {
+            // One line per step: a terminal run shows where Play stops (#12179).
+            backend::play_step("checking the game's assets");
             backend::complete_assets(&tag);
             if let Some(auto) = auto {
+                backend::play_step("updating registry mods");
                 let lines = mods_page::auto_update(&[auto], auto_enabled);
                 if !lines.is_empty() {
                     let _ = mods_tx.send(mods_page::Event::AutoUpdated(lines));
                 }
             }
+            backend::play_step("reading the sign-in");
             let session = account::session_for_game(&backend::game_home(), offline_without_owner);
+            backend::play_step("starting the game");
             let _ = tx.send(Msg::Session(session));
         });
     }
@@ -5576,7 +5596,7 @@ fn closed_by_press(closed_at: Option<Point<Pixels>>, event: &ClickEvent) -> bool
 mod tests {
     #[test]
     fn an_unopenable_data_folder_starts_on_settings_instead_of_exiting() {
-        use super::{page_after_startup, Page};
+        use super::{Page, page_after_startup};
         assert!(matches!(
             page_after_startup(Page::Play, true),
             Page::Settings
@@ -5588,7 +5608,7 @@ mod tests {
     #[test]
     fn a_menu_button_stays_closed_after_the_press_that_closed_its_menu() {
         use super::closed_by_press;
-        use gpui::{point, px, ClickEvent, KeyboardClickEvent, MouseClickEvent, MouseDownEvent};
+        use gpui::{ClickEvent, KeyboardClickEvent, MouseClickEvent, MouseDownEvent, point, px};
         let click = |x: f32| {
             ClickEvent::Mouse(MouseClickEvent {
                 down: MouseDownEvent {
@@ -5611,7 +5631,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn cmd_q_quits_and_cmd_w_closes_the_window() {
-        use super::{key_bindings, CloseWindow, Quit};
+        use super::{CloseWindow, Quit, key_bindings};
         use gpui::{Keymap, Keystroke};
         let keymap = Keymap::new(key_bindings());
         let key = |s: &'static str| [Keystroke::parse(s).unwrap()];
@@ -5677,7 +5697,7 @@ mod tests {
     /// it stays off: signing in comes first.
     #[test]
     fn play_prepares_first_for_an_owner() {
-        use super::{play_press, PlayPress};
+        use super::{PlayPress, play_press};
         assert_eq!(play_press(true, Some(true), false), PlayPress::Play);
         assert_eq!(play_press(true, None, false), PlayPress::Play);
         assert_eq!(
@@ -5707,7 +5727,7 @@ mod tests {
 
     #[test]
     fn a_completed_sign_in_is_handled_once_across_ui_polls() {
-        use super::{sign_in_change, SignInState};
+        use super::{SignInState, sign_in_change};
         let mut shown = None;
         let completed = SignInState::Done(Ok(horizon_launcher::account::Account {
             uuid: "11111111111111111111111111111111".into(),
