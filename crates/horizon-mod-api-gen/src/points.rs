@@ -1007,6 +1007,7 @@ mod tests {
         for point in existing.as_array_mut().unwrap() {
             if let Some(raw) = point.get_mut("raw_shape") {
                 for arg in raw["args"].as_array_mut().unwrap() {
+                    assert_eq!(arg["record_mutable"].as_bool(), Some(true));
                     added += usize::from(
                         arg.as_object_mut()
                             .unwrap()
@@ -1014,6 +1015,10 @@ mod tests {
                             .is_some(),
                     );
                 }
+                assert_eq!(
+                    raw.get("outcome_record_mutable"),
+                    (raw["outcome"] != "none").then_some(&serde_json::Value::Bool(true)),
+                );
                 added += usize::from(
                     raw.as_object_mut()
                         .unwrap()
