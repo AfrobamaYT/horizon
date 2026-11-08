@@ -1905,6 +1905,7 @@ pub fn target_continue(st: &mut TargetState, must_see: bool, m: &mut Mob, cx: &m
             }
         }
     }
+    m.set_ai_target(cx.w, Some(who));
     true
 }
 impl Goal for NearestTarget {
