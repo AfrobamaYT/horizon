@@ -1139,7 +1139,7 @@ impl Items {
             instruments: load_instruments(root, overlay),
             enchantments: Arc::new(crate::enchant::Enchantments::load_with(
                 root, overlay, defaults,
-            )),
+            )?),
         })
     }
     /// Use the server's loaded loot-table snapshot for item and block drops.
@@ -1199,7 +1199,7 @@ impl Items {
             instruments: HashMap::new(),
             enchantments: Arc::new(crate::enchant::Enchantments::load_with(
                 root, overlay, defaults,
-            )),
+            )?),
         })
     }
     /// An item table with only tags, for unit tests of item rules.
@@ -2784,10 +2784,11 @@ mod tests {
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         assert!(
             crate::enchant::Enchantments::load_with(&root, &off, &defaults)
+                .unwrap()
                 .list
                 .is_empty()
         );
-        let enchantments = crate::enchant::Enchantments::load_with(&root, &on, &defaults);
+        let enchantments = crate::enchant::Enchantments::load_with(&root, &on, &defaults).unwrap();
         assert_eq!(enchantments.list.len(), 1);
         assert_eq!(enchantments.list[0].max_level, 7);
         fs::remove_dir_all(root).unwrap();

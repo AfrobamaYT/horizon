@@ -155,7 +155,7 @@ fn parse_entry(
     v: &Value,
     tags: &HashMap<String, Vec<Arc<str>>>,
     lang: &HashMap<String, String>,
-) -> Option<Enchantment> {
+) -> crate::Result<Enchantment> {
     let native_post_attack = v["effects"]["minecraft:post_attack"]
         .as_array()
         .into_iter()
@@ -170,7 +170,7 @@ fn parse_entry(
             horizon_core::json_nbt::json_to_tag(&e["effect"]).map(|tag| (i, Arc::new(tag)))
         })
         .collect::<Result<HashMap<_, _>, _>>()
-        .ok()?;
+        .map_err(|error| format!("{id}: {error}"))?;
     let exclusive = match &v["exclusive_set"] {
         Value::String(s) if s.starts_with('#') => tags.get(&s[1..]).cloned().unwrap_or_default(),
         other => string_list(other)
@@ -179,7 +179,7 @@ fn parse_entry(
             .collect(),
     };
     let key = v["description"]["translate"].as_str().unwrap_or("");
-    Some(Enchantment {
+    Ok(Enchantment {
         native_post_attack,
         id: Arc::from(id),
         description: lang.get(key).cloned().unwrap_or_else(|| {
@@ -218,7 +218,12 @@ impl Enchantments {
             })
             .collect();
     }
-    pub fn load(root: &Path, defaults: &horizon_world::item_defaults::ItemDefaults) -> Self {
+    /// Refuse the load if a mod effect payload cannot be represented as NBT.
+    /// Errors identify the enchantment; arbitrary JSON payloads had no prior refusal message.
+    pub fn load(
+        root: &Path,
+        defaults: &horizon_world::item_defaults::ItemDefaults,
+    ) -> crate::Result<Self> {
         Self::load_with(root, &horizon_world::loot::PackOverlay::NONE, defaults)
     }
     /// Load from a resource root; `overlay` (a world's data packs' content
@@ -228,7 +233,7 @@ impl Enchantments {
         root: &Path,
         overlay: &horizon_world::loot::PackOverlay,
         defaults: &horizon_world::item_defaults::ItemDefaults,
-    ) -> Self {
+    ) -> crate::Result<Self> {
         let data = root.join("data/minecraft");
         let mut raw_tags = read_tag_dir(&data.join("tags/enchantment"), overlay.conditions);
         for (id, files) in overlay.tag_kind("enchantment") {
@@ -327,8 +332,8 @@ impl Enchantments {
                 .collect();
         let list = files
             .iter()
-            .filter_map(|(id, v)| parse_entry(id, v, &tags, &lang))
-            .collect::<Vec<_>>();
+            .map(|(id, v)| parse_entry(id, v, &tags, &lang))
+            .collect::<crate::Result<Vec<_>>>()?;
         let index = list
             .iter()
             .enumerate()
@@ -353,7 +358,7 @@ impl Enchantments {
                 },
             );
         }
-        Self {
+        Ok(Self {
             list,
             index,
             tags,
@@ -361,7 +366,7 @@ impl Enchantments {
             damage_tags,
             props,
             lang,
-        }
+        })
     }
     pub fn get(&self, id: &str) -> Option<&Enchantment> {
         self.index.get(id).map(|&i| &self.list[i])
@@ -373,20 +378,18 @@ impl Enchantments {
     pub fn with_entries<'a>(
         &self,
         entries: impl IntoIterator<Item = (&'a str, &'a Value)>,
-    ) -> Option<Self> {
+    ) -> crate::Result<Option<Self>> {
         let mut table = None::<Self>;
         for (id, v) in entries {
             if self.index.contains_key(id) {
                 continue;
             }
             let t = table.get_or_insert_with(|| self.clone());
-            let Some(e) = parse_entry(id, v, &t.tags, &t.lang) else {
-                continue;
-            };
+            let e = parse_entry(id, v, &t.tags, &t.lang)?;
             t.index.insert(e.id.clone(), t.list.len());
             t.list.push(e);
         }
-        table
+        Ok(table)
     }
     /// The longest `minecraft:ignite` the attacker's `minecraft:post_attack`
     /// effects (Fire Aspect) set on the victim, in seconds: the effects whose
@@ -986,7 +989,36 @@ pub mod tests {
         );
         assert!(Arc::ptr_eq(payload, &entry.clone().native_post_attack[&1]));
         let bad = json!({"effects":{"minecraft:post_attack":[{"effect":{"type":"example:charge","bad":null}}]}});
-        assert!(parse_entry("example:charge", &bad, &tags, &lang).is_none());
+        assert!(parse_entry("example:charge", &bad, &tags, &lang).is_err());
+        let base = sample();
+        let before = base.list.len();
+        let error = base
+            .with_entries([("example:valid", &definition), ("example:invalid", &bad)])
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains("example:invalid"));
+        assert_eq!(base.list.len(), before);
+        assert!(base.get("example:valid").is_none());
+
+        let root = std::env::temp_dir().join(format!(
+            "horizon-enchant-refusal-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("data/example/enchantment")).unwrap();
+        std::fs::write(root.join("items.json"), "{}").unwrap();
+        std::fs::write(
+            root.join("data/example/enchantment/invalid.json"),
+            bad.to_string(),
+        )
+        .unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let error = Enchantments::load(&root, &defaults).err().unwrap();
+        assert!(error.to_string().contains("example:invalid"));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// A small registry built from literal JSON matching the vanilla files.
@@ -1362,6 +1394,7 @@ pub mod tests {
                 ("enchex:hex", &hex),
                 ("minecraft:sharpness", &other),
             ])
+            .unwrap()
             .unwrap();
         assert_eq!(synced.full_name("enchex:drill", 2).0, "Drill II");
         assert_eq!(synced.full_name("enchex:drill", 1).0, "Drill I");
@@ -1369,7 +1402,11 @@ pub mod tests {
         assert_eq!(synced.full_name("minecraft:sharpness", 1).0, "sharpness I");
         assert_eq!(synced.list.len(), e.list.len() + 2);
         // Nothing new: the game's table stays in use.
-        assert!(e.with_entries([("minecraft:sharpness", &other)]).is_none());
+        assert!(
+            e.with_entries([("minecraft:sharpness", &other)])
+                .unwrap()
+                .is_none()
+        );
     }
 
     /// The enchantment's name and its level come from the selected language,
