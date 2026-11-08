@@ -142,5 +142,50 @@ pub fn identity(rule: &Rule, shape: &Shape, exposure: &dyn Exposure) -> Result<S
             Shape::Opaque(_) => return Err(format!("unimplemented: opaque shape {shape:?}")),
         })
     }
-    walk(rule, shape, exposure, &mut Vec::new())
+    Ok(format!(
+        "exposure({};{})",
+        exposure.name(),
+        walk(rule, shape, exposure, &mut Vec::new())?
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crossing::tests::internal;
+
+    struct First;
+    impl Exposure for First {
+        fn name(&self) -> &str {
+            "first"
+        }
+        fn field(&self, _: &str, _: Option<u32>, index: u32) -> bool {
+            index == 0
+        }
+    }
+
+    #[test]
+    fn fingerprints_layout_and_exposure_and_terminates_recursive_graphs() {
+        let make = |s| Rule::new(&[internal("horizon_client::Node", "struct", s)]);
+        let a = make("struct Node { a: u8, next: Option<Box<Node>> }");
+        let b = make("struct Node { a: u16, next: Option<Box<Node>> }");
+        let shape = a.shape("horizon_client", None, &syn::parse_str("Node").unwrap());
+        let full = identity(&a, &shape, &All).unwrap();
+        assert!(full.contains("ref(horizon_client::Node)"));
+        assert_ne!(full, identity(&b, &shape, &All).unwrap());
+        let first = identity(&a, &shape, &First).unwrap();
+        assert_ne!(full, first);
+        assert!(!first.contains("next"));
+    }
+
+    #[test]
+    fn guarded_layout_is_refused() {
+        let rule = Rule::new(&[internal(
+            "horizon_client::Node",
+            "struct",
+            "struct Node { #[cfg(x)] a: u8 }",
+        )]);
+        let shape = rule.shape("horizon_client", None, &syn::parse_str("Node").unwrap());
+        assert!(identity(&rule, &shape, &All).is_err());
+    }
 }

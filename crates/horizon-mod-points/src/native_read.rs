@@ -45,17 +45,27 @@ pub fn read(
         let Some((&step, rest)) = path.split_first() else {
             return f(node);
         };
-        let ordinal = match step {
-            Step::Field(n) | Step::Variant(n) => n as u64,
-            Step::Index(n) => n,
+        let candidates = match step {
+            Step::Index(n) => n..n.checked_add(1).ok_or(RowError::Bounds)?,
+            Step::Field(_) | Step::Variant(_) => 0..node.len(),
             Step::Root(_) => return Err(RowError::Bounds),
         };
-        node.child(ordinal, &mut |found, _, child| {
-            if found != step {
-                return Err(RowError::Bounds);
+        for ordinal in candidates {
+            let mut matched = false;
+            let result = node.child(ordinal, &mut |found, _, child| {
+                if found == step {
+                    matched = true;
+                    resolve(child, rest, f)
+                } else {
+                    Ok(())
+                }
+            });
+            if matched {
+                return result;
             }
-            resolve(child, rest, f)
-        })
+            result?;
+        }
+        Err(RowError::Bounds)
     }
     fn descend(
         node: &dyn NativeNode,
