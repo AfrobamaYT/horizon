@@ -797,7 +797,8 @@ mod tests {
                     (
                         waypoint_operation::TRACK,
                         "example:flag".into(),
-                        Some(0x12_34AB)
+                        // The packet carries the colour as ARGB, opaque.
+                        Some(0xFF12_34AB_u32 as i32)
                     ),
                 ]
             );

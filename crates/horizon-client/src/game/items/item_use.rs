@@ -431,14 +431,15 @@ impl Game<'_> {
     /// `Player.canEat(canAlwaysEat)` for `stack`, food that is eaten only
     /// when hungry, then a mod's answer.
     pub(super) fn can_eat(&self, stack: &ItemStack, can_always_eat: bool) -> bool {
-        let mut can_eat = can_always_eat
+        let vanilla = can_always_eat
             || self.creative
             || self
                 .player
                 .as_ref()
                 .is_some_and(|p| p.health.food.food < 20);
-        self.native_can_eat(stack, &mut can_eat);
-        can_eat
+        let mut answer = None;
+        self.native_can_eat(stack, vanilla, &mut answer);
+        answer.unwrap_or(vanilla)
     }
 }
 
@@ -593,6 +594,13 @@ mod tests {
             (32, 40, 1),
             (32, -3, 36),
             (i32::MAX, i32::MIN, i32::MAX),
+            // The extremes a mod may set on a 72000 tick use, which
+            // `spear_use`'s tick test runs on.
+            (72_000, i32::MIN, i32::MAX),
+            (72_000, i32::MAX, 1),
+            (72_000, -5, 72_006),
+            (i32::MIN, i32::MIN, 1),
+            (i32::MIN, i32::MAX, 1),
         ] {
             let got = use_counter_leaving(own, remaining);
             assert_eq!(got, counter, "{own} {remaining}");
@@ -600,6 +608,8 @@ mod tests {
                 // Read back the way a use reads its ticks left.
                 assert_eq!(ticks_left(own, got.unsigned_abs() - 1), remaining);
             }
+            // Reading the ticks left back never overflows either.
+            ticks_left(own, got.unsigned_abs() - 1);
         }
     }
 
