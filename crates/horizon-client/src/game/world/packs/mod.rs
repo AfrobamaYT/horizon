@@ -345,6 +345,7 @@ impl Game<'_> {
         // registering mod for crash attribution.
         let client_listeners = self.register_client_reload_listeners();
         let runtime_sprites = super::client_reload::collect_runtime_sprites();
+        super::mods::register_fluid_models(self.options.execution_role);
         self.pack_reload = Some(PackReload::spawn(kind, move |progress| {
             stage_pack(
                 &vanilla,

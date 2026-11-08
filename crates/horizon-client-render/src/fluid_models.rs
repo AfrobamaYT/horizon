@@ -37,7 +37,7 @@ pub fn set_world_looks<'a>(looks: impl IntoIterator<Item = &'a FluidLook>) {
         .collect();
 }
 
-/// Remembers the models mods registered, asked once before the resources first load.
+/// Replaces the models recollected before each resource bake, including reloads.
 pub fn register(models: Vec<FluidModel>) {
     *REGISTERED.write().unwrap_or_else(|e| e.into_inner()) = models;
 }

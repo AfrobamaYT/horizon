@@ -237,6 +237,11 @@ pub(super) fn register_standalone_models(role: ExecutionRole) {
     if let Some(names) = collect_standalone_models(role) {
         horizon_client::models::register_standalone(names);
     }
+    register_fluid_models(role);
+}
+
+/// Recollect before each resource bake, retaining registration-phase attribution.
+pub(super) fn register_fluid_models(role: ExecutionRole) {
     if let Some(models) = collect_fluid_models(role) {
         horizon_client::fluid_models::register(models);
     }
@@ -250,7 +255,17 @@ fn collect_fluid_models(
     }
     let mut models = Vec::new();
     Game::native_register_fluid_models(&RegistrationContext::new(), &mut models);
-    Some(models)
+    Some(
+        models
+            .into_iter()
+            .map(|model| horizon_mod_package::content::FluidModel {
+                fluid: model.fluid,
+                still: model.still,
+                flowing: model.flowing,
+                overlay: model.overlay,
+            })
+            .collect(),
+    )
 }
 
 fn collect_standalone_models(role: ExecutionRole) -> Option<Vec<String>> {
@@ -1383,8 +1398,62 @@ mod tests {
     }
 
     #[test]
+    fn fluid_models_recollection_changes_model_identifiers() {
+        use mod_api::{FluidModel, Hooks, ModEntry, RegisterFluidModelsEvent, testing::with_mods};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct Models(Arc<AtomicUsize>);
+        #[mod_api::horizon_mod]
+        impl Hooks for Models {
+            fn register_fluid_models(
+                &self,
+                _: &RegistrationContext,
+                event: &mut RegisterFluidModelsEvent<'_>,
+            ) {
+                let generation = self.0.load(Ordering::SeqCst);
+                let mut model = FluidModel::default();
+                model.fluid = "reload_fluid:oil".into();
+                model.still = Some(format!("reload_fluid:block/oil_{generation}"));
+                event.models.push(model);
+            }
+        }
+        let generation = Arc::new(AtomicUsize::new(0));
+        with_mods(
+            vec![ModEntry::new(
+                "reload_fluid",
+                Box::new(Models(generation.clone())),
+            )]
+            .into(),
+            || {
+                mod_api::__private::with_test_packages(&["reload_fluid"], || {
+                    horizon_client::fluid_models::set_world_looks([
+                        &horizon_mod_package::content::FluidLook {
+                            id: "reload_fluid:oil".into(),
+                            sprite: None,
+                            tint: None,
+                            world: Some(Default::default()),
+                        },
+                    ]);
+                    register_fluid_models(ExecutionRole::Client);
+                    assert_eq!(
+                        horizon_client::fluid_models::resolved()[0].still,
+                        "reload_fluid:block/oil_0"
+                    );
+                    generation.store(1, Ordering::SeqCst);
+                    register_fluid_models(ExecutionRole::Client);
+                    assert_eq!(
+                        horizon_client::fluid_models::resolved()[0].still,
+                        "reload_fluid:block/oil_1"
+                    );
+                    horizon_client::fluid_models::register(vec![]);
+                    horizon_client::fluid_models::set_world_looks([]);
+                });
+            },
+        );
+    }
+
+    #[test]
     fn fluid_models_collect_only_on_the_client() {
-        use horizon_mod_package::content::FluidModel;
+        use mod_api::FluidModel;
         use mod_api::{Hooks, ModEntry, RegisterFluidModelsEvent, testing::with_mods};
         #[derive(Default)]
         struct Models;
@@ -1395,11 +1464,10 @@ mod tests {
                 _: &RegistrationContext,
                 event: &mut RegisterFluidModelsEvent<'_>,
             ) {
-                event.models.push(FluidModel {
-                    fluid: "registration_test:oil".into(),
-                    flowing: Some("registration_test:block/oil_flow".into()),
-                    ..FluidModel::default()
-                });
+                let mut model = FluidModel::default();
+                model.fluid = "registration_test:oil".into();
+                model.flowing = Some("registration_test:block/oil_flow".into());
+                event.models.push(model);
             }
         }
         with_mods(
