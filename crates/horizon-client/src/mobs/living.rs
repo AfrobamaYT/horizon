@@ -3470,7 +3470,7 @@ mod tests {
             assert_eq!(m.flying_speed(w), 0.02, "no rider");
             m.rider = Some(super::super::equine::Rider::default());
             assert_eq!(m.flying_speed(w), 0.02, "unsaddled");
-            m.extra.saddled = true;
+            m.extra.set_saddled(true);
             assert_eq!(m.flying_speed(w), 0.3_f32 * 0.1);
         });
         assert!(ran, "built test world ran");

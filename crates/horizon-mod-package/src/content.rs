@@ -1738,6 +1738,24 @@ mod tests {
     use super::*;
     use crate::manifest::Package;
 
+    #[test]
+    fn plain_content_files_over_the_size_limit_are_refused() {
+        let dir = scratch("plain-size-limit");
+        let name = "assets/ruby/textures/block/huge.png";
+        let path = dir.join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_len(MAX_FILE + 1)
+            .unwrap();
+        let mut reader = FileReader::Dir(&dir);
+        let error = reader.path(name).unwrap_err();
+        assert!(error.contains("is over"), "{error}");
+        let error = reader.read(name).unwrap_err();
+        assert!(error.contains("is over"), "{error}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     const MANIFEST_TEXT: &str = r#"
 id = "ruby"
 name = "Ruby"

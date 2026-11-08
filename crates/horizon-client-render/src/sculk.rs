@@ -778,7 +778,7 @@ mod tests {
 
     fn identified(event: &'static str, distance: f32) -> Info {
         Info {
-            source: Some(Who::Mob(7)),
+            source: Some(Who::Mob(7).into()),
             owner: Some(Who::Mob(8)),
             source_uuid: Some([100, 0, 0, 1]),
             owner_uuid: Some([100, 0, 0, 2]),
@@ -801,7 +801,7 @@ mod tests {
         assert_eq!((back.source, back.owner), (None, None));
         // A live entity with no saved identity writes nothing for it.
         let unnamed = Info {
-            source: Some(Who::Mob(7)),
+            source: Some(Who::Mob(7).into()),
             ..info("minecraft:step", 3.0)
         };
         let tag = info_to_nbt(&unnamed);

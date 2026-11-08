@@ -2289,7 +2289,13 @@ pub(super) mod initial_history_tests {
     /// wetness reaches half the rain in 3 s instead of 60 s.
     #[test]
     fn a_pack_s_half_lives_replace_the_defaults() {
-        let hud = HudBatch::new([800, 450]);
+        let hud = HudBatch::new(
+            [800, 450],
+            crate::hud::GuiScale {
+                requested: 0,
+                unicode: false,
+            },
+        );
         let f = frame(&hud);
         let mut u = FrameUniforms {
             half_lives: [Some(30.0), Some(10.0), None, None],

@@ -1551,7 +1551,9 @@ mod boss_bar_room_tests {
     fn boss_bars_bottom_is_below_every_drawn_bar() {
         // The missing-glyph metrics: no game assets needed.
         let font = Font::load(
-            std::path::Path::new("/nonexistent-horizon-hud-test-resources"),
+            &horizon_assets::resource_source::ResourceSource::directory(
+                "/nonexistent-horizon-hud-test-resources".into(),
+            ),
             &std::collections::HashMap::new(),
             &[],
             (1, 1),
@@ -1574,7 +1576,7 @@ mod boss_bar_room_tests {
             })
             .collect();
         for h in [60, 120, 152, 153, 240, 300, 600] {
-            let bottom = boss_overlay(400, h, &bars, &font)
+            let bottom = boss_overlay(400, h, &bars, &font, |_, _| false)
                 .iter()
                 .filter_map(|d| match d {
                     GuiDraw::Sprite { y, h, .. } => Some(y + h),
