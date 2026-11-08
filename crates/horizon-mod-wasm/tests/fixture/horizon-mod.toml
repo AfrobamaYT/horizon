@@ -4,3 +4,4 @@ version = "0.1.0"
 description = "Minimal shared-memory wasm fixture."
 api = "0.2"
 side = "both"
+capabilities = ["registries"]
