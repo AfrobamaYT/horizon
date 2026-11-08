@@ -937,8 +937,8 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_flagged_player_is_no_ones_target() {
-        use horizon_client::motion::PlayerMotion;
         use super::Target;
+        use horizon_client::motion::PlayerMotion;
         with_game(|game| {
             let zombie = game
                 .res
@@ -1021,7 +1021,11 @@ mod tests {
             assert!(matches!(saved.get("Invulnerable"), Some(Tag::Byte(1))));
             assert!(matches!(saved.get("invulnerable_time"), Some(Tag::Int(7))));
             // A later load restores both onto the body.
-            game.player.as_mut().unwrap().health.permanently_invulnerable = false;
+            game.player
+                .as_mut()
+                .unwrap()
+                .health
+                .permanently_invulnerable = false;
             game.player.as_mut().unwrap().health.invulnerable_time = 0;
             let mut pending = true;
             game.player
@@ -1029,7 +1033,13 @@ mod tests {
                 .unwrap()
                 .load_saved_state_once(&mut pending, &game.level)
                 .unwrap();
-            assert!(game.player.as_ref().unwrap().health.permanently_invulnerable);
+            assert!(
+                game.player
+                    .as_ref()
+                    .unwrap()
+                    .health
+                    .permanently_invulnerable
+            );
             assert_eq!(game.entity_invulnerable_time(player), Some(7));
         });
     }

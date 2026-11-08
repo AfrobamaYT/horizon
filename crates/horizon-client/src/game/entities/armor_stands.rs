@@ -808,9 +808,11 @@ impl Game<'_> {
         // the saved flag or window refuses the hit — past only for
         // #bypasses_invulnerability damage and a creative player's hit
         // (`DamageSource.isCreativePlayer`).
-        if self
-            .saved_refuses_damage(self.armor_stands[i].id, "minecraft:player_attack", self.creative)
-        {
+        if self.saved_refuses_damage(
+            self.armor_stands[i].id,
+            "minecraft:player_attack",
+            self.creative,
+        ) {
             return false;
         }
         if self.creative {
