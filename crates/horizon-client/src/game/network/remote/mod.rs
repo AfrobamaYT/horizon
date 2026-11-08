@@ -16838,11 +16838,11 @@ mod player_tick_tests {
 }
 
 /// Whether a synchronized dimension type's values are inside the codec's ranges
-/// (`DimensionType.java`: a coordinate scale of `1.0E-5F` to `3.0E7`, an ambient light of 0 to 1),
-/// so a portal's ratio of two scales is finite and the light is a light.
+/// (`DimensionType.java`: a coordinate scale of `1.0E-5F` to `3.0E7`, a monster spawn block light
+/// limit of 0 to 15; the ambient light has no range), so a portal's ratio of two scales is finite.
 fn sane_facts(facts: &horizon_world::dimension_type::DimensionFacts) -> bool {
     (f64::from(1.0e-5_f32)..=3.0e7).contains(&facts.coordinate_scale)
-        && (0.0..=1.0).contains(&facts.ambient_light)
+        && (0..=15).contains(&facts.monster_spawn_block_light_limit)
 }
 
 #[cfg(test)]
@@ -16863,7 +16863,10 @@ mod level_facts_tests {
             assert!(!sane_facts(&facts), "{scale}");
         }
         facts.coordinate_scale = 1.0;
+        // the codec sets no range on the ambient light
         facts.ambient_light = 1.5;
+        assert!(sane_facts(&facts));
+        facts.monster_spawn_block_light_limit = 16;
         assert!(!sane_facts(&facts));
     }
 }
