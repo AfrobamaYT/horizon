@@ -85,7 +85,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
 fn add(dir: &Path, args: &[String]) -> Result<(), String> {
     let request = request(args)?;
     let path = dir.join(MANIFEST);
-    let original = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let original = crate::bounded::read(&path, crate::bounded::MAX_MANIFEST)?;
     // Manifest::parse owns mod id, native pin and existing declaration validation.
     let manifest = Manifest::parse(&original)?;
     let native = manifest
@@ -97,10 +97,9 @@ fn add(dir: &Path, args: &[String]) -> Result<(), String> {
         .join("target/horizon-mod/prebuilt")
         .join(&native.horizon)
         .join("points.json");
-    let catalog: Catalog = serde_json::from_str(
-        &fs::read_to_string(&points).map_err(|e| format!("{}: {e}", points.display()))?,
-    )
-    .map_err(|e| format!("{}: {e}", points.display()))?;
+    let catalog: Catalog =
+        serde_json::from_str(&crate::bounded::read(&points, crate::bounded::MAX_CATALOG)?)
+            .map_err(|e| format!("{}: {e}", points.display()))?;
     let candidate = append(&original, &manifest, &request, &internals, &catalog)?;
     crate::internals::atomic_write_manifest(&path, candidate)
 }

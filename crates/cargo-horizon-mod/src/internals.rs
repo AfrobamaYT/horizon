@@ -52,7 +52,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
 
 fn add(dir: &Path, paths: &[&str], kind: Option<&str>) -> Result<(), String> {
     let path = dir.join(MANIFEST);
-    let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let text = crate::bounded::read(&path, crate::bounded::MAX_MANIFEST)?;
     let manifest = Manifest::parse(&text)?;
     let native = manifest
         .native
@@ -130,7 +130,7 @@ fn upsert(
 /// The launcher owns source staging and compiler diagnostics; this tool owns manifest edits.
 fn sync(dir: &Path) -> Result<(), String> {
     let path = dir.join(MANIFEST);
-    let original = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let original = crate::bounded::read(&path, crate::bounded::MAX_MANIFEST)?;
     let manifest = Manifest::parse(&original)?;
     manifest
         .native
@@ -150,7 +150,7 @@ fn sync(dir: &Path) -> Result<(), String> {
         .map_err(|e| format!("Invalid internals discovery result: {e}"))?;
     let (candidate, report) = replace(&original, &entries)?;
     // The explicit check may take time. Do not overwrite edits made while it was running.
-    if fs::read_to_string(&path).map_err(|e| e.to_string())? != original {
+    if crate::bounded::read(&path, crate::bounded::MAX_MANIFEST)? != original {
         return Err("horizon-mod.toml changed during discovery; run cargo horizon-mod internals sync again.".into());
     }
     atomic_write(&path, candidate)?;
@@ -386,7 +386,8 @@ pub fn load(dir: &Path, revision: &str) -> Result<Vec<ListedInternal>, String> {
     let cache = dir.join("target/horizon-mod/prebuilt").join(revision);
     let path = cache.join(CATALOG);
     if path.is_file() {
-        return internals::read(&path);
+        let text = crate::bounded::read(&path, crate::bounded::MAX_CATALOG)?;
+        return serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()));
     }
     let host = match (std::env::consts::OS, std::env::consts::ARCH) {
         ("linux", "x86_64") => "x86_64-unknown-linux-gnu",
