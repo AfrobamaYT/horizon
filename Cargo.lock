@@ -1957,6 +1957,7 @@ dependencies = [
  "horizon-mod-runtime",
  "horizon-narrator",
  "horizon-optifine",
+ "horizon-polytone",
  "horizon-protocol",
  "horizon-shader-api",
  "horizon-shaders",
@@ -2281,6 +2282,7 @@ dependencies = [
 name = "horizon-polytone"
 version = "0.1.0"
 dependencies = [
+ "log",
  "regex",
  "serde_json",
 ]

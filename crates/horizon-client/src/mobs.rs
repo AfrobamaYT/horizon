@@ -1466,6 +1466,10 @@ pub struct Extra {
     /// attachment (`getPassengerRidingPosition(this).y` is its feet plus this)
     /// and the vehicle's box (`Mob.getAttackBoundingBox`, `getHitbox`).
     pub seat: Option<(u32, f64, Aabb)>,
+    /// The living vehicle `positionRider` last seated this rider on, with
+    /// its `yBodyRotO` and `yBodyRot`: a rider of a living vehicle is drawn
+    /// from that body (`LivingEntityRenderer.solveBodyRot`), not its own.
+    pub vehicle_body: Option<(u32, f32, f32)>,
     /// `Entity.boardingCooldown`: ticks after leaving a boat before a boat
     /// can pick this mob up again.
     pub boarding_cooldown: i32,
@@ -4122,6 +4126,17 @@ impl Mob {
         if !amount.is_finite() {
             amount = f32::MAX;
         }
+        // LivingEntity.hurtServer: inside the hurt cooldown a hit is compared
+        // with `lastHurt` by this incoming amount, before armor and Resistance,
+        // and `actuallyHurt` gets only what it adds.
+        let incoming = amount;
+        let cooldown = self.invulnerable as f32 > 10.0;
+        if cooldown {
+            if incoming <= self.last_hurt {
+                return false;
+            }
+            amount = incoming - self.last_hurt;
+        }
         // LivingEntity.getDamageAfterArmorAbsorb asks `hurtArmor` *before*
         // `CombatRules.getDamageAfterAbsorb`, so a worn piece wears by the
         // damage the armour, toughness and enchantment reductions have not
@@ -4218,22 +4233,12 @@ impl Mob {
         // Wolf.actuallyHurt: wolf armor takes the damage instead of the wolf.
         let absorbed = self.wolf_armor_absorbs(&source);
         let mut knock = true;
-        let window = self.invulnerable as f32 > 10.0;
+        let window = cooldown;
         container.record_should_cause_side_effects(!window);
-        if window && amount <= self.last_hurt {
-            return false;
+        if window {
+            container.record_reduction(Reduction::Invulnerability, self.last_hurt);
         }
-        let mut dealt = if window {
-            container.reduce(
-                Reduction::Invulnerability,
-                amount,
-                self.last_hurt,
-                amount - self.last_hurt,
-                true,
-            )
-        } else {
-            amount
-        };
+        let mut dealt = amount;
         // The cooldown the hit leaves: what is left of it within it, else vanilla's 20 or
         // what `LivingIncomingDamageEvent` set.
         if window {
@@ -4255,7 +4260,7 @@ impl Mob {
         }
         // NeoForge bubbles what Pre left up to `lastHurt`: vanilla's value plus what Pre
         // added, so a hit no listener changes keeps vanilla's.
-        self.last_hurt = amount + container.pre_change();
+        self.last_hurt = incoming + container.pre_change();
         self.invulnerable = container.post_attack_invulnerability_ticks();
         if window {
             knock = false;
@@ -7284,6 +7289,107 @@ mod visibility_percent_tests {
         sneaking.head = Some(Arc::from("minecraft:skeleton_skull"));
         sneaking.sneaking = true;
         assert_eq!(sneaking.visibility_percent(Species::Skeleton), 0.4);
+    }
+}
+
+/// Added controls (H248): `LivingEntity.hurtServer` compares a hit inside
+/// the hurt cooldown, and keeps `lastHurt`, by its incoming amount; the
+/// reductions (`actuallyHurt`) get only the accepted difference.
+#[cfg(test)]
+mod hurt_cooldown_incoming_tests {
+    use super::*;
+
+    fn mob(species: Species) -> Mob {
+        let mut kind = (*sensor_scan_tests::kind()).clone();
+        kind.species = species;
+        let mut m = Mob::new(1, Arc::new(kind), Vec3::ZERO, 0.0);
+        m.attrs.max_health = 40.0;
+        m.health = 40.0;
+        m
+    }
+
+    #[test]
+    fn full_resistance_keeps_the_incoming_amounts_and_takes_a_stronger_hit() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
+        let mut m = mob(Species::Pig);
+        m.extra
+            .effects
+            .push(StoredEffect::new("minecraft:resistance", 600, 4));
+        assert!(m.damage(level, 1.0, Damage::of(DamageKind::Generic)));
+        assert_eq!((m.health, m.invulnerable, m.last_hurt), (40.0, 20, 1.0));
+        assert!(!m.damage(level, 1.0, Damage::of(DamageKind::Generic)));
+        assert!(m.damage(level, 2.0, Damage::of(DamageKind::Generic)));
+        assert_eq!((m.health, m.invulnerable, m.last_hurt), (40.0, 20, 2.0));
+        assert!(!m.damage(level, 1.5, Damage::of(DamageKind::Generic)));
+        assert_eq!(m.last_hurt, 2.0);
+    }
+
+    #[test]
+    fn the_armor_effectiveness_callback_runs_only_for_accepted_hits() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
+        let mut m = mob(Species::Pig);
+        // This damage-boundary fixture supplies effective armor directly;
+        // equipment attributes are normally prepared by the equipment tick.
+        Arc::make_mut(&mut m.kind).armor = 6.0;
+        let mut calls = 0;
+        let mut breach = |f: f32, _: &mut LegacyRandom| {
+            calls += 1;
+            f
+        };
+        assert!(m.damage_with(
+            level,
+            4.0,
+            Damage::of(DamageKind::Cactus),
+            Some(&mut breach)
+        ));
+        assert!(!m.damage_with(
+            level,
+            4.0,
+            Damage::of(DamageKind::Cactus),
+            Some(&mut breach)
+        ));
+        assert!(m.damage_with(
+            level,
+            8.0,
+            Damage::of(DamageKind::Cactus),
+            Some(&mut breach)
+        ));
+        assert_eq!(calls, 2);
+        assert_eq!(m.last_hurt, 8.0);
+    }
+
+    #[test]
+    fn absorption_soaks_the_accepted_difference() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
+        let mut m = mob(Species::Pig);
+        m.absorption = 1.5;
+        assert!(m.damage(level, 1.0, Damage::of(DamageKind::Generic)));
+        assert_eq!((m.health, m.absorption), (40.0, 0.5));
+        // 3 after 1: the difference 2, the last 0.5 absorption first.
+        assert!(m.damage(level, 3.0, Damage::of(DamageKind::Generic)));
+        assert_eq!((m.health, m.absorption, m.last_hurt), (38.5, 0.0, 3.0));
+    }
+
+    #[test]
+    fn a_horse_armor_wears_by_the_accepted_difference() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
+        let mut m = mob(Species::Horse);
+        m.extra.set_body(Some("minecraft:iron_horse_armor".into()));
+        assert!(m.damage(level, 4.0, Damage::of(DamageKind::Cactus)));
+        assert!(m.damage(level, 8.0, Damage::of(DamageKind::Cactus)));
+        let worn: Vec<f32> = m
+            .outbox
+            .iter()
+            .filter_map(|e| match e {
+                MobEvent::ArmorHurt { amount, .. } => Some(*amount),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(worn, [4.0, 4.0]);
     }
 }
 
