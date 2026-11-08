@@ -677,3 +677,124 @@ fn retained_consumer_tail() {
 fn retained_push() {
     run_output(Family::Damage, Output::Push);
 }
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn retained_conditional_context() {
+    crate::entry::install_client_hooks();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let scratch =
+        Scratch(std::env::temp_dir().join(format!("horizon-conditional-{}", std::process::id())));
+    mod_api::testing::with_mods(
+        vec![mod_api::ModEntry::new(
+            "consumer",
+            Box::new(ConsumerPanic(calls.clone())),
+        )]
+        .into(),
+        || {
+            crate::game::native_entity_refs::tests::with_game(|game| {
+                game.world_root = scratch.0.clone();
+                game.options.dedicated = Some(Vec::new());
+                game.load_server_loot();
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                for id in [71, 72] {
+                    let kind = game
+                        .res
+                        .mob_types()
+                        .get("minecraft:chicken")
+                        .unwrap()
+                        .clone();
+                    let mut mob = Mob::new(id, kind, Vec3::new(f64::from(id - 70), 80.0, 0.5), 0.0);
+                    mob.no_ai = true;
+                    game.mobs.push(mob);
+                }
+                let stone = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:stone")
+                    .unwrap();
+                game.world.set(4, 80, 4, stone).unwrap();
+                let conditional = || MobEvent::IfBroke {
+                    mob: 71,
+                    effects: vec![MobEvent::Jump { mob: 71 }],
+                    otherwise: vec![MobEvent::Jump { mob: 72 }],
+                };
+                // Construct two already-produced consumer batches: they must not share break context.
+                let batch = game.creatures.pending.entry(game.dim.id()).or_default();
+                batch.normal.push_back(NormalMobActions {
+                    events: vec![
+                        MobEvent::BreakBlock {
+                            pos: [4, 80, 4],
+                            drop: false,
+                            by: Some(71),
+                            breaker: None,
+                        },
+                        MobEvent::LayEgg {
+                            mob: 71,
+                            at: [1.0, 80.0, 0.5],
+                            pitch: 1.0,
+                        },
+                        conditional(),
+                    ],
+                    broke: Vec::new(),
+                });
+                batch.normal.push_back(NormalMobActions {
+                    events: vec![conditional()],
+                    broke: Vec::new(),
+                });
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    game.tick_creature_entities()
+                }));
+                assert_eq!(
+                    result.unwrap_err().downcast_ref::<&str>(),
+                    Some(&"real item consumer")
+                );
+                assert_eq!(eggs(game), 1);
+                assert!(!game.mobs[0].ai.jumping && !game.mobs[1].ai.jumping);
+                game.tick_creature_entities().unwrap();
+                assert!(
+                    game.mobs[0].ai.jumping,
+                    "consumer tail lost its completed break context"
+                );
+                assert!(
+                    game.mobs[1].ai.jumping,
+                    "fresh batch inherited an earlier break context"
+                );
+                assert_eq!(eggs(game), 1, "entered egg action replayed");
+            });
+        },
+    );
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn retained_stale_push_target() {
+    let scratch =
+        Scratch(std::env::temp_dir().join(format!("horizon-stale-push-{}", std::process::id())));
+    crate::game::native_entity_refs::tests::with_game(|game| {
+        game.world_root = scratch.0.clone();
+        game.options.dedicated = Some(Vec::new());
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        game.creatures
+            .pending
+            .entry(game.dim.id())
+            .or_default()
+            .pushes
+            .push(999, Vec3::new(0.25, 0.0, 0.0));
+        game.tick_creature_entities().unwrap();
+        let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+        let mut mob = Mob::new(999, kind, Vec3::new(1.0, 80.0, 0.5), 0.0);
+        mob.no_ai = true;
+        game.mobs.push(mob);
+        game.tick_creature_entities().unwrap();
+        assert_eq!(
+            game.mobs[0].velocity.x, 0.0,
+            "obsolete target push reached a later occupant"
+        );
+    });
+}
