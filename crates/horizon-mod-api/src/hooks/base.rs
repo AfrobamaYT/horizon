@@ -814,7 +814,8 @@ pub trait Hooks {
         side = "server",
         contract = "cancel",
         out = "claimed",
-        neoforge = "PlayerInteractEvent.EntityInteract"
+        neoforge = "PlayerInteractEvent.EntityInteract",
+        paper = "PlayerInteractEntityEvent"
     )]
     fn entity_interact();
     /// A player left-clicks the block `state` at `pos`, `face` the face hit
@@ -1011,7 +1012,12 @@ pub trait Hooks {
     /// save: an edit made here to one of them (a neighbour's block entity, say)
     /// is not in that copy, and is dropped with the chunk.
     /// Server-side.
-    #[hook(side = "server", contract = "listen", neoforge = "ChunkEvent.Load")]
+    #[hook(
+        side = "server",
+        contract = "listen",
+        neoforge = "ChunkEvent.Load",
+        paper = "ChunkLoadEvent"
+    )]
     fn chunk_load();
     /// Chunk `chunk` of `dimension` left the world (NeoForge's
     /// `ChunkEvent.Unload`), with a level that closes for being empty too. Don't
@@ -3072,6 +3078,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
+        paper = "DragonEggFormEvent",
         cancellable = true,
         target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_dragon_egg_form"
     )]
