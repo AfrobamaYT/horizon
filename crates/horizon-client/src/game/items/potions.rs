@@ -1246,7 +1246,7 @@ impl Game<'_> {
                     let mut cancel = false;
                     self.native_mob_effect_expired(
                         player,
-                        mod_api::__private::effect_key(
+                        mod_api::__private::effect_key_by_index(
                             e.registry_index.expect("active effect registry index"),
                         )
                         .expect("effects resolved at load"),
@@ -1290,7 +1290,7 @@ impl Game<'_> {
                         },
                     ));
                     let (keep, changes) = self.mod_effect_tick(
-                        mod_api::__private::effect_key(
+                        mod_api::__private::effect_key_by_index(
                             e.registry_index.expect("active effect registry index"),
                         )
                         .expect("effects resolved at load"),
@@ -1378,7 +1378,7 @@ impl Game<'_> {
         kind: &str,
         effect: &str,
     ) -> bool {
-        let key = brewing::effect(effect).and_then(|def| mod_api::__private::effect_key(def.index));
+        let key = brewing::effect(effect).and_then(|def| mod_api::__private::effect_key_by_index(def.index));
         self.can_be_affected_resolved(entity, kind, effect, key)
     }
 
@@ -1410,7 +1410,7 @@ impl Game<'_> {
         // is asked for every add.
         let key = effect
             .registry_index
-            .and_then(mod_api::__private::effect_key);
+            .and_then(mod_api::__private::effect_key_by_index);
         if !self.can_be_affected_resolved(None, "minecraft:player", effect.id, key) {
             return false;
         }
@@ -1459,7 +1459,7 @@ impl Game<'_> {
             if let Some(living) = self.effect_living_ref(None) {
                 self.native_mob_effect_remove(
                     living,
-                    mod_api::__private::effect_key(
+                    mod_api::__private::effect_key_by_index(
                         current
                             .registry_index
                             .expect("active effect registry index"),
@@ -1492,7 +1492,7 @@ impl Game<'_> {
         new: bool,
     ) {
         if let Some(effect) =
-            brewing::effect(effect).and_then(|def| mod_api::__private::effect_key(def.index))
+            brewing::effect(effect).and_then(|def| mod_api::__private::effect_key_by_index(def.index))
         {
             self.mod_effect_added_resolved(effect, entity, amplifier, new);
         }
@@ -2669,7 +2669,7 @@ impl horizon_client::mobs::ModEffectTicks for Game<'_> {
             return true;
         };
         let holder = LivingRef::new(EntityRef::new(epoch, mob.id));
-        let Some(effect) = mod_api::__private::effect_key(effect) else {
+        let Some(effect) = mod_api::__private::effect_key_by_index(effect) else {
             return true;
         };
         let (keep, changes) = self.mod_effect_tick(
@@ -2700,7 +2700,7 @@ impl horizon_client::mobs::ModEffectTicks for Game<'_> {
     }
     fn effect_expired(&self, mob: u32, effect: usize, amplifier: i32, cancel: &mut bool) {
         if let Some(living) = self.effect_living_ref(Some(mob as i32))
-            && let Some(effect) = mod_api::__private::effect_key(effect)
+            && let Some(effect) = mod_api::__private::effect_key_by_index(effect)
         {
             self.native_mob_effect_expired(living, effect, amplifier, cancel);
         }

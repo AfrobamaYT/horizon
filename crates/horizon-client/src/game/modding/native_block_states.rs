@@ -141,6 +141,20 @@ impl Game<'_> {
             .to_owned()
     }
 
+    /// The canonical fluid id retained by the completed registry.
+    pub(super) fn fluid_key_id(&self, key: FluidKey) -> String {
+        mod_api::__private::fluid_id(key)
+            .expect("invalid fluid key slot")
+            .to_owned()
+    }
+    /// The key of a block in the completed registry.
+    pub(super) fn block_key(&self, id: &str) -> Option<BlockKey> {
+        mod_api::__private::block_key(id)
+    }
+    /// The key of an effect in the completed registry.
+    pub(super) fn effect_key(&self, id: &str) -> Option<EffectKey> {
+        mod_api::__private::effect_key(id)
+    }
     /// The canonical block entity type id retained by the load-owned slot.
     pub(super) fn block_entity_type_key_id(&self, key: BlockEntityTypeKey) -> String {
         mod_api::__private::block_entity_type_name(key)
