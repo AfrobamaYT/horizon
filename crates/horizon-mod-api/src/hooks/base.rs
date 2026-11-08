@@ -2694,6 +2694,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no sign-editing event)",
+        paper = "SignChangeEvent",
         cancellable = true
     )]
     fn sign_changed(
