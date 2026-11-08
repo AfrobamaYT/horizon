@@ -6,7 +6,7 @@ use super::{
     ItemPlace, ItemResource, ItemStack, ResourceHandler, ServerHost, Transaction,
 };
 use crate::Components;
-use crate::crafting::WalkedIngredient;
+use crate::ingredient_parser::WalkedIngredient;
 use std::{fmt, marker::PhantomData};
 
 /// An amount of one fluid, as NeoForge's `FluidStack`: its registered or unresolved
@@ -431,14 +431,17 @@ mod tests {
     fn load() -> TestReader {
         crate::__private::install(Default::default());
         crate::install_parts(&[], &crate::parts::tests::rule_schema(), |_| false).unwrap();
-        crate::registry_keys::resolve_fluids(&[
-            "minecraft:empty",
-            "minecraft:water",
-            "minecraft:flowing_water",
-            "minecraft:lava",
-            "minecraft:flowing_lava",
-            "minecraft:milk",
-        ])
+        crate::registry_keys::resolve_fluids(
+            &[
+                "minecraft:empty",
+                "minecraft:water",
+                "minecraft:flowing_water",
+                "minecraft:lava",
+                "minecraft:flowing_lava",
+                "minecraft:milk",
+            ],
+            &[],
+        )
         .unwrap();
         let mut tags = HashMap::new();
         tags.insert(
@@ -598,20 +601,25 @@ mod tests {
     /// share its code without touching its answers.
     #[test]
     fn item_ingredients_still_parse_the_same() {
-        let items = horizon_items::items::Items::for_tests(HashMap::new());
+        let items = ();
         // Supply the resolved ids fixture, not a second JSON/NBT converter.
-        let parse = |v: &serde_json::Value, items: &horizon_items::items::Items| {
-            crate::Ingredient::parse(v, items, &|data| {
-                let ids = data.get("horizon:resolved_items")?.as_array()?;
-                let ids = ids
-                    .iter()
-                    .map(|v| horizon_core::nbt::Tag::String(v.as_str().unwrap().into()))
-                    .collect();
-                Some(horizon_core::nbt::Compound::from([(
-                    "horizon:resolved_items".into(),
-                    horizon_core::nbt::Tag::List(ids),
-                )]))
-            })
+        let parse = |v: &serde_json::Value, _items: &()| {
+            crate::ingredient_parser::WalkedIngredient::walk(
+                v,
+                &HashMap::new(),
+                &crate::ingredient_parser::resolved_items,
+                &|data| {
+                    let ids = data.get("horizon:resolved_items")?.as_array()?;
+                    let ids = ids
+                        .iter()
+                        .map(|v| horizon_core::nbt::Tag::String(v.as_str().unwrap().into()))
+                        .collect();
+                    Some(horizon_core::nbt::Compound::from([(
+                        "horizon:resolved_items".into(),
+                        horizon_core::nbt::Tag::List(ids),
+                    )]))
+                },
+            )
         };
         let json = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap();
         let stone = parse(&json(r#""minecraft:stone""#), &items).unwrap();

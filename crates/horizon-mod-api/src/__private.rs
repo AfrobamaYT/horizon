@@ -445,20 +445,18 @@ pub mod game {
     }
 }
 
-/// Construct a fluid state from an engine-owned state and its load-resolved key.
-pub fn engine_fluid_state(
+/// Construct a fluid state from load-resolved data supplied by the engine boundary.
+pub fn fluid_state(
     fluid: crate::FluidKey,
-    state: horizon_world::fluid::FluidState,
+    amount: u8,
+    falling: bool,
+    source: bool,
 ) -> crate::FluidState {
-    debug_assert_eq!(
-        state.amount() == 0,
-        state.kind() == horizon_world::fluid::FluidKind::Empty
-    );
     crate::FluidState {
         fluid,
-        amount: state.amount(),
-        falling: state.falling(),
-        source: state.is_source(),
+        amount,
+        falling,
+        source,
     }
 }
 

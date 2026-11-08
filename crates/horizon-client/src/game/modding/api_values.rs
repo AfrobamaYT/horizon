@@ -1055,7 +1055,9 @@ pub(crate) fn install_stack_hooks() {
                 return;
             }
             if let Ok(stack) = stack.try_into_api() {
-                mod_api::crafting::native_ingredient_test(context, kind, data, &stack, accept);
+                horizon_client::crafting::native_hooks::native_ingredient_test(
+                    context, kind, data, &stack, accept,
+                );
             }
         },
         enchantments: |stack, target, value| {

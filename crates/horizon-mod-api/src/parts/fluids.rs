@@ -51,7 +51,7 @@ pub mod tests {
         .into();
         crate::install(mods.clone());
         install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
-        let error = resolve_fluids(&[]).unwrap_err();
+        let error = resolve_fluids(&[], &[]).unwrap_err();
         assert_eq!(
             error,
             vec![crate::UnknownFluid {
@@ -59,7 +59,7 @@ pub mod tests {
                 id: "minecraft:water".to_owned()
             }]
         );
-        resolve_fluids(&["minecraft:water", "minecraft:lava"]).unwrap();
+        resolve_fluids(&["minecraft:water", "minecraft:lava"], &[]).unwrap();
         let chocolate = fluid_key("maker:chocolate").unwrap();
         assert_eq!(fluid_id(chocolate), Some("maker:chocolate"));
         for name in ["minecraft:water", "minecraft:lava", "maker:chocolate"] {

@@ -90,7 +90,12 @@ pub(super) fn emit<'a>(
                 one_function(functions.iter(), function)?.clone(),
                 // A hook in the mod API crate, or in a crate above it, calls its dispatch
                 // directly; one below it calls the callback the game installs.
-                if matches!(krate, "horizon-mod-api" | "horizon-client-render") {
+                if matches!(krate, "horizon-mod-api" | "horizon-client-render")
+                    || super::has_call(
+                        &one_function(functions.iter(), function)?.block,
+                        &format!("dispatch_{name}"),
+                    )
+                {
                     format!("dispatch_{name}")
                 } else {
                     name.to_owned()
