@@ -2624,6 +2624,7 @@ impl Game<'_> {
             )
         {
             horizon_world::level::register_sea_level(key, spawn.sea_level);
+            Dim::add_extra(&spawn.dimension);
         }
         // The replacement player starts with its inventory menu, even if the
         // server switched levels without closing the previous container.

@@ -715,10 +715,16 @@ fn set_level_sea_levels(
         let own = mods.iter().find(|d| d.id == id).and_then(|d| d.sea_level);
         // The noise settings are what the terrain is built with; `sea_level` of the mod is for
         // a generator that has none.
-        let sea = serde_json::from_str::<serde_json::Value>(stem)
-            .ok()
+        let stem = serde_json::from_str::<serde_json::Value>(stem).ok();
+        // A superflat generator builds at -63 (`FlatLevelSource.getSeaLevel`) whatever its level
+        // is told; a mod's explicit sea level still wins for it.
+        let flat = stem
+            .as_ref()
+            .is_some_and(|stem| stem["generator"]["type"].as_str() == Some("minecraft:flat"));
+        let sea = stem
             .and_then(|stem| stem_sea_level(&stem, &read))
-            .or(own);
+            .or(own)
+            .or(flat.then_some(-63));
         if let (Some(sea), Ok(key)) = (sea, horizon_core::LevelKey::parse(id)) {
             levels.push((key, sea));
         }
