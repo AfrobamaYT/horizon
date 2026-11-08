@@ -2638,7 +2638,10 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// window's player is drawn only in third person (and F5 front view); an
     /// invisible player is not asked. `draw` is the frame of `native_mob_submit`:
     /// at the player's feet, turned with the body. The name tag, shadow,
-    /// flames and glowing outline draw as before.
+    /// flames and glowing outline draw as before. Push parts to `hidden` to
+    /// leave only those parts out of the vanilla model this frame (after Skin
+    /// Customization; its armour, held items and other layers keep theirs),
+    /// as a mod drawing its own outer skin layer does.
     #[hook(
         side = "client",
         contract = "cancel",

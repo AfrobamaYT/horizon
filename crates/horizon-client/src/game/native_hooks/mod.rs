@@ -78,7 +78,8 @@ use mod_api::{
     UsePhase,
 };
 use mod_api::{
-    BlockKey, DebugEntry, DebugRenderer, EffectKey, GuiLayer, PosedParts, RuntimeSprite,
+    BlockKey, DebugEntry, DebugRenderer, EffectKey, GuiLayer, HumanoidPart, PosedParts,
+    RuntimeSprite,
 };
 use mod_api::{
     CameraType, Identifier, MobRef, NativeDespawn, NativePermissionLevel, NativeSpawnCheck,

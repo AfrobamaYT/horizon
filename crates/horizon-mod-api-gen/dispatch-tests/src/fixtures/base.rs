@@ -692,6 +692,7 @@ mod stubs {
     pub(super) struct NativeMapInfo<'a>(pub &'a ());
     pub(super) struct NativePlayerRender<'a>(pub &'a ());
     pub(super) struct PosedParts;
+    pub(super) struct HumanoidPart;
     pub(super) struct NativeCommand;
     pub(super) struct NativeLifecycleContext;
     pub(super) struct Load(pub &'static str);

@@ -8142,10 +8142,13 @@ impl Game<'_> {
                 .then(|| self.remote_player_name(mob.id))
                 .flatten()
                 .map(|name| NativePlayerRender { name, local: false });
+            let mut hidden = Vec::new();
             let modded = if layers_only {
                 false
             } else if let Some(who) = who {
-                self.mod_player_geometry(mob, who, alpha as f32, camera, packed, out)
+                let drawn;
+                (drawn, hidden) = self.mod_player_geometry(mob, who, alpha as f32, camera, packed, out);
+                drawn
             } else {
                 !is_player && self.mod_mob_geometry(mob, alpha as f32, camera, packed, out)
             };
@@ -8210,21 +8213,30 @@ impl Game<'_> {
                 );
                 skinned = Some((mark, skin.bounds));
             } else {
-                let render = if layers_only {
-                    horizon_client::mobs::render::render_layers
+                if layers_only {
+                    horizon_client::mobs::render::render_layers(
+                        mob,
+                        alpha as f32,
+                        camera,
+                        &lookup,
+                        packed,
+                        self.res.mob_data(),
+                        &armor,
+                        out,
+                    );
                 } else {
-                    horizon_client::mobs::render::render_with
-                };
-                render(
-                    mob,
-                    alpha as f32,
-                    camera,
-                    &lookup,
-                    packed,
-                    self.res.mob_data(),
-                    &armor,
-                    out,
-                );
+                    horizon_client::mobs::render::render_with_hidden(
+                        mob,
+                        alpha as f32,
+                        camera,
+                        &lookup,
+                        packed,
+                        self.res.mob_data(),
+                        &armor,
+                        &hidden,
+                        out,
+                    );
+                }
             }
             // HDR output: mobs that are light shine by their kind, as blocks do (entity.wgsl
             // fs_hdr_mark); a tier's window lifts only their bright texels.

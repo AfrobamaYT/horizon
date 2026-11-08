@@ -1292,9 +1292,10 @@ impl Game<'_> {
         player: &NativeMobRender<'_>,
         who: &NativePlayerRender<'_>,
         draw: &mut BlockEntityDraw,
+        hidden: &mut Vec<HumanoidPart>,
         drawn: &mut bool,
     ) {
-        self.fire_player_submit(player, who, draw, drawn);
+        self.fire_player_submit(player, who, draw, hidden, drawn);
     }
     /// A layer on every mob and player in view, once a frame after its
     /// vanilla model and layers (`EntityRenderersEvent.AddLayers`, with

@@ -1509,6 +1509,22 @@ pub fn render_with(
     extra: &[(&Part, [f32; 4], u32, u32, bool)],
     out: &mut Vec<Vertex>,
 ) {
+    render_with_hidden(m, alpha, camera, atlas, light, data, extra, &[], out);
+}
+/// [`render_with`], with the parts a mod's `player_submit` hid left out of the body (after Skin
+/// Customization); the armour in `extra` and the other layers keep every part.
+#[allow(clippy::too_many_arguments)]
+pub fn render_with_hidden(
+    m: &Mob,
+    alpha: f32,
+    camera: glam::DVec3,
+    atlas: Atlas,
+    light: u32,
+    data: &MobData,
+    extra: &[(&Part, [f32; 4], u32, u32, bool)],
+    hidden: &[mod_api::HumanoidPart],
+    out: &mut Vec<Vertex>,
+) {
     // The invisibility effect hides the model (a drinking wandering trader);
     // an illusioner shows its four mirror images instead.
     if m.is_invisible() {
@@ -1519,7 +1535,9 @@ pub fn render_with(
                 let shifted =
                     camera - glam::DVec3::new(off[0] + w[0], off[1] + w[1], off[2] + w[2]);
                 let base = base_transform(m, alpha, shifted);
-                render_visible(m, alpha, base, atlas, light, data, extra, true, out, None);
+                render_visible(
+                    m, alpha, base, atlas, light, data, extra, true, hidden, out, None,
+                );
             }
         }
         return;
@@ -1533,6 +1551,7 @@ pub fn render_with(
         data,
         extra,
         true,
+        hidden,
         out,
         None,
     );
@@ -1563,6 +1582,7 @@ pub fn render_skinned(
         data,
         &[],
         true,
+        &[],
         out,
         Some(skin),
     );
@@ -1822,7 +1842,19 @@ pub fn render_layers(
     out: &mut Vec<Vertex>,
 ) {
     let base = base_transform(m, alpha, camera);
-    render_visible(m, alpha, base, atlas, light, data, extra, false, out, None);
+    render_visible(
+        m,
+        alpha,
+        base,
+        atlas,
+        light,
+        data,
+        extra,
+        false,
+        &[],
+        out,
+        None,
+    );
 }
 /// A mob drawn under `origin` instead of at its position (the spinning mob
 /// of `SpawnerRenderer.submitEntityInSpawner`).
@@ -1836,7 +1868,19 @@ pub fn render_posed(
     out: &mut Vec<Vertex>,
 ) {
     let base = base_transform_at(m, alpha, origin);
-    render_visible(m, alpha, base, atlas, light, data, &[], true, out, None);
+    render_visible(
+        m,
+        alpha,
+        base,
+        atlas,
+        light,
+        data,
+        &[],
+        true,
+        &[],
+        out,
+        None,
+    );
 }
 /// The custom model's key of a body model: `main` is the wide player model, `kind.model`.
 fn cem_key(model_key: &str) -> &str {
@@ -1962,6 +2006,7 @@ fn render_visible(
     data: &MobData,
     extra: &[(&Part, [f32; 4], u32, u32, bool)],
     body_visible: bool,
+    hidden: &[mod_api::HumanoidPart],
     out: &mut Vec<Vertex>,
     skin: Option<&mut super::skin::Skin>,
 ) {
@@ -2082,6 +2127,18 @@ fn render_visible(
     if !posable {
         skin = None;
     }
+    // The parts a mod's `player_submit` hid this frame: the body draws without them, the armour and
+    // the other layers below with every part.
+    let mut hidden_poses = Poses::pooled();
+    let body_poses: &Poses = if hidden.is_empty() {
+        &poses
+    } else {
+        hidden_poses.copy_from(&poses);
+        for part in hidden {
+            hidden_poses.visible(part.model_name(), false);
+        }
+        &hidden_poses
+    };
     let draw_body = |out: &mut Vec<Vertex>, skin: &mut Option<&mut super::skin::Skin>| {
         // A player or mannequin whose skin has no atlas sprite (an evicted or
         // never stored download) draws with its default skin, not invisibly.
@@ -2099,7 +2156,7 @@ fn render_visible(
                 skin,
                 &model,
                 base,
-                &poses,
+                body_poses,
                 uv,
                 0.0,
                 body_color(m, alpha),
@@ -2112,7 +2169,7 @@ fn render_visible(
                     skin,
                     &model,
                     base,
-                    &poses,
+                    body_poses,
                     glow,
                     0.0,
                     body_color(m, alpha),
@@ -2749,10 +2806,9 @@ mod tests {
         );
     }
 
-    /// `mob_layer`'s posed parts are the poses vanilla gave the body this frame, read without
-    /// changing anything: a mob nobody listens to draws exactly as before (#2060).
-    #[test]
-    fn posed_parts_are_the_frames_vanilla_poses_and_change_nothing() {
+    /// A zombie whose model is a humanoid built here (head with its hat, body, arms, legs: one
+    /// face each), and empty mob data: what the posed-parts tests draw, without `.local`.
+    fn humanoid_zombie() -> (Mob, MobData) {
         let cube = |x: f32| serde_json::json!({ "pose": [x, 0.0, 0.0], "polygons": [[[x, 0.0, 0.0, 0.0, 0.0], [x + 1.0, 0.0, 0.0, 1.0, 0.0], [x + 1.0, 1.0, 0.0, 1.0, 1.0], [x, 1.0, 0.0, 0.0, 1.0]]] });
         let mut head = cube(0.0);
         head["children"] = serde_json::json!({ "hat": cube(0.0) });
@@ -2787,6 +2843,14 @@ mod tests {
             species_placements: Default::default(),
             pathfindable_overrides: Default::default(),
         };
+        (mob, data)
+    }
+
+    /// `mob_layer`'s posed parts are the poses vanilla gave the body this frame, read without
+    /// changing anything: a mob nobody listens to draws exactly as before (#2060).
+    #[test]
+    fn posed_parts_are_the_frames_vanilla_poses_and_change_nothing() {
+        let (mob, data) = humanoid_zombie();
         let atlas = |_: &str| Some([0.0, 0.0, 1.0, 1.0]);
         let draw = |mob: &Mob| {
             let mut out = Vec::new();
@@ -2837,6 +2901,53 @@ mod tests {
         );
         cow.age = 37;
         assert!(posed_parts(&cow, 0.5, &data).is_none(), "not a humanoid");
+    }
+
+    /// A part `player_submit` hid leaves the body, after Skin Customization, while the armour
+    /// layered on it keeps the part (#2060, part 2).
+    #[test]
+    fn a_hidden_part_leaves_the_body_but_not_its_armour() {
+        let (mob, data) = humanoid_zombie();
+        let atlas = |_: &str| Some([0.0, 0.0, 1.0, 1.0]);
+        let armour = mob.kind.model.clone();
+        let extra = [(&*armour, [0.0, 0.0, 1.0, 1.0], 0xFFFF_FFFF, 0, false)];
+        let draw = |hidden: &[mod_api::HumanoidPart],
+                    extra: &[(&Part, [f32; 4], u32, u32, bool)]| {
+            let mut out = Vec::new();
+            render_with_hidden(
+                &mob,
+                0.5,
+                glam::DVec3::ZERO,
+                &atlas,
+                0xf0f0,
+                &data,
+                extra,
+                hidden,
+                &mut out,
+            );
+            out.len()
+        };
+        let whole = draw(&[], &[]);
+        let one_face = 4;
+        assert_eq!(
+            draw(&[mod_api::HumanoidPart::RightArm], &[]),
+            whole - one_face
+        );
+        assert_eq!(
+            draw(&[mod_api::HumanoidPart::Head], &[]),
+            whole - 2 * one_face,
+            "the head's child, the hat, goes with it"
+        );
+        assert_eq!(
+            draw(&[], &extra),
+            2 * whole,
+            "the armour layer copies every part"
+        );
+        assert_eq!(
+            draw(&[mod_api::HumanoidPart::RightArm], &extra),
+            2 * whole - one_face,
+            "only the body loses the arm"
+        );
     }
 
     #[test]
