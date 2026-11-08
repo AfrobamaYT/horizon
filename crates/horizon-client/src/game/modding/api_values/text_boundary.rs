@@ -1389,6 +1389,19 @@ mod text_capture_tests {
     use serde_json::json;
 
     #[test]
+    fn item_and_entity_hovers_survive_a_round_trip() {
+        for hover in [
+            json!({"action":"show_item", "id":"minecraft:stick", "count":3, "components":{"minecraft:rarity":"epic"}}),
+            json!({"action":"show_entity", "id":"minecraft:pig", "uuid":[0,1,0,2], "name":{"translate":"test.name"}}),
+        ] {
+            let source = json!({"text":"x", "hover_event":hover});
+            let api = EngineText::from(source).try_into_api().unwrap();
+            let engine = api.try_into_engine(&()).unwrap();
+            assert_eq!(engine.component()["hover_event"], hover);
+        }
+    }
+
+    #[test]
     fn a_span_style_hover_matches_the_component_capture() {
         for hover in [
             json!({"action":"show_text", "value":{"text":"hi", "bold":true}}),
