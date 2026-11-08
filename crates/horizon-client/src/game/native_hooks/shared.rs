@@ -5390,17 +5390,20 @@ mod item_fall_on_tests {
                 }
                 // The part's write destroys the stone after the batch; it is put back at once,
                 // so the item rests on it again and must not be heard landing twice.
+                let mut destructions = 0;
                 for _ in 0..80 {
                     game.ticked_entities_through = u32::MAX;
                     horizon_client::block_contact::in_level(Some(game.dim.id()), || {
                         game.tick_items();
                     });
                     if game.world.block(1, 64, 1) == air {
+                        destructions += 1;
                         game.world.set(1, 64, 1, stone).unwrap();
                         let heard = heard.0.lock().unwrap();
                         assert_eq!(heard.len(), 1, "the write landed after the batch");
                     }
                 }
+                assert_eq!(destructions, 1, "one observed landing-write destruction");
                 let heard = heard.0.lock().unwrap().clone();
                 assert_eq!(heard.len(), 1, "one landing: {heard:?}");
                 let (entity, kind, pos, distance, damage) = &heard[0];
