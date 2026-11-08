@@ -16,30 +16,18 @@ pub(super) fn local(directory: &Dir) -> Result<(), Error> {
         #[cfg(target_os = "linux")]
         // ext*, tmpfs, overlayfs, XFS, Btrfs, ZFS, ramfs, F2FS, FAT and exFAT. Unknown
         // implementations (including NFS, SMB and FUSE) must not silently inherit trust.
-        let supported = matches!(
-            status.f_type as u64,
-            0xef53
-                | 0x01021994
-                | 0x794c7630
-                | 0x58465342
-                | 0x9123683e
-                | 0x2fc12fc1
-                | 0x858458f6
-                | 0xf2f52010
-                | 0x4d44
-                | 0x2011bab0
-        );
+        let supported = supported_linux(status.f_type as u64);
         #[cfg(target_os = "macos")]
         let supported = status.f_flags & libc::MNT_LOCAL as u32 != 0 && {
             // SAFETY: the kernel's fixed f_fstypename is NUL-terminated.
             let kind = unsafe { std::ffi::CStr::from_ptr(status.f_fstypename.as_ptr()) };
             matches!(kind.to_bytes(), b"apfs" | b"hfs" | b"msdos" | b"exfat")
         };
-        return if supported {
+        if supported {
             Ok(())
         } else {
             Err(Error::UnsupportedFilesystem)
-        };
+        }
     }
     #[cfg(windows)]
     {
@@ -79,15 +67,45 @@ pub(super) fn local(directory: &Dir) -> Result<(), Error> {
             .ok_or(Error::UnsupportedFilesystem)?;
         let root: Vec<_> = root.as_os_str().encode_wide().chain(Some(0)).collect();
         // SAFETY: root is a NUL-terminated volume path from the owned directory handle.
-        return if matches!(unsafe { GetDriveTypeW(root.as_ptr()) }, 2 | 3 | 5 | 6) {
+        if matches!(unsafe { GetDriveTypeW(root.as_ptr()) }, 2 | 3 | 5 | 6) {
             Ok(())
         } else {
             Err(Error::UnsupportedFilesystem)
-        };
+        }
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
         let _ = directory;
         Err(Error::UnsupportedFilesystem)
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn supported_linux(kind: u64) -> bool {
+    matches!(
+        kind,
+        0xef53
+            | 0x01021994
+            | 0x794c7630
+            | 0x58465342
+            | 0x9123683e
+            | 0x2fc12fc1
+            | 0x858458f6
+            | 0xf2f52010
+            | 0x4d44
+            | 0x2011bab0
+    )
+}
+
+#[cfg(all(test, target_os = "linux"))]
+#[test]
+fn local_filesystem_contract() {
+    for kind in [0xef53, 0x01021994, 0x794c7630, 0x58465342, 0x9123683e] {
+        assert!(supported_linux(kind));
+    }
+    for kind in [
+        0x6969, 0xff534d42, 0x517b, 0x65735546, 0x01021997, 0x9fa0, 0,
+    ] {
+        assert!(!supported_linux(kind), "unsafe filesystem {kind:x}");
     }
 }

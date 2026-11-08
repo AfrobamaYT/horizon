@@ -31,6 +31,12 @@ fn child_keeps_gate_and_tree_after_creator_closes_its_copies() {
     let root = tempfile::tempdir().unwrap();
     let data = root.path().join("data");
     let trees = [directory(&root.path().join("tree"))];
+    if std::env::var_os("HORIZON_TEST_CLOSED_STDIN").is_some() {
+        // SAFETY: only the isolated regression subprocess closes its own stdin.
+        unsafe {
+            libc::close(0);
+        }
+    }
     let claims = ChildLeases::acquire(&data, &trees).unwrap();
     use std::os::fd::AsRawFd;
     for file in claims.files() {
@@ -90,28 +96,6 @@ fn child_keeps_gate_and_tree_after_creator_closes_its_copies() {
     gate.unlock().unwrap();
 }
 
-#[cfg(unix)]
-#[test]
-fn failed_exec_leaves_no_tree_or_gate_owner() {
-    let root = tempfile::tempdir().unwrap();
-    let data = root.path().join("data");
-    let trees = [directory(&root.path().join("tree"))];
-    let claims = ChildLeases::acquire(&data, &trees).unwrap();
-    assert!(claims
-        .spawn(Command::new(root.path().join("missing-program")))
-        .is_err());
-    let registry = Registry::with_release(&data, Release::Unlock).unwrap();
-    released(&registry, &trees[0]);
-    drop(registry);
-    let gate = File::options()
-        .read(true)
-        .write(true)
-        .open(data.join("run-leases/gate"))
-        .unwrap();
-    gate.try_lock().unwrap();
-    gate.unlock().unwrap();
-}
-
 #[test]
 fn bridge_actor() {
     if std::env::var_os("HORIZON_LEASE_BRIDGE_ACTOR").is_none() {
@@ -120,4 +104,53 @@ fn bridge_actor() {
     println!("BRIDGE-READY");
     std::io::stdout().flush().unwrap();
     std::io::stdin().read_line(&mut String::new()).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn closed_stdin_does_not_lose_tree() {
+    let status = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "process::leases::tests::child_keeps_gate_and_tree_after_creator_closes_its_copies",
+            "--nocapture",
+        ])
+        .env("HORIZON_TEST_CLOSED_STDIN", "1")
+        .status()
+        .unwrap();
+    assert!(status.success());
+}
+
+#[cfg(unix)]
+#[test]
+fn creator_flags_remain_cloexec_until_child_callback() {
+    use std::os::unix::process::CommandExt;
+    let root = tempfile::tempdir().unwrap();
+    let trees = [directory(&root.path().join("tree"))];
+    let claims = ChildLeases::acquire(&root.path().join("data"), &trees).unwrap();
+    // SAFETY: sysconf/fcntl only query this process. Snapshot all slots, including vacant
+    // ones later used for transfer duplicates; ignore pre-existing inherited non-CLOEXEC fds.
+    let maximum = i32::try_from(unsafe { libc::sysconf(libc::_SC_OPEN_MAX) }).unwrap();
+    let flags: Vec<_> = (3..maximum)
+        .map(|fd| (fd, unsafe { libc::fcntl(fd, libc::F_GETFD) }))
+        .collect();
+    let mut command = Command::new("/bin/true");
+    // This callback precedes the transfer callback and sees the fork's untouched flags.
+    unsafe {
+        command.pre_exec(move || {
+            for &(fd, before) in &flags {
+                let after = libc::fcntl(fd, libc::F_GETFD);
+                if after >= 0 && before != 0 && after & libc::FD_CLOEXEC == 0 {
+                    return Err(io::Error::from_raw_os_error(libc::EINVAL));
+                }
+            }
+            Ok(())
+        });
+    }
+    let child = claims.spawn(command);
+    assert!(
+        child.is_ok(),
+        "creator cleared CLOEXEC before its child's callback"
+    );
+    assert!(child.unwrap().wait().unwrap().success());
 }

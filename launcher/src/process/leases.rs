@@ -35,16 +35,31 @@ impl ChildLeases {
     /// be reused after these owners drop. No allocation or lock is taken in the child callback.
     #[cfg(unix)]
     pub fn spawn(self, mut command: std::process::Command) -> io::Result<std::process::Child> {
-        use std::os::{fd::AsRawFd, unix::process::CommandExt};
-        let mut fds: Vec<_> = self.files().iter().map(|file| file.as_raw_fd()).collect();
-        fds.sort_unstable();
-        fds.dedup();
+        use std::os::{
+            fd::{AsRawFd, FromRawFd},
+            unix::process::CommandExt,
+        };
+        let transfer = self
+            .files()
+            .iter()
+            .map(|file| {
+                // SAFETY: file is owned; duplicate above stdio so Command cannot replace it.
+                let fd = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 3) };
+                if fd < 0 {
+                    Err(io::Error::last_os_error())
+                } else {
+                    // SAFETY: fcntl returned a new owned descriptor; File closes without unlock.
+                    Ok(unsafe { File::from_raw_fd(fd) })
+                }
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+        let fds: Vec<_> = transfer.iter().map(AsRawFd::as_raw_fd).collect();
         command.env("HORIZON_RUNTIME_DATA_ROOT", &self.data).env(
             "HORIZON_RUNTIME_LEASE_FDS",
             fds.iter().map(i32::to_string).collect::<Vec<_>>().join(","),
         );
-        // SAFETY: only async-signal-safe fcntl calls run after fork. self owns every fd until
-        // spawn returns, and the launcher/holder copies keep their original CLOEXEC flags.
+        // SAFETY: only async-signal-safe fcntl calls run after fork. transfer owns every fd until
+        // spawn returns, and the creator's copies keep their original CLOEXEC flags.
         unsafe {
             command.pre_exec(move || {
                 for &fd in &fds {
@@ -57,6 +72,7 @@ impl ChildLeases {
             });
         }
         let child = command.spawn();
+        drop(transfer); // File closes only: inherited descriptions are never explicitly unlocked.
         drop(self); // Close-only, including the gate: never unlock the transferred set.
         child
     }
