@@ -138,6 +138,33 @@ fn build(
                 encode: quote!({ let value = &**value; #e }),
             }
         }
+        // A shared pointer owns a copy on this side of the boundary; `Arc<str>` is a string.
+        Shape::Wrapped(wrapper @ (Wrapper::Arc | Wrapper::Rc), inner) => {
+            let pointer = if *wrapper == Wrapper::Arc {
+                quote!(std::sync::Arc)
+            } else {
+                quote!(std::rc::Rc)
+            };
+            if matches!(**inner, Shape::Scalar(Scalar::Str)) {
+                let c = build(rule, &Shape::Scalar(Scalar::String), stack, mode)?;
+                let d = c.decode;
+                ValueCodec {
+                    decode: quote!(#pointer::<str>::from(#d)),
+                    encode: quote!({
+                        let value = &String::from(&**value);
+                        out.put(value);
+                    }),
+                }
+            } else {
+                let c = build(rule, inner, stack, mode)?;
+                let d = c.decode;
+                let e = c.encode;
+                ValueCodec {
+                    decode: quote!(#pointer::new(input.nested(|input| Ok(#d))?)),
+                    encode: quote!({ let value = &**value; #e }),
+                }
+            }
+        }
         Shape::Option(inner) => {
             let c = build(rule, inner, stack, mode)?;
             let d = c.decode;
