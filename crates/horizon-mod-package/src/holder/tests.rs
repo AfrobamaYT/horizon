@@ -289,6 +289,42 @@ fn failed_kill_hands_unreaped_child_off_without_exceeding_launch_budget() {
         assert!(bounded, "unreaped child blocked launch after its deadline");
     }
 }
+#[test]
+fn failed_reaper_spawn_retains_ownership_without_waiting_or_panicking() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    struct Owner(Arc<AtomicBool>);
+    impl Drop for Owner {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+    let dropped = Arc::new(AtomicBool::new(false));
+    let waited = Arc::new(AtomicBool::new(false));
+    let observed = waited.clone();
+    let start = Instant::now();
+    controller::handoff(
+        Owner(dropped.clone()),
+        move |_| {
+            observed.store(true, Ordering::SeqCst);
+        },
+        |job| {
+            drop(job); // Builder::spawn consumes/drops the closure even when creation fails.
+            Err(io::ErrorKind::WouldBlock.into())
+        },
+    );
+    assert!(start.elapsed() < Duration::from_millis(300));
+    assert!(
+        !waited.load(Ordering::SeqCst),
+        "failed spawn fell back to inline wait"
+    );
+    assert!(
+        !dropped.load(Ordering::SeqCst),
+        "unreaped owner was silently dropped"
+    );
+}
 fn assert_record_owned(data: &Path, expected: bool) {
     let record = fs::read_dir(data.join("run-records"))
         .unwrap()

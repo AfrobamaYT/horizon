@@ -156,5 +156,28 @@ pub(super) fn retire(
                 .min(Duration::from_millis(5)),
         );
     }
-    std::thread::spawn(move || reap(child));
+    handoff(child, reap, |job| {
+        std::thread::Builder::new()
+            .name("holder-reaper".into())
+            .spawn(job)
+            .map(drop)
+    });
+}
+
+pub(super) fn handoff<T: Send + 'static>(
+    child: T,
+    reap: impl FnOnce(T) + Send + 'static,
+    spawn: impl FnOnce(Box<dyn FnOnce() + Send>) -> io::Result<()>,
+) {
+    let pending = std::sync::Arc::new(std::sync::Mutex::new(Some(child)));
+    let worker = pending.clone();
+    if let Err(error) = spawn(Box::new(move || {
+        reap(worker.lock().unwrap().take().unwrap())
+    })) {
+        log::error!(
+            "Cannot start holder-reaper: {error}; retaining unreaped child until process exit"
+        );
+        // The failed spawner dropped its closure; keep our remaining owner deliberately alive.
+        std::mem::forget(pending);
+    }
 }
