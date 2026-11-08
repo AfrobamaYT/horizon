@@ -294,6 +294,8 @@ impl Game<'_> {
         // The candidate's named predicates/modifiers must also be available to
         // argument codecs before any of its functions can be exposed.
         self.sync_enchantment_registries();
+        // A function's `loot ... loot <id>` names the reloaded packs' tables.
+        self.sync_loot_table_ids();
         let mut registries = self.ui.registries.clone();
         registries.permission = self.fns.command_level();
         registries.functions = store.functions.keys().cloned().collect();
@@ -479,7 +481,9 @@ impl Game<'_> {
 
     // ---- ticking -----------------------------------------------------------------
 
-    /// `ServerFunctionManager.tick` and the scheduled events.
+    /// `ServerFunctionManager.tick`: the `#minecraft:load` functions after a
+    /// reload, then the `#minecraft:tick` ones, before the levels tick (and
+    /// before the game time moves on).
     pub(super) fn tick_functions(&mut self) {
         if self.remote.is_some() {
             return;
@@ -492,6 +496,19 @@ impl Game<'_> {
                 self.run_function_by_id(&f, None, source);
             }
         }
+        for f in self.fns.store.tag_functions("minecraft:tick") {
+            self.run_function_by_id(&f, None, source);
+        }
+    }
+    /// `ServerLevel.tickTime`'s `getScheduledEvents().tick`: the scheduled
+    /// functions due at the game time this tick has just reached.
+    pub(super) fn run_scheduled_functions(&mut self) {
+        self.ensure_datapacks();
+        if self.remote.is_some() {
+            return;
+        }
+        self.exec = ExecState::default();
+        let source = self.server_source();
         let now = self.world.game_time;
         loop {
             let due = self
@@ -512,9 +529,6 @@ impl Game<'_> {
                 }
                 None => self.run_function_by_id(&event.id, None, source),
             }
-        }
-        for f in self.fns.store.tag_functions("minecraft:tick") {
-            self.run_function_by_id(&f, None, source);
         }
     }
     fn run_function_by_id(&mut self, id: &str, args: Option<&Tag>, source: Source) {
@@ -2087,18 +2101,17 @@ mod tests {
         )
         .unwrap();
         with_game(|game| {
-            game.load_world(WorldRequest {
-                rule_registry: std::sync::Arc::new(
-                    horizon_client::gamerules::RuleRegistry::vanilla(),
-                ),
-                save_root: root.clone(),
-                folder: "test".into(),
-                name: Some("test".into()),
-                seed: Some(1),
-                creative: true,
-                create: None,
-            })
+            let mut request = WorldRequest::new(
+                "test",
+                Some("test"),
+                Some(1),
+                true,
+                None,
+                std::sync::Arc::new(horizon_client::gamerules::RuleRegistry::vanilla()),
+            )
             .unwrap();
+            request.save_root = root.clone();
+            game.load_world(request).unwrap();
             assert!(game.fns.store.functions.contains_key("test:start"));
             assert_eq!(
                 game.fns.store.tag_functions("minecraft:load"),

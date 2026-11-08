@@ -208,6 +208,7 @@ pub(super) struct GuestSwap {
         Option<u128>,
         Option<u8>,
         Option<u32>,
+        Option<i32>,
     ),
     /// Whether the outer turn is a fake player.
     acting_fake: bool,
@@ -521,6 +522,7 @@ mod tests {
                     data_slots: 0,
                     results: Vec::new(),
                     crafting: None,
+                    links: None,
                 }));
                 for is_mod in [false, true] {
                     game.world.block_entities.insert(
@@ -2421,6 +2423,7 @@ mod pickup_xp_tests {
                 ticks: 0,
                 health: 5,
                 no_gravity: true,
+                following: None,
             });
             game.guest_orbs(0);
             let left = game.orbs.iter().any(|o| o.id == 40);

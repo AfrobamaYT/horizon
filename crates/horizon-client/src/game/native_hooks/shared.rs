@@ -5326,6 +5326,7 @@ pub(super) mod particle_count_tests {
             count: 1,
             ticks: 0,
             health: 5,
+            following: None,
         }
     }
 
