@@ -4,6 +4,7 @@
 //! Mods page.
 pub mod link;
 mod points;
+pub use points::InternalsCatalog;
 mod runtime;
 #[allow(
     dead_code,
@@ -15,6 +16,7 @@ mod runtime;
 pub(crate) mod boundary {
     include!(concat!(env!("OUT_DIR"), "/wire_host_generated.rs"));
 }
+pub(crate) use runtime::WeakWasmMod;
 pub use runtime::{CallClass, WasmHandler, WasmMod};
 
 pub(crate) trait NoAnswer {
@@ -57,6 +59,8 @@ pub enum Refusal {
     Toolchain { found: String, group: String },
     /// A dependency of this mod was refused, so its group can't link.
     DependencyRefused { dependency: String },
+    /// The mod's declared game internals do not resolve against this game's catalog.
+    Internals(mod_points::endpoint_policy::InternalsRefusal),
     /// The package's `mod.wasm` failed its checks.
     Package(String),
     /// The group could not instantiate, initialize or run.
@@ -92,6 +96,7 @@ impl std::fmt::Display for Refusal {
             Self::DependencyRefused { dependency } => {
                 write!(f, "its dependency {dependency} didn't load")
             }
+            Self::Internals(why) => write!(f, "{why}"),
             Self::Package(why) => write!(f, "{why}"),
             Self::Runtime(why) => write!(f, "{why}"),
             Self::Layout { .. } => write!(f, "built for another version of the mod API"),
@@ -352,6 +357,7 @@ pub fn load_installed(game_dir: &Path, dev: &[PathBuf]) -> Loaded {
                 .into_iter()
                 .map(|p| (p.manifest.id, Refusal::NoStd))
                 .collect(),
+            catalog: None,
         },
     };
     refused.append(&mut loaded.refused);
@@ -378,22 +384,41 @@ pub struct Loaded {
     pub manifests: Vec<Manifest>,
     pub refused: Vec<(String, Refusal)>,
     modules: Vec<WasmMod>,
+    catalog: Option<InternalsCatalog>,
 }
 
 impl Loaded {
+    /// Supplies the game's internals catalog for `initialize`, which resolves each mod's
+    /// declared internals against it. Without one, a mod declaring internals is refused.
+    pub fn with_catalog(mut self, catalog: InternalsCatalog) -> Self {
+        self.catalog = Some(catalog);
+        self
+    }
+
     /// Initializes programmatically loaded mods with the final inventory, then installs
     /// their point listeners. Call once, before sealing the point registry.
     pub fn initialize(
         &self,
         inventory: &[mod_api::PackageInfo],
     ) -> Result<(), Vec<(String, Refusal)>> {
-        let refused = initialize_selected(self.manifests.iter().zip(&self.modules), inventory);
+        let refused = initialize_selected(
+            self.manifests.iter().zip(&self.modules),
+            inventory,
+            self.catalog.as_ref(),
+        );
         if refused.is_empty() {
             Ok(())
         } else {
             Err(refused)
         }
     }
+}
+
+static CATALOG: OnceLock<InternalsCatalog> = OnceLock::new();
+
+/// Installs the game's internals catalog for the process-wide `initialize`, once, before it.
+pub fn install_catalog(catalog: InternalsCatalog) {
+    let _ = CATALOG.set(catalog);
 }
 
 static MODULES: OnceLock<Vec<(Manifest, WasmMod)>> = OnceLock::new();
@@ -406,24 +431,26 @@ pub fn initialize(inventory: &[mod_api::PackageInfo]) {
     refused.extend(initialize_selected(
         modules.iter().map(|(manifest, module)| (manifest, module)),
         inventory,
+        CATALOG.get(),
     ));
     let _ = INITIALIZED_REFUSALS.set(refused);
 }
 fn initialize_selected<'a>(
     modules: impl Iterator<Item = (&'a Manifest, &'a WasmMod)>,
     inventory: &[mod_api::PackageInfo],
+    catalog: Option<&InternalsCatalog>,
 ) -> Vec<(String, Refusal)> {
     let mut refused = Vec::new();
     for (manifest, module) in modules {
         let result = if initialize_modules(std::slice::from_ref(module), inventory) {
-            points::listen(manifest, module)
+            points::listen(manifest, module, catalog)
         } else {
-            Err("initialization failed".into())
+            Err(Refusal::Runtime("initialization failed".into()))
         };
         if let Err(why) = result {
             module.disable();
             log::error!("wasm mod {} refused: {why}", manifest.id);
-            refused.push((manifest.id.clone(), Refusal::Runtime(why)));
+            refused.push((manifest.id.clone(), why));
         }
     }
     refused

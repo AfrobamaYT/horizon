@@ -110,6 +110,16 @@ fn owner_name(owner: Option<&Type>) -> Option<String> {
 
 type Roots = Vec<(Type, bool)>;
 
+/// Whether a root crosses only as an opaque leaf, through references and boxes.
+fn opaque_leaf(shape: &crate::crossing::Shape) -> bool {
+    use crate::crossing::Shape;
+    match shape {
+        Shape::Ref { to, .. } | Shape::Wrapped(_, to) => opaque_leaf(to),
+        Shape::Opaque(_) => true,
+        _ => false,
+    }
+}
+
 fn roots(
     rule: &Rule,
     module: &str,
@@ -117,15 +127,8 @@ fn roots(
     signature: &Signature,
     shape: &point_shape::Shape,
 ) -> Result<(Roots, Option<Roots>), String> {
-    let _ = rule;
     if module.split("::").next() != Some("horizon_client") {
         return Err("lower-crate raw points need their own once-per-crate helper module".into());
-    }
-    if shape.borrowed_return {
-        return Err("borrowed-return projection integration pending".into());
-    }
-    if matches!(shape.returns, point_shape::Returns::UnitResult) {
-        return Err("UnitResult needs its distinct return Result projection".into());
     }
     let authority = point_shape::raw_shape(shape, signature, None);
     let mut inputs = Vec::new();
@@ -144,6 +147,19 @@ fn roots(
         let syn::FnArg::Typed(argument) = argument else {
             unreachable!()
         };
+        // Callbacks (closures, fn pointers) and unclassified syntax (`&dyn Trait`, `Box<dyn
+        // Trait>`) are engine objects: never serialized, never passed over the boundary. They
+        // project only as an opaque leaf (a typed header with no value and no children, which
+        // takes no patch), so the point stays safe to listen to; anything that would project
+        // data instead is refused with its class as the reason.
+        if permission.class != "plain"
+            && !opaque_leaf(&rule.shape(module, owner_name(owner).as_deref(), &argument.ty))
+        {
+            return Err(format!(
+                "{} argument `{}` is not an opaque leaf",
+                permission.class, permission.name
+            ));
+        }
         inputs.push(((*argument.ty).clone(), permission.record_mutable));
     }
     let outcome = shape.raw_outcome(signature);
@@ -155,17 +171,15 @@ fn roots(
     if let Some(result) = result {
         inputs.push((result, authority.outcome_record_mutable == Some(true)));
     }
-    let tail = if shape.has_return() {
-        Some(match outcome {
-            point_shape::RawOutcome::Result(ty) => {
-                vec![(ty, authority.return_record_mutable)]
-            }
-            // Native unit return listeners have no mutable cancellation control.
-            point_shape::RawOutcome::Cancel | point_shape::RawOutcome::None => Vec::new(),
-        })
-    } else {
-        None
-    };
+    // The return phase has one root: the returned slot itself (the value, the `Result` of a
+    // `UnitResult`, or a borrowed `&T`/`&mut T`), distinct from the head's cancel or result
+    // control. A reference slot is projected through its pointee: the patch writes the pointee
+    // at its node, never retargets the reference, and a shared pointee is read-only. Consumed
+    // by-value arguments and the receiver are never roots here.
+    let tail = Some(match &signature.output {
+        syn::ReturnType::Type(_, ty) => vec![((**ty).clone(), authority.return_record_mutable)],
+        syn::ReturnType::Default => Vec::new(),
+    });
     Ok((inputs, tail))
 }
 

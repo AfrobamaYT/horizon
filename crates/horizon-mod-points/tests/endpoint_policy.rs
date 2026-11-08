@@ -1,5 +1,5 @@
 use mod_points::endpoint_policy::{
-    EndpointPolicy, InternalDeclaration, InternalField, PointSpec, SchemaCatalog,
+    EndpointPolicy, InternalDeclaration, InternalField, InternalsRefusal, PointSpec, SchemaCatalog,
 };
 use mod_points::exposure::{Field, Layout};
 use std::sync::Arc;
@@ -74,10 +74,57 @@ fn grants_are_per_module_validated_and_freed() {
     assert!(b.field(0, None, 0));
     assert!(!b.field(0, None, 1));
     assert_ne!(a.key(0), b.key(0));
-    assert!(EndpointPolicy::build(&c, &[declaration("Game::secret", "def")], &[3]).is_err());
-    assert!(EndpointPolicy::build(&c, &[declaration("Game::missing", "abc")], &[3]).is_err());
     let weak = Arc::downgrade(&b);
     drop(b);
     drop(granted);
     assert!(weak.upgrade().is_none());
+}
+
+fn refusal(c: &SchemaCatalog, d: InternalDeclaration, listened: &[usize]) -> InternalsRefusal {
+    match EndpointPolicy::build(c, &[d], listened) {
+        Err(why) => why,
+        Ok(_) => panic!("declaration was accepted"),
+    }
+}
+#[test]
+fn invalid_declarations_get_typed_refusals() {
+    let c = catalog();
+    let path = |p: &str| p.to_string();
+    assert_eq!(
+        refusal(&c, declaration("Game::secret", "def"), &[3]),
+        InternalsRefusal::OpaqueReceiverMember(path("Game::secret"))
+    );
+    assert_eq!(
+        refusal(&c, declaration("Game::missing", "abc"), &[3]),
+        InternalsRefusal::UnknownPath(path("Game::missing"))
+    );
+    assert_eq!(
+        refusal(&c, declaration("Game::visible", "bad"), &[3]),
+        InternalsRefusal::HashMismatch(path("Game::visible"))
+    );
+    let mut method = declaration("Game::visible", "abc");
+    method.kind = Some("method".into());
+    assert_eq!(
+        refusal(&c, method, &[3]),
+        InternalsRefusal::NotAField(path("Game::visible"))
+    );
+    assert_eq!(
+        refusal(&c, declaration("Game::visible", "abc"), &[]),
+        InternalsRefusal::NoListener(path("Game::visible"))
+    );
+    assert_eq!(
+        refusal(&c, declaration("Game::visible", "abc"), &[9]),
+        InternalsRefusal::UnknownPoint(9)
+    );
+    // The same path under two kinds is ambiguous without a declared kind.
+    let mut ambiguous = catalog();
+    let mut twin = ambiguous.fields[0].clone();
+    twin.kind = "method".into();
+    ambiguous.fields.push(twin);
+    let mut open = declaration("Game::visible", "abc");
+    open.kind = None;
+    assert_eq!(
+        refusal(&ambiguous, open, &[3]),
+        InternalsRefusal::AmbiguousKind(path("Game::visible"))
+    );
 }
