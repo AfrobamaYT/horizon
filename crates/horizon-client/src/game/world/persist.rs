@@ -1149,7 +1149,6 @@ impl Game<'_> {
         // `Mob.setTarget` -> `asValidTarget`: a player the golem cannot attack
         // (`IronGolem.canAttack`) comes back as no target.
         m.extra.anger = horizon_client::mobs::anger_left(m.extra.anger_end, self.world.game_time);
-        let restore_anger = m.extra.anger > 0 && m.extra.angry_at.is_some();
         let anger_uuid = match tag.get("angry_at") {
             Some(Tag::IntArray(words)) if words.len() == 4 => {
                 Some([words[0], words[1], words[2], words[3]])
@@ -1168,12 +1167,12 @@ impl Game<'_> {
                 | horizon_client::mobs::Species::Enderman
                 | horizon_client::mobs::Species::ZombifiedPiglin
         );
-        let notify_target = neutral
-            && mod_api::__private::listened(mod_api::HookId::LivingChangeTarget)
-            && self.native_lifecycle.epoch().is_some();
-        if restore_anger && !notify_target {
-            m.ai.target = (!m.built_by_player()).then_some(horizon_client::mobs::Who::Player);
-        }
+        // Restore on the server whether or not a mod listens. The saved UUID
+        // can name an unloaded entity, an online player, or another mob;
+        // substituting the local player when there is no listener both changes
+        // vanilla behavior and makes loading depend on mod subscriptions.
+        let restore_target =
+            neutral && self.is_logical_server() && self.native_lifecycle.epoch().is_some();
         m.extra.mount = mount;
         m.extra.passenger = mount.is_some();
         if finalize {
@@ -1190,14 +1189,8 @@ impl Game<'_> {
         self.remember(id, uuid, tag);
         self.bind_saved_entity_attachments(id, &mut m.attachment_lifetime);
         self.mobs.push(m);
-        if notify_target
-            && !self.native_restore_loaded_target(id, anger_uuid)
-            && restore_anger
-            && let Some(mob) = self.mobs.iter_mut().find(|mob| mob.id == id)
-        {
-            // Handles are not available during some early load paths: keep
-            // the prior behavior until the level can expose them.
-            mob.ai.target = (!mob.built_by_player()).then_some(horizon_client::mobs::Who::Player);
+        if restore_target {
+            self.native_restore_loaded_target(id, anger_uuid);
         }
         for rider in riders {
             if let Some(r) = self.load_mob(rider, Some(id))
@@ -2548,6 +2541,114 @@ mod tests {
                 game.load_mob(entity("minecraft:pig"), None).unwrap();
                 assert_eq!(*observed.lock().unwrap(), [(wolf, true), (golem, true)]);
             });
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn neutral_load_restores_only_the_saved_live_target_with_or_without_listeners() {
+        use std::sync::{Arc, Mutex};
+
+        struct Observe(Arc<Mutex<Vec<(u32, Option<u32>)>>>);
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for Observe {
+            fn living_change_target(
+                &self,
+                _host: &dyn mod_api::Host,
+                event: &mut mod_api::LivingChangeTargetEvent<'_>,
+            ) -> mod_api::Flow {
+                self.0.lock().unwrap().push((
+                    event.mob.entity().id(),
+                    event.original_target.map(|target| target.entity().id()),
+                ));
+                mod_api::Flow::Continue
+            }
+        }
+
+        fn check(game: &mut Game<'_>, observed: Option<&Mutex<Vec<(u32, Option<u32>)>>>) {
+            let uuid = [274, 0, 0, 1];
+            let entity_at_origin = |kind: &str| {
+                let mut mob = entity(kind);
+                if let Tag::Compound(ref mut tag) = mob {
+                    tag.insert(
+                        "Pos".into(),
+                        Tag::List(vec![Tag::Double(0), Tag::Double(0), Tag::Double(0)]),
+                    );
+                }
+                mob
+            };
+            let mut zombie = entity_at_origin("minecraft:zombie");
+            if let Tag::Compound(ref mut tag) = zombie {
+                tag.insert("UUID".into(), Tag::IntArray(uuid.to_vec()));
+            }
+            let zombie = game.load_mob(zombie, None).unwrap();
+            let saved_neutral = |kind: &str, target: [i32; 4]| {
+                let mut mob = entity_at_origin(kind);
+                if let Tag::Compound(ref mut tag) = mob {
+                    // Vanilla reads the target even when the anger timer expired.
+                    tag.insert("angry_at".into(), Tag::IntArray(target.to_vec()));
+                    tag.insert("anger_end_time".into(), Tag::Long(-1));
+                }
+                mob
+            };
+            let live = game
+                .load_mob(saved_neutral("minecraft:iron_golem", uuid), None)
+                .unwrap();
+            let absent = game
+                .load_mob(saved_neutral("minecraft:iron_golem", [274, 0, 0, 2]), None)
+                .unwrap();
+            let enderman = game
+                .load_mob(saved_neutral("minecraft:enderman", uuid), None)
+                .unwrap();
+            assert_eq!(
+                game.mobs
+                    .iter()
+                    .find(|mob| mob.id == live)
+                    .unwrap()
+                    .ai
+                    .target,
+                Some(horizon_client::mobs::Who::Mob(zombie))
+            );
+            assert_eq!(
+                game.mobs
+                    .iter()
+                    .find(|mob| mob.id == absent)
+                    .unwrap()
+                    .ai
+                    .target,
+                None,
+                "an offline UUID must never become a different player"
+            );
+            let enderman_state = game.mobs.iter().find(|mob| mob.id == enderman).unwrap();
+            assert_eq!(
+                enderman_state.ai.target,
+                Some(horizon_client::mobs::Who::Mob(zombie))
+            );
+            assert!(
+                enderman_state.extra.flag,
+                "Enderman.setTarget must open its mouth"
+            );
+            if let Some(observed) = observed {
+                assert_eq!(
+                    *observed.lock().unwrap(),
+                    [
+                        (live, Some(zombie)),
+                        (absent, None),
+                        (enderman, Some(zombie))
+                    ]
+                );
+            }
+        }
+
+        super::super::native_entity_refs::tests::with_game(|game| check(game, None));
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![mod_api::ModEntry::new(
+            "observe",
+            Box::new(Observe(observed.clone())),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| check(game, Some(&observed)));
         });
     }
 

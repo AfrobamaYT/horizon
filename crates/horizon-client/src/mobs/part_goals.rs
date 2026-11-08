@@ -26,6 +26,24 @@ use mod_api::{
 pub trait GoalHost {
     /// The handles' epoch: a handle of an earlier world refuses.
     fn epoch(&self) -> Option<NativeWorldEpoch>;
+    /// The game's complete portal eligibility, including player passengers.
+    fn mob_can_use_portal(&self, mob: &Mob) -> bool;
+    /// Compute climbing from the game's collision and climbing registry.
+    fn mob_is_climbing(&self, mob: &Mob) -> bool;
+    /// Player credit for a mob, distinguishing absent credit from an unresolved player.
+    fn mob_player_credit(&self, mob: &Mob) -> Option<Option<u32>>;
+    /// Read a lent mob's current target with the game's target validation.
+    fn mob_target(&self, mob: &Mob, world: &MobWorld<'_>) -> Option<mod_api::LivingRef>;
+    /// Tags of a mob currently lent to the tick.
+    fn mob_tags(&self, mob: &Mob) -> Option<Vec<String>>;
+    /// Display name of a mob currently lent to the tick.
+    fn mob_name(&self, mob: &Mob) -> String;
+    /// Whether a mob currently lent to the tick has joined its level.
+    fn mob_added_to_level(&self, mob: &Mob) -> bool;
+    /// Portal cooldown of a mob currently lent to the tick.
+    fn mob_portal_cooldown(&self, mob: &Mob) -> i32;
+    /// Whether a mob currently lent to the tick refuses a damage type.
+    fn mob_invulnerable_to_damage(&self, mob: &Mob, damage_type: &str) -> bool;
     /// Run `goal`'s `op` on the mob in hand with the tick's `MobWorld`, naming
     /// `mod_id`'s `part` in a panic. None where this side runs no mod goals.
     fn run_goal(

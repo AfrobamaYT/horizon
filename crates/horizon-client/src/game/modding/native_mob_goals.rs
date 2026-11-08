@@ -16,7 +16,7 @@ use mod_api::{MobRef, NativeGoal, NativeMobFilter, NativeMobGoalEntry};
 /// species variant of one (a bee's `BeeHurtByOtherGoal`, a labeled stroll)
 /// keeps its own vanilla name, as `goals` reads it and `remove_goal` takes
 /// it to remove that one.
-fn goal_id(name: &str) -> &str {
+pub(super) fn goal_id(name: &str) -> &str {
     match name {
         "Float" => "float",
         "ClimbOnTopOfPowderSnow" => "climb_on_top_of_powder_snow",
