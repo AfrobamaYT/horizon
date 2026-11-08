@@ -135,6 +135,24 @@ impl NativeNode for Text<'_> {
     }
 }
 
+/// A text leaf over an owned string, such as a `Box<dyn Error>`'s `Display` output: it reads like
+/// [`Text`].
+pub struct DisplayText(pub String, pub u64, pub u64);
+impl NativeNode for DisplayText {
+    fn key(&self) -> u64 {
+        self.1
+    }
+    fn value(&self, f: &mut Header<'_>) -> Result<(), RowError> {
+        Text(&self.0, self.1, self.2).value(f)
+    }
+    fn len(&self) -> u64 {
+        Text(&self.0, self.1, self.2).len()
+    }
+    fn child(&self, ordinal: u64, f: &mut Visitor<'_>) -> Result<(), RowError> {
+        Text(&self.0, self.1, self.2).child(ordinal, f)
+    }
+}
+
 /// An indexed view over a borrowed standard collection iterator.
 pub struct Collection<F> {
     pub key: u64,

@@ -24,7 +24,7 @@ pub fn codecs(rule: &Rule, arguments: &[Shape], result: &Shape) -> Result<Callab
     let decode = args.decode;
     let encode = result.encode;
     Ok(CallableCodecs {
-        decode: quote!(|input: &mut mod_api::wire::Reader<'_>| -> Result<_, mod_api::wire::WireError> { Ok(#decode) }),
+        decode: quote!(|input: &mut mod_api::wire::Reader<'_>| -> ::core::result::Result<_, mod_api::wire::WireError> { Ok(#decode) }),
         encode: quote!(|value, out: &mut mod_api::wire::Writer| { #encode }),
     })
 }
