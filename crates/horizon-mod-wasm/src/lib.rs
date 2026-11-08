@@ -69,6 +69,8 @@ pub enum Refusal {
     NoStd,
     /// A running group trapped or exhausted a resource limit.
     Stopped,
+    /// Another thread owns a group whose import is running native code.
+    Busy,
 }
 
 impl std::fmt::Display for Refusal {
@@ -98,6 +100,7 @@ impl std::fmt::Display for Refusal {
             }
             Self::NoStd => write!(f, "this game has no wasm standard library member"),
             Self::Stopped => write!(f, "stopped after a trap or resource limit"),
+            Self::Busy => write!(f, "its wasm group is busy"),
         }
     }
 }

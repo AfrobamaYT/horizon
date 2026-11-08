@@ -1,5 +1,24 @@
 use super::*;
 
+struct Random<F>(F);
+impl<F: FnMut() -> i64> mod_api::StructureRandom for Random<F> {
+    fn next_int_bound(&mut self, _: i32) -> i32 {
+        0
+    }
+    fn next_float(&mut self) -> f32 {
+        0.0
+    }
+    fn next_double(&mut self) -> f64 {
+        0.0
+    }
+    fn next_boolean(&mut self) -> bool {
+        false
+    }
+    fn next_long(&mut self) -> i64 {
+        (self.0)()
+    }
+}
+
 fn guest(layout: u64, body: &str) -> Vec<u8> {
     wat::parse_str(format!(
         r#"(module
@@ -51,6 +70,80 @@ fn hook_round_trip_and_malformed_reply_poison() {
     assert!(module.running.poisoned.load(Ordering::Relaxed));
     assert_eq!(call(&module), None);
 }
+#[test]
+fn encoding_failure_refuses_partial_arguments() {
+    let module = module("i64.const 2199023255556");
+    assert_eq!(
+        module.call(
+            CallClass::Hook,
+            Frame::default(),
+            0,
+            None,
+            |w| {
+                w.put(&42u32);
+                w.fail(WireError::Invalid("resource refused"));
+            },
+            |r| r.take::<u32>()
+        ),
+        None
+    );
+    assert!(module.is_stopped());
+}
+
+#[test]
+fn nested_handler_decodes_in_scope_and_remains_callable_after_return() {
+    let bounds = crate::boundary::export_id("StructurePiece", "bounding_box").unwrap();
+    let random_id = crate::boundary::import_id("StructureRandom", "next_long").unwrap();
+    for handler in [123, 999] {
+        let module = module(&format!(
+            r#"
+        local.get 0 i32.const {bounds} i32.eq if (result i64)
+          local.get 1 i64.load i64.const 123 i64.ne if unreachable end
+          i32.const 1024 i32.const 1 i32.store
+          i32.const 1028 i32.const 2 i32.store
+          i32.const 1032 i32.const 3 i32.store
+          i32.const 1036 i32.const 4 i32.store
+          i32.const 1040 i32.const 5 i32.store
+          i32.const 1044 i32.const 6 i32.store
+          i64.const 4398046511128
+        else local.get 0 i32.const 1 i32.eq if (result i64)
+          i32.const {random_id} i32.const 0 i32.const 0 i32.const 2048 i32.const 8 call $host
+          i32.const 8 i32.ne if unreachable end
+          i64.const 8796093022216
+        else
+          i64.const 2199023255552 local.get 2 i64.extend_i32_u i64.or
+        end end"#
+        ));
+        let found: mod_api::FoundStructure = module
+            .call(
+                CallClass::Hook,
+                Frame::default(),
+                0,
+                None,
+                |w| {
+                    w.put(&[9i32, 10, 11]);
+                    w.put(&vec![Id(handler)]);
+                },
+                |r| r.take(),
+            )
+            .unwrap();
+        assert_eq!(found.position, [9, 10, 11]);
+        if handler == 123 {
+            let bounds = found.pieces[0].bounding_box();
+            assert_eq!(bounds.min, [1, 2, 3]);
+            assert_eq!(bounds.max, [4, 5, 6]);
+        }
+        let mut random = Random(|| i64::from(found.pieces[0].bounding_box().max[2]));
+        let mut frame = Frame::default();
+        frame.set_structure_random_mut(&mut random);
+        let answer = module.call(CallClass::Load, frame, 1, None, |_| {}, |r| r.take::<i64>());
+        if handler == 123 {
+            assert_eq!(answer, Some(6));
+        }
+        assert_eq!(module.is_stopped(), handler != 123);
+    }
+}
+
 #[test]
 fn calls_do_not_leave_an_active_module_ownership_cycle() {
     let module = module("i64.const 2199023255556");
@@ -362,7 +455,10 @@ fn callback_borrows_only_the_lent_context_and_restores_depth() {
     group.store.data_mut().depth = 1;
     group.store.data_mut().cx.frames.push(Frame::default());
     let mut context = group.store.as_context_mut();
+    let lending = context.data().lending.clone();
+    lending.fetch_add(1, Ordering::Relaxed);
     let loan = Loan {
+        lending,
         group: Arc::as_ptr(&module.running) as usize,
         context: Cell::new((&mut context as *mut StoreContextMut<'_, State>).cast()),
         previous: LENT.get(),
@@ -386,34 +482,6 @@ fn callback_borrows_only_the_lent_context_and_restores_depth() {
 
 #[test]
 fn import_reply_retry_survives_a_nested_callback() {
-    struct Random(WasmMod);
-    impl mod_api::StructureRandom for Random {
-        fn next_int_bound(&mut self, _: i32) -> i32 {
-            0
-        }
-        fn next_float(&mut self) -> f32 {
-            0.0
-        }
-        fn next_double(&mut self) -> f64 {
-            0.0
-        }
-        fn next_boolean(&mut self) -> bool {
-            false
-        }
-        fn next_long(&mut self) -> i64 {
-            self.0
-                .call(
-                    CallClass::Callback,
-                    Frame::default(),
-                    1,
-                    None,
-                    |w| w.put(&70i64),
-                    |r| r.take::<i64>(),
-                )
-                .unwrap_or(-1)
-                + 1
-        }
-    }
     let id = crate::boundary::import_id("StructureRandom", "next_long").unwrap();
     let module = module(&format!(
         r#"
@@ -428,13 +496,85 @@ fn import_reply_retry_survives_a_nested_callback() {
           i64.const 4398046511112
         end"#
     ));
-    let mut random = Random(module.clone());
+    let mut random = Random(|| {
+        module
+            .call(
+                CallClass::Hook,
+                Frame::default(),
+                1,
+                None,
+                |w| w.put(&70i64),
+                |r| r.take::<i64>(),
+            )
+            .unwrap_or(-1)
+            + 1
+    });
     let mut frame = Frame::default();
     frame.set_structure_random_mut(&mut random);
     assert_eq!(
         module.call(CallClass::Hook, frame, 0, None, |_| {}, |r| r.take::<i64>()),
         Some(71)
     );
+}
+
+#[test]
+fn another_threads_hook_fails_fast_while_an_import_lends_the_group() {
+    let id = crate::boundary::import_id("StructureRandom", "next_long").unwrap();
+    let module = module(&format!(
+        "i32.const {id} i32.const 0 i32.const 0 i32.const 2048 i32.const 8 call $host drop i64.const 8796093022216"
+    ));
+    let mut random = Random(|| {
+        let module = module.clone();
+        let (send, recv) = std::sync::mpsc::channel();
+        let thread = std::thread::spawn(move || send.send(call(&module)).unwrap());
+        assert_eq!(
+            recv.recv_timeout(Duration::from_secs(1))
+                .expect("a Hook must not wait for the importing thread"),
+            None
+        );
+        thread.join().unwrap();
+        7
+    });
+    let mut frame = Frame::default();
+    frame.set_structure_random_mut(&mut random);
+    assert_eq!(
+        module.call(CallClass::Load, frame, 0, None, |_| {}, |r| r.take::<i64>()),
+        Some(7)
+    );
+    assert!(!module.is_stopped());
+}
+
+#[test]
+fn nested_load_calls_do_not_extend_the_outer_deadline() {
+    let id = crate::boundary::import_id("StructureRandom", "next_long").unwrap();
+    let module = module(&format!(
+        "local.get 0 i32.const 1 i32.eq if (result i64) i64.const 0 else i32.const {id} i32.const 0 i32.const 0 i32.const 2048 i32.const 8 call $host drop i64.const 8796093022216 end"
+    ));
+    let epoch = module.running.group.lock().unwrap().store.engine().clone();
+    let mut random = Random(|| {
+        for _ in 0..1000 {
+            epoch.increment_epoch();
+        }
+        assert_eq!(
+            module.call(
+                CallClass::Load,
+                Frame::default(),
+                1,
+                None,
+                |_| {},
+                |r| r.take::<()>()
+            ),
+            None
+        );
+        7
+    });
+    let mut frame = Frame::default();
+    frame.set_structure_random_mut(&mut random);
+    assert_eq!(
+        module.call(CallClass::Hook, frame, 0, None, |_| {}, |r| r.take::<i64>()),
+        None
+    );
+    assert!(module.is_stopped());
 }
 
 #[test]
