@@ -5611,164 +5611,170 @@ mod forced_respawn_tests {
 
 #[cfg(test)]
 mod item_damage_range_tests {
-    use super::super::native_machines::tests::server_game;
     use super::*;
+    use crate::game::native_entity_refs::tests::with_game;
     use horizon_core::position::BlockPos;
 
     #[test]
     #[ignore = "needs prepared resources and scratch homes/cwd"]
     fn actual_chest_damage_range_uses_live_damage_and_effective_presence() {
-        let mut game = server_game();
-        game.build_registries();
-        game.set_allow_commands(true);
-        game.block_ticks
-            .add_empty_chunk(BlockPos::new(0, 0, 0).chunk())
-            .unwrap();
-        assert!(game.run_command("forceload add 0 0"));
-        assert!(game.run_command("setblock 4 199 4 stone"));
-        assert!(game.run_command(r#"setblock 4 200 4 chest{Items:[{Slot:0b,id:"minecraft:diamond_sword",count:1,components:{"minecraft:custom_data":{marker:195}}},{Slot:1b,id:"minecraft:diamond_sword",count:1,components:{"minecraft:damage":3,"minecraft:custom_data":{marker:195}}},{Slot:2b,id:"minecraft:diamond_sword",count:1,components:{"minecraft:damage":4,"minecraft:custom_data":{marker:195}}},{Slot:3b,id:"minecraft:diamond_sword",count:1,components:{"minecraft:damage":5,"minecraft:custom_data":{marker:195}}},{Slot:4b,id:"minecraft:stone",count:1,components:{"minecraft:custom_data":{marker:195}}},{Slot:5b,id:"minecraft:diamond_sword",count:1,components:{"!minecraft:damage":{},"minecraft:custom_data":{marker:195}}}]}"#));
-        assert!(game.run_command("scoreboard objectives add h195 dummy"));
-        assert!(game.world.loaded(4, 4));
-        assert!(game.run_command("execute if block 4 199 4 stone"));
-        let clock = game.world.game_time;
-        let stacks = match game.world.block_entities.get(&(4, 200, 4)).unwrap() {
-            horizon_client::containers::BlockEntity::Chest(slots) => slots.clone(),
-            _ => panic!("actual loaded chest missing"),
-        };
-        for (slot, damage) in [0, 3, 4, 5, 0, 0].into_iter().enumerate() {
-            let stack = stacks[slot].as_ref().unwrap();
-            assert_eq!(stack.damage, damage);
-            assert_eq!(stack.count, 1);
-            assert_eq!(
-                &*stack.item,
-                if slot == 4 {
-                    "minecraft:stone"
-                } else {
-                    "minecraft:diamond_sword"
-                }
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
             );
-            assert_eq!(
-                stack.custom_data().unwrap().get(&"marker".into()),
-                Some(&horizon_core::nbt::Tag::Int(195))
-            );
-            assert!(game.run_command(&format!(
-                "execute if items block 4 200 4 container.{slot} {}",
-                stack.item
-            )));
-        }
-        assert!(stacks[6].is_none());
-        assert!(
-            game.items()
-                .get("minecraft:diamond_sword")
-                .unwrap()
-                .components
-                .iter()
-                .any(|c| c == "minecraft:damage")
-        );
-        assert!(
-            !game
-                .items()
-                .get("minecraft:stone")
-                .unwrap()
-                .components
-                .iter()
-                .any(|c| c == "minecraft:damage")
-        );
-        let removed =
-            horizon_client::item_data::encode_components(stacks[5].as_ref().unwrap()).unwrap();
-        assert!(
-            removed.get("!minecraft:damage").is_some(),
-            "actual removal patch must survive load before evaluating it"
-        );
-        assert!(game.run_command(
-            "execute unless data block 4 200 4 Items[{Slot:0b}].components.\"minecraft:damage\""
-        ));
-        assert!(game.run_command(
-            "execute if data block 4 200 4 Items[{Slot:2b,components:{\"minecraft:damage\":4}}]"
-        ));
-        assert!(game.run_command(
-            "execute if data block 4 200 4 Items[{Slot:5b}].components.\"!minecraft:damage\""
-        ));
-        let mut cases = Vec::new();
-        for (slot, damage) in [(1, 3), (2, 4), (3, 5)] {
-            for (shape, expected) in [
-                ("4", damage == 4),
-                ("{min:4}", damage >= 4),
-                ("{max:4}", damage <= 4),
-                ("{min:3,max:4}", (3..=4).contains(&damage)),
-            ] {
-                cases.push((
-                    slot,
-                    format!("minecraft:damage~{{damage:{shape}}}"),
-                    expected,
-                ));
-            }
-        }
-        cases.extend([
-            (0, "damage~{damage:0}".into(), true),
-            (0, "damage~{damage:{min:1}}".into(), false),
-            (4, "damage~{damage:0}".into(), false),
-            (5, "damage~{damage:0}".into(), false),
-            (2, "!damage~{damage:4}".into(), false),
-            (1, "!damage~{damage:4}".into(), true),
-            (1, "damage=3".into(), true),
-            (1, "damage=4".into(), false),
-            (1, "count~1".into(), true),
-            (1, "custom_data~{marker:195}".into(), true),
-        ]);
-        let mut mismatches = Vec::new();
-        for (slot, term, expected) in cases {
-            let stack = stacks[slot].as_ref().unwrap();
-            let predicate = ItemInput {
-                id: stack.item.to_string(),
-                tag: false,
-                any: false,
-                components: Some(format!("[{term}]")),
+            game.build_registries();
+            game.set_allow_commands(true);
+            game.block_ticks
+                .add_empty_chunk(BlockPos::new(0, 0, 0).chunk())
+                .unwrap();
+            assert!(game.run_command("forceload add 0 0"));
+            assert!(game.run_command("setblock 4 199 4 stone"));
+            assert!(game.run_command(r#"setblock 4 200 4 chest{Items:[{Slot:0b,id:"minecraft:diamond_sword",count:1,components:{"minecraft:custom_data":{marker:195}}},{Slot:1b,id:"minecraft:diamond_sword",count:1,components:{"minecraft:damage":3,"minecraft:custom_data":{marker:195}}},{Slot:2b,id:"minecraft:diamond_sword",count:1,components:{"minecraft:damage":4,"minecraft:custom_data":{marker:195}}},{Slot:3b,id:"minecraft:diamond_sword",count:1,components:{"minecraft:damage":5,"minecraft:custom_data":{marker:195}}},{Slot:4b,id:"minecraft:stone",count:1,components:{"minecraft:custom_data":{marker:195}}},{Slot:5b,id:"minecraft:diamond_sword",count:1,components:{"!minecraft:damage":{},"minecraft:custom_data":{marker:195}}}]}"#));
+            assert!(game.run_command("scoreboard objectives add h195 dummy"));
+            assert!(game.world.loaded(4, 4));
+            assert!(game.run_command("execute if block 4 199 4 stone"));
+            let clock = game.world.game_time;
+            let stacks = match game.world.block_entities.get(&(4, 200, 4)).unwrap() {
+                horizon_client::containers::BlockEntity::Chest(slots) => slots.clone(),
+                _ => panic!("actual loaded chest missing"),
             };
-            let actual = game.stack_matches(&predicate, stack);
-            if actual != expected {
-                mismatches.push(format!(
-                    "direct slot{slot} {term}: {actual}, expected{expected}"
-                ));
+            for (slot, damage) in [0, 3, 4, 5, 0, 0].into_iter().enumerate() {
+                let stack = stacks[slot].as_ref().unwrap();
+                assert_eq!(stack.damage, damage);
+                assert_eq!(stack.count, 1);
+                assert_eq!(
+                    &*stack.item,
+                    if slot == 4 {
+                        "minecraft:stone"
+                    } else {
+                        "minecraft:diamond_sword"
+                    }
+                );
+                assert_eq!(
+                    stack.custom_data().unwrap().get(&"marker".into()),
+                    Some(&horizon_core::nbt::Tag::Int(195))
+                );
+                assert!(game.run_command(&format!(
+                    "execute if items block 4 200 4 container.{slot} {}",
+                    stack.item
+                )));
             }
-            assert!(game.run_command("scoreboard players set #r h195 91"));
-            assert!(game.run_command("scoreboard players set #s h195 17"));
-            let command = format!(
-                "execute store result score #r h195 store success score #s h195 if items block 4 200 4 container.{slot} {}[{term}]",
-                stack.item
+            assert!(stacks[6].is_none());
+            assert!(
+                game.items()
+                    .get("minecraft:diamond_sword")
+                    .unwrap()
+                    .components
+                    .iter()
+                    .any(|c| c == "minecraft:damage")
             );
-            game.run_command(&command);
-            let r = game.score.board.score("#r", "h195").map(|s| s.value);
-            let s = game.score.board.score("#s", "h195").map(|s| s.value);
-            if (r, s) != (Some(i32::from(expected)), Some(i32::from(expected))) {
-                mismatches.push(format!("command {term}: {r:?}/{s:?}, expected{expected}"));
+            assert!(
+                !game
+                    .items()
+                    .get("minecraft:stone")
+                    .unwrap()
+                    .components
+                    .iter()
+                    .any(|c| c == "minecraft:damage")
+            );
+            let removed =
+                horizon_client::item_data::encode_components(stacks[5].as_ref().unwrap()).unwrap();
+            assert!(
+                removed.get("!minecraft:damage").is_some(),
+                "actual removal patch must survive load before evaluating it"
+            );
+            assert!(game.run_command(
+                "execute unless data block 4 200 4 Items[{Slot:0b}].components.\"minecraft:damage\""
+            ));
+            assert!(game.run_command(
+                "execute if data block 4 200 4 Items[{Slot:2b,components:{\"minecraft:damage\":4}}]"
+            ));
+            assert!(game.run_command(
+                "execute if data block 4 200 4 Items[{Slot:5b}].components.\"!minecraft:damage\""
+            ));
+            let mut cases = Vec::new();
+            for (slot, damage) in [(1, 3), (2, 4), (3, 5)] {
+                for (shape, expected) in [
+                    ("4", damage == 4),
+                    ("{min:4}", damage >= 4),
+                    ("{max:4}", damage <= 4),
+                    ("{min:3,max:4}", (3..=4).contains(&damage)),
+                ] {
+                    cases.push((
+                        slot,
+                        format!("minecraft:damage~{{damage:{shape}}}"),
+                        expected,
+                    ));
+                }
             }
-            assert!(game.run_command("scoreboard players set #branch h195 23"));
-            game.run_command(&format!("execute unless items block 4 200 4 container.{slot} {}[{term}] run scoreboard players set #branch h195 7",stack.item));
-            let branch = game.score.board.score("#branch", "h195").map(|s| s.value);
-            if branch != Some(if expected { 23 } else { 7 }) {
-                mismatches.push(format!("unless {term}: {branch:?}"));
+            cases.extend([
+                (0, "damage~{damage:0}".into(), true),
+                (0, "damage~{damage:{min:1}}".into(), false),
+                (4, "damage~{damage:0}".into(), false),
+                (5, "damage~{damage:0}".into(), false),
+                (2, "!damage~{damage:4}".into(), false),
+                (1, "!damage~{damage:4}".into(), true),
+                (1, "damage=3".into(), true),
+                (1, "damage=4".into(), false),
+                (1, "count~1".into(), true),
+                (1, "custom_data~{marker:195}".into(), true),
+            ]);
+            let mut mismatches = Vec::new();
+            for (slot, term, expected) in cases {
+                let stack = stacks[slot].as_ref().unwrap();
+                let predicate = ItemInput {
+                    id: stack.item.to_string(),
+                    tag: false,
+                    any: false,
+                    components: Some(format!("[{term}]")),
+                };
+                let actual = game.stack_matches(&predicate, stack);
+                if actual != expected {
+                    mismatches.push(format!(
+                        "direct slot{slot} {term}: {actual}, expected{expected}"
+                    ));
+                }
+                assert!(game.run_command("scoreboard players set #r h195 91"));
+                assert!(game.run_command("scoreboard players set #s h195 17"));
+                let command = format!(
+                    "execute store result score #r h195 store success score #s h195 if items block 4 200 4 container.{slot} {}[{term}]",
+                    stack.item
+                );
+                game.run_command(&command);
+                let r = game.score.board.score("#r", "h195").map(|s| s.value);
+                let s = game.score.board.score("#s", "h195").map(|s| s.value);
+                if (r, s) != (Some(i32::from(expected)), Some(i32::from(expected))) {
+                    mismatches.push(format!("command {term}: {r:?}/{s:?}, expected{expected}"));
+                }
+                assert!(game.run_command("scoreboard players set #branch h195 23"));
+                game.run_command(&format!("execute unless items block 4 200 4 container.{slot} {}[{term}] run scoreboard players set #branch h195 7",stack.item));
+                let branch = game.score.board.score("#branch", "h195").map(|s| s.value);
+                if branch != Some(if expected { 23 } else { 7 }) {
+                    mismatches.push(format!("unless {term}: {branch:?}"));
+                }
             }
-        }
-        assert!(!game.run_command(
-            "execute if items block 4 200 4 container.4 diamond_sword[damage~{damage:4}]"
-        ));
-        assert!(!game.run_command(
-            "execute if items block 4 200 4 container.6 diamond_sword[damage~{damage:4}]"
-        ));
-        let actual = match game.world.block_entities.get(&(4, 200, 4)).unwrap() {
-            horizon_client::containers::BlockEntity::Chest(slots) => slots,
-            _ => panic!("source chest changed"),
-        };
-        assert_eq!(
-            actual, &stacks,
-            "queries must leave the authoritative loaded stacks unchanged"
-        );
-        assert_eq!(game.world.game_time, clock);
-        assert!(
-            mismatches.is_empty(),
-            "damage-only command predicate mismatches: {mismatches:#?}"
-        );
+            assert!(!game.run_command(
+                "execute if items block 4 200 4 container.4 diamond_sword[damage~{damage:4}]"
+            ));
+            assert!(!game.run_command(
+                "execute if items block 4 200 4 container.6 diamond_sword[damage~{damage:4}]"
+            ));
+            let actual = match game.world.block_entities.get(&(4, 200, 4)).unwrap() {
+                horizon_client::containers::BlockEntity::Chest(slots) => slots,
+                _ => panic!("source chest changed"),
+            };
+            assert_eq!(
+                actual, stacks,
+                "queries must leave the authoritative loaded stacks unchanged"
+            );
+            assert_eq!(game.world.game_time, clock);
+            assert!(
+                mismatches.is_empty(),
+                "damage-only command predicate mismatches: {mismatches:#?}"
+            );
+        });
     }
 }
 

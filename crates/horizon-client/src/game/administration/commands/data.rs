@@ -2133,57 +2133,27 @@ mod modern_literal_tests {
 #[cfg(test)]
 mod bell_command_identity_tests {
     use super::*;
-    use crate::game::{Audio, Options, Progress, Settings, load_resources};
     use horizon_client::{chunk::Chunk, motion::PlayerMotion};
     use horizon_core::{geometry::Vec3, position::ChunkPos};
     use std::sync::Arc;
     fn with_game(test: impl FnOnce(&mut Game<'_>)) {
-        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let settings = Settings::default();
-        let loaded = load_resources(
-            root.clone(),
-            None,
-            &root,
-            &settings,
-            std::time::Instant::now(),
-            false,
-            true,
-            &Progress::new(),
-            &mut |_, _| unreachable!(),
-        )
-        .unwrap();
-        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
-        options.resources = root.clone();
-        options.game_dir = Some(
-            std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap())
-                .join(format!("h174-{:?}", std::thread::current().id())),
-        );
-        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
-        let mut game = Game::new(
-            &loaded.resources,
-            loaded.pack,
-            loaded.gui.unwrap(),
-            options,
-            settings,
-            Audio::silent(&root),
-            None,
-        )
-        .unwrap();
-        game.build_registries();
-        game.set_allow_commands(true);
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.build_registries();
+            game.set_allow_commands(true);
 
-        game.world
-            .chunks
-            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-        game.block_ticks
-            .add_empty_chunk(ChunkPos::new(0, 0))
-            .unwrap();
-        game.player = Some(PlayerMotion::new(game.motion, Vec3::new(2.5, 200.0, 2.5)).unwrap());
-        game.creative = true;
-        assert!(game.run_command("forceload add 0 0"));
-        assert!(game.run_command("tick freeze"));
-        assert!(game.run_command("fill 0 198 0 15 199 15 stone"));
-        test(&mut game);
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            game.block_ticks
+                .add_empty_chunk(ChunkPos::new(0, 0))
+                .unwrap();
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::new(2.5, 200.0, 2.5)).unwrap());
+            game.creative = true;
+            assert!(game.run_command("forceload add 0 0"));
+            assert!(game.run_command("tick freeze"));
+            assert!(game.run_command("fill 0 198 0 15 199 15 stone"));
+            test(game);
+        });
     }
 
     #[test]
