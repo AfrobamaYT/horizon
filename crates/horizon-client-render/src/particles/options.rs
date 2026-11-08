@@ -30,7 +30,8 @@ pub struct ParticleOptions {
     pub vibration: Option<(PositionSource, [f64; 3], i32)>,
     /// A native mod's own particle type, by its namespaced name (`mymod:spark`):
     /// `SimpleParticleType` plus the provider `particles/<name>.json` names.
-    pub mod_particle: Option<String>,
+    /// API requests borrow the immutable load table; native file input can own its name.
+    pub mod_particle: Option<std::borrow::Cow<'static, str>>,
 }
 impl ParticleOptions {
     pub fn simple(ty: ParticleType) -> Self {
@@ -51,7 +52,7 @@ impl ParticleOptions {
     /// `assets/<namespace>/particles/<path>.json`, drawn as a plain billboard.
     pub fn named(name: impl Into<String>) -> Self {
         Self {
-            mod_particle: Some(name.into()),
+            mod_particle: Some(std::borrow::Cow::Owned(name.into())),
             ..Self::simple(ParticleType::Smoke)
         }
     }

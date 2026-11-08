@@ -49,11 +49,10 @@ impl<C: ?Sized> TryIntoEngine<C> for ApiOptions {
             ),
             ParticleKind::Custom => (
                 ParticleType::Smoke,
-                Some(
+                Some(std::borrow::Cow::Borrowed(
                     mod_api::__private::particle_name(self.ty)
-                        .ok_or(ParticleValueError::UnknownProvider)?
-                        .to_owned(),
-                ),
+                        .ok_or(ParticleValueError::UnknownProvider)?,
+                )),
             ),
         };
         Ok(EngineOptions {
@@ -163,13 +162,16 @@ mod tests {
         assert_eq!(value.try_into_engine(&()).unwrap().geyser, Some((7, 1.25)));
     }
     #[test]
-    fn particle_custom_provider_uses_its_retained_name() {
+    fn particle_custom_provider_borrows_its_retained_name() {
         prepare();
         let value = EngineOptions::named("test:spark").try_into_api().unwrap();
-        assert_eq!(
-            value.try_into_engine(&()).unwrap().mod_particle.as_deref(),
-            Some("test:spark")
-        );
+        let published = mod_api::__private::particle_name(value.ty).unwrap();
+        let output = value.try_into_engine(&()).unwrap();
+        assert_eq!(output.mod_particle.as_deref(), Some("test:spark"));
+        assert!(std::ptr::eq(
+            output.mod_particle.as_deref().unwrap(),
+            published
+        ));
     }
     #[test]
     fn particle_boundary_refuses_nonfinite_nested_input() {
