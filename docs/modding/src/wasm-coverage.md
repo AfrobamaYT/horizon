@@ -639,6 +639,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `BackendMut::item_entity_set_no_pickup_delay` | crosses | Wire call |
 | `BackendMut::item_entity_set_never_pickup` | crosses | Wire call |
 | `BackendMut::item_entity_set_target` | crosses | Wire call |
+| `BackendMut::container_set_stack_limit` | crosses | Wire call |
 | `BackendMut::item_resource_enchant_randomly` | crosses | Wire call |
 | `BackendMut::container_insert` | crosses | Wire call |
 | `BackendMut::container_extract` | crosses | Wire call |
@@ -1682,6 +1683,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `CriterionTest::test` | crosses | Wire call |
 | `RowPages::window` | crosses | Wire call |
 | `RowFunction::invoke` | crosses | Wire call |
+| `ResourceHandler<ItemResource>::set_max_stack_size` | crosses | Wire call |
 | `ResourceHandler<ItemResource>::size` | crosses | Wire call |
 | `ResourceHandler<ItemResource>::resource` | crosses | Wire call |
 | `ResourceHandler<ItemResource>::amount` | crosses | Wire call |
@@ -1700,6 +1702,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `ItemCapabilityProvider<dyn EnergyHandler>::provide` | crosses | Wire call |
 | `EntityCapabilityProvider<dyn ResourceHandler<ItemResource>, Option<Direction>>::provide` | crosses | Wire call |
 | `EntityCapabilityProvider<dyn EnergyHandler, Option<Direction>>::provide` | crosses | Wire call |
+| `ResourceHandler<FluidResource>::set_max_stack_size` | crosses | Wire call |
 | `ResourceHandler<FluidResource>::size` | crosses | Wire call |
 | `ResourceHandler<FluidResource>::resource` | crosses | Wire call |
 | `ResourceHandler<FluidResource>::amount` | crosses | Wire call |

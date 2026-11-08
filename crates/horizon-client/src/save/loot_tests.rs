@@ -203,3 +203,42 @@ fn opened_loot_parity_fixture() {
         .unwrap();
     }
 }
+
+#[test]
+fn container_limit_survives_chunk_save_and_reload() {
+    let (registry, biomes) = fixture();
+    let pos = (1, 64, 2);
+    let mut chunk = Chunk::empty(0, 0);
+    chunk.set(1, 64, 2, 1);
+    chunk
+        .block_entities
+        .push((pos, crate::containers::BlockEntity::Chest(vec![None; 27])));
+    chunk.saved = Some(Arc::new(ChunkExtras {
+        block_entity_sources: vec![(pos, Tag::compound([("horizon:stack_limit", Tag::Int(10))]))],
+        ..Default::default()
+    }));
+    let encoded = encode(&chunk, &registry, &biomes);
+    let loaded = decode(&encoded, &registry, &biomes).unwrap();
+    assert_eq!(
+        loaded.saved.as_ref().unwrap().block_entity_sources[0]
+            .1
+            .get("horizon:stack_limit"),
+        Some(&Tag::Int(10))
+    );
+}
+
+#[test]
+fn unmodified_container_nbt_has_no_stack_limit() {
+    let (registry, biomes) = fixture();
+    let mut chunk = Chunk::empty(0, 0);
+    chunk.set(1, 64, 2, 1);
+    chunk.block_entities.push((
+        (1, 64, 2),
+        crate::containers::BlockEntity::Chest(vec![None; 27]),
+    ));
+    let loaded = decode(&encode(&chunk, &registry, &biomes), &registry, &biomes).unwrap();
+    assert_eq!(loaded.saved.as_ref().unwrap().block_entity_sources.len(), 1);
+    for (_, tag) in &loaded.saved.as_ref().unwrap().block_entity_sources {
+        assert!(tag.get("horizon:stack_limit").is_none());
+    }
+}

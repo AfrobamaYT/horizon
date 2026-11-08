@@ -1561,6 +1561,13 @@ pub fn encode_with(
                 None => current,
             };
             let mut saved = crate::block_entity_nbt::canonical(&merged).unwrap_or(merged);
+            if let Some(limit) = extras
+                .and_then(|x| x.block_entity_sources.iter().find(|(q, _)| q == p))
+                .and_then(|(_, tag)| tag.get("horizon:stack_limit"))
+                && let Tag::Compound(map) = &mut saved
+            {
+                map.insert("horizon:stack_limit".into(), limit.clone());
+            }
             if let Some((_, attachments)) =
                 extras.and_then(|e| e.block_entity_attachments.iter().find(|(pos, _)| pos == p))
                 && let Tag::Compound(map) = &mut saved

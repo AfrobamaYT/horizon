@@ -204,6 +204,12 @@ impl Game<'_> {
             known_recipes: Some(&host.hub.guests[gi].recipe_book),
             ..self.menu_env()
         };
+        let limits = host.hub.guests[gi]
+            .menu
+            .as_ref()
+            .map(|opened| opened.slots.stack_limits(&self.world, opened.size))
+            .unwrap_or_default();
+        menu.set_container_limits(limits);
         load_player(menu, &host.hub.guests[gi]);
         menu.brewed_potion_hook = !mod_api::__private::mods().is_empty();
         menu.item_smelted_hook = menu.brewed_potion_hook;

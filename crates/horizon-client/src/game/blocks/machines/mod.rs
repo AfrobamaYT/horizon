@@ -434,7 +434,10 @@ impl Containers<'_> {
         if !self.accepts(view, slot, stack) {
             return 0;
         }
-        view.slot_limit().min(self.max_stack(stack))
+        let capacity = view.slot_limit().min(self.max_stack(stack));
+        view.locate(slot)
+            .and_then(|(pos, _)| self.world.container_stack_limit(pos))
+            .map_or(capacity, |limit| capacity.min(limit))
     }
     /// How many of `stack` slot `slot` takes now: none where `can_place` refuses it, else
     /// `capacity` less what it holds.
@@ -719,7 +722,15 @@ impl Game<'_> {
             return (Some(stack), false);
         }
         let was_empty = c.is_empty(view);
-        let max = c.max_stack(&stack);
+        let vanilla_max = c.max_stack(&stack);
+        let override_limit = view
+            .locate(slot)
+            .and_then(|(pos, _)| c.world.container_stack_limit(pos));
+        let restricted = override_limit.is_some_and(|limit| limit < vanilla_max);
+        let max = override_limit.map_or(vanilla_max, |limit| vanilla_max.min(limit));
+        if restricted && max == 0 {
+            return (Some(stack), false);
+        }
         let mut success = false;
         let mut filled_empty = false;
         let Some(target) = self.slot_mut_at(view, slot) else {
@@ -737,7 +748,7 @@ impl Game<'_> {
                     count: stack.count.min(max),
                     ..stack.clone()
                 });
-                stack.count = 0;
+                stack.count = if restricted { stack.count.saturating_sub(max) } else { 0 };
                 success = true;
                 filled_empty = true;
             }
