@@ -881,6 +881,15 @@ impl Mob {
         }
         self.ai.target = target;
     }
+    /// Apply an AI target change after listeners have had a chance to alter it.
+    pub fn set_ai_target(&mut self, w: &MobWorld, target: Option<Who>) -> super::TargetChange {
+        let is_brain = super::ai::brain_target(self).is_some();
+        let change = w.change_target(self, is_brain, target);
+        if let super::TargetChange::Set(target) = change {
+            self.set_target(target);
+        }
+        change
+    }
     /// `Mob.asValidTarget` and the modeled `canAttack` overrides over the
     /// target's facts (#1175): one rule set both the write handle and a goal
     /// tick's view ask — the facts of the target, not where they were read.
@@ -1625,7 +1634,7 @@ impl Goal for MeleeAttack {
             && t.is_player
             && t.creative
         {
-            m.ai.target = None;
+            m.set_ai_target(cx.w, None);
         }
         m.ai.aggressive = false;
         m.nav_stop();
@@ -1964,12 +1973,12 @@ impl Goal for NearestTarget {
     fn can_continue(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
         target_continue(&mut self.target_goal, self.must_see, m, cx)
     }
-    fn start(&mut self, m: &mut Mob, _: &mut Cx) {
-        m.ai.target = self.found;
+    fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
+        m.set_ai_target(cx.w, self.found);
         self.target_goal.unseen = 0;
     }
-    fn stop(&mut self, m: &mut Mob, _: &mut Cx) {
-        m.ai.target = None;
+    fn stop(&mut self, m: &mut Mob, cx: &mut Cx) {
+        m.set_ai_target(cx.w, None);
     }
 }
 /// HurtByTargetGoal (optionally alerting others of the same species).
@@ -2079,7 +2088,7 @@ impl Goal for HurtByTarget {
         target_continue(&mut self.st, true, m, cx)
     }
     fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
-        m.ai.target = m.ai.last_hurt_by;
+        m.set_ai_target(cx.w, m.ai.last_hurt_by);
         self.timestamp = m.ai.last_hurt_by_time;
         self.st.unseen_memory = 300;
         self.st.unseen = 0;
@@ -2140,11 +2149,11 @@ impl Goal for HurtByTarget {
             }
         }
         if cub {
-            m.ai.target = None;
+            m.set_ai_target(cx.w, None);
         }
     }
-    fn stop(&mut self, m: &mut Mob, _: &mut Cx) {
-        m.ai.target = None;
+    fn stop(&mut self, m: &mut Mob, cx: &mut Cx) {
+        m.set_ai_target(cx.w, None);
     }
 }
 /// What an AvoidEntityGoal flees from.
@@ -3900,6 +3909,66 @@ mod visibility_hook_tests {
                     "{looking} looking at {head}"
                 );
             }
+        });
+    }
+}
+
+#[cfg(test)]
+mod target_change_hook_tests {
+    use super::*;
+    use crate::mobs::world::{test_player, with_test_world};
+    use crate::mobs::{MobHooks, PlayerView, TargetChange};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Cancel(AtomicUsize);
+    impl MobHooks for Cancel {
+        fn enderman_anger_suppressed(&self, _: u32, _: &PlayerView) -> bool {
+            false
+        }
+        fn can_grief(&self, _: u32, rule: bool) -> bool {
+            rule
+        }
+        fn grief_hooked(&self) -> bool {
+            false
+        }
+        fn living_visibility(&self, _: &PlayerView, _: u32, v: f64) -> f64 {
+            v
+        }
+        fn living_change_target(
+            &self,
+            _: &mut Mob,
+            _: &MobWorld<'_>,
+            brain: bool,
+            target: Option<Who>,
+        ) -> TargetChange {
+            assert!(!brain);
+            assert_eq!(target, Some(Who::Player));
+            self.0.fetch_add(1, Ordering::Relaxed);
+            TargetChange::Keep
+        }
+    }
+
+    #[test]
+    fn nearest_target_goal_respects_cancellation() {
+        with_test_world(&[], |world, types| {
+            let hook = Cancel(AtomicUsize::new(0));
+            let mut world = world.clone();
+            world.player = Some(test_player(Vec3::new(1.5, 64.0, 0.5)));
+            world.mob_hooks = Some(&hook);
+            let kind = Arc::new(types.types["minecraft:zombie"].clone());
+            let mut mob = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
+            let mut goal = NearestTarget::player(false);
+            goal.found = Some(Who::Player);
+            let mut level = crate::health::TestLevel::new(0);
+            let mut events = Vec::new();
+            let mut cx = Cx {
+                w: &world,
+                level: &mut level.level(),
+                events: &mut events,
+            };
+            goal.start(&mut mob, &mut cx);
+            assert_eq!(mob.ai.target, None);
+            assert_eq!(hook.0.load(Ordering::Relaxed), 1);
         });
     }
 }

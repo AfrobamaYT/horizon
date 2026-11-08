@@ -369,14 +369,14 @@ impl Goal for AvoidLlamas {
         self.0.can_continue(m, cx)
     }
     fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
-        m.ai.target = None;
+        m.set_ai_target(cx.w, None);
         self.0.start(m, cx)
     }
     fn stop(&mut self, m: &mut Mob, cx: &mut Cx) {
         self.0.stop(m, cx)
     }
     fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
-        m.ai.target = None;
+        m.set_ai_target(cx.w, None);
         self.0.tick(m, cx)
     }
 }
@@ -473,12 +473,12 @@ impl Goal for OwnerHurtBy {
     }
     fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
         if let Some((who, at)) = owner_view(m, cx.w).and_then(|p| p.hurt_by) {
-            m.ai.target = Some(who);
+            m.set_ai_target(cx.w, Some(who));
             self.timestamp = at;
         }
     }
-    fn stop(&mut self, m: &mut Mob, _: &mut Cx) {
-        m.ai.target = None;
+    fn stop(&mut self, m: &mut Mob, cx: &mut Cx) {
+        m.set_ai_target(cx.w, None);
     }
 }
 /// `OwnerHurtTargetGoal`: attack what the owner attacks.
@@ -507,12 +507,12 @@ impl Goal for OwnerHurt {
     }
     fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
         if let Some((who, at)) = owner_view(m, cx.w).and_then(|p| p.last_hurt) {
-            m.ai.target = Some(who);
+            m.set_ai_target(cx.w, Some(who));
             self.timestamp = at;
         }
     }
-    fn stop(&mut self, m: &mut Mob, _: &mut Cx) {
-        m.ai.target = None;
+    fn stop(&mut self, m: &mut Mob, cx: &mut Cx) {
+        m.set_ai_target(cx.w, None);
     }
 }
 /// `Wolf.wantsToAttack`: never creepers, ghasts, tame cats and parrots, or a
@@ -597,10 +597,18 @@ fn valid_player_target(w: &MobWorld) -> bool {
 }
 /// `NeutralMob.stopBeingAngry`.
 fn stop_being_angry(m: &mut Mob) {
+    stop_being_angry_with_world(m, None);
+}
+
+fn stop_being_angry_with_world(m: &mut Mob, world: Option<&MobWorld>) {
     // setLastHurtByMob(null) also stamps the time.
     m.ai.last_hurt_by = None;
     m.ai.last_hurt_by_time = m.age as i32;
-    m.ai.target = None;
+    if let Some(world) = world {
+        m.set_ai_target(world, None);
+    } else {
+        m.ai.target = None;
+    }
     m.extra.angry_at = None;
     m.extra.anger = 0;
 }
@@ -623,7 +631,7 @@ pub(super) fn update_persistent_anger(m: &mut Mob, w: &MobWorld) {
         && w.seen(id).is_none_or(|s| !s.alive)
         && angry_at == Some(target)
     {
-        stop_being_angry(m);
+        stop_being_angry_with_world(m, Some(w));
         return;
     }
     // Mob.getTarget: a player in creative or spectator mode is no target.
@@ -644,7 +652,7 @@ pub(super) fn update_persistent_anger(m: &mut Mob, w: &MobWorld) {
         && m.extra.anger == 0
         && !(target == Some(Who::Player) && valid_player_target(w))
     {
-        stop_being_angry(m);
+        stop_being_angry_with_world(m, Some(w));
     }
     // The anger's target as it was when the tick began, once it is found: a
     // player who is not here yet (a reloaded wolf ticks before the player
@@ -654,7 +662,7 @@ pub(super) fn update_persistent_anger(m: &mut Mob, w: &MobWorld) {
             .as_ref()
             .is_some_and(|p| p.creative || p.spectator || w.difficulty.id == 0)
     {
-        stop_being_angry(m);
+        stop_being_angry_with_world(m, Some(w));
     }
 }
 /// The part of `Wolf.tick` both sides run: `interestedAngle` eases toward 1

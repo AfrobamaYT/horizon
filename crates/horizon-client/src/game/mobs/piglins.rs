@@ -418,6 +418,10 @@ impl Game<'_> {
     }
     /// `PiglinAi.angerNearbyPiglins`.
     pub(super) fn anger_piglins(&mut self, only_if_seen: bool) {
+        // Fake players never become a mob's target.
+        if self.lan_acting_fake {
+            return;
+        }
         let Some(p) = self.player.as_ref() else {
             return;
         };
@@ -445,8 +449,34 @@ impl Game<'_> {
             if only_if_seen && !self.can_see(m.center(), eye) {
                 continue;
             }
+            let id = self.mobs[i].id;
+            let change = if mod_api::__private::listened(mod_api::HookId::LivingChangeTarget) {
+                let original = self
+                    .lan_acting_entity
+                    .or_else(|| self.player_identity().map(|(_, id)| id))
+                    .and_then(|id| self.entity(id))
+                    .and_then(|entity| self.living(entity));
+                let Some(original) = original else { continue };
+                let Some(epoch) = self.native_lifecycle.epoch() else {
+                    continue;
+                };
+                let mob = mod_api::MobRef::new(mod_api::EntityRef::new(epoch, id));
+                self.native_mob_target_event(mob, Some(original), true)
+                    .and_then(|target| self.native_mob_bind_target(id, target))
+                    .map_or(
+                        horizon_client::mobs::TargetChange::Keep,
+                        horizon_client::mobs::TargetChange::Set,
+                    )
+            } else {
+                horizon_client::mobs::TargetChange::Set(Some(horizon_client::mobs::Who::Player))
+            };
             let m = &mut self.mobs[i];
+            let previous = m.ai.target;
             horizon_client::mobs::piglin::set_guarded_anger_target(m, player_uuid);
+            m.ai.target = match change {
+                horizon_client::mobs::TargetChange::Keep => previous,
+                horizon_client::mobs::TargetChange::Set(target) => target,
+            };
         }
     }
     /// A clear line of sight between two points (blocks with collision stop it).

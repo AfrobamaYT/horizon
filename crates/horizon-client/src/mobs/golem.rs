@@ -45,12 +45,12 @@ impl Goal for ResetUniversalAnger {
     }
     /// `NeutralMob.forgetCurrentTargetAndRefreshUniversalAnger`:
     /// `stopBeingAngry`, then `startPersistentAngerTimer`.
-    fn start(&mut self, m: &mut Mob, _: &mut Cx) {
+    fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
         self.timestamp = m.ai.last_hurt_by_time;
         // setLastHurtByMob(null) also stamps the time.
         m.ai.last_hurt_by = None;
         m.ai.last_hurt_by_time = m.age as i32;
-        m.ai.target = None;
+        m.set_ai_target(cx.w, None);
         m.extra.angry_at = None;
         // `TimeUtil.rangeOfSeconds(20, 39)`.
         m.extra.anger = 400 + m.random.next_int_bound(381).unwrap_or(0);
@@ -274,11 +274,11 @@ impl Goal for DefendVillage {
                 && m.position.distance_squared(t.position) <= 64.0 * 64.0
         })
     }
-    fn start(&mut self, m: &mut Mob, _cx: &mut Cx) {
-        m.ai.target = Some(Who::Player);
+    fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
+        m.set_ai_target(cx.w, Some(Who::Player));
     }
-    fn stop(&mut self, m: &mut Mob, _cx: &mut Cx) {
-        m.ai.target = None;
+    fn stop(&mut self, m: &mut Mob, cx: &mut Cx) {
+        m.set_ai_target(cx.w, None);
     }
 }
 /// `MoveTowardsTargetGoal`: close in on a target within range.

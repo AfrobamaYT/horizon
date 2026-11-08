@@ -247,7 +247,27 @@ impl Game<'_> {
             ticked.insert(m.id);
             // `horizon-report`'s cost by mob type (tick_profile.rs).
             let sampled = super::super::tick_profile::start().map(|t| (t, mobs[i].kind.clone()));
-            let kept = horizon_client::mobs::riders::tick(mobs, i, &w, &mut level, events);
+            // Target listeners run inside this tick while the mob list and
+            // player view are lent out. Restore both before resuming a panic.
+            let kept = if mod_api::__private::listened(mod_api::HookId::LivingChangeTarget) {
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    horizon_client::mobs::riders::tick(mobs, i, &w, &mut level, events)
+                })) {
+                    Ok(kept) => kept,
+                    Err(payload) => {
+                        mobs[i].despawn = mod_api::NativeDespawn::default();
+                        if seen_guest.is_none() {
+                            base.player = w.player;
+                        } else if let Some(k) = lent {
+                            *spare = w.player.map(|v| std::mem::replace(&mut guests[k].1, v));
+                        }
+                        *dispatch_panic = Some(payload);
+                        break;
+                    }
+                }
+            } else {
+                horizon_client::mobs::riders::tick(mobs, i, &w, &mut level, events)
+            };
             if let Some((started, kind)) = sampled {
                 super::super::tick_profile::add(level_id, &kind, started);
             }

@@ -1119,12 +1119,15 @@ impl Game<'_> {
                     mod_api::HookId::EndermanAnger,
                     mod_api::HookId::EntityMobGriefing,
                     mod_api::HookId::LivingVisibility,
+                    mod_api::HookId::LivingChangeTarget,
                 ]
                 .into_iter()
                 .any(mod_api::__private::listened))
             .then_some(self as &dyn horizon_client::mobs::MobHooks),
-            goal_host: (self.native_authoritative() && mod_api::__private::has_entity_parts())
-                .then_some(self as &dyn horizon_client::mobs::part_goals::GoalHost),
+            goal_host: (self.native_authoritative()
+                && (mod_api::__private::has_entity_parts()
+                    || mod_api::__private::listened(mod_api::HookId::LivingChangeTarget)))
+            .then_some(self as &dyn horizon_client::mobs::part_goals::GoalHost),
             asks_animal_tame: self.remote.is_none()
                 && mod_api::__private::listened(mod_api::HookId::AnimalTame),
             asks_living_destroy_block: self.remote.is_none()
@@ -3939,9 +3942,33 @@ impl Game<'_> {
         let Some(host) = self.lan.as_ref() else {
             return;
         };
-        for m in self.mobs.iter_mut() {
-            if host.mob_players.get(&m.id).copied() == conn && m.bounds().intersects(area) {
-                horizon_client::mobs::ai::forgive_dead_player(m);
+        let ids: Vec<u32> = self
+            .mobs
+            .iter()
+            .filter(|m| {
+                host.mob_players.get(&m.id).copied() == conn
+                    && m.bounds().intersects(area)
+                    && horizon_client::mobs::ai::forgives_dead_player(m)
+            })
+            .map(|m| m.id)
+            .collect();
+        for id in ids {
+            let Some(epoch) = self.native_lifecycle.epoch() else {
+                if let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id) {
+                    horizon_client::mobs::ai::forgive_dead_player(mob);
+                }
+                continue;
+            };
+            let mob_ref = mod_api::MobRef::new(mod_api::EntityRef::new(epoch, id));
+            let change = self
+                .native_mob_target_event(mob_ref, None, false)
+                .and_then(|target| self.native_mob_bind_target(id, target))
+                .map_or(
+                    horizon_client::mobs::TargetChange::Keep,
+                    horizon_client::mobs::TargetChange::Set,
+                );
+            if let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id) {
+                horizon_client::mobs::ai::forgive_dead_player_with_change(mob, change);
             }
         }
     }
@@ -8862,6 +8889,16 @@ fn mob_effect_instance(
 }
 
 impl horizon_client::mobs::MobHooks for Game<'_> {
+    fn living_change_target(
+        &self,
+        mob: &mut Mob,
+        world: &MobWorld<'_>,
+        is_brain: bool,
+        target: Option<Who>,
+    ) -> horizon_client::mobs::TargetChange {
+        self.native_mob_change_target_in_tick(mob, world, is_brain, target)
+    }
+
     fn enderman_anger_suppressed(&self, enderman: u32, player: &PlayerView) -> bool {
         if !mod_api::__private::listened(mod_api::HookId::EndermanAnger) {
             return false;

@@ -344,7 +344,11 @@ pub fn ai_step(
         m.extra.anger -= 1;
     }
     if m.ai.target.is_none() && m.alive() && !m.no_ai {
-        m.ai.target = find_target(m, w, level_random);
+        if let Some(target) = find_target(m, w, level_random)
+            && let super::TargetChange::Set(next) = w.change_target(m, true, Some(target))
+        {
+            m.ai.target = next;
+        }
     }
 }
 /// `MemorySlot.tick`: expire before decrementing a finite saved lifetime.
@@ -533,9 +537,11 @@ impl Goal for Charge {
             sound(m, name, cx.events);
         }
     }
-    fn stop(&mut self, m: &mut Mob, _: &mut Cx) {
+    fn stop(&mut self, m: &mut Mob, cx: &mut Cx) {
         m.extra.counter2 = TIME_BETWEEN_ATTACKS;
-        m.ai.target = None;
+        if let super::TargetChange::Set(target) = cx.w.change_target(m, true, None) {
+            m.ai.target = target;
+        }
     }
     fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
         let Some(who) = m.ai.target else { return };
@@ -582,7 +588,9 @@ impl Goal for Charge {
             });
             m.velocity = Vec3::new(m.velocity.x * 0.6, m.velocity.y, m.velocity.z * 0.6);
         }
-        m.ai.target = None;
+        if let super::TargetChange::Set(target) = cx.w.change_target(m, true, None) {
+            m.ai.target = target;
+        }
     }
 }
 /// The body texture: the baby's, the adult's, or the zombie's variant.

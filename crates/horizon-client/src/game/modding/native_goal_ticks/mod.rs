@@ -366,8 +366,10 @@ impl GoalCxBackend for GoalCx<'_, '_> {
                 Some(Resolved::Dragon(_)) | None => return false,
             },
         };
-        self.m.set_target(who);
-        true
+        matches!(
+            self.m.set_ai_target(self.w, who),
+            mobs::TargetChange::Set(_)
+        )
     }
 
     fn jump(&mut self) {
@@ -422,6 +424,70 @@ impl mobs::part_goals::GoalHost for Game<'_> {
                 true
             }
         })
+    }
+}
+
+impl Game<'_> {
+    /// Dispatch a target change against the mob tick's scoped read view. The
+    /// game has lent its mob list to the tick, so using `Game` itself as the
+    /// host here would make the actor and other mob handles unresolvable.
+    pub(super) fn native_mob_change_target_in_tick(
+        &self,
+        mob: &mut Mob,
+        world: &MobWorld<'_>,
+        is_brain: bool,
+        target: Option<Who>,
+    ) -> mobs::TargetChange {
+        let vanilla = mobs::TargetChange::Set(target);
+        if !mod_api::__private::listened(mod_api::HookId::LivingChangeTarget) {
+            return vanilla;
+        }
+        let Some(epoch) = self.native_lifecycle.epoch() else {
+            return vanilla;
+        };
+        let original = match target {
+            None => None,
+            Some(Who::Mob(id)) => Some(LivingRef::new(EntityRef::new(epoch, id))),
+            Some(Who::Player) => {
+                let Some((_, id)) = world.player_identity else {
+                    return vanilla;
+                };
+                Some(LivingRef::new(EntityRef::new(epoch, id)))
+            }
+        };
+        let entity = MobRef::new(EntityRef::new(epoch, mob.id));
+        let context = GoalCx {
+            m: mob,
+            w: world,
+            host: self,
+        };
+        let mut new_target = original;
+        let mut cancel = false;
+        mod_api::dispatch_living_change_target(
+            &context,
+            mod_api::__private::LivingChangeTargetCall {
+                mob: entity,
+                original_target: original,
+                new_target: &mut new_target,
+                is_brain,
+                cancel: &mut cancel,
+            },
+        );
+        if cancel {
+            return mobs::TargetChange::Keep;
+        }
+        if new_target == original {
+            return vanilla;
+        }
+        let Some(target) = new_target else {
+            return mobs::TargetChange::Set(None);
+        };
+        match context.resolve(target.entity()) {
+            Some(Resolved::Player) => mobs::TargetChange::Set(Some(Who::Player)),
+            Some(Resolved::Own) => mobs::TargetChange::Set(Some(Who::Mob(context.m.id))),
+            Some(Resolved::Seen(seen)) => mobs::TargetChange::Set(Some(Who::Mob(seen.id))),
+            Some(Resolved::Dragon(_)) | None => mobs::TargetChange::Keep,
+        }
     }
 }
 

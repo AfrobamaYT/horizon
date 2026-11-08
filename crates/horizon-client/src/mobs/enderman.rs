@@ -213,7 +213,7 @@ pub fn custom_server_ai_step(m: &mut Mob, cx: &mut Cx) {
         );
         if br > 0.5 && cx.w.can_see_sky(x, y, z) && m.random.next_float() * 30.0 < (br - 0.4) * 2.0
         {
-            m.ai.target = None;
+            m.set_ai_target(cx.w, None);
             teleport_random(m, cx.w, cx.events);
         }
     }
@@ -346,9 +346,9 @@ impl Goal for LookForPlayer {
         // setBeingStaredAt: play the stare sound.
         m.extra.counter = m.age as i32;
     }
-    fn stop(&mut self, m: &mut Mob, _: &mut Cx) {
+    fn stop(&mut self, m: &mut Mob, cx: &mut Cx) {
         self.pending = false;
-        m.ai.target = None;
+        m.set_ai_target(cx.w, None);
     }
     fn can_continue(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
         let Some(p) = cx.w.player.clone() else {
@@ -372,7 +372,7 @@ impl Goal for LookForPlayer {
             self.aggro -= 1;
             if self.aggro <= 0 {
                 self.pending = false;
-                m.ai.target = Some(Who::Player);
+                m.set_ai_target(cx.w, Some(Who::Player));
                 cx.events.push(MobEvent::Sound(
                     "entity.enderman.stare",
                     m.center(),

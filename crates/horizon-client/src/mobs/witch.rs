@@ -208,7 +208,7 @@ fn witch_attack(m: &mut Mob, who: Who, _power: f32, cx: &mut Cx) {
     // The potion it throws: `PotionContents.createItemStack(Items.SPLASH_POTION,
     // potion)` for the one `Witch.performRangedAttack` picks.
     let potion = if heals {
-        m.ai.target = None;
+        m.set_ai_target(cx.w, None);
         if health <= 4.0 {
             "minecraft:healing"
         } else {

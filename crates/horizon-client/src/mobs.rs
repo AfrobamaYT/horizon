@@ -3624,8 +3624,45 @@ pub trait MobHooks {
     /// `LivingVisibilityEvent`: `visibility`, the player's visibility
     /// percent as mob `looking` targets it, as mods scale it.
     fn living_visibility(&self, player: &PlayerView, looking: u32, visibility: f64) -> f64;
+    /// A proposed target change. A listener may cancel or substitute a target.
+    fn living_change_target(
+        &self,
+        _mob: &mut Mob,
+        _world: &MobWorld<'_>,
+        _is_brain: bool,
+        target: Option<Who>,
+    ) -> TargetChange {
+        TargetChange::Set(target)
+    }
+}
+/// Outcome of a target-change event.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TargetChange {
+    /// Apply the resulting target.
+    Set(Option<Who>),
+    /// Keep the previous target.
+    Keep,
 }
 impl MobWorld<'_> {
+    /// Dispatch a proposed AI target change, validating a substituted target.
+    pub fn change_target(
+        &self,
+        mob: &mut Mob,
+        is_brain: bool,
+        target: Option<Who>,
+    ) -> TargetChange {
+        let Some(hooks) = self.mob_hooks else {
+            return TargetChange::Set(target);
+        };
+        match hooks.living_change_target(mob, self, is_brain, target) {
+            TargetChange::Set(Some(who))
+                if Some(who) != target && self.target_info(who).is_none() =>
+            {
+                TargetChange::Keep
+            }
+            change => change,
+        }
+    }
     /// Whether a mob may grief here at all: the rule, or a mod that may say
     /// yes against it.
     pub fn griefing_possible(&self) -> bool {

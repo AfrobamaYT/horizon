@@ -234,6 +234,20 @@ impl Game<'_> {
                 return false;
             }
         }
+        let Some(target) = self.native_mob_target_event(mob, target, false) else {
+            return false;
+        };
+        if let Some(target) = target {
+            let Some(kind) = self.native_entity_target(target.entity()) else {
+                return false;
+            };
+            let Some(state) = self.mobs.iter().find(|m| m.id == id) else {
+                return false;
+            };
+            if !self.native_mob_valid_target(state, kind) {
+                return false;
+            }
+        }
         let Some(who) = self.native_mob_bind_target(id, target) else {
             return false;
         };
@@ -244,13 +258,35 @@ impl Game<'_> {
         true
     }
 
+    /// Dispatch a mod-initiated change while the mob remains in the game.
+    pub(super) fn native_mob_target_event(
+        &self,
+        mob: MobRef,
+        original_target: Option<LivingRef>,
+        is_brain: bool,
+    ) -> Option<Option<LivingRef>> {
+        if !mod_api::__private::listened(mod_api::HookId::LivingChangeTarget) {
+            return Some(original_target);
+        }
+        let mut new_target = original_target;
+        let mut cancel = false;
+        self.native_living_change_target(mod_api::__private::LivingChangeTargetCall {
+            mob,
+            original_target,
+            new_target: &mut new_target,
+            is_brain,
+            cancel: &mut cancel,
+        });
+        (!cancel).then_some(new_target)
+    }
+
     /// The `Who` mob `id` stores for `target`, for either target setter: a
     /// mob, or a player in the level in place. A player target binds to the
     /// mob (`mob_players`), so the mob's tick sees that player. None for a
     /// fake player (the root rule for every mob target setter), a player in
     /// another level, or anything else (an armor stand, the dragon, a stale
     /// handle).
-    fn native_mob_bind_target(
+    pub(super) fn native_mob_bind_target(
         &mut self,
         id: u32,
         target: Option<LivingRef>,
@@ -307,6 +343,9 @@ impl Game<'_> {
         if !horizon_client::mobs::ai::writes_brain_target(m) {
             return false;
         }
+        let Some(target) = self.native_mob_target_event(mob, target, true) else {
+            return false;
+        };
         let Some(who) = self.native_mob_bind_target(id, target) else {
             return false;
         };
@@ -681,6 +720,46 @@ mod tests {
         let kind = game.res.mob_types().get(name).unwrap().clone();
         game.mobs.push(Mob::new(id, kind, Vec3::ZERO, 0.0));
         game.mob(game.entity(id).unwrap()).unwrap()
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn redirected_fake_target_is_refused_with_the_original_target_intact() {
+        use std::sync::{Arc, Mutex};
+        struct Redirect(Arc<Mutex<Option<LivingRef>>>);
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for Redirect {
+            fn living_change_target(
+                &self,
+                host: &dyn mod_api::Host,
+                event: &mut mod_api::LivingChangeTargetEvent<'_>,
+            ) {
+                assert!(event.mob.living().health(host).is_some());
+                *event.new_target = *self.0.lock().unwrap();
+            }
+        }
+        let redirect = Arc::new(Mutex::new(None));
+        let mods = vec![mod_api::ModEntry::new(
+            "target-test",
+            Box::new(Redirect(redirect.clone())),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                super::super::native_item_places::tests::open_to_lan(game);
+                let level = game.level(game.dim.id()).unwrap();
+                let fake = game.fake_player(level, 1234, "fake").unwrap();
+                *redirect.lock().unwrap() = Some(LivingRef::new(fake.entity()));
+                let mob = add_mob(game, 12, "minecraft:zombie");
+                let existing = add_mob(game, 13, "minecraft:sheep");
+                game.mobs[0].ai.target = Some(Who::Mob(13));
+                assert!(!mob.set_target(game, None));
+                assert_eq!(
+                    game.mobs[0].ai.target,
+                    Some(Who::Mob(existing.entity().id()))
+                );
+            })
+        });
     }
 
     #[test]

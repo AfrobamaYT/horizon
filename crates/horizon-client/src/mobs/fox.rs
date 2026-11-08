@@ -903,7 +903,7 @@ impl Goal for Pounce {
             ) == "minecraft:snow"
         {
             m.head_pitch = 60.0;
-            m.ai.target = None;
+            m.set_ai_target(cx.w, None);
             set_flag(m, FACEPLANTED, true);
         }
     }

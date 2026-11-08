@@ -664,7 +664,7 @@ fn drop_invalid_player_target(m: &mut Mob, w: &MobWorld) {
             .as_ref()
             .is_some_and(|p| p.creative || p.spectator || w.difficulty.base == 0)
     {
-        m.ai.target = None;
+        m.set_ai_target(w, None);
         if matches!(m.species(), Species::ZombifiedPiglin | Species::IronGolem) {
             m.extra.anger = 0;
             m.ai.last_hurt_by = None;
@@ -1977,7 +1977,7 @@ fn push_entities(
             && w.seen(id).is_some_and(super::golem::golem_prey)
             && m.random.next_int_bound(20).unwrap_or(1) == 0
         {
-            m.ai.target = Some(who);
+            m.set_ai_target(w, Some(who));
         }
         // doPush calls the other living entity's push; sleeping vetoes both impulses.
         let sleeping = match who {
@@ -3260,6 +3260,29 @@ pub fn ate(m: &mut Mob, events: &mut Vec<MobEvent>) {
 }
 /// `NeutralMob.playerDied` for a mob that is neutral: the anger at the
 /// player who died ends. The caller checks `forgive_dead_players`.
+pub fn forgives_dead_player(m: &Mob) -> bool {
+    match m.species() {
+        Species::Bee => super::bee::get(m).and_then(|bee| bee.angry_at) == Some(Who::Player),
+        Species::PolarBear => m.extra.flag2,
+        Species::Enderman | Species::ZombifiedPiglin => m.ai.target == Some(Who::Player),
+        _ => m.extra.angry_at == Some(Who::Player),
+    }
+}
+
+/// Apply forgiveness after the caller has dispatched the target change. Anger
+/// bookkeeping still occurs if a listener cancels the target change.
+pub fn forgive_dead_player_with_change(m: &mut Mob, change: super::TargetChange) {
+    if !forgives_dead_player(m) {
+        return;
+    }
+    let previous = m.ai.target;
+    forgive_dead_player(m);
+    match change {
+        super::TargetChange::Keep => m.ai.target = previous,
+        super::TargetChange::Set(target) => m.set_target(target),
+    }
+}
+
 pub fn forgive_dead_player(m: &mut Mob) {
     match m.species() {
         Species::Bee => super::bee::forgive_dead_player(m),
@@ -5120,6 +5143,25 @@ mod forgiveness_tests {
         let mut t = (*crate::mobs::sensor_scan_tests::kind()).clone();
         t.species = species;
         Mob::new(1, Arc::new(t), Vec3::ZERO, 0.0)
+    }
+
+    #[test]
+    fn forgiveness_keeps_cancelled_target_but_ends_anger() {
+        let mut golem = mob(Species::IronGolem);
+        golem.extra.angry_at = Some(Who::Player);
+        golem.extra.anger = 300;
+        golem.ai.target = Some(Who::Player);
+        assert!(forgives_dead_player(&golem));
+        forgive_dead_player_with_change(&mut golem, super::super::TargetChange::Keep);
+        assert_eq!(golem.ai.target, Some(Who::Player));
+        assert_eq!(golem.extra.anger, 0);
+
+        golem.extra.angry_at = Some(Who::Player);
+        forgive_dead_player_with_change(
+            &mut golem,
+            super::super::TargetChange::Set(Some(Who::Mob(7))),
+        );
+        assert_eq!(golem.ai.target, Some(Who::Mob(7)));
     }
 
     #[test]

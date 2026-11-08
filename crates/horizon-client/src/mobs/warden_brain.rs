@@ -13,7 +13,7 @@
 //! `RunOne` shuffles with a random of its own, seeded with the brain's
 //! shuffle seed.
 use super::{
-    Mob, MobEvent, MobWorld, Who,
+    Mob, MobEvent, MobWorld, TargetChange, Who,
     brain::Timed,
     goals::Cx,
     path::Path,
@@ -251,6 +251,23 @@ impl Brain {
         self.activity = a;
     }
     /// `WardenAi.updateActivity`: `setActiveActivityToFirstValid`.
+    pub(super) fn will_clear_attack_target(&self) -> bool {
+        self.activity == Act::Fight
+            && self.mem.attack_target.present()
+            && [
+                Act::Emerge,
+                Act::Dig,
+                Act::Roar,
+                Act::Fight,
+                Act::Investigate,
+                Act::Sniff,
+                Act::Idle,
+            ]
+            .into_iter()
+            .find(|&activity| self.requirements_met(activity))
+            .is_some_and(|activity| activity != Act::Fight)
+    }
+
     pub fn update_activity(&mut self) {
         for a in [
             Act::Emerge,
@@ -564,10 +581,13 @@ pub(super) fn set_disturbance(m: &mut Mob, w: &MobWorld, position: [i32; 3]) {
     mm.walk_target.clear();
 }
 /// `Warden.setAttackTarget`.
-pub(super) fn set_attack_target(m: &mut Mob, target: Who) {
+pub(super) fn set_attack_target(m: &mut Mob, w: &MobWorld, target: Who) {
+    let TargetChange::Set(target) = w.change_target(m, true, Some(target)) else {
+        return;
+    };
     let mm = mem(m);
     mm.roar_target.clear();
-    mm.attack_target.set(target);
+    mm.attack_target.set_opt(target);
     mm.cant_reach_walk_target_since.clear();
     mm.sonic_boom_cooldown.set_ttl((), 200);
 }
@@ -870,12 +890,14 @@ impl B {
                 if can && alive && angry {
                     return true;
                 }
-                // WardenAi.onTargetInvalid
-                if !can && let Some(st) = m.extra.warden.as_mut() {
-                    st.anger.clear(target);
+                if let TargetChange::Set(replacement) = cx.w.change_target(m, true, None) {
+                    // WardenAi.onTargetInvalid
+                    if !can && let Some(st) = m.extra.warden.as_mut() {
+                        st.anger.clear(target);
+                    }
+                    set_dig_cooldown(m);
+                    mem(m).attack_target.set_opt(replacement);
                 }
-                set_dig_cooldown(m);
-                mem(m).attack_target.clear();
                 true
             }),
             B::SetEntityLookTarget(r) => one(r, || {
@@ -1153,7 +1175,7 @@ impl B {
                     warden::set_pose(m, Pose::Standing);
                 }
                 if let Some(target) = mem(m).roar_target.value() {
-                    set_attack_target(m, target);
+                    set_attack_target(m, cx.w, target);
                 }
                 mem(m).roar_target.clear();
             }

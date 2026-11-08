@@ -791,7 +791,7 @@ impl Goal for PandaHurtBy {
     fn can_continue(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
         let s = st(m);
         if s.got_bamboo || s.did_bite {
-            m.ai.target = None;
+            m.set_ai_target(cx.w, None);
             false
         } else {
             self.0.can_continue(m, cx)

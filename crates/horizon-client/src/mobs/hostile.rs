@@ -264,7 +264,7 @@ impl Goal for SpiderAttack {
     }
     fn can_continue(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
         if mob_brightness(m, cx.w) >= 0.5 && m.random.next_int_bound(100).unwrap_or(1) == 0 {
-            m.ai.target = None;
+            m.set_ai_target(cx.w, None);
             return false;
         }
         self.0.can_continue(m, cx)
