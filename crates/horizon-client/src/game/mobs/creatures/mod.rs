@@ -143,9 +143,13 @@ pub(super) struct NativeSound {
 }
 
 #[derive(Default)]
-struct PendingMobBatch {
+struct NormalMobActions {
     events: Vec<MobEvent>,
     broke: Vec<u32>,
+}
+#[derive(Default)]
+struct PendingMobBatch {
+    normal: std::collections::VecDeque<NormalMobActions>,
     guests: Vec<(u32, u32, MobEvent)>,
     pushes: horizon_client::mobs::PendingPushes,
 }
@@ -1561,7 +1565,16 @@ impl Game<'_> {
         self.creatures.seen_buf = snapshot;
         self.creatures.ticked = ticked;
         // Completed brain actions are never fed back into the producer pass.
-        pending.events.append(&mut events);
+        if !events.is_empty() {
+            pending.normal.push_back(NormalMobActions {
+                events: std::mem::take(&mut events),
+                broke: Vec::new(),
+            });
+        }
+        if dispatch_panic.is_none() {
+            // The successful final sweep consumed all pushes for surviving mobs.
+            pending.pushes = Default::default();
+        }
         pending.guests.append(&mut guest_events);
         self.creatures.pending.insert(level_id, pending);
         self.creatures.event_buf = events;
@@ -1605,8 +1618,10 @@ impl Game<'_> {
         }
         let mut pending = self.creatures.pending.remove(level_id).unwrap_or_default();
         let delivery = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<()> {
-            self.handle_mob_events_pending(&mut pending.events, &mut pending.broke)?;
-            pending.broke.clear();
+            while let Some(batch) = pending.normal.front_mut() {
+                self.handle_mob_events_pending(&mut batch.events, &mut batch.broke)?;
+                self.creatures.event_buf = pending.normal.pop_front().unwrap().events;
+            }
             self.lan_guest_mob_events(&mut pending.guests);
             Ok(())
         }));
