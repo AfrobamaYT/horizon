@@ -1,0 +1,81 @@
+//! Borrowed projection adapters used by generated native readers.
+use crate::{locators::Step, native_read::NativeNode};
+use mod_api::{RowError, wire::Put};
+
+type Visitor<'a> = dyn FnMut(Step, u32, &dyn NativeNode) -> Result<(), RowError> + 'a;
+
+/// A plain Wire leaf, with its generated canonical schema key.
+pub struct Scalar<'a, T: Put>(pub &'a T, pub u64);
+impl<T: Put> NativeNode for Scalar<'_, T> {
+    fn key(&self) -> u64 {
+        self.1
+    }
+    fn value(
+        &self,
+        f: &mut dyn FnMut(Option<&dyn Put>) -> Result<(), RowError>,
+    ) -> Result<(), RowError> {
+        f(Some(self.0))
+    }
+    fn len(&self) -> u64 {
+        0
+    }
+    fn child(&self, _: u64, _: &mut Visitor<'_>) -> Result<(), RowError> {
+        Err(RowError::Bounds)
+    }
+}
+
+/// A borrowed UTF-16 view of a native UTF-8 string. Indexes are UTF-16 code units.
+pub struct Text<'a>(pub &'a str, pub u64, pub u64);
+impl NativeNode for Text<'_> {
+    fn key(&self) -> u64 {
+        self.1
+    }
+    fn value(
+        &self,
+        f: &mut dyn FnMut(Option<&dyn Put>) -> Result<(), RowError>,
+    ) -> Result<(), RowError> {
+        f(Some(&self.len()))
+    }
+    fn len(&self) -> u64 {
+        self.0.encode_utf16().count() as u64
+    }
+    fn child(&self, ordinal: u64, f: &mut Visitor<'_>) -> Result<(), RowError> {
+        let index = usize::try_from(ordinal).map_err(|_| RowError::Bounds)?;
+        let value = self.0.encode_utf16().nth(index).ok_or(RowError::Bounds)?;
+        f(
+            Step::Index(ordinal),
+            u32::try_from(ordinal).map_err(|_| RowError::Bounds)?,
+            &Scalar(&value, self.2),
+        )
+    }
+}
+
+/// Borrowed sequence. The closure wraps one element only for the duration of a visit.
+pub struct Sequence<'a, T, F> {
+    pub items: &'a [T],
+    pub key: u64,
+    pub wrap: F,
+}
+impl<T, F> NativeNode for Sequence<'_, T, F>
+where
+    F: Fn(&T, &mut Visitor<'_>) -> Result<(), RowError>,
+{
+    fn key(&self) -> u64 {
+        self.key
+    }
+    fn value(
+        &self,
+        f: &mut dyn FnMut(Option<&dyn Put>) -> Result<(), RowError>,
+    ) -> Result<(), RowError> {
+        f(Some(&self.len()))
+    }
+    fn len(&self) -> u64 {
+        self.items.len() as u64
+    }
+    fn child(&self, ordinal: u64, f: &mut Visitor<'_>) -> Result<(), RowError> {
+        let index = usize::try_from(ordinal).map_err(|_| RowError::Bounds)?;
+        let field = u32::try_from(ordinal).map_err(|_| RowError::Bounds)?;
+        let item = self.items.get(index).ok_or(RowError::Bounds)?;
+        (self.wrap)(item, &mut |_, _, node| f(Step::Index(ordinal), field, node))
+    }
+}

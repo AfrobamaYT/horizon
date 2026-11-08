@@ -29,6 +29,10 @@ pub mod native_window;
 /// Live, borrowed native row traversal.
 #[doc(hidden)]
 pub mod native_read;
+
+/// Borrowed native row node adapters.
+#[doc(hidden)]
+pub mod native_nodes;
 #[cfg(target_arch = "wasm32")]
 pub use guest::register;
 #[cfg(not(target_arch = "wasm32"))]
