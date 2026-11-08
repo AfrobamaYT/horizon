@@ -50,11 +50,18 @@ the dimension type the game reads: `has_fixed_time`, `has_ender_dragon_fight`, `
 `ambient_light`, `infiniburn`, the monster spawn light range and block light limit, the `skybox`,
 the `cardinal_light` and the gameplay switches (`water_evaporates`, `fast_lava`,
 `respawn_anchor_works`, `nether_portal_spawns_piglin`, `piglins_zombify`, `snow_golem_melts`,
-`can_start_raid`, `sky_light_level`). A field left at its default is the Overworld's, and the game
-refuses a value out of range (a `coordinate_scale` of 0, an `ambient_light` above 1, an unknown
-`skybox`) at startup with a message naming the mod. The level opens, ticks, saves and closes as the
+`can_start_raid`, `sky_light_level`) and the bed rule (`bed_can_sleep`, `bed_can_set_spawn`,
+`bed_destroy_on_use`, `bed_destroy_on_leave`: `always`, `when_dark` or `never`, and whether a bed
+explodes or breaks; the same four with `straw_bed_` for the straw bed). A field left at its default is the Overworld's, and the game
+refuses a value out of range (a `coordinate_scale` outside 0.00001 to 30000000, an `ambient_light` that is not a number, an unknown
+`skybox`, a bed rule that is none of the three) at startup with a message naming the mod. The
+`coordinate_scale` is what `execute in mymod:pocket` scales a position by, and what a portal
+between two levels scales by (`DimensionType.getTeleportationScale`); a position given to a
+teleport call is taken as it is. The level opens, ticks, saves and closes as the
 Nether and the End do, in `dimensions/mymod/pocket/` of the world, and clients receive its
-dimension type when they join.
+dimension type when they join. A client of a server takes the whole type, not only the build
+range: the level's fluids, mobs, beds and time follow the type the server sent, as on the host,
+whether or not the client has the mod that registered the level.
 
 `sky_color`, `fog_color` (`#rrggbb`) and `cloud_height` set the sky overhead, the fog at the
 horizon and the clouds' height; left as None they are the Overworld's. They apply to the host's own
@@ -113,7 +120,16 @@ It is false for an unregistered dimension and for an entity that cannot change l
 orb, a projectile); a fake player stays where it is. Nothing builds a platform at the destination, so look for the
 ground first, or place one.
 
+### Saving a level
+
+`level.request_save(host)` asks the server to save a level, as the autosave and `/save-all` do, with its
+chunks on disk when it ends. The save runs at the start of the next server tick, not inside the call (a hook
+may be running in the tick that is saving), and a level asked for twice before then is saved once. The call
+answers whether the request was taken. `level_save` fires with the level's dimension once it was written; a
+save that fails fires nothing and is logged.
+
 ### Chunk generators
+
 
 A chunk generator is a mod's code for a level's terrain: vanilla's `ChunkGenerator`, and
 `build_terrain` its `buildTerrain`. Register it once, at startup, and name it from a dimension,

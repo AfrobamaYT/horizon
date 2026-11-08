@@ -2005,6 +2005,14 @@ impl Game<'_> {
         if Some(conn) == self.lan_acting && self.fake_blocks(mod_api::FakeEffect::ChangeDimension) {
             return Ok(true);
         }
+        // A canceled travel keeps the player where they are.
+        if !self.server_player_travel_allowed(
+            conn,
+            level,
+            super::server_travel::TravelCause::Teleport,
+        ) {
+            return Ok(true);
+        }
         self.level_teleports
             .push(super::server_travel::LevelTeleport {
                 conn,
