@@ -1,6 +1,7 @@
 //! Open resource layers, shared by asset packs and passive mod data.
 //! Archive layers retain one reader and never materialize their entries.
 //! Diverges from upstream: asset and passive jar-data layers share this source.
+#[cfg(not(target_arch = "wasm32"))]
 use crate::zip::Zip;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
@@ -11,8 +12,52 @@ use std::{
     sync::Arc,
 };
 
+/// File identity/change stamps for resource-cache keys, following symlinks.
+pub(crate) fn metadata_fingerprint(metadata: &fs::Metadata) -> io::Result<u64> {
+    let mut hash = DefaultHasher::new();
+    metadata.len().hash(&mut hash);
+    metadata.modified()?.hash(&mut hash);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        (
+            metadata.dev(),
+            metadata.ino(),
+            metadata.ctime(),
+            metadata.ctime_nsec(),
+        )
+            .hash(&mut hash);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        metadata.creation_time().hash(&mut hash);
+    }
+    Ok(hash.finish())
+}
+
+fn copy_resource_bytes(
+    bytes: &[u8],
+    out: &mut impl io::Write,
+    budget: &std::sync::atomic::AtomicU64,
+) -> io::Result<()> {
+    use std::sync::atomic::Ordering;
+    let mut left = budget.load(Ordering::Relaxed);
+    loop {
+        let next = left.checked_sub(bytes.len() as u64).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::FileTooLarge, "pack exceeds unpack budget")
+        })?;
+        match budget.compare_exchange_weak(left, next, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => break,
+            Err(current) => left = current,
+        }
+    }
+    out.write_all(bytes)
+}
+
 enum Storage {
     Directory(PathBuf),
+    #[cfg(not(target_arch = "wasm32"))]
     Archive(Zip),
     Prefix {
         source: ResourceSource,
@@ -68,6 +113,7 @@ impl std::fmt::Debug for ResourceSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let kind = match self.0.as_ref() {
             Storage::Directory(_) => "Directory",
+            #[cfg(not(target_arch = "wasm32"))]
             Storage::Archive(_) => "Archive",
             Storage::Prefix { .. } => "Prefix",
             Storage::Index(_) => "Index",
@@ -244,6 +290,7 @@ impl ResourceSource {
                 .collect()
         }
         match self.0.as_ref() {
+            #[cfg(not(target_arch = "wasm32"))]
             Storage::Archive(archive) => {
                 collect(archive.names().filter(|name| stays_inside(name)), top)
             }
@@ -260,10 +307,12 @@ impl ResourceSource {
     pub fn directory(root: PathBuf) -> Self {
         Self(Arc::new(Storage::Directory(root)))
     }
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn archive(path: &Path) -> io::Result<Self> {
         Ok(Self::opened_archive(Zip::open(path)?))
     }
     /// Share an archive that was already opened while discovering its metadata.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn opened_archive(archive: Zip) -> Self {
         Self(Arc::new(Storage::Archive(archive)))
     }
@@ -296,12 +345,46 @@ impl ResourceSource {
         }
         match self.0.as_ref() {
             Storage::Directory(root) => horizon_core::prepared_files::read(&root.join(name)),
+            #[cfg(not(target_arch = "wasm32"))]
             Storage::Archive(archive) => archive.read(name),
             Storage::Prefix { source, prefix } => source.read(&format!("{prefix}{name}")),
             Storage::Index(files) => files
                 .get(name)
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, name.to_owned()))?
                 .read(),
+        }
+    }
+    /// Copy a resource under a shared output budget, streaming archive entries.
+    pub fn copy_to(
+        &self,
+        name: &str,
+        out: &mut impl io::Write,
+        budget: &std::sync::atomic::AtomicU64,
+    ) -> io::Result<()> {
+        if !stays_inside(name) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "unsafe resource name",
+            ));
+        }
+        match self.0.as_ref() {
+            Storage::Archive(archive) => archive.copy_to(name, out, budget).map(|_| ()),
+            Storage::Prefix { source, prefix } => {
+                source.copy_to(&format!("{prefix}{name}"), out, budget)
+            }
+            Storage::Index(files) => match &files
+                .get(name)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, name.to_owned()))?
+                .0
+            {
+                ResourceStorage::File { source, name } => source.copy_to(name, out, budget),
+                ResourceStorage::Bytes(bytes) => copy_resource_bytes(bytes, out, budget),
+            },
+            Storage::Directory(root) => copy_resource_bytes(
+                &horizon_core::prepared_files::read(&root.join(name))?,
+                out,
+                budget,
+            ),
         }
     }
     pub fn read_to_string(&self, name: &str) -> io::Result<String> {
@@ -320,6 +403,7 @@ impl ResourceSource {
             Storage::Directory(root) => {
                 horizon_core::prepared_files::read_head(&root.join(name), max)
             }
+            #[cfg(not(target_arch = "wasm32"))]
             Storage::Archive(archive) => archive.read_head(name, max),
             Storage::Prefix { source, prefix } => source.read_head(&format!("{prefix}{name}"), max),
             Storage::Index(files) => match &files
@@ -348,6 +432,7 @@ impl ResourceSource {
                     path.is_file()
                 }
             }
+            #[cfg(not(target_arch = "wasm32"))]
             Storage::Archive(archive) => archive.contains(name),
             Storage::Prefix { source, prefix } => source.contains(&format!("{prefix}{name}")),
             Storage::Index(files) => files.contains_key(name),
@@ -366,6 +451,7 @@ impl ResourceSource {
             Storage::Directory(root) => {
                 horizon_core::prepared_files::read_head(&root.join(name), max.saturating_add(1))?
             }
+            #[cfg(not(target_arch = "wasm32"))]
             Storage::Archive(archive) => return archive.read_limited(name, max),
             Storage::Prefix { source, prefix } => {
                 return source.read_limited(&format!("{prefix}{name}"), max);
@@ -412,6 +498,7 @@ impl ResourceSource {
                 out.sort();
                 out
             }
+            #[cfg(not(target_arch = "wasm32"))]
             Storage::Archive(archive) => archive
                 .names()
                 .filter(|name| name.starts_with(prefix) && stays_inside(name))
@@ -492,8 +579,9 @@ impl ResourceSource {
     fn file_fingerprint(&self, name: &str, archives: &mut HashMap<usize, u64>) -> Option<u64> {
         match self.0.as_ref() {
             Storage::Directory(root) => {
-                crate::zip::metadata_fingerprint(&fs::metadata(root.join(name)).ok()?).ok()
+                metadata_fingerprint(&fs::metadata(root.join(name)).ok()?).ok()
             }
+            #[cfg(not(target_arch = "wasm32"))]
             Storage::Archive(archive) => {
                 let key = Arc::as_ptr(&self.0) as usize;
                 let fingerprint = match archives.get(&key) {

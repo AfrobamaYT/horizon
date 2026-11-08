@@ -20,26 +20,75 @@ pub struct ModMenuType {
     pub slots: usize,
     pub data_slots: usize,
     pub results: Vec<usize>,
+    /// its crafting grid, if it has one (`crafting`).
+    pub crafting: Option<ModCrafting>,
+    /// its linked slots, if it has any (`links`).
+    pub links: Option<ModLinks>,
+}
+
+/// a mod menu type's linked slots: `count` container slots from `from` on,
+/// which show the slots of the containers a native mod links them to
+/// (`native_menu_links`) instead of the block entity's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ModLinks {
+    pub from: usize,
+    pub count: usize,
+}
+
+impl ModLinks {
+    /// The linked container slots.
+    pub fn slots(&self) -> std::ops::Range<usize> {
+        self.from..self.from + self.count
+    }
+}
+
+/// a mod menu type's crafting grid: `size`x`size` container slots from
+/// `grid` on, row by row, and the slot showing what they craft. The block
+/// entity holds the grid; the result is the menu's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ModCrafting {
+    pub grid: usize,
+    pub size: usize,
+    pub result: usize,
+}
+
+impl ModCrafting {
+    /// The grid's container slots.
+    pub fn grid_slots(&self) -> std::ops::Range<usize> {
+        self.grid..self.grid + self.size * self.size
+    }
 }
 
 static MOD_MENU_TYPES: std::sync::OnceLock<Vec<ModMenuType>> = std::sync::OnceLock::new();
 
-/// registers the content mods' menu types, `(id, slots, data slots,
-/// results)`, a list set once per process (false when it already was).
-pub fn register_mod_menu_types(
-    menus: impl IntoIterator<Item = (String, usize, usize, Vec<usize>)>,
-) -> bool {
+/// One menu type as [`register_mod_menu_types`] takes it: `(id, slots, data
+/// slots, results, crafting, links)`.
+pub type ModMenuTypeEntry = (
+    String,
+    usize,
+    usize,
+    Vec<usize>,
+    Option<ModCrafting>,
+    Option<ModLinks>,
+);
+
+/// registers the content mods' menu types, a list set once per process
+/// (false when it already was).
+pub fn register_mod_menu_types(menus: impl IntoIterator<Item = ModMenuTypeEntry>) -> bool {
     if MOD_MENU_TYPES.get().is_some() {
         return false;
     }
-    let menus = menus
-        .into_iter()
-        .map(|(id, slots, data_slots, results)| ModMenuType {
-            id: Box::leak(id.into_boxed_str()),
-            slots,
-            data_slots,
-            results,
-        });
+    let menus =
+        menus.into_iter().map(
+            |(id, slots, data_slots, results, crafting, links)| ModMenuType {
+                id: Box::leak(id.into_boxed_str()),
+                slots,
+                data_slots,
+                results,
+                crafting,
+                links,
+            },
+        );
     MOD_MENU_TYPES.set(menus.collect()).is_ok()
 }
 
@@ -76,7 +125,7 @@ impl FurnaceKind {
         self != Self::Furnace
     }
     pub fn from_block(name: &str) -> Option<Self> {
-        match name {
+        match crate::block_entity_types::factory_block(name) {
             "minecraft:furnace" => Some(Self::Furnace),
             "minecraft:blast_furnace" => Some(Self::BlastFurnace),
             "minecraft:smoker" => Some(Self::Smoker),
@@ -320,6 +369,14 @@ impl Crafter {
 }
 impl BlockEntity {
     pub fn for_block(name: &str) -> Option<Self> {
+        let factory = crate::block_entity_types::factory_block(name);
+        if crate::block_entity_types::factory_valid(name) == Some(false) {
+            return None;
+        }
+        Self::for_factory(factory)
+    }
+
+    fn for_factory(name: &str) -> Option<Self> {
         if let Some(hanging) = crate::signs::sign_kind(name) {
             return Some(Self::Sign(crate::signs::SignData {
                 hanging,
@@ -393,6 +450,9 @@ impl BlockEntity {
         if name == "minecraft:end_gateway" {
             return Some(Self::EndGateway(EndGateway::default()));
         }
+        if name == "minecraft:bell" {
+            return Some(Self::Bell);
+        }
         if name == "minecraft:daylight_detector" {
             return Some(Self::DaylightDetector);
         }
@@ -453,6 +513,17 @@ impl BlockEntity {
     /// it (a furnace is its kind's, a sign only its standing or hanging
     /// kind); native types use the accepted declaration's valid blocks.
     pub fn fits(&self, name: &str) -> bool {
+        if crate::block_entity_types::additional_valid(name, self.id())
+            || (!name.starts_with("minecraft:")
+                && crate::block_entity_types::valid(name, self.id()) == Some(true))
+        {
+            return true;
+        }
+        let factory = crate::block_entity_types::factory_block(name);
+        if factory != name {
+            return crate::block_entity_types::factory_valid(name) == Some(true)
+                && self.fits(factory);
+        }
         match self {
             Self::Chest(items) => container_size(name) == Some(items.len()),
             Self::Furnace(f) => FurnaceKind::from_block(name) == Some(f.kind),
@@ -487,6 +558,7 @@ impl BlockEntity {
             Self::Crafter(_) => name == "minecraft:crafter",
             Self::EndGateway(_) => name == "minecraft:end_gateway",
             Self::DaylightDetector => name == "minecraft:daylight_detector",
+            Self::Bell => name == "minecraft:bell",
             Self::StructureBlock(_) => name == "minecraft:structure_block",
             Self::TestBlock(_) => name == "minecraft:test_block",
             Self::TestInstanceBlock(_) => name == "minecraft:test_instance_block",
@@ -525,6 +597,7 @@ impl BlockEntity {
             Self::Skull(_) => "minecraft:skull",
             Self::EndGateway(_) => "minecraft:end_gateway",
             Self::DaylightDetector => "minecraft:daylight_detector",
+            Self::Bell => "minecraft:bell",
             Self::Brushable(_) => "minecraft:brushable_block",
             Self::Campfire(_) => "minecraft:campfire",
             Self::ChiseledBookshelf(_) => "minecraft:chiseled_bookshelf",
@@ -559,6 +632,7 @@ impl BlockEntity {
             | Self::TestBlock(_)
             | Self::TestInstanceBlock(_)
             | Self::DaylightDetector
+            | Self::Bell
             | Self::Brushable(_) => Vec::new(),
             Self::Mod(m) => m.items.iter().flatten().cloned().collect(),
             Self::Lectern(l) => l.book.iter().cloned().collect(),
@@ -589,6 +663,7 @@ impl BlockEntity {
             | Self::TestBlock(_)
             | Self::TestInstanceBlock(_)
             | Self::DaylightDetector
+            | Self::Bell
             | Self::Brushable(_) => &[],
             Self::Jukebox(j) => &j.items,
             Self::Crafter(c) => &c.items,
@@ -624,6 +699,7 @@ impl BlockEntity {
             | Self::TestBlock(_)
             | Self::TestInstanceBlock(_)
             | Self::DaylightDetector
+            | Self::Bell
             | Self::Brushable(_) => &mut [],
             Self::Jukebox(j) => &mut j.items,
             Self::Crafter(c) => &mut c.items,
