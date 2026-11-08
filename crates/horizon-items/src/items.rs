@@ -77,8 +77,9 @@ pub enum ConsumeEffect {
 /// Typed consumable shared by item prototypes and stack component patches.
 pub type ItemConsumable = horizon_world::consumable::Consumable<String, ConsumeEffect>;
 
-/// Decode `Consumable.CODEC` defaults and ordered effects at the component boundary.
-pub(crate) fn parse_consumable(
+/// Decode `Consumable.CODEC` defaults and ordered effects at the load boundary.
+/// Opaque mod payloads are converted once to retained NBT; invalid payloads refuse admission.
+pub fn parse_consumable(
     cons: &Value,
 ) -> std::result::Result<ItemConsumable, horizon_core::json_nbt::JsonNbtError> {
     Ok(ItemConsumable {
