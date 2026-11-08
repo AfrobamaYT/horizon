@@ -12,6 +12,7 @@ const PROFILES: [&str; 2] = ["fast", "release"];
 #[derive(Debug)]
 pub enum Error {
     Busy,
+    UnsupportedFilesystem,
     Unsafe(PathBuf),
     Io(io::Error),
 }

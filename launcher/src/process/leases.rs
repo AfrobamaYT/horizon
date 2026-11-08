@@ -67,6 +67,7 @@ mod tests;
 fn error(error: Error) -> io::Error {
     match error {
         Error::Busy => io::ErrorKind::WouldBlock.into(),
+        Error::UnsupportedFilesystem => io::ErrorKind::Unsupported.into(),
         Error::Unsafe(_) => io::ErrorKind::InvalidInput.into(),
         Error::Io(error) => error,
     }

@@ -46,6 +46,7 @@ impl Registry {
         crate::native_cache::checked(data, true)?;
         fs::create_dir_all(data)?;
         let data = Dir::open_ambient_dir(data.canonicalize()?, cap_std::ambient_authority())?;
+        filesystem::local(&data)?;
         match data.create_dir("run-leases") {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
@@ -66,6 +67,7 @@ impl Registry {
 
     /// Gate first; identity comes from a held directory, never a mutable path.
     pub(crate) fn lock(self: &Arc<Self>, tree: &Dir, mode: LockMode) -> Result<Claim, Error> {
+        filesystem::local(tree)?;
         let metadata = tree.dir_metadata()?;
         let identity = format!("{}:{}", metadata.dev(), metadata.ino());
         let key = format!("{:x}", Sha256::digest(identity.as_bytes()));
@@ -171,6 +173,8 @@ pub(crate) fn shared(command: &Command) -> Result<Vec<Claim>, Error> {
         })
         .collect()
 }
+
+mod filesystem;
 
 #[cfg(test)]
 mod tests;

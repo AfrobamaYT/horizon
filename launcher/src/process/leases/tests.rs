@@ -60,6 +60,15 @@ fn child_keeps_gate_and_tree_after_creator_closes_its_copies() {
             "actor exited before readiness"
         );
     }
+    let gate = File::options()
+        .read(true)
+        .write(true)
+        .open(data.join("run-leases/gate"))
+        .unwrap();
+    assert!(matches!(
+        gate.try_lock(),
+        Err(std::fs::TryLockError::WouldBlock)
+    ));
     let registry = Registry::with_release(&data, Release::Unlock).unwrap();
     assert!(matches!(
         registry.lock(&trees[0], LockMode::Exclusive),
@@ -73,15 +82,6 @@ fn child_keeps_gate_and_tree_after_creator_closes_its_copies() {
             )
             .unwrap(),
     );
-    let gate = File::options()
-        .read(true)
-        .write(true)
-        .open(data.join("run-leases/gate"))
-        .unwrap();
-    assert!(matches!(
-        gate.try_lock(),
-        Err(std::fs::TryLockError::WouldBlock)
-    ));
     child.stdin.take().unwrap().write_all(b"exit\n").unwrap();
     assert!(child.wait().unwrap().success());
     released(&registry, &trees[0]);

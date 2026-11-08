@@ -160,6 +160,48 @@ fn killed_holder_releases_production_home_source_and_parent_leases() {
 }
 
 #[test]
+fn gate_excludes_collection_mid_acquire_and_until_last_claim_drops() {
+    let root = tempfile::tempdir().unwrap();
+    let registry = Registry::at(root.path()).unwrap();
+    let held = registry.directory.try_clone().unwrap();
+    assert!(matches!(
+        open_lock(&held, "gate", LockMode::Exclusive, Release::Unlock),
+        Err(Error::Busy)
+    ));
+    let claim = registry
+        .lock(&directory(&root.path().join("tree")), LockMode::Shared)
+        .unwrap();
+    drop(registry);
+    assert!(matches!(
+        open_lock(&held, "gate", LockMode::Exclusive, Release::Unlock),
+        Err(Error::Busy)
+    ));
+    drop(claim);
+    let exclusive = open_lock(&held, "gate", LockMode::Exclusive, Release::Unlock).unwrap();
+    assert!(matches!(Registry::at(root.path()), Err(Error::Busy)));
+    drop(exclusive);
+    assert!(Registry::at(root.path()).is_ok());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn unsupported_volume_refuses_registry_and_tree_without_creating_entries() {
+    assert!(matches!(
+        Registry::at(Path::new("/proc")),
+        Err(Error::UnsupportedFilesystem)
+    ));
+    let root = tempfile::tempdir().unwrap();
+    let registry = Registry::at(root.path()).unwrap();
+    let before = registry.directory.entries().unwrap().count();
+    let proc = Dir::open_ambient_dir("/proc", cap_std::ambient_authority()).unwrap();
+    assert!(matches!(
+        registry.lock(&proc, LockMode::Shared),
+        Err(Error::UnsupportedFilesystem)
+    ));
+    assert_eq!(registry.directory.entries().unwrap().count(), before);
+}
+
+#[test]
 fn lease_holder_actor() {
     let Some(root) = std::env::var_os("HORIZON_LEASE_ACTOR_ROOT") else {
         return;
