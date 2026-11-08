@@ -18,6 +18,9 @@ pub fn native_play_sound(
     original: &SoundPlay,
     sound: &mut Option<SoundPlay>,
 ) {
+    if !mod_api::__private::listened(HookId::PlaySound) {
+        return;
+    }
     mod_api::dispatch_play_sound(
         &crate::api_context::LoopReader(context).context(),
         instance,
@@ -36,6 +39,9 @@ pub fn native_play_sound_source(
     sound: &SoundPlay,
     channel: &ChannelRef,
 ) {
+    if !mod_api::__private::listened(HookId::PlaySoundSource) {
+        return;
+    }
     mod_api::dispatch_play_sound_source(
         &crate::api_context::LoopReader(context).context(),
         sound,
@@ -52,6 +58,9 @@ pub fn native_play_streaming_source(
     sound: &SoundPlay,
     channel: &ChannelRef,
 ) {
+    if !mod_api::__private::listened(HookId::PlayStreamingSource) {
+        return;
+    }
     mod_api::dispatch_play_streaming_source(
         &crate::api_context::LoopReader(context).context(),
         sound,
@@ -64,6 +73,9 @@ pub fn native_play_streaming_source(
 /// reload and when the output device changes (`SoundEngineLoadEvent`).
 #[inline(never)]
 pub fn native_sound_engine_load(context: &horizon_world::native_load_context::LoopContext) {
+    if !mod_api::__private::listened(HookId::SoundEngineLoad) {
+        return;
+    }
     mod_api::dispatch_sound_engine_load(&crate::api_context::LoopReader(context).context());
 }
 
