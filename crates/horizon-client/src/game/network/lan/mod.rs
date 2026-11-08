@@ -5561,7 +5561,6 @@ mod world_spawn_sync_tests {
                 latency: Arc::new(AtomicI32::new(0)),
                 address: "127.0.0.1:1".parse().unwrap(),
                 expected: false,
-                configured: Default::default(),
             },
             1,
             [0.5, 80.0, 0.5],
@@ -5725,14 +5724,16 @@ mod world_spawn_sync_tests {
             game.spawn = Some(host_personal);
             let rx = host(game);
             let mut host = game.lan.take().unwrap();
-            let guest = &mut host.hub.guests[0];
-            guest.dimension = "minecraft:overworld".into();
-            guest.spawn = Some(guest_personal);
-            guest.health = 0.0;
-            guest.dead = true;
-            guest.loaded = true;
-            game.guest_respawn(&mut host, 1);
-            let guest = &host.hub.guests[0];
+            host.hub.guests.update(0, |guest| {
+                guest.dimension = "minecraft:overworld".into();
+                guest.spawn = Some(guest_personal);
+                guest.health = 0.0;
+                guest.dead = true;
+                guest.loaded = true;
+            });
+            game.lan = Some(host);
+            game.guest_respawn(1);
+            let guest = &game.lan.as_ref().unwrap().hub.guests[0];
             assert_eq!(
                 guest.position, guest_personal,
                 "the guest's landing stays personal"
