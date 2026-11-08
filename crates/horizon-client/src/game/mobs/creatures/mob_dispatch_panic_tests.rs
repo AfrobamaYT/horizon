@@ -2,7 +2,10 @@ use super::*;
 use horizon_client::{
     chunk::Chunk,
     join_seq::JoinSeq,
-    join_seq::residency::{Change, EntityLookup, EntityTable, Journal, Kind, Owner, SourceEntity},
+    join_seq::residency::{
+        Change, Journal, Kind, Owner,
+        table::{EntityLookup, EntityTable, SourceEntity},
+    },
 };
 use horizon_core::random::{LegacyRandom, RandomSource};
 use horizon_mod_runtime::attachments::{AttachmentType, Holder};
@@ -161,7 +164,12 @@ fn mob_despawn_listener_panic_preserves_owned_rows_and_lent_random() {
                     game.world.attachment_syncs.insert(Holder::Level);
                     let expected_syncs = game.world.attachment_syncs.clone();
                     game.world.path_writes = Some(Vec::new());
-                    let stone = game.res.blocks.default_state("minecraft:stone").unwrap();
+                    let stone = game
+                        .pack
+                        .assets
+                        .registry
+                        .default_state("minecraft:stone")
+                        .unwrap();
                     game.world.set(4, 80, 4, stone).unwrap();
                     let expected_writes = game.world.path_writes.clone();
                     game.world.random = LegacyRandom::new(0x5eed);
