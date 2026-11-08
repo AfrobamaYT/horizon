@@ -1535,166 +1535,151 @@ mod loot_kill_target_tests {
 #[cfg(test)]
 mod loot_mine_location_tests {
     use super::*;
-    use crate::game::{Audio, Options, Progress, Settings, load_resources};
     use horizon_client::{chunk::Chunk, containers::BlockEntity};
     use std::sync::Arc;
     const TABLE: &str = r###"{"type":"minecraft:block","pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:emerald","modifier":{"type":"minecraft:set_count","count":2}}]},{"rolls":1,"condition":{"type":"minecraft:location_check","offsetX":1,"predicate":{"block":{"blocks":"minecraft:oak_log","state":{"axis":"x"}}}},"entries":[{"type":"minecraft:item","name":"minecraft:diamond"}]}]}"###;
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
     fn loot_mine_location_reads_actual_offset_block_state() {
-        let root = std::path::PathBuf::from(
-            std::env::var_os("HORIZON_TEST_RESOURCES").expect("prepared resources required"),
-        );
-        let settings = Settings::default();
-        let loaded = load_resources(
-            root.clone(),
-            None,
-            &root,
-            &settings,
-            std::time::Instant::now(),
-            false,
-            true,
-            &Progress::new(),
-            &mut |_, _| unreachable!(),
-        )
-        .unwrap();
-        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
-        options.resources = root.clone();
-        options.game_dir = Some(
-            std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap()).join("h079-game"),
-        );
-        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
-        let mut game = Game::new(
-            &loaded.resources,
-            loaded.pack,
-            loaded.gui.unwrap(),
-            options,
-            settings,
-            Audio::silent(&root),
-            None,
-        )
-        .unwrap();
-        game.build_registries();
-        game.set_allow_commands(true);
-        game.world
-            .chunks
-            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-        game.block_ticks
-            .add_empty_chunk(ChunkPos::new(0, 0))
-            .unwrap();
-
-        game.world
-            .chunks
-            .insert((-1, -1), Arc::new(Chunk::empty(-1, -1)));
-        game.world
-            .chunks
-            .insert((-1, 0), Arc::new(Chunk::empty(-1, 0)));
-        game.world
-            .chunks
-            .insert((0, -1), Arc::new(Chunk::empty(0, -1)));
-        for (x, z) in [(-1, -1), (-1, 0), (0, -1)] {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.options.game_dir = Some(
+                std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap())
+                    .join("h079-game"),
+            );
+            game.build_registries();
+            game.set_allow_commands(true);
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
             game.block_ticks
-                .add_empty_chunk(ChunkPos::new(x, z))
+                .add_empty_chunk(ChunkPos::new(0, 0))
                 .unwrap();
-        }
-        game.world_root =
-            std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap()).join("h079-world");
-        let pack = game.world_root.join("datapacks/h079");
-        std::fs::create_dir_all(pack.join("data/minecraft/loot_table/blocks")).unwrap();
-        std::fs::create_dir_all(pack.join("data/h079/function")).unwrap();
-        std::fs::write(
-            pack.join("pack.mcmeta"),
-            r#"{"pack":{"description":"H079 fixture"}}"#,
-        )
-        .unwrap();
-        std::fs::write(
-            pack.join("data/minecraft/loot_table/blocks/stone.json"),
-            TABLE,
-        )
-        .unwrap();
-        std::fs::write(
-            pack.join("data/h079/function/admit.mcfunction"),
-            "scoreboard players set pack h079 42\n",
-        )
-        .unwrap();
-        std::fs::write(
-            game.world_root.join("datapacks.json"),
-            r#"{"enabled":["vanilla","file/h079"],"disabled":[]}"#,
-        )
-        .unwrap();
-        game.world_tables = game.build_world_tables(false, &[]).unwrap().0;
-        assert!(game.world_tables.is_some());
-        game.ensure_datapacks();
-        assert!(game.run_command("scoreboard objectives add h079 dummy"));
-        game.run_command("function h079:admit");
-        assert!(
-            game.run_command("execute if score pack h079 matches 42"),
-            "real pack function admission"
-        );
-        assert!(game.run_command("forceload add -16 -16 15 15"));
-        assert!(game.run_command("fill -16 199 -16 15 199 15 stone"));
-        let clock = game.world.game_time;
-        let mut differences = Vec::new();
-        for (label, x, z, counterpart, expected) in [
-            ("correct", 4, 4, Some("oak_log[axis=x]"), 1),
-            ("wrong-state", 8, 4, Some("oak_log[axis=z]"), 0),
-            ("absent", 12, 4, None, 0),
-            ("negative-center", -4, -4, Some("oak_log[axis=x]"), 1),
-        ] {
-            assert!(game.run_command(&format!("setblock {x} 200 {z} stone strict")));
-            if let Some(other) = counterpart {
-                assert!(game.run_command(&format!("setblock {} 200 {z} {other} strict", x + 1)));
+
+            game.world
+                .chunks
+                .insert((-1, -1), Arc::new(Chunk::empty(-1, -1)));
+            game.world
+                .chunks
+                .insert((-1, 0), Arc::new(Chunk::empty(-1, 0)));
+            game.world
+                .chunks
+                .insert((0, -1), Arc::new(Chunk::empty(0, -1)));
+            for (x, z) in [(-1, -1), (-1, 0), (0, -1)] {
+                game.block_ticks
+                    .add_empty_chunk(ChunkPos::new(x, z))
+                    .unwrap();
             }
-            assert!(game.run_command(&format!(
-                "execute if block {} 200 {z} {}",
-                x + 1,
-                counterpart.unwrap_or("air")
-            )));
-            let before = (game.world.block(x, 200, z), game.world.block(x + 1, 200, z));
-            assert!(game.run_command(&format!("setblock {x} 200 10 chest strict")));
-            let Some(BlockEntity::Chest(initial)) = game.world.block_entities.get(&(x, 200, 10))
-            else {
-                panic!("real output chest")
-            };
-            assert!(initial.iter().all(Option::is_none));
-            let prefix = if x < 0 {
-                "execute positioned -8.25 200.125 -8.75 run "
-            } else {
-                ""
-            };
-            assert!(game.run_command(&format!(
-                "{prefix}loot insert {x} 200 10 mine {x} 200 {z} stick"
-            )));
-            let Some(BlockEntity::Chest(output)) = game.world.block_entities.get(&(x, 200, 10))
-            else {
-                panic!("actual output")
-            };
+            game.world_root = std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap())
+                .join("h079-world");
+            let pack = game.world_root.join("datapacks/h079");
+            std::fs::create_dir_all(pack.join("data/minecraft/loot_table/blocks")).unwrap();
+            std::fs::create_dir_all(pack.join("data/h079/function")).unwrap();
+            std::fs::write(
+                pack.join("pack.mcmeta"),
+                r#"{"pack":{"description":"H079 fixture"}}"#,
+            )
+            .unwrap();
+            std::fs::write(
+                pack.join("data/minecraft/loot_table/blocks/stone.json"),
+                TABLE,
+            )
+            .unwrap();
+            std::fs::write(
+                pack.join("data/h079/function/admit.mcfunction"),
+                "scoreboard players set pack h079 42\n",
+            )
+            .unwrap();
+            std::fs::write(
+                game.world_root.join("datapacks.json"),
+                r#"{"enabled":["vanilla","file/h079"],"disabled":[]}"#,
+            )
+            .unwrap();
+            let stack = game.reload_datapacks(false, &[]).unwrap();
+            game.world_tables = game
+                .build_world_tables(
+                    &stack,
+                    false,
+                    &game.options.resources.clone(),
+                    game.mods.data_switched,
+                )
+                .unwrap()
+                .0;
+            assert!(game.world_tables.is_some());
+            game.ensure_datapacks();
+            assert!(game.run_command("scoreboard objectives add h079 dummy"));
+            game.run_command("function h079:admit");
             assert!(
-                output
+                game.run_command("execute if score pack h079 matches 42"),
+                "real pack function admission"
+            );
+            assert!(game.run_command("forceload add -16 -16 15 15"));
+            assert!(game.run_command("fill -16 199 -16 15 199 15 stone"));
+            let clock = game.world.game_time;
+            let mut differences = Vec::new();
+            for (label, x, z, counterpart, expected) in [
+                ("correct", 4, 4, Some("oak_log[axis=x]"), 1),
+                ("wrong-state", 8, 4, Some("oak_log[axis=z]"), 0),
+                ("absent", 12, 4, None, 0),
+                ("negative-center", -4, -4, Some("oak_log[axis=x]"), 1),
+            ] {
+                assert!(game.run_command(&format!("setblock {x} 200 {z} stone strict")));
+                if let Some(other) = counterpart {
+                    assert!(
+                        game.run_command(&format!("setblock {} 200 {z} {other} strict", x + 1))
+                    );
+                }
+                assert!(game.run_command(&format!(
+                    "execute if block {} 200 {z} {}",
+                    x + 1,
+                    counterpart.unwrap_or("air")
+                )));
+                let before = (game.world.block(x, 200, z), game.world.block(x + 1, 200, z));
+                assert!(game.run_command(&format!("setblock {x} 200 10 chest strict")));
+                let Some(BlockEntity::Chest(initial)) =
+                    game.world.block_entities.get(&(x, 200, 10))
+                else {
+                    panic!("real output chest")
+                };
+                assert!(initial.iter().all(Option::is_none));
+                let prefix = if x < 0 {
+                    "execute positioned -8.25 200.125 -8.75 run "
+                } else {
+                    ""
+                };
+                assert!(game.run_command(&format!(
+                    "{prefix}loot insert {x} 200 10 mine {x} 200 {z} stick"
+                )));
+                let Some(BlockEntity::Chest(output)) = game.world.block_entities.get(&(x, 200, 10))
+                else {
+                    panic!("actual output")
+                };
+                assert!(
+                    output
+                        .iter()
+                        .flatten()
+                        .any(|s| s.item.as_ref() == "minecraft:emerald" && s.count == 2),
+                    "pack override and unconditional roll are real"
+                );
+                let diamonds: u32 = output
                     .iter()
                     .flatten()
-                    .any(|s| s.item.as_ref() == "minecraft:emerald" && s.count == 2),
-                "pack override and unconditional roll are real"
-            );
-            let diamonds: u32 = output
-                .iter()
-                .flatten()
-                .filter(|s| s.item.as_ref() == "minecraft:diamond")
-                .map(|s| s.count)
-                .sum();
-            if diamonds != expected {
-                differences.push((label, diamonds, expected));
+                    .filter(|s| s.item.as_ref() == "minecraft:diamond")
+                    .map(|s| s.count)
+                    .sum();
+                if diamonds != expected {
+                    differences.push((label, diamonds, expected));
+                }
+                assert_eq!(
+                    (game.world.block(x, 200, z), game.world.block(x + 1, 200, z)),
+                    before
+                );
             }
-            assert_eq!(
-                (game.world.block(x, 200, z), game.world.block(x + 1, 200, z)),
-                before
+            assert_eq!(game.world.game_time, clock);
+            assert!(
+                differences.is_empty(),
+                "actual offset block predicate differences: {differences:?}"
             );
-        }
-        assert_eq!(game.world.game_time, clock);
-        assert!(
-            differences.is_empty(),
-            "actual offset block predicate differences: {differences:?}"
-        );
+        });
     }
 }
 

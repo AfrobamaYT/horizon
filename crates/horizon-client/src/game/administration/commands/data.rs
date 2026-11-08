@@ -1598,6 +1598,7 @@ mod tests {
                 join: Default::default(),
                 item_transformation: None,
                 knot_check: None,
+                interaction: None,
                 id: 12,
                 kind: "minecraft:block_display".into(),
                 position: Vec3::new(0.5, 64.0, 0.5),
@@ -1848,7 +1849,12 @@ mod boat_passenger_tree_tests {
             let bi = game.boats.iter().position(|b| b.position.x == 8.5).unwrap();
             let bid = game.boats[bi].id;
             let child = game
-                .spawn_mob_reason("minecraft:cow", [8.5, 200.0, 8.5], true, true, false)
+                .spawn_mob(
+                    "minecraft:cow",
+                    [8.5, 200.0, 8.5],
+                    true,
+                    crate::game::creatures::SpawnSite::Plain,
+                )
                 .unwrap();
             let ci = game.mobs.iter().position(|m| m.id == child).unwrap();
             game.mobs[ci].no_ai = true;
@@ -1874,7 +1880,7 @@ mod boat_passenger_tree_tests {
                 game.mobs[ci].extra.anger_end,
                 game.mobs[ci].extra.angry_at,
             );
-            let first = game.entity_nbt(Target::Boat(bid)).unwrap();
+            let first = game.command_target_nbt(Target::Boat(bid)).unwrap();
             let after = (
                 game.persist.uuids.len(),
                 game.persist.uuid_of(child),
@@ -1890,7 +1896,12 @@ mod boat_passenger_tree_tests {
                 failures.push("first parent must use existing UUID registration once".into());
             }
             let control = game
-                .spawn_mob_reason("minecraft:cow", [12.5, 200.0, 8.5], true, true, false)
+                .spawn_mob(
+                    "minecraft:cow",
+                    [12.5, 200.0, 8.5],
+                    true,
+                    crate::game::creatures::SpawnSite::Plain,
+                )
                 .unwrap();
             let di = game.mobs.iter().position(|m| m.id == control).unwrap();
             game.mobs[di].no_ai = true;
@@ -1902,7 +1913,7 @@ mod boat_passenger_tree_tests {
                 game.persist.uuid_of(control),
                 game.mobs[di].extra.anger_end,
             );
-            let direct_control = game.entity_nbt(Target::Mob(control)).unwrap();
+            let direct_control = game.command_target_nbt(Target::Mob(control)).unwrap();
             let direct_after = (
                 game.persist.uuids.len(),
                 game.persist.uuid_of(control),
@@ -1921,7 +1932,7 @@ mod boat_passenger_tree_tests {
                 direct_control.get("UUID"),
                 Some(&Tag::IntArray(direct_after.1.unwrap().to_vec()))
             );
-            let direct_child = game.entity_nbt(Target::Mob(child)).unwrap();
+            let direct_child = game.command_target_nbt(Target::Mob(child)).unwrap();
             let saved_child = |tag: &Tag| match tag.get("Passengers") {
                 Some(Tag::List(v)) if v.len() == 1 => Some(v[0].clone()),
                 _ => None,
@@ -1931,7 +1942,7 @@ mod boat_passenger_tree_tests {
             }
             let stable = game.persist.uuids.len();
             for _ in 0..2 {
-                let again = game.entity_nbt(Target::Boat(bid)).unwrap();
+                let again = game.command_target_nbt(Target::Boat(bid)).unwrap();
                 if saved_child(&again).as_ref() != Some(&direct_child) {
                     failures.push("repeated parent must keep exactly one actual child".into());
                 }
@@ -1948,7 +1959,7 @@ mod boat_passenger_tree_tests {
                 failures.push("registered data command must reach live tree".into());
             }
             game.boats[bi].leash = Some(horizon_client::mobs::leash::Holder::Mob(control));
-            let leashed = game.entity_nbt(Target::Boat(bid)).unwrap();
+            let leashed = game.command_target_nbt(Target::Boat(bid)).unwrap();
             assert_eq!(
                 leashed.get("leash").and_then(|t| t.get("UUID")),
                 direct_control.get("UUID")
@@ -1957,15 +1968,15 @@ mod boat_passenger_tree_tests {
             assert_eq!(leashed.get("Silent"), Some(&Tag::Byte(1)));
             game.dismount_mob(child);
             assert!(
-                game.entity_nbt(Target::Boat(bid))
+                game.command_target_nbt(Target::Boat(bid))
                     .unwrap()
                     .get("Passengers")
                     .is_none()
             );
             game.ride_mount(Target::Mob(child), Target::Boat(bid))
                 .unwrap();
-            let remount_child = game.entity_nbt(Target::Mob(child)).unwrap();
-            if saved_child(&game.entity_nbt(Target::Boat(bid)).unwrap()).as_ref()
+            let remount_child = game.command_target_nbt(Target::Mob(child)).unwrap();
+            if saved_child(&game.command_target_nbt(Target::Boat(bid)).unwrap()).as_ref()
                 != Some(&remount_child)
             {
                 failures.push("actual remount tree".into());
@@ -2608,247 +2619,225 @@ mod falling_live_adoption_tests {
 #[cfg(test)]
 mod vehicle_container_tests {
     use super::*;
-    use crate::game::{Audio, Options, Progress, Settings, load_resources};
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
     fn loaded_vehicle_saves_own_only_their_container_fields() {
-        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let settings = Settings::default();
-        let loaded = load_resources(
-            root.clone(),
-            None,
-            &root,
-            &settings,
-            std::time::Instant::now(),
-            false,
-            true,
-            &Progress::new(),
-            &mut |_, _| unreachable!(),
-        )
-        .unwrap();
-        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
-        options.resources = root.clone();
-        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
-        let mut game = Game::new(
-            &loaded.resources,
-            loaded.pack,
-            loaded.gui.unwrap(),
-            options,
-            settings,
-            Audio::silent(&root),
-            None,
-        )
-        .unwrap();
-        game.build_registries();
-        game.set_allow_commands(true);
-        let cases = [
-            (
-                "boat_plain",
-                "minecraft:oak_boat",
-                "Items:[{Slot:0b,id:\"minecraft:diamond\",count:3,components:{\"minecraft:custom_data\":{h052:9}}}],LootTable:\"minecraft:empty\",LootTableSeed:73L",
-                None,
-                false,
-                "",
-            ),
-            (
-                "cart_plain",
-                "minecraft:minecart",
-                "Items:[{Slot:0b,id:\"minecraft:diamond\",count:3,components:{\"minecraft:custom_data\":{h052:9}}}],LootTable:\"minecraft:empty\",LootTableSeed:73L",
-                None,
-                false,
-                "",
-            ),
-            (
-                "boat_items",
-                "minecraft:oak_chest_boat",
-                "Items:[{Slot:0b,id:\"minecraft:diamond\",count:3,components:{\"minecraft:custom_data\":{h052:9}}}],LootTableSeed:73L",
-                Some(1usize),
-                false,
-                "",
-            ),
-            (
-                "cart_items",
-                "minecraft:chest_minecart",
-                "Items:[{Slot:0b,id:\"minecraft:diamond\",count:3,components:{\"minecraft:custom_data\":{h052:9}}}],LootTableSeed:73L",
-                Some(1usize),
-                false,
-                "",
-            ),
-            (
-                "boat_table",
-                "minecraft:oak_chest_boat",
-                "LootTable:\"minecraft:empty\",LootTableSeed:73L",
-                None,
-                true,
-                "minecraft:empty",
-            ),
-            (
-                "cart_table",
-                "minecraft:chest_minecart",
-                "LootTable:\"minecraft:empty\",LootTableSeed:73L",
-                None,
-                true,
-                "minecraft:empty",
-            ),
-            (
-                "boat_empty_table",
-                "minecraft:oak_chest_boat",
-                "LootTable:\"\",LootTableSeed:73L",
-                None,
-                true,
-                "minecraft:",
-            ),
-            (
-                "cart_empty_table",
-                "minecraft:chest_minecart",
-                "LootTable:\"\",LootTableSeed:73L",
-                None,
-                true,
-                "minecraft:",
-            ),
-            (
-                "boat_empty",
-                "minecraft:oak_chest_boat",
-                "",
-                Some(0usize),
-                false,
-                "",
-            ),
-            (
-                "cart_empty",
-                "minecraft:chest_minecart",
-                "",
-                Some(0usize),
-                false,
-                "",
-            ),
-        ];
-        let clock = game.world.game_time;
-        let mut differences = Vec::new();
-        for (i, (name, kind, fields, expected_items, pending, table_text)) in
-            cases.iter().enumerate()
-        {
-            let uuid = [52, 0, 0, i as i32 + 1];
-            let source = [
-                r#"{Pos:[4.5d,200d,4.5d],NoGravity:1b,Tags:["h052"]"#,
-                if fields.is_empty() { "" } else { "," },
-                fields,
-                "}",
-            ]
-            .concat();
-            let (tag, _) = parse_snbt(&source).unwrap();
-            let target = if kind.contains("boat") {
-                game.load_boat(tag, Some(uuid), kind);
-                let b = game.boats.last().unwrap();
-                assert_eq!(
-                    b.items
-                        .first()
-                        .and_then(Option::as_ref)
-                        .map_or(0, |s| s.count),
-                    if *expected_items == Some(1) { 3 } else { 0 },
-                    "{name}: actual boat inventory"
-                );
-                Target::Boat(b.id)
-            } else {
-                game.load_cart(tag, Some(uuid), kind);
-                let c = game.carts.last().unwrap();
-                assert_eq!(
-                    c.items
-                        .first()
-                        .and_then(Option::as_ref)
-                        .map_or(0, |s| s.count),
-                    if *expected_items == Some(1) { 3 } else { 0 },
-                    "{name}: actual cart inventory"
-                );
-                Target::Cart(c.id)
-            };
-            let id = match target {
-                Target::Boat(id) | Target::Cart(id) => id,
-                _ => unreachable!(),
-            };
-            let saved = game.entity_nbt(target).unwrap();
-            assert_eq!(saved.get("UUID"), Some(&Tag::IntArray(uuid.to_vec())));
-            assert_eq!(
-                saved.get("Tags"),
-                Some(&Tag::List(vec![Tag::String("h052".into())]))
-            );
-            let actual_items = match saved.get("Items") {
-                Some(Tag::List(items)) => Some(items.len()),
-                None => None,
-                other => panic!("{name}: {other:?}"),
-            };
-            if actual_items != *expected_items {
-                differences.push(format!(
-                    "{name}: Items {actual_items:?} != {expected_items:?}"
-                ));
-            }
-            let table = pending.then(|| Tag::String((*table_text).into()));
-            let seed = pending.then_some(Tag::Long(73));
-            for (key, expected) in [
-                ("LootTable", table.as_ref()),
-                ("LootTableSeed", seed.as_ref()),
-            ] {
-                if saved.get(key) != expected {
-                    differences.push(format!(
-                        "{name}: {key} {:?} != {expected:?}",
-                        saved.get(key)
-                    ));
-                }
-            }
-            if *expected_items == Some(1) {
-                // The model, not a stale loaded Items list, owns the inventory.
-                let slots = match target {
-                    Target::Boat(_) => &mut game.boats.last_mut().unwrap().items,
-                    Target::Cart(_) => &mut game.carts.last_mut().unwrap().items,
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.build_registries();
+            game.set_allow_commands(true);
+            let cases = [
+                (
+                    "boat_plain",
+                    "minecraft:oak_boat",
+                    "Items:[{Slot:0b,id:\"minecraft:diamond\",count:3,components:{\"minecraft:custom_data\":{h052:9}}}],LootTable:\"minecraft:empty\",LootTableSeed:73L",
+                    None,
+                    false,
+                    "",
+                ),
+                (
+                    "cart_plain",
+                    "minecraft:minecart",
+                    "Items:[{Slot:0b,id:\"minecraft:diamond\",count:3,components:{\"minecraft:custom_data\":{h052:9}}}],LootTable:\"minecraft:empty\",LootTableSeed:73L",
+                    None,
+                    false,
+                    "",
+                ),
+                (
+                    "boat_items",
+                    "minecraft:oak_chest_boat",
+                    "Items:[{Slot:0b,id:\"minecraft:diamond\",count:3,components:{\"minecraft:custom_data\":{h052:9}}}],LootTableSeed:73L",
+                    Some(1usize),
+                    false,
+                    "",
+                ),
+                (
+                    "cart_items",
+                    "minecraft:chest_minecart",
+                    "Items:[{Slot:0b,id:\"minecraft:diamond\",count:3,components:{\"minecraft:custom_data\":{h052:9}}}],LootTableSeed:73L",
+                    Some(1usize),
+                    false,
+                    "",
+                ),
+                (
+                    "boat_table",
+                    "minecraft:oak_chest_boat",
+                    "LootTable:\"minecraft:empty\",LootTableSeed:73L",
+                    None,
+                    true,
+                    "minecraft:empty",
+                ),
+                (
+                    "cart_table",
+                    "minecraft:chest_minecart",
+                    "LootTable:\"minecraft:empty\",LootTableSeed:73L",
+                    None,
+                    true,
+                    "minecraft:empty",
+                ),
+                (
+                    "boat_empty_table",
+                    "minecraft:oak_chest_boat",
+                    "LootTable:\"\",LootTableSeed:73L",
+                    None,
+                    true,
+                    "minecraft:",
+                ),
+                (
+                    "cart_empty_table",
+                    "minecraft:chest_minecart",
+                    "LootTable:\"\",LootTableSeed:73L",
+                    None,
+                    true,
+                    "minecraft:",
+                ),
+                (
+                    "boat_empty",
+                    "minecraft:oak_chest_boat",
+                    "",
+                    Some(0usize),
+                    false,
+                    "",
+                ),
+                (
+                    "cart_empty",
+                    "minecraft:chest_minecart",
+                    "",
+                    Some(0usize),
+                    false,
+                    "",
+                ),
+            ];
+            let clock = game.world.game_time;
+            let mut differences = Vec::new();
+            for (i, (name, kind, fields, expected_items, pending, table_text)) in
+                cases.iter().enumerate()
+            {
+                let uuid = [52, 0, 0, i as i32 + 1];
+                let source = [
+                    r#"{Pos:[4.5d,200d,4.5d],NoGravity:1b,Tags:["h052"]"#,
+                    if fields.is_empty() { "" } else { "," },
+                    fields,
+                    "}",
+                ]
+                .concat();
+                let (tag, _) = parse_snbt(&source).unwrap();
+                let target = if kind.contains("boat") {
+                    game.load_boat(tag, Some(uuid), kind);
+                    let b = game.boats.last().unwrap();
+                    assert_eq!(
+                        b.items
+                            .first()
+                            .and_then(Option::as_ref)
+                            .map_or(0, |s| s.count),
+                        if *expected_items == Some(1) { 3 } else { 0 },
+                        "{name}: actual boat inventory"
+                    );
+                    Target::Boat(b.id)
+                } else {
+                    game.load_cart(tag, Some(uuid), kind);
+                    let c = game.carts.last().unwrap();
+                    assert_eq!(
+                        c.items
+                            .first()
+                            .and_then(Option::as_ref)
+                            .map_or(0, |s| s.count),
+                        if *expected_items == Some(1) { 3 } else { 0 },
+                        "{name}: actual cart inventory"
+                    );
+                    Target::Cart(c.id)
+                };
+                let id = match target {
+                    Target::Boat(id) | Target::Cart(id) => id,
                     _ => unreachable!(),
                 };
-                slots[0].as_mut().unwrap().count = 4;
-            }
-            // A normal model can save without any raw input. Boat pending tables
-            // already live in the retained source; no replacement pending state is invented.
-            if !pending {
-                game.persist.raw.remove(&id);
-                let saved = game.entity_nbt(target).unwrap();
-                let expected = if *expected_items == Some(1) { 4 } else { 0 };
-                let count = match saved.get("Items") {
-                    Some(Tag::List(items)) => items.first().and_then(|t| t.get("count")).cloned(),
-                    _ => None,
-                };
-                assert_eq!(
-                    count,
-                    (expected != 0).then_some(Tag::Int(expected)),
-                    "{name}: no-raw model count"
-                );
-                assert!(saved.get("LootTable").is_none() && saved.get("LootTableSeed").is_none());
+                let saved = game.command_target_nbt(target).unwrap();
                 assert_eq!(saved.get("UUID"), Some(&Tag::IntArray(uuid.to_vec())));
+                assert_eq!(
+                    saved.get("Tags"),
+                    Some(&Tag::List(vec![Tag::String("h052".into())]))
+                );
+                let actual_items = match saved.get("Items") {
+                    Some(Tag::List(items)) => Some(items.len()),
+                    None => None,
+                    other => panic!("{name}: {other:?}"),
+                };
+                if actual_items != *expected_items {
+                    differences.push(format!(
+                        "{name}: Items {actual_items:?} != {expected_items:?}"
+                    ));
+                }
+                let table = pending.then(|| Tag::String((*table_text).into()));
+                let seed = pending.then_some(Tag::Long(73));
+                for (key, expected) in [
+                    ("LootTable", table.as_ref()),
+                    ("LootTableSeed", seed.as_ref()),
+                ] {
+                    if saved.get(key) != expected {
+                        differences.push(format!(
+                            "{name}: {key} {:?} != {expected:?}",
+                            saved.get(key)
+                        ));
+                    }
+                }
+                if *expected_items == Some(1) {
+                    // The model, not a stale loaded Items list, owns the inventory.
+                    let slots = match target {
+                        Target::Boat(_) => &mut game.boats.last_mut().unwrap().items,
+                        Target::Cart(_) => &mut game.carts.last_mut().unwrap().items,
+                        _ => unreachable!(),
+                    };
+                    slots[0].as_mut().unwrap().count = 4;
+                }
+                // A normal model can save without any raw input. Boat pending tables
+                // already live in the retained source; no replacement pending state is invented.
+                if !pending {
+                    game.persist.raw.remove(&id);
+                    let saved = game.command_target_nbt(target).unwrap();
+                    let expected = if *expected_items == Some(1) { 4 } else { 0 };
+                    let count = match saved.get("Items") {
+                        Some(Tag::List(items)) => {
+                            items.first().and_then(|t| t.get("count")).cloned()
+                        }
+                        _ => None,
+                    };
+                    assert_eq!(
+                        count,
+                        (expected != 0).then_some(Tag::Int(expected)),
+                        "{name}: no-raw model count"
+                    );
+                    assert!(
+                        saved.get("LootTable").is_none() && saved.get("LootTableSeed").is_none()
+                    );
+                    assert_eq!(saved.get("UUID"), Some(&Tag::IntArray(uuid.to_vec())));
+                }
             }
-        }
-        // Retained loader diagnostic, not a writer parity assertion: an input
-        // containing both a table and Items currently keeps modeled contents.
-        for kind in ["minecraft:oak_chest_boat", "minecraft:chest_minecart"] {
-            let source = r#"{Pos:[4.5d,200d,4.5d],LootTable:"minecraft:empty",LootTableSeed:73L,Items:[{Slot:0b,id:"minecraft:diamond",count:3}]}"#;
-            let (tag, _) = parse_snbt(source).unwrap();
-            let count = if kind.contains("boat") {
-                game.load_boat(tag, Some([52, 1, 0, 1]), kind);
-                game.boats.last().unwrap().items[0]
-                    .as_ref()
-                    .map_or(0, |s| s.count)
-            } else {
-                game.load_cart(tag, Some([52, 1, 0, 2]), kind);
-                game.carts.last().unwrap().items[0]
-                    .as_ref()
-                    .map_or(0, |s| s.count)
-            };
-            eprintln!(
-                "separate loader diagnostic {kind}: supplied table+Items retains modeled count {count}"
+            // Retained loader diagnostic, not a writer parity assertion: an input
+            // containing both a table and Items currently keeps modeled contents.
+            for kind in ["minecraft:oak_chest_boat", "minecraft:chest_minecart"] {
+                let source = r#"{Pos:[4.5d,200d,4.5d],LootTable:"minecraft:empty",LootTableSeed:73L,Items:[{Slot:0b,id:"minecraft:diamond",count:3}]}"#;
+                let (tag, _) = parse_snbt(source).unwrap();
+                let count = if kind.contains("boat") {
+                    game.load_boat(tag, Some([52, 1, 0, 1]), kind);
+                    game.boats.last().unwrap().items[0]
+                        .as_ref()
+                        .map_or(0, |s| s.count)
+                } else {
+                    game.load_cart(tag, Some([52, 1, 0, 2]), kind);
+                    game.carts.last().unwrap().items[0]
+                        .as_ref()
+                        .map_or(0, |s| s.count)
+                };
+                eprintln!(
+                    "separate loader diagnostic {kind}: supplied table+Items retains modeled count {count}"
+                );
+            }
+            assert_eq!(game.world.game_time, clock);
+            assert!(
+                differences.is_empty(),
+                "class-owned save differences:\n{}",
+                differences.join("\n")
             );
-        }
-        assert_eq!(game.world.game_time, clock);
-        assert!(
-            differences.is_empty(),
-            "class-owned save differences:\n{}",
-            differences.join("\n")
-        );
+        });
     }
 }

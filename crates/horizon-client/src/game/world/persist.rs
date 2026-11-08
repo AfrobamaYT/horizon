@@ -4099,55 +4099,29 @@ mod item_display_saved_transform_tests {
 #[cfg(test)]
 mod baby_modifier_mutation_tests {
     use super::*;
-    use crate::game::{Audio, Options, Progress, Settings, load_resources};
     use horizon_client::mobs::finalize::{self, Attr};
     use horizon_client::motion::PlayerMotion;
 
     fn with_game(test: impl FnOnce(&mut Game<'_>)) {
-        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let settings = Settings::default();
-        let loaded = load_resources(
-            root.clone(),
-            None,
-            &root,
-            &settings,
-            std::time::Instant::now(),
-            false,
-            true,
-            &Progress::new(),
-            &mut |_, _| unreachable!(),
-        )
-        .unwrap();
-        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
-        options.resources = root.clone();
-        options.game_dir = Some(
-            std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap())
-                .join(format!("h235-{:?}", std::thread::current().id())),
-        );
-        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
-        let mut game = Game::new(
-            &loaded.resources,
-            loaded.pack,
-            loaded.gui.unwrap(),
-            options,
-            settings,
-            Audio::silent(&root),
-            None,
-        )
-        .unwrap();
-        game.build_registries();
-        game.set_allow_commands(true);
-        game.world
-            .chunks
-            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-        game.block_ticks
-            .add_empty_chunk(ChunkPos::new(0, 0))
-            .unwrap();
-        assert!(game.run_command("forceload add 0 0"));
-        assert!(game.run_command("difficulty normal"));
-        game.player = Some(PlayerMotion::new(game.motion, Vec3::new(2.5, 200.0, 2.5)).unwrap());
-        game.creative = true;
-        test(&mut game);
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.options.game_dir = Some(
+                std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap())
+                    .join(format!("h235-{:?}", std::thread::current().id())),
+            );
+            game.build_registries();
+            game.set_allow_commands(true);
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            game.block_ticks
+                .add_empty_chunk(ChunkPos::new(0, 0))
+                .unwrap();
+            assert!(game.run_command("forceload add 0 0"));
+            assert!(game.run_command("difficulty normal"));
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::new(2.5, 200.0, 2.5)).unwrap());
+            game.creative = true;
+            test(game);
+        });
     }
     fn zombie(game: &Game<'_>, n: i32) -> usize {
         let i: Vec<usize> = (0..game.mobs.len())
@@ -4402,53 +4376,28 @@ mod baby_modifier_mutation_tests {
 #[cfg(test)]
 mod attribute_instance_save_tests {
     use super::*;
-    use crate::game::{Audio, Options, Progress, Settings, commands::Target, load_resources};
+    use crate::game::commands::Target;
     use horizon_client::motion::PlayerMotion;
 
     fn with_game(test: impl FnOnce(&mut Game<'_>)) {
-        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let settings = Settings::default();
-        let loaded = load_resources(
-            root.clone(),
-            None,
-            &root,
-            &settings,
-            std::time::Instant::now(),
-            false,
-            true,
-            &Progress::new(),
-            &mut |_, _| unreachable!(),
-        )
-        .unwrap();
-        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
-        options.resources = root.clone();
-        options.game_dir = Some(
-            std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap())
-                .join(format!("h105-{:?}", std::thread::current().id())),
-        );
-        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
-        let mut game = Game::new(
-            &loaded.resources,
-            loaded.pack,
-            loaded.gui.unwrap(),
-            options,
-            settings,
-            Audio::silent(&root),
-            None,
-        )
-        .unwrap();
-        game.build_registries();
-        game.set_allow_commands(true);
-        game.world
-            .chunks
-            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-        game.block_ticks
-            .add_empty_chunk(ChunkPos::new(0, 0))
-            .unwrap();
-        assert!(game.run_command("forceload add 0 0"));
-        game.player = Some(PlayerMotion::new(game.motion, Vec3::new(2.5, 200.0, 2.5)).unwrap());
-        game.creative = true;
-        test(&mut game);
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.options.game_dir = Some(
+                std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap())
+                    .join(format!("h105-{:?}", std::thread::current().id())),
+            );
+            game.build_registries();
+            game.set_allow_commands(true);
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            game.block_ticks
+                .add_empty_chunk(ChunkPos::new(0, 0))
+                .unwrap();
+            assert!(game.run_command("forceload add 0 0"));
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::new(2.5, 200.0, 2.5)).unwrap());
+            game.creative = true;
+            test(game);
+        });
     }
     fn mob(game: &Game<'_>, n: i32) -> usize {
         let i: Vec<usize> = (0..game.mobs.len())
@@ -4460,7 +4409,7 @@ mod attribute_instance_save_tests {
     /// The ids of the attribute instances the mob's save holds, in order.
     fn saved_ids(game: &mut Game<'_>, i: usize) -> Vec<String> {
         let tag = game
-            .entity_nbt(Target::Mob(game.mobs[i].id))
+            .command_target_nbt(Target::Mob(game.mobs[i].id))
             .expect("saved mob");
         match tag.get("attributes") {
             Some(Tag::List(l)) => l.iter().filter_map(|t| text(t.get("id"))).collect(),
@@ -4503,7 +4452,9 @@ mod attribute_instance_save_tests {
             // A save of the ticked pig, loaded again: the loaded instance stays
             // before the new pig's first tick.
             let i = mob(game, 1);
-            let mut saved = game.entity_nbt(Target::Mob(game.mobs[i].id)).unwrap();
+            let mut saved = game
+                .command_target_nbt(Target::Mob(game.mobs[i].id))
+                .unwrap();
             if let Tag::Compound(c) = &mut saved {
                 c.insert("UUID".into(), Tag::IntArray(vec![105, 0, 0, 3]));
             }
@@ -4587,7 +4538,9 @@ mod attribute_instance_save_tests {
                 }
             }
             let i = mob(game, 11);
-            let tag = game.entity_nbt(Target::Mob(game.mobs[i].id)).unwrap();
+            let tag = game
+                .command_target_nbt(Target::Mob(game.mobs[i].id))
+                .unwrap();
             if tag.get("attributes") != Some(&Tag::List(Vec::new())) {
                 failures.push(format!(
                     "pig before a tick: attributes {:?}",
@@ -4610,53 +4563,28 @@ mod attribute_instance_save_tests {
 #[cfg(test)]
 mod mob_inventory_merge_tests {
     use super::*;
-    use crate::game::{Audio, Options, Progress, Settings, commands::Target, load_resources};
+    use crate::game::commands::Target;
     use horizon_client::motion::PlayerMotion;
 
     fn with_game(test: impl FnOnce(&mut Game<'_>)) {
-        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let settings = Settings::default();
-        let loaded = load_resources(
-            root.clone(),
-            None,
-            &root,
-            &settings,
-            std::time::Instant::now(),
-            false,
-            true,
-            &Progress::new(),
-            &mut |_, _| unreachable!(),
-        )
-        .unwrap();
-        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
-        options.resources = root.clone();
-        options.game_dir = Some(
-            std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap())
-                .join(format!("h138-{:?}", std::thread::current().id())),
-        );
-        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
-        let mut game = Game::new(
-            &loaded.resources,
-            loaded.pack,
-            loaded.gui.unwrap(),
-            options,
-            settings,
-            Audio::silent(&root),
-            None,
-        )
-        .unwrap();
-        game.build_registries();
-        game.set_allow_commands(true);
-        game.world
-            .chunks
-            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-        game.block_ticks
-            .add_empty_chunk(ChunkPos::new(0, 0))
-            .unwrap();
-        assert!(game.run_command("forceload add 0 0"));
-        game.player = Some(PlayerMotion::new(game.motion, Vec3::new(2.5, 200.0, 2.5)).unwrap());
-        game.creative = true;
-        test(&mut game);
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.options.game_dir = Some(
+                std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap())
+                    .join(format!("h138-{:?}", std::thread::current().id())),
+            );
+            game.build_registries();
+            game.set_allow_commands(true);
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            game.block_ticks
+                .add_empty_chunk(ChunkPos::new(0, 0))
+                .unwrap();
+            assert!(game.run_command("forceload add 0 0"));
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::new(2.5, 200.0, 2.5)).unwrap());
+            game.creative = true;
+            test(game);
+        });
     }
     fn mob(game: &Game<'_>, n: i32) -> usize {
         let i: Vec<usize> = (0..game.mobs.len())
@@ -4694,7 +4622,7 @@ mod mob_inventory_merge_tests {
     /// The saved Inventory, read the same way.
     fn saved(game: &mut Game<'_>, i: usize) -> Vec<(String, u32, Option<i32>)> {
         let tag = game
-            .entity_nbt(Target::Mob(game.mobs[i].id))
+            .command_target_nbt(Target::Mob(game.mobs[i].id))
             .expect("saved mob");
         let Some(Tag::List(list)) = tag.get("Inventory") else {
             return Vec::new();
@@ -4816,7 +4744,7 @@ mod mob_inventory_merge_tests {
 #[cfg(test)]
 mod invalid_passenger_tests {
     use super::*;
-    use crate::game::{Audio, Options, Progress, Settings, commands::Target, load_resources};
+    use crate::game::commands::Target;
     use horizon_client::motion::PlayerMotion;
 
     const PIG: &str = "NoAI:1b,NoGravity:1b,PersistenceRequired:1b,Silent:1b";
@@ -4849,7 +4777,7 @@ mod invalid_passenger_tests {
     /// Each saved passenger of `id` as (id, UUID word 3, first tag), in order;
     /// `None` when the entity saves no Passengers.
     fn saved(game: &mut Game<'_>, id: u32) -> Option<Vec<(String, Option<i32>, String)>> {
-        let tag = game.entity_nbt(Target::Mob(id)).expect("saved mob");
+        let tag = game.command_target_nbt(Target::Mob(id)).expect("saved mob");
         let Some(Tag::List(list)) = tag.get("Passengers") else {
             return None;
         };
@@ -4878,51 +4806,26 @@ mod invalid_passenger_tests {
     }
 
     fn with_game(test: impl FnOnce(&mut Game<'_>)) {
-        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let settings = Settings::default();
-        let loaded = load_resources(
-            root.clone(),
-            None,
-            &root,
-            &settings,
-            std::time::Instant::now(),
-            false,
-            true,
-            &Progress::new(),
-            &mut |_, _| unreachable!(),
-        )
-        .unwrap();
-        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
-        options.resources = root.clone();
-        options.game_dir = Some(
-            std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap())
-                .join(format!("h161-{:?}", std::thread::current().id())),
-        );
-        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
-        let mut game = Game::new(
-            &loaded.resources,
-            loaded.pack,
-            loaded.gui.unwrap(),
-            options,
-            settings,
-            Audio::silent(&root),
-            None,
-        )
-        .unwrap();
-        game.build_registries();
-        game.set_allow_commands(true);
-        game.world
-            .chunks
-            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-        game.block_ticks
-            .add_empty_chunk(ChunkPos::new(0, 0))
-            .unwrap();
-        assert!(game.run_command("forceload add 0 0"));
-        game.player = Some(PlayerMotion::new(game.motion, Vec3::new(2.5, 200.0, 2.5)).unwrap());
-        game.creative = true;
-        let time = game.world.game_time;
-        test(&mut game);
-        assert_eq!(game.world.game_time, time);
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.options.game_dir = Some(
+                std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap())
+                    .join(format!("h161-{:?}", std::thread::current().id())),
+            );
+            game.build_registries();
+            game.set_allow_commands(true);
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            game.block_ticks
+                .add_empty_chunk(ChunkPos::new(0, 0))
+                .unwrap();
+            assert!(game.run_command("forceload add 0 0"));
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::new(2.5, 200.0, 2.5)).unwrap());
+            game.creative = true;
+            let time = game.world.game_time;
+            test(game);
+            assert_eq!(game.world.game_time, time);
+        });
     }
 
     /// Expected values from the official 26.3 server:
@@ -4970,7 +4873,7 @@ mod invalid_passenger_tests {
             if got.as_ref() != Some(&want) {
                 failures.push(format!("mixed: saved {got:?}"));
             }
-            let a_saved = game.entity_nbt(Target::Mob(a)).unwrap();
+            let a_saved = game.command_target_nbt(Target::Mob(a)).unwrap();
             if !matches!(a_saved.get("CustomName"), Some(Tag::String(s)) if s.to_string().unwrap_or_default() == "a")
             {
                 failures.push("mixed: rider a lost its CustomName".into());
@@ -5036,7 +4939,7 @@ mod invalid_passenger_tests {
                     failures.push(format!("merged {merge}: child left"));
                 }
             }
-            let name = game.entity_nbt(Target::Mob(root)).unwrap();
+            let name = game.command_target_nbt(Target::Mob(root)).unwrap();
             if !matches!(name.get("CustomName"), Some(Tag::String(s)) if s.to_string().unwrap_or_default() == "merged2")
             {
                 failures.push("merged: CustomName did not apply".into());
@@ -5064,7 +4967,7 @@ mod invalid_passenger_tests {
 #[cfg(test)]
 mod summon_uuid_conflict_tests {
     use super::*;
-    use crate::game::{Audio, Options, Progress, Settings, commands::Target, load_resources};
+    use crate::game::commands::Target;
     use horizon_client::motion::PlayerMotion;
 
     const PIG: &str = "NoAI:1b,NoGravity:1b,PersistenceRequired:1b,Silent:1b";
@@ -5105,7 +5008,7 @@ mod summon_uuid_conflict_tests {
     }
     /// The first tag and the UUID of each saved passenger of mob `id`, in order.
     fn saved_riders(game: &mut Game<'_>, id: u32) -> Vec<(String, Option<Tag>)> {
-        let saved = game.entity_nbt(Target::Mob(id)).expect("saved mob");
+        let saved = game.command_target_nbt(Target::Mob(id)).expect("saved mob");
         let Some(Tag::List(list)) = saved.get("Passengers") else {
             return Vec::new();
         };
@@ -5129,57 +5032,32 @@ mod summon_uuid_conflict_tests {
     /// A game with a loaded, force-loaded chunk 0 0, a live pig holding UUID
     /// 100 and a live armor stand holding UUID 150.
     fn with_game(test: impl FnOnce(&mut Game<'_>, u32)) {
-        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let settings = Settings::default();
-        let loaded = load_resources(
-            root.clone(),
-            None,
-            &root,
-            &settings,
-            std::time::Instant::now(),
-            false,
-            true,
-            &Progress::new(),
-            &mut |_, _| unreachable!(),
-        )
-        .unwrap();
-        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
-        options.resources = root.clone();
-        options.game_dir = Some(
-            std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap())
-                .join(format!("h160-{:?}", std::thread::current().id())),
-        );
-        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
-        let mut game = Game::new(
-            &loaded.resources,
-            loaded.pack,
-            loaded.gui.unwrap(),
-            options,
-            settings,
-            Audio::silent(&root),
-            None,
-        )
-        .unwrap();
-        game.build_registries();
-        game.set_allow_commands(true);
-        game.world
-            .chunks
-            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-        game.block_ticks
-            .add_empty_chunk(ChunkPos::new(0, 0))
-            .unwrap();
-        assert!(game.run_command("forceload add 0 0"));
-        game.player = Some(PlayerMotion::new(game.motion, Vec3::new(2.5, 200.0, 2.5)).unwrap());
-        game.creative = true;
-        // Setup controls: the live actors the later trees name.
-        assert!(summon(&mut game, "h160_existing", 100, ""));
-        assert!(game.run_command(
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.options.game_dir = Some(
+                std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap())
+                    .join(format!("h160-{:?}", std::thread::current().id())),
+            );
+            game.build_registries();
+            game.set_allow_commands(true);
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            game.block_ticks
+                .add_empty_chunk(ChunkPos::new(0, 0))
+                .unwrap();
+            assert!(game.run_command("forceload add 0 0"));
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::new(2.5, 200.0, 2.5)).unwrap());
+            game.creative = true;
+            // Setup controls: the live actors the later trees name.
+            assert!(summon(game, "h160_existing", 100, ""));
+            assert!(game.run_command(
             "summon minecraft:armor_stand 1.5 200 3.5 {UUID:[I;160,0,0,150],Tags:[\"h160_stand\"],NoGravity:1b}"
         ));
-        let existing = live(&game, 100);
-        assert_eq!(existing.len(), 1);
-        assert_eq!(live(&game, 150).len(), 1);
-        test(&mut game, existing[0]);
+            let existing = live(game, 100);
+            assert_eq!(existing.len(), 1);
+            assert_eq!(live(game, 150).len(), 1);
+            test(game, existing[0]);
+        });
     }
 
     /// Expected values from the official 26.3 server:
@@ -5231,7 +5109,7 @@ mod summon_uuid_conflict_tests {
             for (tag, n, children, fresh) in conflicts {
                 let mobs = game.mobs.len();
                 let next = game.next_entity;
-                let hooks = (game.persist.joins_canceled, game.persist.joined_mark);
+                let hooks = (game.persist.joins_canceled, game.persist.joined_seq);
                 let draw = game.world.random.clone().next_long();
                 if summon(game, tag, n, &children) {
                     failures.push(format!("{tag}: summon succeeded"));
@@ -5248,7 +5126,7 @@ mod summon_uuid_conflict_tests {
                         game.next_entity
                     ));
                 }
-                if (game.persist.joins_canceled, game.persist.joined_mark) != hooks {
+                if (game.persist.joins_canceled, game.persist.joined_seq) != hooks {
                     failures.push(format!("{tag}: join hook counts changed"));
                 }
                 if game.world.random.clone().next_long() != draw {
@@ -6317,54 +6195,28 @@ mod camel_pose_saved_tests {
 #[cfg(test)]
 mod mob_hurt_cooldown_tests {
     use super::*;
-    use crate::game::{Audio, Options, Progress, Settings, load_resources};
     use horizon_client::motion::PlayerMotion;
 
     fn with_game(test: impl FnOnce(&mut Game<'_>)) {
-        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let settings = Settings::default();
-        let loaded = load_resources(
-            root.clone(),
-            None,
-            &root,
-            &settings,
-            std::time::Instant::now(),
-            false,
-            true,
-            &Progress::new(),
-            &mut |_, _| unreachable!(),
-        )
-        .unwrap();
-        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
-        options.resources = root.clone();
-        options.game_dir = Some(
-            std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap())
-                .join(format!("h248-{:?}", std::thread::current().id())),
-        );
-        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
-        let mut game = Game::new(
-            &loaded.resources,
-            loaded.pack,
-            loaded.gui.unwrap(),
-            options,
-            settings,
-            Audio::silent(&root),
-            None,
-        )
-        .unwrap();
-        game.build_registries();
-        game.set_allow_commands(true);
-        game.world
-            .chunks
-            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-        game.block_ticks
-            .add_empty_chunk(ChunkPos::new(0, 0))
-            .unwrap();
-        assert!(game.run_command("forceload add 0 0"));
-        assert!(game.run_command("difficulty normal"));
-        game.player = Some(PlayerMotion::new(game.motion, Vec3::new(2.5, 200.0, 2.5)).unwrap());
-        game.creative = true;
-        test(&mut game);
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.options.game_dir = Some(
+                std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap())
+                    .join(format!("h248-{:?}", std::thread::current().id())),
+            );
+            game.build_registries();
+            game.set_allow_commands(true);
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            game.block_ticks
+                .add_empty_chunk(ChunkPos::new(0, 0))
+                .unwrap();
+            assert!(game.run_command("forceload add 0 0"));
+            assert!(game.run_command("difficulty normal"));
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::new(2.5, 200.0, 2.5)).unwrap());
+            game.creative = true;
+            test(game);
+        });
     }
     /// The pig with `[I;0,248,0,n]`: its health and its hurt cooldown state
     /// (`invulnerableTime`, `lastHurt`).

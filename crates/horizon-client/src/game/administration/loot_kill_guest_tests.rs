@@ -26,13 +26,14 @@ fn game() -> Game<'static> {
     );
     let settings = Settings::default();
     let loaded = load_resources(
-        root.clone(),
+        horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+        Vec::new(),
         None,
         &root,
         &settings,
         std::time::Instant::now(),
         false,
-        true,
+        execution_role::ExecutionRole::IntegratedServer,
         &Progress::new(),
         &mut |_, _| unreachable!(),
     )
@@ -47,7 +48,9 @@ fn game() -> Game<'static> {
         loaded.gui.unwrap(),
         options,
         settings,
-        Audio::silent(&root),
+        Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            root.clone(),
+        )),
         None,
     )
     .unwrap();
@@ -103,7 +106,6 @@ fn game() -> Game<'static> {
             latency: Arc::new(AtomicI32::new(0)),
             address: "127.0.0.1:25565".parse().unwrap(),
             expected: false,
-            configured: Default::default(),
         },
         2,
         [22.5, 101.0, 9.5],
@@ -215,7 +217,9 @@ fn an_empty_handed_guest_is_the_killer_and_a_missing_one_is_not() {
         .as_mut()
         .unwrap()
         .hub
-        .guest_mut(2)
+        .guests
+        .iter_mut()
+        .find(|guest| guest.conn == 2)
         .unwrap()
         .inventory[0] = None;
     first.inventory[first.selected] = Some(looting.clone());

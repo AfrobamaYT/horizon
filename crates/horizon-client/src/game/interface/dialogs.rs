@@ -1216,12 +1216,13 @@ mod background_tests {
 
     #[test]
     fn a_configuration_dialog_keeps_the_panorama_visible() {
-        let mut atlas = HudAtlas::build(std::path::Path::new(
-            "/nonexistent-horizon-dialog-background-test",
-        ))
-        .unwrap();
+        let mut atlas =
+            HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+                std::path::PathBuf::from("/nonexistent-horizon-dialog-background-test"),
+            ))
+            .unwrap();
         atlas.sprites.remove("gui/menu_background");
-        let mut batch = HudBatch::new([640, 480]);
+        let mut batch = HudBatch::scratch([640, 480]);
         draw_background(&mut batch, &atlas, false);
         assert_eq!(
             batch.vertices.len(),
@@ -1233,10 +1234,11 @@ mod background_tests {
 
     #[test]
     fn dialogs_keep_the_menu_and_in_world_pack_backgrounds() {
-        let mut atlas = HudAtlas::build(std::path::Path::new(
-            "/nonexistent-horizon-dialog-background-test",
-        ))
-        .unwrap();
+        let mut atlas =
+            HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+                std::path::PathBuf::from("/nonexistent-horizon-dialog-background-test"),
+            ))
+            .unwrap();
         for (name, u) in [
             ("gui/menu_background", 0.1),
             ("gui/inworld_menu_background", 0.6),
@@ -1254,7 +1256,7 @@ mod background_tests {
             );
         }
         for (in_world, u) in [(false, 0.1), (true, 0.6)] {
-            let mut batch = HudBatch::new([640, 480]);
+            let mut batch = HudBatch::scratch([640, 480]);
             draw_background(&mut batch, &atlas, in_world);
             assert!(!batch.vertices.is_empty());
             assert!(

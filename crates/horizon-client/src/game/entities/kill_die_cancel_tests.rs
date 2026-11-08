@@ -18,13 +18,17 @@ struct Probe {
 struct ProbeMod(Arc<Probe>);
 #[mod_api::__subscriptions]
 impl Hooks for ProbeMod {
-    fn living_death(&self, _: &mut dyn ServerHost, e: &mut LivingDeathEvent<'_>) {
+    fn living_death(&self, _: &mut dyn ServerHost, e: &mut LivingDeathEvent<'_>) -> mod_api::Flow {
         self.0
             .calls
             .lock()
             .unwrap()
             .push((e.entity, e.damage_type.to_owned()));
-        e.cancel = self.0.veto.load(Ordering::Relaxed);
+        if self.0.veto.load(Ordering::Relaxed) {
+            mod_api::Flow::Cancel
+        } else {
+            mod_api::Flow::Continue
+        }
     }
 }
 
