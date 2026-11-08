@@ -889,8 +889,8 @@ fn server_completion_reads_published_data_without_world_access_on_first_open() {
 #[ignore = "needs prepared resources"]
 fn data_maps_updated_fires_for_each_registry_on_first_open_and_every_reload() {
     use mod_api::{
-        DataMapTypesEvent, DataMapsUpdateCause, DataMapsUpdatedEvent, DataPackFilesEvent,
-        HostSide, NativeDataMapType, ServerHost,
+        DataMapTypesEvent, DataMapsUpdateCause, DataMapsUpdatedEvent, DataPackFilesEvent, HostSide,
+        NativeDataMapType, ServerHost,
     };
     use std::sync::atomic::AtomicUsize;
 
@@ -935,7 +935,9 @@ fn data_maps_updated_fires_for_each_registry_on_first_open_and_every_reload() {
     };
     mod_api::testing::with_mods(vec![ModEntry::new("probe", Box::new(probe))].into(), || {
         with_game(|game| {
-            let root = std::env::temp_dir().join(format!("data-maps-updated-{}", std::process::id()));
+            game.options.dedicated = Some(Vec::new());
+            let root =
+                std::env::temp_dir().join(format!("data-maps-updated-{}", std::process::id()));
             game.load_world(request(&root)).unwrap();
             let reloaded = |game: &crate::game::Game<'_>| {
                 game.native_data_map("minecraft:item", "probe:fuel", "minecraft:coal")

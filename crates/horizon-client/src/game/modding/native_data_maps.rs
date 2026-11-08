@@ -308,10 +308,7 @@ mod tests {
             ty("mymod:c", "minecraft:block"),
             ty("mymod:d", "minecraft:biome"),
         ];
-        assert_eq!(
-            registries_of(&types),
-            ["minecraft:item", "minecraft:block"]
-        );
+        assert_eq!(registries_of(&types), ["minecraft:item", "minecraft:block"]);
         assert!(registries_of(&[ty("mymod:d", "minecraft:biome")]).is_empty());
         assert!(registries_of(&[]).is_empty());
     }
