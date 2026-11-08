@@ -2019,7 +2019,7 @@ impl Hub {
                     permission,
                     dedicated,
                     &self.sync.builtin,
-                    &self.mod_commands.0,
+                    &super::commands::with_session_tools(&self.mod_commands.0),
                     &self.sync.features,
                     &self.rule_registry,
                 )
@@ -5527,6 +5527,64 @@ mod tests {
             horizon_protocol::registry::Ids::from_names(vec!["minecraft:speed".to_string()]),
         );
         hub_with_sync(sync)
+    }
+
+    #[test]
+    fn modprofile_guest_tree_survives_refresh_with_permissions() {
+        for level in 0..=4 {
+            let mut sync = SyncData::empty();
+            sync.commands = Some(crate::lan::commands::CommandTree {
+                root: serde_json::json!({"type":"root","children":{}}),
+            });
+            let (mut hub, rx) = hub_with_sync(sync);
+            hub.guests.update(0, |guest| guest.permission = level);
+            for refresh in [false, true] {
+                if refresh {
+                    hub.set_mod_commands(7, serde_json::json!({"children":{"plugin":{"type":"literal","executable":true}}}));
+                } else {
+                    hub.send_commands(0);
+                }
+                let crate::lan::Out::Packet(body) = rx.try_recv().unwrap() else {
+                    panic!("packet");
+                };
+                let mut reader = horizon_protocol::buf::Reader::new(&body);
+                let id = reader.varint().unwrap();
+                let play::Clientbound::Commands(packet) =
+                    play::Clientbound::decode(id, &body[reader.position()..]).unwrap()
+                else {
+                    panic!("commands");
+                };
+                let root = &packet.nodes[packet.root as usize];
+                let profile = root
+                    .children
+                    .iter()
+                    .map(|&i| &packet.nodes[i as usize])
+                    .find(|n| n.name == "modprofile");
+                if level < 3 {
+                    assert!(profile.is_none());
+                } else {
+                    let profile = profile.expect("admins receive modprofile on join and refresh");
+                    assert!(profile.restricted && !profile.executable);
+                    let actions: Vec<_> = profile
+                        .children
+                        .iter()
+                        .map(|&i| {
+                            let node = &packet.nodes[i as usize];
+                            assert!(node.executable);
+                            node.name.as_str()
+                        })
+                        .collect();
+                    assert_eq!(actions, ["report", "start", "stop"]);
+                }
+                if refresh {
+                    assert!(
+                        root.children
+                            .iter()
+                            .any(|&i| packet.nodes[i as usize].name == "plugin")
+                    );
+                }
+            }
+        }
     }
 
     #[test]

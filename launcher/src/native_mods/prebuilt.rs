@@ -1,6 +1,6 @@
 //! The prebuilt game (#589): mods that need nothing but the mod API compile against a downloaded
 //! build of the game (`tools/prebuilt_game.py`, released daily by `prebuilt-game.yml`) with rustc
-//! alone, in seconds, instead of building the game from source. The route is chosen before
+//! alone instead of building the game from source. The route is chosen before
 //! anything runs: a mod set the prebuilt game can't serve, or a revision with no prebuilt
 //! release, builds from source, and the build log says why. A prebuilt build that fails is an
 //! error like any other build's, never retried from source.

@@ -209,7 +209,7 @@ API's own, converted on the game side.
 
 ## Injections stay, and the API comes first
 
-`[[native.injection]]` stays as the native-only escape hatch for what the API does not yet reach. The rule is
+`[[inject]]` is the shared native/wasm escape hatch for what the API does not yet reach. The rule is
 API first: a mod needing something the API lacks asks for the hook that replaces the injection, and the
 injection is the stopgap until it exists. The [injections chapter](../injections.md) holds the current forms,
 the decision ladder and the hook-request format.
@@ -220,7 +220,7 @@ Compiling a native mod against a game already built is the route that makes nati
 rests on the one before:
 
 1. **The prebuilt game.** The game as a dylib with its metadata, built daily and published as prerelease
-   builds, so a native mod compiles against it in seconds instead of rebuilding the game.
+   builds, so a native mod compiles against it instead of rebuilding the game.
 2. **Slots.** Injection targets compiled into the prebuilt game, so a mixin does not force a rebuild. The
    generated slot points exist; filling them from a mod follows.
 3. **The internals tier.** A per-mod declared list of game internals the prebuilt game exposes. It is native

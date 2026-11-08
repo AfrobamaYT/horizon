@@ -72,6 +72,47 @@ impl<'a, A: HealthAttributes, E: CombatEnvironment<A>> ServerPlayerCombat<'a, E,
     ) -> Result<bool, ServerDamageError<Error<E>, A::Error>> {
         living_hurt::hurt_after_helmet(state, self, hit)
     }
+    pub fn finish_selected_equipment(
+        &mut self,
+        state: &mut HurtState<E::Source>,
+        mut selected: living_hurt::SelectedHurt<E::UseItem>,
+        inner: Option<bool>,
+    ) -> Result<bool, ServerDamageError<Error<E>, A::Error>> {
+        if let Some(bypass) = inner {
+            self.apply_equipment_inner(&mut selected.hit.container, selected.damage, bypass)?;
+        }
+        living_hurt::finish_equipment_hurt(state, self, selected)
+    }
+    /// The inner immunity and armor-bypass gates precede ordinary equipment wear.
+    pub fn prepare_equipment_inner(
+        &mut self,
+    ) -> Result<Option<bool>, ServerDamageError<Error<E>, A::Error>> {
+        if damage_immunity::server_player_immunity(self.environment)
+            .map_err(ServerDamageError::Environment)?
+        {
+            return Ok(None);
+        }
+        self.environment
+            .bypasses(crate::damage_reduction::Bypass::Armor)
+            .map(Some)
+            .map_err(ServerDamageError::Environment)
+    }
+    pub fn apply_equipment_inner(
+        &mut self,
+        container: &mut DamageContainer,
+        damage: f32,
+        bypass_armor: bool,
+    ) -> Result<(), ServerDamageError<Error<E>, A::Error>> {
+        ServerPlayerDamage::new(
+            self.attributes,
+            self.data,
+            self.food,
+            self.ids,
+            self.environment,
+        )
+        .expect("validated immutable player schema")
+        .apply_after_equipment(container, damage, bypass_armor)
+    }
 }
 impl<A: HealthAttributes, E: CombatEnvironment<A>> HurtWorld for ServerPlayerCombat<'_, E, A> {
     type Error = ServerDamageError<Error<E>, A::Error>;

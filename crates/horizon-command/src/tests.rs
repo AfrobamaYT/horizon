@@ -228,6 +228,29 @@ fn reader_matches_brigadier() {
     assert_eq!(e.context().unwrap(), "<--[HERE]");
 }
 #[test]
+fn modprofile_session_command_requires_admin_permission() {
+    let rules = horizon_client_core::gamerules::RuleRegistry::vanilla();
+    let session = vanilla::session_dispatcher(&rules, &[]);
+    assert!(vanilla::dispatcher().find("modprofile").is_none());
+    for permission in 0..=4 {
+        let mut registry = reg();
+        registry.permission = permission;
+        for (action, expected) in [
+            ("start", "modprofile.start"),
+            ("stop", "modprofile.stop"),
+            ("report", "modprofile.report"),
+        ] {
+            let line = format!("modprofile {action}");
+            let parse = session.parse(&line, &registry);
+            if permission < 3 {
+                assert!(parse.executable().is_err());
+            } else {
+                assert_eq!(parse.executable().unwrap().1, expected);
+            }
+        }
+    }
+}
+#[test]
 fn session_dispatchers_respect_feature_flags() {
     let first = horizon_client_core::gamerules::RuleRegistry::vanilla();
     let second = horizon_client_core::gamerules::RuleRegistry::vanilla();

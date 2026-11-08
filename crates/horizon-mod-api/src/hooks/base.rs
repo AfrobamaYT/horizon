@@ -2348,12 +2348,16 @@ pub trait Hooks {
         mounting: bool,
         canceled: &mut bool,
     );
-    /// A player's click is about to act on what the crosshair points at. `event.key` says which: `Attack` (when an attack is allowed, and each tick a held key keeps digging a block), `Use` (once for each hand tried, main hand first, before the hand's target and item) or `PickBlock` (only with a block or entity aimed at). Cancel to skip the action; a cancelled use also gives the other hand no turn. A cancelled attack or use still swings `event.hand` unless the listener clears `event.swing_hand`. Client side: a single player's window and a server's player.
+    /// An interaction mapping is about to act on the tick's crosshair target. `attempt`
+    /// distinguishes a queued press from held use or mining. Use asks for each hand tried,
+    /// main first. Cancelling the main hand ends the click. A cancelled attack or use still
+    /// swings unless the listener clears `swing_hand`. Fires on the window client.
     #[hook(
         side = "client",
         contract = "cancel",
         out = "canceled",
         neoforge = "InputEvent.InteractionKeyMappingTriggered",
+        version = 2,
         cancellable = true
     )]
     fn interaction_key_mapping_triggered();
