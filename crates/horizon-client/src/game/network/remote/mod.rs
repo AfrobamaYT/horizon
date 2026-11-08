@@ -597,6 +597,11 @@ pub(super) struct Remote {
     /// sequence its block updates only replace the remembered state; then the block
     /// takes it.
     predictions: HashMap<[i32; 3], Prediction>,
+    /// The entities the level held when its `LocalPlayer` was added
+    /// (`ClientLevel.addEntity` on login or respawn): `ClientLevel.tickEntities`
+    /// ticks in the order entities were added, so these tick before the
+    /// player and every later one after it.
+    ticked_before_player: std::collections::HashSet<u32>,
     /// Open container: (window id, menu name).
     pub(super) menu: ClientMenu,
     /// The crafting result slot of the open menu as the server last set it
@@ -610,6 +615,11 @@ pub(super) struct Remote {
     /// follows (`horizon:menu_extra`).
     menu_extra: Option<horizon_protocol::menu_extra::Message>,
     entities: HashMap<i32, Tracked>,
+    /// Per-tick remote entity scratch retained between frames.
+    tick_fluids: Vec<Option<horizon_client::mobs::living::Fluids>>,
+    tick_rain: Vec<bool>,
+    tick_standings: Vec<Option<String>>,
+    tick_water_fx: Vec<horizon_client::mobs::MobEvent>,
     /// Complete network riding graph, including invisible plugin seat entities.
     pub(super) passenger_vehicles: HashMap<u32, u32>,
     lerps: HashMap<i32, Lerp>,
@@ -1164,12 +1174,17 @@ impl Game<'_> {
             sent_info: info,
             predictions: HashMap::new(),
             menu: ClientMenu::default(),
+            ticked_before_player: std::collections::HashSet::new(),
             craft_result: None,
             menu_title: None,
             state_id: 0,
             use_target: None,
             menu_extra: None,
             entities: HashMap::new(),
+            tick_fluids: Vec::new(),
+            tick_rain: Vec::new(),
+            tick_standings: Vec::new(),
+            tick_water_fx: Vec::new(),
             passenger_vehicles: HashMap::new(),
             lerps: HashMap::new(),
             cart_lerps: HashMap::new(),
@@ -1405,12 +1420,17 @@ impl Game<'_> {
             sent_info: info,
             predictions: HashMap::new(),
             menu: ClientMenu::default(),
+            ticked_before_player: std::collections::HashSet::new(),
             craft_result: None,
             menu_title: None,
             state_id: 0,
             use_target: None,
             menu_extra: None,
             entities: HashMap::new(),
+            tick_fluids: Vec::new(),
+            tick_rain: Vec::new(),
+            tick_standings: Vec::new(),
+            tick_water_fx: Vec::new(),
             passenger_vehicles: HashMap::new(),
             lerps: HashMap::new(),
             cart_lerps: HashMap::new(),
@@ -3872,6 +3892,13 @@ impl Game<'_> {
                     r.sequence = 0;
                 }
                 self.enter_remote_dimension(&p.spawn, true, reason);
+                // handleRespawn adds the new LocalPlayer after what the kept
+                // level holds; a new level holds nothing yet.
+                let before: std::collections::HashSet<u32> =
+                    self.mobs.iter().map(|m| m.id).collect();
+                if let Some(r) = self.remote.as_mut() {
+                    r.ticked_before_player = before;
+                }
                 if dimension_changed {
                     // LevelExtractor.setLevel: a new level drops the highlights.
                     self.test_highlights.clear();
@@ -4032,6 +4059,9 @@ impl Game<'_> {
                 let rotation =
                     [p.yaw, p.pitch, p.head_yaw].map(horizon_protocol::buf::unpack_degrees);
                 if let Some(r) = self.remote.as_mut() {
+                    // ClientLevel.addEntity: an id it holds already is removed
+                    // and added again, after the player.
+                    r.ticked_before_player.remove(&(p.id as u32));
                     // A new entity looks its PlayerInfo up afresh.
                     r.level_player_textures.remove(&p.id);
                     if kind == "minecraft:player" {
@@ -6722,6 +6752,10 @@ impl Game<'_> {
         // ClientLevel.tick: the End's sky flash, frozen or not.
         self.tick_end_flash();
         self.player_border();
+        // The entities added after the player tick after it: their pushes
+        // (from where they ended last tick, onto where the player ended)
+        // reach its next move, this one.
+        let pushed_after = self.remote_pushes(false);
         self.tick_remote_entities(running);
         self.tick_remote_arm_poses();
         self.tick_random_textures();
@@ -6769,7 +6803,8 @@ impl Game<'_> {
         self.tick_subtitles();
         self.tick_client_load();
         let entity_collisions = self.player_entity_collisions();
-        let pushed = self.remote_pushes();
+        // Those added before it tick before it: their pushes reach this move.
+        let pushed = pushed_after.add_vector(self.remote_pushes(true));
         let sprint_window = self.settings.sprint_window;
         let Some(player) = self.player.as_mut() else {
             return Ok(());
@@ -7173,8 +7208,10 @@ impl Game<'_> {
     /// `LivingEntity.pushEntities`, and of the boats' pushes: on a client
     /// `EntitySelector.pushableBy` lets entities push only the local player,
     /// so the server never sends these pushes. `doPush(player)` is
-    /// `player.push(entity)`.
-    fn remote_pushes(&self) -> Vec3 {
+    /// `player.push(entity)`. `before_player`: the mobs that tick before the
+    /// player (`ticked_before_player`) and the boats, else the mobs that tick
+    /// after it.
+    fn remote_pushes(&self, before_player: bool) -> Vec3 {
         let (Some(p), Some(r)) = (self.player.as_ref(), self.remote.as_ref()) else {
             return Vec3::ZERO;
         };
@@ -7199,7 +7236,8 @@ impl Game<'_> {
         let board = &self.score.board;
         let player_team = board.players_team(&r.profile_name);
         let mut push = Vec3::ZERO;
-        for m in &self.mobs {
+        let order = |id: u32| r.ticked_before_player.contains(&id) == before_player;
+        for m in self.mobs.iter().filter(|m| order(m.id)) {
             let listed = r
                 .level_players
                 .get(&(m.id as i32))
@@ -7241,7 +7279,14 @@ impl Game<'_> {
         // AbstractBoat.push(player) from the boat's own tick (its box grown
         // by 0.2 sideways) and from the player's pushEntities (its box).
         let area = Vec3::new(f64::from(0.2_f32), f64::from(-0.01_f32), f64::from(0.2_f32));
-        for b in self.boats.iter().filter(|b| self.riding != Some(b.id)) {
+        // The boats' pushes stay where they were measured: with the entities
+        // that tick before the player.
+        let boats = if before_player {
+            &self.boats[..]
+        } else {
+            &[][..]
+        };
+        for b in boats.iter().filter(|b| self.riding != Some(b.id)) {
             let bb = b.bounds();
             let times = usize::from(
                 bounds.intersects(bb.inflate(area))
@@ -7326,48 +7371,53 @@ impl Game<'_> {
         // tropical fish lie on their side without `in_water`, #1591).
         // A frozen level ticks only the players, as below.
         // Entity.isInRain for the wolves, which dry off by their own `Wolf.tick`.
-        let (fluids, rain, standings, thundering): (Vec<_>, Vec<_>, Vec<_>, bool) = {
+        let (mut fluids, mut rain, mut standings, mut water_fx) = {
+            let r = self
+                .remote
+                .as_mut()
+                .expect("remote entity tick without remote state");
+            (
+                std::mem::take(&mut r.tick_fluids),
+                std::mem::take(&mut r.tick_rain),
+                std::mem::take(&mut r.tick_standings),
+                std::mem::take(&mut r.tick_water_fx),
+            )
+        };
+        let thundering = {
             let w = self.mob_world_base(&[]);
             let players = self.remote.as_ref().map(|r| &r.level_players);
-            let fluids = self
-                .mobs
-                .iter()
-                .map(|m| {
-                    (running || players.is_some_and(|p| p.contains_key(&(m.id as i32))))
-                        .then(|| w.fluids(m.bounds(), m.eye_y()))
-                })
-                .collect();
-            let rain = self
-                .mobs
-                .iter()
-                .map(|m| {
-                    m.species() == horizon_client::mobs::Species::Wolf
-                        && horizon_client::mobs::tame::in_rain(m, &w)
-                })
-                .collect();
+            fluids.clear();
+            fluids.extend(self.mobs.iter().map(|m| {
+                (running || players.is_some_and(|p| p.contains_key(&(m.id as i32))))
+                    .then(|| w.fluids(m.bounds(), m.eye_y()))
+            }));
+            rain.clear();
+            rain.extend(self.mobs.iter().map(|m| {
+                m.species() == horizon_client::mobs::Species::Wolf
+                    && horizon_client::mobs::tame::in_rain(m, &w)
+            }));
             // The block under each mob the packs' random-model rules read (a grazing
             // cow), one hair below the feet like `Entity.getBlockStateOn`; nothing
             // without rules.
-            let standings = self
-                .mobs
-                .iter()
-                .map(|m| {
-                    horizon_client::mobs::cem::tracks_standing(&m.kind.id).then(|| {
-                        let (x, y, z) = (
-                            m.position.x.floor() as i32,
-                            (m.position.y - 0.0001).floor() as i32,
-                            m.position.z.floor() as i32,
-                        );
-                        w.block_name(x, y, z).to_owned()
-                    })
+            standings.clear();
+            standings.extend(self.mobs.iter().map(|m| {
+                horizon_client::mobs::cem::tracks_standing(&m.kind.id).then(|| {
+                    let (x, y, z) = (
+                        m.position.x.floor() as i32,
+                        (m.position.y - 0.0001).floor() as i32,
+                        m.position.z.floor() as i32,
+                    );
+                    w.block_name(x, y, z).to_owned()
                 })
-                .collect();
-            (fluids, rain, standings, w.thundering)
+            }));
+            w.thundering
         };
         // The window's own player already splashes from its motion tick.
         let own = self.remote.as_ref().map(|r| r.entity_id);
-        let mut water_fx = Vec::new();
-        for ((m, fluids), standing) in self.mobs.iter_mut().zip(fluids).zip(standings) {
+        for i in 0..self.mobs.len() {
+            let m = &mut self.mobs[i];
+            let fluids = fluids[i].take();
+            let standing = standings[i].take();
             if let Some(fluids) = fluids {
                 let was = m.fluids.in_water;
                 let first = m.first_tick;
@@ -7844,7 +7894,13 @@ impl Game<'_> {
         for splash in entered {
             self.apply_item_splash(splash);
         }
-        let _ = self.handle_mob_events(mob_fx);
+        let _ = self.handle_mob_events_reusable(&mut mob_fx);
+        if let Some(r) = self.remote.as_mut() {
+            r.tick_fluids = fluids;
+            r.tick_rain = rain;
+            r.tick_standings = standings;
+            r.tick_water_fx = mob_fx;
+        }
         for (item, ticks, at, eye, pitch, yaw) in using {
             self.remote_player_eating(&item, ticks, at, eye, pitch, yaw);
         }

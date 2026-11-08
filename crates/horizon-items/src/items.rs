@@ -1468,6 +1468,7 @@ impl Items {
             entity_levels: None,
             block_levels: None,
             target: None,
+            location: None,
             keep_empty,
         };
         ctx.evaluate(table, random)
@@ -1494,6 +1495,40 @@ impl Items {
         let standing = standing.replacen("wall_", "", 1);
         let standing = format!("{namespace}:blocks/{standing}");
         self.loot.contains_key(&standing).then_some(standing)
+    }
+    /// `BlockPredicate` state matching shared with block loot conditions.
+    pub fn matches_block_state(
+        &self,
+        c: &Value,
+        block: &str,
+        properties: &horizon_world::chunk::BlockProperties,
+    ) -> bool {
+        let blocks_ok = match &c["blocks"].as_str().or(c["block"].as_str()) {
+            Some(spec) => self.block_matches(spec, block),
+            None => true,
+        };
+        blocks_ok
+            && c["state"]
+                .as_object()
+                .into_iter()
+                .flatten()
+                .chain(c["properties"].as_object().into_iter().flatten())
+                .all(|(k, v)| {
+                    let have = properties.get(k).map(String::as_str);
+                    match v {
+                        Value::String(s) => have == Some(s.as_str()),
+                        Value::Object(r) => {
+                            let have: i64 = have.and_then(|h| h.parse().ok()).unwrap_or(0);
+                            r.get("min")
+                                .and_then(Value::as_i64)
+                                .is_none_or(|m| have >= m)
+                                && r.get("max")
+                                    .and_then(Value::as_i64)
+                                    .is_none_or(|m| have <= m)
+                        }
+                        _ => true,
+                    }
+                })
     }
     /// `Block.getDrops`: the block's loot table rolled with `roll`, drawing
     /// from the table's random sequence when it has one (`sequences`: the
@@ -1546,6 +1581,44 @@ impl Items {
         }
         self.roll_block_table(table, &block.name, &block.properties, roll, random)
     }
+    /// Loot-mine command evaluation with its actual location predicate reader.
+    #[allow(clippy::too_many_arguments)]
+    pub fn block_drops_with_location<R: RandomSource>(
+        &self,
+        registry: &BlockRegistry,
+        state: BlockStateId,
+        held: Option<&ItemStack>,
+        location: &dyn Fn(&Value) -> Option<bool>,
+        random: &mut R,
+        this_entity: bool,
+        keep_empty: bool,
+    ) -> Vec<ItemStack> {
+        let Some(block) = registry.state(state) else {
+            return Vec::new();
+        };
+        let Some(table) = self
+            .block_loot_table(registry, state)
+            .and_then(|id| self.loot.get(&id))
+        else {
+            return Vec::new();
+        };
+        self.roll_block_table_at(
+            table,
+            &block.name,
+            &block.properties,
+            BlockLootRoll {
+                held,
+                breaker: this_entity,
+                keep_empty,
+                ..Default::default()
+            },
+            random,
+            Some(location),
+        )
+        .into_iter()
+        .filter(|drop| !drop.item.starts_with(DYNAMIC))
+        .collect()
+    }
     fn roll_block_table<R: RandomSource>(
         &self,
         table: &Value,
@@ -1553,6 +1626,17 @@ impl Items {
         properties: &horizon_world::chunk::BlockProperties,
         roll: BlockLootRoll<'_>,
         random: &mut R,
+    ) -> Vec<ItemStack> {
+        self.roll_block_table_at(table, block, properties, roll, random, roll.location)
+    }
+    fn roll_block_table_at<R: RandomSource>(
+        &self,
+        table: &Value,
+        block: &str,
+        properties: &horizon_world::chunk::BlockProperties,
+        roll: BlockLootRoll<'_>,
+        random: &mut R,
+        location: Option<&dyn Fn(&Value) -> Option<bool>>,
     ) -> Vec<ItemStack> {
         let ask = |_: &mut R, id: &str, level: u32| roll.levels.map_or(level, |ask| ask(id, level));
         let ctx = LootContext {
@@ -1566,6 +1650,7 @@ impl Items {
             entity_levels: None,
             block_levels: roll.levels.map(|_| &ask as &LootLevels<'_, R>),
             target: None,
+            location,
             keep_empty: roll.keep_empty,
         };
         ctx.evaluate(table, random)
@@ -1605,6 +1690,7 @@ impl Items {
             entity_levels: None,
             block_levels: None,
             target: None,
+            location: None,
             keep_empty,
         };
         // LootTable.getRandomItemsRaw visits the table itself first.
@@ -1661,6 +1747,7 @@ impl Items {
             entity_levels: None,
             block_levels: None,
             target: None,
+            location: None,
             keep_empty: false,
         };
         ctx.evaluate(table, random)
@@ -1688,6 +1775,7 @@ impl Items {
             entity_levels: None,
             block_levels: None,
             target: None,
+            location: None,
             keep_empty: false,
         };
         ctx.evaluate(table, random)
@@ -1823,6 +1911,7 @@ impl Items {
             entity_levels: levels,
             block_levels: None,
             target,
+            location: None,
             keep_empty,
         };
         ctx.evaluate(table, random)
@@ -1871,6 +1960,8 @@ pub type BlockLootLevels<'a> = dyn Fn(&str, u32) -> u32 + 'a;
 /// `BlockState.getDrops` is given them).
 #[derive(Clone, Copy, Default)]
 pub struct BlockLootRoll<'a> {
+    /// Location predicate reader for command block loot, absent for ordinary breaks.
+    pub location: Option<&'a dyn Fn(&Value) -> Option<bool>>,
     /// Retain emitted empty slots for command replacement output.
     pub keep_empty: bool,
     /// `LootContextParams.TOOL`; none is the empty stack.
@@ -1906,6 +1997,8 @@ struct LootContext<'a, R> {
     /// Asked only at block enchantment readers; None keeps vanilla's level.
     block_levels: Option<&'a LootLevels<'a, R>>,
     target: Option<EntityTarget<'a>>,
+    /// Bound only for the actual loot-mine location subset.
+    location: Option<&'a dyn Fn(&Value) -> Option<bool>>,
     /// Command replacement consumes the emitted list positions, including empty stacks.
     keep_empty: bool,
 }
@@ -2049,34 +2142,9 @@ impl<R: RandomSource> LootContext<'_, R> {
                     .unwrap_or(0.0) as f32;
                 random.next_float() < chance
             }
-            "minecraft:match_block" | "minecraft:block_state_property" => {
-                let blocks_ok = match &c["blocks"].as_str().or(c["block"].as_str()) {
-                    Some(spec) => self.items.block_matches(spec, self.block),
-                    None => true,
-                };
-                blocks_ok
-                    && c["state"]
-                        .as_object()
-                        .into_iter()
-                        .flatten()
-                        .chain(c["properties"].as_object().into_iter().flatten())
-                        .all(|(k, v)| {
-                            let have = self.properties.get(k).map(String::as_str);
-                            match v {
-                                Value::String(s) => have == Some(s.as_str()),
-                                Value::Object(r) => {
-                                    let have: i64 = have.and_then(|h| h.parse().ok()).unwrap_or(0);
-                                    r.get("min")
-                                        .and_then(Value::as_i64)
-                                        .is_none_or(|m| have >= m)
-                                        && r.get("max")
-                                            .and_then(Value::as_i64)
-                                            .is_none_or(|m| have <= m)
-                                }
-                                _ => true,
-                            }
-                        })
-            }
+            "minecraft:match_block" | "minecraft:block_state_property" => self
+                .items
+                .matches_block_state(c, self.block, self.properties),
             "minecraft:match_tool" => {
                 let items = &c["predicate"]["items"];
                 let items_ok = match (self.held, items) {
@@ -2144,7 +2212,10 @@ impl<R: RandomSource> LootContext<'_, R> {
             // LocationCheck reads the world at its offset, which this engine
             // does not have: held true (a double plant's other half is taken
             // as there). Unknown types fail, as in loot.rs.
-            "minecraft:location_check" => true,
+            "minecraft:location_check" => self
+                .location
+                .and_then(|location| location(c))
+                .unwrap_or(true),
             // A mod's own kind: the condition hook answers.
             k if !c.is_null() && k.contains(':') && !k.starts_with("minecraft:") => {
                 let ctx = self.native_loot_context(random);
@@ -2605,10 +2676,10 @@ fn loot_of(stack: &ItemStack) -> horizon_world::loot::LootStack {
                 horizon_client_core::scoreboard::tag_to_json(name),
             ));
         }
-        if let Some((material, pattern)) = &data.trim {
+        if let Some(trim) = &data.trim {
             components.push((
                 "minecraft:trim".to_owned(),
-                serde_json::json!({"material": &**material, "pattern": &**pattern}),
+                horizon_client_core::scoreboard::tag_to_json(&crate::item_data::trim::to_nbt(trim)),
             ));
         }
     }
@@ -3609,6 +3680,66 @@ mod tests {
         }
     }
 
+    #[test]
+    fn location_context_preserves_unaffected_rolls_and_rng_continuation() {
+        let registry = BlockRegistry::from_facts_json(&br#"{"defaults":{"minecraft:stone":0},"states":[["stone",false,false,"","minecraft:stone"]]}"#[..]).unwrap();
+        let mut items = Items::for_tests(HashMap::new());
+        items.loot = Arc::new([("minecraft:blocks/stone".into(), json!({"pools":[{
+            "rolls":{"type":"minecraft:uniform","min":1,"max":3},
+            "condition":{"type":"minecraft:match_tool","predicate":{"items":"minecraft:stick"}},
+            "entries":[{"type":"minecraft:item","name":"minecraft:diamond","weight":1},
+                       {"type":"minecraft:item","name":"minecraft:emerald","weight":3}],
+            "modifier":[{"type":"minecraft:set_count","count":{"type":"minecraft:uniform","min":1,"max":4}}]
+        }]}))].into_iter().collect());
+        let unused = |_: &Value| -> Option<bool> {
+            panic!("unaffected conditions must not invoke location reader")
+        };
+        for seed in [0, 1, 79, i64::MAX] {
+            for held in [None, Some(ItemStack::new("minecraft:stick", 1))] {
+                let mut old = LegacyRandom::new(seed);
+                let mut contextual = old.clone();
+                assert_eq!(
+                    items.block_drops(&registry, BlockStateId(0), held.as_ref(), &mut old),
+                    items.block_drops_with_location(
+                        &registry,
+                        BlockStateId(0),
+                        held.as_ref(),
+                        &unused,
+                        &mut contextual,
+                        false,
+                        false,
+                    )
+                );
+                assert_eq!(old.next_long(), contextual.next_long());
+                assert_eq!(old.next_int_bound(137), contextual.next_int_bound(137));
+            }
+        }
+    }
+
+    #[test]
+    fn location_context_keeps_unbound_and_unsupported_legacy_behavior() {
+        let items = Items::for_tests(HashMap::new());
+        let properties = horizon_world::chunk::BlockProperties::new();
+        let condition = json!({"type":"minecraft:location_check","predicate":{"block":{"blocks":"minecraft:stone"}}});
+        let table = json!({"pools":[{"rolls":1,"condition":condition,"entries":[{"type":"minecraft:item","name":"minecraft:diamond"}]}]});
+        let unbound = ctx(&items, None, &properties, "minecraft:stone");
+        assert_eq!(
+            unbound.evaluate(&table, &mut LegacyRandom::new(79)).len(),
+            1
+        );
+        for value in [Some(false), Some(true), None] {
+            let reader = |_: &Value| value;
+            let bound = LootContext {
+                location: Some(&reader),
+                ..ctx(&items, None, &properties, "minecraft:stone")
+            };
+            assert_eq!(
+                bound.evaluate(&table, &mut LegacyRandom::new(79)).len(),
+                usize::from(value.unwrap_or(true))
+            );
+        }
+    }
+
     fn ctx<'a>(
         items: &'a Items,
         held: Option<&'a ItemStack>,
@@ -3626,6 +3757,7 @@ mod tests {
             entity_levels: None,
             block_levels: None,
             target: None,
+            location: None,
             keep_empty: false,
         }
     }

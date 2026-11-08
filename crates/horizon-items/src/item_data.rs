@@ -54,6 +54,8 @@ use std::sync::Arc;
 
 /// Enchantment id and level, in insertion order.
 pub type Levels = Vec<(Arc<str>, u32)>;
+pub mod trim;
+pub use trim::Trim;
 
 /// A stack's modelled and preserved components. Start with `Default` (or
 /// `ItemStack::data_mut`) and use the fields and setters; component storage may
@@ -82,7 +84,7 @@ pub struct StackData {
     /// `custom_name`), kept as saved.
     pub potion_extra: Vec<(String, Tag)>,
     /// `minecraft:trim`: (material, pattern).
-    pub trim: Option<(Arc<str>, Arc<str>)>,
+    pub trim: Option<Trim>,
     /// `minecraft:container` (shulker boxes): the non-empty slots.
     pub container: Vec<(u8, ItemStack)>,
     /// `minecraft:charged_projectiles` (a loaded crossbow).
@@ -294,12 +296,7 @@ impl StackData {
                 self.written = tag.as_ref().map(written_book_from_tag);
             }
             "minecraft:trim" => {
-                self.trim = match (value["material"].as_str(), value["pattern"].as_str()) {
-                    (Some(material), Some(pattern)) => {
-                        Some((Arc::from(material), Arc::from(pattern)))
-                    }
-                    _ => None,
-                };
+                self.trim = tag.as_ref().and_then(trim::from_nbt);
             }
             // The stack's damage is outside its data; a name keeps its own reading.
             "minecraft:damage" | "minecraft:custom_name" => self.set_other(id, tag),
@@ -1186,14 +1183,8 @@ fn components_tag_inner(
                 Tag::compound(potion.into_iter().chain(extra)),
             ));
         }
-        if let Some((material, pattern)) = &d.trim {
-            entries.push((
-                "minecraft:trim",
-                Tag::compound([
-                    ("material", Tag::String((&**material).into())),
-                    ("pattern", Tag::String((&**pattern).into())),
-                ]),
-            ));
+        if let Some(trim) = &d.trim {
+            entries.push(("minecraft:trim", trim::to_nbt(trim)));
         }
         if let Some(id) = d.map_id {
             entries.push(("minecraft:map_id", Tag::Int(id)));
@@ -1506,12 +1497,7 @@ pub fn decode_components(components: Option<&Tag>) -> (u32, Option<Box<StackData
             .get("minecraft:ominous_bottle_amplifier")
             .and_then(int)
             .map(|v| v.clamp(0, 4) as u8),
-        trim: c.get("minecraft:trim").and_then(|t| {
-            Some((
-                Arc::from(t.get("material").and_then(string)?.as_str()),
-                Arc::from(t.get("pattern").and_then(string)?.as_str()),
-            ))
-        }),
+        trim: c.get("minecraft:trim").and_then(trim::from_nbt),
         bundle_selected: BundleSelected::default(),
         other: Vec::new(),
         wire: Wire::default(),
@@ -1757,6 +1743,31 @@ mod tests {
             .unwrap()
             .0;
         assert_eq!(encode_components(&stack), Some(expected));
+    }
+
+    #[test]
+    fn inline_trim_is_modeled_and_saved_without_raw_fallback() {
+        let source = horizon_world::nbt::parse_snbt(r#"{id:"minecraft:diamond_chestplate",count:1,components:{"minecraft:custom_data":{keep:284},"minecraft:trim":{material:{palette_id:"minecraft:gold",description:"Inline material"},pattern:{asset_id:"minecraft:coast",description:"Inline pattern",decal:0b}}}}"#).unwrap().0;
+        let decoded = crate::item_nbt::item_from_nbt(&source).unwrap();
+        let data = decoded.data().unwrap();
+        assert!(
+            data.trim.is_some(),
+            "inline trim must be adopted into the actual model"
+        );
+        assert!(data.other("minecraft:trim").is_none(), "not a raw fallback");
+        let mut fresh = ItemStack::new("minecraft:diamond_chestplate", 1);
+        fresh.data_mut().trim = data.trim.clone();
+        fresh.data_mut().set_other(
+            "minecraft:custom_data",
+            Some(Tag::compound([("keep", Tag::Int(284))])),
+        );
+        for stack in [&decoded, &fresh] {
+            assert_eq!(
+                components_tag(0, stack.data()),
+                source.get("components").cloned()
+            );
+            assert_eq!(crate::item_nbt::item_to_nbt(stack), source);
+        }
     }
 
     fn check_lodestone_saved_default(decoded: bool) {
