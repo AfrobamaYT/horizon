@@ -598,3 +598,241 @@ Server side is assumed except for the two `both` tick hooks; a server-half count
 [paper-PlayerStatisticIncrementEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerStatisticIncrementEvent.html
 
 [paper-PlayerItemHeldEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerItemHeldEvent.html
+## Event counterparts: base player hooks (#1015)
+
+Paper API 26.3 (paper-api `26.3.build.244-stable`), public Javadoc; Horizon cited by function
+name; scope = the hooks below.
+
+| Horizon hook | Paper event / status | Evidence and porting boundary |
+|---|---|---|
+| `player_toggle_entity_age_lock` | **Partial:** [`PlayerToggleEntityAgeLockEvent`][paper-PlayerToggleEntityAgeLockEvent] | The age-lock toggle and new `isAgeLocked()` value agree, but the event additionally exposes item and hand and is cancellable, while the hook only reports player, entity and lock state after the lock and item use changed. No key. |
+| `player_toggle_flight` | **Partial:** [`PlayerToggleFlightEvent`][paper-PlayerToggleFlightEvent] | The client-requested change of flying state reaches the player (`isFlying()`), the event is cancellable, and the hook's `cancel` restores the previous state and resyncs abilities exactly as the event's cancel does. Not a full match: the hook is not told for a LAN host's own player nor for flight a game-mode change starts or ends, which Paper's event also reports for the host. |
+| `player_toggle_sneak` | **Partial:** [`PlayerToggleSneakEvent`][paper-PlayerToggleSneakEvent] | The same sneaking change with `isSneaking()`, but the event is cancellable and the listen-only hook cannot express that cancel, and it runs before the state change where the hook runs after the hub applied it. No key. |
+| `player_totem` | **Partial:** [`EntityResurrectEvent`][paper-EntityResurrectEvent] | The totem-resurrection opportunity overlaps, but the event is cancellable and can run without a totem, initially cancelled; `getHand()` identifies the totem hand. The hook only reports a server player whose save is already decided, just before consumption and effects, and cannot veto it or supply the hand. No key. |
+| `player_trade` | **Partial:** [`PlayerTradeEvent`][paper-PlayerTradeEvent] | The completed trade with a villager or wandering trader and the merchant handle (`getMerchant()`) match, but the event is cancellable and raised as the trade is made, while the hook only listens once the trade completed. No key. |
+| `player_unleash_entity` | **Partial:** [`PlayerUnleashEntityEvent`][paper-PlayerUnleashEntityEvent] | Same player action and entity, but the event is raised prior to the unleash and is cancellable, while the hook listens after the leash was cleared. No key. |
+| `player_velocity` | **Partial:** [`PlayerVelocityEvent`][paper-PlayerVelocityEvent] | The applied velocity is the same fact (`getVelocity()`), but the event is cancellable and exposes `setVelocity`, while the hook only listens to the motion the server syncs to the client. No key. |
+| `portal_create` | **Partial:** [`PortalCreateEvent`][paper-PortalCreateEvent] | Nether portal and End platform creation match (`getBlocks()` gives the placed blocks, `getReason()` says which), but the event is cancellable and runs before the blocks are placed, while the hook fires with the blocks already in the world. No key. |
+| `potion_splash` | **Partial:** [`PotionSplashEvent`][paper-PotionSplashEvent], [`LingeringPotionSplashEvent`][paper-LingeringPotionSplashEvent] | The item and position of the burst match, but splash and lingering arrivals are separate cancellable events: splash exposes affected entities and intensity setters, while lingering exposes the area-effect cloud and its creation policy. The hook only listens after the hit effects applied. No key. |
+| `prepare_hopper_transfer` | **Partial:** [`PrepareHopperTransferEvent`][paper-PrepareHopperTransferEvent] | Both concern preparing a hopper transfer, but the event already exposes source and destination inventories and can exclude source slots with `setSlotAllowed()`. The hook only reports the hopper position once before pushing or pulling, with no slot-selection result. No key. |
+| `prepare_item_craft` | **Covered:** [`PrepareItemCraftEvent`][paper-PrepareItemCraftEvent] | The server crafting-result preparation matches: `getView()` identifies the player and `getInventory()` exposes the result through [`CraftingInventory.setResult()`][paper-CraftingInventory], matching writable `result`. The inventory carries the table location via [`Inventory.getLocation()`][paper-Inventory] (nullable for virtual containers, including the inventory grid), and neither is cancellable. Key added. |
+| `prepare_item_enchant` | **Partial:** [`PrepareItemEnchantEvent`][paper-PrepareItemEnchantEvent] | Same offer-calculation moment with enchanter, table block and offered level costs; [`getOffers()`][paper-PrepareItemEnchantEvent] allows modifying offers, including their costs via [`EnchantmentOffer.setCost()`][paper-EnchantmentOffer], while `getExpLevelCostsOffered()` is deprecated. The event is cancellable and also exposes the item, enchantments and bookshelf bonus, while the hook only supplies player, position and writable costs and cannot cancel. No key. |
+| `prepare_smithing` | **Covered:** [`PrepareSmithingEvent`][paper-PrepareSmithingEvent] | Fired when a smithing-table result is prepared; it is non-cancellable and offers `setResult` inherited from [`PrepareResultEvent`][paper-PrepareResultEvent], matching the hook's writable `result`, with the inventory carrying the player and table. Key added. |
+| `projectile_impact` | **Partial:** [`ProjectileHitEvent`][paper-ProjectileHitEvent] | The projectile and hit entity/block/face match, but the event exposes no exact impact point for the hook's `at`. Its cancellation Javadoc explicitly leaves block collisions and explosions to occur unless their respective events are cancelled, while the hook suppresses the whole impact and lets the projectile fly on. No key. |
+| `projectile_launch` | **Partial:** [`ProjectileLaunchEvent`][paper-ProjectileLaunchEvent] | The same projectile added for a player or another source, but the event is cancellable and raised before the launch completes, while the hook listens after the projectile joined the level. No key. |
+| `raid_spawn_wave` | **Partial:** [`RaidSpawnWaveEvent`][paper-RaidSpawnWaveEvent] | A spawned wave with its raiders and patrol leader (non-cancellable, like the hook) matches, and the inherited raid handle exposes [`Raid.getSpawnedGroups()`][paper-Raid]. However, `Raid.getLocation()` is the raid center, not the wave spawn position passed as `pos`, which the event does not document. No key. |
+| `raid_state_change` | **Partial:** [`RaidStopEvent`][paper-RaidStopEvent], [`RaidFinishEvent`][paper-RaidFinishEvent], [`RaidTriggerEvent`][paper-RaidTriggerEvent] | The hook's four states are split across separate events: trigger is cancellable (the hook cannot veto it), `RaidStopEvent` covers many stop reasons beyond the hook's `stopped`, and no single event carries the `triggered`/`victory`/`loss`/`stopped` value. No key. |
+| `random_tick` | **Gap:** none | No Paper/Bukkit event marks a block's random tick, and the hook's `state`, `pos` and `handled` (skip the vanilla tick) have no Javadoc counterpart, so a port has nothing to listen to. No key. |
+| `register_commands` | **Partial:** [`LifecycleEvents.COMMANDS`][paper-LifecycleEvents] | Paper does have a command-registration lifecycle event, supplying a [`Commands` registrar][paper-Commands] rather than filtering the client command list with `PlayerCommandSendEvent`. Its registration/reload lifecycle and ability to override vanilla command literals differ from the hook's world-opening or explicit refresh collection, which omits vanilla names; the generic `ReloadableRegistrarEvent` alone does not identify this command-specific event. No key. |
+| `release_using` | **Partial:** [`PlayerStopUsingItemEvent`][paper-PlayerStopUsingItemEvent] | The item and `getTicksHeldFor()` match on the server half, but the event is player-only (the hook also fires for mobs) and has no way to set the hook's `used` result. No key. |
+
+[paper-PlayerToggleEntityAgeLockEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/PlayerToggleEntityAgeLockEvent.html
+[paper-PlayerToggleFlightEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerToggleFlightEvent.html
+[paper-PlayerToggleSneakEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerToggleSneakEvent.html
+[paper-PlayerTradeEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/PlayerTradeEvent.html
+[paper-PlayerUnleashEntityEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerUnleashEntityEvent.html
+[paper-PlayerVelocityEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerVelocityEvent.html
+[paper-PortalCreateEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/world/PortalCreateEvent.html
+[paper-PotionSplashEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/PotionSplashEvent.html
+[paper-PrepareHopperTransferEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/inventory/PrepareHopperTransferEvent.html
+[paper-PrepareItemCraftEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/inventory/PrepareItemCraftEvent.html
+[paper-PrepareItemEnchantEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/enchantment/PrepareItemEnchantEvent.html
+[paper-PrepareSmithingEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/inventory/PrepareSmithingEvent.html
+[paper-PrepareResultEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/inventory/PrepareResultEvent.html
+[paper-ProjectileLaunchEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/ProjectileLaunchEvent.html
+[paper-RaidSpawnWaveEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/raid/RaidSpawnWaveEvent.html
+[paper-RaidStopEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/raid/RaidStopEvent.html
+[paper-RaidFinishEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/raid/RaidFinishEvent.html
+[paper-RaidTriggerEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/raid/RaidTriggerEvent.html
+[paper-PlayerCommandSendEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerCommandSendEvent.html
+[paper-EntityResurrectEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/EntityResurrectEvent.html
+[paper-CraftingInventory]: https://jd.papermc.io/paper/26.3/org/bukkit/inventory/CraftingInventory.html
+[paper-Inventory]: https://jd.papermc.io/paper/26.3/org/bukkit/inventory/Inventory.html
+[paper-EnchantmentOffer]: https://jd.papermc.io/paper/26.3/org/bukkit/enchantments/EnchantmentOffer.html
+[paper-LingeringPotionSplashEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/LingeringPotionSplashEvent.html
+[paper-LifecycleEvents]: https://jd.papermc.io/paper/26.3/io/papermc/paper/plugin/lifecycle/event/types/LifecycleEvents.html
+[paper-Commands]: https://jd.papermc.io/paper/26.3/io/papermc/paper/command/brigadier/Commands.html
+[paper-Raid]: https://jd.papermc.io/paper/26.3/org/bukkit/Raid.html
+
+## Event counterparts: base and resource hooks (#1015)
+
+Paper API 26.3 (`26.3.build.244-stable`), public Javadoc; Horizon cited by function name; scope = the 20 `base.rs` hooks below.
+Paper is server-only, so only the server side of `both` hooks is comparable; no Paper server code or invented event is used.
+
+| Horizon hook | Paper event / status | Evidence and porting boundary |
+|---|---|---|
+| `resource_pack_status` | **Partial:** [`PlayerResourcePackStatusEvent`][paper-PlayerResourcePackStatusEvent] | Both listen for a client resource-pack answer on the server, but Paper exposes the pack UUID through getID(), which the hook omits. No key. |
+| `right_click_block` | **Partial:** [`PlayerInteractEvent`][paper-PlayerInteractEvent] | Action.RIGHT_CLICK_BLOCK identifies the server interaction, with player, block, hit position/face, hand, item and separate block/item use controls. Paper cannot express cancellation_result and its swing/consumption choices. No key. |
+| `run_mod_command` | **Gap:** none (nearest [`ServerCommandEvent`][paper-ServerCommandEvent]) | The cited event fires early for non-player commands, before permission and argument resolution, while the hook runs after both and exposes the mod invocation and `ran`. No key. |
+| `screen` | **Gap:** none | No cited Paper event opens a block-entity screen or supplies the hidden-slot layout the hook collects; the dossier's candidates are unrelated inventory/recipe events. No key. |
+| `sculk_bloom` | **Gap:** none (nearest [`SculkBloomEvent`][paper-SculkBloomEvent]) | Paper documents cursor creation at the cursor spawn block, including plugin-triggered creation; sculk_bloom observes the catalyst after its block state has begun blooming. The Javadoc does not establish that post-bloom moment or catalyst position; cursor charge and cancellation also differ. No key. |
+| `server_about_to_start` | **Gap:** none | No cited Paper event marks the server's pre-world-load start; no dossier candidate covers the `dedicated` flag at that moment. No key. |
+| `server_started` | **Partial:** [`ServerLoadEvent`][paper-ServerLoadEvent] | LoadType.STARTUP identifies completed server startup, but the Javadoc does not establish all worlds loaded before the first tick and first player, and the event lacks the dedicated flag. No key. |
+| `server_starting` | **Gap:** none | No cited Paper event marks the post-`server_about_to_start`/pre-play start with the `dedicated` flag; no dossier candidate covers this moment. No key. |
+| `server_stopped` | **Gap:** none | No cited Paper event marks the end of teardown after the final save and storage release, including failed startups; no dossier candidate covers it. No key. |
+| `server_stopping` | **Gap:** none | No cited Paper event marks the start of teardown with worlds loaded and players still connected; no dossier candidate covers it. No key. |
+| `server_tick` | **Partial:** [`ServerTickEndEvent`][paper-ServerTickEndEvent] | Paper documents the main-loop tick end; ServerTickStartEvent exposes the upcoming tick number. These separate events do not supply the combined start/end phases and lifecycle context, including world_running; the start event Javadoc does not establish precise pre-level ordering. No key. |
+| `settings` | **Gap:** none | No cited Paper event collects per-mod settings-page buttons; the nearest dossier candidate is a player recipe-book setting change, not a mod page. No key. |
+| `should_apply_effect_tick_this_tick` | **Gap:** none (nearest [`EntityEffectTickEvent`][paper-EntityEffectTickEvent]) | Paper documents effect application, including instant effects; the hook asks a content effect scheduling predicate every tick before deciding whether to apply it. The predicate supplies remaining tick_count and no entity, whereas Paper exposes an entity and cancels application. No key. |
+| `sign_changed` | **Partial:** [`SignChangeEvent`][paper-SignChangeEvent] | Both fire for a player's checked sign-text edit on the server, with player, side, position and editable lines; the event is cancellable and lets the lines be rewritten. Not a full match: the hook is not told for the host's own sign edits on a LAN or single-player world, nor for the sign changes that are no text edit, while Paper reports the host's edit too. |
+| `sleep_finished_time` | **Partial:** [`TimeSkipEvent`][paper-TimeSkipEvent] | Inherited getSkipReason() with NIGHT_SKIP identifies sleep skips, and getSkipAmount()/setSkipAmount() plus the world clock allow the target time to be read and changed; cancellation prevents the clock change. The Javadoc does not promise refusal of targets before current or the distinct gate before time_skip, so result and precise ordering are not established. No key. |
+| `smoke_source` | **Gap:** none | No cited Paper event replaces or observes `CampfireBlock.isSmokeSource` for the block under a campfire. No key. |
+| `spawn_change` | **Partial:** [`SpawnChangeEvent`][paper-SpawnChangeEvent] | Both listen on the server when the world spawn changes, and the world exposes the new spawn location. Paper additionally supplies getPreviousLocation(), which spawn_change does not pass; the information differs. No key. |
+| `sponge_absorb` | **Partial:** [`SpongeAbsorbEvent`][paper-SpongeAbsorbEvent] | The event describes the same sponge absorption, but it fires with the world still unchanged and can cancel, while the hook fires after the sponge is wet and listens only. No key. |
+| `state_for_placement` | **Gap:** none | No cited Paper event runs at `Block.getStateForPlacement` with the placement context, fluid state and replaceable answer; no dossier candidate covers it. No key. |
+| `tab_complete` | **Partial:** [`TabCompleteEvent`][paper-TabCompleteEvent] | The event matches a server-side completion request and lets completions be changed, but the supplied Javadoc exposes no replaced byte range and the hook's `range` cannot be recovered; cancel semantics also differ. No key. |
+
+[paper-ServerCommandEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/server/ServerCommandEvent.html
+[paper-SculkBloomEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/SculkBloomEvent.html
+[paper-SignChangeEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/SignChangeEvent.html
+[paper-TimeSkipEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/world/TimeSkipEvent.html
+[paper-SpawnChangeEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/world/SpawnChangeEvent.html
+[paper-SpongeAbsorbEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/SpongeAbsorbEvent.html
+[paper-TabCompleteEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/server/TabCompleteEvent.html
+
+[paper-ServerLoadEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/server/ServerLoadEvent.html
+
+[paper-ServerTickEndEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/server/ServerTickEndEvent.html
+
+## Event counterparts: base-target hooks (#1015)
+
+Paper API 26.3 (paper-api `26.3.build.244-stable`), public Javadoc; Horizon cited by function name; scope = the base-target hooks below.
+Server-only events are compared with the hook's server half; moments with no Paper/Bukkit event are recorded as gaps.
+
+| Horizon hook | Paper event / status | Evidence and porting boundary |
+|---|---|---|
+| `target_hit` | **Partial:** [`TargetHitEvent`][paper-TargetHitEvent] | Paper describes the projectile hitting the target before its redstone signal and advancement can be cancelled; `target_hit` notifies after the output power is applied. Paper also exposes the projectile and allows signal-strength changes and cancellation, which the listen-only hook cannot express. No key. |
+| `thunder_change` | **Partial:** [`ThunderChangeEvent`][paper-ThunderChangeEvent] | Same server-side thunder-state change, with `toThunderState` and cancellation matching the hook's `cancel`, but Paper exposes a cause that the command-only hook does not pass. No key. |
+| `tick_block` | **Gap:** none | No Paper/Bukkit event covers a due scheduled block tick before `BlockState.tick`; no candidate is listed and Paper has no block-tick event. No key. |
+| `time_skip` | **Partial:** [`TimeSkipEvent`][paper-TimeSkipEvent] | The event covers a server-side clock jump and can be cancelled, but the hook fires before the skip and exposes `from`, `to`, and cause, while Paper's event (through [`ClockTimeSkipEvent`][paper-ClockTimeSkipEvent]) also lets plugins change the skip amount, which the hook cannot express. No key. |
+| `tnt_primed` | **Partial:** [`TNTPrimeEvent`][paper-TNTPrimeEvent] | Bukkit covers server-side TNT-block priming with cancellation and the priming entity, but also exposes the prime cause and priming block, which the hook does not pass. The hook additionally covers a dispenser's TNT item and excludes explosion priming, so its scope differs. No key. |
+| `trade_select` | **Partial:** [`TradeSelectEvent`][paper-TradeSelectEvent] | Same server-side trade-sidebar selection with the villager, player, and index. The hook only listens, whereas Paper's event is cancellable, so the cancel result cannot be expressed. No key. |
+| `trade_with_villager` | **Partial:** [`PlayerTradeEvent`][paper-PlayerTradeEvent] | Paper covers player trading with a villager or wandering trader and exposes a mutable trade. The collect hook also mutates the live offer, but only after the trade completes with uses counted; it cannot express Paper's cancellation. No key. |
+| `update_shape` | **Gap:** none | No Paper/Bukkit event covers `BlockBehaviour.updateShape` neighbour recomputation with the old state, direction, neighbour, and replacement state. No key. |
+| `use_duration` | **Gap:** none (nearest [`PlayerInteractEvent`][paper-PlayerInteractEvent]) | Paper's interact event is a server-side click event, not the client-and-server item `getUseDuration` query with no user; it has no duration value to read or change. No key. |
+| `use_item` | **Partial:** [`PlayerInteractEvent`][paper-PlayerInteractEvent] | The right-click item use is represented by `PlayerInteractEvent` with the item, hand, and air/block action, but Paper fires before the block's own handling and its cancellation stops the interaction, while the hook runs at `Item.use` and `claimed` only takes the use. No key. |
+| `use_on` | **Partial:** [`PlayerInteractEvent`][paper-PlayerInteractEvent] | Paper exposes the clicked block, face, and item on a right-click block action, but it fires before the block lets the click through, not where `ItemStack.useOn` starts; cancellation also differs from the hook's `claimed`. No key. |
+| `vault_change_state` | **Partial:** [`VaultChangeStateEvent`][paper-VaultChangeStateEvent] | Both concern a server-side vault state change, but the hook notifies after the block state is updated and passes only the new state and position. Paper permits cancellation and exposes the current state and associated player as well as the new state; the listen-only hook cannot express those facts or the cancel result. No key. |
+| `vault_loot` | **Partial:** [`BlockDispenseLootEvent`][paper-BlockDispenseLootEvent] | Paper documents vault loot dispensing and exposes the block, loot list, loot table and unlocking player, with loot replacement and cancellation. The hook only hears each item immediately before ejection, passing its item ID and block position; it lacks the full loot batch, table, player and mutable result. No key. |
+| `vehicle_create` | **Partial:** [`VehicleCreateEvent`][paper-VehicleCreateEvent] | Paper raises the event when a vehicle is created, with the vehicle type and location. The hook only listens, while Paper's event is cancellable, so the result differs. No key. |
+| `vehicle_damage` | **Partial:** [`VehicleDamageEvent`][paper-VehicleDamageEvent] | Both cover server-side vehicle damage with a mutable damage amount and cancellation, but the hook passes only the vehicle kind and amount. Paper also identifies the vehicle, attacker and damage source, which the hook cannot express. No key. |
+| `vehicle_destroy` | **Partial:** [`VehicleDestroyEvent`][paper-VehicleDestroyEvent] | Both concern vehicle destruction, but the hook only listens before removal, passing kind and position, and excludes TNT minecarts that prime. Paper exposes the vehicle, attacker and damage source and permits cancellation; these facts and the cancel result are absent from the hook. No key. |
+| `vehicle_moved` | **Partial:** [`VehicleMoveEvent`][paper-VehicleMoveEvent] | Both provide server-side movement notifications with from/to positions and no cancellation. The hook passes kind and an optional rider UUID, without vehicle identity, and watches only vehicles carrying a server player or recently left by one; Paper exposes the vehicle and from/to locations without that rider restriction. No key. |
+| `weather_change` | **Partial:** [`WeatherChangeEvent`][paper-WeatherChangeEvent] | The event covers a server-side weather change and cancellation, but it exposes only the rain state (`toWeatherState`) and cause, not the hook's requested thundering state. No key. |
+| `whitelist_state_update` | **Covered:** [`WhitelistToggleEvent`][paper-WhitelistToggleEvent] | Same dedicated-server whitelist toggle, with `isEnabled` matching the hook's `enabled`; both are listen-only/non-cancellable. Key added. |
+| `world_border_bounds_change_finish` | **Partial:** [`WorldBorderBoundsChangeFinishEvent`][paper-WorldBorderBoundsChangeFinishEvent] | Both notify after a timed server-side world-border move finishes, without cancellation. Paper exposes the border, old/new sizes and duration, while the hook passes no arguments, so the information does not match. No key. |
+
+[paper-TargetHitEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/block/TargetHitEvent.html
+[paper-ThunderChangeEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/weather/ThunderChangeEvent.html
+[paper-TimeSkipEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/world/TimeSkipEvent.html
+[paper-ClockTimeSkipEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/world/ClockTimeSkipEvent.html
+[paper-TradeSelectEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/inventory/TradeSelectEvent.html
+[paper-PlayerTradeEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/PlayerTradeEvent.html
+[paper-VaultChangeStateEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/block/VaultChangeStateEvent.html
+[paper-VaultDisplayItemEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/VaultDisplayItemEvent.html
+[paper-VehicleCreateEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/vehicle/VehicleCreateEvent.html
+[paper-VehicleDamageEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/vehicle/VehicleDamageEvent.html
+[paper-VehicleDestroyEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/vehicle/VehicleDestroyEvent.html
+[paper-VehicleMoveEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/vehicle/VehicleMoveEvent.html
+[paper-WeatherChangeEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/weather/WeatherChangeEvent.html
+[paper-WhitelistToggleEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/server/WhitelistToggleEvent.html
+[paper-WorldBorderBoundsChangeFinishEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/world/border/WorldBorderBoundsChangeFinishEvent.html
+
+[paper-TNTPrimeEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/TNTPrimeEvent.html
+
+[paper-BlockDispenseLootEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/BlockDispenseLootEvent.html
+
+## Event counterparts: base world border, lifecycle and save hooks (#1015)
+
+Paper API 26.3 (paper-api `26.3.build.244-stable`), cited from its public Javadoc only; Horizon hooks are cited by function name, never by line.
+Scope = the four `base.rs` hooks below: two world-border notifications, the server world lifecycle and the completed-save cycle.
+
+| Horizon hook | Paper event / status | Evidence and porting boundary |
+|---|---|---|
+| `world_border_bounds_changed` | **Partial:** [`WorldBorderBoundsChangeEvent`][paper-WorldBorderBoundsChangeEvent] | Paper describes instant changes and timed moves on the server, but its Javadoc does not establish the hook's notification after `cmd_worldborder` calls `set_size`/`lerp_to`. The event is cancellable and exposes old/new sizes and mutable size/duration, while the listen-only hook passes no size or duration and cannot cancel or alter the change. No key. |
+| `world_border_center_changed` | **Partial:** [`WorldBorderCenterChangeEvent`][paper-WorldBorderCenterChangeEvent] | Paper describes a server world-border center change, but its Javadoc does not establish the hook's notification after `cmd_worldborder` calls `set_center`. The event exposes old/new centers and permits cancellation and `setNewCenter`, whereas the listen-only hook passes only the fact of the change and cannot prevent or retarget it. No key. |
+| `world_lifecycle` | **Gap:** none (nearest [`WorldLoadEvent`][paper-WorldLoadEvent] / [`WorldUnloadEvent`][paper-WorldUnloadEvent]) | Paper describes individual world load/unload events, not the hook's server-world open-through-close phase sequence. Neither event exposes `WorldOpenFailed`/`WorldCloseFailed` with the engine's failure text, and the cancellable unload event does not establish a completed-close notification. No key. |
+| `world_saved` | **Gap:** none (nearest [`WorldSaveEvent`][paper-WorldSaveEvent]) | Paper documents a world being saved, not completion of the whole save cycle in `save_game_with` after levels, parked levels, metadata and player autosaves. Its public API has no flush/still-pending flag corresponding to `wait`, so it does not establish the hook's moment or information. No key. |
+
+[paper-WorldBorderBoundsChangeEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/world/border/WorldBorderBoundsChangeEvent.html
+[paper-WorldBorderCenterChangeEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/world/border/WorldBorderCenterChangeEvent.html
+
+[paper-WorldSaveEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/world/WorldSaveEvent.html
+
+## Event counterparts: chunk watching, spawners and misc entity hooks (#1015)
+
+Paper API 26.3 (paper-api `26.3.build.244-stable`), public Javadoc only; Horizon cited by function name, never by line number.
+Scope: the twenty misc-chunk hooks below, from `chunk_unwatch` to `entity_change_block_pre`.
+
+| Horizon hook | Paper event / status | Evidence and porting boundary |
+|---|---|---|
+| `chunk_unwatch` | **Partial:** [`PlayerChunkUnloadEvent`][paper-PlayerChunkUnloadEvent] | The event reports a player receiving a chunk unload packet and exposes player and chunk without cancellation. `chunk_unwatch` also reports leaving a level or disconnecting, after the network step; the packet event does not document all those watch removals. No key. |
+| `chunk_watch` | **Gap:** none (nearest [`PlayerChunkLoadEvent`][paper-PlayerChunkLoadEvent]) | The event reports a player receiving a chunk, with player and chunk, rather than starting to watch or queuing it. `chunk_watch` precedes `chunk_sent`; receiving the chunk is a different moment. No key. |
+| `client_information_updated` | **Partial:** [`PlayerClientOptionsChangeEvent`][paper-PlayerClientOptionsChangeEvent] | Both report server-side client settings and the event exposes locale, view distance, chat, skin parts, main hand, filtering, listing and particles. Its Javadoc promises a settings change, not one callback for every play-phase packet including equal values with explicit old and new snapshots as `client_information_updated` does. No key. |
+| `clone_item_stack` | **Partial:** [`PlayerPickBlockEvent`][paper-PlayerPickBlockEvent] | Both concern a server-side block pick, and the event exposes the block and inherited item and include-data flag. Paper also carries player and source/target inventory slots and permits cancellation and slot changes, but returns a copy of the picked item with no replacement setter; `clone_item_stack` replaces the computed stack and carries no player or slots. No key. |
+| `connects_to` | **Gap:** none (nearest [`BlockCanBuildEvent`][paper-BlockCanBuildEvent]) | `BlockCanBuildEvent` asks whether a block may be built at a position and offers only a buildable flag; it never asks whether a fence, wall or bars connects toward a neighbour and has no kind, direction or `face_solid`. No key. |
+| `contents_changed` | **Gap:** none | No Paper event reports a container's backing block being marked changed after a write; the listed candidates (world change, main hand, equipment) carry none of the level, position and state the hook passes. No key. |
+| `create_fluid_source` | **Gap:** none (nearest [`FluidLevelChangeEvent`][paper-FluidLevelChangeEvent]) | The event reports a block's fluid level changing due to adjacent blocks and permits cancelling or changing its new data. `create_fluid_source` instead decides whether each neighbouring source counts during fluid computation, including spread checks with no change; these are different moments. No key. |
+| `create_spawn_position` | **Gap:** none (nearest [`SpawnChangeEvent`][paper-SpawnChangeEvent]) | `SpawnChangeEvent` fires after a world's spawn changes and offers only the previous location, so there is no pre-selection veto, no rotation change and no position out; the other candidates are per-player spawns. No key. |
+| `crop_grow_post` | **Gap:** none (nearest [`BlockGrowEvent`][paper-BlockGrowEvent]) | `BlockGrowEvent` fires before a block grows (cancelling prevents it) and carries only the new state; no Paper event reports the crop after it grew or the original and current states the hook passes. No key. |
+| `crop_grow_pre` | **Partial:** [`BlockGrowEvent`][paper-BlockGrowEvent] | `BlockGrowEvent` matches the about-to-grow moment and its cancel maps to `result = False`, but it fires only once growth is determined, cannot force growth (`result = True`) and reports the new state rather than the growing state. No key. |
+| `custom_click_action` | **Partial:** [`PlayerCustomClickEvent`][paper-PlayerCustomClickEvent] | Both report custom clicks with an identifier and optional tag payload on the server. Paper exposes a common connection (including configuration connections) and is non-cancellable; `custom_click_action` carries a play-phase player and a cancel result. No key. |
+| `custom_spawner_tick` | **Gap:** none (nearest [`PreSpawnerSpawnEvent`][paper-PreSpawnerSpawnEvent]) | `PreSpawnerSpawnEvent` fires only when a block spawner is about to spawn an entity, at the spawner's location; the hook is a per-tick callback for a mod-registered spawner key that runs the spawner's own logic and may spawn nothing. No key. |
+| `modify_custom_spawners` | **Gap:** none | Paper has no event through which a mod adds custom spawner entries to a level's spawner list; the listed spawn events are per spawn and cannot register a spawner. No key. |
+| `effect_particle_modification` | **Gap:** none (nearest [`EntityPotionEffectEvent`][paper-EntityPotionEffectEvent]) | The potion events fire when an effect is added, removed or ticks, not when its particles are chosen for a viewer, and neither [`EntityEffectTickEvent`][paper-EntityEffectTickEvent] nor the other candidates exposes the particle options or the visible flag. No key. |
+| `enchanted_block_loot` | **Gap:** none (nearest [`BlockDispenseLootEvent`][paper-BlockDispenseLootEvent]) | The event reports a block dispensing loot from its designated loot table, such as a vault, and permits replacing the dispensed loot or cancelling. `enchanted_block_loot` instead modifies each enchantment level read during a block-drop roll with tool and state; there is no event here for that mid-roll query. No key. |
+| `enchanted_entity_loot` | **Gap:** none (nearest [`LootGenerateEvent`][paper-LootGenerateEvent]) | `LootGenerateEvent`'s Javadoc says it is not called for an entity's loot table, and no other supplied event exposes the enchantment level read mid-roll with the entity, source and attacker. No key. |
+| `enchantment_level_set` | **Gap:** none | The dossier supplies no Paper event for the enchanting table drawing each row's level; no candidate carries the offer (player, row, power, item, drawn level) or lets a mod change it. No key. |
+| `ender_entity_teleport` | **Partial:** [`EntityTeleportEvent`][paper-EntityTeleportEvent] | The event explicitly includes natural Enderman and Shulker teleports and exposes entity, from/to locations, destination changes and cancellation. It also covers pathfinding and commands without a documented cause field to isolate self-teleports, and permits changing the origin, which `ender_entity_teleport` cannot express. No key. |
+| `enderman_anger` | **Partial:** [`EndermanAttackPlayerEvent`][paper-EndermanAttackPlayerEvent] | Both concern an enderman deciding whether a player's stare counts, with enderman, player and cancellation on the server. Paper starts cancelled for a pumpkin or missed look and allows uncancelling; `enderman_anger` runs only after a valid visible stare without a pumpkin and can only suppress it, also serving freeze and close-range escape checks. No key. |
+| `entity_change_block_pre` | **Partial:** [`EntityChangeBlockEvent`][paper-EntityChangeBlockEvent] | The event exposes the entity, block and proposed block data and permits vetoing a block change, matching the pre-change result. It is generic for entity block changes without a documented field limiting it to landing trampling, which is the scope of `entity_change_block_pre`. No key. |
+
+[paper-BlockDispenseLootEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/BlockDispenseLootEvent.html
+[paper-BlockGrowEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/BlockGrowEvent.html
+[paper-EndermanAttackPlayerEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/entity/EndermanAttackPlayerEvent.html
+[paper-PlayerChangedMainHandEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerChangedMainHandEvent.html
+[paper-PreSpawnerSpawnEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/entity/PreSpawnerSpawnEvent.html
+[paper-SpawnChangeEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/world/SpawnChangeEvent.html
+[paper-PlayerChunkUnloadEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/packet/PlayerChunkUnloadEvent.html
+[paper-PlayerClientOptionsChangeEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/player/PlayerClientOptionsChangeEvent.html
+[paper-PlayerPickBlockEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/PlayerPickBlockEvent.html
+[paper-PlayerCustomClickEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/PlayerCustomClickEvent.html
+[paper-EntityTeleportEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/EntityTeleportEvent.html
+
+## Event counterparts: entity lifecycle and interaction (#1015)
+
+Paper API 26.3 (paper-api `26.3.build.244-stable`), public Javadoc only; Horizon hooks are cited by function name, never by line.
+Scope: the 20 entity hooks below. A key is added only where moment, side, information and result all agree; everything else is Partial or Gap.
+
+| Horizon hook | Paper event / status | Evidence and porting boundary |
+|---|---|---|
+| `entity_constructing` | **Gap:** none | No dossier candidate covers entity construction while its holder can still be given attachments; nothing on the server-only Paper side exposes the kind and holder at that point. No key. |
+| `entity_inside` | **Partial:** [`EntityInsideBlockEvent`][paper-EntityInsideBlockEvent] | Same server-side subject (an entity inside a reacting block), with the block and entity available; but the event is documented for entering the hitbox while the hook fires once per entity and block per move, it is cancellable where the hook is listen-only, and it lacks the `precise` flag. No key. |
+| `entity_interact_specific` | **Partial:** [`PlayerInteractAtEntityEvent`][paper-PlayerInteractAtEntityEvent] | Same server-side right-click-on-entity moment, with the entity, player, hand and clicked position available; the held stack is accessible through the player. Paper cancellation prevents the interaction, but does not document the hook's successful claim that swings the hand and ends the click. No key. |
+| `entity_mob_griefing` | **Gap:** none | No dossier candidate answers the vanilla mob-griefing permission question for the different actions the hook gates; per-action events cannot replace the shared yes/no answer the hook returns. No key. |
+| `entity_place` | **Partial:** [`BlockPlaceEvent`][paper-BlockPlaceEvent] | Matches a server-side player placing a block, with block against, placed block, item and cancellation; its [`BlockMultiPlaceEvent`][paper-BlockMultiPlaceEvent] subclass also describes multi-block player placements. Paper is player-only here, while the hook also covers mob placers (enderman, snow golem), and Paper's Javadoc does not promise the hook's before-write moment. No key. |
+| `entity_size` | **Gap:** none | No dossier candidate reports a recalculated size, and no Paper event exposes width, height and eye height as values a mod can edit. No key. |
+| `entity_struck_by_lightning` | **Partial:** [`EntityZapEvent`][paper-EntityZapEvent] | Server-side lightning striking an entity, exposing both the struck entity and bolt and allowing cancellation; however, this is an entity-transformation event with a replacement entity, not the hook's general pre-hit permission for every struck entity. No key. |
+| `explosion_knockback` | **Partial:** [`EntityKnockbackEvent`][paper-EntityKnockbackEvent] | Server-side knockback about to be applied, with the entity and a settable vector; its documented `Cause.EXPLOSION` selects explosion knockback. It lacks the hook's explosion center and affected block list, and adds cancellation to the hook's vector override. No key. |
+| `explosion_start` | **Partial:** [`ExplosionPrimeEvent`][paper-ExplosionPrimeEvent] | Fires server-side when an entity decides to explode and is cancellable, overlapping the hook's pre-blast moment; but it is entity-only, so it does not cover all explosions. Both expose radius and fire, but Paper makes them settable while the hook only permits cancellation, and Paper lacks the hook's block interaction and damage type. No key. |
+| `farmland_trample` | **Partial:** [`PlayerInteractEvent`][paper-PlayerInteractEvent] | `Action.PHYSICAL` is the documented trampling path, server-side and cancellable; but the event is generic across physical interactions and player-only, and it lacks the fall `distance`, while the hook fires for mobs and players on landing. No key. |
+| `finalize_spawn` | **Gap:** none (nearest [`PreCreatureSpawnEvent`][paper-PreCreatureSpawnEvent]) | This cancellable server event exposes type, location and reason for limited natural and spawner attempts, even ones that may fail later; its Javadoc does not place it at mob finalization. It supplies neither the hook's unspawned mob nor difficulty and group overrides. No key. |
+| `fluid_flow` | **Gap:** none (nearest [`FluidLevelChangeEvent`][paper-FluidLevelChangeEvent]) | That event reports a block's fluid level changing and lets you set the new fluid data; it exposes no flow vector for an entity to edit, which is what `FlowingFluid.getFlow` computes. No key. |
+| `fluid_place_block` | **Partial:** [`BlockFormEvent`][paper-BlockFormEvent] | Its documented cases include obsidian/cobblestone forming on contact with water, overlapping server-side fluid-caused block placement; cancellation prevents formation and the new block state is available through the inherited API. It also covers unrelated formation and exposes no source `liquid_pos`, so it cannot represent the hook's full information and scope. No key. |
+| `game_rule_changed` | **Partial:** [`WorldGameRuleChangeEvent`][paper-WorldGameRuleChangeEvent] | Same subject and side, exposing the rule, the new value and a command sender; but the event is per-world and cancellable with a settable value, so it runs before the change is applied, while the hook is a listen-only server-wide notification that the rule was set. No key. |
+| `game_shutting_down` | **Gap:** none | No dossier candidate covers the end of the process; the hook fires after the client or dedicated server has stopped, a lifecycle moment no listed event describes. No key. |
+| `get_enchantment_level` | **Gap:** none | No dossier candidate fires on an enchantment-level read; nothing exposes a mutable level map for gameplay effects while leaving the stack's own component untouched. No key. |
+| `grindstone_place` | **Partial:** [`PrepareGrindstoneEvent`][paper-PrepareGrindstoneEvent] | Fires server-side when inputs are put in for grinding, exposing the inventory and an inherited `getResult`/`setResult` API, so the output can be replaced or cleared. It is non-cancellable and has no experience override, unlike the hook's `cancel` and `xp`. No key. |
+| `grindstone_take` | **Gap:** none (nearest [`PrepareGrindstoneEvent`][paper-PrepareGrindstoneEvent]) | It fires when an item is put in, not when the result is taken; no listed event covers the take or exposes the experience and input-remainder values. No key. |
+| `ingredient_test` | **Gap:** none | No dossier candidate runs inside recipe matching for a custom ingredient's predicate; the hook answers per stack test, which no listed event exposes. No key. |
+| `is_pathfindable` | **Gap:** none | No dossier candidate answers whether a block state is pathfindable per `PathComputationType`; no listed event exposes that per-state boolean. No key. |
+
+[paper-EntityInsideBlockEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/entity/EntityInsideBlockEvent.html
+[paper-BlockPlaceEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/BlockPlaceEvent.html
+[paper-RaidSpawnWaveEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/raid/RaidSpawnWaveEvent.html
+[paper-WorldGameRuleChangeEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/world/WorldGameRuleChangeEvent.html
+[paper-PrepareGrindstoneEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/inventory/PrepareGrindstoneEvent.html
+[paper-PlayerInteractAtEntityEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerInteractAtEntityEvent.html
+[paper-BlockMultiPlaceEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/BlockMultiPlaceEvent.html
+[paper-EntityZapEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/entity/EntityZapEvent.html
+[paper-PreCreatureSpawnEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/entity/PreCreatureSpawnEvent.html

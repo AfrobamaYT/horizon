@@ -2961,6 +2961,7 @@ impl Game<'_> {
         let entity = self.loot_entity_ref(entity);
         self.with_level(|b, level, ticks| {
             level.drop_entity = entity;
+            level.drop_breaker_at = entity.map(|_| at);
             b.destroy_block(level, ticks, at, true)
         });
         self.process_level_events()

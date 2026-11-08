@@ -1340,7 +1340,8 @@ impl ArrowScene<'_, '_> {
                         effects.apply(Effect::ClearFreeze);
                         effects.apply(Effect::LavaIgnite);
                     }
-                    FluidKind::Empty => {}
+                    // A mod's fluid does nothing to an entity inside it.
+                    FluidKind::Empty | FluidKind::Mod(_) | FluidKind::ModFlowing(_) => {}
                 }
             }
         }

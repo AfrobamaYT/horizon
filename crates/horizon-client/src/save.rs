@@ -68,7 +68,7 @@ mod loot_tests;
 pub fn chunks_with_block_entities<'a, N: std::hash::BuildHasher>(
     chunks: impl IntoIterator<Item = &'a Arc<Chunk>>,
     entities: &HashMap<(i32, i32, i32), crate::containers::BlockEntity>,
-    names: &HashMap<(i32, i32, i32), String, N>,
+    names: &HashMap<(i32, i32, i32), Tag, N>,
 ) -> Vec<Chunk> {
     let chunks: Vec<_> = chunks.into_iter().collect();
     if chunks.is_empty() {
@@ -623,27 +623,16 @@ fn read_ticks(
 }
 fn fluid_name(kind: u32) -> Option<String> {
     use horizon_world::fluid::FluidKind;
-    let fluid = *FluidKind::ALL.get(kind as usize)?;
-    Some(
-        match fluid {
-            FluidKind::Empty => return None,
-            FluidKind::FlowingWater => "minecraft:flowing_water",
-            FluidKind::Water => "minecraft:water",
-            FluidKind::FlowingLava => "minecraft:flowing_lava",
-            FluidKind::Lava => "minecraft:lava",
-        }
-        .to_owned(),
-    )
+    match FluidKind::from_tick_id(kind)? {
+        FluidKind::Empty => None,
+        fluid => Some(fluid.name().to_owned()),
+    }
 }
 fn fluid_id(name: &str) -> Option<u32> {
     use horizon_world::fluid::FluidKind;
-    Some(match name {
-        "minecraft:flowing_water" => FluidKind::FlowingWater,
-        "minecraft:water" => FluidKind::Water,
-        "minecraft:flowing_lava" => FluidKind::FlowingLava,
-        "minecraft:lava" => FluidKind::Lava,
-        _ => return None,
-    } as u32)
+    FluidKind::from_name(name)
+        .filter(|kind| *kind != FluidKind::Empty)
+        .map(FluidKind::tick_id)
 }
 
 pub use horizon_items::item_nbt::{
@@ -1528,7 +1517,7 @@ pub fn encode_with(
             if let Some((_, name)) = chunk.block_names.iter().find(|(q, _)| q == p)
                 && let Tag::Compound(map) = &mut current
             {
-                map.insert("CustomName".into(), string(name));
+                map.insert("CustomName".into(), name.clone());
             }
             let source = extras
                 .and_then(|x| x.block_entity_sources.iter().find(|(q, _)| q == p))
@@ -1540,7 +1529,25 @@ pub fn encode_with(
                 Some(original) => {
                     let loaded = decode_block_entity(original).map_or_else(
                         || current.clone(),
-                        |(q, e)| encode_block_entity(q, &e, &block),
+                        |(q, e)| {
+                            let mut loaded = encode_block_entity(q, &e, &block);
+                            if !matches!(
+                                e,
+                                crate::containers::BlockEntity::Banner(_)
+                                    | crate::containers::BlockEntity::Sign(_)
+                                    | crate::containers::BlockEntity::Mod(_)
+                            ) && let Some(name) = original
+                                .get("CustomName")
+                                .and_then(crate::block_entity_nbt::component)
+                                && let Tag::Compound(map) = &mut loaded
+                            {
+                                // BaseContainerBlockEntity.loadAdditional: the
+                                // external name is also part of the loaded model.
+                                // Its removal must win over the source overlay.
+                                map.insert("CustomName".into(), name);
+                            }
+                            loaded
+                        },
                     );
                     merge_block_entity(original, &loaded, &current)
                 }
@@ -1842,7 +1849,18 @@ fn decode_column(
                             horizon_mod_runtime::attachments::Attachments::from_nbt(data.clone()),
                         ));
                     }
-                    if let Some(name) = text(e.get("CustomName")) {
+                    let name = if matches!(
+                        be.1,
+                        crate::containers::BlockEntity::Banner(_)
+                            | crate::containers::BlockEntity::Sign(_)
+                            | crate::containers::BlockEntity::Mod(_)
+                    ) {
+                        text(e.get("CustomName")).map(|name| string(&name))
+                    } else {
+                        e.get("CustomName")
+                            .and_then(crate::block_entity_nbt::component)
+                    };
+                    if let Some(name) = name {
                         chunk.block_names.push((be.0, name));
                     }
                     if let Some(rolled) = roll_loaded_loot(&chunk, biomes, e, &mut be, loot) {
@@ -6413,16 +6431,16 @@ mod tests {
             for z in [-17, -16, -1, 0, 15, 16] {
                 let p = (x, 64, z);
                 entities.insert(p, BlockEntity::Chest(vec![None; 27]));
-                names.insert(p, format!("container {x},{z}"));
+                names.insert(p, string(&format!("container {x},{z}")));
             }
         }
         // Names without a modelled entity must also survive the snapshot.
-        names.insert((-2, 80, -3), "orphan name".into());
+        names.insert((-2, 80, -3), string("orphan name"));
         let mut source = Chunk::empty(-1, -1);
         source
             .block_entities
             .push(((99, 0, 99), BlockEntity::Chest(vec![])));
-        source.block_names.push(((99, 0, 99), "stale".into()));
+        source.block_names.push(((99, 0, 99), string("stale")));
         source.saved = Some(Arc::new(ChunkExtras::default()));
         let source = Arc::new(source);
         let batch = vec![
@@ -6468,7 +6486,7 @@ mod tests {
         names.clear();
         assert!(!snapshot[0].block_entities.is_empty());
         assert!(!snapshot[0].block_names.is_empty());
-        assert_eq!(source.block_names[0].1, "stale");
+        assert_eq!(source.block_names[0].1, string("stale"));
         assert_eq!(source.block_entities[0].0, (99, 0, 99));
     }
 
@@ -7213,6 +7231,54 @@ mod tests {
     }
     use super::*;
     use crate::chunk::{MIN_Y, SECTIONS};
+
+    #[test]
+    fn a_mods_fluid_ticks_are_saved_by_name() {
+        use horizon_world::fluid::{FluidKind, ModFluidRules, ModFluidType, register_mod_fluid};
+        let fluid = register_mod_fluid(ModFluidType {
+            id: "savetest:oil".into(),
+            flowing_id: "savetest:flowing_oil".into(),
+            bucket: None,
+            rules: ModFluidRules {
+                tick_delay: 5,
+                drop_off: 1,
+                slope_find_distance: 4,
+                converts_to_source: false,
+            },
+        });
+        let fluid = fluid.unwrap();
+        let tick = |kind: FluidKind| SavedTick {
+            kind: horizon_core::ticks::TickTypeId(kind.tick_id()),
+            pos: BlockPos::new(1, 64, 2),
+            delay: 3,
+            priority: horizon_core::ticks::TickPriority::Normal,
+        };
+        let ticks = [
+            tick(FluidKind::ModFlowing(fluid)),
+            tick(FluidKind::Mod(fluid)),
+            tick(FluidKind::FlowingWater),
+            tick(FluidKind::Lava),
+        ];
+        let tag = tick_list(&ticks, fluid_name);
+        let names: Vec<_> = match &tag {
+            Tag::List(list) => list.iter().filter_map(|t| text(t.get("i"))).collect(),
+            _ => Vec::new(),
+        };
+        assert_eq!(
+            names,
+            [
+                "savetest:flowing_oil",
+                "savetest:oil",
+                "minecraft:flowing_water",
+                "minecraft:lava"
+            ]
+        );
+        let back = read_ticks(Some(&tag), (0, 0), fluid_id);
+        assert_eq!(
+            back.iter().map(|t| t.kind).collect::<Vec<_>>(),
+            ticks.iter().map(|t| t.kind).collect::<Vec<_>>()
+        );
+    }
 
     #[test]
     fn only_server_disk_records_intern_saved_fluid_names() {
