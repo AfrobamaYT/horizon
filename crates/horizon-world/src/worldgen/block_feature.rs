@@ -462,6 +462,13 @@ mod bound_tag_tests {
         let bindings = FeatureBlockBindings::new(&registry, BTreeSet::new()).unwrap();
         let json = serde_json::to_string(&vec!["minecraft:stone"; 8193]).unwrap();
         assert_eq!(bindings.predicate_block_set(&json).unwrap().len(), 1);
+        let predicate = format!(r#"{{"type":"matching_blocks","blocks":{json}}}"#);
+        assert!(
+            super::super::block_predicate::BlockPredicate::from_json_with_blocks(
+                &predicate, &bindings,
+            )
+            .is_ok()
+        );
     }
     #[test]
     fn replacement_target_ceiling() {
