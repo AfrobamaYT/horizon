@@ -453,7 +453,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn item_block_maps_a_mod_items_back_to_its_block() {
         use super::super::native_entity_refs::tests::{run_fresh_cases, with_game_at};
-        use mod_api::{self, Host, Hooks};
+        use mod_api::{self, Hooks, Host};
         use std::sync::Arc;
 
         const CHILD: &str = "HORIZON_ITEM_BLOCK_MOD_CHILD";
@@ -468,7 +468,11 @@ mod tests {
         struct TestMod;
         #[mod_api::__subscriptions]
         impl Hooks for TestMod {
-            fn blocks(&self, _context: &mod_api::RegistrationContext, event: &mut mod_api::BlocksEvent<'_>) {
+            fn blocks(
+                &self,
+                _context: &mod_api::RegistrationContext,
+                event: &mut mod_api::BlocksEvent<'_>,
+            ) {
                 event.blocks.push({
                     let mut draft = mod_api::Block::new(CRATE, "minecraft:stone");
                     draft.item = true;
@@ -476,7 +480,8 @@ mod tests {
                 });
             }
         }
-        let mods: mod_api::Mods = Arc::from([mod_api::ModEntry::new("item_test", Box::new(TestMod))]);
+        let mods: mod_api::Mods =
+            Arc::from([mod_api::ModEntry::new("item_test", Box::new(TestMod))]);
         mod_api::__private::install(mods.clone());
         crate::game::api_values::install_parts(&mods).unwrap();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
