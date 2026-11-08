@@ -641,7 +641,7 @@ handle, an entity the client doesn't track and a level it doesn't show:
 - `level.day_time(host)`: the synchronized Overworld clock in ticks (counting past 24000), advanced at the
   server-supplied rate while the client level runs. This remains the Overworld clock in the End, even though
   the sky uses the End's own default clock. Only a handle for the level the client shows can read it.
-- `living.equipment(host, slot)`, `hand_item`, `effect`, `effects`, `health` and `max_health`, for the local player.
+- `living.equipment(host, slot)`, `hand_item`, `effect`, `effects`, `potion_affected` (`hasEffect`), `health` and `max_health`, for the local player.
   Another entity's equipment, effects and health stay server reads, and so does every write.
 - `player.last_death_location(host)`, for the local player: the position the login and respawn packets carried.
 - `player.inventory(host)` reads non-empty main inventory `ItemStack`s in slot order, with components. It returns `None` for a stale or unavailable player; on a client only the local player's inventory is available. Armor and offhand are separate equipment.
