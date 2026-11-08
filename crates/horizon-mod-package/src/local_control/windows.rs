@@ -1,5 +1,6 @@
 use super::{Marker, check_deadline, pause};
 use sha2::{Digest, Sha256};
+use std::ptr::{null, null_mut};
 use std::{
     ffi::c_void,
     fs::File,
@@ -26,20 +27,14 @@ impl Drop for Local {
     }
 }
 fn current_user_acl() -> io::Result<Local> {
-    let mut token = std::ptr::null_mut();
+    let mut token = null_mut();
     if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
         return Err(io::Error::last_os_error());
     }
     let token = unsafe { OwnedHandle::from_raw_handle(token) };
     let mut size = 0;
     unsafe {
-        GetTokenInformation(
-            token.as_raw_handle(),
-            TokenUser,
-            std::ptr::null_mut(),
-            0,
-            &mut size,
-        );
+        GetTokenInformation(token.as_raw_handle(), TokenUser, null_mut(), 0, &mut size);
     }
     let mut storage = vec![0usize; (size as usize).div_ceil(std::mem::size_of::<usize>())];
     if unsafe {
@@ -56,7 +51,7 @@ fn current_user_acl() -> io::Result<Local> {
     }
     // SAFETY: TokenUser initialized aligned storage; SID pointers stay inside its lifetime.
     let user = unsafe { &*storage.as_ptr().cast::<TOKEN_USER>() };
-    let mut string = std::ptr::null_mut();
+    let mut string = null_mut();
     if unsafe { ConvertSidToStringSidW(user.User.Sid, &mut string) } == 0 {
         return Err(io::Error::last_os_error());
     }
@@ -71,13 +66,13 @@ fn current_user_acl() -> io::Result<Local> {
         .encode_utf16()
         .chain([0])
         .collect();
-    let mut descriptor = std::ptr::null_mut();
+    let mut descriptor = null_mut();
     if unsafe {
         ConvertStringSecurityDescriptorToSecurityDescriptorW(
             sddl.as_ptr(),
             1,
             &mut descriptor,
-            std::ptr::null_mut(),
+            null_mut(),
         )
     } == 0
     {
@@ -102,15 +97,7 @@ pub struct Stream(File);
 impl Stream {
     pub fn set_nonblocking(&self, enabled: bool) -> io::Result<()> {
         let mode = PIPE_READMODE_BYTE | if enabled { PIPE_NOWAIT } else { PIPE_WAIT };
-        if unsafe {
-            SetNamedPipeHandleState(
-                self.0.as_raw_handle(),
-                &mode,
-                std::ptr::null(),
-                std::ptr::null(),
-            )
-        } == 0
-        {
+        if unsafe { SetNamedPipeHandleState(self.0.as_raw_handle(), &mode, null(), null()) } == 0 {
             return Err(io::Error::last_os_error());
         }
         Ok(())
@@ -177,7 +164,7 @@ impl Endpoint {
             check_deadline(deadline)?;
             // NOWAIT can report a listening instance as successful: confirm an actual peer.
             unsafe {
-                ConnectNamedPipe(stream.0.as_raw_handle(), std::ptr::null_mut());
+                ConnectNamedPipe(stream.0.as_raw_handle(), null_mut());
             }
             let mut peer = 0;
             if unsafe { GetNamedPipeClientProcessId(stream.0.as_raw_handle(), &mut peer) } != 0 {
@@ -203,10 +190,10 @@ pub fn connect(marker: &Marker, deadline: Instant) -> io::Result<Stream> {
                 name(marker).as_ptr(),
                 GENERIC_READ | GENERIC_WRITE,
                 0,
-                std::ptr::null(),
+                null(),
                 OPEN_EXISTING,
                 0,
-                std::ptr::null_mut(),
+                null_mut(),
             )
         };
         if handle != INVALID_HANDLE_VALUE {

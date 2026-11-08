@@ -1,5 +1,6 @@
 use super::*;
 use crate::local_control::Channel;
+use std::ptr::{null, null_mut};
 use std::{sync::mpsc, time::Duration};
 fn marker() -> (tempfile::TempDir, Marker) {
     let root = tempfile::tempdir().unwrap();
@@ -16,15 +17,7 @@ fn private_pipe_exchanges_authenticated_messages_once_without_inheriting_handles
     let handle = endpoint.0.as_ref().unwrap().0.as_raw_handle();
     let (mut flags, mut maximum) = (0, 0);
     assert_ne!(
-        unsafe {
-            GetNamedPipeInfo(
-                handle,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                &mut maximum,
-            )
-        },
+        unsafe { GetNamedPipeInfo(handle, null_mut(), null_mut(), null_mut(), &mut maximum,) },
         0
     );
     assert_eq!(maximum, 1);
@@ -96,7 +89,7 @@ fn descriptor_has_exactly_one_allow_ace_for_the_current_token_user() {
     let descriptor = current_user_acl().unwrap();
     unsafe {
         let (mut present, mut defaulted) = (0, 0);
-        let mut acl = std::ptr::null_mut();
+        let mut acl = null_mut();
         assert_ne!(
             GetSecurityDescriptorDacl(descriptor.0, &mut present, &mut acl, &mut defaulted),
             0
@@ -114,33 +107,27 @@ fn descriptor_has_exactly_one_allow_ace_for_the_current_token_user() {
             0
         );
         assert_eq!(size.AceCount, 1);
-        let mut ace = std::ptr::null_mut();
+        let mut ace = null_mut();
         assert_ne!(GetAce(acl, 0, &mut ace), 0);
         let ace = &*ace.cast::<ACCESS_ALLOWED_ACE>();
         assert_eq!(ace.Header.AceType, 0); // ACCESS_ALLOWED_ACE_TYPE from the Windows ABI.
         assert_eq!(ace.Header.AceFlags, 0);
         assert_eq!(ace.Mask, GENERIC_ALL);
-        let mut token = std::ptr::null_mut();
+        let mut token = null_mut();
         assert_ne!(
             OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token),
             0
         );
         let token = OwnedHandle::from_raw_handle(token);
         let mut bytes = 0;
-        GetTokenInformation(
-            token.as_raw_handle(),
-            TokenUser,
-            std::ptr::null_mut(),
-            0,
-            &mut bytes,
-        );
-        let mut storage = vec![0usize; (bytes as usize).div_ceil(std::mem::size_of::<usize>())];
+        // TOKEN_USER plus the Windows ABI maximum 68-byte SID fits this aligned buffer.
+        let mut storage = [0usize; 32];
         assert_ne!(
             GetTokenInformation(
                 token.as_raw_handle(),
                 TokenUser,
                 storage.as_mut_ptr().cast(),
-                bytes,
+                std::mem::size_of_val(&storage) as u32,
                 &mut bytes
             ),
             0
@@ -155,13 +142,24 @@ fn descriptor_has_exactly_one_allow_ace_for_the_current_token_user() {
         );
     }
 }
-fn remote(marker: &Marker) -> Vec<u16> {
+fn open_remote(marker: &Marker) -> HANDLE {
     let local = String::from_utf16(&name(marker)[..name(marker).len() - 1]).unwrap();
-    local
+    let path: Vec<u16> = local
         .replacen(r"\\.\", r"\\localhost\", 1)
         .encode_utf16()
         .chain([0])
-        .collect()
+        .collect();
+    unsafe {
+        CreateFileW(
+            path.as_ptr(),
+            GENERIC_READ | GENERIC_WRITE,
+            0,
+            null(),
+            OPEN_EXISTING,
+            0,
+            null_mut(),
+        )
+    }
 }
 #[test]
 fn remote_clients_are_rejected_when_the_control_pipe_accepts_the_same_credentials() {
@@ -188,19 +186,9 @@ fn remote_clients_are_rejected_when_the_control_pipe_accepts_the_same_credential
     assert_ne!(handle, INVALID_HANDLE_VALUE);
     let server = unsafe { OwnedHandle::from_raw_handle(handle) };
     unsafe {
-        ConnectNamedPipe(server.as_raw_handle(), std::ptr::null_mut());
+        ConnectNamedPipe(server.as_raw_handle(), null_mut());
     }
-    let allowed = unsafe {
-        CreateFileW(
-            remote(&control).as_ptr(),
-            GENERIC_READ | GENERIC_WRITE,
-            0,
-            std::ptr::null(),
-            OPEN_EXISTING,
-            0,
-            std::ptr::null_mut(),
-        )
-    };
+    let allowed = open_remote(&control);
     assert_ne!(
         allowed,
         INVALID_HANDLE_VALUE,
@@ -210,22 +198,9 @@ fn remote_clients_are_rejected_when_the_control_pipe_accepts_the_same_credential
     let _allowed = unsafe { OwnedHandle::from_raw_handle(allowed) };
     let endpoint = Endpoint::bind(&marker).unwrap();
     unsafe {
-        ConnectNamedPipe(
-            endpoint.0.as_ref().unwrap().0.as_raw_handle(),
-            std::ptr::null_mut(),
-        );
+        ConnectNamedPipe(endpoint.0.as_ref().unwrap().0.as_raw_handle(), null_mut());
     }
-    let denied = unsafe {
-        CreateFileW(
-            remote(&marker).as_ptr(),
-            GENERIC_READ | GENERIC_WRITE,
-            0,
-            std::ptr::null(),
-            OPEN_EXISTING,
-            0,
-            std::ptr::null_mut(),
-        )
-    };
+    let denied = open_remote(&marker);
     assert_eq!(denied, INVALID_HANDLE_VALUE);
     assert_eq!(
         io::Error::last_os_error().raw_os_error(),

@@ -1,7 +1,7 @@
 //! Selected-game holder bootstrap; production IO/signals are wired by the next layer.
 use crate::{
-    local_control::{Channel, Endpoint, Marker, connect},
-    locks::{LockMode, Release},
+    local_control::{Channel, Marker, connect},
+    locks::LockMode,
     runtime_leases::{Claim, Registry, open_directory},
 };
 use cap_fs_ext::{FollowSymlinks, MetadataExt, OpenOptionsFollowExt};
@@ -9,9 +9,9 @@ use cap_std::fs::{Dir, File, OpenOptions};
 use serde::{Deserialize, Serialize};
 use std::{
     ffi::OsString,
-    io::{self, Read},
+    io,
     path::{Path, PathBuf},
-    process::{Child, Command, ExitStatus},
+    process::{Command, ExitStatus},
     time::{Duration, Instant},
 };
 pub const ENV: &str = "HORIZON_RUNTIME_HOLDER";
@@ -97,20 +97,10 @@ pub struct Program {
 impl Program {
     fn command(&self) -> io::Result<Command> {
         let mut command = Command::new(&self.executable);
-        if let Some(raw) = &self.raw_windows {
-            #[cfg(windows)]
-            {
-                use std::os::windows::process::CommandExt;
-                command.raw_arg(raw);
-            }
-            #[cfg(not(windows))]
-            {
-                let _ = raw;
-                return Err(io::ErrorKind::InvalidInput.into());
-            }
-        } else {
-            command.args(&self.arguments);
+        if self.raw_windows.is_some() {
+            return Err(io::ErrorKind::Unsupported.into());
         }
+        command.args(&self.arguments);
         command
             .current_dir(&self.directory)
             .env_clear()
@@ -190,162 +180,11 @@ struct Request {
     entry: Entry,
     program: Program,
 }
-pub struct Prepared {
-    request: Request,
-    _snapshots: Vec<Snapshot>,
-    _claims: Vec<Claim>,
-}
-impl Prepared {
-    pub fn new(data: PathBuf, trees: Vec<(PathBuf, bool)>, program: Program) -> io::Result<Self> {
-        if !data.is_absolute()
-            || !program.directory.is_absolute()
-            || trees.is_empty()
-            || trees.len() > 15
-            || !trees.iter().any(|(_, complete)| *complete)
-        {
-            return Err(io::ErrorKind::InvalidInput.into());
-        }
-        // The namespace gate must precede every selected-tree open, not just its eventual lock.
-        let registry = Registry::with_release(&data, Release::Close).map_err(lease_error)?;
-        let mut snapshots = trees
-            .into_iter()
-            .map(|(path, complete)| Snapshot::capture(&path, complete))
-            .collect::<io::Result<Vec<_>>>()?;
-        let mut entry = Entry {
-            version: crate::local_control::VERSION,
-            data,
-            trees: snapshots
-                .iter()
-                .map(|snapshot| snapshot.tree.clone())
-                .collect(),
-        };
-        let record = record(&entry.data)?;
-        entry.trees.push(record.tree.clone());
-        snapshots.push(record);
-        let claims = snapshots
-            .iter()
-            .map(|snapshot| {
-                registry
-                    .lock(&snapshot.directory, LockMode::Shared)
-                    .map_err(lease_error)
-            })
-            .collect::<io::Result<_>>()?;
-        entry.recheck()?;
-        use std::io::Write;
-        let directory = &snapshots.last().unwrap().directory;
-        let mut options = OpenOptions::new();
-        options
-            .write(true)
-            .create_new(true)
-            .follow(FollowSymlinks::No);
-        directory
-            .open_with("launch.json", &options)?
-            .write_all(&serde_json::to_vec(&entry).map_err(|_| io::ErrorKind::InvalidData)?)?;
-        Ok(Self {
-            request: Request { entry, program },
-            _snapshots: snapshots,
-            _claims: claims,
-        })
-    }
-}
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 enum Reply {
     Acquired,
     Commit,
-}
-/// Capability bytes probe format support, never executable authenticity.
-pub fn capable(path: &Path) -> io::Result<bool> {
-    let mut file = std::fs::File::open(path)?;
-    let mut buffer = [0; 8192];
-    let mut retained = 0;
-    loop {
-        let read = file.read(&mut buffer[retained..])?;
-        if read == 0 {
-            return Ok(false);
-        }
-        let length = retained + read;
-        if buffer[..length]
-            .windows(CAPABILITY.len())
-            .any(|bytes| bytes == CAPABILITY)
-        {
-            return Ok(true);
-        }
-        retained = length.min(CAPABILITY.len() - 1);
-        buffer.copy_within(length - retained..length, 0);
-    }
-}
-/// Legacy images return without spawning or receiving bootstrap secrets.
-pub enum Started {
-    Legacy(Command),
-    Holder { child: Child, degraded: bool },
-}
-pub fn launch(
-    mut holder: Command,
-    marker: &Marker,
-    prepared: &Prepared,
-    deadline: Instant,
-) -> io::Result<Started> {
-    if !capable(Path::new(holder.get_program()))? {
-        return Ok(Started::Legacy(prepared.request.program.command()?));
-    }
-    prepared
-        .request
-        .entry
-        .check_image(Path::new(holder.get_program()))?;
-    let mut endpoint = Endpoint::bind(marker)?;
-    holder.env(
-        ENV,
-        serde_json::to_string(marker).map_err(|_| io::ErrorKind::InvalidData)?,
-    );
-    let (mut child, degraded) = spawn(&mut holder)?;
-    let request = &prepared.request;
-    let handshake = (|| {
-        let stream = endpoint.accept(deadline)?;
-        let channel = Channel::authenticate(stream, marker, true, deadline)?;
-        let channel = channel.send(request)?;
-        let (channel, reply) = channel.receive::<Reply>()?;
-        if !matches!(reply, Reply::Acquired) {
-            return Err(io::ErrorKind::InvalidData.into());
-        }
-        request.entry.recheck()?;
-        channel.send(&Reply::Commit).map(drop)
-    })();
-    if let Err(error) = handshake {
-        let _ = child.kill();
-        child.wait()?;
-        return Err(error);
-    }
-    Ok(Started::Holder { child, degraded })
-}
-fn spawn(command: &mut Command) -> io::Result<(Child, bool)> {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        use windows_sys::Win32::{
-            Foundation::ERROR_ACCESS_DENIED, System::Threading::CREATE_BREAKAWAY_FROM_JOB,
-        };
-        command.creation_flags(CREATE_BREAKAWAY_FROM_JOB);
-        match command.spawn() {
-            Ok(child) => return Ok((child, false)),
-            Err(error) if error.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32) && in_job()? => {
-                command.creation_flags(0);
-                return command.spawn().map(|child| (child, true));
-            }
-            Err(error) => return Err(error),
-        }
-    }
-    #[cfg(not(windows))]
-    command.spawn().map(|child| (child, false))
-}
-#[cfg(windows)]
-fn in_job() -> io::Result<bool> {
-    use windows_sys::Win32::System::{JobObjects::IsProcessInJob, Threading::GetCurrentProcess};
-    let mut assigned = 0;
-    if unsafe { IsProcessInJob(GetCurrentProcess(), std::ptr::null_mut(), &mut assigned) } == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(assigned != 0)
 }
 fn run(encoded: OsString, claims: &mut Option<Acquired>) -> io::Result<ExitStatus> {
     let marker: Marker = serde_json::from_str(encoded.to_str().ok_or(io::ErrorKind::InvalidData)?)
@@ -374,22 +213,6 @@ fn run(encoded: OsString, claims: &mut Option<Acquired>) -> io::Result<ExitStatu
     );
     command.status()
 }
-/// Persistent per-launch kernel-owned record; cleanup treats held records as live, never PIDs.
-fn record(data: &Path) -> io::Result<Snapshot> {
-    use cap_fs_ext::DirExt;
-    use sha2::Digest;
-    let directory = open_directory(data).map_err(lease_error)?;
-    match directory.create_dir("run-records") {
-        Err(error) if error.kind() != io::ErrorKind::AlreadyExists => return Err(error),
-        _ => {}
-    }
-    let records = directory.open_dir_nofollow("run-records")?;
-    let mut nonce = [0; 16];
-    getrandom::fill(&mut nonce).map_err(|_| io::ErrorKind::Other)?;
-    let name = format!("{:x}", sha2::Sha256::digest(nonce));
-    records.create_dir(&name)?;
-    Snapshot::capture(&data.join("run-records").join(name), false)
-}
 /// Does nothing for ordinary startup. Private startup can never reach the normal game path.
 pub fn enter() {
     let Some(encoded) = std::env::var_os(ENV) else {
@@ -409,5 +232,3 @@ fn lease_error(error: crate::runtime_leases::Error) -> io::Error {
 }
 #[cfg(test)]
 mod tests;
-#[cfg(all(test, windows))]
-mod windows_tests;
