@@ -325,3 +325,41 @@ A key exists only where the moment, side, facts and outcome all agree; otherwise
 [paper-ItemCraftedEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/inventory/ItemCraftedEvent.html
 [paper-ItemDespawnEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/ItemDespawnEvent.html
 [paper-EntityPickupItemEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/EntityPickupItemEvent.html
+
+## Event counterparts: base item hooks (#1015)
+
+Paper API 26.3 (paper-api `26.3.build.244-stable`), public Javadoc only: no Paper server source is used and no Bukkit compatibility layer is proposed. Horizon hooks are cited by function name; scope is the 20 `base-item` hooks below.
+
+| Horizon hook | Paper event / status | Evidence and porting boundary |
+|---|---|---|
+| `item_spawn` | **Gap:** none (nearest [`ItemSpawnEvent`][paper-ItemSpawnEvent]) | Paper describes a cancellable spawn whose cancellation prevents the item from spawning, whereas `item_spawn` listens only after the item was successfully added. Its item entity supplies the stack and position, but the before/after boundary differs. No key. |
+| `items` | **Gap:** none cited | Item declarations are collected once at registration; no cited Paper event fires when content is registered or offers the declared items as an out-value. No key. |
+| `left_click_block` | **Partial:** [`PlayerInteractEvent`][paper-PlayerInteractEvent] | Action.LEFT_CLICK_BLOCK narrows the server interaction to a left click on a block, with the clicked block and face. Paper additionally exposes the item and hand and separate block-use and item-use results, whereas left_click_block passes block state, position and face with one cancel flag; its Javadoc also does not establish the hook's precise post-guard dig-start ordering. No key. |
+| `level_load` | **Partial:** [`WorldLoadEvent`][paper-WorldLoadEvent] | Paper announces a loaded world on the server and exposes that world, but its Javadoc does not establish Horizon's ordering before the first chunk or its lazy dimension-open lifecycle. No key. |
+| `level_tick_post` | **Gap:** none cited | No cited Paper event marks the end of one dimension's tick pass, and the cited set has no per-level tick event at all, so Horizon's per-dimension ordering cannot be expressed. No key. |
+| `level_tick_pre` | **Gap:** none cited | As `level_tick_post`: the cited set has no per-level tick event, so the start of a dimension's tick pass is not observable through the cited events. No key. |
+| `level_unload` | **Gap:** none (nearest [`WorldUnloadEvent`][paper-WorldUnloadEvent]) | Paper exposes the unloading world but is cancellable; it does not document the hook's already-closed, after-last-save notification. No key. |
+| `lightning_strike` | **Partial:** [`LightningStrikeEvent`][paper-LightningStrikeEvent] | Both describe a server lightning strike with cancellation, position and cause; the lightning entity also exposes its causing entity. Paper distinguishes SPAWNER, TRAP and ENCHANTMENT as well as COMMAND, CUSTOM, TRIDENT and WEATHER, so its cause information cannot all be expressed by Horizon's weather/trident/command/mod values. No key. |
+| `living_breathe` | **Gap:** none (nearest [`EntityAirChangeEvent`][paper-EntityAirChangeEvent]) | Paper fires when remaining air changes, with a settable amount and cancellation; it does not describe the per-tick breathing decision with separate mutable can_breathe, consume and refill inputs. No key. |
+| `living_drown` | **Gap:** none (nearest [`EntityDamageEvent`][paper-EntityDamageEvent]) | Paper's drowning damage event concerns the damage application, rather than the air tick deciding whether to drown; it lacks the hook's is_drowning flag and bubble count. No key. |
+| `living_entity_use_item_finish` | **Gap:** none (nearest [`PlayerItemConsumeEvent`][paper-PlayerItemConsumeEvent]) | Paper fires while a player is finishing consumption, before effects and item removal, and can cancel them or set a replacement. Horizon fires after finishUsingItem and exposes the actual resulting stack, also for non-consumable timed uses; the moments differ. No key. |
+| `living_entity_use_item_start` | **Gap:** none (nearest [`PlayerInteractEvent`][paper-PlayerInteractEvent]) | A right-click interaction does not establish that LivingEntity.startUsingItem has been reached: interactions can perform other actions or never start a timed use. It also lacks the mutable duration and mob uses. No key. |
+| `living_entity_use_item_stop` | **Partial:** [`PlayerStopUsingItemEvent`][paper-PlayerStopUsingItemEvent] | Paper detects a player releasing an item and exposes the item and elapsed ticks. It is non-cancellable, lacks the hand and remaining duration, and cannot express Horizon's cancellation of the release outcome or its mob uses. No key. |
+| `living_entity_use_item_tick` | **Gap:** none cited | No cited Paper event fires on every tick of an item use or lets a listener move the remaining duration; the cited click events are a different moment. No key. |
+| `living_equipment_change` | **Covered:** [`EntityEquipmentChangedEvent`][paper-EntityEquipmentChangedEvent] | Paper fires after an equipment change is detected, server-side, for a living entity, and its changed-slot map carries each slot's old and new stack, matching the hook's `from`/`to`; it is listen-only (non-cancellable) like the hook. Paper batches the slots where Horizon reports one per slot. Key added. |
+| `living_equipment_listened` | **Gap:** none cited | It is a Horizon-only opt-in gate asked once a tick, not a game moment; no cited event expresses it, and the equipment events it gates are unrelated to the gate itself. No key. |
+| `living_fall` | **Gap:** none (nearest [`EntityDamageEvent`][paper-EntityDamageEvent]) | Paper's damage event fires when fall damage lands, after fall handling, and exposes neither the fall distance nor the damage multiplier the hook lets mods change; the both-side pre-damage moment has no cited event. No key. |
+| `living_heal` | **Partial:** [`EntityRegainHealthEvent`][paper-EntityRegainHealthEvent] | Paper exposes the healing entity, mutable amount and cancellation on the server, matching the server half of living_heal. It also supplies a regain reason and fast-regeneration flag which Horizon does not pass; its Javadoc does not specify the hook's precise pre-application ordering. No key. |
+| `living_incoming_damage` | **Partial:** [`EntityDamageEvent`][paper-EntityDamageEvent] | The hit moment, server side, cancellation and a settable damage amount match, but Horizon also passes and lets mods change the invulnerability ticks a fresh hit leaves and passes the attacker's weapon, neither of which the event exposes. No key. |
+| `living_jump` | **Partial:** [`EntityJumpEvent`][paper-EntityJumpEvent] | `EntityJumpEvent` detects a living entity's jump server-side and identifies the entity, but it is cancellable (a listen-only hook cannot express its cancel) and fires at the jump decision rather than after the velocity write; `HorseJumpEvent` and `PlayerJumpEvent` are narrower. No key. |
+
+[paper-LightningStrikeEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/weather/LightningStrikeEvent.html
+[paper-EntityEquipmentChangedEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/entity/EntityEquipmentChangedEvent.html
+[paper-EntityJumpEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/entity/EntityJumpEvent.html
+[paper-ItemSpawnEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/ItemSpawnEvent.html
+[paper-WorldLoadEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/world/WorldLoadEvent.html
+[paper-WorldUnloadEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/world/WorldUnloadEvent.html
+[paper-EntityAirChangeEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/EntityAirChangeEvent.html
+[paper-PlayerItemConsumeEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerItemConsumeEvent.html
+[paper-PlayerStopUsingItemEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/PlayerStopUsingItemEvent.html
+[paper-EntityRegainHealthEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/EntityRegainHealthEvent.html
