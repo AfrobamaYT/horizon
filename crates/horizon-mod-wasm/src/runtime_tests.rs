@@ -77,6 +77,39 @@ fn a_member_cannot_bypass_group_limits_with_private_memories() {
 }
 
 #[test]
+fn linker_heap_symbols_follow_all_members_static_data() {
+    let first = wat::parse_str(r#"(module (@custom "dylink.0" "\01\04\10\00\00\00"))"#).unwrap();
+    let second = wat::parse_str(
+        r#"(module (@custom "dylink.0" "\01\04\20\00\00\00")
+        (import "GOT.mem" "__heap_base" (global $heap (mut i32)))
+        (import "GOT.mem" "__data_end" (global $end (mut i32)))
+        (func (export "heap") (result i32) global.get $heap)
+        (func (export "data") (result i32) global.get $end))"#,
+    )
+    .unwrap();
+    let engine = wasmtime::Engine::default();
+    let mut group = Group::link(
+        &engine,
+        &[
+            Member {
+                name: "first",
+                module: &first,
+            },
+            Member {
+                name: "second",
+                module: &second,
+            },
+        ],
+    )
+    .unwrap();
+    for symbol in ["heap", "data"] {
+        let mut output = [wasmtime::Val::I32(0)];
+        group.call("second", symbol, &[], &mut output).unwrap();
+        assert_eq!(output[0].i32(), Some(262192)); // 256 KiB stack + 16 + 32 bytes.
+    }
+}
+
+#[test]
 fn boundary_exports_are_per_member_but_other_horizon_symbols_are_not() {
     let bytes = guest(mod_api::wire::LAYOUT, "i64.const 0");
     let engine = engine().unwrap();

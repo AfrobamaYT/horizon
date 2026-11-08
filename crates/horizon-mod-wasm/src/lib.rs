@@ -4,7 +4,7 @@
 //! Mods page.
 pub mod link;
 mod runtime;
-pub mod boundary {
+pub(crate) mod boundary {
     include!(concat!(env!("OUT_DIR"), "/wire_host_generated.rs"));
 }
 pub use runtime::{CallClass, WasmHandler, WasmMod};

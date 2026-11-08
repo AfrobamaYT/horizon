@@ -374,7 +374,7 @@ impl WasmMod {
             })
             .collect())
     }
-    pub fn call<R>(
+    pub(crate) fn call<R>(
         &self,
         class: CallClass,
         frame: Frame,
