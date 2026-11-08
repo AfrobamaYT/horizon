@@ -53,7 +53,7 @@ struct Game { change: bool }
 static VALIDATIONS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 #[derive(Debug)] enum BlockEntitySnapshotError { InvalidStack }
 mod mod_api {
-    pub type StackWriteError = ();
+    #[derive(Debug)] pub enum StackWriteError { Unavailable }
     pub enum HookId { Proof, MenuButton, MenuQuickMove }
     pub mod __private {
         pub fn listened(_: super::HookId) -> bool { true }
@@ -62,14 +62,14 @@ mod mod_api {
 }
 mod game { pub mod api_values {
     pub trait TryIntoApi { type Api; fn try_into_api(&self) -> Result<Self::Api, ()>; }
-    pub trait TryIntoEngine { type Engine; fn try_into_engine(&self, _: &()) -> Result<Self::Engine, ()>; }
+    pub trait TryIntoEngine { type Engine; fn try_into_engine(&self, _: &()) -> Result<Self::Engine, crate::mod_api::StackWriteError>; }
     pub trait ItemBoundary { fn boundary_items(&self) -> Option<&()> { Some(&()) } }
 } }
 use game::api_values::*;
 impl TryIntoApi for Stack { type Api = Stack; fn try_into_api(&self) -> Result<Stack, ()> { Ok(self.clone()) } }
-impl TryIntoEngine for Stack { type Engine = Stack; fn try_into_engine(&self, _: &()) -> Result<Stack, ()> { VALIDATIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed); if self.0 > 250 { Err(()) } else { Ok(self.clone()) } } }
+impl TryIntoEngine for Stack { type Engine = Stack; fn try_into_engine(&self, _: &()) -> Result<Stack, mod_api::StackWriteError> { VALIDATIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed); if self.0 > 250 { Err(mod_api::StackWriteError::Unavailable) } else { Ok(self.clone()) } } }
 impl TryIntoApi for Option<Stack> { type Api = Self; fn try_into_api(&self) -> Result<Self, ()> { Ok(self.clone()) } }
-impl TryIntoEngine for Option<Stack> { type Engine = Self; fn try_into_engine(&self, items: &()) -> Result<Self, ()> { self.as_ref().map(|s| s.try_into_engine(items)).transpose() } }
+impl TryIntoEngine for Option<Stack> { type Engine = Self; fn try_into_engine(&self, items: &()) -> Result<Self, mod_api::StackWriteError> { self.as_ref().map(|s| s.try_into_engine(items)).transpose() } }
 impl Stack { fn revision(&self) -> u32 { 0 } }
 fn finish_block_entity_writeback<T>(_: &mut Stack, _: &Stack, _: u32, _: &(), _: &str, result: Result<T, BlockEntitySnapshotError>) -> Result<T, BlockEntitySnapshotError> { result }
 impl ItemBoundary for Game {}
@@ -111,7 +111,7 @@ fn main() {
     let dir =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/untouched-writeback");
     std::fs::create_dir_all(&dir).unwrap();
-    for (name, methods, success) in [
+    let mut variants = vec![
         ("baseline", methods.clone(), true),
         (
             "revalidate",
@@ -127,7 +127,24 @@ fn main() {
             methods.replace("__api_stack != __original_stack", "false"),
             false,
         ),
+    ];
+    for (name, condition) in [
+        ("anvil_update", "api == original"),
+        ("grindstone_place", "api == original"),
+        ("grindstone_take", "api == original"),
+        ("menu_button", "cursor == original"),
+        ("menu_quick_move", "held == original"),
     ] {
+        let start = methods.find(&format!("fn {name}(")).unwrap();
+        let end = methods[start + 3..]
+            .find("fn ")
+            .map_or(methods.len(), |i| start + 3 + i);
+        let mut mutant = methods.clone();
+        mutant.replace_range(start..end, &methods[start..end].replace(condition, "false"));
+        assert_ne!(mutant, methods);
+        variants.push((name, mutant, false));
+    }
+    for (name, methods, success) in variants {
         let source = dir.join(format!("{name}.rs"));
         let binary = dir.join(name);
         std::fs::write(&source, fixture.replace("METHODS", &methods)).unwrap();
