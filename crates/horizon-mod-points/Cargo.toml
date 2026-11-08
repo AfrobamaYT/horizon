@@ -9,6 +9,9 @@ description = "The game's injection points for mods that listen at them: typed f
 [lib]
 name = "mod_points"
 
+[features]
+wasm-guest = ["horizon-mod-api/wasm-guest"]
+
 [dependencies]
 horizon-mod-api = { path = "../horizon-mod-api" }
 

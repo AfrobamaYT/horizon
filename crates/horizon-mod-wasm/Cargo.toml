@@ -8,6 +8,7 @@ description = "The runtime for wasm mods: groups packages by their dependencies 
 
 [dependencies]
 horizon-core = { path = "../horizon-core" }
+mod_points = { package = "horizon-mod-points", path = "../horizon-mod-points" }
 mod_api = { package = "horizon-mod-api", path = "../horizon-mod-api" }
 horizon-mod-package = { path = "../horizon-mod-package", default-features = false }
 log = "0.4"

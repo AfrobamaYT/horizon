@@ -36,6 +36,9 @@ pub struct GamePoint {
     pub at_return: bool,
     /// Whether it has a raw form: listeners with the receiver and every parameter by its own type.
     pub raw: bool,
+    /// Full raw listener contract, including engine-typed parameters.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_shape: Option<point_shape::RawShape>,
     /// Its raw listeners' function type, by path: a mod's raw listener has this type.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub listener: Option<String>,
@@ -655,6 +658,9 @@ pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
             ],
             at_return: shape.has_return(),
             raw: shape.raw,
+            raw_shape: shape
+                .raw
+                .then(|| point_shape::raw_shape(&shape, found.sig, found.owner.map(|(ty, _)| ty))),
             listener: shape
                 .raw
                 .then(|| format!("{}::{}", found.module, shape.raw_listener())),
@@ -906,6 +912,61 @@ pub(crate) fn records(points: &[GamePoint], sources: &[source::Point]) -> String
     let listeners = points.iter().map(|point| parse(&point.api[0]));
     let variants = points.iter().map(|point| parse(&point.api[1]));
     let dispatch = points.iter().map(|point| parse(&point.api[2]));
+    let mut guest_functions = proc_macro2::TokenStream::new();
+    let mut guest_entries = proc_macro2::TokenStream::new();
+    let mut api_places = proc_macro2::TokenStream::new();
+    let mut layout = 0xcbf29ce484222325u64;
+    for point in points {
+        for byte in format!(
+            "{}:{}:{}:{}",
+            point.name, point.host, point.record_item, point.at_return
+        )
+        .bytes()
+        {
+            layout = (layout ^ u64::from(byte)).wrapping_mul(0x100000001b3);
+        }
+        let record = quote::format_ident!("{}", point.record);
+        let passed = match point.host {
+            "host" => quote!(&host,),
+            "server" | "client" => quote!(&mut host,),
+            "both" => quote!(if server {
+                ::mod_api::HostSide::Server(&mut host)
+            } else {
+                ::mod_api::HostSide::Client(&mut host)
+            },),
+            _ => quote!(),
+        };
+        let function = quote::format_ident!("point_{}", point.name);
+        let listener = quote::format_ident!("{}Listener", point_shape::camel(&point.name));
+        let side = (point.host == "both").then(|| quote!(let server: bool = input.take()?;));
+        guest_functions.extend(quote! {
+            fn #function(place: PointId, input: &mut ::mod_api::wire::Reader<'_>, out: &mut ::mod_api::wire::Writer) -> Result<(), ::mod_api::wire::WireError> {
+                let listener: u32 = input.take()?;
+                #side
+                let mut args: #record = input.take()?;
+                let mut host = ::mod_api::wire::guest::Guest;
+                crate::guest::fire(place, listener, |function| {
+                    // SAFETY: head and return have the same checked host and record type.
+                    let function = unsafe { ::std::mem::transmute::<*const (), listeners::#listener>(function) };
+                    function(#passed &mut args);
+                })?;
+                out.put(&());
+                out.put(&args);
+                Ok(())
+            }
+        });
+        for name in std::iter::once(point.name.clone())
+            .chain(point.at_return.then(|| format!("{}_return", point.name)))
+        {
+            let variant = quote::format_ident!("{}", point_shape::camel(&name));
+            let target = &point.target;
+            let at_return = name.ends_with("_return") && name != point.name;
+            api_places.extend(quote! { (PointId::#variant, #target, #at_return), });
+            guest_entries.extend(quote! {
+                table[PointId::#variant as usize] = Some((PointId::#variant, #function as Dispatch));
+            });
+        }
+    }
     let private_variants = sources.iter().map(|point| {
         let head = quote::format_ident!("{}", point_shape::camel(&point.name));
         let back = quote::format_ident!("{}Return", point_shape::camel(&point.name));
@@ -913,6 +974,31 @@ pub(crate) fn records(points: &[GamePoint], sources: &[source::Point]) -> String
     });
     quote! {
         #(#records)*
+        /// The generated point export table and record layout, checked separately from the API layout.
+        #[doc(hidden)]
+        pub const POINT_LAYOUT: u64 = #layout;
+        /// API places as (place, target function, return phase), for manifest validation.
+        #[doc(hidden)]
+        pub const API_PLACES: &[(PointId, &str, bool)] = &[#api_places];
+        #[cfg(any(target_arch = "wasm32", feature = "wasm-guest"))]
+        fn guest_dispatch(id: u32, input: &mut ::mod_api::wire::Reader<'_>, out: &mut ::mod_api::wire::Writer) -> Result<(), ::mod_api::wire::WireError> {
+            if id == 0xBFFF_FFFF { out.put(&crate::guest::subscriptions()); return Ok(()); }
+            let index = id.checked_sub(0x8000_0000).ok_or(::mod_api::wire::WireError::Tag(id))? as usize;
+            let (place, function) = guest_exports::TABLE.get(index).copied().flatten().ok_or(::mod_api::wire::WireError::Tag(id))?;
+            function(place, input, out)
+        }
+        #[cfg(any(target_arch = "wasm32", feature = "wasm-guest"))]
+        #[allow(unused_mut, unused_variables)]
+        mod guest_exports {
+            use super::*;
+            type Dispatch = fn(PointId, &mut ::mod_api::wire::Reader<'_>, &mut ::mod_api::wire::Writer) -> Result<(), ::mod_api::wire::WireError>;
+            pub(super) const TABLE: [Option<(PointId, Dispatch)>; POINT_COUNT] = {
+                let mut table = [None; POINT_COUNT];
+                #guest_entries
+                table
+            };
+            #guest_functions
+        }
         /// A point's place: its head and return in catalog order.
         #[doc(hidden)]
         #[repr(usize)]
@@ -934,6 +1020,37 @@ pub(crate) fn records(points: &[GamePoint], sources: &[source::Point]) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn raw_point_inventory() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let points = game_points(&root).unwrap();
+        let mut inventory = Vec::new();
+        for point in &points {
+            assert_eq!(point.raw_shape.is_some(), point.raw, "{}", point.target);
+            for at_return in [false, true] {
+                if at_return && !point.at_return && !point.raw {
+                    continue;
+                }
+                inventory.push(serde_json::json!({
+                    "name": if at_return { format!("{}_return", point.name) } else { point.name.clone() },
+                    "target": point.target,
+                    "api": !at_return || point.at_return,
+                    "raw_shape": point.raw_shape,
+                    "raw_status": if point.raw { "snapshot generator needed" } else { "no raw place" },
+                }));
+            }
+        }
+        if let Ok(path) = std::env::var("POINT_INVENTORY") {
+            fs::write(path, serde_json::to_vec_pretty(&inventory).unwrap()).unwrap();
+        }
+        println!(
+            "{} functions; {} places; {} raw functions",
+            points.len(),
+            inventory.len(),
+            points.iter().filter(|point| point.raw).count()
+        );
+    }
 
     fn point(attribute: &str, method: &str) -> Result<point_shape::Shape, String> {
         let method: syn::ImplItemFn = syn::parse_str(method).map_err(|e| e.to_string())?;

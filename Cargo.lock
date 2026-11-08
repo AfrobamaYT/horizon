@@ -2156,11 +2156,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-mod-point-emit"
+version = "0.1.0"
+dependencies = [
+ "horizon-mod-package",
+ "serde",
+]
+
+[[package]]
 name = "horizon-mod-point-shape"
 version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
+ "serde",
  "syn 2.0.119",
 ]
 
@@ -2200,6 +2209,7 @@ dependencies = [
  "horizon-mod-api",
  "horizon-mod-api-gen",
  "horizon-mod-package",
+ "horizon-mod-points",
  "log",
  "serde_json",
  "wasmparser 0.261.0",
