@@ -5,6 +5,7 @@
 /// Ids belong to one source; neither a node nor a type key is an engine address.
 pub type Row = (u32, Option<u32>, u32, u64, Vec<u8>);
 
+// exhaustive: generated boundary code builds it; its fields are private
 /// One bounded traversal of a row source. Providers check this at their native boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RowWindow {
