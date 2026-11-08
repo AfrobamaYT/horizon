@@ -103,6 +103,16 @@ fn head(snapshot: mod_points::snapshot::Snapshot<'_>, edits: &mut mod_api::wire:
             depth: 4,
         })
         .unwrap();
+    // A window starting on the hidden ordinal is refused, never shifted onto the next field;
+    // one starting at the granted ordinal reads it.
+    let node = |start| RowWindow {
+        node: receiver,
+        start,
+        rows: 8,
+        depth: 3,
+    };
+    assert_eq!(snapshot.window(node(0)), Err(RowError::Bounds));
+    assert!(snapshot.window(node(1)).is_ok());
     let owned = mod_points::snapshot::Snapshot::new(&rows);
     // Only the granted `size` is present, under its declaration ordinal 1.
     assert!(owned.field(receiver, 0).is_none(), "hidden field leaked");
