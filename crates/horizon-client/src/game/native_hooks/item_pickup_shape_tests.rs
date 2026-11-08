@@ -10,9 +10,24 @@ use mod_api::{Flow, Hooks, ItemPickedUpEvent, ModEntry, ServerHost, testing::wit
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
-struct Pickups(Arc<Mutex<Vec<u32>>>);
+struct Pickups(Arc<Mutex<Vec<u32>>>, Arc<Mutex<Vec<&'static str>>>);
 #[mod_api::__subscriptions]
 impl Hooks for Pickups {
+    fn player_stat_award(
+        &self,
+        _: &mut dyn ServerHost,
+        _: &mut mod_api::PlayerStatAwardEvent<'_>,
+    ) -> Flow {
+        self.1.lock().unwrap().push("stat");
+        Flow::Continue
+    }
+    fn player_advancement_progress(
+        &self,
+        _: &mut dyn ServerHost,
+        _: &mut mod_api::PlayerAdvancementProgressEvent<'_>,
+    ) {
+        self.1.lock().unwrap().push("criterion");
+    }
     fn item_picked_up(&self, _: &mut dyn ServerHost, event: &mut ItemPickedUpEvent<'_>) -> Flow {
         self.0.lock().unwrap().push(event.count);
         if event.count == 2 {
@@ -29,9 +44,10 @@ impl Hooks for Pickups {
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated mod registry"]
 fn indexed_pickup_keeps_bound_survivors_and_processes_shifted_tail() {
     let heard = Arc::new(Mutex::new(Vec::new()));
+    let notifications = Arc::new(Mutex::new(Vec::new()));
     let mods: mod_api::Mods = vec![ModEntry::new(
         "pickup_shape",
-        Box::new(Pickups(heard.clone())),
+        Box::new(Pickups(heard.clone(), notifications.clone())),
     )]
     .into();
     with_mods(mods, || {
@@ -49,6 +65,18 @@ fn indexed_pickup_keeps_bound_survivors_and_processes_shifted_tail() {
                     .fill(Some(ItemStack::new("minecraft:stone", 64)));
                 game.offhand = Some(ItemStack::new("minecraft:stone", 64));
                 game.inventory[0] = Some(ItemStack::new("minecraft:apple", 62));
+                let uuid = horizon_client::lan::playerdata::uuid_ints(7);
+                game.level.player_uuid = Some(uuid);
+                game.lan_acting_uuid = Some(7);
+                game.lan_acting_name = Some("pickup_test".into());
+                game.lan_acting_entity = Some(42);
+                let data = scratch.join("data/pickup_test/advancement");
+                std::fs::create_dir_all(&data).unwrap();
+                std::fs::write(data.join("pickup.json"), br#"{"criteria":{"take":{"trigger":"minecraft:thrown_item_picked_up_by_player"}}}"#).unwrap();
+                game.adv.tree = Arc::new(horizon_client::advancements::Tree::load(
+                    &scratch.join("data"),
+                ));
+                game.adv.loaded = true;
                 let level = game.level(game.dim.id()).unwrap();
                 let mut ids = Vec::new();
                 for count in [1, 3, 2] {
@@ -62,6 +90,11 @@ fn indexed_pickup_keeps_bound_survivors_and_processes_shifted_tail() {
                             0,
                         )
                         .unwrap();
+                    game.dropped
+                        .iter_mut()
+                        .find(|row| row.id == item.id())
+                        .unwrap()
+                        .thrower = Some(uuid);
                     ids.push(item.id());
                 }
                 let joins: Vec<_> = game.dropped.iter().map(|item| item.join_seq()).collect();
@@ -82,6 +115,7 @@ fn indexed_pickup_keeps_bound_survivors_and_processes_shifted_tail() {
                 );
                 table.drain();
                 heard.lock().unwrap().clear();
+                notifications.lock().unwrap().clear();
                 game.world.random = horizon_core::random::LegacyRandom::new(12345);
                 let mut round = game.native_tick_round();
                 game.tick_dropped_items(&mut round);
@@ -89,6 +123,10 @@ fn indexed_pickup_keeps_bound_survivors_and_processes_shifted_tail() {
                     *heard.lock().unwrap(),
                     [1, 3, 2],
                     "the shifted row must not be skipped"
+                );
+                assert_eq!(
+                    *notifications.lock().unwrap(),
+                    ["stat", "criterion", "stat"]
                 );
                 assert_eq!(game.inventory[0].as_ref().unwrap().count, 64);
                 assert_eq!(

@@ -4945,9 +4945,11 @@ impl Game<'_> {
         );
         let feet = [p.position.x, p.position.y, p.position.z];
         let own = self.level.ensure_player_uuid();
-        let mut i = 0;
-        while i < items.len() {
-            let item = &items[i];
+        // The predicate's Game borrow ends before each yielded row's effects.
+        // This cell is stack-local and never accessible to a native callback.
+        let game = std::cell::RefCell::new(&mut *self);
+        for item in items.extract_if_mut(|item| {
+            let mut game = game.borrow_mut();
             let b = item.bounds();
             let touching = b.min_position().x < max[0]
                 && b.max_position().x > min[0]
@@ -4957,57 +4959,56 @@ impl Game<'_> {
                 && b.max_position().z > min[2];
             // ItemEntity.playerTouch: no pickup delay, and the target (if any) is this player.
             if touching && item.pickup_delay == 0 && item.target.is_none_or(|t| t == own) {
-                if self.native_pickup_refused(&item.stack) {
-                    items[i].pickup_delay = 10;
-                    i += 1;
-                    continue;
+                if game.native_pickup_refused(&item.stack) {
+                    item.pickup_delay = 10;
+                    return false;
                 }
                 let before = item.stack.count;
                 let kind = item.stack.item.clone();
                 let thrower = item.thrower;
-                match self.add_stack_to_inventory(item.stack.clone()) {
+                match game.add_stack_to_inventory(item.stack.clone()) {
                     None => {
-                        self.award_stat("picked_up", &kind, before as i32);
+                        game.award_stat("picked_up", &kind, before as i32);
                         if let Some(thrower) = thrower {
-                            self.trigger_thrown_picked_up_by_player(&items[i].stack, thrower);
+                            game.trigger_thrown_picked_up_by_player(&item.stack, thrower);
                         }
-                        self.add_pickup(
-                            pickups::Taken::Item(Box::new(items.remove(i))),
-                            pickups::Collector::Player,
-                        );
-                        let pitch = ((self.world.random.next_float()
-                            - self.world.random.next_float())
-                            * 0.7
-                            + 1.0)
-                            * 2.0;
-                        self.audio
-                            .play("minecraft:entity.item.pickup", Some(feet), 0.2, pitch);
-                        continue;
+                        return true;
                     }
                     Some(rest) => {
                         if rest.count < before {
-                            self.award_stat("picked_up", &kind, (before - rest.count) as i32);
+                            game.award_stat("picked_up", &kind, (before - rest.count) as i32);
                             if let Some(thrower) = thrower {
-                                self.trigger_thrown_picked_up_by_player(&rest, thrower);
+                                game.trigger_thrown_picked_up_by_player(&rest, thrower);
                             }
-                            self.add_pickup(
-                                pickups::Taken::Item(Box::new(items[i].clone())),
+                            game.add_pickup(
+                                pickups::Taken::Item(Box::new(item.clone())),
                                 pickups::Collector::Player,
                             );
                             // handleTakeItemEntity: the random pitch of a full pickup.
-                            let pitch = ((self.world.random.next_float()
-                                - self.world.random.next_float())
+                            let pitch = ((game.world.random.next_float()
+                                - game.world.random.next_float())
                                 * 0.7
                                 + 1.0)
                                 * 2.0;
-                            self.audio
+                            game.audio
                                 .play("minecraft:entity.item.pickup", Some(feet), 0.2, pitch);
                         }
-                        items[i].stack = rest;
+                        item.stack = rest;
                     }
                 }
             }
-            i += 1;
+            false
+        }) {
+            let mut game = game.borrow_mut();
+            game.add_pickup(
+                pickups::Taken::Item(Box::new(item)),
+                pickups::Collector::Player,
+            );
+            let pitch = ((game.world.random.next_float() - game.world.random.next_float()) * 0.7
+                + 1.0)
+                * 2.0;
+            game.audio
+                .play("minecraft:entity.item.pickup", Some(feet), 0.2, pitch);
         }
         self.put_back_dropped(items);
         self.spawn_destroyed_contents(destroyed);
