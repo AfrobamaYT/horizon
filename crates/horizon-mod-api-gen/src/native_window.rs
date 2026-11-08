@@ -62,13 +62,16 @@ fn generate_inner(
         if depth > 128 {
             return Err("unimplemented: recursive native projection".into());
         }
+        if let Some((graph, plan)) = runtime {
+            let id = graph.id(shape).ok_or("missing runtime schema")?;
+            if graph.layouts[id].opaque.is_some() {
+                return Ok(quote!(mod_points::native_nodes::Opaque((#plan).key(#id).unwrap_or(0))));
+            }
+        }
         if depth > 0 && runtime.is_some() {
             if let Shape::Named(path, _) = shape {
                 let (graph, plan) = runtime.as_ref().unwrap();
                 let id = graph.id(shape).ok_or("missing runtime schema")?;
-                if graph.layouts[id].opaque.is_some() {
-                    return Err("opaque native layout".into());
-                }
                 let helper = quote::format_ident!("__horizon_node_{id}");
                 let _ = path;
                 return Ok(quote!(#helper(&(#place), #plan)));

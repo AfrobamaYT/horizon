@@ -12,6 +12,42 @@ mod model {
 }
 include!(concat!(env!("OUT_DIR"), "/reader.rs"));
 #[test]
+fn opaque_argument_keeps_visible_siblings() {
+    use mod_points::{exposure::Plan, native_read::NativeNode};
+    let game = model::Game {
+        hidden: model::Unknown,
+        later: model::Nested {
+            value: 42,
+            back: None,
+        },
+        other: 99,
+    };
+    let plan = Plan::build(&layouts(), None, &[], &[ROOT]).unwrap();
+    let node = reader(&game, &plan);
+    let mut seen = 0;
+    node.child(0, &mut |_, _, opaque| {
+        assert_eq!(opaque.len(), 0);
+        opaque.value(&mut |value| {
+            assert!(value.is_none());
+            Ok(())
+        })?;
+        seen += 1;
+        Ok(())
+    })
+    .unwrap();
+    node.child(2, &mut |_, _, scalar| {
+        scalar.value(&mut |value| {
+            assert!(value.is_some());
+            Ok(())
+        })?;
+        seen += 1;
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(seen, 2);
+}
+
+#[test]
 fn two_policies() {
     use mod_points::{
         exposure::{Grant, Plan},

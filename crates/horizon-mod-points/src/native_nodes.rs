@@ -6,6 +6,23 @@ use mod_api::{RowError, wire::Put};
 pub type Visitor<'a> = dyn FnMut(Step, u32, &dyn NativeNode) -> Result<(), RowError> + 'a;
 type Header<'a> = dyn FnMut(Option<&dyn Put>) -> Result<(), RowError> + 'a;
 
+/// An opaque typed header with no native data or children.
+pub struct Opaque(pub u64);
+impl NativeNode for Opaque {
+    fn key(&self) -> u64 {
+        self.0
+    }
+    fn value(&self, f: &mut Header<'_>) -> Result<(), RowError> {
+        f(None)
+    }
+    fn len(&self) -> u64 {
+        0
+    }
+    fn child(&self, _: u64, _: &mut Visitor<'_>) -> Result<(), RowError> {
+        Err(RowError::Bounds)
+    }
+}
+
 /// A plain Wire leaf, with its generated canonical schema key.
 pub struct Scalar<'a, T: Put>(pub &'a T, pub u64);
 impl<T: Put> NativeNode for Scalar<'_, T> {
