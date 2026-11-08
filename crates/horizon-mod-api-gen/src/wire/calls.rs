@@ -112,7 +112,11 @@ pub(super) fn imports<'m>(methods: &'m [Method]) -> Vec<&'m Method> {
         .collect()
 }
 
-fn has_frame(ty: &Ty) -> bool {
+pub(super) fn held_methods(methods: &[Method]) -> Vec<&Method> {
+    methods.iter().filter(|m| super::held(m.owner)).collect()
+}
+
+pub(super) fn has_frame(ty: &Ty) -> bool {
     match ty {
         Ty::Dyn(..) | Ty::Handler(..) => true,
         Ty::List(t, _)
@@ -438,6 +442,33 @@ pub(super) fn lend(types: &Types<'_>, ty: &Ty, local: &str) -> Option<Lent> {
 
 /// A record that borrows, as the statements reading it into locals, the expression building it
 /// from them, and the statements sending back what a mod may change.
+pub(super) fn writeback_fields(
+    types: &Types<'_>,
+    def: usize,
+    name: &str,
+    mutable: bool,
+) -> Option<Vec<(usize, Lent, bool)>> {
+    let super::ty::Kind::Record(fields) = &types.defs[def].kind else {
+        return None;
+    };
+    let mut own = Vec::new();
+    let mut refs = Vec::new();
+    for (i, f) in fields.iter().enumerate() {
+        let local = format!("{name}_{i}");
+        let lent = lend(types, &f.ty, &local)?;
+        if mutable && lent.mutable {
+            let by_ref = matches!(f.ty, Ty::Ref(..) | Ty::Option(..)) && lent.expr != local;
+            if by_ref {
+                refs.push((i, lent, true));
+            } else {
+                own.push((i, lent, false));
+            }
+        }
+    }
+    own.extend(refs);
+    Some(own)
+}
+
 fn borrowed(
     types: &Types<'_>,
     def: usize,
@@ -448,8 +479,7 @@ fn borrowed(
     let super::ty::Kind::Record(fields) = &d.kind else {
         return None;
     };
-    let (mut read, mut build, mut back_ref, mut back_own) =
-        (String::new(), Vec::new(), String::new(), String::new());
+    let (mut read, mut build, mut back) = (String::new(), Vec::new(), String::new());
     for (i, f) in fields.iter().enumerate() {
         let local = format!("{name}_{i}");
         // A frame object the event carries is the guest's own, never sent.
@@ -497,12 +527,12 @@ fn borrowed(
         };
         writeln!(read, "let {m}{local}: {} = input.take()?;", lent.owned).unwrap();
         build.push(format!("{}: {}", f.rust, lent.expr));
-        if mutable && lent.mutable {
-            if matches!(f.ty, Ty::Ref(..) | Ty::Option(..)) && lent.expr != local {
-                write!(back_ref, "out.put(&{local});").unwrap();
-            } else {
-                write!(back_own, "out.put(&{name}.{});", f.rust).unwrap();
-            }
+    }
+    for (i, _, by_ref) in writeback_fields(types, def, name, mutable)? {
+        if by_ref {
+            write!(back, "out.put(&{name}_{i});").unwrap();
+        } else {
+            write!(back, "out.put(&{name}.{});", fields[i].rust).unwrap();
         }
     }
     let m = if mutable { "mut " } else { "" };
@@ -511,7 +541,7 @@ fn borrowed(
         d.rust,
         build.join(", ")
     ));
-    Some((read, format!("{name}"), format!("{back_own}{back_ref}")))
+    Some((read, format!("{name}"), back))
 }
 
 /// The export a mod answers with the hooks it listens to: they cross as names, which stay
