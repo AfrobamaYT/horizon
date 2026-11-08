@@ -7,7 +7,7 @@ impl PartRegistrar {
         } else {
             format!("{}:{id}", self.mod_id)
         };
-        if !horizon_mod_package::content::namespaced_id(&id) {
+        if crate::Identifier::parse_namespaced(&id).is_none() {
             return Err(crate::GameRuleError::InvalidId);
         }
         if id.split_once(':').unwrap().0 != self.mod_id {

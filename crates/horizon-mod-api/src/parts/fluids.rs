@@ -539,7 +539,7 @@ impl FluidsRegistrar for PartRegistrar {
 
     fn declare_fluid(&mut self, path: &str) -> crate::FluidKey {
         let id = format!("{}:{path}", self.mod_id);
-        if path.contains(':') || !horizon_mod_package::content::namespaced_id(&id) {
+        if path.contains(':') || crate::Identifier::parse_namespaced(&id).is_none() {
             self.refused.push(format!(
                 "mod {}: invalid fluid declaration {id:?}",
                 self.mod_id
