@@ -2490,10 +2490,15 @@ impl Game<'_> {
         }
         let placement = match companion {
             None => Placement::Single,
-            Some((at, extra)) => Placement::Multi(Vec::from([
-                BlockPlacement::new(pos, state),
-                BlockPlacement::new(at, extra),
-            ])),
+            Some((at, extra)) => {
+                let (Ok(state), Ok(extra)) = (state.try_into_api(), extra.try_into_api()) else {
+                    return false;
+                };
+                Placement::Multi(Vec::from([
+                    BlockPlacement::new(pos, state),
+                    BlockPlacement::new(at, extra),
+                ]))
+            }
         };
         let placer = self.entity(placer);
         let mut canceled = false;
