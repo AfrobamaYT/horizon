@@ -60,7 +60,7 @@ fn capability_is_answered_only_within_its_group() {
         return;
     };
     let mut infos = Vec::new();
-    let packages = ["counter_lib", "alpha", "beta", "gamma"].map(|id| {
+    let packages = ["counter_lib", "alpha", "beta", "gamma", "hog"].map(|id| {
         let path = std::path::Path::new(&folder).join(format!("{id}/target/horizon-mod/{id}.hmod"));
         let manifest = horizon_mod_package::Package::read(&path).unwrap().manifest;
         infos.push(mod_api::PackageInfo::new(
@@ -115,6 +115,61 @@ fn capability_is_answered_only_within_its_group() {
             .filter(|answer| !answer.is_empty())
             .collect();
         answers.sort();
-        assert_eq!(answers, ["alpha: 7 true", "beta: 7", "gamma: none"]);
+        // Each member counts its own `register` and `server_chat` calls and reports them. The game
+        // calls every member's `register` once per registration pass and fires `server_chat` once
+        // per member, so no member sees a call twice because another member of its group exists.
+        let counts: Vec<(String, String)> = answers
+            .iter()
+            .map(|answer| {
+                let (answer, counts) = answer.split_once(" [").unwrap();
+                (answer.to_string(), counts.trim_end_matches(']').to_string())
+            })
+            .collect();
+        let replies: Vec<&str> = counts.iter().map(|(answer, _)| answer.as_str()).collect();
+        assert_eq!(replies, ["alpha: 7 true", "beta: 7", "gamma: none"]);
+        let registers: Vec<&str> = counts
+            .iter()
+            .map(|(_, counts)| {
+                let (registers, chats) = counts.split_once(' ').unwrap();
+                assert_eq!(chats, "chats=1", "a hook fires once per member");
+                registers
+            })
+            .collect();
+        assert!(registers[0] != "registers=0", "register ran");
+        assert!(
+            registers.iter().all(|r| *r == registers[0]),
+            "every member registers as often as every other, in its group or not: {registers:?}"
+        );
+        // The allocator's retry, in the real group memory (256 MiB). `hog` keeps 150 MiB it frees
+        // when the group's allocator asks. With nothing held, a 1 GiB request fails and says so (no
+        // trap) after the evictor ran once; holding, a 150 MiB request that cannot fit beside the
+        // held buffer succeeds because the evictor freed it first, and ran once more.
+        let hog = |text: &'static str| -> String {
+            let mut said = Vec::new();
+            for entry in mod_api::__private::mods().iter() {
+                let mut message = Text::literal("");
+                let mut replies = Vec::new();
+                let mut event = ServerChatEvent {
+                    player_id: 1,
+                    player: 1,
+                    username: "tester",
+                    raw_text: text,
+                    message: &mut message,
+                    replies: &mut replies,
+                };
+                entry.fields().hooks.server_chat(&mut World, &mut event);
+                if let mod_api::text::TextContent::Literal(answer) = message.content
+                    && answer.starts_with("hog:")
+                {
+                    said.push(answer);
+                }
+            }
+            assert_eq!(said.len(), 1, "{text}: {said:?}");
+            said.remove(0)
+        };
+        assert_eq!(hog("grab_all"), "hog: refused [evicted=1]");
+        assert_eq!(hog("hold"), "hog: held [evicted=1]");
+        assert_eq!(hog("grab"), "hog: grabbed [evicted=2]");
+        assert_eq!(hog("grab_all"), "hog: refused [evicted=3]");
     });
 }

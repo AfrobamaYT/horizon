@@ -41,7 +41,7 @@ use hashbrown::HashMap;
 use naga::FastHashMap;
 use objc2::{
     available,
-    rc::{autoreleasepool, Retained},
+    rc::{Retained, autoreleasepool},
     runtime::ProtocolObject,
 };
 use objc2_foundation::ns_string;
@@ -174,7 +174,7 @@ impl crate::Instance for Instance {
             _ => {
                 return Err(crate::InstanceError::new(format!(
                     "window handle {window_handle:?} is not a Metal-compatible handle"
-                )))
+                )));
             }
         };
 
@@ -228,6 +228,7 @@ bitflags!(
 #[allow(dead_code)]
 struct CapabilitiesQuery {
     msl_version: MTLLanguageVersion,
+    legacy_intel: bool,
     fragment_rw_storage: bool,
     read_write_texture_tier: MTLReadWriteTextureTier,
     msaa_desktop: bool,
@@ -337,6 +338,8 @@ struct CapabilitiesQuery {
 #[derive(Debug)]
 struct PrivateCapabilities {
     msl_version: MTLLanguageVersion,
+    /// Haswell-era Intel Metal drivers need conservative shader and draw paths.
+    legacy_intel: bool,
     low_power: bool,
     headless: bool,
     has_unified_memory: Option<bool>,

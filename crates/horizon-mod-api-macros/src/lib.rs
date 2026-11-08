@@ -141,6 +141,7 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
         "BlockEntityPart" => Some("block_entity_subscribed"),
         "ItemPart" => Some("item_subscribed"),
         "MenuPart" => Some("menu_subscribed"),
+        "FluidPart" => Some("fluid_subscribed"),
         // Entity parts carry no scoped hook yet (#1077): `register_goals` is
         // not one, so its subscriptions stay empty whatever it overrides.
         "EntityPart" => Some("entity_subscribed_empty"),
@@ -514,8 +515,11 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
                 (point_shape::RawOutcome::Result(_), false) => {
                     inputs.push(quote!(&mut #result_place,))
                 }
-                (point_shape::RawOutcome::Result(_), true) => inputs.push(quote!(&mut __result,)),
                 _ => {}
+            }
+            // The return phase's one root is the returned slot, whatever the head's outcome was.
+            if at_return && matches!(function.sig.output, syn::ReturnType::Type(..)) {
+                inputs.push(quote!(&mut __result,));
             }
             if inputs.len() != roots {
                 return syn::Error::new_spanned(
@@ -568,7 +572,7 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
                                 Err(_) => __out.fail(mod_api::wire::WireError::Invalid("raw native projection refused")),
                             }
                         },
-                        |__raw_bytes: &[u8]| -> Result<(), mod_api::wire::WireError> {
+                        |__raw_bytes: &[u8]| -> ::core::result::Result<(), mod_api::wire::WireError> {
                             __root.close();
                             #apply
                         },
@@ -659,7 +663,7 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
                         |__out: &mut mod_api::wire::Writer| {
                             let __state = __snapshot_state.borrow();
                             let mut __snapshot = mod_points::snapshot::Builder::default();
-                            let __rows = (|| -> Result<_, mod_api::wire::WireError> {
+                            let __rows = (|| -> ::core::result::Result<_, mod_api::wire::WireError> {
                                 let __root = __snapshot.node(None, 0, const { mod_points::snapshot::key("raw-call") })?;
                                 #(#rows)*
                                 __snapshot.value(Some(__root), #count, const { mod_points::snapshot::key(#control_key) }, &*__state.#control_position)?;

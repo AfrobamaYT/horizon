@@ -1307,3 +1307,155 @@ fn memory_growth_limit_traps_and_poison_is_shared_by_proxies() {
     assert_eq!(call(&module), None);
     assert!(module.running.poisoned.load(Ordering::Relaxed));
 }
+
+mod internals {
+    use super::module;
+    use crate::points::{InternalsCatalog, Listen, install_policy};
+    use horizon_mod_package::manifest::Manifest;
+    use mod_points::endpoint_policy::{InternalField, InternalsRefusal, PointSpec, SchemaCatalog};
+    use mod_points::exposure::{Field, Layout};
+
+    fn layout(name: &str, fields: Vec<Field>, opaque: bool) -> Layout {
+        Layout {
+            name: name.into(),
+            signature: name.into(),
+            fields,
+            children: vec![],
+            opaque: opaque.then(|| "opaque".into()),
+        }
+    }
+    fn field(name: &str, ordinal: u32, target: usize) -> Field {
+        Field {
+            case: None,
+            ordinal,
+            name: name.into(),
+            target,
+        }
+    }
+    fn entry(path: &str, hash: &str, name: &str) -> InternalField {
+        InternalField {
+            path: path.into(),
+            kind: "field".into(),
+            hash: hash.into(),
+            receiver: 0,
+            field: name.into(),
+        }
+    }
+    const POINT: usize = 0;
+    fn catalog() -> InternalsCatalog {
+        InternalsCatalog {
+            schema: SchemaCatalog {
+                layouts: vec![
+                    layout(
+                        "receiver",
+                        vec![field("a", 0, 1), field("b", 1, 1), field("secret", 2, 2)],
+                        false,
+                    ),
+                    layout("scalar", vec![], false),
+                    layout("opaque", vec![], true),
+                    layout("call", vec![field("root0", 0, 0)], false),
+                ],
+                points: vec![PointSpec {
+                    head_call: 3,
+                    tail_call: None,
+                    receiver: Some(0),
+                }],
+                fields: vec![
+                    entry("Game::a", "ha", "a"),
+                    entry("Game::b", "hb", "b"),
+                    entry("Game::secret", "hs", "secret"),
+                ],
+            },
+            head_calls: vec![(mod_points::RAW_PLACES[POINT].0, 3)],
+        }
+    }
+    fn manifest(internals: &[(&str, &str)]) -> Manifest {
+        let list: Vec<_> = internals
+            .iter()
+            .map(|(path, hash)| format!("{{path='{path}',kind='field',hash='{hash}'}}"))
+            .collect();
+        Manifest::parse(&format!(
+            "id = 'p'\nname = 'P'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = ['registries']\ninternals = [{}]\n[wasm]\nsha512 = '{}'\ntoolchain = 'test'\nbuilt_with = 'test'\n",
+            list.join(","),
+            "a".repeat(128)
+        ))
+        .unwrap()
+    }
+    fn place() -> [mod_points::PointId; 1] {
+        [mod_points::RAW_PLACES[POINT].0]
+    }
+    fn refusal(internals: &[(&str, &str)], places: &[mod_points::PointId]) -> InternalsRefusal {
+        let module = module("i64.const 0");
+        match install_policy(&manifest(internals), &module, places, Some(&catalog())) {
+            Err(Listen::Internals(why)) => why,
+            _ => panic!("declaration was accepted or refused untyped"),
+        }
+    }
+
+    #[test]
+    fn declarations_select_a_per_module_plan_freed_on_unload() {
+        let (one, two) = (module("i64.const 0"), module("i64.const 0"));
+        let catalog = catalog();
+        install_policy(
+            &manifest(&[("Game::a", "ha")]),
+            &one,
+            &place(),
+            Some(&catalog),
+        )
+        .unwrap();
+        install_policy(
+            &manifest(&[("Game::b", "hb")]),
+            &two,
+            &place(),
+            Some(&catalog),
+        )
+        .unwrap();
+        let (weak_one, weak_two) = (one.downgrade(), two.downgrade());
+        let (a, b) = (weak_one.plan(3).unwrap(), weak_two.plan(3).unwrap());
+        assert!(a.field(0, None, 0) && !a.field(0, None, 1));
+        assert!(b.field(0, None, 1) && !b.field(0, None, 0));
+        assert_ne!(a.key(0), b.key(0));
+        // A point nobody listened to at this module has no plan.
+        assert!(weak_one.plan(4).is_none());
+        let (owned_a, owned_b) = (std::sync::Arc::downgrade(&a), std::sync::Arc::downgrade(&b));
+        drop((a, b));
+        assert!(owned_a.upgrade().is_some());
+        drop(one);
+        assert!(owned_a.upgrade().is_none(), "unloading frees the plan");
+        assert!(weak_one.plan(3).is_none());
+        assert!(owned_b.upgrade().is_some(), "another module keeps its plan");
+        drop(two);
+        assert!(owned_b.upgrade().is_none());
+    }
+
+    #[test]
+    fn invalid_declarations_refuse_with_typed_reasons() {
+        let path = |p: &str| p.to_string();
+        assert_eq!(
+            refusal(&[("Game::nope", "h")], &place()),
+            InternalsRefusal::UnknownPath(path("Game::nope"))
+        );
+        assert_eq!(
+            refusal(&[("Game::a", "wrong")], &place()),
+            InternalsRefusal::HashMismatch(path("Game::a"))
+        );
+        assert_eq!(
+            refusal(&[("Game::secret", "hs")], &place()),
+            InternalsRefusal::OpaqueReceiverMember(path("Game::secret"))
+        );
+        assert_eq!(
+            refusal(&[("Game::a", "ha")], &[]),
+            InternalsRefusal::NoListener(path("Game::a"))
+        );
+    }
+
+    #[test]
+    fn declarations_without_a_catalog_are_refused_as_such() {
+        let module = module("i64.const 0");
+        assert!(matches!(
+            install_policy(&manifest(&[("Game::a", "ha")]), &module, &place(), None),
+            Err(Listen::Internals(InternalsRefusal::NoCatalog))
+        ));
+        assert!(install_policy(&manifest(&[]), &module, &place(), None).is_ok());
+    }
+}

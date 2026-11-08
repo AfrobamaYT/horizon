@@ -269,6 +269,7 @@ pub(super) fn emit<'a>(
                     PartKind::BlockEntity => ("BlockEntityPart", "block_entity"),
                     PartKind::Item => ("ItemPart", "item"),
                     PartKind::Menu => ("MenuPart", "menu"),
+                    PartKind::Fluid => ("FluidPart", "fluid"),
                 };
                 if is_render {
                     return Err(format!("render hook {name} cannot be scoped"));
@@ -837,10 +838,8 @@ fn stack_crossing_routed(
         let stack = contains_boundary(ty, STACK_VALUES);
         let infallible = contains_boundary(ty, INFALLIBLE_VALUES);
         let mutable = matches!(ty, Type::Reference(r) if r.mutability.is_some());
-        // A `&mut dyn Context` is the game's own drawing surface: it is passed through, never copied.
-        let surface = matches!(ty, Type::Reference(r) if matches!(*r.elem, Type::TraitObject(_)));
         if surfaces.contains_key(name.as_str())
-            || surface
+            || matches!(ty, Type::Reference(r) if matches!(&*r.elem, Type::TraitObject(_)))
             || (!stack && !block && !infallible && !mutable)
         {
             arguments.push(name.clone());
@@ -1270,6 +1269,31 @@ fn main() {
                 if success { "passed" } else { "mutant killed" }
             );
         }
+    }
+
+    #[test]
+    fn boundary_draw_context_is_borrowed_not_snapshotted() {
+        let state: Type = syn::parse_quote!(BlockState);
+        let draw: Type = syn::parse_quote!(&mut dyn CameraDrawContext);
+        let replace: Type = syn::parse_quote!(&mut bool);
+        let crossing = stack_crossing(
+            &[
+                ("state".into(), &state),
+                ("draw".into(), &draw),
+                ("replace".into(), &replace),
+            ],
+            None,
+            "BlockScreenEffectDraw",
+            false,
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            crossing.arguments,
+            ["__api_state", "draw", "&mut __api_replace"]
+        );
+        assert!(!crossing.before.contains("__api_draw"));
+        assert!(!crossing.after.contains("*draw"));
     }
 
     #[test]

@@ -53,7 +53,7 @@ impl Default for State {
     fn default() -> Self {
         Self {
             limits: wasmtime::StoreLimitsBuilder::new()
-                .trap_on_grow_failure(true)
+                .trap_on_grow_failure(false)
                 .memory_size(256 << 20)
                 .table_elements(1 << 20)
                 .build(),
@@ -113,6 +113,8 @@ struct Running {
     group: Mutex<Group<State>>,
     poisoned: AtomicBool,
     lending: Arc<AtomicUsize>,
+    /// Exposure plans for this module's raw listeners; freed with the module.
+    policy: std::sync::OnceLock<mod_points::endpoint_policy::EndpointPolicy>,
 }
 struct PoisonOnPanic<'a>(&'a AtomicBool);
 impl Drop for PoisonOnPanic<'_> {
@@ -166,6 +168,15 @@ pub(crate) struct WeakWasmMod {
     subscriptions: Arc<Mutex<std::collections::HashMap<(Id, u32), &'static [Option<HookId>]>>>,
 }
 impl WeakWasmMod {
+    /// The module-owned plan for a raw point's head call, until the module is dropped.
+    pub(crate) fn plan(&self, head_call: usize) -> Option<Arc<mod_points::exposure::Plan>> {
+        self.running.upgrade()?.policy.get()?.plan(head_call)
+    }
+    pub(crate) fn is_stopped(&self) -> bool {
+        self.running
+            .upgrade()
+            .is_some_and(|running| running.poisoned.load(Ordering::Relaxed))
+    }
     pub(crate) fn call<R>(
         &self,
         class: CallClass,
@@ -396,7 +407,7 @@ fn host_reply(mut caller: Caller<'_, State>, ptr: u32) -> wasmtime::Result<()> {
 }
 
 impl WasmMod {
-    fn downgrade(&self) -> WeakWasmMod {
+    pub(crate) fn downgrade(&self) -> WeakWasmMod {
         WeakWasmMod {
             id: self.id.clone(),
             running: Arc::downgrade(&self.running),
@@ -412,6 +423,10 @@ impl WasmMod {
     }
     pub(crate) fn mod_id(&self) -> &str {
         &self.id
+    }
+    /// Stores the module's endpoint policy; it lives exactly as long as the module.
+    pub(crate) fn set_policy(&self, policy: mod_points::endpoint_policy::EndpointPolicy) {
+        let _ = self.running.policy.set(policy);
     }
     pub(crate) fn is_stopped(&self) -> bool {
         self.running.poisoned.load(Ordering::Relaxed)
@@ -504,6 +519,7 @@ impl WasmMod {
             lending,
             group: Mutex::new(group),
             poisoned: AtomicBool::new(false),
+            policy: std::sync::OnceLock::new(),
         });
         running
             .group

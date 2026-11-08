@@ -12,8 +12,8 @@ use horizon_items::items::ItemStack;
 use horizon_world::registry::BlockStateId;
 use mod_api::mod_chunk_tickets::ModTicket;
 use mod_api::{
-    BlockHit, BlockTransformPreview, ChunkRef, ChunkStatus, DimensionKey, Hand,
-    LevelRef, LightLayer, MapState, NativeClipBlock, NativeClipFluid, NativeTicketOwner, PlayerRef,
+    BlockHit, BlockTransformPreview, ChunkRef, ChunkStatus, DimensionKey, Hand, LevelRef,
+    LightLayer, MapState, NativeClipBlock, NativeClipFluid, NativeTicketOwner, PlayerRef,
     RespawnData, TicketController, Vec3,
 };
 
@@ -1343,14 +1343,10 @@ mod tests {
             let chunk = game.level_chunk_ref(level, [5, 6]).unwrap();
             assert!(game.chunk_set_forced(chunk, true));
             assert!(game.levels_to_tick().contains(&game.dim));
-            game.save
-                .save_forced_chunks(&game.streaming.forced)
-                .unwrap();
+            game.save_chunk_tickets().unwrap();
             assert!(game.save.load_forced_chunks().contains(&(5, 6)));
             assert!(game.chunk_set_forced(chunk, false));
-            game.save
-                .save_forced_chunks(&game.streaming.forced)
-                .unwrap();
+            game.save_chunk_tickets().unwrap();
             assert!(game.save.load_forced_chunks().is_empty());
         });
     }

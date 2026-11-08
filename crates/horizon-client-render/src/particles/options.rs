@@ -6,6 +6,10 @@ use mod_api::particles::PositionSource;
 // exhaustive: the game builds it with a literal; mods use the constructors
 pub struct ParticleOptions {
     pub ty: ParticleType,
+    /// Pre-1.20.5 entity effects use velocity as RGB; true is ambient.
+    pub legacy_entity_effect: Option<bool>,
+    /// Pre-1.21.4 trail lifetime is selected by the provider.
+    pub legacy_trail_lifetime: bool,
     /// `BlockParticleOption`: the block's particle sprite and terrain tint.
     pub block: Option<(String, u32)>,
     /// RGB(A) for dust, spells, entity effects and tinted leaves.
@@ -43,6 +47,8 @@ impl ParticleOptions {
     pub fn simple(ty: ParticleType) -> Self {
         Self {
             ty,
+            legacy_entity_effect: None,
+            legacy_trail_lifetime: false,
             block: None,
             color: [1.0; 4],
             scale: 1.0,

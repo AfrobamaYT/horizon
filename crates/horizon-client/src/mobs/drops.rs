@@ -267,20 +267,8 @@ pub fn slot_item(m: &Mob, slot: &str) -> Option<LootStack> {
         for (e, l) in &g.slots[index] {
             stack.enchantments.push((e.to_string(), *l as i32));
         }
-        if let Some((material, pattern)) = &g.trims[index] {
-            let trim = Some(horizon_core::nbt::Tag::Compound(
-                [
-                    (
-                        "material".into(),
-                        horizon_core::nbt::Tag::String((**material).into()),
-                    ),
-                    (
-                        "pattern".into(),
-                        horizon_core::nbt::Tag::String((**pattern).into()),
-                    ),
-                ]
-                .into(),
-            ));
+        if let Some(trim) = &g.trims[index] {
+            let trim = Some(crate::item_data::trim::to_nbt(trim));
             stack.components.push(("minecraft:trim".to_owned(), trim));
         }
     }

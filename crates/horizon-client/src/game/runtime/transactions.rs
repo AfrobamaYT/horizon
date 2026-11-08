@@ -70,7 +70,7 @@ struct Kept {
     attachments: Option<Attachments>,
     hopper: Option<HopperState>,
     /// The custom name Horizon keeps beside the model (`World::block_names`).
-    name: Option<String>,
+    name: Option<horizon_core::nbt::Tag>,
     /// The container lock and loot table roll kept beside the model.
     extras: BlockEntityExtras,
 }

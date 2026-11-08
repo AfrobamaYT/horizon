@@ -170,21 +170,27 @@ impl Wasm {
                 wasmparser::Payload::ImportSection(section) => {
                     for import in section.into_imports() {
                         let import = import.map_err(|_| WasmError::InvalidMember)?;
-                        let allowed = match (import.module, import.name, import.ty) {
+                        let allowed = matches!(
+                            (import.module, import.name, import.ty),
                             ("env", "memory", wasmparser::TypeRef::Memory(_))
-                            | ("env", "__indirect_function_table", wasmparser::TypeRef::Table(_))
-                            | (
-                                "env",
-                                "__stack_pointer" | "__memory_base" | "__table_base",
-                                wasmparser::TypeRef::Global(_),
-                            )
-                            | ("env", _, wasmparser::TypeRef::Func(_))
-                            | ("GOT.mem" | "GOT.func", _, wasmparser::TypeRef::Global(_))
-                            | ("horizon", "host" | "host_reply", wasmparser::TypeRef::Func(_)) => {
-                                true
-                            }
-                            _ => false,
-                        };
+                                | (
+                                    "env",
+                                    "__indirect_function_table",
+                                    wasmparser::TypeRef::Table(_)
+                                )
+                                | (
+                                    "env",
+                                    "__stack_pointer" | "__memory_base" | "__table_base",
+                                    wasmparser::TypeRef::Global(_),
+                                )
+                                | ("env", _, wasmparser::TypeRef::Func(_))
+                                | ("GOT.mem" | "GOT.func", _, wasmparser::TypeRef::Global(_))
+                                | (
+                                    "horizon",
+                                    "host" | "host_reply",
+                                    wasmparser::TypeRef::Func(_)
+                                )
+                        );
                         if !allowed {
                             return Err(WasmError::InvalidMember);
                         }

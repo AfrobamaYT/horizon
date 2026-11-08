@@ -1,16 +1,69 @@
 //! Game-owned dimension codec and registered pack-entry conversion.
 use horizon_world::worldgen::overrides::{LevelHeight, ModDimension};
-use mod_api::DimensionSettings;
+use mod_api::{BiomeSourceKind, DimensionSettings};
 use serde_json::{Value, json};
 
+/// The dimension type's fields these settings set.
 fn dimension_type(settings: &DimensionSettings) -> Value {
-    json!({
+    let mut json = json!({
         "min_y": settings.min_y,
         "height": settings.height,
         "logical_height": settings.logical_height,
         "has_skylight": settings.has_skylight,
         "has_ceiling": settings.has_ceiling,
-    })
+        "has_fixed_time": settings.has_fixed_time,
+        "has_ender_dragon_fight": settings.has_ender_dragon_fight,
+        "coordinate_scale": settings.coordinate_scale,
+        "ambient_light": settings.ambient_light,
+        "infiniburn": settings.infiniburn,
+        "monster_spawn_light_level": {
+            "type": "minecraft:uniform",
+            "min_inclusive": settings.monster_spawn_light_level.0,
+            "max_inclusive": settings.monster_spawn_light_level.1,
+        },
+        "monster_spawn_block_light_limit": settings.monster_spawn_block_light_limit,
+        "skybox": settings.skybox,
+        "cardinal_light": settings.cardinal_light,
+        "attributes": {
+            "minecraft:gameplay/water_evaporates": settings.water_evaporates,
+            "minecraft:gameplay/fast_lava": settings.fast_lava,
+            "minecraft:gameplay/respawn_anchor_works": settings.respawn_anchor_works,
+            "minecraft:gameplay/nether_portal_spawns_piglin": settings.nether_portal_spawns_piglin,
+            "minecraft:gameplay/piglins_zombify": settings.piglins_zombify,
+            "minecraft:gameplay/snow_golem_melts": settings.snow_golem_melts,
+            "minecraft:gameplay/can_start_raid": settings.can_start_raid,
+            "minecraft:gameplay/sky_light_level": settings.sky_light_level,
+        },
+    });
+    let attributes = json["attributes"]
+        .as_object_mut()
+        .expect("attributes is an object");
+    if let Some(color) = &settings.sky_color {
+        attributes.insert("minecraft:visual/sky_color".into(), json!(color));
+    }
+    if let Some(color) = &settings.fog_color {
+        attributes.insert("minecraft:visual/fog_color".into(), json!(color));
+    }
+    if let Some(height) = settings.cloud_height {
+        attributes.insert("minecraft:visual/cloud_height".into(), json!(height));
+    }
+    json
+}
+/// The level stem's `biome_source`.
+fn biome_source(settings: &DimensionSettings) -> Value {
+    match settings.biome_source {
+        BiomeSourceKind::Fixed => json!({"type": "minecraft:fixed", "biome": settings.biome}),
+        BiomeSourceKind::Checkerboard => json!({
+            "type": "minecraft:checkerboard",
+            "biomes": settings.biomes,
+            "scale": settings.biome_scale,
+        }),
+        BiomeSourceKind::MultiNoise => {
+            json!({"type": "minecraft:multi_noise", "preset": settings.biome_preset})
+        }
+        BiomeSourceKind::End => json!({"type": "minecraft:the_end"}),
+        _ => unreachable!("unknown API biome source"),
+    }
 }
 
 /// The actual engine dimension-type codec, called before registration is installed.
@@ -27,7 +80,7 @@ pub(in crate::game) fn installed_dimensions() -> Vec<ModDimension> {
                 "generator": {
                     "type": settings.generator,
                     "settings": settings.noise_settings,
-                    "biome_source": {"type": "minecraft:fixed", "biome": settings.biome},
+                    "biome_source": biome_source(&settings),
                 },
             });
             ModDimension {
@@ -458,6 +511,174 @@ mod tests {
                 )]
             );
             assert_eq!(mod_api::__private::dimension_declarations(), retained);
+        }
+    }
+}
+
+#[cfg(test)]
+mod main_dimension_tests {
+    use super::*;
+
+    #[test]
+    fn the_default_settings_are_accepted_and_name_the_overworlds_type() {
+        let settings = DimensionSettings::default();
+        assert!(valid_shape(&settings));
+        assert_eq!(settings.invalid_field(), None);
+        let json = dimension_type(&settings);
+        assert_eq!(json["coordinate_scale"], 1.0);
+        assert_eq!(json["infiniburn"], "#minecraft:infiniburn_overworld");
+        assert_eq!(json["monster_spawn_light_level"]["max_inclusive"], 7);
+        assert_eq!(
+            json["attributes"]["minecraft:gameplay/piglins_zombify"],
+            true
+        );
+        assert_eq!(json["attributes"]["minecraft:gameplay/fast_lava"], false);
+    }
+
+    #[test]
+    fn a_field_out_of_range_is_refused_by_name() {
+        let refused = |edit: fn(&mut DimensionSettings)| {
+            let mut settings = DimensionSettings::default();
+            edit(&mut settings);
+            settings.invalid_field().unwrap_or_default()
+        };
+        assert!(refused(|s| s.coordinate_scale = 0.0).contains("coordinate_scale"));
+        assert!(refused(|s| s.coordinate_scale = f64::NAN).contains("coordinate_scale"));
+        assert!(refused(|s| s.ambient_light = 1.5).contains("ambient_light"));
+        assert!(refused(|s| s.sky_light_level = 16.0).contains("sky_light_level"));
+        assert!(
+            refused(|s| s.monster_spawn_light_level = (8, 7)).contains("monster_spawn_light_level")
+        );
+        assert!(refused(|s| s.monster_spawn_block_light_limit = 16).contains("block_light_limit"));
+        assert!(refused(|s| s.skybox = "moon".into()).contains("skybox"));
+        assert!(refused(|s| s.cardinal_light = "up".into()).contains("cardinal_light"));
+        assert!(
+            refused(|s| s.infiniburn = "minecraft:infiniburn_end".into()).contains("infiniburn")
+        );
+    }
+}
+
+#[cfg(test)]
+mod biome_source_tests {
+    use super::*;
+
+    #[test]
+    fn each_source_names_the_stem_the_data_pack_codec_reads() {
+        let mut settings = DimensionSettings::default();
+        assert_eq!(
+            biome_source(&settings),
+            json!({"type": "minecraft:fixed", "biome": "minecraft:plains"})
+        );
+        settings.biome_source = BiomeSourceKind::Checkerboard;
+        settings.biomes = vec!["minecraft:desert".into(), "minecraft:plains".into()];
+        settings.biome_scale = 3;
+        assert_eq!(
+            biome_source(&settings),
+            json!({
+                "type": "minecraft:checkerboard",
+                "biomes": ["minecraft:desert", "minecraft:plains"],
+                "scale": 3
+            })
+        );
+        settings.biome_source = BiomeSourceKind::MultiNoise;
+        settings.biome_preset = "minecraft:nether".into();
+        assert_eq!(
+            biome_source(&settings),
+            json!({"type": "minecraft:multi_noise", "preset": "minecraft:nether"})
+        );
+        settings.biome_source = BiomeSourceKind::End;
+        assert_eq!(
+            biome_source(&settings),
+            json!({"type": "minecraft:the_end"})
+        );
+    }
+
+    #[test]
+    fn a_source_the_codec_refuses_is_refused_by_name() {
+        let refused = |edit: fn(&mut DimensionSettings)| {
+            let mut settings = DimensionSettings::default();
+            edit(&mut settings);
+            settings.invalid_biome_source().unwrap_or_default()
+        };
+        assert_eq!(refused(|_| {}), "");
+        // vanilla's codec takes a holder set of any size, so 65 biomes are accepted
+        assert_eq!(
+            refused(|s| {
+                s.biome_source = BiomeSourceKind::Checkerboard;
+                s.biomes = (0..65).map(|n| format!("test:biome_{n}")).collect();
+            }),
+            ""
+        );
+        assert!(
+            refused(|s| s.biome_source = BiomeSourceKind::Checkerboard).contains("checkerboard")
+        );
+        assert!(
+            refused(|s| {
+                s.biome_source = BiomeSourceKind::Checkerboard;
+                s.biomes = vec!["minecraft:plains".into()];
+                s.biome_scale = 63;
+            })
+            .contains("biome_scale")
+        );
+        assert!(
+            refused(|s| {
+                s.biome_source = BiomeSourceKind::MultiNoise;
+                s.biome_preset = "minecraft:end".into();
+            })
+            .contains("biome_preset")
+        );
+        assert!(
+            refused(|s| {
+                s.biome_source = BiomeSourceKind::End;
+                s.generator = "mymod:void".into();
+            })
+            .contains("fixed biome source")
+        );
+        assert_eq!(
+            refused(|s| {
+                s.biome_source = BiomeSourceKind::MultiNoise;
+            }),
+            ""
+        );
+    }
+}
+
+#[cfg(test)]
+mod visual_tests {
+    use super::*;
+
+    #[test]
+    fn the_sky_fog_and_clouds_are_written_only_when_set() {
+        let plain = dimension_type(&DimensionSettings::default());
+        assert!(
+            plain["attributes"]
+                .get("minecraft:visual/sky_color")
+                .is_none()
+        );
+        let settings = DimensionSettings {
+            sky_color: Some("#112233".into()),
+            fog_color: Some("#445566".into()),
+            cloud_height: Some(192.0),
+            ..Default::default()
+        };
+        assert_eq!(settings.invalid_field(), None);
+        let attributes = &dimension_type(&settings)["attributes"];
+        assert_eq!(attributes["minecraft:visual/sky_color"], "#112233");
+        assert_eq!(attributes["minecraft:visual/fog_color"], "#445566");
+        assert_eq!(attributes["minecraft:visual/cloud_height"], 192.0);
+    }
+
+    #[test]
+    fn a_colour_that_is_not_rrggbb_is_refused() {
+        for bad in ["112233", "#12345", "#12345g", "#1234567"] {
+            let settings = DimensionSettings {
+                sky_color: Some(bad.into()),
+                ..Default::default()
+            };
+            assert!(
+                settings.invalid_field().unwrap().contains("#rrggbb"),
+                "{bad}"
+            );
         }
     }
 }

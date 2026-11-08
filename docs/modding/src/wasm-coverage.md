@@ -73,6 +73,8 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `ServerHost::attachment_validate_write` | crosses | Wire call |
 | `ServerHost::transaction_open` | crosses | Wire call |
 | `ServerHost::transaction_close` | crosses | Wire call |
+| `ServerHost::schedule_task` | crosses | Wire call |
+| `ServerHost::cancel_task` | crosses | Wire call |
 | `ServerHost::net_send_to_player` | crosses | Wire call |
 | `ServerHost::fake_player` | crosses | Wire call |
 | `ServerHost::projectile` | crosses | Wire call |
@@ -118,6 +120,8 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `ClientHost::view_hit` | crosses | Wire call |
 | `ClientHost::camera` | crosses | Wire call |
 | `ClientHost::camera_entity` | crosses | Wire call |
+| `ClientHost::client_surface_heights` | crosses | Wire call |
+| `ClientHost::set_camera_entity` | crosses | Wire call |
 | `ClientHost::crosshair_target` | crosses | Wire call |
 | `ClientHost::translate` | crosses | Wire call |
 | `ClientHost::fluid_name` | crosses | Wire call |
@@ -173,6 +177,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Backend::block_state_destroy_speed` | crosses | Wire call |
 | `Backend::block_state_sound` | crosses | Wire call |
 | `Backend::block_state_has_block_entity` | crosses | Wire call |
+| `Backend::block_state_map_color` | crosses | Wire call |
 | `Backend::block_states_of` | crosses | Wire call |
 | `Backend::block_state_definition` | crosses | Wire call |
 | `Backend::block_state_matches` | crosses | Wire call |
@@ -228,6 +233,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Backend::entity_kind` | crosses | Wire call |
 | `Backend::entity_level` | crosses | Wire call |
 | `Backend::entity_permanently_invulnerable` | crosses | Wire call |
+| `Backend::entity_invulnerable_time` | crosses | Wire call |
 | `Backend::entity_damage_cooldown_time` | crosses | Wire call |
 | `Backend::entity_invulnerable_to_damage` | crosses | Wire call |
 | `Backend::entity_entities_team_damage_allowed` | crosses | Wire call |
@@ -238,6 +244,11 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Backend::entity_eye_height` | crosses | Wire call |
 | `Backend::entity_eye_position` | crosses | Wire call |
 | `Backend::entity_view_vector` | crosses | Wire call |
+| `Backend::entity_up_vector` | crosses | Wire call |
+| `Backend::entity_on_block` | crosses | Wire call |
+| `Backend::entity_pick` | crosses | Wire call |
+| `Backend::entity_is_multipart` | crosses | Wire call |
+| `Backend::entity_parts` | crosses | Wire call |
 | `Backend::entity_distance_to_sqr` | crosses | Wire call |
 | `Backend::entity_head_yaw` | crosses | Wire call |
 | `Backend::entity_direction` | crosses | Wire call |
@@ -343,6 +354,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Backend::level_best_neighbor_signal` | crosses | Wire call |
 | `Backend::level_has_neighbor_signal` | crosses | Wire call |
 | `Backend::level_dimension_shape` | crosses | Wire call |
+| `Backend::level_dimension_type` | crosses | Wire call |
 | `Backend::level_seed` | crosses | Wire call |
 | `Backend::level_difficulty` | crosses | Wire call |
 | `Backend::level_game_rule_bool` | crosses | Wire call |
@@ -394,6 +406,11 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Backend::living_item_use_remaining` | crosses | Wire call |
 | `Backend::living_used_item_hand` | crosses | Wire call |
 | `Backend::living_dimensions_for_pose` | crosses | Wire call |
+| `Backend::living_can_use_portal` | crosses | Wire call |
+| `Backend::living_in_melee_range` | crosses | Wire call |
+| `Backend::living_can_freeze` | crosses | Wire call |
+| `Backend::living_can_breathe_underwater` | crosses | Wire call |
+| `Backend::living_bed_orientation` | crosses | Wire call |
 | `Backend::living_effect_blend_factor` | crosses | Wire call |
 | `Backend::menu_container_id` | crosses | Wire call |
 | `Backend::menu_kind` | crosses | Wire call |
@@ -403,6 +420,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Backend::menu_slot_backing` | crosses | Wire call |
 | `Backend::menu_slot_holds` | crosses | Wire call |
 | `Backend::menu_slot_gives` | crosses | Wire call |
+| `Backend::menu_slot_boxes` | crosses | Wire call |
 | `Backend::merchant_offers` | crosses | Wire call |
 | `Backend::merchant_trading_player` | crosses | Wire call |
 | `Backend::merchant_profession` | crosses | Wire call |
@@ -471,6 +489,13 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Backend::player_previous_game_mode` | crosses | Wire call |
 | `Backend::player_is_secondary_use_active` | crosses | Wire call |
 | `Backend::player_is_fake` | crosses | Wire call |
+| `Backend::player_may_use_item_at` | crosses | Wire call |
+| `Backend::player_can_harm` | crosses | Wire call |
+| `Backend::player_respawn_config` | crosses | Wire call |
+| `Backend::player_text_filtering` | crosses | Wire call |
+| `Backend::player_sleep_ignored` | crosses | Wire call |
+| `Backend::player_counts_for_sleep` | crosses | Wire call |
+| `Backend::player_sleep_timer` | crosses | Wire call |
 | `Backend::player_inventory` | crosses | Wire call |
 | `Backend::player_game_mode` | crosses | Wire call |
 | `Backend::player_is_creative` | crosses | Wire call |
@@ -561,9 +586,11 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `BackendMut::entity_uuid` | crosses | Wire call |
 | `BackendMut::entity_set_invulnerable` | crosses | Wire call |
 | `BackendMut::entity_set_damage_cooldown_time` | crosses | Wire call |
+| `BackendMut::entity_set_invulnerable_time` | crosses | Wire call |
 | `BackendMut::entity_hurt` | crosses | Wire call |
 | `BackendMut::entity_set_velocity` | crosses | Wire call |
 | `BackendMut::entity_teleport_to` | crosses | Wire call |
+| `BackendMut::entity_teleport_to_level` | crosses | Wire call |
 | `BackendMut::entity_set_rotation` | crosses | Wire call |
 | `BackendMut::entity_set_head_yaw` | crosses | Wire call |
 | `BackendMut::entity_push` | crosses | Wire call |
@@ -707,6 +734,8 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `BackendMut::player_action_bar` | crosses | Wire call |
 | `BackendMut::player_tab_list` | crosses | Wire call |
 | `BackendMut::player_set_sleep_ignored` | crosses | Wire call |
+| `BackendMut::player_set_respawn_config` | crosses | Wire call |
+| `BackendMut::player_set_sleep_timer` | crosses | Wire call |
 | `BackendMut::player_set_nickname` | crosses | Wire call |
 | `BackendMut::player_hide` | crosses | Wire call |
 | `BackendMut::player_open_menu` | crosses | Wire call |
@@ -791,6 +820,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `BlockEntityDrawContext::text` | crosses | Wire call |
 | `BlockEntityDrawContext::text_width` | crosses | Wire call |
 | `BlockEntityDrawContext::model_part` | crosses | Wire call |
+| `BlockEntityDrawContext::fluid_box` | crosses | Wire call |
 | `WorldDrawContext::draw_instance_group` | crosses | Wire call |
 | `WorldDrawContext::lines` | crosses | Wire call |
 | `WorldDrawContext::quads` | crosses | Wire call |
@@ -874,6 +904,8 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Registrar::modify_entity_attributes` | crosses | Wire call |
 | `Registrar::fluid_key` | crosses | Wire call |
 | `Registrar::declare_fluid` | crosses | Wire call |
+| `Registrar::declare_world_fluid` | crosses | Wire call |
+| `Registrar::attach_fluid_part` | crosses | Wire call |
 | `Registrar::game_rule_category` | crosses | Wire call |
 | `Registrar::game_rule_bool` | crosses | Wire call |
 | `Registrar::item_key` | crosses | Wire call |
@@ -885,6 +917,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Registrar::register_key_mapping` | crosses | Wire call |
 | `Registrar::attach_menu_part` | crosses | Wire call |
 | `Registrar::particle_key` | crosses | Wire call |
+| `Registrar::declare_spawn_placement` | crosses | Wire call |
 | `Registrar::add_structure_type` | crosses | Wire call |
 | `Registrar::register_ticket_controller` | crosses | Wire call |
 | `CapabilityProviders::block_entity_provider` | crosses | Wire call |
@@ -1022,7 +1055,6 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::mob_spawned` | crosses | Wire call |
 | `Hooks::mob_killed` | crosses | Wire call |
 | `Hooks::item_picked_up` | crosses | Wire call |
-| `Hooks::inventory_tick` | crosses | Wire call |
 | `Hooks::on_equip` | crosses | Wire call |
 | `Hooks::health_hud` | crosses | Wire call |
 | `Hooks::entity_interact` | crosses | Wire call |
@@ -1034,7 +1066,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::entity_leave_level` | crosses | Wire call |
 | `Hooks::block_entity_fluids` | crosses | Wire call |
 | `Hooks::should_apply_effect_tick_this_tick` | crosses | Wire call |
-| `Hooks::apply_effect_tick` | crosses | Wire call |
+| `Hooks::apply_effect_tick` | gap | borrow/resource shape not yet supported |
 | `Hooks::on_effect_added` | crosses | Wire call |
 | `Hooks::mob_effect_added` | crosses | Wire call |
 | `Hooks::chunk_load` | crosses | Wire call |
@@ -1256,7 +1288,6 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::player_open_sign` | crosses | Wire call |
 | `Hooks::player_pick_item` | crosses | Wire call |
 | `Hooks::player_pickup_arrow` | crosses | Wire call |
-| `Hooks::player_portal` | crosses | Wire call |
 | `Hooks::player_ready_arrow` | crosses | Wire call |
 | `Hooks::player_recipe_book_click` | crosses | Wire call |
 | `Hooks::player_recipe_book_settings_change` | crosses | Wire call |
@@ -1323,6 +1354,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::can_continue_sleeping` | crosses | Wire call |
 | `Hooks::can_player_sleep` | crosses | Wire call |
 | `Hooks::chat_suggestion_applied` | crosses | Wire call |
+| `Hooks::chunk_ticket_level_updated` | crosses | Wire call |
 | `Hooks::chunk_watch` | crosses | Wire call |
 | `Hooks::chunk_sent` | crosses | Wire call |
 | `Hooks::chunk_unwatch` | crosses | Wire call |
@@ -1355,8 +1387,10 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::custom_spawner_tick` | crosses | Wire call |
 | `Hooks::customize_boss_event_progress` | crosses | Wire call |
 | `Hooks::customize_chat_overlay` | crosses | Wire call |
+| `Hooks::data_maps_updated` | crosses | Wire call |
 | `Hooks::debug_entry_lines` | crosses | Wire call |
 | `Hooks::debug_renderer_draw` | crosses | Wire call |
+| `Hooks::dimension_transition_screen_draw` | crosses | Wire call |
 | `Hooks::effect_particle_modification` | crosses | Wire call |
 | `Hooks::enchanted_block_loot` | crosses | Wire call |
 | `Hooks::enchanted_entity_loot` | crosses | Wire call |
@@ -1371,6 +1405,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::entity_place` | crosses | Wire call |
 | `Hooks::entity_size` | crosses | Wire call |
 | `Hooks::entity_struck_by_lightning` | crosses | Wire call |
+| `Hooks::entity_travel_to_dimension` | crosses | Wire call |
 | `Hooks::explosion_knockback` | crosses | Wire call |
 | `Hooks::explosion_start` | crosses | Wire call |
 | `Hooks::extract_block_screen_effect` | crosses | Wire call |
@@ -1379,6 +1414,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::flip_frame` | crosses | Wire call |
 | `Hooks::fluid_flow` | crosses | Wire call |
 | `Hooks::fluid_place_block` | crosses | Wire call |
+| `Hooks::fluid_tooltip` | crosses | Wire call |
 | `Hooks::game_rule_changed` | crosses | Wire call |
 | `Hooks::game_shutting_down` | crosses | Wire call |
 | `Hooks::gather_effect_screen_tooltips` | crosses | Wire call |
@@ -1422,6 +1458,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::living_shield_block` | crosses | Wire call |
 | `Hooks::living_use_totem` | crosses | Wire call |
 | `Hooks::living_visibility` | crosses | Wire call |
+| `Hooks::map_decoration_types` | crosses | Wire call |
 | `Hooks::menu_extra_data` | crosses | Wire call |
 | `Hooks::mob_despawn` | crosses | Wire call |
 | `Hooks::mob_effect_applicable` | crosses | Wire call |
@@ -1464,6 +1501,8 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::register_block_tint_sources` | crosses | Wire call |
 | `Hooks::register_debug_entries` | crosses | Wire call |
 | `Hooks::register_debug_renderers` | crosses | Wire call |
+| `Hooks::register_dimension_transition_screen` | crosses | Wire call |
+| `Hooks::register_fluid_models` | crosses | Wire call |
 | `Hooks::register_gui_layers` | crosses | Wire call |
 | `Hooks::register_item_tint_sources` | crosses | Wire call |
 | `Hooks::register_range_select_item_model_property` | crosses | Wire call |
@@ -1482,6 +1521,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::render_tooltip_texture` | crosses | Wire call |
 | `Hooks::right_click_empty` | crosses | Wire call |
 | `Hooks::right_click_item` | crosses | Wire call |
+| `Hooks::scheduled_task` | crosses | Wire call |
 | `Hooks::screen_closing` | crosses | Wire call |
 | `Hooks::screen_exclusion_areas` | crosses | Wire call |
 | `Hooks::screen_init_post` | crosses | Wire call |
@@ -1583,6 +1623,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `ItemPart::use_on` | crosses | Wire call |
 | `ItemPart::use_item` | crosses | Wire call |
 | `ItemPart::hurt_enemy` | crosses | Wire call |
+| `ItemPart::inventory_tick` | crosses | Wire call |
 | `ItemPart::item_bar` | crosses | Wire call |
 | `ItemPart::dispense_item` | crosses | Wire call |
 | `ItemPart::tooltip_component` | crosses | Wire call |
@@ -1596,6 +1637,8 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `ItemPart::on_item_use_first` | crosses | Wire call |
 | `MenuPart::menu_subscribed` | crosses | Wire call |
 | `MenuPart::menu_slot_rules` | crosses | Wire call |
+| `FluidPart::fluid_subscribed` | crosses | Wire call |
+| `FluidPart::fluid_rules` | crosses | Wire call |
 | `ServerReloadListener::prepare` | crosses | Wire call |
 | `ClientReloadListener::prepare` | crosses | Wire call |
 | `BlockTintSource::color` | crosses | Wire call |
@@ -1644,7 +1687,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 
 | Library mod plain `pub fn` / `pub static` called by a dependent | crosses | shared dependency rlib, stable crate identity, and retained public exports; production-loader library fixture covers separate library/observer/dependent builds |
 
-Required gap total: 0.
+Required gap total: 1.
 
 ## Entity snapshot revision boundary
 

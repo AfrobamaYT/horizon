@@ -50,6 +50,18 @@ group give the game, so a handler one mod of a group gave is usable by another m
 mod built for a toolchain whose std lacks that table is refused at load; rebuild the mod and the std
 together.
 
+The state is 32 words, zeroed, exported by the std member as `horizon_group_state`: the handler table, the cache budget, and
+29 slots for eviction callbacks. A member's allocator is `mod_api`'s `#[global_allocator]` on wasm32. When an allocation
+fails because the group's memory (256 MiB) is full, it calls every callback registered with
+`mod_api::wire::guest::register_eviction(fn())` once and retries once; if that frees nothing the allocation fails as
+usual (`try_reserve` returns an error, an infallible allocation ends the call with a trap). Register a callback to
+give back what a cache can rebuild. It must free memory and must not allocate. Registering the same function twice is
+harmless; `false` means all 29 slots are taken.
+
+A wasm mod must not declare its own `#[global_allocator]`: `cargo horizon-mod build --wasm` fails with rustc's error
+"the `#[global_allocator]` in this crate conflicts with global allocator in: mod_api". Allocate through the standard
+collections and let the group's allocator do the rest.
+
 ## Dependencies
 
 `[dependencies]` work as for native mods. List the library mod in `horizon-mod.toml` and its

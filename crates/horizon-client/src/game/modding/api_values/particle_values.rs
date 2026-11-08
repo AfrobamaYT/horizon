@@ -58,6 +58,8 @@ impl<C: ?Sized> TryIntoEngine<C> for ApiOptions {
         Ok(EngineOptions {
             ty,
             mod_particle: custom,
+            legacy_entity_effect: self.legacy_entity_effect,
+            legacy_trail_lifetime: self.legacy_trail_lifetime,
             block: self.block.clone(),
             color: self.color,
             scale: self.scale,
@@ -82,6 +84,8 @@ impl TryIntoApi for EngineOptions {
         .ok_or(ParticleValueError::UnknownProvider)?;
         Ok(ApiOptions {
             ty: key,
+            legacy_entity_effect: self.legacy_entity_effect,
+            legacy_trail_lifetime: self.legacy_trail_lifetime,
             block: self.block.clone(),
             color: self.color,
             scale: self.scale,
@@ -117,6 +121,8 @@ mod tests {
     fn particle_keys_preserve_provider_and_every_option_slot() {
         prepare();
         let mut original = EngineOptions::trail([3.0, 4.0, 5.0], 0x112233, 19);
+        original.legacy_entity_effect = Some(true);
+        original.legacy_trail_lifetime = true;
         original.scale = 2.5;
         original.to_color = [0.1, 0.3, 0.7];
         original.block = Some(("test:sprite".into(), 0x123456));
@@ -134,7 +140,11 @@ mod tests {
             mod_api::__private::particle_kind(api.ty),
             Some(ParticleKind::Vanilla(ParticleType::Trail as u32))
         );
+        assert_eq!(api.legacy_entity_effect, Some(true));
+        assert!(api.legacy_trail_lifetime);
         let result = api.try_into_engine(&()).unwrap();
+        assert_eq!(result.legacy_entity_effect, Some(true));
+        assert!(result.legacy_trail_lifetime);
         assert_eq!(result.ty, ParticleType::Trail);
         assert_eq!(result.trail, Some(([3.0, 4.0, 5.0], 19)));
         assert_eq!(

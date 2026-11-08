@@ -49,7 +49,8 @@ fn reload_resolves_parts_against_reloaded_tags() {
         let prepared = game
             .prepare_world_reload(&stack, &root, game.mods.data_switched)
             .unwrap();
-        game.reload_world_tables(prepared);
+        game.install_world_tables(prepared);
+        game.run_native_advancement_grants();
         assert_eq!(stone_key.id(game), name);
         assert_eq!(
             stone_key,
@@ -254,7 +255,10 @@ fn right_click_block_controls_cauldron_use() {
             .registry
             .default_state("minecraft:cauldron")
             .unwrap();
-        assert_eq!(game.level_set_block(level, [0, 64, 0], empty, NativeBlockUpdateFlags::NEIGHBORS), Ok(true));
+        assert_eq!(
+            game.level_set_block(level, [0, 64, 0], empty, NativeBlockUpdateFlags::NEIGHBORS),
+            Ok(true)
+        );
         game.inventory[game.selected] = Some(ItemStack::new("minecraft:water_bucket", 1));
         let hit = Hit {
             pos: [0, 64, 0],
@@ -267,7 +271,10 @@ fn right_click_block_controls_cauldron_use() {
         allowed.store(true, Ordering::SeqCst);
         game.use_hand(Some(&hit)).unwrap();
         assert_ne!(game.world.block(0, 64, 0), empty);
-        assert_eq!(game.level_set_block(level, hit.pos, empty, NativeBlockUpdateFlags::NEIGHBORS), Ok(true));
+        assert_eq!(
+            game.level_set_block(level, hit.pos, empty, NativeBlockUpdateFlags::NEIGHBORS),
+            Ok(true)
+        );
         game.inventory[game.selected] = Some(ItemStack::new("minecraft:water_bucket", 1));
         game.keys.insert(KeyCode::ShiftLeft);
         game.use_hand(Some(&hit)).unwrap();
@@ -280,7 +287,10 @@ fn right_click_block_controls_cauldron_use() {
             .registry
             .default_state("minecraft:campfire")
             .unwrap();
-        assert_eq!(game.level_set_block(level, hit.pos, campfire, NativeBlockUpdateFlags::NEIGHBORS), Ok(true));
+        assert_eq!(
+            game.level_set_block(level, hit.pos, campfire, NativeBlockUpdateFlags::NEIGHBORS),
+            Ok(true)
+        );
         let entity = game.new_block_entity("minecraft:campfire").unwrap();
         game.world.block_entities.insert((0, 64, 0), entity);
         game.inventory[game.selected] = Some(ItemStack::new("minecraft:beef", 2));
@@ -298,7 +308,10 @@ fn right_click_block_controls_cauldron_use() {
             .registry
             .default_state("minecraft:oak_fence")
             .unwrap();
-        assert_eq!(game.level_set_block(level, hit.pos, fence, NativeBlockUpdateFlags::NEIGHBORS), Ok(true));
+        assert_eq!(
+            game.level_set_block(level, hit.pos, fence, NativeBlockUpdateFlags::NEIGHBORS),
+            Ok(true)
+        );
         let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
         let mut mob = horizon_client::mobs::Mob::new(
             12,
@@ -348,7 +361,10 @@ fn fence_ties_without_a_lead_only_on_main_hand() {
             .registry
             .default_state("minecraft:oak_fence")
             .unwrap();
-        assert_eq!(game.level_set_block(level, [0, 64, 0], fence, NativeBlockUpdateFlags::NEIGHBORS), Ok(true));
+        assert_eq!(
+            game.level_set_block(level, [0, 64, 0], fence, NativeBlockUpdateFlags::NEIGHBORS),
+            Ok(true)
+        );
         let hit = Hit {
             pos: [0, 64, 0],
             face: [0, 1, 0],

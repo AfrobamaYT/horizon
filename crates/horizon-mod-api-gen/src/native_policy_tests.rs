@@ -154,7 +154,7 @@ fn opaque_hidden_fields_are_not_reached_and_enum_ordinals_are_local() {
 }
 
 /// Helpers live in `crate::__horizon_points` and are called from the game's other modules, so each
-/// emitted fn must be `pub(crate)`: a private helper is E0603 at every call site.
+/// emitted fn must not be private: a private helper is E0603 at every call site.
 #[test]
 fn staged_helpers_are_callable_from_sibling_modules() {
     let rule = Rule::new(&[internal(
@@ -183,8 +183,8 @@ fn staged_helpers_are_callable_from_sibling_modules() {
         assert!(!fns.is_empty());
         for item in fns {
             assert!(
-                matches!(item.vis, syn::Visibility::Restricted(_)),
-                "{} is not pub(crate)",
+                !matches!(item.vis, syn::Visibility::Inherited),
+                "{} is private",
                 item.sig.ident
             );
         }

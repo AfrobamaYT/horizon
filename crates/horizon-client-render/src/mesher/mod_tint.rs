@@ -241,7 +241,10 @@ impl BlockAndTintGetter for Region<'_, '_, '_> {
             .info
             .get(id as usize)
             .map_or(FluidState::EMPTY, |i| i.fluid);
-        let key = mod_api::__private::world_fluid_key(state.kind() as usize)?;
+        let key = match state.kind().vanilla_index() {
+            Some(index) => mod_api::__private::world_fluid_key(usize::from(index))?,
+            None => mod_api::__private::fluid_key(state.kind().name())?,
+        };
         Some(mod_api::__private::fluid_state(
             key,
             state.amount(),

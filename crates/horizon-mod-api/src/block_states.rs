@@ -129,6 +129,11 @@ impl BlockStates<'_> {
     pub fn has_block_entity(&self, state: BlockState) -> Option<bool> {
         self.backend?.block_state_has_block_entity(state)
     }
+    /// `BlockState.getMapColor`: the state's `MapColor.id`, 0 for none (`MapColor.NONE`).
+    /// None as for `replaceable`.
+    pub fn map_color(&self, state: BlockState) -> Option<u8> {
+        self.backend?.block_state_map_color(state)
+    }
     /// The block's property names and legal serialized values. None without resolved tables.
     pub fn definition(&self, block: crate::BlockKey) -> Option<Vec<StateProperty>> {
         self.backend?.block_state_definition(block)
@@ -171,6 +176,7 @@ mod tests {
         assert_eq!(facts.destroy_speed(state), None);
         assert_eq!(facts.sound(state), None);
         assert_eq!(facts.has_block_entity(state), None);
+        assert_eq!(facts.map_color(state), None);
         assert_eq!(facts.states_of(crate::BlockKey(0)), None);
     }
 }

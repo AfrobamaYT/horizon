@@ -61,7 +61,7 @@ pub fn decoders<'a>(rule: &Rule, paths: impl Iterator<Item = &'a str>) -> TokenS
         )
         .expect("a decodable layout has a path");
         let decode = codec.decode;
-        out.push(quote!(pub(crate) fn #name(input: &mut mod_api::wire::Reader<'_>) -> Result<#native, mod_api::wire::WireError> { Ok(#decode) }));
+        out.push(quote!(pub fn #name(input: &mut mod_api::wire::Reader<'_>) -> Result<#native, mod_api::wire::WireError> { Ok(#decode) }));
     }
     quote!(#(#out)*)
 }
@@ -83,6 +83,24 @@ fn build(
             decode: quote!(input.take()?),
             encode: quote!(out.put(value);),
         },
+        Shape::Wrapped(Wrapper::Box, inner) if **inner == Shape::DynError => ValueCodec {
+            decode: quote!(::std::convert::From::<::std::string::String>::from(
+                input.take::<::std::string::String>()?
+            )),
+            encode: quote!({
+                let value = &value.to_string();
+                out.put(value);
+            }),
+        },
+        Shape::Result(ok, err) => {
+            let ok = build(rule, ok, stack, mode)?;
+            let err = build(rule, err, stack, mode)?;
+            let (od, oe, ed, ee) = (ok.decode, ok.encode, err.decode, err.encode);
+            ValueCodec {
+                decode: quote!(match input.take::<u8>()? { 0 => Ok(input.nested(|input| Ok(#od))?), 1 => Err(input.nested(|input| Ok(#ed))?), tag => return Err(mod_api::wire::WireError::Tag(tag.into())) }),
+                encode: quote!(match value { Ok(value) => { out.put(&0u8); #oe } Err(value) => { out.put(&1u8); #ee } }),
+            }
+        }
         Shape::Wrapped(Wrapper::Box, inner) => {
             let c = build(rule, inner, stack, mode)?;
             let d = c.decode;

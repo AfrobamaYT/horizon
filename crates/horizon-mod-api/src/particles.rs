@@ -24,6 +24,10 @@ pub enum PositionSource {
 pub struct ParticleOptions {
     /// Provider identity issued by `Registrar::particle_key`, never an engine enum.
     pub ty: ParticleKey,
+    /// Older entity-effect providers use velocity as RGB; true is ambient.
+    pub legacy_entity_effect: Option<bool>,
+    /// Older trails choose their lifetime in the provider rather than on the wire.
+    pub legacy_trail_lifetime: bool,
     /// `BlockParticleOption`: the block's particle sprite and terrain tint.
     pub block: Option<(String, u32)>,
     /// RGB(A) for dust, spells, entity effects and tinted leaves.
@@ -46,18 +50,14 @@ pub struct ParticleOptions {
     /// sent to clients; the resolved point is used for local rendering
     /// (`ParticleEngine::vibration` is the same particle).
     pub vibration: Option<(PositionSource, [f64; 3], i32)>,
-    /// Pre-1.20.5 entity-effect providers use spawn velocity as RGB; true is ambient.
-    pub legacy_entity_effect: Option<bool>,
-    /// A pre-1.21.4 server's trail, which had no duration: TrailParticle.Provider chose
-    /// `nextInt(40) + 10` after constructing the particle. Set by the client for an older
-    /// server only, never read from the wire.
-    pub legacy_trail_lifetime: bool,
 }
 impl ParticleOptions {
     /// Construct an option for a retained vanilla or custom sprite-provider key.
     pub fn simple(ty: ParticleKey) -> Self {
         Self {
             ty,
+            legacy_entity_effect: None,
+            legacy_trail_lifetime: false,
             block: None,
             color: [1.0; 4],
             scale: 1.0,
@@ -66,8 +66,6 @@ impl ParticleOptions {
             item: None,
             geyser: None,
             vibration: None,
-            legacy_entity_effect: None,
-            legacy_trail_lifetime: false,
         }
     }
     /// `GeyserParticleOptions(type, waterBlocks)`.

@@ -1,5 +1,5 @@
 //! Native, non-owning implementations of ordinary callable resources.
-use crate::snapshot::Root;
+use crate::snapshot::{Root, Window};
 use mod_api::{
     RowError, RowFunction,
     wire::{self, Reader, WireError, Writer},
@@ -74,6 +74,43 @@ impl FunctionSource {
             decode: decode as *const (),
             encode: encode as *const (),
             invoke: invoke::<F, A, R>,
+        }))
+    }
+}
+type Selected<T> = fn(&T, &[u8]) -> Result<Vec<u8>, RowError>;
+
+impl FunctionSource {
+    /// Borrow one callback argument of a raw call's leased state, from inside that state's
+    /// checked reader. `invoke` decodes the arguments, borrows the callback place inside `state`
+    /// (refusing a place already borrowed with [`RowError::Reentrant`]), calls it and encodes the
+    /// result. The source shares the reading window's value lease, so it is refused once the
+    /// native call's lease closes, after the call ends and on any other thread.
+    ///
+    /// # Safety
+    /// `state` must be the leased root the window's source was built over, so the lease being
+    /// live keeps it valid; `invoke` must only touch the callback through `state`.
+    pub unsafe fn at<T>(
+        window: Window,
+        state: &T,
+        invoke: Selected<T>,
+    ) -> Result<Arc<dyn RowFunction>, RowError> {
+        unsafe fn shim<T>(
+            root: *const (),
+            invoke: *const (),
+            _: *const (),
+            bytes: &[u8],
+        ) -> Result<Vec<u8>, RowError> {
+            // SAFETY: `at` paired this pointer pair with T, and checks both leases per call.
+            let invoke: Selected<T> = unsafe { std::mem::transmute(invoke) };
+            invoke(unsafe { &*root.cast::<T>() }, bytes)
+        }
+        Ok(Arc::new(Self {
+            call: wire::borrow_token()?,
+            value: window.lease().ok_or(RowError::Stale)?,
+            root: std::ptr::from_ref(state).cast(),
+            decode: invoke as *const (),
+            encode: std::ptr::null(),
+            invoke: shim::<T>,
         }))
     }
 }

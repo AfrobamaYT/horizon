@@ -51,6 +51,18 @@ impl TryIntoEngine<()> for mod_api::BlockShapes {
         })
     }
 }
+impl TryIntoEngine<()> for mod_api::ShapeEntityKind {
+    type Engine = engine::ShapeEntityKind;
+    type Error = String;
+    fn try_into_engine(&self, _: &()) -> Result<Self::Engine, Self::Error> {
+        Ok(match self {
+            Self::Item => engine::ShapeEntityKind::Item,
+            Self::Player => engine::ShapeEntityKind::Player,
+            Self::Living => engine::ShapeEntityKind::Living,
+            Self::Other => engine::ShapeEntityKind::Other,
+        })
+    }
+}
 impl TryIntoEngine<()> for mod_api::Block {
     type Engine = engine::Block;
     type Error = String;
@@ -69,11 +81,21 @@ impl TryIntoEngine<()> for mod_api::Block {
                 .as_ref()
                 .map(|v| v.try_into_engine(&()))
                 .transpose()?,
-            // The API declaration has no per-entity or interaction shapes; only
-            // content files (`horizon-mod-package`) declare them.
-            outline_context_shapes: Default::default(),
-            collision_context_shapes: Default::default(),
-            interaction_shapes: None,
+            outline_context_shapes: self
+                .outline_context_shapes
+                .iter()
+                .map(|(kind, shape)| Ok((kind.try_into_engine(&())?, shape.try_into_engine(&())?)))
+                .collect::<Result<_, String>>()?,
+            collision_context_shapes: self
+                .collision_context_shapes
+                .iter()
+                .map(|(kind, shape)| Ok((kind.try_into_engine(&())?, shape.try_into_engine(&())?)))
+                .collect::<Result<_, String>>()?,
+            interaction_shapes: self
+                .interaction_shapes
+                .as_ref()
+                .map(|s| s.try_into_engine(&()))
+                .transpose()?,
             state_properties: self
                 .state_properties
                 .iter()
@@ -148,6 +170,38 @@ mod tests {
     use super::*;
     use mod_api::{Block, BlockProperties, Item, Tag};
     use std::collections::BTreeMap;
+
+    #[test]
+    fn context_shape_declarations_preserve_categories_and_boxes() {
+        let shape = mod_api::BlockShapes {
+            properties: vec![],
+            values: BTreeMap::new(),
+            default: Some(vec![[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]]),
+        };
+        let mut draft = Block::new("test:shape", "minecraft:stone");
+        for kind in [
+            mod_api::ShapeEntityKind::Item,
+            mod_api::ShapeEntityKind::Player,
+            mod_api::ShapeEntityKind::Living,
+            mod_api::ShapeEntityKind::Other,
+        ] {
+            draft.outline_context_shapes.insert(kind, shape.clone());
+            draft.collision_context_shapes.insert(kind, shape.clone());
+        }
+        draft.interaction_shapes = Some(shape);
+        let result = draft.try_into_engine(&()).unwrap();
+        let boxes = Some(vec![[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]]);
+        for kind in [
+            engine::ShapeEntityKind::Item,
+            engine::ShapeEntityKind::Player,
+            engine::ShapeEntityKind::Living,
+            engine::ShapeEntityKind::Other,
+        ] {
+            assert_eq!(result.outline_context_shapes[&kind].default, boxes);
+            assert_eq!(result.collision_context_shapes[&kind].default, boxes);
+        }
+        assert_eq!(result.interaction_shapes.unwrap().default, boxes);
+    }
 
     #[test]
     fn declaration_conversion_preserves_admission_outcomes() {
@@ -385,5 +439,25 @@ mod effect_write_tests {
                 Err(StackWriteError::InvalidEffectPayload)
             );
         }
+    }
+}
+
+impl TryIntoEngine<()> for (String, mod_api::WorldFluid) {
+    type Engine = engine::FluidLook;
+    type Error = std::convert::Infallible;
+    fn try_into_engine(&self, _: &()) -> Result<Self::Engine, Self::Error> {
+        let (id, fluid) = self;
+        Ok(engine::FluidLook {
+            id: id.clone(),
+            sprite: None,
+            tint: None,
+            world: Some(engine::WorldFluid {
+                tick_delay: fluid.tick_delay,
+                drop_off: fluid.drop_off,
+                slope_find_distance: fluid.slope_find_distance,
+                source_conversion: fluid.source_conversion,
+                bucket: fluid.bucket,
+            }),
+        })
     }
 }

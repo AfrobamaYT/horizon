@@ -170,9 +170,17 @@ pub fn revision(value: &str) -> bool {
 
 pub(super) fn valid_mod_id(id: &str) -> bool {
     (1..=64).contains(&id.len())
+        && !reserved_mod_id(id)
         && id
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
+
+fn reserved_mod_id(id: &str) -> bool {
+    matches!(id, "con" | "prn" | "aux" | "nul")
+        || (id.len() == 4
+            && (id.starts_with("com") || id.starts_with("lpt"))
+            && matches!(id.as_bytes()[3], b'1'..=b'9'))
 }
 
 fn rust_ident(name: &str) -> bool {
@@ -216,6 +224,12 @@ impl Manifest {
         if !m.internals.is_empty() && m.native.is_none() && m.wasm.is_none() {
             return Err(format!(
                 "{MANIFEST}: internals need a [native] or [wasm] mod"
+            ));
+        }
+        if reserved_mod_id(&m.id) {
+            return Err(format!(
+                "{MANIFEST}: id {:?} is a reserved Windows device name",
+                m.id
             ));
         }
         if !valid_mod_id(&m.id) {
@@ -873,6 +887,24 @@ pub fn find(dir: &Path) -> Vec<PathBuf> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn windows_device_mod_ids_are_refused() {
+        for id in ["con", "prn", "aux", "nul", "com1", "com9", "lpt1", "lpt9"] {
+            assert!(
+                Manifest::parse(&EXAMPLE.replace("ruby", id))
+                    .unwrap_err()
+                    .contains("reserved Windows device name"),
+                "{id}"
+            );
+        }
+        for id in ["console", "com0", "com10", "lpt0", "con_tool"] {
+            assert!(
+                Manifest::parse(&EXAMPLE.replace("ruby", id)).is_ok(),
+                "{id}"
+            );
+        }
+    }
+
     const EXAMPLE: &str = r#"
 id = "ruby"
 name = "Ruby"
@@ -892,6 +924,26 @@ capabilities = ["registries"]
         assert!(Manifest::parse(&text("distinct")).is_ok());
         let error = Manifest::parse(&text("shared")).unwrap_err();
         assert!(error.contains("duplicate module id"), "{error}");
+    }
+
+    #[test]
+    fn wasm_internals_declarations_parse_with_and_without_kind_and_need_a_wasm_or_native_mod() {
+        let wasm = format!(
+            "[wasm]\nsha512='{}'\ntoolchain='t'\nbuilt_with='t'\n",
+            "a".repeat(128)
+        );
+        let injection = "[[inject]]\nid='fell'\nat='Game::break_block'\nkind='head'\nwith='fell'\naccess='internals'\nhash='h'\n";
+        let text = |internals: &str, tail: &str| format!("{EXAMPLE}{internals}{tail}");
+        let ok = Manifest::parse(&text(
+            "internals=[{path='Game::world',kind='field',hash='1'},{path='Game::tick',hash='2'}]\n",
+            &format!("{wasm}{injection}"),
+        ))
+        .unwrap();
+        assert_eq!(ok.internals[0].kind.as_deref(), Some("field"));
+        assert_eq!(ok.internals[1].kind, None);
+        // A wasm internals listener with nothing declared, and declarations with no code mod.
+        assert!(Manifest::parse(&text("", &format!("{wasm}{injection}"))).is_err());
+        assert!(Manifest::parse(&text("internals=[{path='Game::world',hash='1'}]\n", "")).is_err());
     }
 
     #[test]
@@ -1239,7 +1291,12 @@ capabilities = ["registries"]
 
     #[test]
     fn a_wasm_mod_carries_exactly_its_declared_module() {
-        let module = b"\0asm\x01\0\0\0".to_vec();
+        // A minimal valid shared member: a `dylink.0` section and the three guest exports.
+        let module = wat::parse_str(
+            r#"(module (@custom "dylink.0" "\01\04\00\00\00\00")
+                (func (export "horizon_layout")) (func (export "horizon_in")) (func (export "horizon_hook")))"#,
+        )
+        .unwrap();
         let text = format!(
             "{}\n[wasm]\nsha512 = \"{}\"\ntoolchain = \"1.99.1\"\nbuilt_with = \"test\"\n",
             EXAMPLE.trim_end(),

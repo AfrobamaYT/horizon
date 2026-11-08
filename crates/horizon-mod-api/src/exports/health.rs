@@ -2,4 +2,6 @@
 #[doc(hidden)]
 pub mod health;
 pub use crate::health::DamageContainer;
-pub use crate::health::{DamageValues, HurtSource, Reduction, ShieldBlock, Victim};
+pub use crate::health::{
+    DamageValues, HurtSource, Reduction, ReductionChange, ShieldBlock, Victim,
+};

@@ -4,6 +4,7 @@ use mod_api::{
     BoolGameRuleKey, Flow, Hooks, Registrar, RegistrationContext, ServerChatEvent, ServerHost, Text,
 };
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
 /// The test harness registers every mod once to collect its controllers and again to install it,
 /// so each registration replaces the key.
 static RULE: Mutex<Option<BoolGameRuleKey>> = Mutex::new(None);
@@ -18,12 +19,17 @@ impl Counter for Seven {
     }
 }
 
+/// How many times the game ran this member's `register` and `server_chat`.
+static REGISTERS: AtomicU32 = AtomicU32::new(0);
+static CHATS: AtomicU32 = AtomicU32::new(0);
+
 #[derive(Default)]
 pub struct Mod;
 
 #[mod_api::horizon_mod]
 impl Hooks for Mod {
     fn register(&self, registrar: &mut dyn Registrar, _cx: &RegistrationContext) {
+        REGISTERS.fetch_add(1, Relaxed);
         registrar.game_rule_category("machines").expect("category");
         *RULE.lock().unwrap() = Some(
             registrar
@@ -45,7 +51,12 @@ impl Hooks for Mod {
             .level("minecraft:overworld")
             .and_then(|level| level.game_rule_bool(host, RULE.lock().unwrap().unwrap()))
             .unwrap();
-        *event.message = Text::literal(format!("{}: {answer} {rule}", env!("CARGO_PKG_NAME")));
+        *event.message = Text::literal(format!(
+            "{}: {answer} {rule} [registers={} chats={}]",
+            env!("CARGO_PKG_NAME"),
+            REGISTERS.load(Relaxed),
+            CHATS.fetch_add(1, Relaxed) + 1
+        ));
         Flow::Continue
     }
 }

@@ -49,6 +49,11 @@ pub(crate) fn spell(shape: &Shape) -> Option<TokenStream> {
             let inner = spell(inner)?;
             quote!(::std::option::Option<#inner>)
         }
+        Shape::Result(ok, err) => {
+            let (ok, err) = (spell(ok)?, spell(err)?);
+            quote!(::std::result::Result<#ok, #err>)
+        }
+        Shape::DynError => quote!(dyn ::std::error::Error),
         Shape::Wrapped(wrapper, inner) => {
             let inner = spell(inner)?;
             match wrapper {
@@ -95,8 +100,6 @@ fn path_tokens(path: &str) -> TokenStream {
     let rest = segments.map(|s| format_ident!("{s}"));
     quote!(#head #(::#rest)*)
 }
-
-/// Whether a value of `shape` can be built from a copy: no borrowed or shared part.
 
 /// Resolve the receiver exactly where its method signature is written.
 pub(crate) fn function_scope(rule: &Rule, internal: &Internal) -> Option<(String, Option<String>)> {

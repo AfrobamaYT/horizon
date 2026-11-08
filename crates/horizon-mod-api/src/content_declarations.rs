@@ -92,6 +92,20 @@ pub struct BlockShapes {
     pub default: Option<Vec<[f64; 6]>>,
 }
 
+/// Entity category selecting a load-time shape override.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+// exhaustive: entity categories are the closed content schema vocabulary.
+pub enum ShapeEntityKind {
+    /// Dropped items.
+    Item,
+    /// Players.
+    Player,
+    /// Other living entities.
+    Living,
+    /// Non-living entities.
+    Other,
+}
+
 /// BlockStateProperty in a load-time content declaration.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: these variants are the closed content declaration vocabulary.
@@ -121,6 +135,12 @@ pub struct Block {
     pub shapes: Option<BlockShapes>,
     /// collision shapes.
     pub collision_shapes: Option<BlockShapes>,
+    /// Outline overrides for actual entity queries; omitted kinds use the default.
+    pub outline_context_shapes: BTreeMap<ShapeEntityKind, BlockShapes>,
+    /// Collision overrides for actual entity queries; omitted kinds use the default.
+    pub collision_context_shapes: BTreeMap<ShapeEntityKind, BlockShapes>,
+    /// Ray-face override, without replacing the outline hit point or creating a hit.
+    pub interaction_shapes: Option<BlockShapes>,
     /// State properties of its own, which its template does not have.
     pub state_properties: BTreeMap<String, BlockStateProperty>,
     /// State properties overlaid on the template default.

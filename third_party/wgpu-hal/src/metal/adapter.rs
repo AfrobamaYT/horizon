@@ -695,7 +695,12 @@ impl super::CapabilitiesQuery {
         let argument_buffers = available!(macos = 10.13, ios = 11.0, tvos = 11.0, visionos = 1.0)
             .then(|| device.argumentBuffersSupport());
 
-        let is_virtual = device.name().to_string().to_lowercase().contains("virtual");
+        let device_name = device.name().to_string();
+        let is_virtual = device_name.to_lowercase().contains("virtual");
+        // Intel Macs without Metal 3 use older drivers even when OCLP runs a newer macOS.
+        // Their Metal compiler rejects newer MSL and their indirect terrain draws misplace
+        // sections. Keep the compute/flat-draw path, but use its conservative variants.
+        let legacy_intel = is_legacy_intel(&device_name, metal3);
 
         let mesh_shaders = family_check
                 && (device.supportsFamily(MTLGPUFamily::Metal3)
@@ -729,9 +734,11 @@ impl super::CapabilitiesQuery {
         } else {
             MTLLanguageVersion::Version1_0
         };
+        let msl_version = cap_msl_version(msl_version, legacy_intel);
 
         Self {
             msl_version,
+            legacy_intel,
             // macOS 10.11 doesn't support read-write resources
             fragment_rw_storage: available!(macos = 10.12, ios = 8.0, tvos = 8.0, visionos = 1.0),
             read_write_texture_tier: rw_texture_tier,
@@ -746,7 +753,8 @@ impl super::CapabilitiesQuery {
                 MUTABLE_COMPARISON_SAMPLER_SUPPORT,
             ),
             sampler_clamp_to_border: Self::supports_any(device, SAMPLER_CLAMP_TO_BORDER_SUPPORT),
-            indirect_draw_dispatch: Self::supports_any(device, INDIRECT_DRAW_DISPATCH_SUPPORT),
+            indirect_draw_dispatch: !legacy_intel
+                && Self::supports_any(device, INDIRECT_DRAW_DISPATCH_SUPPORT),
             base_vertex_first_instance_drawing: Self::supports_any(
                 device,
                 BASE_VERTEX_FIRST_INSTANCE_SUPPORT,
@@ -1557,6 +1565,7 @@ impl super::CapabilitiesQuery {
     pub fn private_capabilities(&self) -> super::PrivateCapabilities {
         super::PrivateCapabilities {
             msl_version: self.msl_version,
+            legacy_intel: self.legacy_intel,
             low_power: self.low_power,
             headless: self.headless,
             has_unified_memory: self.has_unified_memory,
@@ -1593,6 +1602,46 @@ impl super::CapabilitiesQuery {
     }
 }
 
+fn is_legacy_intel(name: &str, supports_metal3: bool) -> bool {
+    name.starts_with("Intel") && !supports_metal3
+}
+
+fn cap_msl_version(version: MTLLanguageVersion, legacy_intel: bool) -> MTLLanguageVersion {
+    if legacy_intel && version > MTLLanguageVersion::Version2_0 {
+        MTLLanguageVersion::Version2_0
+    } else {
+        version
+    }
+}
+
+#[cfg(test)]
+mod compatibility_tests {
+    use super::{MTLLanguageVersion, cap_msl_version, is_legacy_intel};
+
+    #[test]
+    fn only_intel_without_metal3_uses_legacy_compatibility() {
+        assert!(is_legacy_intel("Intel Iris Pro", false));
+        assert!(!is_legacy_intel("Intel Iris Xe", true));
+        assert!(!is_legacy_intel("Apple M2", false));
+    }
+
+    #[test]
+    fn legacy_intel_caps_msl_at_20_without_raising_older_versions() {
+        assert_eq!(
+            cap_msl_version(MTLLanguageVersion::Version3_2, true),
+            MTLLanguageVersion::Version2_0
+        );
+        assert_eq!(
+            cap_msl_version(MTLLanguageVersion::Version1_2, true),
+            MTLLanguageVersion::Version1_2
+        );
+        assert_eq!(
+            cap_msl_version(MTLLanguageVersion::Version3_2, false),
+            MTLLanguageVersion::Version3_2
+        );
+    }
+}
+
 impl super::PrivateCapabilities {
     pub fn device_type(&self) -> wgt::DeviceType {
         if self.has_unified_memory.unwrap_or(self.low_power) {
@@ -1605,8 +1654,8 @@ impl super::PrivateCapabilities {
 
 impl super::PrivateTextureFormatCapabilities {
     pub fn map_format(&self, format: wgt::TextureFormat) -> MTLPixelFormat {
-        use wgt::TextureFormat as Tf;
         use MTLPixelFormat as MTL;
+        use wgt::TextureFormat as Tf;
         match format {
             Tf::R8Unorm => MTL::R8Unorm,
             Tf::R8Snorm => MTL::R8Snorm,
@@ -1756,8 +1805,8 @@ impl super::PrivateTextureFormatCapabilities {
         aspects: crate::FormatAspects,
     ) -> MTLPixelFormat {
         use crate::FormatAspects as Fa;
-        use wgt::TextureFormat as Tf;
         use MTLPixelFormat as MTL;
+        use wgt::TextureFormat as Tf;
         match (format, aspects) {
             // map combined depth-stencil format to their stencil-only format
             // see https://developer.apple.com/library/archive/documentation/Miscellaneous/Conceptual/MetalProgrammingGuide/WhatsNewiniOS10tvOS10andOSX1012/WhatsNewiniOS10tvOS10andOSX1012.html#//apple_ref/doc/uid/TP40014221-CH14-DontLinkElementID_77
