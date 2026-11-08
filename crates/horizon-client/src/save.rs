@@ -949,7 +949,7 @@ fn decode_mod_block_entity(id: String, tag: &Tag) -> Option<crate::containers::M
     ))
 }
 /// Decode an entity at a known block, refusing undeclared IDs and invalid native membership.
-/// Vanilla decoding remains unchanged; only declared native types override templates.
+/// Canonical membership wins; blocks absent from the table use vanilla membership.
 pub fn decode_block_entity_for_block(
     tag: &Tag,
     block: &str,
@@ -959,11 +959,8 @@ pub fn decode_block_entity_for_block(
         crate::containers::BlockEntity::Mod(m) => {
             crate::block_entity_types::valid(block, m.id()) == Some(true)
         }
-        _ => {
-            crate::block_entity_types::valid(block, decoded.1.id()) == Some(true)
-                || (crate::block_entity_types::type_for(block).is_none()
-                    && (block.starts_with("minecraft:") || decoded.1.fits(block)))
-        }
+        _ => crate::block_entity_types::valid(block, decoded.1.id())
+            .unwrap_or_else(|| decoded.1.fits(block)),
     };
     valid.then_some(decoded)
 }
@@ -7153,36 +7150,65 @@ mod tests {
         // The production registry is immutable. Exercise its real readers in a fresh process.
         const CHILD: &str = "HORIZON_TEST_NATIVE_SAVED_MEMBERSHIP";
         if std::env::var_os(CHILD).is_none() {
-            assert!(
+            for mode in ["accepted", "revoked"] {
+                assert!(
                 std::process::Command::new(std::env::current_exe().unwrap())
                     .args([
                         "--exact",
                         "save::tests::native_saved_ids_must_match_the_declared_block_membership",
                         "--nocapture"
                     ])
-                    .env(CHILD, "1")
+                    .env(CHILD, mode)
                     .status()
                     .unwrap()
                     .success()
             );
+            }
             return;
         }
         use crate::block_entity_types::{self, BlockEntityTypes};
-        block_entity_types::install(BlockEntityTypes::new(
+        let mut types = BlockEntityTypes::new(
             [
                 ("test:press".into(), "test:machine".into()),
                 ("test:mill".into(), "test:machine".into()),
                 ("test:board".into(), "test:other".into()),
             ]
             .into(),
-            vec!["test:machine".into(), "test:other".into()],
-        ))
-        .unwrap();
+            vec![
+                "test:machine".into(),
+                "test:other".into(),
+                "minecraft:chest".into(),
+            ],
+        );
+        types.template(
+            "minecraft:trapped_chest".into(),
+            "minecraft:trapped_chest".into(),
+            "minecraft:trapped_chest".into(),
+        );
+        let accepted = std::env::var(CHILD).unwrap() == "accepted";
+        if accepted {
+            types
+                .add_valid("minecraft:trapped_chest", "minecraft:chest")
+                .unwrap();
+        }
+        block_entity_types::install(types).unwrap();
         let tag = |id: &str| {
             horizon_core::nbt::parse_snbt(&format!(r#"{{id:"{id}",x:1,y:64,z:2,energy:900L}}"#,))
                 .unwrap()
                 .0
         };
+        assert_eq!(
+            decode_block_entity_for_block(&tag("minecraft:chest"), "minecraft:trapped_chest")
+                .is_some(),
+            accepted
+        );
+        assert!(
+            decode_block_entity_for_block(&tag("minecraft:banner"), "minecraft:stone").is_none()
+        );
+        assert!(
+            decode_block_entity_for_block(&tag("minecraft:banner"), "minecraft:trapped_chest")
+                .is_none()
+        );
         for block in ["test:press", "test:mill"] {
             let (_, entity) = decode_block_entity_for_block(&tag("test:machine"), block).unwrap();
             assert!(entity.fits(block));
