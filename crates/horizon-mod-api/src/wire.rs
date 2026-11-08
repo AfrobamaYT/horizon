@@ -22,6 +22,8 @@ pub const INIT: u32 = 0xFFFF_FF00;
 pub const RELEASE: u32 = 0xFFFF_FF01;
 /// The game's import freeing an object the mod held: its input is the id.
 pub const HOST_RELEASE: u32 = 0xFFFF_FF02;
+/// The game's import taking a message from the mod (a panic's text): its input is a string.
+pub const HOST_LOG: u32 = 0xFFFF_FF03;
 
 /// The layout of every value and call that crosses, a hash the generator writes: a mod built
 /// for another one is refused when it loads.
