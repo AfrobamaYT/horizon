@@ -48,6 +48,10 @@ impl Window {
     pub fn builder(self) -> Builder {
         Builder::limited(self)
     }
+    /// Finish a bounded builder into owned rows without copying.
+    pub fn finish(self, builder: Builder) -> Rows {
+        builder.finish().into_rows()
+    }
     /// Source-local node; the source schema owns checking that it exists.
     pub fn node(self) -> u32 {
         self.node

@@ -1206,7 +1206,7 @@ fn ordinary_row_pages_import_checks_its_native_root_and_returns_owned_rows() {
     fn read(root: &u32, window: Window) -> Result<Vec<mod_api::Row>, mod_api::RowError> {
         let mut rows = window.builder();
         rows.value(None, 0, const { key("u32") }, root)?;
-        Ok(rows.finish().into_rows())
+        Ok(window.finish(rows))
     }
     let module = row_window_guest();
     let root = Box::new(42u32);
@@ -1266,7 +1266,7 @@ fn row_pages_refuses_an_encoded_temporary_dropped_before_the_first_window_fetch(
                     PageSource::new(&value, |root, window: Window| {
                         let mut rows = window.builder();
                         rows.value(None, 0, const { key("u32") }, root)?;
-                        Ok(rows.finish().into_rows())
+                        Ok(window.finish(rows))
                     })
                 }
                 .unwrap();

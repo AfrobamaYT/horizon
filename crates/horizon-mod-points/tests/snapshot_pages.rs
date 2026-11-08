@@ -49,7 +49,7 @@ fn read(root: &Root, window: Window) -> Result<Vec<mod_api::Row>, RowError> {
             )?;
         }
     }
-    Ok(out.finish().into_rows())
+    Ok(window.finish(out))
 }
 fn request() -> RowWindow {
     RowWindow {
@@ -201,7 +201,7 @@ fn window_bounds_are_checked_before_reading_and_overruns_expose_no_partial_rows(
         let parent = out.node(None, 0, key("R"))?;
         let child = out.node(Some(parent), 0, key("R"))?;
         out.node(Some(child), 0, key("R"))?;
-        Ok(out.finish().into_rows())
+        Ok(window.finish(out))
     }
     with_root(&(), |unit| {
         let deep: Arc<dyn RowPages> = unsafe { PageSource::new(&unit, spill) }.unwrap();
@@ -227,7 +227,7 @@ fn window_bounds_are_checked_before_reading_and_overruns_expose_no_partial_rows(
             PageSource::new(&text, |root, window| {
                 let mut out = window.builder();
                 out.value(None, 0, key("String"), root)?;
-                Ok(out.finish().into_rows())
+                Ok(window.finish(out))
             })
         }
         .unwrap();
