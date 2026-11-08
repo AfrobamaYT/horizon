@@ -5,8 +5,7 @@ pub trait Hooks {
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "ClientPlayerNetworkEvent.LoggingOut",
-        fabric = "ClientPlayConnectionEvents.DISCONNECT"
+        neoforge = "ClientPlayerNetworkEvent.LoggingOut"
     )]
     fn client_disconnecting();
     /// The normal menu blur request, before finite/range validation. None disables it.

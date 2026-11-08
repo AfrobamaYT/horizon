@@ -13,8 +13,7 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         host = "read",
-        neoforge = "IBlockExtension.getCloneItemStack",
-        fabric = "PlayerPickItemEvents.BLOCK"
+        neoforge = "IBlockExtension.getCloneItemStack"
     )]
     fn clone_item_stack();
 }
