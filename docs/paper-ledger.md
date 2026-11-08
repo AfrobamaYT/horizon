@@ -798,3 +798,34 @@ Scope: the twenty misc-chunk hooks below, from `chunk_unwatch` to `entity_change
 [paper-PlayerPickBlockEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/PlayerPickBlockEvent.html
 [paper-PlayerCustomClickEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/PlayerCustomClickEvent.html
 [paper-EntityTeleportEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/EntityTeleportEvent.html
+
+## Event counterparts: living entities and mob lifecycle (#1015)
+
+Paper API 26.3 (paper-api `26.3.build.244-stable`), public Javadoc only; Horizon hooks are cited by function name.
+Scope: the 20 hooks below — living motion and projectile values, shield/totem/visibility, menus, minecarts, mob despawn/effects/spawning/splitting and mod configs.
+
+| Horizon hook | Paper event / status | Evidence and porting boundary |
+|---|---|---|
+| `living_get_projectile` | **Partial:** [`PlayerLaunchProjectileEvent`][paper-PlayerLaunchProjectileEvent] | The event fires as a player shoots and exposes the projectile and item, but its Javadoc excludes arrows (bow and crossbow shots, the hook's main case), it fires at launch after the ammunition was chosen, it cannot replace the ammunition stack, and mobs are not covered. No key. |
+| `living_flying_speed` | **Gap:** none | No Paper/Bukkit event is fired before a living entity's airborne acceleration (`getFlyingSpeed`) is used; there is no per-tick value hook, and this one is both-side and replayed. No key. |
+| `living_jump_power` | **Partial:** [`HorseJumpEvent`][paper-HorseJumpEvent] | The jump moment and a settable power match, but only for an `AbstractHorse`; [`EntityJumpEvent`][paper-EntityJumpEvent] and [`PlayerJumpEvent`][paper-PlayerJumpEvent] cover other jumpers without any power value, so player and mob jump power have no counterpart. No key. |
+| `living_speed` | **Gap:** none | No Paper event precedes a living entity's ground or fluid movement speed (`getSpeed`); attribute values are readable but there is no pre-use value hook, and this hook is per-tick on both sides. No key. |
+| `living_shield_block` | **Gap:** none (nearest [`PlayerShieldDisableEvent`][paper-PlayerShieldDisableEvent]) | The nearest event fires later, when an axe disables a player's shield and a cooldown starts; no Paper event resolves what a raised `blocks_attacks` item stops, so the blocked and shield-damage amounts and non-player blockers have no counterpart. No key. |
+| `living_use_totem` | **Gap:** none | No Paper event fires when a killing blow is about to be absorbed by a held `death_protection` item; the dossier's interaction events cover using blocks and entities, not death protection, and none carries the damage source or hand. No key. |
+| `living_visibility` | **Gap:** none | No Paper/Bukkit event is asked for a mob's visibility percentage while targeting, so neither the entity, the looking entity nor the scaled visibility can be observed. No key. |
+| `menu_extra_data` | **Gap:** none | No Paper event hands a block's opening player the extra screen bytes for its mod menu; the menu-open path gives no per-block data channel, and no dossier candidate carries menu, block, position and data together. No key. |
+| `minecart_pass` | **Gap:** none | No Paper event fires as a minecart passes through a block's column, and no dossier candidate carries the block state, position and entity together. No key. |
+| `mob_despawn` | **Gap:** none (nearest [`ItemDespawnEvent`][paper-ItemDespawnEvent]) | The only despawn event offered is for dropped items at their five-minute timer; no Paper event precedes a mob's `checkDespawn` decision, so the dimension, kind, position and despawn result have no counterpart. No key. |
+| `mob_effect_applicable` | **Partial:** [`EntityPotionEffectEvent`][paper-EntityPotionEffectEvent] | The event fires around a potion modification and its cancel can express the hook's `Deny`, but it is generic over added, changed, cleared and removed effects and cannot force an add that vanilla's tag check refuses (the hook's `Allow`). No key. |
+| `mob_effect_expired` | **Partial:** [`EntityPotionEffectEvent`][paper-EntityPotionEffectEvent] | Cancelling the event keeps the effect, matching the hook's cancel, and the entity and old effect (with its amplifier) are available; but the event is generic over every potion-effect modification and the dossier documents no field that isolates expiry, so the same moment is not guaranteed. No key. |
+| `mob_effect_remove` | **Partial:** [`EntityPotionEffectEvent`][paper-EntityPotionEffectEvent] | The event's cancel matches the hook's cancel and it exposes the entity and modified type/old effect, but it also fires for additions, changes and clears, and no dossier field restricts it to a deliberate removal of one effect. No key. |
+| `mob_spawn_placement_check` | **Gap:** none | No Paper event asks whether a mob may spawn at a position under its type's placement rules; the dossier's spawn events are world spawn-point, raid and player-spawn events, with no position, reason or result. No key. |
+| `mob_spawn_position_check` | **Gap:** none | No Paper event runs vanilla's `checkSpawnRules`/`checkSpawnObstruction` for a fresh mob, so neither the `Default`/`Succeed`/`Fail` answer nor skipping the checks and their random draws can be expressed. No key. |
+| `mob_split` | **Covered:** [`SlimeSplitEvent`][paper-SlimeSplitEvent] | Fired when an `AbstractCubeMob` splits on death: the parent (its size via `getSize()`), a settable child count and cancellation stopping the split match the hook's moment, server side, kind/size/count facts and cancel/out count, for slimes, magma cubes and sulfur cubes. Key added. |
+| `config_loading` | **Gap:** none | No Paper event is fired when a mod's own config file is read; the hook is a mod-loader notification carrying the config's owner, file and text. No key. |
+| `config_reloading` | **Gap:** none | No Paper event reports a mod config file changing on disk or carries its new text; the hook is Horizon's own poll of its config files. No key. |
+| `config_unloading` | **Gap:** none | No Paper event accompanies a server-scoped mod config being dropped as a server stops. No key. |
+| `register_configs` | **Gap:** none | No Paper event collects mod config declarations before a game or world starts; there is no mod-config registration phase, so the collected configs have no counterpart. No key. |
+
+[paper-HorseJumpEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/HorseJumpEvent.html
+[paper-SlimeSplitEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/SlimeSplitEvent.html
