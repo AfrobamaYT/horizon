@@ -598,3 +598,37 @@ Server side is assumed except for the two `both` tick hooks; a server-half count
 [paper-PlayerStatisticIncrementEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerStatisticIncrementEvent.html
 
 [paper-PlayerItemHeldEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerItemHeldEvent.html
+
+## Event counterparts: entity lifecycle and interaction (#1015)
+
+Paper API 26.3 (paper-api `26.3.build.244-stable`), public Javadoc only; Horizon hooks are cited by function name, never by line.
+Scope: the 20 entity hooks below. A key is added only where moment, side, information and result all agree; everything else is Partial or Gap.
+
+| Horizon hook | Paper event / status | Evidence and porting boundary |
+|---|---|---|
+| `entity_constructing` | **Gap:** none | No dossier candidate covers the moment before an entity is constructed, when its holder can still be given attachments; nothing on the server-only Paper side exposes the kind and holder at that point. No key. |
+| `entity_inside` | **Partial:** [`EntityInsideBlockEvent`][paper-EntityInsideBlockEvent] | Same server-side subject (an entity inside a reacting block), with the block and entity available; but the event is documented for entering the hitbox while the hook fires once per entity and block per move, it is cancellable where the hook is listen-only, and it lacks the `precise` flag. No key. |
+| `entity_interact_specific` | **Partial:** [`PlayerInteractEntityEvent`][paper-PlayerInteractEntityEvent] | Same server-side right-click-on-entity moment, cancellable and carrying the entity and hand; but it exposes no point clicked relative to the entity, so `location` and the specific-at-position distinction have no counterpart. No key. |
+| `entity_mob_griefing` | **Gap:** none | No dossier candidate answers the vanilla mob-griefing permission question for the different actions the hook gates; per-action events cannot replace the shared yes/no answer the hook returns. No key. |
+| `entity_place` | **Partial:** [`BlockPlaceEvent`][paper-BlockPlaceEvent] | Matches a server-side player placing a block before the write (block against, placed state, item, cancel); but it is player-only and single-block, while the hook also covers mob placers (enderman, snow golem) and `Multi` placements, which the event cannot express. No key. |
+| `entity_size` | **Gap:** none | No dossier candidate reports a recalculated size, and no Paper event exposes width, height and eye height as values a mod can edit. No key. |
+| `entity_struck_by_lightning` | **Partial:** [`LightningStrikeEvent`][paper-LightningStrikeEvent] | Same server-side pre-hit strike moment and cancellable, with the bolt; but the event names no struck entity, so a cancel would cancel the whole strike rather than spare one entity as the hook does. No key. |
+| `explosion_knockback` | **Gap:** none (nearest [`EntityExplodeEvent`][paper-EntityExplodeEvent]) | Paper's explosion events expose the block list and yield, not the per-entity knockback velocity applied after the blast; the `knockback_velocity` out value has no counterpart. No key. |
+| `explosion_start` | **Partial:** [`ExplosionPrimeEvent`][paper-ExplosionPrimeEvent] | Fires server-side before an entity's explosion and is cancellable, matching the pre-blast moment for TNT, creepers, fireballs, withers and crystals; but it is entity-only, so beds, respawn anchors and wind bursts have no counterpart, and it exposes radius/fire instead of the explosion's blocks. No key. |
+| `farmland_trample` | **Partial:** [`PlayerInteractEvent`][paper-PlayerInteractEvent] | `Action.PHYSICAL` is the documented trampling path, server-side and cancellable; but the event is generic across physical interactions and player-only, and it lacks the fall `distance`, while the hook fires for mobs and players on landing. No key. |
+| `finalize_spawn` | **Gap:** none (nearest [`RaidSpawnWaveEvent`][paper-RaidSpawnWaveEvent]) | The nearest listed candidate reports a raid wave's raiders and patrol leader; nothing exposes a mob at `FinalizeSpawn` time (kind, reason, position, difficulty, group) before it is created. No key. |
+| `fluid_flow` | **Gap:** none (nearest [`FluidLevelChangeEvent`][paper-FluidLevelChangeEvent]) | That event reports a block's fluid level changing and lets you set the new fluid data; it exposes no flow vector for an entity to edit, which is what `FlowingFluid.getFlow` computes. No key. |
+| `fluid_place_block` | **Partial:** [`FluidLevelChangeEvent`][paper-FluidLevelChangeEvent] | Both fire server-side before a fluid-caused block write and are cancellable with a settable new `BlockData`; but the event is the generic fluid-level change, not limited by a documented field to a fluid placing a different state, and it exposes no source `liquid_pos`, so `new_state` only roughly maps. No key. |
+| `game_rule_changed` | **Partial:** [`WorldGameRuleChangeEvent`][paper-WorldGameRuleChangeEvent] | Same subject and side, exposing the rule, the new value and a command sender; but the event is per-world and cancellable with a settable value, so it runs before the change is applied, while the hook is a listen-only server-wide notification that the rule was set. No key. |
+| `game_shutting_down` | **Gap:** none | No dossier candidate covers the end of the process; the hook fires after the client or dedicated server has stopped, a lifecycle moment no listed event describes. No key. |
+| `get_enchantment_level` | **Gap:** none | No dossier candidate fires on an enchantment-level read; nothing exposes a mutable level map for gameplay effects while leaving the stack's own component untouched. No key. |
+| `grindstone_place` | **Partial:** [`PrepareGrindstoneEvent`][paper-PrepareGrindstoneEvent] | Fires server-side when the inputs change and the grindstone prepares a result; but it is non-cancellable and its listed API exposes only the inventory, so the hook's `output`, `xp` and `cancel` overrides cannot be expressed. No key. |
+| `grindstone_take` | **Gap:** none (nearest [`PrepareGrindstoneEvent`][paper-PrepareGrindstoneEvent]) | It fires when an item is put in, not when the result is taken; no listed event covers the take or exposes the experience and input-remainder values. No key. |
+| `ingredient_test` | **Gap:** none | No dossier candidate runs inside recipe matching for a custom ingredient's predicate; the hook answers per stack test, which no listed event exposes. No key. |
+| `is_pathfindable` | **Gap:** none | No dossier candidate answers whether a block state is pathfindable per `PathComputationType`; no listed event exposes that per-state boolean. No key. |
+
+[paper-EntityInsideBlockEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/entity/EntityInsideBlockEvent.html
+[paper-BlockPlaceEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/BlockPlaceEvent.html
+[paper-RaidSpawnWaveEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/raid/RaidSpawnWaveEvent.html
+[paper-WorldGameRuleChangeEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/world/WorldGameRuleChangeEvent.html
+[paper-PrepareGrindstoneEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/inventory/PrepareGrindstoneEvent.html
