@@ -329,12 +329,21 @@ impl Game<'_> {
                 (self.armor[1].as_ref(), "chest"),
                 (self.armor[0].as_ref(), "head"),
                 (self.offhand.as_ref(), "offhand"),
-            ].into_iter().filter_map(|(stack, slot)| {
+            ]
+            .into_iter()
+            .filter_map(|(stack, slot)| {
                 let e = horizon_client::item_sync::equippable(stack?, self.res.items())?;
-                if e.slot != slot { return None; }
+                if e.slot != slot {
+                    return None;
+                }
                 let overlay = e.camera_overlay?;
-                Some(overlay.strip_prefix("minecraft:").map_or_else(|| overlay.clone(), str::to_owned))
-            }).collect(),
+                Some(
+                    overlay
+                        .strip_prefix("minecraft:")
+                        .map_or_else(|| overlay.clone(), str::to_owned),
+                )
+            })
+            .collect(),
             ticks_frozen: p.ticks_frozen,
             percent_frozen: p.percent_frozen(),
             partial,

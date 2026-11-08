@@ -1521,14 +1521,27 @@ impl Game<'_> {
                                 self.gpu_utilization =
                                     f64::from(gpu) * 100.0 / f64::from(ms(cpu).max(0.001));
                             }
-                            if self.settings.horizon.gpu_culling == horizon_client::graphics::GpuCullingMode::Auto
+                            if self.settings.horizon.gpu_culling
+                                == horizon_client::graphics::GpuCullingMode::Auto
                                 && self.screen == Screen::Playing
                                 && !self.streaming.terrain_loading()
-                                && horizon_client::graphics::gpu_culling_offer().reason().is_none()
-                                && let Some(on) = self.gpu_culling_auto.observe(ms(cpu), r.gpu_times.last().copied(), ms(elapsed))
+                                && horizon_client::graphics::gpu_culling_offer()
+                                    .reason()
+                                    .is_none()
+                                && let Some(on) = self.gpu_culling_auto.observe(
+                                    ms(cpu),
+                                    r.gpu_times.last().copied(),
+                                    ms(elapsed),
+                                )
                             {
-                                log::info!("Horizon: GPU Culling Auto turns it {} ({})", if on { "on" } else { "off" }, self.gpu_culling_auto.state());
-                                if r.set_gpu_culling(on).is_err() { self.gpu_culling_auto.reset(); }
+                                log::info!(
+                                    "Horizon: GPU Culling Auto turns it {} ({})",
+                                    if on { "on" } else { "off" },
+                                    self.gpu_culling_auto.state()
+                                );
+                                if r.set_gpu_culling(on).is_err() {
+                                    self.gpu_culling_auto.reset();
+                                }
                             }
                             self.frame_stats.record_cpu(ms(cpu));
                             let render = r.last_encode;
