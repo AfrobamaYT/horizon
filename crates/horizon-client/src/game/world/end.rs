@@ -299,8 +299,20 @@ impl EyeOfEnder {
 impl Game<'_> {
     /// The environment attributes of the current dimension.
     pub(super) fn dim_environment(&self) -> &Environment {
+        // A client of a server draws a level of a mod or a pack with the type the server sent.
+        if let Some(own) = self
+            .remote
+            .as_ref()
+            .and_then(|r| r.level_environment.as_ref())
+        {
+            return own;
+        }
         match self.dim {
-            Dim::Overworld | Dim::Extra(_) => self.res.environment(),
+            Dim::Overworld => self.res.environment(),
+            Dim::Extra(_) => horizon_client::environment::Environment::for_level(
+                self.dim.id(),
+                self.res.environment(),
+            ),
             Dim::Nether => self.res.nether_environment(),
             Dim::End => self.res.end_environment(),
         }
