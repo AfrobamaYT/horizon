@@ -463,6 +463,7 @@ impl Game<'_> {
             modifiers,
             cooldown_events,
             player_sounds,
+            block_sounds,
             combat: host_combat,
             building_boxes,
         })
@@ -582,6 +583,7 @@ impl Game<'_> {
             modifiers,
             cooldown_events,
             player_sounds,
+            block_sounds,
         } = swap;
         // `ServerPlayer.permissions()` back to the host's after the turn.
         self.ui.registries.permission = permission;

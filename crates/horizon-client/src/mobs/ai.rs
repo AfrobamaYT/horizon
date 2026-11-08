@@ -1666,7 +1666,7 @@ fn ageable_step(
 /// `checkFallDistanceAccumulation` and the `ELYTRA_GLIDE` game event of
 /// every 10th tick are not ported here.
 fn update_fall_flying(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
-    use horizon_world::player_inventory::EquipmentSlot;
+    use horizon_core::equipment_slot::EquipmentSlot;
     if !m.extra.fall_flying {
         return;
     }
@@ -1699,8 +1699,8 @@ fn update_fall_flying(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     }
 }
 /// `EquipmentSlot`'s serialized name, which `equippable` names its slot by.
-fn glider_slot_name(slot: horizon_world::player_inventory::EquipmentSlot) -> &'static str {
-    use horizon_world::player_inventory::EquipmentSlot as S;
+fn glider_slot_name(slot: horizon_core::equipment_slot::EquipmentSlot) -> &'static str {
+    use horizon_core::equipment_slot::EquipmentSlot as S;
     match slot {
         S::MainHand => "mainhand",
         S::OffHand => "offhand",

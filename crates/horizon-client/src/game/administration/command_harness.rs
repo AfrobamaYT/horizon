@@ -697,9 +697,7 @@ impl Game<'_> {
                                     .map(|p| p.conn)
                             })
                             .ok_or("mob click: owner not connected")?;
-                        let mut host = g.lan.take().ok_or("mob click: no hub")?;
                         g.lan_guest_packet(
-                            &mut host,
                             conn,
                             horizon_protocol::packets::play::Serverbound::Interact(
                                 horizon_protocol::packets::play::Interact {
@@ -710,7 +708,6 @@ impl Game<'_> {
                                 },
                             ),
                         );
-                        g.lan = Some(host);
                         Ok(())
                     })?;
                 }

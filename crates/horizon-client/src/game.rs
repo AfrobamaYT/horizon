@@ -10011,7 +10011,7 @@ impl Game<'_> {
     pub(super) fn camera_orientation(&self) -> glam::Quat {
         if self.studio_freecam.active {
             return camera_rotation(
-                perspective::CameraType::FirstPerson,
+                horizon_client::camera::CameraType::FirstPerson,
                 self.studio_freecam.yaw,
                 self.studio_freecam.pitch,
             ) * glam::Quat::from_rotation_z(self.studio_freecam.roll.to_radians());

@@ -198,8 +198,11 @@ impl Game<'_> {
         let stack = super::functions::pack_stack(
             &self.world_root,
             &self.options.resources,
+            &self.pack.data_source,
+            &self.pack.data_changes,
             self.cmds.vanilla_disabled,
             &self.level.enabled_features,
+            &super::pack_finders::data_packs(&self.mods),
         );
         let mut defs = std::collections::HashMap::new();
         for pack in stack.builtin.iter().chain(stack.enabled_packs()) {

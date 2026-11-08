@@ -5944,7 +5944,7 @@ pub fn bucket_components(m: &Mob) -> crate::item_data::StackData {
     data.set_other("minecraft:bucket_entity_data", Some(bucket_data(m)));
     // SulfurCube.saveToBucketTag: the body block, when it has one.
     if m.species() == crate::mobs::Species::SulfurCube
-        && let Some(body) = &m.extra.body
+        && let Some(body) = m.extra.body_id()
     {
         data.set_other(
             "minecraft:sulfur_cube_content",

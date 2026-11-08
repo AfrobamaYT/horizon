@@ -2008,7 +2008,7 @@ pub enum MobEvent {
     /// item's maximum and Unbreaking.
     GliderWear {
         mob: u32,
-        slot: horizon_world::player_inventory::EquipmentSlot,
+        slot: horizon_core::equipment_slot::EquipmentSlot,
     },
     /// `OfferFlowerGoal.stop`: the item goes to the target's antenna (saddle)
     /// slot if it is empty, as a guaranteed drop.

@@ -72,6 +72,7 @@ const SPEAR_SOURCE: HurtSource<'static> = HurtSource {
     damage_type: "minecraft:spear",
     causing: 0,
     direct: 0,
+    position: None,
 };
 
 impl Game<'_> {
@@ -228,7 +229,6 @@ impl Game<'_> {
         let attack = self.attack_of(attacker_id);
         let land = |g: &mut Self| {
             g.with_attack(attack.clone(), |g| {
-                let _attacker = g.knockback_scope(attacker_id);
                 g.combat.player_attacker = Some((s.from, s.disable_blocking));
                 g.note_player_attacker(
                     "minecraft:spear",

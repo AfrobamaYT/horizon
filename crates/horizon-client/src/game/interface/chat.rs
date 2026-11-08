@@ -176,7 +176,7 @@ impl Game<'_> {
             &tree,
             horizon_client::command::MOD_COMMAND,
         );
-        with_native_commands(&tree_with_mods, &["studio"])
+        with_studio_commands(&with_native_commands(&tree_with_mods, &["studio"]))
     }
 }
 

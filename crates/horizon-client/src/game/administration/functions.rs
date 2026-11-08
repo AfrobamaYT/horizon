@@ -278,8 +278,10 @@ impl Game<'_> {
                 entry.ids.clone_from(ids);
             }
         }
-        let dispatcher =
-            horizon_client::command::vanilla::game_dispatcher_with_features(enabled_features);
+        let dispatcher = horizon_client::command::vanilla::session_dispatcher(
+            &self.level.rule_registry,
+            enabled_features,
+        );
         store.functions.retain(|id, function| {
             for line in &function.lines {
                 if let datapack::FunctionLine::Command(line) = line

@@ -1017,9 +1017,9 @@ pub fn item_stack(m: &Mob, slot: usize) -> Option<crate::items::ItemStack> {
 /// body and saddle from their own fields.
 pub fn equipment_stack(
     m: &Mob,
-    slot: horizon_world::player_inventory::EquipmentSlot,
+    slot: horizon_core::equipment_slot::EquipmentSlot,
 ) -> Option<crate::items::ItemStack> {
-    use horizon_world::player_inventory::EquipmentSlot as S;
+    use horizon_core::equipment_slot::EquipmentSlot as S;
     match slot {
         S::Body | S::Saddle => m.item_by_slot(slot),
         _ => item_stack(m, slot as usize),

@@ -736,7 +736,6 @@ impl Hub {
             sync,
             rule_registry: crate::gamerules::rule_registry(),
             ticks: 0,
-            seat_order: 0,
             sound_seeds: Mutex::new(crate::random_source::create()),
             sound_order: Mutex::default(),
             immediate_respawn: false,

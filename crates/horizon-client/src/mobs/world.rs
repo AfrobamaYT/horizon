@@ -79,7 +79,7 @@ impl MobWorld<'_> {
             .iter()
             .map(|b| std::array::from_fn(|i| f64::from(at[i % 3]) + b[i]))
             .collect();
-        shape_top(&boxes, f64::from(at[1])).map(|height| pos_to_bed(head, height))
+        shape_top(boxes, f64::from(at[1])).map(|height| pos_to_bed(head, height))
     }
     /// The biome's base temperature at a position.
     pub fn temperature(&self, x: i32, y: i32, z: i32) -> f32 {

@@ -325,7 +325,11 @@ impl Game<'_> {
                 .unwrap_or(false);
         }
         let vehicle_id = match vehicle {
-            Target::Mob(id) | Target::Boat(id) | Target::Cart(id) => id,
+            Target::Mob(id)
+            | Target::Boat(id)
+            | Target::Cart(id)
+            | Target::Stand(id)
+            | Target::Other(id) => id,
             _ => return false,
         };
         if !matches!(rider, Target::Player | Target::Mob(_))
@@ -406,6 +410,11 @@ impl Game<'_> {
                     return false;
                 }
             }
+            Target::Stand(id) | Target::Other(id) => {
+                if self.seat(id).is_none() {
+                    return false;
+                }
+            }
             _ => return false,
         }
         let allowed = match rider {
@@ -443,6 +452,13 @@ impl Game<'_> {
                         self.mount.jump_ticks = 0;
                         self.mount.jump_scale = 0.0;
                     }
+                    Target::Stand(id) | Target::Other(id) => {
+                        let Some(seat) = self.seat(id) else {
+                            return false;
+                        };
+                        self.board_seat(id, seat);
+                        return self.native_vehicle_id(rider) == Some(vehicle_id);
+                    }
                     _ => {}
                 }
                 self.riding = Some(vehicle_id);
@@ -460,7 +476,7 @@ impl Game<'_> {
 
     /// Attempts to board a vehicle through the shared server mount path.
     ///
-    /// Players and mobs can ride a mob, boat or minecart. Returns false for
+    /// Players and mobs can ride a mob, boat, minecart or generic seat entity. Returns false for
     /// unsupported entity pairs, stale or held-out handles, a full stored
     /// vehicle, a cycle, or a canceled mount or dismount. Mob vehicle capacity
     /// follows its species; minecarts store one passenger and boats store one

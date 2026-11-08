@@ -640,9 +640,9 @@ impl Game<'_> {
     /// the rest goes on the stack where it is worn. A glider is only picked
     /// while its next point of wear will not break it (`canGlideUsing`), so
     /// this wear never breaks one.
-    fn wear_mob_glider(&mut self, id: u32, slot: horizon_world::player_inventory::EquipmentSlot) {
+    fn wear_mob_glider(&mut self, id: u32, slot: horizon_core::equipment_slot::EquipmentSlot) {
         use horizon_client::mobs::finalize;
-        use horizon_world::player_inventory::EquipmentSlot as S;
+        use horizon_core::equipment_slot::EquipmentSlot as S;
         let Some(stack) = self
             .mobs
             .iter()
@@ -663,7 +663,7 @@ impl Game<'_> {
         };
         let damage = stack.damage + loss;
         match slot {
-            S::Body => m.extra.body_damage = damage as i32,
+            S::Body => m.extra.set_body_damage(damage as i32),
             S::Saddle => m.set_saddle(Some(ItemStack { damage, ..stack })),
             _ => finalize::set_slot_damage(m, slot as usize, damage),
         }
@@ -2200,7 +2200,7 @@ impl Game<'_> {
                         kind: &kind,
                         slot: EquipmentSlot::ALL[choice.slot],
                         source: hurt,
-                        recently_hit: by_player,
+                        recently_hit: player_killed,
                         stack: &stack,
                         original_chance: choice.original,
                         preserved: choice.preserved,
@@ -2287,7 +2287,7 @@ impl Game<'_> {
             kind: &kind,
             player: None,
             source: hurt,
-            recently_hit: by_player,
+            recently_hit: player_killed,
         };
         self.drop_death_items(&dying, stacks, 10, |_| dispenser::new_item_motion());
         if let Some(reward) = experience {

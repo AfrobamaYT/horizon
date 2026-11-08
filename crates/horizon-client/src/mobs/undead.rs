@@ -330,7 +330,7 @@ impl Goal for DrownedTridentAttack {
         // trident test is re-checked, and the goal only falls back to a target
         // it is still walking towards once the trident is gone.
         self.0.can_use(m, cx)
-            && (m.extra.main_hand.as_deref() == Some("minecraft:trident") || !m.ai.nav.is_done())
+            && (m.extra.main_hand_id() == Some("minecraft:trident") || !m.ai.nav.is_done())
     }
     fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
         self.0.start(m, cx);

@@ -870,7 +870,7 @@ pub fn item(v: &Value, it: &ItemView, w: &dyn World) -> bool {
         else {
             return false;
         };
-        if !horizon_core::nbt_path::compare_nbt(&pattern, Some(actual)) {
+        if !crate::nbt_path::compare_nbt(&pattern, Some(actual)) {
             return false;
         }
     }
@@ -919,7 +919,7 @@ pub fn block(v: &Value, pos: [i32; 3], w: &dyn World) -> bool {
         let Ok((pattern, _)) = horizon_core::nbt::parse_snbt(nbt) else {
             return false;
         };
-        if !horizon_core::nbt_path::compare_nbt(&pattern, w.block_entity_nbt(pos).as_ref()) {
+        if !crate::nbt_path::compare_nbt(&pattern, w.block_entity_nbt(pos).as_ref()) {
             return false;
         }
     }
@@ -1075,7 +1075,7 @@ pub fn entity(v: &Value, e: &EntityView, w: &dyn World, origin: [f64; 3]) -> boo
             // pattern (`NbtUtils.compareNbt`); no compound known fails.
             "minecraft:nbt" => p.as_str().is_some_and(|s| {
                 horizon_core::nbt::parse_snbt(s).is_ok_and(|(pattern, _)| {
-                    horizon_core::nbt_path::compare_nbt(&pattern, e.nbt.as_ref())
+                    crate::nbt_path::compare_nbt(&pattern, e.nbt.as_ref())
                 })
             }),
             "minecraft:type_specific/player" => {

@@ -161,7 +161,7 @@ fn a_grounded_riding_or_levitating_mob_stops_gliding() {
 #[test]
 #[ignore = "needs prepared resources in .local/horizon-client"]
 fn a_glider_wears_on_the_twentieth_and_fortieth_glide_ticks() {
-    use horizon_world::player_inventory::EquipmentSlot;
+    use horizon_core::equipment_slot::EquipmentSlot;
     let ran = crate::mobs::world::with_built_test_world(
         &[],
         |_, _| {},
@@ -199,7 +199,7 @@ fn a_glider_wears_on_the_twentieth_and_fortieth_glide_ticks() {
 #[test]
 #[ignore = "needs prepared resources in .local/horizon-client"]
 fn the_wear_draws_once_from_the_mobs_own_random() {
-    use horizon_world::player_inventory::EquipmentSlot;
+    use horizon_core::equipment_slot::EquipmentSlot;
     let ran = crate::mobs::world::with_built_test_world(
         &[],
         |_, _| {},

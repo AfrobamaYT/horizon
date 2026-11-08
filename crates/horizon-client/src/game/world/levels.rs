@@ -643,7 +643,7 @@ impl Game<'_> {
         if let Some(&first) = order.first()
             && self.dim != first
         {
-            let _ = self.enter_level(None, first);
+            let _ = self.enter_level(first);
         }
         self.level_pass = Pass::default();
         if result.is_err() {

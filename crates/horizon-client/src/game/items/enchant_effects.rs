@@ -51,12 +51,17 @@ impl PlayerSlot {
             Self::Armor(i) => ["head", "chest", "legs", "feet"][i],
         }
     }
-    fn equipment_slot(self) -> horizon_world::player_inventory::EquipmentSlot {
-        use horizon_world::player_inventory::EquipmentSlot;
+    fn equipment_slot(self) -> mod_api::EquipmentSlot {
+        use mod_api::EquipmentSlot;
         match self {
             Self::Main => EquipmentSlot::MainHand,
             Self::Off => EquipmentSlot::OffHand,
-            Self::Armor(i) => super::armor_slot(i),
+            Self::Armor(i) => [
+                EquipmentSlot::Head,
+                EquipmentSlot::Chest,
+                EquipmentSlot::Legs,
+                EquipmentSlot::Feet,
+            ][i],
         }
     }
 }
@@ -528,7 +533,7 @@ impl Game<'_> {
                 if alive && !g.mobs[index].alive() {
                     g.native_kill_event(index);
                 }
-                g.last_hurt_by_player.insert(attacker, g.lan_acting);
+                g.remember_mob_player_credit(attacker);
             }
         });
     }
@@ -633,7 +638,7 @@ impl Game<'_> {
     /// an item that takes no wear or a creative player, Unbreaking's share
     /// from the level's random, and a piece worn out leaves the slot.
     fn wear_player_piece(&mut self, slot: PlayerSlot, amount: u32) {
-        self.damage_player_equipment(slot.equipment_slot(), amount);
+        self.damage_player_equipment(slot.equipment_slot(), amount.min(i32::MAX as u32) as i32);
     }
     /// `EnchantmentHelper.doPostAttackEffectsWithItemSource`'s `VICTIM` loop
     /// after the player's hit hurt the mob at `victim` (`direct` is the hit's

@@ -117,7 +117,11 @@ impl Game<'_> {
             _ => None,
         };
         let loot = live_target.as_ref().and_then(|_| {
-            horizon_client::structure_blocks::loot_data(&self.options.resources, &self.pack_files())
+            horizon_client::structure_blocks::loot_data(
+                &self.options.resources,
+                &self.pack_files(),
+                self.res.item_defaults(),
+            )
         });
         let matcher = |predicate: &serde_json::Value, entity: &horizon_world::loot::LootEntity| {
             loot.as_ref()
