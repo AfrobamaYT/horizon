@@ -6158,6 +6158,69 @@ mod tests {
         assert!(!d.reaches_base_check(0, 1.0, true, false));
     }
 
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn carry_dragon_dispatches_only_after_phase_and_source_guards() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        struct Probe(Arc<AtomicUsize>);
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for Probe {
+            fn entity_invulnerability_check(
+                &self,
+                _: &mut dyn mod_api::LevelRandomHost,
+                _: &mut mod_api::EntityInvulnerabilityCheckEvent<'_>,
+            ) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+        let heard = Arc::new(AtomicUsize::new(0));
+        let mods = vec![mod_api::ModEntry::new(
+            "probe",
+            Box::new(Probe(heard.clone())),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.dragon = Some(dragon(Phase::Scanning { time: 0 }));
+                let arrow = ProjectileKind::Trident;
+                let hit = |game: &mut Game<'_>, counts, direct| {
+                    game.hurt_dragon_part_at(
+                        0,
+                        2.0,
+                        counts,
+                        None,
+                        DamageKind::Generic,
+                        DragonHitOrigin {
+                            direct,
+                            entity_id: None,
+                            from: None,
+                            invulnerability_checked: false,
+                        },
+                    )
+                };
+                assert_eq!(hit(game, true, Some(&arrow)), Hurt::Shrugged);
+                assert_eq!(heard.load(Ordering::SeqCst), 0);
+                game.dragon = Some(dragon(flying()));
+                let id = game.dragon.as_ref().unwrap().id;
+                assert!(game.command_damage_dragon(
+                    id,
+                    2.0,
+                    "minecraft:generic",
+                    DamageKind::Generic,
+                    (None, None, None)
+                ));
+                assert_eq!(heard.load(Ordering::SeqCst), 0);
+                assert!(matches!(hit(game, false, None), Hurt::Landed { .. }));
+                assert_eq!(heard.load(Ordering::SeqCst), 0);
+                hit(game, true, None);
+                assert_eq!(heard.load(Ordering::SeqCst), 1);
+            });
+        });
+    }
+
     fn dragon_as(entity: u32) -> Dragon {
         let mut d = dragon(flying());
         d.id = entity;
