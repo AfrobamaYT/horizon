@@ -338,7 +338,7 @@ mod tests {
             entry(
                 "horizon_client::ctl::Ctl",
                 "trait",
-                "trait Ctl { fn exit(&self); fn flow(&self, flow: Flow); fn name(&self) -> &str; \
+                "trait Ctl { fn exit(&self); fn flow(&self, flow: Flow); fn bytes(&self) -> &[u8]; fn name(&self) -> &str; \
                  fn each<T>(&self, t: T); fn take(self); fn edit(&mut self, e: &mut u32); \
                  fn wait(&self, at: std::time::Instant) -> std::time::Duration; }",
             ),
@@ -355,10 +355,12 @@ mod tests {
         assert_eq!(gaps[0], None);
         assert_eq!(gaps[1], None);
         assert!(gaps[2].as_ref().unwrap().contains("result"));
-        assert!(gaps[3].as_ref().unwrap().contains("generic"));
-        assert!(gaps[4].as_ref().unwrap().contains("by value"));
-        assert!(gaps[5].as_ref().unwrap().contains("mutable reference"));
-        assert_eq!(gaps[6], None);
+        // A borrowed string result crosses as the owned string.
+        assert_eq!(gaps[3], None);
+        assert!(gaps[4].as_ref().unwrap().contains("generic"));
+        assert!(gaps[5].as_ref().unwrap().contains("by value"));
+        assert!(gaps[6].as_ref().unwrap().contains("mutable reference"));
+        assert_eq!(gaps[7], None);
         // The object's shape keeps the trait's identity, through every pointer.
         let object =
             |ty: &str| rule.shape("horizon_client::ctl", None, &syn::parse_str(ty).unwrap());
