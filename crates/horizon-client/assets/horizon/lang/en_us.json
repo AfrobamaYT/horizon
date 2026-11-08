@@ -7,6 +7,7 @@
   "horizon.modprofile.inHook": "Cannot stop profiling from inside a mod callback.",
   "horizon.modprofile.writeFailed": "Could not save the mod profile: %s",
   "horizon.fluid.unknown": "Unknown fluid",
+  "horizon.fluid.amount": "%s mB",
   "horizon.options.controller": "Controller",
   "horizon.options.three_d_skin_layers": "3D Skin Layers",
   "horizon.options.vibration": "Vibration",
