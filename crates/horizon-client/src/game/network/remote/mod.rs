@@ -8,6 +8,7 @@
 //! everything else.
 use super::remote_chunks::{ChunkDecoder, ChunkFormat, Next};
 use super::{Dim, Game, Mining, Screen, level_sounds::LevelSound};
+use crate::game::api_values::TryIntoApi;
 use horizon_client::actions::Action;
 use horizon_client::first_person::{Hand, SwingAnimation};
 use horizon_client::{
@@ -624,7 +625,8 @@ pub(super) struct Remote {
     /// (`CraftingMenu.slotChangedCraftingGrid`): the client never computes it.
     pub(super) craft_result: Option<ItemStack>,
     /// The open menu's title as the server named it, with its styles.
-    pub(super) menu_title: Option<horizon_client::text::Text>,
+    menu_title: Option<horizon_client::text::Text>,
+    menu_title_snapshot: Option<Arc<mod_api::Text>>,
     state_id: i32,
     use_target: Option<[i32; 3]>,
     /// A mod menu's extra data, kept for the `OpenScreen` of its window that
@@ -1199,6 +1201,7 @@ impl Game<'_> {
             ticked_before_player: std::collections::HashSet::new(),
             craft_result: None,
             menu_title: None,
+            menu_title_snapshot: None,
             state_id: 0,
             use_target: None,
             menu_extra: None,
@@ -1449,6 +1452,7 @@ impl Game<'_> {
             ticked_before_player: std::collections::HashSet::new(),
             craft_result: None,
             menu_title: None,
+            menu_title_snapshot: None,
             state_id: 0,
             use_target: None,
             menu_extra: None,
@@ -2557,6 +2561,29 @@ impl Game<'_> {
         }
     }
     fn set_registries(&mut self, registries: Arc<Dynamic>) {
+        let entries: Vec<(&str, serde_json::Value)> = registries
+            .registries
+            .get("minecraft:enchantment")
+            .into_iter()
+            .flatten()
+            .filter_map(|(name, data)| {
+                Some((
+                    name.as_str(),
+                    horizon_client::scoreboard::tag_to_json(data.as_ref()?),
+                ))
+            })
+            .collect();
+        let enchantments = match self
+            .stations()
+            .enchantments
+            .with_entries(entries.iter().map(|(n, v)| (*n, v)))
+        {
+            Ok(table) => table.map(Arc::new),
+            Err(error) => {
+                log::warn!("Horizon: refused enchantment registry: {error}");
+                return;
+            }
+        };
         // The server's biomes the game lacks (a world data pack's) join the
         // game's table, from the data it sent: colours, meshing and the
         // chunk format all go through that table. The window's own server
@@ -2583,23 +2610,6 @@ impl Game<'_> {
                     .collect()
             })
             .unwrap_or_default();
-        let entries: Vec<(&str, serde_json::Value)> = registries
-            .registries
-            .get("minecraft:enchantment")
-            .into_iter()
-            .flatten()
-            .filter_map(|(name, data)| {
-                Some((
-                    name.as_str(),
-                    horizon_client::scoreboard::tag_to_json(data.as_ref()?),
-                ))
-            })
-            .collect();
-        let enchantments = self
-            .stations()
-            .enchantments
-            .with_entries(entries.iter().map(|(n, v)| (*n, v)))
-            .map(Arc::new);
         if let Some(r) = self.remote.as_mut() {
             r.enchantments = enchantments;
             let bits = ceil_log2(biomes.len());
@@ -6032,7 +6042,10 @@ impl Game<'_> {
 
     /// Resolve inline `object:player` profiles through the same skin cache as
     /// player heads on items. The next frame uses the uploaded atlas texture.
-    pub(super) fn resolve_inline_profiles(&mut self, profiles: &[serde_json::Value]) {
+    pub(super) fn resolve_inline_profiles(
+        &mut self,
+        profiles: &[std::sync::Arc<serde_json::Value>],
+    ) {
         use horizon_client::skins;
         for profile in profiles {
             let skin = skins::head_skin(
@@ -11111,7 +11124,7 @@ impl Game<'_> {
         self.recipe_ui.reset_screen();
         if let Some(r) = self.remote.as_mut() {
             r.menu.set(None);
-            r.menu_title = None;
+            r.set_menu_title(None);
             r.craft_result = None;
         }
         self.mount_menu_reset();
@@ -11142,7 +11155,7 @@ impl Game<'_> {
         if let Some(r) = self.remote.as_mut() {
             r.menu
                 .set(Some((container, "minecraft:merchant".to_owned())));
-            r.menu_title = Some(text);
+            r.set_menu_title(Some(text));
         }
         let session = horizon_client::merchant::Session::new(Vec::new(), true);
         self.open_remote_merchant(session, (!title.is_empty()).then_some(title));
@@ -11225,6 +11238,7 @@ impl Game<'_> {
             // LecternScreen: the book and page come in the menu's content and data.
             if let Some(r) = self.remote.as_mut() {
                 r.menu.set(Some((p.container, menu)));
+                r.set_menu_title(None);
             }
             self.remote_open_lectern(target.unwrap_or_default());
             return;
@@ -11311,7 +11325,7 @@ impl Game<'_> {
         let title = menu_title(&p.title);
         if let Some(r) = self.remote.as_mut() {
             r.menu.set(Some((p.container, menu.clone())));
-            r.menu_title = Some(title);
+            r.set_menu_title(Some(title));
         }
         self.craft_size = if menu == "minecraft:crafting" { 3 } else { 2 };
         self.container = None;
@@ -11336,7 +11350,7 @@ impl Game<'_> {
                 self.container = None;
                 if let Some(r) = self.remote.as_mut() {
                     r.menu.set(None);
-                    r.menu_title = None;
+                    r.set_menu_title(None);
                 }
                 self.send(S::ContainerClose(play::ContainerClose {
                     container: p.container,
@@ -11358,7 +11372,7 @@ impl Game<'_> {
         if let Some(r) = self.remote.as_mut() {
             r.menu
                 .set(Some((p.container, format!("{MOUNT_MENU}{columns}"))));
-            r.menu_title = None;
+            r.set_menu_title(None);
         }
     }
     /// The type of the menu a server opened (`MenuType`'s id).
@@ -12331,6 +12345,19 @@ impl ClientMenu {
 }
 
 impl Remote {
+    pub(super) fn set_menu_title(&mut self, title: Option<horizon_client::text::Text>) {
+        self.menu_title_snapshot = title.try_into_api().ok().flatten().map(Arc::new);
+        self.menu_title = title;
+    }
+
+    pub(super) fn menu_title_snapshot(&self) -> Option<&mod_api::Text> {
+        self.menu_title_snapshot.as_deref()
+    }
+
+    pub(super) fn shared_menu_title_snapshot(&self) -> Option<Arc<mod_api::Text>> {
+        self.menu_title_snapshot.clone()
+    }
+
     /// Resolve registry keys only when registries or the dimension change.
     fn resolve_clocks(&mut self) {
         self.overworld_clock = self
@@ -12625,6 +12652,137 @@ mod attachment_query_tests;
 mod tests {
     use super::super::api_values::TryIntoApi;
 
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn menu_title_snapshot_tracks_open_replacement_and_close() {
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            let (client, _server) = horizon_protocol::connection::Pipe::pair();
+            game.connect_local(client, "menu-title-test").unwrap();
+            let remote = game.remote.as_mut().unwrap();
+            for value in [Some("first"), Some("replacement"), None] {
+                remote.set_menu_title(value.map(horizon_client::text::Text::literal));
+                assert_eq!(
+                    remote.menu_title_snapshot(),
+                    remote.menu_title.try_into_api().unwrap().as_ref()
+                );
+            }
+        });
+    }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn menu_title_snapshot_follows_packet_and_close_paths() {
+        use horizon_core::nbt::Tag;
+        use horizon_protocol::packets::play::{self, Clientbound as C};
+        use std::sync::Arc;
+
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            let (client, _server) = horizon_protocol::connection::Pipe::pair();
+            game.connect_local(client, "menu-title-paths").unwrap();
+            let menu_id = |game: &super::Game<'_>, name: &str| {
+                game.remote
+                    .as_ref()
+                    .unwrap()
+                    .builtin
+                    .get("minecraft:menu")
+                    .unwrap()
+                    .id(name)
+                    .unwrap()
+            };
+            let chest = menu_id(game, "minecraft:generic_9x3");
+            let lectern = menu_id(game, "minecraft:lectern");
+            let open = |game: &mut super::Game<'_>, menu, title: &str| {
+                game.handle_packet(C::OpenScreen(play::OpenScreen {
+                    container: 7,
+                    menu,
+                    title: Tag::String(title.into()),
+                }))
+                .unwrap();
+            };
+            let snapshot = |game: &super::Game<'_>| {
+                let shared = game
+                    .remote
+                    .as_ref()
+                    .unwrap()
+                    .shared_menu_title_snapshot()
+                    .unwrap();
+                let observed = game.test_observed_title().unwrap();
+                assert!(Arc::ptr_eq(&observed, &shared));
+                shared
+            };
+            open(game, chest, "first");
+            let first = snapshot(game);
+            open(game, chest, "replacement");
+            let replacement = snapshot(game);
+            assert!(!Arc::ptr_eq(&first, &replacement));
+            assert_ne!(first, replacement);
+            game.handle_packet(C::ContainerClose(play::ContainerClose { container: 7 }))
+                .unwrap();
+            assert!(
+                game.remote
+                    .as_ref()
+                    .unwrap()
+                    .shared_menu_title_snapshot()
+                    .is_none()
+            );
+            assert!(game.test_observed_title().is_none());
+            open(game, chest, "again");
+            snapshot(game);
+            game.remote_close_container();
+            assert!(
+                game.remote
+                    .as_ref()
+                    .unwrap()
+                    .shared_menu_title_snapshot()
+                    .is_none()
+            );
+            open(game, chest, "before reject");
+            game.remote_reject_container(7);
+            assert!(
+                game.remote
+                    .as_ref()
+                    .unwrap()
+                    .shared_menu_title_snapshot()
+                    .is_none()
+            );
+            open(game, chest, "before dimension change");
+            spawn_menu_test(game);
+            assert!(
+                game.remote
+                    .as_ref()
+                    .unwrap()
+                    .shared_menu_title_snapshot()
+                    .is_none()
+            );
+            open(game, chest, "before lectern");
+            snapshot(game);
+            open(game, lectern, "lectern");
+            assert!(
+                game.remote
+                    .as_ref()
+                    .unwrap()
+                    .shared_menu_title_snapshot()
+                    .is_none()
+            );
+            game.remote_lectern_page(1);
+            assert!(
+                game.remote
+                    .as_ref()
+                    .unwrap()
+                    .shared_menu_title_snapshot()
+                    .is_none()
+            );
+            game.handle_packet(C::ContainerClose(play::ContainerClose { container: 7 }))
+                .unwrap();
+            assert!(
+                game.remote
+                    .as_ref()
+                    .unwrap()
+                    .shared_menu_title_snapshot()
+                    .is_none()
+            );
+            assert!(game.test_observed_title().is_none());
+        });
+    }
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn stopping_a_retained_client_dig_aborts_only_once() {
@@ -13077,7 +13235,6 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn mods_replace_and_cancel_received_chat() {
         use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
-        use horizon_client::text::Text;
         use horizon_core::nbt::Tag;
         use horizon_protocol::{
             connection::Pipe,
@@ -13092,12 +13249,14 @@ mod tests {
                 _: &mut dyn mod_api::ClientHost,
                 event: &mut mod_api::ClientChatReceivedEvent<'_>,
             ) -> mod_api::Flow {
-                let text = event.message.plain();
+                let mod_api::text::TextContent::Literal(text) = &event.message.content else {
+                    panic!("expected literal chat fixture");
+                };
                 if text.contains("drop") {
                     return mod_api::Flow::Cancel;
                 }
                 if event.system {
-                    *event.message = Text::literal(format!("[server] {text}"));
+                    *event.message = mod_api::Text::literal(format!("[server] {text}"));
                 }
                 mod_api::Flow::Continue
             }
@@ -14316,7 +14475,12 @@ mod tests {
             assert!(!level.is_loaded(game, [160, 64, 0]));
             game.handle_packet(C::BlockUpdate(play::BlockUpdate { pos: at, state: 1 }))
                 .unwrap();
-            assert_eq!(level.block(game, at).as_deref(), Some("minecraft:stone"));
+            assert_eq!(
+                level
+                    .block(game, at)
+                    .and_then(mod_api::__private::block_key_id),
+                Some("minecraft:stone")
+            );
             assert!(level.block_state(game, at).is_some());
             assert_eq!(level.block(game, [160, 64, 0]), None);
             assert_eq!(level.block_property(game, [160, 64, 0], "facing"), None);
