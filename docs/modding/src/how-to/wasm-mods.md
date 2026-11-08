@@ -100,26 +100,6 @@ native listeners. When injections are declared, the wasm build requires the pinn
 Listeners register in the host's ordinary point list, with the same priority, dependency order,
 owner enable flag and stop behavior as native listeners. Mixins remain native-only.
 
-Raw listeners read an owned per-call snapshot, never engine addresses or Rust memory layouts.
-Rows identify a node, its parent, a declaration-order field/index, a generated 64-bit type key
-and a plain Wire value. Every generated raw constructor accepts the same
-`fn(mod_points::snapshot::Snapshot<'_>, &mut mod_api::wire::RecordPatch)` listener signature.
-Reads cannot mutate the snapshot. The head outcome cell uses `Option<T>` for cancellation with a
-replacement result; the return outcome cell contains `T` directly, like the native return listener.
-Declared mutable raw-record fields, including
-by-value arguments which native raw records expose as `&mut`, use checked, atomic writeback.
-Rejected replies apply no argument or outcome writes. The initial generated readers cover free
-functions with primitive arguments and unit/primitive returns; engine receivers, nominal types,
-callbacks and borrowed returns need staged catalog readers and are refused until those exist.
-
-The shared `RowPages` resource interface returns owned windows, with a node, starting index,
-row count and child-depth bound. Native borrowed providers check their marked call's lifetime
-before every read and resolve movable elements afresh. Retaining or transferring a provider does
-not keep its native root alive: expired and wrong-thread reads are refused, while rows already
-returned remain owned and usable. This interface alone does not enable the missing nominal readers
-above. Sparse `wire::RecordPatch` records likewise carry only field ids and ordinary Wire values;
-the receiving schema validates every edit before committing any field.
-
 ## ABI reference
 
 A dependency group consists of core wasm shared modules with `dylink.0`, not components.
@@ -149,8 +129,7 @@ Pointers and lengths below are wasm32 `u32` values. The game provides these impo
 Each guest exports:
 
 - `horizon_layout() -> u64`: the generated layout hash. A mismatch is refused.
-- `horizon_layout_ext() -> u64`, when `mod_points` is linked: the full point catalog and row-schema
-  layout hash. The loader checks it before accepting any listener.
+- `horizon_layout_ext() -> u64`, when `mod_points` is linked: the point layout hash. The loader checks it before accepting any listener.
 - `horizon_in(len) -> ptr`: the buffer into which the game writes the next call's input.
 - `horizon_hook(id) -> u64`: runs the generated export ID after the input is written. The high
   32 bits are the reply pointer and the low 32 bits its length; `u32::MAX` as the length denotes
@@ -163,17 +142,10 @@ The reserved IDs are `INIT = 0xFFFF_FF00` (guest package-list initialization),
 Other IDs index the generated import or export table. A hook reply
 contains its return value followed by writable arguments in field order.
 
-Points use that same hook export, call arena and execution budget. API place IDs are
-`0x8000_0000 + place`; raw place IDs are `0xC000_0000 + place`. The subscription query
-`0xBFFF_FFFF` returns `(place, injection_id)` pairs, with bit 30 of the place marking raw access.
-Point call input starts with the `u32` subscription index. An API `HostSide` point then carries a
-server/client boolean, followed by its listener record. A raw record contains the owned rows,
-an optional ordinary `RowPages` resource and an initially empty `RecordPatch`; there is no separate
-raw row prefix or API-typed argument proxy. API calls reply with unit and their record; raw calls
-reply with unit and a sparse `RecordPatch`. The host validates the complete patch before applying
-any producer-authorized argument or outcome writes; return argument edits are rejected.
-Raw snapshots are
-bounded to 65,536 rows and 1 MiB of encoded plain values, independently of runtime group limits.
+API points use that same hook export, call arena and execution budget. API place IDs are
+`0x8000_0000 + place`. Point call input starts with the `u32` subscription index.
+An API `HostSide` point then carries a server/client boolean, followed by its listener
+record. API calls reply with unit and their record.
 
 Wire values use little-endian numbers; lengths and collection counts are `u32`, strings are a
 byte length followed by UTF-8 bytes, options have a byte tag (`0` or `1`), enums have a `u32`

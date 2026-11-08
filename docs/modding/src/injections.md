@@ -16,11 +16,11 @@ mods' listeners, without changing game source.
 
 A `mod.wasm` can listen at generated function slots through the shared-memory Wire boundary
 ([Building a mod to `mod.wasm`](how-to/wasm-mods.md)). The wasm loader accepts `head`,
-`modify_arg`, `replace` and `return` on matching generated API or raw places; this does not
-make a place admissible when its record or raw snapshot reader cannot be generated. Call kinds and source
+`modify_arg`, `replace` and `return` on matching generated API places; this does not
+make a place admissible when its record cannot be generated. Call kinds and source
 routing are native-only. A mismatched listener is refused at load with
 `listener does not match its declared API head/return target`; a place without a generated
-record is refused with `no generated API snapshot/record` or `no generated raw snapshot/record`.
+API record is refused with `no generated API snapshot/record`.
 
 ## Adding a pinned declaration
 
@@ -158,7 +158,7 @@ the event, and writes take `host`.
 | Form | Where | Game rebuild | `mod.wasm` |
 | --- | --- | --- | --- |
 | API `[[inject]]` | admitted head/return slots | no | generated function records only |
-| Internals `[[inject]]` | head/return slots and supported call sites | only without a compiled slot | function slots only |
+| Native internals `[[inject]]` | head/return slots and supported call sites | only without a compiled slot | — |
 | Hook or Part method (no injection) | its documented firing point | no | yes |
 
 ## Ordering
