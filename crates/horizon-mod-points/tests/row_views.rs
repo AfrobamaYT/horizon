@@ -2,7 +2,7 @@ use mod_api::{
     RowError, RowView,
     wire::{Id, ResourceCodec, ResourceScope, WireError},
 };
-use mod_points::snapshot::{Builder, PageSource, Window, with_root};
+use mod_points::snapshot::{PageSource, Window, with_root};
 use std::{
     any::{Any, TypeId},
     rc::Rc,
@@ -17,7 +17,8 @@ impl ResourceCodec for NoResources {
         Err(WireError::Invalid("unused"))
     }
 }
-fn read(values: &Vec<u32>, window: Window, out: &mut Builder) -> Result<(), RowError> {
+fn read(values: &Vec<u32>, window: Window) -> Result<Vec<mod_api::Row>, RowError> {
+    let mut out = window.builder();
     if window.node() != 0 || window.start() > values.len() {
         return Err(RowError::Bounds);
     }
@@ -32,7 +33,7 @@ fn read(values: &Vec<u32>, window: Window, out: &mut Builder) -> Result<(), RowE
             out.external(i as u32 + 1, Some(0), i as u32, 2, 1, Some(value))?;
         }
     }
-    Ok(())
+    Ok(window.finish(out))
 }
 #[test]
 fn row_view_reads_real_pages_and_refuses_after_expiry() {
