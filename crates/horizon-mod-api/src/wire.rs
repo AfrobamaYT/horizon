@@ -390,6 +390,32 @@ impl<T: Wire, E: Wire> Wire for Result<T, E> {
     }
 }
 
+impl<T: Wire> Wire for Arc<[T]> {
+    const MIN: usize = 4;
+    fn put(&self, out: &mut Writer) {
+        out.put_len(self.len());
+        for item in self.iter() {
+            out.put(item);
+        }
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        Vec::<T>::take(input).map(Into::into)
+    }
+}
+
+impl<T: Wire> Wire for Box<[T]> {
+    const MIN: usize = 4;
+    fn put(&self, out: &mut Writer) {
+        out.put_len(self.len());
+        for item in self.iter() {
+            out.put(item);
+        }
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        Vec::<T>::take(input).map(Into::into)
+    }
+}
+
 impl<T: Wire> Wire for Box<T> {
     const MIN: usize = T::MIN;
     fn put(&self, out: &mut Writer) {

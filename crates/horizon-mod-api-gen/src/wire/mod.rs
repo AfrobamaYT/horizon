@@ -255,6 +255,9 @@ pub(super) struct Unbound {
 }
 
 pub(super) struct Surface<'a> {
+    /// The methods that mention a type that does not cross: the traits still need them, and
+    /// each answers that it is not available.
+    pub(super) dropped: Vec<Method>,
     /// The variants of the generated `HookId`, each with its hook's name.
     pub(super) hooks: Vec<(String, String)>,
     pub(super) types: Types<'a>,
@@ -360,7 +363,8 @@ pub(super) fn surface<'a>(
         }
         for (module, via, function) in &members {
             let name = function.sig.ident.to_string();
-            if hidden(&function.attrs) || name.ends_with("subscribed") {
+            let subscription = SUBSCRIBED.iter().any(|(o, n)| o == owner && *n == name);
+            if hidden(&function.attrs) && !subscription {
                 continue;
             }
             if not_on_wasm(&function.attrs) {
@@ -388,7 +392,7 @@ pub(super) fn surface<'a>(
         }
     }
     report.push_str("\nMethods that do not cross:\n");
-    methods.retain(|m| {
+    let (methods, dropped): (Vec<Method>, Vec<Method>) = methods.into_iter().partition(|m| {
         let excluded = m
             .params
             .iter()
@@ -404,6 +408,7 @@ pub(super) fn surface<'a>(
     std::fs::write(target.join("wire-skipped.txt"), report)
         .map_err(|e| format!("writing wire report: {e}"))?;
     Ok(Surface {
+        dropped,
         hooks,
         types,
         methods,
@@ -541,10 +546,19 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Generated, Str
     with_providers.push(("capability_providers_generated.rs", providers.as_str()));
     let surface = surface(root, &with_providers)?;
     let mut wire = emit::types(&surface.types);
-    let mut guest = calls::guest(&surface.types, &surface.methods, &surface.parts);
+    let mut guest = calls::guest(
+        &surface.types,
+        &surface.methods,
+        &surface.dropped,
+        &surface.parts,
+    );
     guest.push_str(&calls::hook_names(&surface.hooks));
     guest.push_str(&calls::dispatch(&surface.types, &surface.methods).0);
-    let _ = writeln!(wire, "#[doc(hidden)]\npub const WIRE_LAYOUT: u64 = {:#x};", layout(&surface));
+    let _ = writeln!(
+        wire,
+        "#[doc(hidden)]\npub const WIRE_LAYOUT: u64 = {:#x};",
+        layout(&surface)
+    );
     Ok(Generated { wire, guest })
 }
 
@@ -660,9 +674,24 @@ mod tests {
                         .or_default() += 1;
                 }
                 println!("classes {classes:?}");
-                let code = super::calls::guest(&surface.types, &surface.methods, &surface.parts);
+                let code = super::calls::guest(
+                    &surface.types,
+                    &surface.methods,
+                    &surface.dropped,
+                    &surface.parts,
+                );
                 std::fs::write(root.join("target/guest_calls_sample.rs"), &code).unwrap();
-                for m in super::calls::imports(&surface.methods) { if !super::calls::plain_pub(m) { println!("nonplain {}::{} ({:?}) -> {:?}", m.owner, m.name, m.params.iter().map(|p| &p.1).collect::<Vec<_>>(), m.ret); } }
+                for m in super::calls::imports(&surface.methods) {
+                    if !super::calls::plain_pub(m) {
+                        println!(
+                            "nonplain {}::{} ({:?}) -> {:?}",
+                            m.owner,
+                            m.name,
+                            m.params.iter().map(|p| &p.1).collect::<Vec<_>>(),
+                            m.ret
+                        );
+                    }
+                }
                 let (hooks, apart) = super::calls::dispatch(&surface.types, &surface.methods);
                 std::fs::write(root.join("target/guest_hooks_sample.rs"), &hooks).unwrap();
                 println!(
@@ -670,8 +699,30 @@ mod tests {
                     hooks.matches("answer").count(),
                     apart.len()
                 );
-                for a in apart.iter().take(40) {
-                    println!("apart {a}");
+                for m in surface
+                    .methods
+                    .iter()
+                    .filter(|m| apart.contains(&format!("{}::{}", m.owner, m.name)))
+                    .step_by(6)
+                {
+                    for p in &m.params {
+                        if let super::ty::Ty::Ref(t, _) = &p.1 {
+                            if let super::ty::Ty::Named(d) = &**t {
+                                if let super::ty::Kind::Record(fs) = &surface.types.defs[*d].kind {
+                                    for f in fs {
+                                        if super::calls::probe(&surface.types, &f.ty).is_none() {
+                                            println!("badfield {}.{} {:?}", m.name, f.rust, f.ty);
+                                        }
+                                    }
+                                } else {
+                                    println!(
+                                        "notrecord {} {:?}",
+                                        m.name, surface.types.defs[*d].kind
+                                    );
+                                }
+                            }
+                        }
+                    }
                 }
                 for def in &surface.types.defs {
                     if let super::ty::Kind::Opaque(why) = &def.kind {

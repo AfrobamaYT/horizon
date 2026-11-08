@@ -84,6 +84,28 @@ impl<T> AttachmentChange<T> {
     }
 }
 
+impl<H> AttachmentOwner<H> {
+    /// Rebuild a transferred residency identity; the index still validates it.
+    #[doc(hidden)]
+    pub fn from_parts(holder: H, generation: u64) -> Self {
+        Self { holder, generation }
+    }
+    /// The fields needed to transfer this identity.
+    #[doc(hidden)]
+    pub fn parts(&self) -> (&H, u64) {
+        (&self.holder, self.generation)
+    }
+    /// Rebuild a snapshot row from a transferred identity and value.
+    #[doc(hidden)]
+    pub fn into_row(self, entry: Arc<AttachmentEntry>) -> AttachmentRow<H> {
+        AttachmentRow {
+            holder: self.holder,
+            generation: self.generation,
+            entry,
+        }
+    }
+}
+
 impl<H: Copy> AttachmentRow<H> {
     /// Capture non-forgeable authority to validate this residency before a write.
     pub fn write_token(&self) -> AttachmentOwner<H> {
