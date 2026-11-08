@@ -145,6 +145,36 @@ fn nested_handler_decodes_in_scope_and_remains_callable_after_return() {
 }
 
 #[test]
+fn imports_inherit_the_root_borrow_token_and_expire_with_the_call() {
+    let id = crate::boundary::import_id("StructureRandom", "next_long").unwrap();
+    let module = module(&format!(
+        "i32.const {id} i32.const 0 i32.const 0 i32.const 1024 i32.const 8 call $host drop i32.const {id} i32.const 0 i32.const 0 i32.const 1024 i32.const 8 call $host drop i64.const 4398046511112"
+    ));
+    let saved = Cell::new(None::<mod_api::wire::ScopeToken>);
+    let calls = Cell::new(0);
+    let mut random = Random(|| {
+        calls.set(calls.get() + 1);
+        if let Some(token) = saved.get() {
+            token.check().unwrap();
+        } else {
+            saved.set(Some(mod_api::wire::borrow_token().unwrap()));
+        }
+        7
+    });
+    let mut frame = Frame::default();
+    frame.set_structure_random_mut(&mut random);
+    assert_eq!(
+        module.call(CallClass::Hook, frame, 0, None, |_| {}, |r| r.take::<i64>()),
+        Some(7)
+    );
+    assert_eq!(calls.get(), 2);
+    assert!(matches!(
+        saved.get().unwrap().check(),
+        Err(mod_api::wire::ScopeError::Stale)
+    ));
+}
+
+#[test]
 fn guest_panic_text_is_logged_with_mod_id_and_no_reply() {
     struct Capture(Mutex<Vec<String>>);
     impl log::Log for Capture {
@@ -224,6 +254,71 @@ fn a_member_cannot_bypass_group_limits_with_private_memories() {
     .err()
     .unwrap();
     assert!(refusal.to_string().contains("must import the group memory"));
+}
+
+#[test]
+#[ignore = "requires shared std and the real noop fixture"]
+fn guest_input_pool_stays_flat_for_100k_no_import_calls() {
+    let std = std::fs::read(std::env::var("HORIZON_WASM_STD").unwrap()).unwrap();
+    let fixture = horizon_mod_package::manifest::Package::read_wasm(std::path::Path::new(
+        &std::env::var("HORIZON_WASM_FIXTURE").unwrap(),
+    ))
+    .unwrap();
+    let module = WasmMod::instantiate(
+        &engine().unwrap(),
+        &[
+            Member {
+                name: "std",
+                module: &std,
+            },
+            Member {
+                name: "fixture",
+                module: &fixture,
+            },
+        ],
+    )
+    .unwrap()
+    .pop()
+    .unwrap();
+    let subscriptions: Vec<String> = module
+        .call(
+            CallClass::Load,
+            Frame::default(),
+            crate::boundary::SUBSCRIBED,
+            None,
+            |_| {},
+            |r| r.take(),
+        )
+        .unwrap();
+    assert!(subscriptions.iter().any(|hook| hook == "server_stopped"));
+    let id = crate::boundary::export_id("Hooks", "server_stopped").unwrap();
+    let mut group = module.running.group.lock().unwrap();
+    group.store.set_epoch_deadline(30_000);
+    fn step(module: &WasmMod, store: &mut Store<State>, id: u32) {
+        let memory = store.data().memory.unwrap();
+        let input = module.input.call(&mut *store, 1).unwrap();
+        memory.write(&mut *store, input as usize, &[0]).unwrap();
+        let reply = module.hook.call(&mut *store, id).unwrap();
+        assert_eq!(reply as u32, 1);
+        let mut bytes = [0xff];
+        memory
+            .read(&*store, (reply >> 32) as usize, &mut bytes)
+            .unwrap();
+        assert_eq!(bytes, [0]);
+    }
+    for _ in 0..1000 {
+        step(&module, &mut group.store, id);
+    }
+    let memory = group.store.data().memory.unwrap();
+    let before = memory.size(&group.store);
+    for _ in 0..100_000 {
+        step(&module, &mut group.store, id);
+    }
+    let after = memory.size(&group.store);
+    assert_eq!(
+        after, before,
+        "warmed no-import calls must not retain inputs"
+    );
 }
 
 #[test]
@@ -639,11 +734,314 @@ fn dropping_a_handler_releases_its_id_on_the_next_call() {
     );
     assert_eq!(call(&module), Some(0));
     drop(WasmHandler {
-        module: module.clone(),
+        module: module.downgrade(),
         index: Id(123),
     });
     assert_eq!(call(&module), Some(1));
     assert!(!module.running.poisoned.load(Ordering::Relaxed));
+}
+
+struct StopProbe {
+    module: WeakWasmMod,
+    dropped: Arc<AtomicBool>,
+}
+impl Drop for StopProbe {
+    fn drop(&mut self) {
+        assert_eq!(
+            self.module.call(
+                CallClass::Callback,
+                Frame::default(),
+                0,
+                None,
+                |_| {},
+                |r| r.take::<u32>()
+            ),
+            None
+        );
+        self.dropped.store(true, Ordering::Relaxed);
+    }
+}
+fn hold_stop_probe(module: &WasmMod) -> Arc<AtomicBool> {
+    let dropped = Arc::new(AtomicBool::new(false));
+    module
+        .running
+        .group
+        .lock()
+        .unwrap()
+        .store
+        .data_mut()
+        .cx
+        .held
+        .insert_long(Box::new(StopProbe {
+            module: module.downgrade(),
+            dropped: dropped.clone(),
+        }));
+    dropped
+}
+
+#[test]
+fn retained_proxy_does_not_own_running_and_unload_drops_native_resources() {
+    let module = module("i64.const 4398046511108");
+    let proxy = WasmHandler::new(&module, Id(123));
+    let running = Arc::downgrade(&module.running);
+    let dropped = hold_stop_probe(&module);
+    drop(module);
+    assert_eq!(running.strong_count(), 0);
+    assert!(dropped.load(Ordering::Relaxed));
+    assert_eq!(
+        proxy.module.call(
+            CallClass::Callback,
+            Frame::default(),
+            0,
+            None,
+            |_| {},
+            |r| r.take::<u32>()
+        ),
+        None
+    );
+}
+
+#[test]
+fn disable_clears_held_resources_before_retained_proxy_can_call() {
+    let module = module("i64.const 4398046511108");
+    let proxy = WasmHandler::new(&module, Id(123));
+    let dropped = hold_stop_probe(&module);
+    module.disable();
+    assert!(dropped.load(Ordering::Relaxed));
+    assert_eq!(
+        proxy.module.call(
+            CallClass::Callback,
+            Frame::default(),
+            0,
+            None,
+            |_| {},
+            |r| r.take::<u32>()
+        ),
+        None
+    );
+}
+
+#[test]
+fn disable_during_native_import_defers_resource_drop_until_call_returns() {
+    let id = crate::boundary::import_id("StructureRandom", "next_long").unwrap();
+    let module = module(&format!(
+        "i32.const {id} i32.const 0 i32.const 0 i32.const 2048 i32.const 8 call $host drop i64.const 8796093022216"
+    ));
+    let dropped = hold_stop_probe(&module);
+    let mut random = Random(|| {
+        module.disable();
+        assert!(!dropped.load(Ordering::Relaxed));
+        7
+    });
+    let mut frame = Frame::default();
+    frame.set_structure_random_mut(&mut random);
+    assert_eq!(
+        module.call(CallClass::Hook, frame, 0, None, |_| {}, |r| r.take::<i64>()),
+        Some(7)
+    );
+    assert!(dropped.load(Ordering::Relaxed));
+}
+
+#[test]
+fn native_panic_stops_group_before_held_resources_drop() {
+    let id = crate::boundary::import_id("StructureRandom", "next_long").unwrap();
+    let module = module(&format!(
+        "i32.const {id} i32.const 0 i32.const 0 i32.const 2048 i32.const 8 call $host drop i64.const 8796093022216"
+    ));
+    let dropped = hold_stop_probe(&module);
+    let mut random = Random(|| panic!("native callback"));
+    let mut frame = Frame::default();
+    frame.set_structure_random_mut(&mut random);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        module.call(CallClass::Hook, frame, 0, None, |_| {}, |r| r.take::<i64>())
+    }));
+    assert!(result.is_err());
+    assert!(dropped.load(Ordering::Relaxed));
+    assert_eq!(call(&module), None);
+}
+
+#[test]
+fn idle_proxy_called_during_unwind_stops_and_clears_resources() {
+    struct OnUnwind(WeakWasmMod);
+    impl Drop for OnUnwind {
+        fn drop(&mut self) {
+            assert_eq!(
+                self.0.call(
+                    CallClass::Callback,
+                    Frame::default(),
+                    0,
+                    None,
+                    |_| {},
+                    |r| r.take::<u32>()
+                ),
+                None
+            );
+        }
+    }
+    let module = module("i64.const 4398046511108");
+    let dropped = hold_stop_probe(&module);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _callback = OnUnwind(module.downgrade());
+        panic!("unrelated native panic");
+    }));
+    assert!(result.is_err());
+    assert!(module.is_stopped());
+    assert!(dropped.load(Ordering::Relaxed));
+}
+
+#[test]
+fn released_dispatch_receiver_cannot_reenter_guest_while_unwinding() {
+    struct Piece {
+        module: WeakWasmMod,
+        refused: Arc<AtomicBool>,
+    }
+    impl std::fmt::Debug for Piece {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("Piece")
+        }
+    }
+    impl Drop for Piece {
+        fn drop(&mut self) {
+            let result = self.module.call(
+                CallClass::Callback,
+                Frame::default(),
+                2,
+                None,
+                |_| {},
+                |r| r.take::<u32>(),
+            );
+            self.refused.store(result.is_none(), Ordering::Relaxed);
+        }
+    }
+    impl mod_api::EnergyHandler for Piece {
+        fn amount(&self, _: &mut dyn mod_api::ServerHost) -> u32 {
+            assert_eq!(
+                self.module.call(
+                    CallClass::Callback,
+                    Frame::default(),
+                    1,
+                    None,
+                    |_| {},
+                    |r| r.take::<()>()
+                ),
+                Some(())
+            );
+            panic!("last dispatch receiver unwinds");
+        }
+        fn capacity(&self, _: &mut dyn mod_api::ServerHost) -> u32 {
+            0
+        }
+        fn insert(&self, _: &mut dyn mod_api::ServerHost, _: &mod_api::Transaction, _: u32) -> u32 {
+            0
+        }
+        fn extract(
+            &self,
+            _: &mut dyn mod_api::ServerHost,
+            _: &mod_api::Transaction,
+            _: u32,
+        ) -> u32 {
+            0
+        }
+    }
+    let bounds = crate::boundary::import_id("EnergyHandler", "amount").unwrap();
+    let release = mod_api::wire::HOST_RELEASE;
+    let module = module(&format!(
+        r#"
+        local.get 0 i32.eqz if (result i64)
+          i32.const 0 local.get 1 i64.load i64.store
+          i32.const {bounds} i32.const 0 i32.const 8 i32.const 2048 i32.const 24 call $host drop
+          i64.const 0
+        else local.get 0 i32.const 1 i32.eq if (result i64)
+          i32.const {release} i32.const 0 i32.const 8 i32.const 0 i32.const 0 call $host drop
+          i64.const 0
+        else
+          i64.const 4398046511108
+        end end"#
+    ));
+    let refused = Arc::new(AtomicBool::new(false));
+    let piece: Arc<dyn mod_api::EnergyHandler> = Arc::new(Piece {
+        module: module.downgrade(),
+        refused: refused.clone(),
+    });
+    let mut host = mod_api::testing::FakeHost::new();
+    let mut frame = Frame::default();
+    frame.set_server_host_mut(&mut host);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        module.call(
+            CallClass::Hook,
+            frame,
+            0,
+            None,
+            |w| w.put_owned(piece),
+            |r| r.take::<()>(),
+        )
+    }));
+    assert!(result.is_err());
+    assert!(refused.load(Ordering::Relaxed));
+    assert!(module.is_stopped());
+}
+
+#[test]
+fn trap_clears_held_native_resources() {
+    let module = module("unreachable");
+    let dropped = hold_stop_probe(&module);
+    assert_eq!(call(&module), None);
+    assert!(dropped.load(Ordering::Relaxed));
+}
+
+#[test]
+fn returned_builtin_proxy_does_not_keep_its_group_alive() {
+    use mod_api::EnergyHandler;
+    struct World;
+    impl mod_api::Host for World {}
+    mod_api::impl_host_areas!(World);
+    impl mod_api::ServerHost for World {}
+    mod_api::impl_server_host_areas!(World);
+    let amount = crate::boundary::export_id("EnergyHandler", "amount").unwrap();
+    let module = module(&format!(
+        r#"
+        local.get 0 i32.const {amount} i32.eq if (result i64)
+          i32.const 1024 i32.const 17 i32.store
+          i64.const 4398046511108
+        else
+          i64.const 2199023255552 local.get 2 i64.extend_i32_u i64.or
+        end"#
+    ));
+    let proxy: Arc<dyn EnergyHandler> = module
+        .call(
+            CallClass::Hook,
+            Frame::default(),
+            0,
+            None,
+            |w| w.put(&Id(123)),
+            |r| r.take(),
+        )
+        .unwrap();
+    assert_eq!(proxy.amount(&mut World), 17);
+    // Sending this proxy back makes Cx.held retain it. The retained guest proxy
+    // must not create Running -> Cx.held -> WasmHandler -> Running ownership.
+    let _: Id = module
+        .call(
+            CallClass::Hook,
+            Frame::default(),
+            0,
+            None,
+            |w| w.put(&proxy),
+            |r| r.take(),
+        )
+        .unwrap();
+    let running = Arc::downgrade(&module.running);
+    drop(module);
+    assert_eq!(
+        running.strong_count(),
+        0,
+        "a retained guest proxy kept its own group alive"
+    );
+    assert_eq!(
+        proxy.amount(&mut World),
+        0,
+        "an unavailable proxy did not take the call-refused path"
+    );
 }
 
 #[test]
