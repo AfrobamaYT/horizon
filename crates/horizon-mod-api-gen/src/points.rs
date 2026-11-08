@@ -997,6 +997,63 @@ mod tests {
     use super::*;
 
     #[test]
+    fn record_mutability_catalog_proof() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let points = game_points(&root).unwrap();
+        let sources = source::read(&root).unwrap();
+        let full = serde_json::to_vec_pretty(&points).unwrap();
+        let mut existing = serde_json::to_value(&points).unwrap();
+        let mut added = 0;
+        for point in existing.as_array_mut().unwrap() {
+            if let Some(raw) = point.get_mut("raw_shape") {
+                for arg in raw["args"].as_array_mut().unwrap() {
+                    assert_eq!(arg["record_mutable"].as_bool(), Some(true));
+                    added += usize::from(
+                        arg.as_object_mut()
+                            .unwrap()
+                            .remove("record_mutable")
+                            .is_some(),
+                    );
+                }
+                assert_eq!(
+                    raw.get("outcome_record_mutable"),
+                    (raw["outcome"] != "none").then_some(&serde_json::Value::Bool(true)),
+                );
+                added += usize::from(
+                    raw.as_object_mut()
+                        .unwrap()
+                        .remove("outcome_record_mutable")
+                        .is_some(),
+                );
+            }
+        }
+        let existing = serde_json::to_vec_pretty(&existing).unwrap();
+        let proof = serde_json::to_vec_pretty(&serde_json::json!({
+            "existing_fields": String::from_utf8(existing.clone()).unwrap(),
+            "records_and_shapes": records(&points, &sources),
+        }))
+        .unwrap();
+        if let Ok(path) = std::env::var("RECORD_MUTABILITY_BASELINE") {
+            assert_eq!(
+                proof,
+                fs::read(path).unwrap(),
+                "existing points fields or records/SHAPES changed"
+            );
+        }
+        if let Ok(path) = std::env::var("RECORD_MUTABILITY_PROOF") {
+            fs::write(path, proof).unwrap();
+        }
+        println!(
+            "points={} raw={} added_flags={added} bytes={} existing_bytes={} growth={}",
+            points.len(),
+            points.iter().filter(|p| p.raw).count(),
+            full.len(),
+            existing.len(),
+            full.len() - existing.len()
+        );
+    }
+
+    #[test]
     fn raw_shape_catalog_proof() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let mut points = game_points(&root).unwrap();

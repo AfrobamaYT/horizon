@@ -375,7 +375,9 @@ impl<T, const DIRECT: bool> JoinList<T, DIRECT> {
         taken
     }
     /// Restore a lifted pass using its established spawn-buffer ordering.
+    /// An unbound staged batch is admitted without closing another pass.
     pub fn restore(&mut self, mut taken: Self, order: RestoreOrder) {
+        let closes_lift = taken.1.is_some();
         match (&self.1, &taken.1) {
             (Some(a), Some(b)) => assert!(a.same(b), "restoring a different entity owner"),
             (Some(binding), None) => taken.bind_to(binding.clone()),
@@ -390,7 +392,7 @@ impl<T, const DIRECT: bool> JoinList<T, DIRECT> {
             RestoreOrder::SpawnsFirst if self.is_empty() => *self = taken,
             RestoreOrder::SpawnsFirst => self.append(&mut taken),
         }
-        if let Some(binding) = &self.1 {
+        if closes_lift && let Some(binding) = &self.1 {
             binding.marker(residency::Change::Restored);
         }
     }
@@ -424,11 +426,17 @@ impl<T, const DIRECT: bool> JoinList<T, DIRECT> {
     /// Extract selected owners eagerly in list order, compacting survivors in place.
     /// The predicate cannot replace an entity or change its identity.
     pub fn extract_if(&mut self, mut take: impl FnMut(&T) -> bool) -> std::vec::IntoIter<T> {
-        let extracted: Vec<_> = self.0.extract_if(.., |entity| take(entity)).collect();
-        if let Some(binding) = &self.1 {
-            binding.all(&extracted, residency::Change::Remove);
-        }
-        extracted.into_iter()
+        let binding = &self.1;
+        self.0
+            .extract_if(.., |entity| {
+                let removed = take(entity);
+                if removed && let Some(binding) = binding {
+                    binding.entity(entity, residency::Change::Remove);
+                }
+                removed
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
     }
     pub fn swap_remove(&mut self, index: usize) -> T {
         let entity = self.0.swap_remove(index);
@@ -1123,6 +1131,22 @@ mod tests {
     }
 
     #[test]
+    fn journal_panicking_extract_if_keeps_events_and_survivors_in_sync() {
+        let (mut list, journal) = journal_list();
+        let keys: Vec<_> = list.iter().map(key).collect();
+        changes(&journal);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            list.extract_if(|e| {
+                assert_ne!(e.value, 2, "predicate panic");
+                true
+            });
+        }));
+        assert!(result.is_err());
+        assert_eq!(changes(&journal), [residency::Change::Remove(keys[0])]);
+        assert_eq!(list.iter().map(key).collect::<Vec<_>>(), keys[1..]);
+    }
+
+    #[test]
     fn journal_forgotten_drain_preserves_the_undrained_owner() {
         let (mut list, journal) = journal_list();
         list.truncate(1);
@@ -1196,7 +1220,7 @@ mod tests {
 
     #[test]
     fn journal_restore_admits_an_unbound_batch_without_reinstalling_the_spawn_buffer() {
-        use residency::Change::{Install, Restored};
+        use residency::Change::Install;
         for (order, expected) in [
             (RestoreOrder::SurvivorsFirst, [4, 5, 1, 2, 3]),
             (RestoreOrder::SpawnsFirst, [1, 2, 3, 4, 5]),
@@ -1208,9 +1232,39 @@ mod tests {
             list.restore(staged, order);
             assert_eq!(
                 changes(&journal),
-                [Install(admitted[0]), Install(admitted[1]), Restored]
+                [Install(admitted[0]), Install(admitted[1])]
             );
             assert_eq!(list.iter().map(|e| e.value).collect::<Vec<_>>(), expected);
+        }
+    }
+
+    #[test]
+    fn journal_unbound_admission_preserves_an_enclosing_lift() {
+        use residency::Change::{Install, Lifted, Restored};
+        for order in [RestoreOrder::SurvivorsFirst, RestoreOrder::SpawnsFirst] {
+            let (mut list, journal) = journal_list();
+            let original = snapshot(&list);
+            changes(&journal);
+            let outer = list.lift();
+            assert_eq!(changes(&journal), [Lifted]);
+            let staged: JoinList<_> = [entity(4)].into_iter().collect();
+            let admitted = key(&staged[0]);
+            list.restore(staged, order);
+            assert_eq!(changes(&journal), [Install(admitted)]);
+            assert_eq!(list.locate(original[0].1), None);
+            assert_eq!(snapshot(&outer), original);
+            let inner = list.lift();
+            list.restore(inner, order);
+            assert_eq!(changes(&journal), [Lifted, Restored]);
+            list.restore(outer, order);
+            assert_eq!(changes(&journal), [Restored]);
+            let mut expected = original;
+            let added = (admitted.id.get(), admitted.join);
+            match order {
+                RestoreOrder::SurvivorsFirst => expected.push(added),
+                RestoreOrder::SpawnsFirst => expected.insert(0, added),
+            }
+            assert_eq!(snapshot(&list), expected);
         }
     }
 

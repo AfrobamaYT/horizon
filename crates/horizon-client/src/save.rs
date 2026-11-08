@@ -6962,6 +6962,22 @@ mod tests {
     }
 
     #[test]
+    fn queued_client_update_fields_are_not_saved_or_taken_by_a_save() {
+        let saved =
+            horizon_core::nbt::parse_snbt(r#"{id:"test:machine",x:5,y:-60,z:12,progress:7}"#)
+                .unwrap()
+                .0;
+        let (pos, entity) = decode_block_entity(&saved).unwrap();
+        let crate::containers::BlockEntity::Mod(machine) = &entity else {
+            panic!("not a mod's");
+        };
+        let batch = Compound::from([("effect".into(), Tag::Int(23))]);
+        machine.set_client_update_fields(batch.clone());
+        assert_eq!(encode_block_entity(pos, &entity, "test:machine"), saved);
+        assert_eq!(machine.take_client_update_fields(), Some(batch));
+    }
+
+    #[test]
     fn mod_block_entity_round_trips() {
         let saved = horizon_core::nbt::parse_snbt(
             r#"{id:"gtmod:macerator",x:5,y:-60,z:12,energy:1200L,progress:7,Items:[{Slot:0b,id:"minecraft:iron_ore",count:3}]}"#,

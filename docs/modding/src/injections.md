@@ -52,9 +52,10 @@ and are identical on listed and source routes; physical IDs and dispatch remain 
 The build log prints `mod:inject: target -> slot (head/return/site, internals)` for each accepted declaration. A changed
 hash or missing target is refused, not silently redirected. Points order by descending priority,
 then registration (dependency) order; ties within a mod use inject id. Sites retain priority, mod id
-and inject id order. `modify_arg` and `modify_call_arg` remain typed refusals until their operand
-payload is specified. API call sites, API source injects, `replace`, locals and extension fields remain
-refused. The old `[[native.injection]]` table is never a fallback for `[[inject]]`.
+and inject id order. `modify_arg` is accepted on listed head slots but is a typed refusal on the
+source route. `modify_call_arg` remains a typed refusal until its operand payload is specified.
+API call sites, API source injects, `replace`, locals and extension fields remain refused.
+The `native` table accepts only build pins and supporting modules; unknown fields are rejected.
 API head/return functions also load from wasm;
 its remaining routing and full hash checks follow separately.
 
