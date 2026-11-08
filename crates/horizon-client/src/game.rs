@@ -17557,6 +17557,7 @@ pub fn run_with(
         use mod_api::__private::game::RegistrationContextNew;
         let context = mod_api::RegistrationContext::new();
         let inventory: Vec<_> = context.mods().iter().cloned().collect();
+        horizon_client::install_points_catalog();
         horizon_mod_wasm::initialize(&inventory);
     }
     mod_points::__private::seal();

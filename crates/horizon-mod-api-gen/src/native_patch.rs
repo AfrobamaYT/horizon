@@ -111,7 +111,7 @@ fn emit(
     if matches!(shape, Shape::Ref { mutable: false, .. }) {
         return Ok(quote!(if !__np_tree.is_empty() { #reject; }));
     }
-    if let (Some((graph, _)), Shape::Named(..)) = (runtime, shape)
+    if let Some((graph, _)) = runtime
         && let Some(id) = graph.id(shape)
         && graph.layouts[id].opaque.is_some()
     {
@@ -361,10 +361,14 @@ fn sequence(body: TokenStream, place: TokenStream, reject: TokenStream) -> Token
 }
 
 /// One patch planner per named layout, emitted once per source (see `native_window::helpers`).
-pub fn helpers(rule: &Rule, graph: &crate::native_policy::Graph) -> Result<TokenStream, String> {
+pub fn helpers(
+    rule: &Rule,
+    graph: &crate::native_policy::Graph,
+    wanted: &[bool],
+) -> Result<TokenStream, String> {
     let mut helpers = Vec::new();
     for (id, layout) in graph.layouts.iter().enumerate() {
-        if rule.named(&layout.name).is_none() || layout.opaque.is_some() {
+        if !wanted[id] {
             continue;
         }
         let helper = quote::format_ident!("__horizon_patch_{id}");
@@ -392,8 +396,9 @@ pub fn helpers(rule: &Rule, graph: &crate::native_policy::Graph) -> Result<Token
         graph
             .layouts
             .iter()
-            .filter(|layout| layout.opaque.is_none() && rule.named(&layout.name).is_some())
-            .map(|layout| layout.name.as_str()),
+            .enumerate()
+            .filter(|(id, _)| wanted[*id])
+            .map(|(_, layout)| layout.name.as_str()),
     );
     Ok(quote!(#decoders #(#helpers)*))
 }
