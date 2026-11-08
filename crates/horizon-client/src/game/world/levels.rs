@@ -379,12 +379,12 @@ impl Game<'_> {
         let back = self.dim;
         for dim in [Dim::Overworld, Dim::Nether, Dim::End] {
             if dim != back && self.levels.parked.contains_key(&dim) {
-                self.enter_level(None, dim)?;
+                self.enter_level(dim)?;
                 self.wait_for_ticket_chunks(deadline);
             }
         }
         if self.dim != back {
-            self.enter_level(None, back)?;
+            self.enter_level(back)?;
         }
         Ok(())
     }
@@ -401,7 +401,6 @@ impl Game<'_> {
             let ready = streaming
                 .forced
                 .iter()
-                .chain(&streaming.mod_forced)
                 .copied()
                 .chain(self.tickets.portal_chunks())
                 .all(|(cx, cz)| {

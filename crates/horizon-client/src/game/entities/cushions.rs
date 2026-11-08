@@ -553,7 +553,7 @@ impl Game<'_> {
             vehicle.y.floor() as i32,
             vehicle.z.floor() as i32,
         ];
-        if !self.block_in_tag("minecraft:portals", &self.block_name(pos)) {
+        if !self.named_block_in_tag("minecraft:portals", &self.block_name(pos)) {
             return false;
         }
         self.dismount_removed_vehicle(vehicle.y);

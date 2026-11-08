@@ -962,7 +962,7 @@ impl Game<'_> {
             .map(|e| e.id.clone());
         self.recipe_ui.ghost.clear();
         self.recipe_ui.overlay = None;
-        self.place_recipe(BookType::Crafting, entry_index, false);
+        self.place_book_recipe(BookType::Crafting, entry_index, false);
     }
     /// The recipe book's buttons a controller can focus: the book button,
     /// recipes, page arrows, the craftable filter and the tabs (GUI pixels;

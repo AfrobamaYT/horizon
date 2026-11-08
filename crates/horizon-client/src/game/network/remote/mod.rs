@@ -8911,7 +8911,8 @@ impl Game<'_> {
                 && &*stack.item == "minecraft:potion"
                 && stack.potion() == Some("minecraft:water")
                 && hit.face != [0, -1, 0]
-                && self.block_in_tag("minecraft:convertible_to_mud", &self.block_name(hit.pos))
+                && self
+                    .named_block_in_tag("minecraft:convertible_to_mud", &self.block_name(hit.pos))
                 && (self.may_build()
                     || self.with_hand(hand, |g| g.can_place_on_in_adventure(hit.pos)))
             {

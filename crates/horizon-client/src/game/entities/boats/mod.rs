@@ -1668,7 +1668,14 @@ impl Game<'_> {
         // AbstractChestBoat.destroy -> ContainerEntity.chestVehicleDestroyed:
         // with entity_drops on, a player whose hit breaks a chest boat (not a
         // creative discard) angers the piglins that see it.
-        if chest && hurt == Some(true) && !self.creative && self.ui.rules.bool("entity_drops") {
+        if chest
+            && hurt == Some(true)
+            && !self.creative
+            && self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS)
+        {
             self.anger_piglins(true);
         }
         self.vehicle_attack_sounds(area, sweep, magic.then_some(id));

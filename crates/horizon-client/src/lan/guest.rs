@@ -1205,7 +1205,7 @@ fn write_block_predicate(
         // existing map implementation and a private UTF-16 String key adapter.
         #[derive(PartialEq, Eq)]
         struct Key<'a>(&'a horizon_core::nbt::JavaString);
-        impl horizon_world::java_hash_map::JavaKey for Key<'_> {
+        impl horizon_core::java_hash_map::JavaKey for Key<'_> {
             fn java_hash(&self) -> i32 {
                 self.0
                     .0
@@ -1219,7 +1219,7 @@ fn write_block_predicate(
                 self.0.cmp(other.0)
             }
         }
-        let mut ordered = horizon_world::java_hash_map::JavaHashMap::default();
+        let mut ordered = horizon_core::java_hash_map::JavaHashMap::default();
         for (key, matcher) in state {
             ordered.put(Key(key), matcher);
         }
