@@ -1451,22 +1451,19 @@ mod tests {
                 e.cause.to_string(),
             ));
             let attack = self.spare.load(Ordering::Relaxed);
-            if attack == 1001 && e.entity.id() == 102 {
-                let root = mod_api::EntityRef::new(e.entity.epoch(), 101);
-                assert!(root.start_riding(host, e.entity, true));
-            }
             if attack == 1001
-                && e.entity.id() == 101
+                && e.entity.id() == 102
                 && self
                     .heard
                     .lock()
                     .unwrap()
                     .iter()
-                    .filter(|e| e.0 == 101)
+                    .filter(|e| e.0 == 102)
                     .count()
-                    > 1
+                    == 1
             {
-                return mod_api::Flow::Cancel; // Bound the broken traversal in this regression.
+                let root = mod_api::EntityRef::new(e.entity.epoch(), 101);
+                assert!(root.start_riding(host, e.entity, true));
             }
             if attack == 1002 && e.entity.id() == 102 {
                 assert!(mod_api::EntityRef::new(e.entity.epoch(), 103).discard(host));
@@ -1648,7 +1645,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn passenger_callbacks_cannot_revisit_ancestors_or_discarded_siblings() {
-        for attack in [1002, 1001, 1004] {
+        for attack in [1004, 1001, 1002] {
             with_gate(|game, spare, heard| {
                 let kind = game.res.mob_types().get("minecraft:camel").unwrap().clone();
                 for id in [101, 102, 103] {

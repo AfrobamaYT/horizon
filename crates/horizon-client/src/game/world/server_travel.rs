@@ -425,7 +425,7 @@ impl Game<'_> {
         id: u32,
         to: Dim,
         cause: TravelCause,
-        ancestors: &mut Vec<u32>,
+        visited: &mut Vec<u32>,
     ) -> bool {
         if !self.native_authoritative()
             || !mod_api::__private::listened(mod_api::HookId::EntityTravelToDimension)
@@ -435,7 +435,7 @@ impl Game<'_> {
         let Some(epoch) = self.native_lifecycle.epoch() else {
             return true;
         };
-        if ancestors.contains(&id)
+        if visited.contains(&id)
             || (!self.held_out.contains(&id)
                 && self
                     .native_entity_target(mod_api::EntityRef::new(epoch, id))
@@ -444,7 +444,9 @@ impl Game<'_> {
             return false;
         }
         let entity = mod_api::EntityRef::new(epoch, id);
-        ancestors.push(id);
+        // A callback can reparent a participant into a later subtree.
+        // Keep the whole transition's visited set, not only its active path.
+        visited.push(id);
         let riders = self.entity_passengers(entity).unwrap_or_default();
         let mut cancel = false;
         self.native_entity_travel_to_dimension(
@@ -483,11 +485,13 @@ impl Game<'_> {
             .into_iter()
             .filter(|rider| {
                 self.entity_is_passenger(*rider) == Some(false)
-                    && self.entity_tree_may_travel(rider.id(), to, cause, ancestors)
+                    && self.entity_tree_may_travel(rider.id(), to, cause, visited)
             })
             .collect();
         for rider in accepted {
-            if self.entity_is_passenger(rider) == Some(false) {
+            if self.entity_is_passenger(rider) == Some(false)
+                && !self.mobs.iter().any(|m| m.id == rider.id() && !m.alive())
+            {
                 // Reject callback topology changes: the shared mount path
                 // checks live handles, dimension, cycles and vehicle capacity.
                 self.entity_start_riding(rider, entity, true);
