@@ -895,7 +895,9 @@ impl Game<'_> {
             .slots_named(&Owner::Entity(t), slot_name(slot))
             .as_slice()
         {
-            [s] => self.slot_set_with_effects(s, stack.clone(), !defer),
+            // This path owns onEquipItem below, including immediate writes.
+            // The generic stand slot writer must not emit it a second time.
+            [s] => self.slot_set_with_effects(s, stack.clone(), false),
             _ => false,
         };
         if let (true, Some(at), false) = (written, at, first_tick) {
@@ -1216,25 +1218,27 @@ mod tests {
                 game.audio.heard.clear();
                 game.guest_equipment_breaks.clear();
                 let random = game.world.random.clone();
-                // Pre-migration: decide all losses before mutating any slot.
-                let losses: [Option<(u32, u32)>; 4] = std::array::from_fn(|i| {
-                    let stack = game.armor[i].clone()?;
-                    let max = game.items().get(&stack.item)?.max_damage;
-                    let loss = game.wear(&stack, 1);
-                    (loss > 0).then_some((loss, max))
-                });
+                // Player.hurtArmor supplies FEET, LEGS, CHEST, HEAD;
+                // LivingEntity.doHurtEquipment finishes hurtAndBreak (including
+                // its effects/RNG) before the next slot's durability draw.
                 let mut broken = Vec::new();
-                for (index, (cell, loss)) in game.armor.iter_mut().zip(losses).enumerate() {
-                    if let (Some(stack), Some((loss, max))) = (cell.as_mut(), loss) {
-                        stack.damage = stack.damage.saturating_add(loss).min(max);
-                        if stack.damage >= max {
-                            broken.push((stack.clone(), index));
-                            *cell = None;
-                        }
+                for index in [3, 2, 1, 0] {
+                    let Some(mut stack) = game.armor[index].clone() else {
+                        continue;
+                    };
+                    let max = game.items().get(&stack.item).unwrap().max_damage;
+                    let loss = game.wear(&stack, 1);
+                    if loss == 0 {
+                        continue;
                     }
-                }
-                for (stack, index) in &broken {
-                    game.player_equipment_broke(super::super::armor_slot(*index), stack);
+                    stack.damage = stack.damage.saturating_add(loss).min(max);
+                    if stack.damage >= max {
+                        game.armor[index] = None;
+                        game.player_equipment_broke(super::super::armor_slot(index), &stack);
+                        broken.push(index);
+                    } else {
+                        game.armor[index] = Some(stack);
+                    }
                 }
                 let expected_armor = game.armor.clone();
                 let expected_events = game.guest_equipment_breaks.clone();
@@ -1247,15 +1251,15 @@ mod tests {
                     .map(|event| event.identifier.clone())
                     .collect();
                 let expected_random = game.world.random.next_float();
-                assert_eq!(broken.len(), 2);
+                assert_eq!(broken, [1, 0]);
                 if guest {
-                    assert_eq!(expected_events, [49, 50]);
+                    assert_eq!(expected_events, [50, 49]);
                 } else {
                     assert_eq!(expected_sounds.get("minecraft:entity.item.break"), Some(&1));
                     assert_eq!(expected_sounds.get("minecraft:block.anvil.break"), Some(&1));
                     assert_eq!(
                         expected_sound_order,
-                        ["minecraft:entity.item.break", "minecraft:block.anvil.break"]
+                        ["minecraft:block.anvil.break", "minecraft:entity.item.break"]
                     );
                 }
                 game.armor = armor.clone();
