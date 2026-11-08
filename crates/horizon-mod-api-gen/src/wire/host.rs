@@ -244,7 +244,7 @@ fn resources() -> String {
         let path = trait_path(owner);
         writeln!(store,"if value.is::<std::sync::Arc<dyn {path}>>() {{ let value = *value.downcast::<std::sync::Arc<dyn {path}>>().map_err(|_| WireError::Invalid(\"wrong handler\"))?; return Ok(unsafe {{ (&mut *self.cx).held.insert_long(Box::new(OwnerThread::new(value))) }}); }}").unwrap();
         for container in ["Box", "std::sync::Arc"] {
-            writeln!(load,"if view == std::any::TypeId::of::<{container}<dyn {path}>>() {{ return Ok(Box::new({container}::new(crate::WasmHandler {{ index:id,module }}) as {container}<dyn {path}>)); }}").unwrap();
+            writeln!(load,"if view == std::any::TypeId::of::<{container}<dyn {path}>>() {{ return Ok(Box::new({container}::new(crate::WasmHandler::new(&module,id)) as {container}<dyn {path}>)); }}").unwrap();
         }
     }
     format!(

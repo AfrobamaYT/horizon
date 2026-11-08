@@ -639,11 +639,138 @@ fn dropping_a_handler_releases_its_id_on_the_next_call() {
     );
     assert_eq!(call(&module), Some(0));
     drop(WasmHandler {
-        module: module.clone(),
+        module: module.downgrade(),
         index: Id(123),
     });
     assert_eq!(call(&module), Some(1));
     assert!(!module.running.poisoned.load(Ordering::Relaxed));
+}
+
+struct StopProbe {
+    module: WeakWasmMod,
+    dropped: Arc<AtomicBool>,
+}
+impl Drop for StopProbe {
+    fn drop(&mut self) {
+        assert_eq!(
+            self.module.call(
+                CallClass::Callback,
+                Frame::default(),
+                0,
+                None,
+                |_| {},
+                |r| r.take::<u32>()
+            ),
+            None
+        );
+        self.dropped.store(true, Ordering::Relaxed);
+    }
+}
+fn hold_stop_probe(module: &WasmMod) -> Arc<AtomicBool> {
+    let dropped = Arc::new(AtomicBool::new(false));
+    module
+        .running
+        .group
+        .lock()
+        .unwrap()
+        .store
+        .data_mut()
+        .cx
+        .held
+        .insert_long(Box::new(StopProbe {
+            module: module.downgrade(),
+            dropped: dropped.clone(),
+        }));
+    dropped
+}
+
+#[test]
+fn retained_proxy_does_not_own_running_and_unload_drops_native_resources() {
+    let module = module("i64.const 4398046511108");
+    let proxy = WasmHandler::new(&module, Id(123));
+    let running = Arc::downgrade(&module.running);
+    let dropped = hold_stop_probe(&module);
+    drop(module);
+    assert_eq!(running.strong_count(), 0);
+    assert!(dropped.load(Ordering::Relaxed));
+    assert_eq!(
+        proxy.module.call(
+            CallClass::Callback,
+            Frame::default(),
+            0,
+            None,
+            |_| {},
+            |r| r.take::<u32>()
+        ),
+        None
+    );
+}
+
+#[test]
+fn disable_clears_held_resources_before_retained_proxy_can_call() {
+    let module = module("i64.const 4398046511108");
+    let proxy = WasmHandler::new(&module, Id(123));
+    let dropped = hold_stop_probe(&module);
+    module.disable();
+    assert!(dropped.load(Ordering::Relaxed));
+    assert_eq!(
+        proxy.module.call(
+            CallClass::Callback,
+            Frame::default(),
+            0,
+            None,
+            |_| {},
+            |r| r.take::<u32>()
+        ),
+        None
+    );
+}
+
+#[test]
+fn disable_during_native_import_defers_resource_drop_until_call_returns() {
+    let id = crate::boundary::import_id("StructureRandom", "next_long").unwrap();
+    let module = module(&format!(
+        "i32.const {id} i32.const 0 i32.const 0 i32.const 2048 i32.const 8 call $host drop i64.const 8796093022216"
+    ));
+    let dropped = hold_stop_probe(&module);
+    let mut random = Random(|| {
+        module.disable();
+        assert!(!dropped.load(Ordering::Relaxed));
+        7
+    });
+    let mut frame = Frame::default();
+    frame.set_structure_random_mut(&mut random);
+    assert_eq!(
+        module.call(CallClass::Hook, frame, 0, None, |_| {}, |r| r.take::<i64>()),
+        Some(7)
+    );
+    assert!(dropped.load(Ordering::Relaxed));
+}
+
+#[test]
+fn native_panic_stops_group_before_held_resources_drop() {
+    let id = crate::boundary::import_id("StructureRandom", "next_long").unwrap();
+    let module = module(&format!(
+        "i32.const {id} i32.const 0 i32.const 0 i32.const 2048 i32.const 8 call $host drop i64.const 8796093022216"
+    ));
+    let dropped = hold_stop_probe(&module);
+    let mut random = Random(|| panic!("native callback"));
+    let mut frame = Frame::default();
+    frame.set_structure_random_mut(&mut random);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        module.call(CallClass::Hook, frame, 0, None, |_| {}, |r| r.take::<i64>())
+    }));
+    assert!(result.is_err());
+    assert!(dropped.load(Ordering::Relaxed));
+    assert_eq!(call(&module), None);
+}
+
+#[test]
+fn trap_clears_held_native_resources() {
+    let module = module("unreachable");
+    let dropped = hold_stop_probe(&module);
+    assert_eq!(call(&module), None);
+    assert!(dropped.load(Ordering::Relaxed));
 }
 
 #[test]
