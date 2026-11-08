@@ -13,8 +13,8 @@ use horizon_client::{
         seen_grid::SeenGrid,
         spawn_rules::{Reason, SpawnLevel},
         spawn_selection::{
-            self, Category, Counted, Heightmap, NaturalLevel, SpawnCost, SpawnPlayer, SpawnRequest,
-            SpawnState, Spawned, StructureAt, StructureSpawns,
+            self, Category, Counted, Heightmap, NaturalLevel, PlayerSquares, SpawnCost,
+            SpawnPlayer, SpawnRequest, SpawnState, Spawned, StructureAt, StructureSpawns,
         },
     },
 };
@@ -302,6 +302,8 @@ impl<'p> NearestPlayers<'p> {
     }
 }
 
+/// Up to this many players, a spawn start measures to every one.
+const PLAYERS_SCANNED: usize = 8;
 /// The game level as natural spawning reads it.
 pub(super) struct GameLevel<'g, 'a> {
     pub(super) game: &'g Game<'a>,
@@ -310,6 +312,9 @@ pub(super) struct GameLevel<'g, 'a> {
     pub(super) players: Vec<LevelPlayer>,
     /// Where the non-spectators among them are (`getNearestPlayer`).
     pub(super) nearest: Vec<[f64; 3]>,
+    /// `nearest` by square, built when a spawn start first asks with more
+    /// than [`PLAYERS_SCANNED`] players.
+    pub(super) player_squares: std::cell::OnceCell<PlayerSquares>,
     /// Boxes of the mobs this pass created, not yet in the game's list.
     pub(super) pending: std::cell::RefCell<Vec<Aabb>>,
     /// The types and boxes of what a spawner created this tick.
@@ -456,10 +461,15 @@ impl GameLevel<'_, '_> {
             }
         }
         let bounds = mob.bounds();
+        let vanilla = spawn_selection::max_cluster_size(r.species);
+        let cluster_size = self
+            .game
+            .spawn_cluster_size(&mut mob, r.reason, None, vanilla);
         pending.push(mob);
         Some(Spawned {
             bounds,
             school: true,
+            cluster_size,
         })
     }
 }
@@ -724,6 +734,14 @@ impl NaturalLevel for GameLevel<'_, '_> {
     fn nearest_player_positions(&self) -> &[[f64; 3]] {
         &self.nearest
     }
+    fn player_positions_near(&self, x: f64, z: f64, extent: f64, out: &mut Vec<[f64; 3]>) {
+        if self.nearest.len() <= PLAYERS_SCANNED {
+            out.extend_from_slice(&self.nearest);
+            return;
+        }
+        let squares = (self.player_squares).get_or_init(|| PlayerSquares::new(&self.nearest));
+        squares.near(x, z, extent, out);
+    }
     fn respawn(&self) -> Option<[i32; 3]> {
         // The world spawn point lives in the overworld.
         if self.game.dim != Dim::Overworld {
@@ -853,6 +871,7 @@ impl<'a> Game<'a> {
             w: self.mob_world_base(&[]),
             players,
             nearest,
+            player_squares: Default::default(),
             pending: Default::default(),
             pending_ids: Default::default(),
             spawned: Default::default(),
@@ -1888,6 +1907,85 @@ mod tests {
                 untouched.next_int_bound(1 << 30),
                 "vanilla's nextInt(800) is drawn"
             );
+        });
+    }
+
+    use mod_api::NativeSpawnReason;
+
+    /// Answers the group size limit of a type, reading the mob it is lent.
+    struct ZombieClusters;
+    #[mod_api::horizon_part]
+    impl mod_api::EntityPart for ZombieClusters {
+        fn spawn_cluster_size(
+            &self,
+            host: &dyn mod_api::Host,
+            mob: mod_api::UnspawnedMobRef,
+            reason: NativeSpawnReason,
+            _: Option<mod_api::NativeSpawner>,
+            vanilla: u32,
+        ) -> Option<u32> {
+            assert_eq!(mob.kind(host).unwrap().to_string(), "minecraft:zombie");
+            Some(if reason == NativeSpawnReason::Natural {
+                vanilla * 2
+            } else {
+                1
+            })
+        }
+    }
+    /// A second part on the same type: asked only when the first does not answer.
+    struct LaterClusters;
+    #[mod_api::horizon_part]
+    impl mod_api::EntityPart for LaterClusters {
+        fn spawn_cluster_size(
+            &self,
+            _: &dyn mod_api::Host,
+            _: mod_api::UnspawnedMobRef,
+            _: NativeSpawnReason,
+            _: Option<mod_api::NativeSpawner>,
+            _: u32,
+        ) -> Option<u32> {
+            Some(9)
+        }
+    }
+    /// A part that leaves the limit to vanilla.
+    struct SilentClusters;
+    #[mod_api::horizon_part]
+    impl mod_api::EntityPart for SilentClusters {}
+    struct ClusterMod;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for ClusterMod {
+        fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+            r.entity_part("minecraft:zombie", ZombieClusters);
+            r.entity_part("minecraft:zombie", LaterClusters);
+            r.entity_part("minecraft:skeleton", SilentClusters);
+        }
+    }
+
+    /// The parts of the new mob's type answer the group size limit: a part's answer replaces
+    /// vanilla's for its type and reason (the first part to answer wins), a part that does not
+    /// answer, and a type with no part, leave it to vanilla.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated process for native mods"]
+    fn entity_parts_answer_the_spawn_cluster_size() {
+        use super::super::native_entity_refs::tests::with_game;
+        with_game(|game| {
+            let entries = vec![mod_api::ModEntry::new("clusters", Box::new(ClusterMod))];
+            mod_api::__private::install(entries.into());
+            crate::game::api_values::install_parts(&[mod_api::ModEntry::new(
+                "clusters",
+                Box::new(ClusterMod),
+            )])
+            .unwrap();
+            game.resolve_parts().unwrap();
+            let mob = |id: &str| {
+                let kind = game.res.mob_types().get(id).unwrap().clone();
+                Mob::new(1, kind, Vec3::ZERO, 0.0)
+            };
+            let ask = |id: &str, reason| game.spawn_cluster_size(&mut mob(id), reason, None, 4);
+            assert_eq!(ask("minecraft:zombie", NativeSpawnReason::Natural), Some(8));
+            assert_eq!(ask("minecraft:zombie", NativeSpawnReason::Spawner), Some(1));
+            assert_eq!(ask("minecraft:skeleton", NativeSpawnReason::Natural), None);
+            assert_eq!(ask("minecraft:cow", NativeSpawnReason::Natural), None);
         });
     }
 }

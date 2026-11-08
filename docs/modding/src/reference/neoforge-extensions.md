@@ -24,7 +24,7 @@ arguments itself. **Data** means a content declaration in `crates/horizon-mod-pa
 the game through `crates/horizon-items/src/blocks.rs`. **Handle** means a value or reference type in
 `crates/horizon-mod-api/src/` (`ItemStack`, `ItemResource`, `AttachmentStore`).
 
-`EntityPart` exists today but has one method, `register_goals` (`docs/modding/src/concepts/trait-mods/023-entity-parts-and-mob-goals.md`).
+`EntityPart` exists today but has two methods, `register_goals` and `spawn_cluster_size` (`docs/modding/src/concepts/trait-mods/023-entity-parts-and-mob-goals.md`).
 It does not answer `IEntityExtension` methods; those are covered only where a global hook or a handle does.
 
 ## Counts

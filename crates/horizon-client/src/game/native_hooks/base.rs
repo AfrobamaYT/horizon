@@ -2220,20 +2220,6 @@ impl Game<'_> {
     ) {
         self.fire_player_recipe_discovered(player, name, recipe, cancel);
     }
-    /// A server player is about to travel through a Nether portal, End portal or End gateway. `cause`
-    /// is `nether_portal`, `end_portal` or `end_gateway`. The player's state is not swapped in. Set
-    /// `cancel` to keep them in their current place. Server-side.
-    pub(in crate::game) fn native_player_portal(
-        &mut self,
-        player: u128,
-        name: &str,
-        from_dimension: &str,
-        to_dimension: &str,
-        cause: &str,
-        cancel: &mut bool,
-    ) {
-        self.fire_player_portal(player, name, from_dimension, to_dimension, cause, cancel);
-    }
     /// A server player launched with a riptide trident, after the velocity,
     /// spin attack and grounded lift have been applied. The player's state is
     /// swapped in. No reply is needed.
@@ -4411,18 +4397,23 @@ impl Game<'_> {
     ) {
         self.fire_hurt_enemy(stack, entity, kind);
     }
-    /// A server tick of the stack a player carries in `slot`: where
+    /// A server tick of `stack`, the stack a player carries in `slot`: where
     /// `Inventory.tick` calls `Item.inventoryTick`, for every stack, each tick,
     /// `/tick freeze` included (it stops the world, not the player). `slot` is
     /// as `Inventory` saves it (0 to 35; the armour 100 feet to 103 head; -106
     /// the off hand), and `selected` says it is the held slot.
     /// `ItemPlace::PlayerSlot { player, slot }` reads and changes the stack,
     /// which stays in its slot: an emptied one empties the slot, and the
-    /// player's client gets the change. This runs often, so check the item
-    /// first. Server-side, for every living player of the world (the helpers
-    /// read the acting one).
-    pub(in crate::game) fn native_inventory_tick(&mut self, slot: i32, selected: bool) {
-        self.fire_inventory_tick(slot, selected);
+    /// player's client gets the change. Only the `ItemPart`s attached to
+    /// `stack`'s item hear it. Server-side, for every living player of the world
+    /// (the helpers read the acting one).
+    pub(in crate::game) fn native_inventory_tick(
+        &mut self,
+        stack: &ItemStack,
+        slot: i32,
+        selected: bool,
+    ) {
+        self.fire_inventory_tick(stack, slot, selected);
     }
     /// A player's equipment slot `slot` (`head`, `chest`, `legs`, `feet`,
     /// `offhand`, and `mainhand` on a swap of the hands or `/item`) took a different
