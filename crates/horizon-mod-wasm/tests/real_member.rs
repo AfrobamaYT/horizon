@@ -2,6 +2,12 @@
 use horizon_mod_package::manifest::Package;
 use horizon_mod_wasm::{WasmPackage, load};
 
+struct Quiet;
+impl mod_api::Host for Quiet {}
+mod_api::impl_host_areas!(Quiet);
+impl mod_api::ServerHost for Quiet {}
+mod_api::impl_server_host_areas!(Quiet);
+
 #[test]
 fn dump_members() {
     for (name, path) in [
@@ -44,12 +50,52 @@ fn real_member() {
         return;
     };
     let path = std::path::Path::new(&fixture);
+    let manifest = Package::read(path).unwrap().manifest;
+    let info = mod_api::PackageInfo::new(
+        manifest.id.clone(),
+        manifest.version.clone(),
+        mod_api::PackageKind::Code,
+        mod_api::Side::Both,
+        vec![manifest.id.clone()],
+        manifest.dependencies.keys().cloned().collect(),
+    );
     let package = WasmPackage {
-        manifest: Package::read(path).unwrap().manifest,
+        manifest,
         module: Package::read_wasm(path).unwrap(),
     };
     // load checks the layout and calls Hooks::subscribed through the real host boundary.
     let loaded = load(&std::fs::read(std).unwrap(), vec![package]);
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
     assert_eq!(loaded.mods.len(), 1);
+    loaded
+        .initialize(&[info])
+        .expect("guest initialization and point registration");
+    mod_api::testing::with_mods(loaded.mods.into(), || {
+        mod_api::__private::install_parts(
+            mod_api::__private::mods(),
+            &mod_api::__private::part_tests::rule_schema(),
+        )
+        .unwrap();
+        assert!(
+            mod_api::__private::block_entity_types()
+                .iter()
+                .any(|kind| kind.id == "wasm_fixture:counter")
+        );
+        mod_api::__private::mark_game_thread();
+        let mut entity =
+            mod_api::ModBlockEntity::new("wasm_fixture:counter".into(), Default::default());
+        mod_api::dispatch_block_entity_tick(&mut Quiet, [0, 64, 0], &mut entity);
+        assert_eq!(entity.data, [23]);
+        assert_eq!(
+            entity.nbt.get(&"counter".into()),
+            Some(&mod_api::Tag::Int(17))
+        );
+    });
+    mod_points::__private::seal();
+    let mut args = mod_points::TickArgs::__new();
+    mod_points::dispatch::tick(mod_api::HostSide::Server(&mut Quiet), &mut args);
+    assert!(
+        args.cancel,
+        "real wasm listener must modify the point record"
+    );
 }
