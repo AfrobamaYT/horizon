@@ -1,7 +1,6 @@
 //! The build-tool fixture is a real shared module, not a component.
 use horizon_mod_package::manifest::Package;
-use horizon_mod_wasm::link::{Group, Member};
-use wasmtime::{Engine, Val};
+use horizon_mod_wasm::{WasmPackage, load};
 
 #[test]
 fn dump_members() {
@@ -44,34 +43,13 @@ fn real_member() {
         eprintln!("skipping: HORIZON_WASM_FIXTURE and HORIZON_WASM_STD are not set");
         return;
     };
-    let module = Package::read_wasm(std::path::Path::new(&fixture)).unwrap();
-    let std = std::fs::read(std).unwrap();
-    let mut group = Group::link(
-        &Engine::default(),
-        &[
-            Member {
-                name: "std",
-                module: &std,
-            },
-            Member {
-                name: "fixture",
-                module: &module,
-            },
-        ],
-    )
-    .unwrap();
-    let mut result = [Val::I64(0)];
-    group
-        .call("fixture", "horizon_layout", &[], &mut result)
-        .unwrap();
-    assert_ne!(result[0].unwrap_i64(), 0);
-    // Hooks::subscribed has no arguments. An empty fixture returns an empty vector.
-    group
-        .call("fixture", "horizon_in", &[Val::I32(0)], &mut [Val::I32(0)])
-        .unwrap();
-    let mut reply = [Val::I64(0)];
-    group
-        .call("fixture", "horizon_hook", &[Val::I32(0)], &mut reply)
-        .unwrap();
-    assert_eq!(reply[0].unwrap_i64() as u32, 4);
+    let path = std::path::Path::new(&fixture);
+    let package = WasmPackage {
+        manifest: Package::read(path).unwrap().manifest,
+        module: Package::read_wasm(path).unwrap(),
+    };
+    // load checks the layout and calls Hooks::subscribed through the real host boundary.
+    let loaded = load(&std::fs::read(std).unwrap(), vec![package]);
+    assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
+    assert_eq!(loaded.mods.len(), 1);
 }
