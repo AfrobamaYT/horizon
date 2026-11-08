@@ -3,7 +3,50 @@ use quote::quote;
 use std::{collections::BTreeMap, fs, path::PathBuf};
 fn main() {
     let entries = [("Data", "struct", "struct Data { list: Vec<u32>, choice: Choice, map: BTreeMap<u8,u32>, set: BTreeSet<u32> }"), ("Choice", "enum", "enum Choice { Empty, Value(u32) }")].map(|(name,kind,signature)| Internal { path: format!("horizon_client::model::{name}"), kind, signature: signature.into(), cfg: String::new(), hash: String::new(), shape_only: false, opaque_reason: None, refs: BTreeMap::from([("BTreeMap".into(), "std::collections::BTreeMap".into()),("BTreeSet".into(),"std::collections::BTreeSet".into())]) });
+    let mut entries = entries.to_vec();
+    for (name, signature, opaque) in [
+        (
+            "Game",
+            "struct Game { hidden: Opaque, later: Leaf, other: u32 }",
+            None,
+        ),
+        ("Opaque", "struct Opaque { value: u32 }", Some("opaque")),
+        ("Leaf", "struct Leaf { value: u32 }", None),
+    ] {
+        entries.push(Internal {
+            path: format!("horizon_client::model::{name}"),
+            kind: "struct",
+            signature: signature.into(),
+            cfg: String::new(),
+            hash: String::new(),
+            shape_only: false,
+            opaque_reason: opaque,
+            refs: BTreeMap::new(),
+        });
+    }
     let rule = Rule::new(&entries);
+    let ty: syn::Type = syn::parse_str("Game").unwrap();
+    let shape = rule.shape("horizon_client::model", None, &ty);
+    let mut graph = horizon_mod_api_gen::native_policy::Graph::default();
+    let root = graph.add(&rule, &shape);
+    let layouts = graph.tokens();
+    let body = native_patch::generate_runtime(
+        &rule,
+        "horizon_client::model",
+        None,
+        &ty,
+        quote!(*value),
+        quote!(tree),
+        quote!(*plan),
+        true,
+        &graph,
+        quote!(policy),
+    )
+    .unwrap();
+    let runtime = quote! {
+        fn policy() -> mod_points::exposure::Plan { mod_points::exposure::Plan::build(&#layouts, Some(#root), &[mod_points::exposure::Grant { case: None, ordinal: 1 }], &[]).unwrap() }
+        fn plan_game<'a>(value: &'a mut model::Game, tree: &mod_points::native_patch::PatchTree<'_>, plan: &mut mod_api::wire::PatchPlan<'a>, policy: &mod_points::exposure::Plan) -> Result<(), mod_api::wire::WireError> { #body Ok(()) }
+    };
     let mut funcs = Vec::new();
     for (name, ty, writable) in [
         ("plan_data", "Data", true),
@@ -40,7 +83,7 @@ fn main() {
     }
     fs::write(
         PathBuf::from(std::env::var_os("OUT_DIR").unwrap()).join("patch.rs"),
-        quote!(#(#funcs)*).to_string(),
+        quote!(#runtime #(#funcs)*).to_string(),
     )
     .unwrap();
 }

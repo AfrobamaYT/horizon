@@ -47,6 +47,7 @@ pub struct Grant {
 pub struct Plan {
     fields: Vec<HashSet<(Option<u32>, u32)>>,
     keys: Vec<Option<u64>>,
+    complete: Vec<bool>,
 }
 
 impl Plan {
@@ -100,8 +101,18 @@ impl Plan {
                 continue;
             }
             let layout = &layouts[id];
-            if let Some(reason) = &layout.opaque {
-                return Err(format!("{}: {reason}", layout.name));
+            if layout.opaque.is_some() {
+                if Some(id) == receiver
+                    || receiver.is_some_and(|r| {
+                        layouts[r]
+                            .fields
+                            .iter()
+                            .any(|f| selected.contains(&(f.case, f.ordinal)) && f.target == id)
+                    })
+                {
+                    return Err(format!("{}: opaque receiver member", layout.name));
+                }
+                continue;
             }
             pending.extend(&layout.children);
             for field in &layout.fields {
@@ -120,6 +131,9 @@ impl Plan {
             let mut pending = vec![root];
             while let Some(id) = pending.pop() {
                 if graph.insert(&layouts[id].name, id).is_some() {
+                    continue;
+                }
+                if layouts[id].opaque.is_some() {
                     continue;
                 }
                 pending.extend(&layouts[id].children);
@@ -166,7 +180,40 @@ impl Plan {
             }
             keys[root] = Some(hash);
         }
-        Ok(Self { fields, keys })
+        let mut complete = vec![false; layouts.len()];
+        for &root in &reachable {
+            let mut seen = BTreeSet::new();
+            let mut pending = vec![root];
+            let mut allowed = true;
+            while let Some(id) = pending.pop() {
+                if !seen.insert(id) {
+                    continue;
+                }
+                let layout = &layouts[id];
+                if layout.opaque.is_some()
+                    || layout
+                        .fields
+                        .iter()
+                        .any(|f| !fields[id].contains(&(f.case, f.ordinal)))
+                {
+                    allowed = false;
+                    break;
+                }
+                pending.extend(&layout.children);
+                pending.extend(layout.fields.iter().map(|f| f.target));
+            }
+            complete[root] = allowed;
+        }
+        Ok(Self {
+            fields,
+            keys,
+            complete,
+        })
+    }
+
+    /// Whether the entire reachable layout is exposed and constructible.
+    pub fn complete(&self, id: usize) -> bool {
+        self.complete.get(id).copied().unwrap_or(false)
     }
 
     /// Selected-layout schema key, or `None` for a type not reachable from this endpoint.

@@ -3,6 +3,17 @@
 #[cfg(test)]
 mod model {
     use std::collections::{BTreeMap, BTreeSet};
+    pub struct Opaque {
+        pub value: u32,
+    }
+    pub struct Leaf {
+        pub value: u32,
+    }
+    pub struct Game {
+        pub hidden: Opaque,
+        pub later: Leaf,
+        pub other: u32,
+    }
     #[derive(Debug, PartialEq)]
     pub struct Data {
         pub list: Vec<u32>,
@@ -38,6 +49,42 @@ mod tests {
         steps
             .iter()
             .fold(root, |id, s| l.intern(Some(id), *s).unwrap())
+    }
+    #[test]
+    fn partial_policy_is_atomic() {
+        let policy = policy();
+        let mut l = Locators::default();
+        let root = l.intern(None, Step::Root(1)).unwrap();
+        let later = path(&mut l, root, &[Step::Field(1), Step::Field(0)]);
+        let hidden = path(&mut l, root, &[Step::Field(0)]);
+        let other = path(&mut l, root, &[Step::Field(2)]);
+        for denied in [None, Some(hidden), Some(other), Some(root)] {
+            let mut value = model::Game {
+                hidden: model::Opaque { value: 3 },
+                later: model::Leaf { value: 4 },
+                other: 5,
+            };
+            let mut p = RecordPatch::default();
+            if denied != Some(root) {
+                p.set(later, &9u32).unwrap();
+            }
+            if let Some(id) = denied {
+                p.set(id, &7u32).unwrap();
+            }
+            let trees = PatchTree::roots(&l, &[root], &p).unwrap();
+            let mut plan = PatchPlan::default();
+            let result = plan_game(&mut value, &trees[0], &mut plan, &policy);
+            if denied.is_none() {
+                result.unwrap();
+                plan.commit().unwrap();
+            } else {
+                assert!(result.is_err());
+                drop(plan);
+            }
+            assert_eq!(value.later.value, if denied.is_none() { 9 } else { 4 });
+            assert_eq!(value.hidden.value, 3);
+            assert_eq!(value.other, 5);
+        }
     }
     #[test]
     fn tuple_box_option_array_deque_and_whole_replacement() {
