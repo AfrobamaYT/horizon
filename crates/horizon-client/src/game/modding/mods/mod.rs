@@ -229,6 +229,7 @@ struct NativeDeclared {
     blocks: Vec<horizon_mod_package::content::Block>,
     items: Vec<horizon_mod_package::content::Item>,
     types: Vec<horizon_mod_package::content::BlockEntityType>,
+    fluids: Vec<horizon_mod_package::content::FluidLook>,
 }
 
 /// The same native declarations serve startup and every pack reload.
@@ -241,7 +242,7 @@ fn native_declared() -> &'static NativeDeclared {
         let types = super::api_values::block_entity_declarations();
         use super::api_values::TryIntoEngine;
         let mut errors = Vec::new();
-        let blocks = blocks
+        let mut blocks: Vec<horizon_mod_package::content::Block> = blocks
             .iter()
             .filter_map(|v| {
                 v.try_into_engine(&())
@@ -254,7 +255,7 @@ fn native_declared() -> &'static NativeDeclared {
                     .ok()
             })
             .collect();
-        let items = items
+        let mut items: Vec<horizon_mod_package::content::Item> = items
             .iter()
             .filter_map(|v| {
                 v.try_into_engine(&())
@@ -267,11 +268,29 @@ fn native_declared() -> &'static NativeDeclared {
                     .ok()
             })
             .collect();
+        let fluids: Vec<_> = mod_api::__private::declared_world_fluids()
+            .iter()
+            .map(|(id, fluid)| horizon_mod_package::content::FluidLook {
+                id: id.clone(),
+                sprite: None,
+                tint: None,
+                world: Some(horizon_mod_package::content::WorldFluid {
+                    tick_delay: fluid.tick_delay,
+                    drop_off: fluid.drop_off,
+                    slope_find_distance: fluid.slope_find_distance,
+                    source_conversion: fluid.source_conversion,
+                    bucket: fluid.bucket,
+                }),
+            })
+            .collect();
+        blocks.extend(fluids.iter().filter_map(|f| f.world_block()));
+        items.extend(fluids.iter().filter_map(|f| f.world_bucket()));
         NativeDeclared {
             errors,
             blocks,
             items,
             types,
+            fluids,
         }
     })
 }
@@ -281,6 +300,35 @@ pub(super) fn register_standalone_models(role: ExecutionRole) {
     if let Some(names) = collect_standalone_models(role) {
         horizon_client::models::register_standalone(names);
     }
+    register_fluid_models(role);
+}
+
+/// Recollect before each resource bake, retaining registration-phase attribution.
+pub(super) fn register_fluid_models(role: ExecutionRole) {
+    if let Some(models) = collect_fluid_models(role) {
+        horizon_client::fluid_models::register(models);
+    }
+}
+
+fn collect_fluid_models(
+    role: ExecutionRole,
+) -> Option<Vec<horizon_mod_package::content::FluidModel>> {
+    if !role.is_client() {
+        return None;
+    }
+    let mut models = Vec::new();
+    Game::native_register_fluid_models(&RegistrationContext::new(), &mut models);
+    Some(
+        models
+            .into_iter()
+            .map(|model| horizon_mod_package::content::FluidModel {
+                fluid: model.fluid,
+                still: model.still,
+                flowing: model.flowing,
+                overlay: model.overlay,
+            })
+            .collect(),
+    )
 }
 
 fn collect_standalone_models(role: ExecutionRole) -> Option<Vec<String>> {
@@ -316,6 +364,13 @@ pub(super) fn register_debug_entries(role: ExecutionRole) {
     let mut entries = Vec::new();
     Game::native_register_debug_entries(&RegistrationContext::new(), &mut entries);
     horizon_client::debug_entries::register(entries);
+}
+/// The native mods' map decoration types (`native_map_decoration_types`), frozen once at start on
+/// every side.
+pub(super) fn register_map_decoration_types() {
+    let mut types = Vec::new();
+    Game::native_map_decoration_types(&RegistrationContext::new(), &mut types);
+    horizon_client::map_decoration_types::register(types, Game::is_vanilla_decoration_sprite);
 }
 /// The native mods' HUD layers (`native_register_gui_layers`), placed among vanilla's once at
 /// start.
@@ -371,6 +426,16 @@ pub(super) fn register_item_tint_sources(role: ExecutionRole) {
     Game::native_register_item_tint_sources(&RegistrationContext::new(), &mut sources);
     horizon_assets::item_model::register_tint_sources(sources);
 }
+/// Resolve client dimension-transition registrations once, before the first level opens.
+pub(super) fn register_dimension_transition_screens(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut screens = Vec::new();
+    Game::native_register_dimension_transition_screen(&RegistrationContext::new(), &mut screens);
+    horizon_client_render::dimension_transition::register(screens);
+}
+
 /// The native mods' block tint sources (`native_register_block_tint_sources`), kept once at
 /// start, before resources load; every resource load applies them to its mesh tables.
 pub(super) fn register_block_tint_sources(role: ExecutionRole) {
@@ -538,6 +603,7 @@ pub(super) fn content_overlay(
         blocks,
         items,
         types,
+        fluids,
     } = native_declared();
     if !errors.is_empty() {
         return Err(errors.join("\n").into());
@@ -551,6 +617,7 @@ pub(super) fn content_overlay(
         if !errors.is_empty() {
             return Err(errors.join("\n").into());
         }
+        mod_content::accept_world_fluids(&mut mods, fluids);
         // A file item's remainder named a code-declared item that was refused: that mod
         // alone is left out, not every content mod through the overlay's check.
         for e in mod_content::drop_dangling_remainders(&mut mods) {
@@ -678,6 +745,7 @@ pub(super) fn content_root(
 ) -> horizon_client::Result<horizon_assets::resource_source::ResourceRoot> {
     let jar_store = horizon_client::logging::game_home().join("jars");
     let overlay = content_overlay(root, sources, &jar_store)?;
+    let world_fluids = horizon_client::mod_content::register_world_fluids(&overlay.mods)?;
     register_block_entity_types(overlay.root.prepared(), &overlay.mods)?;
     if overlay.announce {
         horizon_protocol::mod_list::set_local(overlay.announced);
@@ -702,10 +770,11 @@ pub(super) fn content_root(
     let fluids = behavior["fluids"]
         .as_array()
         .ok_or("missing fluid registry")?;
-    let fluids = fluids
+    let mut fluids = fluids
         .iter()
         .map(|value| value.as_str().ok_or("invalid fluid registry entry"))
         .collect::<Result<Vec<_>, _>>()?;
+    fluids.extend(world_fluids.iter().map(String::as_str));
     mod_api::__private::resolve_fluids(
         &fluids,
         &horizon_world::fluid::FluidKind::ALL.map(|kind| kind.name()),
@@ -829,7 +898,23 @@ fn register_menu_types(mods: &[horizon_client::mod_content::ContentMod]) {
     let menus = horizon_client::mod_content::menu_types(mods);
     let set = containers::register_mod_menu_types(menus.iter().map(|m| {
         let results = m.results.iter().map(|&r| usize::from(r)).collect();
-        (m.id.clone(), m.slots.into(), m.data_slots.into(), results)
+        let crafting = m.crafting.map(|c| containers::ModCrafting {
+            grid: c.grid.into(),
+            size: c.size.into(),
+            result: c.result.into(),
+        });
+        let links = m.links.map(|l| containers::ModLinks {
+            from: l.from.into(),
+            count: l.count.into(),
+        });
+        (
+            m.id.clone(),
+            m.slots.into(),
+            m.data_slots.into(),
+            results,
+            crafting,
+            links,
+        )
     }));
     if !set
         && containers::mod_menu_types()
@@ -1633,6 +1718,107 @@ mod tests {
         assert_eq!(
             (loaded.kind.id.as_str(), loaded.species()),
             ("ruby:merchant", Species::WanderingTrader)
+        );
+    }
+
+    #[test]
+    fn fluid_models_recollection_changes_model_identifiers() {
+        use mod_api::{FluidModel, Hooks, ModEntry, RegisterFluidModelsEvent, testing::with_mods};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        #[derive(Default)]
+        struct Models(Arc<AtomicUsize>);
+        #[mod_api::horizon_mod]
+        impl Hooks for Models {
+            fn register_fluid_models(
+                &self,
+                _: &RegistrationContext,
+                event: &mut RegisterFluidModelsEvent<'_>,
+            ) {
+                let generation = self.0.load(Ordering::SeqCst);
+                let mut model = FluidModel::default();
+                model.fluid = "reload_fluid:oil".into();
+                model.still = Some(format!("reload_fluid:block/oil_{generation}"));
+                event.models.push(model);
+            }
+        }
+        let generation = Arc::new(AtomicUsize::new(0));
+        with_mods(
+            vec![ModEntry::new(
+                "reload_fluid",
+                Box::new(Models(generation.clone())),
+            )]
+            .into(),
+            || {
+                mod_api::__private::with_test_packages(&["reload_fluid"], || {
+                    horizon_client::fluid_models::set_world_looks([
+                        &horizon_mod_package::content::FluidLook {
+                            id: "reload_fluid:oil".into(),
+                            sprite: None,
+                            tint: None,
+                            world: Some(Default::default()),
+                        },
+                    ]);
+                    register_fluid_models(ExecutionRole::Client);
+                    assert_eq!(
+                        horizon_client::fluid_models::resolved()[0].still,
+                        "reload_fluid:block/oil_0"
+                    );
+                    generation.store(1, Ordering::SeqCst);
+                    register_fluid_models(ExecutionRole::Client);
+                    assert_eq!(
+                        horizon_client::fluid_models::resolved()[0].still,
+                        "reload_fluid:block/oil_1"
+                    );
+                    horizon_client::fluid_models::register(vec![]);
+                    horizon_client::fluid_models::set_world_looks([]);
+                });
+            },
+        );
+    }
+
+    #[test]
+    fn fluid_models_collect_only_on_the_client() {
+        use mod_api::FluidModel;
+        use mod_api::{Hooks, ModEntry, RegisterFluidModelsEvent, testing::with_mods};
+        #[derive(Default)]
+        struct Models;
+        #[mod_api::horizon_mod]
+        impl Hooks for Models {
+            fn register_fluid_models(
+                &self,
+                _: &RegistrationContext,
+                event: &mut RegisterFluidModelsEvent<'_>,
+            ) {
+                let mut model = FluidModel::default();
+                model.fluid = "registration_test:oil".into();
+                model.flowing = Some("registration_test:block/oil_flow".into());
+                model.overlay = Some("registration_test:block/oil_overlay".into());
+                event.models.push(model);
+            }
+        }
+        with_mods(
+            vec![ModEntry::new("registration_test", Box::new(Models))].into(),
+            || {
+                mod_api::__private::with_test_packages(&["registration_test"], || {
+                    for server in [
+                        ExecutionRole::IntegratedServer,
+                        ExecutionRole::DedicatedServer,
+                    ] {
+                        assert_eq!(collect_fluid_models(server), None);
+                    }
+                    let models = collect_fluid_models(ExecutionRole::Client).unwrap();
+                    assert_eq!(models.len(), 1);
+                    assert_eq!(models[0].fluid, "registration_test:oil");
+                    assert_eq!(
+                        models[0].flowing.as_deref(),
+                        Some("registration_test:block/oil_flow")
+                    );
+                    assert_eq!(
+                        models[0].overlay.as_deref(),
+                        Some("registration_test:block/oil_overlay")
+                    );
+                });
+            },
         );
     }
 

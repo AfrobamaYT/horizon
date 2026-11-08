@@ -49,7 +49,8 @@ fn reload_resolves_parts_against_reloaded_tags() {
         let prepared = game
             .prepare_world_reload(&stack, &root, game.mods.data_switched)
             .unwrap();
-        game.reload_world_tables(prepared);
+        game.install_world_tables(prepared);
+        game.run_native_advancement_grants();
         assert_eq!(stone_key.id(game), name);
         assert_eq!(
             stone_key,

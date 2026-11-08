@@ -59,6 +59,7 @@ pub enum PartKind {
     BlockEntity,
     Item,
     Menu,
+    Fluid,
 }
 
 /// A scoped hook: a Part method, called on the Parts attached to what `key` names.

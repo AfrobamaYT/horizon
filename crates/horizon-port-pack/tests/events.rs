@@ -98,6 +98,7 @@ const LABELS: &str = r#"{"hooks": [
     {"name": "open_menu", "neoforge": "IPlayerExtension.openMenu(MenuProvider)"},
     {"name": "block_entity_container", "neoforge": "Capabilities.Item.BLOCK"},
     {"name": "recipes_received", "neoforge": "RecipesReceivedEvent"},
+    {"name": "two_events", "neoforge": "OneEvent, TwoEvent"},
     {"name": "standalone_models", "neoforge": "ModelEvent.RegisterStandalone"},
     {"name": "render_tooltip_texture", "neoforge": "RenderTooltipEvent.Texture"},
     {"name": "anvil_craft_pre", "neoforge": "AnvilCraftEvent.Pre"},
@@ -173,6 +174,9 @@ fn labels_give_counterparts_phases_notes_and_new_names() {
             Some("AnvilCraftEvent.Pre".to_owned())
         )
     );
+    // A label names each event of a comma-separated list.
+    assert_eq!(c.status("OneEvent"), hooked(&["two_events"]));
+    assert_eq!(c.status("TwoEvent"), hooked(&["two_events"]));
     for missing in [
         "ModConfigEvent.Unloading",
         "RegisterPayloadHandlersEvent",
@@ -240,12 +244,20 @@ fn the_built_in_catalog_parses() {
     for (counterpart, hook) in [
         ("AnvilUpdateEvent", "anvil_update"),
         ("RenderTooltipEvent.Pre", "render_tooltip_pre"),
+        // The system subclass is a name of its own to a tool reading listeners.
+        ("ClientChatReceivedEvent.System", "client_chat_received"),
     ] {
         let (Status::Hooked(hooks), None) = c.status(counterpart) else {
             panic!("{counterpart} has no hook");
         };
         assert_eq!(hooks, [hook]);
     }
+    // A label that names two events with a comma, as `mob_spawned` does:
+    // a tool listening to the name finds it beside the other hooks of the event.
+    let (Status::Hooked(hooks), None) = c.status("EntityJoinLevelEvent") else {
+        panic!("EntityJoinLevelEvent has no hook");
+    };
+    assert!(hooks.contains(&"mob_spawned".to_owned()), "{hooks:?}");
 }
 
 #[test]

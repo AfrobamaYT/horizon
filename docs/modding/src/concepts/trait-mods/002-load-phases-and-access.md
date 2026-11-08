@@ -64,3 +64,5 @@ There is no separate common-setup, load-complete or intermod event: registration
 reload cover common setup, client setup is `client_setup`, dedicated setup is `server_about_to_start`,
 and dependencies express intermod ordering. Load complete is the edge after initial Config and before
 `server_about_to_start`, not a hook.
+
+Settings snapshots accept only regular UTF-8 files, without following file or package-directory symlinks (including internal links). Invalid UTF-8, special files and refused entries are absent, not errors. Each file is limited to 64 KiB before trimming, each mod to 1,024 captured keys, and the whole snapshot to 16 MiB before trimming. Over-limit keys are omitted in sorted package-id and key-name order. Enumeration is limited to 4,096 names per package; packages exceeding that budget are omitted entirely rather than retaining an unstable enumeration prefix. One warning per refusal class is emitted per snapshot. These generous limits cover the small scalar setting values used by the settings API; they do not apply to mod data files.

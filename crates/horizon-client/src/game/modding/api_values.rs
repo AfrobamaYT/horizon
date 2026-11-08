@@ -571,6 +571,7 @@ impl TryIntoEngine for mod_api::NativeItemDrop {
     type Error = StackWriteError;
     fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
         Ok(Self::Engine {
+            random: None,
             stack: self.stack.try_into_engine(items)?,
             position: self.position,
             velocity: self.velocity,

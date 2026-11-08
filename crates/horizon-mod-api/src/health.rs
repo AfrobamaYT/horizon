@@ -1,4 +1,18 @@
-//! Moved here from the game so mods can name it.
+//! API-owned health and damage values.
+/// How a modifier changes what a reduction took (NeoForge's `IReductionsModifier`, as plain
+/// data so it also crosses into a wasm mod).
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub enum ReductionChange {
+    /// Take this much more off (less when negative).
+    Add(f32),
+    /// Take this many times as much.
+    Scale(f32),
+    /// Take at least this much.
+    AtLeast(f32),
+    /// Take at most this much.
+    AtMost(f32),
+}
 #[allow(unused_imports)]
 use crate::*;
 /// What took a share of a hit before the health, as NeoForge's `DamageContainer.Reduction`
@@ -23,7 +37,7 @@ pub enum Reduction {
 /// A hit's damage sequence as plain values, field for field: the form it crosses into a wasm
 /// mod as. Reduction storage is crate-visible only for the generated wasm codec; mods use
 /// the reduction accessors so future reduction kinds do not expose a fixed array layout.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct DamageValues {
     /// The damage sequence's `original` value.
@@ -39,6 +53,8 @@ pub struct DamageValues {
     /// The damage sequence's `should_cause_side_effects` value.
     pub should_cause_side_effects: bool,
     pub(crate) reductions: [f32; 6],
+    /// Ordered reduction adjustments for this hit.
+    pub reduction_modifiers: Vec<(Reduction, ReductionChange)>,
     /// The damage sequence's `entered_pre` value.
     pub entered_pre: f32,
     /// The damage sequence's `inflicted` value.
@@ -58,7 +74,7 @@ impl DamageValues {
     }
 }
 /// A plain snapshot of one hit. Sequencing and normalization remain owned by the game.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 // exhaustive: its wrapped values are private; mods use constructors and accessors
 pub struct DamageContainer(DamageValues);
 impl From<DamageValues> for DamageContainer {
@@ -68,10 +84,19 @@ impl From<DamageValues> for DamageContainer {
 }
 impl From<&DamageContainer> for DamageValues {
     fn from(value: &DamageContainer) -> Self {
-        value.0
+        value.0.clone()
     }
 }
 impl DamageContainer {
+    /// Append a per-hit modifier, applied by the engine in registration order.
+    pub fn add_reduction_modifier(&mut self, reduction: Reduction, change: ReductionChange) {
+        self.0.reduction_modifiers.push((reduction, change));
+    }
+    /// Iterate the modifiers registered for this hit in order.
+    pub fn reduction_modifiers(&self) -> impl Iterator<Item = (Reduction, ReductionChange)> + '_ {
+        self.0.reduction_modifiers.iter().copied()
+    }
+
     /// Begin a snapshot with the incoming damage and vanilla's default cooldown.
     pub fn new(original: f32) -> Self {
         Self(DamageValues {
@@ -82,6 +107,7 @@ impl DamageContainer {
             post_attack_invulnerability_ticks: 20,
             should_cause_side_effects: false,
             reductions: [0.0; 6],
+            reduction_modifiers: Vec::new(),
             entered_pre: 0.0,
             inflicted: 0.0,
             health_damage: 0.0,

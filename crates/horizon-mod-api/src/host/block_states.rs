@@ -129,6 +129,12 @@ pub trait BlockStatesBackend {
     #[access(Metadata)]
     fn block_state_has_block_entity(&self, state: BlockState) -> Option<bool>;
     /// Side: both.
+    /// `BlockState.getMapColor(level, pos)` for a state whose colour does not depend on where it
+    /// stands: its `MapColor.id`, 0 (`MapColor.NONE`) for no colour. Map items colour a column
+    /// by it (`MapItem.update`). None for an unknown state.
+    #[access(Metadata)]
+    fn block_state_map_color(&self, state: BlockState) -> Option<u8>;
+    /// Side: both.
     /// The states of `block` (`StateDefinition.getPossibleStates`) in immutable local ordinal
     /// order, independent of world numeric IDs. None for unavailable metadata or an unknown block.
     #[access(Metadata)]

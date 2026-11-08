@@ -138,14 +138,6 @@ enum Target {
     Stand(usize),
 }
 
-/// `new ItemEntity(level, x, y, z, stack)`'s motion, from the item's own random.
-pub(super) fn new_item_motion() -> [f64; 3] {
-    let mut r = random_source::entity();
-    let x = r.next_double() * 0.2 - 0.1;
-    let z = r.next_double() * 0.2 - 0.1;
-    [x, 0.2, z]
-}
-
 /// `EquipmentSlot`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Slot {
@@ -646,6 +638,9 @@ impl Game<'_> {
             "minecraft:honeycomb" => self.dispense_honeycomb(pos, facing, stack)?,
             "minecraft:potion" => self.dispense_potion(pos, facing, stack)?,
             _ if item.ends_with("shulker_box") => self.dispense_shulker_box(pos, facing, stack)?,
+            _ if horizon_world::fluid::mod_fluid_of_bucket(&item).is_some() => {
+                self.dispense_filled_bucket(pos, facing, stack)?
+            }
             _ if super::boats::any_boat_wood(&item).is_some() => {
                 self.dispense_boat(pos, facing, stack)
             }
@@ -1835,9 +1830,7 @@ impl Game<'_> {
         y_offset: f64,
         stack: ItemStack,
     ) -> [f64; 3] {
-        let v = new_item_motion();
-        self.spawn_item(stack, [at.x, at.y + y_offset, at.z], v, 10);
-        v
+        self.spawn_item_own(stack, [at.x, at.y + y_offset, at.z], 10)
     }
     /// `MushroomCow.shear`: `player` is who sheared it, none for a dispenser.
     pub(super) fn shear_mooshroom(&mut self, index: usize, player: Option<u128>, tool: &ItemStack) {
@@ -1886,13 +1879,12 @@ impl Game<'_> {
                 );
                 for stack in drops {
                     for _ in 0..stack.count {
-                        game.spawn_item(
+                        game.spawn_item_own(
                             ItemStack {
                                 count: 1,
                                 ..stack.clone()
                             },
                             [at.x, at.y + height, at.z],
-                            new_item_motion(),
                             0,
                         );
                     }

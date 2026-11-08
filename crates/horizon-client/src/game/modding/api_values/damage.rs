@@ -10,6 +10,31 @@ impl TryIntoApi for engine::DamageContainer {
         CONVERSIONS.with(|count| count.set(count.get() + 1));
         let v = engine::DamageValues::from(self);
         let mut values = DamageValues::from(&DamageContainer::new(v.original));
+        values.reduction_modifiers = v
+            .reduction_modifiers
+            .iter()
+            .map(|(r, c)| {
+                (
+                    match r {
+                        engine::Reduction::Invulnerability => Reduction::Invulnerability,
+                        engine::Reduction::Armor => Reduction::Armor,
+                        engine::Reduction::Enchantments => Reduction::Enchantments,
+                        engine::Reduction::MobEffects => Reduction::MobEffects,
+                        engine::Reduction::Absorption => Reduction::Absorption,
+                        engine::Reduction::InnateResistance => Reduction::InnateResistance,
+                        _ => unreachable!("unknown engine reduction"),
+                    },
+                    match c {
+                        engine::ReductionChange::Add(v) => mod_api::ReductionChange::Add(*v),
+                        engine::ReductionChange::Scale(v) => mod_api::ReductionChange::Scale(*v),
+                        engine::ReductionChange::AtLeast(v) => {
+                            mod_api::ReductionChange::AtLeast(*v)
+                        }
+                        engine::ReductionChange::AtMost(v) => mod_api::ReductionChange::AtMost(*v),
+                    },
+                )
+            })
+            .collect();
         values.original = v.original;
         values.new_damage = v.new_damage;
         values.blocked = v.blocked;
@@ -52,6 +77,36 @@ impl TryIntoEngine<()> for DamageContainer {
     fn try_into_engine(&self, _: &()) -> Result<Self::Engine, Self::Error> {
         let v = DamageValues::from(self);
         Ok(engine::DamageValues {
+            reduction_modifiers: v
+                .reduction_modifiers
+                .iter()
+                .map(|(r, c)| {
+                    (
+                        match r {
+                            Reduction::Invulnerability => engine::Reduction::Invulnerability,
+                            Reduction::Armor => engine::Reduction::Armor,
+                            Reduction::Enchantments => engine::Reduction::Enchantments,
+                            Reduction::MobEffects => engine::Reduction::MobEffects,
+                            Reduction::Absorption => engine::Reduction::Absorption,
+                            Reduction::InnateResistance => engine::Reduction::InnateResistance,
+                            _ => unreachable!("unknown API reduction"),
+                        },
+                        match c {
+                            mod_api::ReductionChange::Add(v) => engine::ReductionChange::Add(*v),
+                            mod_api::ReductionChange::Scale(v) => {
+                                engine::ReductionChange::Scale(*v)
+                            }
+                            mod_api::ReductionChange::AtLeast(v) => {
+                                engine::ReductionChange::AtLeast(*v)
+                            }
+                            mod_api::ReductionChange::AtMost(v) => {
+                                engine::ReductionChange::AtMost(*v)
+                            }
+                            _ => unreachable!("unknown API modifier"),
+                        },
+                    )
+                })
+                .collect(),
             original: v.original,
             new_damage: v.new_damage,
             blocked: v.blocked,

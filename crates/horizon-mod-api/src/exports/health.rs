@@ -3,4 +3,6 @@
 pub mod health;
 #[horizon_mod_api_macros::wasm(via = DamageValues)]
 pub use crate::health::DamageContainer;
-pub use crate::health::{DamageValues, HurtSource, Reduction, ShieldBlock, Victim};
+pub use crate::health::{
+    DamageValues, HurtSource, Reduction, ReductionChange, ShieldBlock, Victim,
+};
