@@ -192,7 +192,8 @@ impl ArmorStandAssets {
     /// `TrimTextureKey`: the trim texture of `stack` on its humanoid
     /// layer (`humanoid` or `humanoid_leggings`), if it has a trim.
     fn trim_texture(&self, asset: &str, kind: &str, stack: &ItemStack) -> Option<TrimTexture> {
-        let (material, pattern) = stack.extra.as_ref()?.trim.as_ref()?;
+        let (material, pattern) =
+            horizon_client::item_data::trim::named(stack.extra.as_ref()?.trim.as_ref()?)?;
         let overrides = self
             .trim_overrides
             .get(asset)
@@ -804,6 +805,17 @@ impl Game<'_> {
         let time = self.world.game_time;
         let at = self.armor_stands[i].position;
         let at = [at.x, at.y, at.z];
+        // `Entity.isInvulnerableTo` before ArmorStand's own branches (#916):
+        // the saved flag or window refuses the hit — past only for
+        // #bypasses_invulnerability damage and a creative player's hit
+        // (`DamageSource.isCreativePlayer`).
+        if self.saved_refuses_damage(
+            self.armor_stands[i].id,
+            "minecraft:player_attack",
+            self.creative,
+        ) {
+            return false;
+        }
         if self.creative {
             let (width, height) = stand_box(&self.armor_stands[i]);
             self.armor_stands.remove(i);
@@ -864,6 +876,9 @@ impl Game<'_> {
                 continue;
             }
             self.armor_stands[i].first_tick = false;
+            // Entity.baseTick: the saved invulnerability window counts down
+            // (#916).
+            self.tick_saved_invulnerable_time(self.armor_stands[i].id);
             self.armor_stand_location_effects(i, false);
             let a = &mut self.armor_stands[i];
             a.previous = a.position;
@@ -952,6 +967,30 @@ impl Game<'_> {
             self.break_armor_stand_by_anything(i, damage_type, 0);
         }
         Ok(())
+    }
+    /// `Ravager.roar` with `mob_griefing` on: every armor stand in `area` (the
+    /// ravager's box grown by 4) takes `strongKnockback` from the ravager at
+    /// `from`. Its `mobAttack` leaves the stand whole (`ArmorStand.hurtServer`:
+    /// not a damage type that breaks one).
+    pub(super) fn roar_pushes_armor_stands(&mut self, area: Aabb, from: [f64; 3]) {
+        for a in self.armor_stands.iter_mut() {
+            let (width, height) = stand_box(a);
+            let half = f64::from(width) / 2.0;
+            let p = a.position;
+            let bounds = Aabb::new(
+                Vec3::new(p.x - half, p.y, p.z - half),
+                Vec3::new(p.x + half, p.y + f64::from(height), p.z + half),
+            );
+            if a.health <= 0.0 || !bounds.intersects(area) {
+                continue;
+            }
+            let (xd, zd) = (p.x - from[0], p.z - from[2]);
+            let dd = (xd * xd + zd * zd).max(0.001);
+            // Entity.push.
+            a.velocity = a
+                .velocity
+                .add_vector(Vec3::new(xd / dd * 4.0, 0.2, zd / dd * 4.0));
+        }
     }
     /// `ArmorStand.pushEntities`: a plain minecart (`RIDABLE_MINECARTS`,
     /// `AbstractMinecart.isRideable`) whose box meets the stand's is shoved
@@ -1053,9 +1092,7 @@ impl Game<'_> {
             source,
             recently_hit: false,
         };
-        self.drop_death_items(&dying, Vec::new(), 10, |_| {
-            super::dispenser::new_item_motion()
-        });
+        self.drop_death_items(&dying, Vec::new(), 10, |_| None);
     }
     /// `ArmorStand.brokenByAnything`, then `kill`, as burning out or a blast
     /// breaks a stand: its equipment pops above its block, the stand item does

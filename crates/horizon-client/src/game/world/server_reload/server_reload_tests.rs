@@ -229,15 +229,17 @@ fn reload_command_uses_applied_listener_state_and_preserves_tables_on_refusal() 
 }
 
 fn request(root: &Path) -> WorldRequest {
-    WorldRequest {
-        rule_registry: std::sync::Arc::new(horizon_client::gamerules::RuleRegistry::vanilla()),
-        save_root: root.to_owned(),
-        folder: "test".into(),
-        name: Some("test".into()),
-        seed: Some(1),
-        creative: true,
-        create: None,
-    }
+    let mut request = WorldRequest::new(
+        "test",
+        Some("test"),
+        Some(1),
+        true,
+        None,
+        std::sync::Arc::new(horizon_client::gamerules::RuleRegistry::vanilla()),
+    )
+    .unwrap();
+    request.save_root = root.to_owned();
+    request
 }
 
 #[test]
