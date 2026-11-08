@@ -3064,7 +3064,11 @@ pub(crate) fn in_use(_tag: &str) -> bool {
 /// is logged and the rest still go. Returns the versions deleted. They install again from GitHub.
 pub fn prune_old_versions() -> Vec<String> {
     let settings = Settings::load();
-    if !settings.auto_prune() {
+    if !settings.auto_prune()
+        || crate::cache_cleanup::Access::UninstrumentedGame
+            .check()
+            .is_err()
+    {
         return Vec::new();
     }
     let mut protected: Vec<String> = settings.selected.iter().cloned().collect();
@@ -3816,7 +3820,7 @@ fn process_alive(pid: u32) -> bool {
 #[cfg(windows)]
 fn process_alive(pid: u32) -> bool {
     use windows_sys::Win32::Foundation::{
-        CloseHandle, GetLastError, ERROR_ACCESS_DENIED, STILL_ACTIVE,
+        CloseHandle, ERROR_ACCESS_DENIED, GetLastError, STILL_ACTIVE,
     };
     use windows_sys::Win32::System::Threading::{
         GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -5021,9 +5025,11 @@ pub fn {f}("
 
         // An x64 launcher, on any Windows, never looks at the ARM64 build.
         let x64_only = game_releases_with(&list, Some(x64), None);
-        assert!(x64_only[..2]
-            .iter()
-            .all(|r| r.asset.as_ref().unwrap().0.ends_with(x64)));
+        assert!(
+            x64_only[..2]
+                .iter()
+                .all(|r| r.asset.as_ref().unwrap().0.ends_with(x64))
+        );
     }
 
     #[test]
@@ -5143,12 +5149,14 @@ pub fn {f}("
         assert_eq!(asset_installed(&arm_choice[2], Some(arm), Some(x64)), None);
 
         let x64_choice = game_releases_with(&list, Some(x64), None);
-        assert!(x64_choice.iter().take(2).all(|release| release
-            .asset
-            .as_ref()
-            .unwrap()
-            .0
-            .ends_with(x64)));
+        assert!(
+            x64_choice.iter().take(2).all(|release| release
+                .asset
+                .as_ref()
+                .unwrap()
+                .0
+                .ends_with(x64))
+        );
         assert_eq!(
             asset_installed(&arm_choice[0], Some(x64), None),
             None,
@@ -6466,15 +6474,21 @@ pub fn {f}("
             Some("v2026.10.13".into())
         );
         assert!(is_prepared("v2026.10.13.1"));
-        assert!(resources_at(&versions.join("v2026.10.13.1"))
-            .join("worldgen/biomes.json")
-            .exists());
-        assert!(!resources_at(&versions.join("v2026.10.13.1"))
-            .join(data_file)
-            .exists());
-        assert!(resources_at(&versions.join("v2026.10.13"))
-            .join(data_file)
-            .exists());
+        assert!(
+            resources_at(&versions.join("v2026.10.13.1"))
+                .join("worldgen/biomes.json")
+                .exists()
+        );
+        assert!(
+            !resources_at(&versions.join("v2026.10.13.1"))
+                .join(data_file)
+                .exists()
+        );
+        assert!(
+            resources_at(&versions.join("v2026.10.13"))
+                .join(data_file)
+                .exists()
+        );
         let left: Vec<_> = fs::read_dir(versions.join("v2026.10.13.1/.local/horizon-client"))
             .unwrap()
             .flatten()
@@ -6788,9 +6802,11 @@ pub fn {f}("
             &log,
         );
         // Written before them, it would answer "missing" for what was just added.
-        assert!(!resources_at(&versions.join("v0.2.1"))
-            .join(data_file)
-            .exists());
+        assert!(
+            !resources_at(&versions.join("v0.2.1"))
+                .join(data_file)
+                .exists()
+        );
         assert_eq!(
             *lines.borrow(),
             [
@@ -6818,9 +6834,11 @@ pub fn {f}("
         complete_assets_in(&versions, "v0.2.2", || vec![empty.clone()], &log);
         complete_assets_in(&versions, "v0.2.2", || vec![empty.clone()], &log);
         // Nothing was added: its data file is still good.
-        assert!(resources_at(&versions.join("v0.2.2"))
-            .join(data_file)
-            .exists());
+        assert!(
+            resources_at(&versions.join("v0.2.2"))
+                .join(data_file)
+                .exists()
+        );
         let what = lines
             .borrow()
             .iter()
@@ -6836,9 +6854,11 @@ pub fn {f}("
                 "v0.2.2: The sounds",
             ]
         );
-        assert!(resources_at(&versions.join("v0.2.2"))
-            .join(RESOURCES_MANIFEST)
-            .exists());
+        assert!(
+            resources_at(&versions.join("v0.2.2"))
+                .join(RESOURCES_MANIFEST)
+                .exists()
+        );
         assert_eq!(
             asset("v0.2.2", &format!("{background}/panorama_0.png")).as_deref(),
             Some(&placeholder[..])

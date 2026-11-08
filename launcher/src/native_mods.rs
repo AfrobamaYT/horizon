@@ -528,8 +528,8 @@ fn logged<T>(
             let _ = append_log(&format!("The build failed: {error}"));
         }
     }
-    // The installed binary and post-build programs have left target/ before trimming. Keep
-    // this lease through installation/export, including failed builds, and never wait on Cargo.
+    // Keep this build lease through installation/export, including failed builds. It does not
+    // exclude independent game starts; automatic trimming can conservatively retain the cache.
     let Ok(cache) = cache else {
         return result;
     };
@@ -543,6 +543,7 @@ fn logged<T>(
                 &[("bytes", &bytes.to_string())],
             ));
         }
+        Err(crate::native_cache::Error::UnprovenExclusion) => {} // Quietly defer automatic eviction.
         Err(error) => log_warning(&cache_error(error)),
         _ => {}
     }
@@ -2457,27 +2458,7 @@ pub fn build_server(
         .map_err(String::from)?;
         export(&Target::Server.directory(&built.version), &output)?;
         // Exports are independent; keep only the newest cached server builds.
-        let cached = root().join("server-builds");
-        let builds = fs::read_dir(&cached)
-            .into_iter()
-            .flatten()
-            .flatten()
-            .filter(|e| e.path().join(".installed").is_file())
-            .map(|e| {
-                let at = fs::metadata(e.path().join(".installed"))
-                    .and_then(|m| m.modified())
-                    .unwrap_or(std::time::UNIX_EPOCH);
-                (e.file_name().to_string_lossy().into_owned(), at)
-            })
-            .collect();
-        if crate::cache_cleanup::Access::UninstrumentedGame
-            .check()
-            .is_ok()
-        {
-            for old in stale(builds, &built.version, &[]) {
-                let _ = fs::remove_dir_all(cached.join(old));
-            }
-        }
+        prune_server_cache(&root().join("server-builds"), &built.version);
         if built.plan != Plan::UpToDate {
             progress(Step::Done {
                 secs: built.secs,
@@ -2643,6 +2624,35 @@ fn carried_over(name: &std::ffi::OsStr, target: Target) -> bool {
 /// How many native builds no instance plays stay installed, the newest first: switching a mod
 /// off and on again plays the kept build again, without compiling.
 const SPARE_BUILDS: usize = 3;
+
+// Cached server exports remain directly executable, independently of the exported copy.
+fn prune_server_cache(cached: &Path, keep: &str) {
+    if crate::cache_cleanup::Access::UninstrumentedGame
+        .check()
+        .is_err()
+    {
+        return;
+    }
+    let builds = fs::read_dir(cached)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| entry.path().join(".installed").is_file())
+        .map(|entry| {
+            let at = fs::metadata(entry.path().join(".installed"))
+                .and_then(|meta| meta.modified())
+                .unwrap_or(std::time::UNIX_EPOCH);
+            (entry.file_name().to_string_lossy().into_owned(), at)
+        })
+        .collect();
+    for old in stale(builds, keep, &[]) {
+        let _ = fs::remove_dir_all(cached.join(old));
+    }
+}
+
+#[cfg(test)]
+#[path = "native_mods/tests/runtime_eviction.rs"]
+mod runtime_eviction_tests;
 
 /// Removes the native builds no instance plays, but `keep` and the [`SPARE_BUILDS`] newest. The
 /// compiled crates (`native/target`) stay, so the next build only compiles what changed.
