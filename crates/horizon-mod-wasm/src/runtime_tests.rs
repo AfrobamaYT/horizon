@@ -796,6 +796,35 @@ fn native_panic_stops_group_before_held_resources_drop() {
 }
 
 #[test]
+fn idle_proxy_called_during_unwind_stops_and_clears_resources() {
+    struct OnUnwind(WeakWasmMod);
+    impl Drop for OnUnwind {
+        fn drop(&mut self) {
+            assert_eq!(
+                self.0.call(
+                    CallClass::Callback,
+                    Frame::default(),
+                    0,
+                    None,
+                    |_| {},
+                    |r| r.take::<u32>()
+                ),
+                None
+            );
+        }
+    }
+    let module = module("i64.const 4398046511108");
+    let dropped = hold_stop_probe(&module);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _callback = OnUnwind(module.downgrade());
+        panic!("unrelated native panic");
+    }));
+    assert!(result.is_err());
+    assert!(module.is_stopped());
+    assert!(dropped.load(Ordering::Relaxed));
+}
+
+#[test]
 fn released_dispatch_receiver_cannot_reenter_guest_while_unwinding() {
     struct Piece {
         module: WeakWasmMod,
