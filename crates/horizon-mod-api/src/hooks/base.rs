@@ -3737,7 +3737,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "PlayerEvent.PlayerChangedDimensionEvent"
+        neoforge = "PlayerEvent.PlayerChangedDimensionEvent",
+        paper = "PlayerChangedWorldEvent"
     )]
     fn player_changed_dimension();
     /// A player's data was copied to their new player (NeoForge's
@@ -4105,7 +4106,6 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "listen",
         neoforge = "AdvancementEvent.AdvancementEarnEvent",
-        paper = "PlayerAdvancementDoneEvent",
         cancellable = false
     )]
     fn player_advancement_done();
@@ -4153,7 +4153,6 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event; Bukkit's PlayerBedEnterEvent)",
-        paper = "PlayerBedEnterEvent",
         cancellable = true
     )]
     fn player_bed_enter();
@@ -4179,8 +4178,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's PlayerBundleItemSelect)",
-        paper = "PlayerBundleItemSelectEvent"
+        neoforge = "none (NeoForge has no such event; Bukkit's PlayerBundleItemSelect)"
     )]
     fn player_bundle_item_select();
     /// A server player changed a beacon's selected effects, after they were stored. Each selected
@@ -4196,8 +4194,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's PlayerClientLoadedWorld)",
-        paper = "PlayerClientLoadedWorldEvent"
+        neoforge = "none (NeoForge has no such event; Bukkit's PlayerClientLoadedWorld)"
     )]
     fn player_client_loaded_world();
     /// A server player has slept for 100 ticks in a bed and now counts as deeply asleep for the
