@@ -242,13 +242,48 @@ fn resources() -> String {
         .filter(|owner| super::mod_receiver(owner).is_none())
     {
         let path = trait_path(owner);
-        writeln!(store,"if value.is::<std::sync::Arc<dyn {path}>>() {{ let value = *value.downcast::<std::sync::Arc<dyn {path}>>().map_err(|_| WireError::Invalid(\"wrong handler\"))?; return Ok(unsafe {{ (&mut *self.cx).held.insert_long(Box::new(OwnerThread::new(value))) }}); }}").unwrap();
+        writeln!(store,"if value.is::<std::sync::Arc<dyn {path}>>() {{ let value = *value.downcast::<std::sync::Arc<dyn {path}>>().map_err(|_| WireError::Invalid(\"wrong handler\"))?; return Ok(unsafe {{ (&mut *cx).held.insert_long(Box::new(OwnerThread::new(value))) }}); }}").unwrap();
         for container in ["Box", "std::sync::Arc"] {
             writeln!(load,"if view == std::any::TypeId::of::<{container}<dyn {path}>>() {{ return Ok(Box::new({container}::new(crate::WasmHandler::new(&module,id)) as {container}<dyn {path}>)); }}").unwrap();
         }
     }
     format!(
-        "struct HostCodec {{ cx:*mut Cx }} impl mod_api::wire::ResourceCodec for HostCodec {{ fn store(&self,value:Box<dyn std::any::Any>)->Result<mod_api::wire::Id,WireError> {{ {store} Err(WireError::Invalid(\"unknown handler type\")) }} fn load(&self,id:mod_api::wire::Id,view:std::any::TypeId)->Result<Box<dyn std::any::Any>,WireError> {{ let module=unsafe {{ (&*self.cx).module.clone() }}.ok_or(WireError::Invalid(\"no calling module\"))?; {load} Err(WireError::Invalid(\"unknown handler view\")) }} }} /// The Cx pointer must stay live for the whole synchronous call.\npub unsafe fn resource_scope(cx:*mut Cx,native_root:bool)->mod_api::wire::ResourceScope {{ let codec=std::rc::Rc::new(HostCodec {{cx}}); if native_root {{ unsafe {{ mod_api::wire::ResourceScope::native_root(codec) }} }} else {{ mod_api::wire::ResourceScope::new(codec) }} }}\n"
+        r#"struct HostCodec;
+thread_local! {{
+    static CURRENT_CX:std::cell::Cell<*mut Cx> = const {{std::cell::Cell::new(std::ptr::null_mut())}};
+    static HOST_CODEC:std::rc::Rc<dyn mod_api::wire::ResourceCodec> = std::rc::Rc::new(HostCodec);
+}}
+fn current_cx()->Result<*mut Cx,WireError> {{
+    let cx=CURRENT_CX.with(|current|current.get());
+    if cx.is_null() {{Err(WireError::Invalid("no resource context"))}} else {{Ok(cx)}}
+}}
+impl mod_api::wire::ResourceCodec for HostCodec {{
+    fn store(&self,value:Box<dyn std::any::Any>)->Result<mod_api::wire::Id,WireError> {{
+        let cx=current_cx()?;
+        {store}
+        Err(WireError::Invalid("unknown handler type"))
+    }}
+    fn load(&self,id:mod_api::wire::Id,view:std::any::TypeId)->Result<Box<dyn std::any::Any>,WireError> {{
+        let cx=current_cx()?;
+        let module=unsafe {{(&*cx).module.clone()}}.ok_or(WireError::Invalid("no calling module"))?;
+        {load}
+        Err(WireError::Invalid("unknown handler view"))
+    }}
+}}
+struct HostContext(*mut Cx);
+impl Drop for HostContext {{fn drop(&mut self) {{CURRENT_CX.with(|current|current.set(self.0));}}}}
+// Field order removes the codec scope before restoring the outer context.
+pub struct HostResources {{_scope:mod_api::wire::ResourceScope,_context:HostContext}}
+/// # Safety
+/// cx and its frame pointees stay live until this guard drops. These private runtime
+/// guards must drop in reverse construction order, before the frame or store is released.
+pub unsafe fn resource_scope(cx:*mut Cx,native_root:bool)->HostResources {{
+    let context=HostContext(CURRENT_CX.with(|current|current.replace(cx)));
+    let codec=HOST_CODEC.with(std::rc::Rc::clone);
+    let scope=if native_root {{unsafe {{mod_api::wire::ResourceScope::native_root(codec)}}}} else {{mod_api::wire::ResourceScope::new(codec)}};
+    HostResources {{_scope:scope,_context:context}}
+}}
+"#
     )
 }
 pub(super) fn generate(surface: &mut super::Surface<'_>) -> Result<String, String> {

@@ -611,3 +611,42 @@ fn wire_loopback_roundtrip_and_atomic_writeback() {
         "released handler must be refused"
     );
 }
+
+#[test]
+fn wire_loopback_resource_codec_restores_context_between_groups() {
+    fn encode() -> Id {
+        let apply: Arc<dyn mod_api::ReloadApply> = <dyn mod_api::ReloadApply>::new(|| {}).into();
+        let mut writer = Writer::new();
+        writer.put_owned(apply);
+        assert_eq!(writer.error(), None);
+        Reader::decode(writer.bytes()).unwrap()
+    }
+    let mut first = Box::new(boundary::Cx::default());
+    let mut second = Box::new(boundary::Cx::default());
+    // Both contexts stay boxed and live through their private lexical guards.
+    let outer = unsafe { boundary::resource_scope(&mut *first, true) };
+    let first_id = encode();
+    {
+        let _inner = unsafe { boundary::resource_scope(&mut *second, true) };
+        let second_id = encode();
+        assert_eq!(
+            second_id, first_id,
+            "independent tables start with the same slot"
+        );
+        assert!(second.held.get(second_id).is_ok());
+        assert!(mod_api::wire::borrow_token().unwrap().check().is_ok());
+    }
+    let next_first_id = encode();
+    assert_ne!(next_first_id, first_id);
+    assert!(first.held.get(first_id).is_ok());
+    assert!(first.held.get(next_first_id).is_ok());
+    assert!(second.held.get(next_first_id).is_err());
+    drop(outer);
+    let apply: Arc<dyn mod_api::ReloadApply> = <dyn mod_api::ReloadApply>::new(|| {}).into();
+    let mut writer = Writer::new();
+    writer.put_owned(apply);
+    assert!(
+        writer.error().is_some(),
+        "no context survives the outer guard"
+    );
+}
