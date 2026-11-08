@@ -485,6 +485,12 @@ fn entity_travel_takes_a_server_host(server: &mut dyn ServerHost, entity: Entity
     );
 }
 
+/// Compile-only: a level is asked to be saved from a server host.
+#[allow(dead_code)]
+fn level_save_takes_a_server_host(server: &mut dyn ServerHost, level: LevelRef) -> bool {
+    level.request_save(server)
+}
+
 /// Compile-only: the player rule reads on any host, and the writes on a server host.
 #[allow(dead_code)]
 fn player_rules_take_their_hosts(

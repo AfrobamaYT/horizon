@@ -235,6 +235,10 @@ impl VanillaTerrain {
         terrain.flat = true;
         Ok(terrain)
     }
+    /// `ChunkGenerator.getSeaLevel`: the sea level the terrain is generated with.
+    pub fn sea_level(&self) -> i32 {
+        self.generator.sea_level()
+    }
     /// Whether this is a superflat generator, whose `spawnOriginalMobs` places nothing.
     pub fn is_flat(&self) -> bool {
         self.flat

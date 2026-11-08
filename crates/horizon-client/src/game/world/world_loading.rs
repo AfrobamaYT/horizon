@@ -836,6 +836,17 @@ fn set_level_types(
         }
     }
     horizon_world::dimension_type::DimensionFacts::set_levels(facts);
+    // The sky, fog and cloud attributes of the levels a mod or a pack added.
+    let attributes = shapes
+        .extra
+        .iter()
+        .filter_map(|level| {
+            let (_, json) = overrides.level_type_json(level.id)?;
+            let attributes = json.get("attributes")?.clone();
+            Some((level.id.to_owned(), attributes))
+        })
+        .collect();
+    horizon_client::environment::Environment::set_level_attributes(attributes);
 }
 
 /// The terrain of a level whose stem names a generator a mod registered, the
@@ -988,6 +999,17 @@ pub(super) fn make_streaming(
             }
         }
     });
+    // The sea level the level's rules and the mods read is the one its generator builds with
+    // (`ChunkGenerator.getSeaLevel`), so a pack's noise settings or a superflat world are seen:
+    // the superflat generators' is -63 (`FlatLevelSource.getSeaLevel`).
+    let register_sea_level = |sea_level: i32| {
+        if let Ok(key) = horizon_core::LevelKey::parse(dim.id()) {
+            horizon_world::level::register_sea_level(key, sea_level);
+        }
+    };
+    if flat.is_some() || flat_vanilla.is_some() {
+        register_sea_level(-63);
+    }
     let mut streaming = if let Some(inner) = debug {
         Streaming::new(
             Arc::new(Persistent {
@@ -1099,6 +1121,7 @@ pub(super) fn make_streaming(
             })?;
         inner.set_loot_source(loot);
         inner.add_mod_signs(res.facts());
+        register_sea_level(inner.sea_level());
         let inner = Arc::new(inner);
         if dim == Dim::Overworld && structures {
             inner.search_rings_behind();

@@ -54,7 +54,13 @@ the `cardinal_light` and the gameplay switches (`water_evaporates`, `fast_lava`,
 refuses a value out of range (a `coordinate_scale` of 0, an `ambient_light` above 1, an unknown
 `skybox`) at startup with a message naming the mod. The level opens, ticks, saves and closes as the
 Nether and the End do, in `dimensions/mymod/pocket/` of the world, and clients receive its
-dimension type when they join.
+dimension type when they join. A client of a server takes the whole type, not only the build
+range: the level's fluids, mobs, beds and time follow the type the server sent, as on the host,
+whether or not the client has the mod that registered the level.
+
+`sky_color`, `fog_color` (`#rrggbb`) and `cloud_height` set the sky overhead, the fog at the
+horizon and the clouds' height; left as None they are the Overworld's. They apply to the host's own
+world: a client of another server that has the mod's dimension shows the Overworld's sky there.
 
 The level's biomes are the one `biome` everywhere unless `biome_source` says otherwise:
 `BiomeSourceKind::Checkerboard` alternates the `biomes` in cells `2^biome_scale` chunks wide,
@@ -128,6 +134,14 @@ pack's. `LevelDimension::key()` gives the level's key (`key.id()` its `namespace
 goes back. Match it with a final `Custom(_)` arm. The game's own rules read the level's own dimension type for these
 too (water that evaporates, fast lava, infiniburn, piglin portals), and `player_respawn_position` may send a player to
 a `Custom` level.
+
+### Saving a level
+
+`level.request_save(host)` asks the server to save a level, as the autosave and `/save-all` do, with its
+chunks on disk when it ends. The save runs at the start of the next server tick, not inside the call (a hook
+may be running in the tick that is saving), and a level asked for twice before then is saved once. The call
+answers whether the request was taken. `level_save` fires with the level's dimension once it was written; a
+save that fails fires nothing and is logged.
 
 ### Chunk generators
 
