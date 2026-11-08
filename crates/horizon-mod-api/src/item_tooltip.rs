@@ -11,6 +11,14 @@ pub struct TooltipDisplay<'a> {
     pub(crate) ominous_banner: bool,
 }
 impl<'a> TooltipDisplay<'a> {
+    /// Reconstruct the read-only projection transported by the mod boundary.
+    #[doc(hidden)]
+    pub fn __wire_from_fields(component: Option<&'a Tag>, ominous_banner: bool) -> Self {
+        Self {
+            component,
+            ominous_banner,
+        }
+    }
     pub fn for_stack(stack: &'a ItemStack) -> Self {
         Self {
             component: stack
