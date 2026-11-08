@@ -157,7 +157,9 @@ impl horizon_mod_api_gen::native_schema::Exposure for OnlyB {
 fn entry(path: &str, signature: &str) -> horizon_mod_api_gen::internals::Internal {
     horizon_mod_api_gen::internals::Internal {
         path: path.into(),
-        kind: if signature.contains("enum ") {
+        kind: if signature.contains("trait ") {
+            "trait"
+        } else if signature.contains("enum ") {
             "enum"
         } else {
             "struct"
@@ -218,8 +220,13 @@ fn policy_fixture(out_dir: &std::path::Path, fixture: PolicyFixture<'_>) {
         None => quote::quote!(None),
     };
     let layouts = graph.tokens();
-    let windows = native_window::helpers(&rule, &graph).unwrap();
-    let patches = native_patch::helpers(&rule, &graph).unwrap();
+    let every: Vec<bool> = graph
+        .layouts
+        .iter()
+        .map(|layout| layout.opaque.is_none() && rule.named(&layout.name).is_some())
+        .collect();
+    let windows = native_window::helpers(&rule, &graph, &every).unwrap();
+    let patches = native_patch::helpers(&rule, &graph, &every).unwrap();
     let (head, tail) = (
         call.head,
         call.tail
@@ -312,6 +319,24 @@ fn receiver_fixture(out_dir: &std::path::Path) {
             body: "{ if name == \"ok\" { Ok(()) } else { Err(\"full\".to_owned()) } }",
         },
     );
+    // A plain `Result` return with a projectable Ok payload and a `Box<dyn Error>` Err.
+    policy_fixture(
+        out_dir,
+        PolicyFixture {
+            file: "native_raw_result.rs",
+            entries: vec![entry(
+                "horizon_client::split::Split",
+                "pub struct Split { pub seats: u32 }",
+            )],
+            module: "horizon_client::split",
+            owner: Some("Split"),
+            impl_path: "split::Split",
+            signature: "fn profile_names(&self) -> Result<u32, Box<dyn std::error::Error>>",
+            name: "game_split_players_split_profile_names",
+            fields: &["seats"],
+            body: "{ if self.seats > 0 { Ok(self.seats) } else { Err(\"no seats\".into()) } }",
+        },
+    );
     // Borrowed returns: a shared `&str` (read-only) and a `&mut` struct (pointee writable).
     policy_fixture(
         out_dir,
@@ -367,6 +392,15 @@ fn receiver_fixture(out_dir: &std::path::Path) {
                     "horizon_client::startup_menu::Action",
                     "pub enum Action { Quit, Options }",
                 ),
+                // The real catalog's trait and the shape of winit's `ControlFlow`.
+                entry(
+                    "horizon_client::startup_menu::EventLoopCtl",
+                    "trait EventLoopCtl { fn exit(&self); fn set_control_flow(&self, flow: ControlFlow); fn bump(&self, n: &mut u32) -> bool; }",
+                ),
+                entry(
+                    "horizon_client::startup_menu::ControlFlow",
+                    "pub enum ControlFlow { Poll, Wait, WaitUntil(std::time::Instant) }",
+                ),
             ],
             module: "horizon_client::startup_menu",
             owner: Some("Loading"),
@@ -377,18 +411,47 @@ fn receiver_fixture(out_dir: &std::path::Path) {
             body: "{ match action { Action::Quit => event_loop.exit(), Action::Options => self.actions += 1 } }",
         },
     );
+    // Callback arguments: five that project (`&dyn Fn`, `&mut dyn FnMut`, scalar, string and
+    // struct arguments and results) and one whose `&Path` argument has no Wire codec.
     policy_fixture(
         out_dir,
         PolicyFixture {
             file: "native_raw_callback.rs",
-            entries: Vec::new(),
+            entries: vec![entry(
+                "horizon_client::test_environments::BlockPos",
+                "pub struct BlockPos { pub x: i32, pub y: i32, pub z: i32 }",
+            )],
             module: "horizon_client::test_environments",
             owner: None,
             impl_path: "",
-            signature: "fn parse(depth: u32, load: &dyn Fn(&str) -> Option<u32>) -> Option<u32>",
+            signature: "fn parse(depth: u32, load: &dyn Fn(&str) -> Option<u32>, wanted: &dyn Fn(&str) -> bool, rain: &dyn Fn(BlockPos) -> bool, emit: &mut dyn FnMut(u32) -> u32, publish: &mut dyn FnMut(u32, &std::path::Path)) -> Option<u32>",
             name: "game_test_environments_parse",
             fields: &[],
-            body: "{ load(\"minecraft:overworld\").map(|id| id + depth) }",
+            body: "{ let n = load(\"minecraft:overworld\")?; let w = wanted(\"w\") as u32; let r = rain(BlockPos { x: depth as i32, y: 64, z: -3 }) as u32; let e = emit(n); publish(1, std::path::Path::new(\"p\")); Some(n + w * 1000 + r * 10000 + e * 100000) }",
+        },
+    );
+    // A callback taking the call's own receiver (`fn(&mut Self, ..)`) and one returning JSON.
+    policy_fixture(
+        out_dir,
+        PolicyFixture {
+            file: "native_raw_bound.rs",
+            entries: vec![
+                entry(
+                    "horizon_client::startup_menu::Loading",
+                    "pub struct Loading { pub actions: u32 }",
+                ),
+                entry(
+                    "horizon_client::startup_menu::Action",
+                    "pub enum Action { Quit, Options }",
+                ),
+            ],
+            module: "horizon_client::startup_menu",
+            owner: Some("Loading"),
+            impl_path: "startup_menu::Loading",
+            signature: "fn menu_action(&mut self, fire: fn(&mut Self, u32), data: &dyn Fn(&str) -> Option<serde_json::Value>, action: Action)",
+            name: "game_startup_menu_loading_menu_action",
+            fields: &["actions"],
+            body: "{ let _ = action; fire(self, 7); let _ = data(\"k\"); }",
         },
     );
 }

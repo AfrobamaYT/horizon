@@ -1697,6 +1697,36 @@ mod iterative_tests {
     use serde_json::json;
 
     #[test]
+    fn default_stack_builders_build_cross_clone_and_drop_512_deep_text() {
+        // Integrated and network workers use named builders without stack_size;
+        // exercise that default as well as std::thread::spawn's unnamed default.
+        for name in [None, Some("Server thread"), Some("horizon-net")] {
+            let builder = std::thread::Builder::new();
+            let builder = match name {
+                Some(name) => builder.name(name.into()),
+                None => builder,
+            };
+            builder
+                .spawn(|| {
+                    let mut text = mod_api::Text::literal("leaf");
+                    for _ in 1..512 {
+                        let mut parent = mod_api::Text::literal("parent");
+                        parent.children.push(text);
+                        text = parent;
+                    }
+                    let engine = text.try_into_engine(&()).unwrap();
+                    let restored = engine.try_into_api().unwrap();
+                    assert_eq!(TextForm::try_from(&restored).unwrap().nodes.len(), 512);
+                    drop((text.clone(), restored.clone(), engine.clone()));
+                    drop((text, restored, engine));
+                })
+                .unwrap()
+                .join()
+                .unwrap();
+        }
+    }
+
+    #[test]
     fn recursive_fields_survive_512_nodes_on_256_kib() {
         std::thread::Builder::new().stack_size(256 * 1024).spawn(|| {
             for (relation, depth) in (0..9).flat_map(|r| [(r, 512), (r, 513)]) {

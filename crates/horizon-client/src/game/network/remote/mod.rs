@@ -544,9 +544,26 @@ pub(super) struct Remote {
     pub(super) use_item: Option<Arc<str>>,
     pub(super) dimension: DimensionType,
     /// The level's key (`minecraft:overworld`): where its far terrain is kept.
-    pub(super) level: String,
+    pub(in crate::game) level: String,
     /// `level`'s key, as mods' handles name the level.
     pub(super) level_key: mod_api::DimensionKey,
+    /// The level's facts from the dimension type this connection's server sent (`None` when it
+    /// sent none the game takes): owned by the connection, so entering a level touches no other
+    /// level's facts, the integrated server's included.
+    pub(in crate::game) level_facts: Option<&'static horizon_world::dimension_type::DimensionFacts>,
+    /// The facts made for each level of this connection, by level, with the type they came from:
+    /// a level entered again with the same type reuses them, so a reconnect-free session leaks
+    /// one set per distinct type.
+    /// The sky, fog and cloud attributes (and timelines) of the level from the server's type, for a
+    /// level of a mod or a pack (`None` for a built-in level, or when the type is refused).
+    pub(in crate::game) level_environment: Option<horizon_client::environment::Environment>,
+    facts_cache: HashMap<
+        String,
+        (
+            serde_json::Value,
+            &'static horizon_world::dimension_type::DimensionFacts,
+        ),
+    >,
     /// `ClientPlayerNetworkEvent.LoggingOut` was fired for this connection: every way out
     /// of a world reports it once.
     logged_out: bool,
@@ -1154,6 +1171,9 @@ impl Game<'_> {
             dimension: DimensionType::vanilla("minecraft:overworld"),
             level: "minecraft:overworld".into(),
             level_key: mod_api::DimensionKey::OVERWORLD,
+            level_facts: None,
+            level_environment: None,
+            facts_cache: Default::default(),
             hashed_seed: 0,
             chunk_format: Arc::new(ChunkFormat::new(
                 &DimensionType::vanilla("minecraft:overworld"),
@@ -1402,6 +1422,9 @@ impl Game<'_> {
             dimension: DimensionType::vanilla("minecraft:overworld"),
             level: "minecraft:overworld".into(),
             level_key: mod_api::DimensionKey::OVERWORLD,
+            level_facts: None,
+            level_environment: None,
+            facts_cache: Default::default(),
             hashed_seed: 0,
             chunk_format: Arc::new(ChunkFormat::new(
                 &DimensionType::vanilla("minecraft:overworld"),
@@ -2605,6 +2628,19 @@ impl Game<'_> {
         keep_world: bool,
         reason: horizon_client::level_loading::Reason,
     ) {
+        // Every level has the sea level its server says (`CommonPlayerSpawnInfo.seaLevel`): the
+        // table may still hold a local world's (a superflat Overworld's).
+        if let Ok(key) = horizon_core::LevelKey::parse(&spawn.dimension) {
+            horizon_world::level::register_sea_level(key, spawn.sea_level);
+            if !matches!(
+                key,
+                horizon_core::LevelKey::OVERWORLD
+                    | horizon_core::LevelKey::NETHER
+                    | horizon_core::LevelKey::END
+            ) {
+                Dim::add_extra(&spawn.dimension);
+            }
+        }
         // The replacement player starts with its inventory menu, even if the
         // server switched levels without closing the previous container.
         self.remote_close_local();
@@ -2644,6 +2680,46 @@ impl Game<'_> {
                 .with_dimension(&dimension)
                 .in_column(shape.column()),
         );
+        // The server's dimension type gives the level's facts (what it does to fluids, mobs,
+        // beds and time), not only its shape: a level of a mod the server runs is no
+        // longer taken for the Overworld.
+        r.level_facts = None;
+        r.level_environment = None;
+        if let Some((name, json)) = r.registries.dimension_json(spawn.dimension_type) {
+            if !matches!(
+                spawn.dimension.as_str(),
+                "minecraft:overworld" | "minecraft:the_nether" | "minecraft:the_end"
+            ) {
+                r.level_environment = horizon_client::environment::Environment::with_type(
+                    self.res.environment(),
+                    &json,
+                );
+            }
+            let cached = r
+                .facts_cache
+                .get(&spawn.dimension)
+                .filter(|(old, _)| *old == json)
+                .map(|(_, facts)| *facts);
+            r.level_facts = cached.or_else(|| {
+                use horizon_world::dimension_type::DimensionFacts;
+                let base = DimensionFacts::base_for_type(&name);
+                let facts = DimensionFacts::patched(base, &name, &json)
+                    .map_err(|why| {
+                        log::warn!("the server's dimension type {name} is refused ({why})")
+                    })
+                    .ok()?;
+                if !sane_facts(&facts) {
+                    log::warn!(
+                        "the server's dimension type {name} is refused (a value out of range)"
+                    );
+                    return None;
+                }
+                let facts: &'static DimensionFacts = Box::leak(Box::new(facts));
+                r.facts_cache
+                    .insert(spawn.dimension.clone(), (json.clone(), facts));
+                Some(facts)
+            });
+        }
         r.dimension = dimension;
         r.resolve_clocks();
         self.world.day_time = r.clock_time(r.default_clock);
@@ -2877,8 +2953,10 @@ impl Game<'_> {
         let block = self.world.block(pos[0], pos[1], pos[2]);
         if let Some(BlockEntity::Mod(m)) = self.world.block_entities.get_mut(&key) {
             if m.id() == name
-                && horizon_client::block_entity_types::type_for(&self.res.facts().get(block).name)
-                    == Some(name)
+                && horizon_client::block_entity_types::valid(
+                    &self.res.facts().get(block).name,
+                    name,
+                ) == Some(true)
             {
                 m.merge_update_tag(fields);
             }
@@ -16977,5 +17055,39 @@ mod player_tick_tests {
                 server.shutdown();
             })
         });
+    }
+}
+
+/// Whether a synchronized dimension type's values are inside the codec's ranges
+/// (`DimensionType.java`: a coordinate scale of `1.0E-5F` to `3.0E7`, a monster spawn block light
+/// limit of 0 to 15; the ambient light has no range), so a portal's ratio of two scales is finite.
+fn sane_facts(facts: &horizon_world::dimension_type::DimensionFacts) -> bool {
+    (f64::from(1.0e-5_f32)..=3.0e7).contains(&facts.coordinate_scale)
+        && (0..=15).contains(&facts.monster_spawn_block_light_limit)
+}
+
+#[cfg(test)]
+mod level_facts_tests {
+    use super::sane_facts;
+    use horizon_world::dimension_type::DimensionFacts;
+
+    /// A type outside the codec's ranges is not taken; the vanilla ones are.
+    #[test]
+    fn a_type_outside_the_codecs_ranges_is_refused() {
+        let mut facts = DimensionFacts::overworld().clone();
+        assert!(sane_facts(&facts));
+        assert!(sane_facts(DimensionFacts::of_builtin_level(
+            horizon_core::LevelKey::NETHER
+        )));
+        for scale in [0.0, f64::from_bits(1), -1.0, 3.1e7, f64::NAN] {
+            facts.coordinate_scale = scale;
+            assert!(!sane_facts(&facts), "{scale}");
+        }
+        facts.coordinate_scale = 1.0;
+        // the codec sets no range on the ambient light
+        facts.ambient_light = 1.5;
+        assert!(sane_facts(&facts));
+        facts.monster_spawn_block_light_limit = 16;
+        assert!(!sane_facts(&facts));
     }
 }

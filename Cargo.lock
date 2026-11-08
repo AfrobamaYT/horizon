@@ -2078,6 +2078,7 @@ dependencies = [
  "horizon-mod-api-macros",
  "horizon-mod-package",
  "horizon-mod-runtime",
+ "horizon-world",
  "log",
  "serde",
  "serde_json",
@@ -2196,6 +2197,7 @@ dependencies = [
  "horizon-mod-api-macros",
  "horizon-mod-point-shape",
  "quote",
+ "serde_json",
  "syn 2.0.119",
 ]
 

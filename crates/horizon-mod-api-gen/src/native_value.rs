@@ -16,6 +16,15 @@ pub fn codec(rule: &Rule, shape: &Shape) -> Result<ValueCodec, String> {
     build(rule, shape, &mut Vec::new(), Mode::Inline)
 }
 
+/// [`codec`] for a value built and read inline at a staged point, where the fields of the
+/// layouts of the workspace crates below the game are public (the staged copy widens them).
+pub fn staged_codec(rule: &Rule, shape: &Shape) -> Result<ValueCodec, String> {
+    rule.widened.set(true);
+    let codec = codec(rule, shape);
+    rule.widened.set(false);
+    codec
+}
+
 /// How a named layout below the requested shape is spelled.
 #[derive(Clone, Copy, PartialEq)]
 enum Mode {
@@ -73,13 +82,78 @@ fn build(
     mode: Mode,
 ) -> Result<ValueCodec, String> {
     let pair = match shape {
+        // An instant crosses as the nanoseconds from the moment it is encoded to it (none if
+        // past), and is rebuilt from the moment it is decoded; a duration as seconds and nanos.
+        Shape::Opaque(Some(name)) if name == "std::time::Instant" => ValueCodec {
+            decode: quote!(
+                std::time::Instant::now() + std::time::Duration::from_nanos(input.take::<u64>()?)
+            ),
+            encode: quote!(out.put(&u64::try_from(value.saturating_duration_since(std::time::Instant::now()).as_nanos()).unwrap_or(u64::MAX));),
+        },
+        // JSON crosses as its text, a path as its (lossy) UTF-8 text.
+        Shape::Opaque(Some(name)) if name == "serde_json::Value" => ValueCodec {
+            decode: quote!({
+                let text: String = input.take()?;
+                serde_json::from_str::<serde_json::Value>(&text)
+                    .map_err(|_| mod_api::wire::WireError::Invalid("json text"))?
+            }),
+            encode: quote!({
+                let text = value.to_string();
+                out.put(&text);
+            }),
+        },
+        Shape::Opaque(Some(name)) if name == "std::path::PathBuf" => ValueCodec {
+            decode: quote!({
+                let text: String = input.take()?;
+                std::path::PathBuf::from(text)
+            }),
+            encode: quote!({
+                let text = value.to_string_lossy().into_owned();
+                out.put(&text);
+            }),
+        },
+        Shape::Opaque(Some(name)) if name == "std::time::Duration" => ValueCodec {
+            decode: quote!({
+                let secs = input.take::<u64>()?;
+                let nanos = input.take::<u32>()?;
+                if nanos >= 1_000_000_000 {
+                    return Err(mod_api::wire::WireError::Invalid("duration nanoseconds"));
+                }
+                std::time::Duration::new(secs, nanos)
+            }),
+            encode: quote!({
+                out.put(&value.as_secs());
+                out.put(&value.subsec_nanos());
+            }),
+        },
         Shape::Scalar(Scalar::Str) | Shape::Ref { .. } | Shape::Slice(_) | Shape::Opaque(_) => {
             return Err(format!("non-owned or opaque shape: {shape:?}"));
+        }
+        Shape::Scalar(Scalar::Signed("isize")) => {
+            return Err("isize has no Wire encoding".into());
         }
         Shape::Scalar(_) | Shape::Unit => ValueCodec {
             decode: quote!(input.take()?),
             encode: quote!(out.put(value);),
         },
+        Shape::Wrapped(Wrapper::Box, inner) if **inner == Shape::DynError => ValueCodec {
+            decode: quote!(::std::convert::From::<::std::string::String>::from(
+                input.take::<::std::string::String>()?
+            )),
+            encode: quote!({
+                let value = &value.to_string();
+                out.put(value);
+            }),
+        },
+        Shape::Result(ok, err) => {
+            let ok = build(rule, ok, stack, mode)?;
+            let err = build(rule, err, stack, mode)?;
+            let (od, oe, ed, ee) = (ok.decode, ok.encode, err.decode, err.encode);
+            ValueCodec {
+                decode: quote!(match input.take::<u8>()? { 0 => Ok(input.nested(|input| Ok(#od))?), 1 => Err(input.nested(|input| Ok(#ed))?), tag => return Err(mod_api::wire::WireError::Tag(tag.into())) }),
+                encode: quote!(match value { Ok(value) => { out.put(&0u8); #oe } Err(value) => { out.put(&1u8); #ee } }),
+            }
+        }
         Shape::Wrapped(Wrapper::Box, inner) => {
             let c = build(rule, inner, stack, mode)?;
             let d = c.decode;
@@ -87,6 +161,33 @@ fn build(
             ValueCodec {
                 decode: quote!(Box::new(input.nested(|input| Ok(#d))?)),
                 encode: quote!({ let value = &**value; #e }),
+            }
+        }
+        // A shared pointer owns a copy on this side of the boundary; `Arc<str>` is a string.
+        Shape::Wrapped(wrapper @ (Wrapper::Arc | Wrapper::Rc), inner) => {
+            let pointer = if *wrapper == Wrapper::Arc {
+                quote!(std::sync::Arc)
+            } else {
+                quote!(std::rc::Rc)
+            };
+            if matches!(**inner, Shape::Scalar(Scalar::Str)) {
+                let c = build(rule, &Shape::Scalar(Scalar::String), stack, mode)?;
+                let d = c.decode;
+                ValueCodec {
+                    decode: quote!(#pointer::<str>::from(#d)),
+                    encode: quote!({
+                        let value = &String::from(&**value);
+                        out.put(value);
+                    }),
+                }
+            } else {
+                let c = build(rule, inner, stack, mode)?;
+                let d = c.decode;
+                let e = c.encode;
+                ValueCodec {
+                    decode: quote!(#pointer::new(input.nested(|input| Ok(#d))?)),
+                    encode: quote!({ let value = &**value; #e }),
+                }
             }
         }
         Shape::Option(inner) => {
@@ -271,6 +372,7 @@ fn fields(
     mode: Mode,
 ) -> Result<ValueCodec, String> {
     if named.foreign
+        && !(named.widened && rule.widened.get())
         && fields
             .iter()
             .any(|f| !matches!(f.vis, syn::Visibility::Public(_)))

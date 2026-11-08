@@ -124,7 +124,7 @@ pub(super) fn types(types: &Types<'_>) -> String {
                     format!(
                         "{}: {}",
                         f.rust,
-                        super::calls::rust_ty(types, &f.ty, false)
+                        borrowed(types, &f.ty)
                             .replace("'_", "'a")
                             .replace("&", "&'a ")
                             .replace("&'a 'static", "&'static")
@@ -195,7 +195,7 @@ pub(super) fn types(types: &Types<'_>) -> String {
             Kind::Variant(cases) => variants(types, &def.rust, cases),
             Kind::Unit => Some(unit(&def.rust)),
             Kind::Json => Some(json(&def.rust)),
-            Kind::Opaque(_) => None,
+            Kind::Opaque => None,
         };
         match body {
             Some(code) => out.push_str(&code),
@@ -367,4 +367,17 @@ fn variants(types: &Types<'_>, rust: &str, cases: &[Case]) -> Option<String> {
                 .replace("out.put(", "out.put_owned(")
         ),
     ))
+}
+
+/// A record field's type for its constructor, a nested borrowing record keeping the constructor's
+/// lifetime (`Option<TerrainUvShift<'a>>`).
+fn borrowed(types: &super::ty::Types<'_>, ty: &super::ty::Ty) -> String {
+    use super::ty::Ty;
+    match ty {
+        Ty::Named(def) if types.defs[*def].lifetimes > 0 => {
+            format!("{}<'_>", types.defs[*def].rust)
+        }
+        Ty::Option(item) => format!("Option<{}>", borrowed(types, item)),
+        ty => super::calls::rust_ty(types, ty, false),
+    }
 }

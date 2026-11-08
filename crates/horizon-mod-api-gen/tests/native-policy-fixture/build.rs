@@ -29,7 +29,7 @@ fn main() {
     let mut graph = Graph::default();
     let root = graph.add(&rule, &rule.shape("horizon_client::model", None, &ty));
     let metadata = graph.tokens();
-    let helpers = native_window::helpers(&rule, &graph).unwrap();
+    let helpers = native_window::helpers(&rule, &graph, &graph.emittable(&rule)).unwrap();
     let body = native_window::generate_runtime(
         &rule,
         "horizon_client::model",

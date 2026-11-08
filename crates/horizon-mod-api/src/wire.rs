@@ -180,6 +180,22 @@ impl Writer {
         self.put_len(text.len());
         self.put_bytes(text.as_bytes());
     }
+    /// A list of `u16`: its count, then each item, in one pass (the bytes of `Vec<u16>`'s own form).
+    pub(crate) fn put_u16s(&mut self, items: &[u16]) {
+        let Some(bytes) = items.len().checked_mul(2).and_then(|n| n.checked_add(4)) else {
+            self.fail(WireError::Length);
+            return;
+        };
+        if !self.can_fit(bytes) {
+            return;
+        }
+        self.put_len(items.len());
+        let start = self.bytes.len();
+        self.bytes.resize(start + items.len() * 2, 0);
+        for (to, item) in self.bytes[start..].chunks_exact_mut(2).zip(items) {
+            to.copy_from_slice(&item.to_le_bytes());
+        }
+    }
     /// A length or count.
     pub fn put_len(&mut self, len: usize) {
         match u32::try_from(len) {
@@ -467,6 +483,16 @@ impl<'a> Reader<'a> {
         let value = read(&mut inner);
         self.data = &data[len - inner.data.len()..];
         value
+    }
+    /// A list of `u16` written by [`Writer::put_u16s`], read in one pass: the length is checked
+    /// against the bytes left before anything is allocated.
+    pub(crate) fn take_u16s(&mut self) -> Result<Vec<u16>, WireError> {
+        let len = self.take_len(2)?;
+        let bytes = self.take_bytes(len * 2)?;
+        Ok(bytes
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect())
     }
     /// A normal Wire list, with its element cap checked before allocating storage. `read`
     /// may impose a shared payload budget across its elements without a second list codec.

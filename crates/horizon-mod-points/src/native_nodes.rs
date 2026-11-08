@@ -23,6 +23,27 @@ impl NativeNode for Opaque {
     }
 }
 
+/// A callback argument: an opaque typed header whose value is a host-held callable, made when
+/// the row is read and valid only within the call's lease.
+pub struct Callable<F>(pub F, pub u64);
+impl<F> NativeNode for Callable<F>
+where
+    F: Fn() -> Result<std::sync::Arc<dyn mod_api::RowFunction>, RowError>,
+{
+    fn key(&self) -> u64 {
+        self.1
+    }
+    fn value(&self, f: &mut Header<'_>) -> Result<(), RowError> {
+        f(Some(&(self.0)()?))
+    }
+    fn len(&self) -> u64 {
+        0
+    }
+    fn child(&self, _: u64, _: &mut Visitor<'_>) -> Result<(), RowError> {
+        Err(RowError::Bounds)
+    }
+}
+
 /// A plain Wire leaf, with its generated canonical schema key.
 pub struct Scalar<'a, T: Put>(pub &'a T, pub u64);
 impl<T: Put> NativeNode for Scalar<'_, T> {
@@ -111,6 +132,24 @@ impl NativeNode for Text<'_> {
             u32::try_from(ordinal).map_err(|_| RowError::Bounds)?,
             &Scalar(&value, self.2),
         )
+    }
+}
+
+/// A text leaf over an owned string, such as a `Box<dyn Error>`'s `Display` output: it reads like
+/// [`Text`].
+pub struct DisplayText(pub String, pub u64, pub u64);
+impl NativeNode for DisplayText {
+    fn key(&self) -> u64 {
+        self.1
+    }
+    fn value(&self, f: &mut Header<'_>) -> Result<(), RowError> {
+        Text(&self.0, self.1, self.2).value(f)
+    }
+    fn len(&self) -> u64 {
+        Text(&self.0, self.1, self.2).len()
+    }
+    fn child(&self, ordinal: u64, f: &mut Visitor<'_>) -> Result<(), RowError> {
+        Text(&self.0, self.1, self.2).child(ordinal, f)
     }
 }
 

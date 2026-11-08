@@ -338,12 +338,21 @@ mod tests {
         fs::write(&package, b"a").unwrap();
         let before = fingerprint(&home, None);
         fs::write(&package, b"ab").unwrap();
-        // If staged internals selection for wasm mods returns, a wasm package is a build input
-        // again and this must go back to `assert_ne!` (main's original assertion).
+        // Declared internals of a wasm package do not select native build inputs: the staged
+        // game carries the whole generated catalog, and the loader resolves each wasm mod's
+        // declarations against it at load time. Only native packages are build inputs.
         assert_eq!(
             before,
             fingerprint(&home, None),
             "a wasm package is not a build input: the native build never reads it"
+        );
+        let native = home.join(native_mods::INSTALLED);
+        fs::create_dir_all(&native).unwrap();
+        fs::write(native.join("example.hmod"), b"a").unwrap();
+        assert_ne!(
+            before,
+            fingerprint(&home, None),
+            "a native package is a build input"
         );
         fs::remove_dir_all(home).unwrap();
     }

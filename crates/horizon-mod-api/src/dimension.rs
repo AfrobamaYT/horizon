@@ -100,12 +100,41 @@ pub struct DimensionSettings {
     pub can_start_raid: bool,
     /// `minecraft:gameplay/sky_light_level`: the sky light that daylight is measured against, 0 to 15.
     pub sky_light_level: f32,
+    /// `Level.getSeaLevel`: the sea level mob spawning, rain and snow, maps and phantoms use. With
+    /// `None` it is the noise settings' own for `minecraft:noise`, and the Overworld's 63 for a
+    /// chunk generator a mod registered, which reads none; `Some` is for that generator, whose
+    /// terrain the game cannot read a sea level from. A level of `minecraft:noise` keeps its noise
+    /// settings' sea level, which the terrain is built with.
+    pub sea_level: Option<i32>,
+    /// When a player can sleep in a bed here (`BedRule.canSleep`): `always`, `when_dark` or `never`.
+    pub bed_can_sleep: String,
+    /// When a bed sets the player's respawn point here (`BedRule.canSetSpawn`): `always`,
+    /// `when_dark` or `never`.
+    pub bed_can_set_spawn: String,
+    /// Whether a bed explodes when a player tries to use it (`BedRule.explodes`), as in the Nether.
+    pub bed_destroy_on_use: bool,
+    /// Whether a bed is destroyed when the player leaves it (`BedRule.destroyOnLeave`).
+    pub bed_destroy_on_leave: bool,
+    /// The same four for a straw bed (`minecraft:gameplay/straw_bed_rule`): when a player can
+    /// sleep in one, `always`, `when_dark` or `never`.
+    pub straw_bed_can_sleep: String,
+    /// When a straw bed sets the respawn point: `always`, `when_dark` or `never`.
+    pub straw_bed_can_set_spawn: String,
+    /// Whether a straw bed explodes when a player tries to use it.
+    pub straw_bed_destroy_on_use: bool,
+    /// Whether a straw bed is destroyed when the player leaves it.
+    pub straw_bed_destroy_on_leave: bool,
     /// `minecraft:visual/sky_color` as `#rrggbb`: the sky overhead; None is the Overworld's.
     pub sky_color: Option<String>,
     /// `minecraft:visual/fog_color` as `#rrggbb`: the fog at the horizon; None is the Overworld's.
     pub fog_color: Option<String>,
     /// `minecraft:visual/cloud_height`: the clouds' height in blocks; None is the Overworld's.
     pub cloud_height: Option<f32>,
+    /// The timelines and default clock the dimension type names: `overworld` (the day and moon
+    /// cycles, the villagers' schedule and the Overworld's clock), `nether` (the villagers'
+    /// schedule only, no clock), `end` (the End's timeline and clock) or `none`. They set the
+    /// level's sky over the day, whether monsters burn in daylight, and the clock `/time` reads.
+    pub day_cycle: String,
 }
 
 impl Default for DimensionSettings {
@@ -140,9 +169,19 @@ impl Default for DimensionSettings {
             snow_golem_melts: false,
             can_start_raid: true,
             sky_light_level: 15.0,
+            sea_level: None,
+            bed_can_sleep: "when_dark".into(),
+            bed_can_set_spawn: "always".into(),
+            bed_destroy_on_use: false,
+            bed_destroy_on_leave: false,
+            straw_bed_can_sleep: "when_dark".into(),
+            straw_bed_can_set_spawn: "never".into(),
+            straw_bed_destroy_on_use: false,
+            straw_bed_destroy_on_leave: true,
             sky_color: None,
             fog_color: None,
             cloud_height: None,
+            day_cycle: "overworld".into(),
         }
     }
 }
@@ -199,6 +238,26 @@ pub struct LevelDimensionType {
     pub can_start_raid: bool,
     /// The sky light that daylight is measured against, 0 to 15.
     pub sky_light_level: f32,
+    /// The timelines the dimension type names, as ids (`minecraft:day`).
+    pub timelines: Vec<String>,
+    /// The clock `/time` reads here, if the dimension type has a default one.
+    pub default_clock: Option<String>,
+    /// When a player can sleep in a bed: `always`, `when_dark` or `never`.
+    pub bed_can_sleep: String,
+    /// When a bed sets the respawn point: `always`, `when_dark` or `never`.
+    pub bed_can_set_spawn: String,
+    /// Whether a bed explodes when a player tries to use it.
+    pub bed_destroy_on_use: bool,
+    /// Whether a bed is destroyed when the player leaves it.
+    pub bed_destroy_on_leave: bool,
+    /// When a player can sleep in a straw bed: `always`, `when_dark` or `never`.
+    pub straw_bed_can_sleep: String,
+    /// When a straw bed sets the respawn point: `always`, `when_dark` or `never`.
+    pub straw_bed_can_set_spawn: String,
+    /// Whether a straw bed explodes when a player tries to use it.
+    pub straw_bed_destroy_on_use: bool,
+    /// Whether a straw bed is destroyed when the player leaves it.
+    pub straw_bed_destroy_on_leave: bool,
 }
 
 impl DimensionSettings {
@@ -230,10 +289,11 @@ impl DimensionSettings {
     pub fn invalid_field(&self) -> Option<String> {
         let light = |n: i32| (0..=15).contains(&n);
         let (low, high) = self.monster_spawn_light_level;
-        let reason = if !(self.coordinate_scale > 0.0 && self.coordinate_scale <= 30_000_000.0) {
-            "coordinate_scale must be above 0 and at most 30000000"
-        } else if !(0.0..=1.0).contains(&self.ambient_light) {
-            "ambient_light must be 0 to 1"
+        // The codec's range: `DimensionFacts::valid_coordinate_scale`.
+        let reason = if !(f64::from(1.0e-5_f32)..=3.0e7).contains(&self.coordinate_scale) {
+            "coordinate_scale must be 0.00001 to 30000000"
+        } else if !self.ambient_light.is_finite() {
+            "ambient_light must be a number"
         } else if !(0.0..=15.0).contains(&self.sky_light_level) {
             "sky_light_level must be 0 to 15"
         } else if !(light(low) && light(high) && low <= high) {
@@ -244,6 +304,16 @@ impl DimensionSettings {
             "skybox must be overworld, end or none"
         } else if !matches!(self.cardinal_light.as_str(), "default" | "nether") {
             "cardinal_light must be default or nether"
+        } else if ![
+            &self.bed_can_sleep,
+            &self.bed_can_set_spawn,
+            &self.straw_bed_can_sleep,
+            &self.straw_bed_can_set_spawn,
+        ]
+        .iter()
+        .all(|rule| matches!(rule.as_str(), "always" | "when_dark" | "never"))
+        {
+            "bed_can_sleep, bed_can_set_spawn, straw_bed_can_sleep and straw_bed_can_set_spawn must be always, when_dark or never"
         } else if !self.infiniburn.starts_with('#') || self.infiniburn.len() < 2 {
             "infiniburn must be a block tag, such as #minecraft:infiniburn_overworld"
         } else if !self
@@ -255,6 +325,11 @@ impl DimensionSettings {
             "sky_color and fog_color must be #rrggbb"
         } else if self.cloud_height.is_some_and(|h| !h.is_finite()) {
             "cloud_height must be a number"
+        } else if !matches!(
+            self.day_cycle.as_str(),
+            "overworld" | "nether" | "end" | "none"
+        ) {
+            "day_cycle must be overworld, nether, end or none"
         } else {
             return None;
         };

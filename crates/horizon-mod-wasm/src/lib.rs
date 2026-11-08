@@ -518,6 +518,13 @@ pub fn load(std_member: &[u8], packages: Vec<WasmPackage>) -> Loaded {
                         |r| r.take(),
                     )
                     .ok_or_else(|| Refusal::Runtime("subscriptions failed".into()))?;
+                // The ground provider runs on the worldgen workers, a contract wasm lacks yet.
+                if names.iter().any(|name| name == "alter_ground") {
+                    return Err(Refusal::Runtime(
+                        "alter_ground: worldgen ground providers are not yet available to wasm mods"
+                            .into(),
+                    ));
+                }
                 module.subscribed = boundary::subscriptions_of("wasm mod", names);
                 checked.push(module);
             }

@@ -70,6 +70,7 @@ impl TryIntoEngine<()> for mod_api::Block {
         Ok(engine::Block {
             id: self.id.clone(),
             template: self.template.clone(),
+            pick_item: self.pick_item.clone(),
             properties: self.properties.try_into_engine(&())?,
             shapes: self
                 .shapes

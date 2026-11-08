@@ -64,7 +64,11 @@ fn generate_inner(
         }
         if let Some((graph, plan)) = runtime {
             let id = graph.id(shape).ok_or("missing runtime schema")?;
-            if graph.layouts[id].opaque.is_some() {
+            // A trait object outside an argument root is only a typed header: its method table
+            // is made where the call's lease is.
+            if graph.layouts[id].opaque.is_some()
+                || matches!(shape, Shape::Opaque(Some(name)) if name.starts_with("dyn "))
+            {
                 return Ok(quote!(mod_points::native_nodes::Opaque((#plan).key(#id).unwrap_or(0))));
             }
         }
@@ -216,6 +220,45 @@ fn generate_inner(
                     } }
                 })
             }
+            Shape::Result(ok, err) => {
+                let ok_child = emit(
+                    rule,
+                    ok,
+                    quote!(*__horizon_payload),
+                    exposure,
+                    depth + 1,
+                    runtime,
+                )?;
+                // An unprojectable payload stays a leaf; its case still reads, without a value.
+                let err_child = emit(
+                    rule,
+                    err,
+                    quote!(*__horizon_payload),
+                    exposure,
+                    depth + 1,
+                    runtime,
+                )?;
+                let ok_key = auxiliary("variant(0)", &format!("{identity};variant(0)"))?;
+                let err_key = auxiliary("variant(1)", &format!("{identity};variant(1)"))?;
+                quote!({
+                    let __horizon_tag: u32 = u32::from((#place).is_err());
+                    mod_points::native_nodes::Variant { key: #key, tag: __horizon_tag, visit: move |__horizon_visit: &mut mod_points::native_nodes::Visitor<'_>| {
+                        match &(#place) {
+                            Ok(__horizon_payload) => __horizon_visit(mod_points::locators::Step::Variant(0), 0, &mod_points::native_nodes::Record { key: #ok_key, count: 1, visit: move |__horizon_index, __horizon_visit: &mut mod_points::native_nodes::Visitor<'_>| match __horizon_index { 0 => __horizon_visit(mod_points::locators::Step::Field(0), 0, &#ok_child), _ => Err(mod_api::RowError::Bounds) } }),
+                            Err(__horizon_payload) => __horizon_visit(mod_points::locators::Step::Variant(1), 1, &mod_points::native_nodes::Record { key: #err_key, count: 1, visit: move |__horizon_index, __horizon_visit: &mut mod_points::native_nodes::Visitor<'_>| match __horizon_index { 0 => __horizon_visit(mod_points::locators::Step::Field(0), 0, &#err_child), _ => Err(mod_api::RowError::Bounds) } }),
+                        }
+                    } }
+                })
+            }
+            Shape::DynError => {
+                let unit = native_schema::identity(
+                    rule,
+                    &Shape::Scalar(Scalar::Unsigned("u16")),
+                    exposure,
+                )?;
+                let unit_key = auxiliary("unit", &unit)?;
+                quote!(mod_points::native_nodes::DisplayText((#place).to_string(), #key, #unit_key))
+            }
             Shape::Tuple(parts) => {
                 let mut arms = Vec::new();
                 for (index, part) in parts.iter().enumerate() {
@@ -358,11 +401,16 @@ fn generate_inner(
 }
 
 /// One helper per named layout of the graph, emitted once per source rather than once per
-/// point body. Each takes the native value and the endpoint's registration `Plan`.
-pub fn helpers(rule: &Rule, graph: &crate::native_policy::Graph) -> Result<TokenStream, String> {
+/// point body. Each takes the native value and the endpoint's registration `Plan`. Only the
+/// layouts `emit` marks (see `native_crate::emitted`) get one: the emitting crate's.
+pub fn helpers(
+    rule: &Rule,
+    graph: &crate::native_policy::Graph,
+    emit: &[bool],
+) -> Result<TokenStream, String> {
     let mut helpers = Vec::new();
     for (id, layout) in graph.layouts.iter().enumerate() {
-        if rule.named(&layout.name).is_none() || layout.opaque.is_some() {
+        if !emit[id] {
             continue;
         }
         let helper = quote::format_ident!("__horizon_node_{id}");

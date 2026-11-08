@@ -194,6 +194,11 @@ fn listen_checked(
         }
         let raw = place & 0x4000_0000 != 0;
         let place = place & 0x3FFF_FFFF;
+        // Raw places run only in a staged game, which installs its catalog; without one a raw
+        // listener would never fire, so it is refused instead of silently registered.
+        if raw && catalog.is_none() {
+            return Err(Listen::Internals(InternalsRefusal::NoCatalog));
+        }
         let catalog = if raw {
             mod_points::RAW_PLACES
         } else {

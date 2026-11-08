@@ -9,6 +9,18 @@ use quote::quote;
 mod tests;
 use std::collections::BTreeMap;
 
+/// The listed trait a `dyn path` layout name is the table of.
+fn table<'a>(rule: &Rule, reason: &'a str) -> Option<&'a str> {
+    let path = reason.strip_prefix("dyn ")?;
+    rule.trait_decl(path).map(|_| path)
+}
+
+/// The trait and method a `dyn path::method` layout name is the callable of.
+fn method<'a>(rule: &Rule, reason: &'a str) -> Option<(&'a str, &'a str)> {
+    let (path, name) = reason.strip_prefix("dyn ")?.rsplit_once("::")?;
+    rule.trait_decl(path).map(|_| (path, name))
+}
+
 /// Finite metadata graph, with transparent references and no native engine values.
 #[derive(Default)]
 pub struct Graph {
@@ -17,6 +29,13 @@ pub struct Graph {
     ids: BTreeMap<String, usize>,
 }
 impl Graph {
+    /// Every layout a helper module can emit: named and not opaque.
+    pub fn emittable(&self, rule: &Rule) -> Vec<bool> {
+        self.layouts
+            .iter()
+            .map(|layout| layout.opaque.is_none() && rule.named(&layout.name).is_some())
+            .collect()
+    }
     /// Auxiliary node ID for a variant payload, map entry or UTF-16 unit.
     pub fn auxiliary(&self, shape: &Shape, role: &str) -> Option<usize> {
         self.id(shape).and_then(|id| {
@@ -131,6 +150,10 @@ impl Graph {
             Shape::Array(p, _) | Shape::Slice(p) | Shape::Option(p) => {
                 children.push(self.add(rule, p))
             }
+            Shape::Result(ok, err) => {
+                children.push(self.add(rule, ok));
+                children.push(self.add(rule, err));
+            }
             Shape::Collection(kind, args) => {
                 let count = if matches!(kind, Collection::HashMap | Collection::BTreeMap) {
                     2
@@ -141,6 +164,29 @@ impl Graph {
                     opaque = Some("malformed collection".into());
                 }
                 children.extend(args.iter().take(count).map(|p| self.add(rule, p)));
+            }
+            // A listed trait's object is a table with one leaf per method, in declaration
+            // order; a method that cannot cross is an opaque leaf with its reason.
+            Shape::Opaque(Some(reason)) if table(rule, reason).is_some() => {
+                let path = table(rule, reason).expect("checked");
+                for (ordinal, method) in crate::native_callable::methods(rule, path)
+                    .iter()
+                    .enumerate()
+                {
+                    fields.push(Field {
+                        case: None,
+                        ordinal: ordinal as u32,
+                        name: method.name.to_string(),
+                        target: self.add(
+                            rule,
+                            &Shape::Opaque(Some(format!("dyn {path}::{}", method.name))),
+                        ),
+                    });
+                }
+            }
+            Shape::Opaque(Some(reason)) if method(rule, reason).is_some() => {
+                let (path, name) = method(rule, reason).expect("checked");
+                opaque = crate::native_callable::method_gap(rule, path, name);
             }
             Shape::Opaque(reason) => {
                 opaque = Some(reason.clone().unwrap_or("opaque layout".into()))
@@ -157,6 +203,7 @@ impl Graph {
         if matches!(
             shape,
             Shape::Scalar(crate::crossing::Scalar::String | crate::crossing::Scalar::Str)
+                | Shape::DynError
         ) {
             let unit = self.add(
                 rule,
@@ -171,6 +218,11 @@ impl Graph {
             Shape::Option(_) => {
                 auxiliaries.push(("variant(0)".to_string(), Vec::new()));
                 auxiliaries.push(("variant(1)".to_string(), self.layouts[id].children.clone()));
+            }
+            Shape::Result(..) => {
+                let children = self.layouts[id].children.clone();
+                auxiliaries.push(("variant(0)".to_string(), vec![children[0]]));
+                auxiliaries.push(("variant(1)".to_string(), vec![children[1]]));
             }
             Shape::Collection(Collection::HashMap | Collection::BTreeMap, _) => {
                 auxiliaries.push(("pair".to_string(), self.layouts[id].children.clone()))

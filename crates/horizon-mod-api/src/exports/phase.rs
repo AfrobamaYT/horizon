@@ -1,8 +1,8 @@
 mod phase;
 pub use phase::{
     DataLoadContext, DataLoadOrigin, LoadReader, LoadedMods, LoopContext, LoopReader, LoopSide,
-    OwningLoad, OwningLoop, PackageInfo, PackageKind, RegistrationContext, RegistrationReadError,
-    install_guest_packages,
+    OwningLoad, OwningLoop, OwningWorldgen, PackageInfo, PackageKind, RegistrationContext,
+    RegistrationReadError, WorldgenHost, install_guest_packages,
 };
 mod __private {
     pub use crate::phase::{
