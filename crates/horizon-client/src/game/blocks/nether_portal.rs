@@ -1550,6 +1550,12 @@ mod tests {
             assert!(game.portals.arrivals.is_empty());
             assert_eq!(heard.lock().unwrap().len(), 1);
             assert!(game.level_entity(id as i32).is_none());
+            assert_eq!(game.persist.removals.len(), 1);
+            game.native_removals_flush();
+            assert!(game.dropped.is_empty());
+            assert!(game.persist.removals.is_empty());
+            game.native_removals_flush();
+            assert!(game.dropped.is_empty());
         });
     }
 

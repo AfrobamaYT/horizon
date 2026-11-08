@@ -450,21 +450,26 @@ impl Game<'_> {
         }
         // teleportCrossDimension ejects passengers and teleports each in order.
         // A refused passenger (and its own subtree) stays in the old level.
-        let riders: Vec<_> = self
+        let mut riders: Vec<_> = self
             .mobs
             .iter()
             .filter(|m| !m.removed && m.extra.mount == Some(id))
-            .map(|m| m.id)
+            .map(|m| (m.extra.vehicle_order, m.id))
             .collect();
-        for rider in riders {
+        riders.sort_by_key(|r| r.0);
+        for &(_, rider) in riders.iter().rev() {
             self.dismount_mob(rider);
             if let Some(m) = self.mobs.iter_mut().find(|m| m.id == rider) {
                 m.extra.mount = None;
                 m.extra.passenger = false;
             }
-            if self.entity_may_travel(rider, to, cause)
-                && let Some(m) = self.mobs.iter_mut().find(|m| m.id == rider)
-            {
+        }
+        let accepted: Vec<_> = riders
+            .into_iter()
+            .filter_map(|(_, rider)| self.entity_may_travel(rider, to, cause).then_some(rider))
+            .collect();
+        for rider in accepted {
+            if let Some(m) = self.mobs.iter_mut().find(|m| m.id == rider) {
                 // Retain accepted edges for the destination's NBT tree only.
                 m.extra.mount = Some(id);
                 m.extra.passenger = true;
@@ -677,7 +682,7 @@ impl Game<'_> {
             {
                 continue;
             }
-            // The vehicle and each rider are asked; one cancel keeps them all.
+            // Refused passengers are detached and stay in the source level.
             let cause = TravelCause::of_plan(&plan);
             if !self.entity_may_travel(vehicle, plan.dim, cause) {
                 continue;
