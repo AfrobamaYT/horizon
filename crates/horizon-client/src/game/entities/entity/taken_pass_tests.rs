@@ -304,11 +304,21 @@ fn lifecycle_fixture_walks_other_owners() {
 }
 
 /// Run each fixture's complete setup and actual action in both dimensions.
-pub(in crate::game) fn in_both_dimensions(mut test: impl FnMut(&mut Game<'_>)) {
+pub(in crate::game) fn in_both_dimensions(mut test: impl FnMut(&mut Game<'_>, &PassBalance)) {
     for dimension in [crate::game::Dim::Overworld, crate::game::Dim::Nether] {
         crate::game::native_entity_refs::tests::with_game(|game| {
             game.enter_level(dimension).unwrap();
-            test(game);
+            use horizon_client::join_seq::residency::{Kind, Owner};
+            let balance = PassBalance::bind(
+                &mut game.mobs,
+                Owner {
+                    dimension: game.dim.key(),
+                    kind: Kind::Mob,
+                },
+                |mob| (mob.id, mob.join),
+            );
+            test(game, &balance);
+            balance.assert_parked(game);
             assert_eq!(
                 game.dim, dimension,
                 "fixture changed the selected dimension"
@@ -317,7 +327,7 @@ pub(in crate::game) fn in_both_dimensions(mut test: impl FnMut(&mut Game<'_>)) {
     }
 }
 
-struct PassBalance {
+pub(in crate::game) struct PassBalance {
     journal: horizon_client::join_seq::residency::Journal,
     owner: horizon_client::join_seq::residency::Owner,
 }
@@ -331,7 +341,7 @@ impl PassBalance {
         list.bind_residency(&journal, owner, identity);
         Self { journal, owner }
     }
-    fn assert_closed(&self) {
+    pub(in crate::game) fn drain_balanced(&self) -> usize {
         use horizon_client::join_seq::residency::Change;
         let mut events = Vec::new();
         self.journal.drain_into(&mut events);
@@ -348,8 +358,8 @@ impl PassBalance {
                 _ => {}
             }
         }
-        assert!(lifts > 0, "actual caller did not emit its lift");
         assert_eq!(depth, 0, "actual caller abandoned a lifted pass");
+        lifts
     }
     fn assert_parked(&self, game: &mut Game<'_>) {
         let home = game.dim;
@@ -358,7 +368,7 @@ impl PassBalance {
             _ => crate::game::Dim::Overworld,
         };
         game.enter_level(away).unwrap();
-        self.assert_closed();
+        self.drain_balanced();
         game.enter_level(home).unwrap();
     }
 }
@@ -368,6 +378,7 @@ impl PassBalance {
 /// remains available for its own assertions.
 pub(in crate::game) fn assert_mob_spawn_survives(
     game: &mut Game<'_>,
+    balance: &PassBalance,
     action: impl FnOnce(&mut Game<'_>),
 ) {
     const SPAWNED: u32 = 1_900_000_000;
@@ -382,18 +393,13 @@ pub(in crate::game) fn assert_mob_spawn_survives(
         mob.no_ai = true;
         game.mobs.push(mob);
     }
-    use horizon_client::join_seq::residency::{Kind, Owner};
-    let balance = PassBalance::bind(
-        &mut game.mobs,
-        Owner {
-            dimension: game.dim.key(),
-            kind: Kind::Mob,
-        },
-        |mob| (mob.id, mob.join),
-    );
+    balance.drain_balanced();
     let mut expected: Vec<_> = game.mobs.iter().map(|mob| (mob.id, mob.join)).collect();
     with_spawn(spawn, || action(game));
-    balance.assert_closed();
+    assert!(
+        balance.drain_balanced() > 0,
+        "actual caller did not emit its lift"
+    );
     let index = game
         .mobs
         .iter()
