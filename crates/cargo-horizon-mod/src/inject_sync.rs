@@ -83,6 +83,19 @@ fn sync(dir: &Path, repo: &Path) -> Result<(), String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(format!("{}: {e}", output.display())),
     };
+    let header = format!(
+        "# {}: written by cargo horizon-mod inject sync\n",
+        manifest.id
+    );
+    for (index, line) in old.lines().enumerate() {
+        if line.contains('#') && line.trim() != header.trim() {
+            return Err(format!(
+                "{}:{}: move the comment out of this generated slot list before syncing",
+                output.display(),
+                index + 1
+            ));
+        }
+    }
     let mut owned = Slots::default();
     owned.extend(&output, &old).map_err(|e| e.to_string())?;
     for (at, origin) in requested.functions {
@@ -115,10 +128,7 @@ fn sync(dir: &Path, repo: &Path) -> Result<(), String> {
             call.target, call.selector, call.ctx
         ));
     }
-    let mut candidate = format!(
-        "# {}: written by cargo horizon-mod inject sync\n",
-        manifest.id
-    );
+    let mut candidate = header;
     for line in sorted {
         candidate.push_str(&line);
         candidate.push('\n');

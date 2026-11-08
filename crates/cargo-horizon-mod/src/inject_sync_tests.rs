@@ -155,3 +155,62 @@ fn inject_sync_refuses_invalid_fields_and_missing_repository() {
         assert!(run(&args.into_iter().map(String::from).collect::<Vec<_>>()).is_err());
     }
 }
+
+#[test]
+fn reviewer_unchanged_file_keeps_mtime() {
+    let f = Fixture::new(
+        "review-mtime",
+        "example",
+        &entry("function", "lower::run", "head", ""),
+    );
+    f.run().unwrap();
+    let output = f.file("example.txt");
+    let old = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1000);
+    fs::File::open(&output)
+        .unwrap()
+        .set_times(fs::FileTimes::new().set_modified(old))
+        .unwrap();
+    f.run().unwrap();
+    assert_eq!(fs::metadata(output).unwrap().modified().unwrap(), old);
+}
+
+#[test]
+fn reviewer_rejects_non_native() {
+    let f = Fixture::new("review-nonnative", "example", "");
+    fs::write(f.mod_dir.join(MANIFEST), "id = 'example'\nname = 'Test'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = ['registries']\n").unwrap();
+    assert!(f.run().is_err());
+    assert!(!f.file("example.txt").exists());
+}
+
+#[test]
+fn reviewer_uses_manifest_owner() {
+    let f = Fixture::new(
+        "review-owner",
+        "second",
+        &entry("function", "lower::run", "head", ""),
+    );
+    f.run().unwrap();
+    assert!(f.file("second.txt").exists());
+    assert!(!f.file("example.txt").exists());
+}
+
+#[test]
+fn reviewer_preserves_user_comment() {
+    let f = Fixture::new(
+        "review-comment",
+        "example",
+        &entry("function", "lower::run", "head", ""),
+    );
+    for text in [
+        "# downstream patch\nuser::slot\n",
+        "user::slot # keep this reason\n",
+    ] {
+        fs::write(f.file("example.txt"), text).unwrap();
+        let error = f.run().unwrap_err();
+        assert!(
+            error.contains("example.txt:1:") && error.contains("move the comment out"),
+            "{error}"
+        );
+        assert_eq!(fs::read_to_string(f.file("example.txt")).unwrap(), text);
+    }
+}

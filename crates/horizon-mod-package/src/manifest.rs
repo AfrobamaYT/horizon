@@ -170,6 +170,10 @@ pub fn revision(value: &str) -> bool {
 
 pub(super) fn valid_mod_id(id: &str) -> bool {
     (1..=64).contains(&id.len())
+        && !matches!(id, "con" | "prn" | "aux" | "nul")
+        && !(id.len() == 4
+            && (id.starts_with("com") || id.starts_with("lpt"))
+            && matches!(id.as_bytes()[3], b'1'..=b'9'))
         && id
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
@@ -860,6 +864,22 @@ pub fn find(dir: &Path) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_device_mod_ids_are_refused() {
+        for id in ["con", "prn", "aux", "nul", "com1", "com9", "lpt1", "lpt9"] {
+            assert!(
+                Manifest::parse(&EXAMPLE.replace("ruby", id)).is_err(),
+                "{id}"
+            );
+        }
+        for id in ["console", "com0", "com10", "lpt0", "con_tool"] {
+            assert!(
+                Manifest::parse(&EXAMPLE.replace("ruby", id)).is_ok(),
+                "{id}"
+            );
+        }
+    }
 
     const EXAMPLE: &str = r#"
 id = "ruby"
