@@ -137,19 +137,10 @@ impl GameLevel<'_> {
         dimension: LevelDimension,
         pos: BlockPos,
         state: BlockStateId,
-        changed: BlockId,
+        changed: mod_api::BlockKey,
         moved: bool,
     ) {
-        // Lift the secondary block identity only after the same prepared routing
-        // seam used by the generated fire path has admitted the primary state.
-        if !super::api_values::block_listens(mod_api::HookId::NeighborChanged, state) {
-            return;
-        }
-        use super::api_values::TryIntoApi;
-        let Ok(changed) = self.behaviours.table.default_state(changed).try_into_api() else {
-            return;
-        };
-        self.fire_neighbor_changed(ticks, dimension, pos, state, changed.block(), moved);
+        self.fire_neighbor_changed(ticks, dimension, pos, state, changed, moved);
     }
 
     /// On an authoritative server, a fluid flows or fire spreads from `from`

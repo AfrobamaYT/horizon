@@ -178,12 +178,8 @@ pub(super) fn emit<'a>(
                     struct ApiState;
                     impl VisitMut for ApiState {
                         fn visit_type_path_mut(&mut self, ty: &mut syn::TypePath) {
-                            if ty.path.segments.len() == 1 {
-                                if ty.path.is_ident("BlockStateId") {
-                                    ty.path = syn::parse_quote!(BlockState);
-                                } else if ty.path.is_ident("BlockId") {
-                                    ty.path = syn::parse_quote!(BlockKey);
-                                }
+                            if ty.path.segments.len() == 1 && ty.path.is_ident("BlockStateId") {
+                                ty.path = syn::parse_quote!(BlockState);
                             }
                             syn::visit_mut::visit_type_path_mut(self, ty);
                         }

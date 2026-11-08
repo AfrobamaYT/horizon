@@ -1019,8 +1019,14 @@ impl LevelAccess for GameLevel<'_> {
         changed: horizon_world::level::BlockId,
         moved: bool,
     ) {
-        if self.native_authoritative {
-            self.native_neighbor_changed(ticks, self.dimension, pos, state, changed, moved);
+        if self.native_authoritative
+            && api_values::block_state::block_listens(mod_api::HookId::NeighborChanged, state)
+        {
+            use api_values::TryIntoApi;
+            let Ok(changed) = self.behaviours.table.default_state(changed).try_into_api() else {
+                return;
+            };
+            self.native_neighbor_changed(ticks, self.dimension, pos, state, changed.block(), moved);
         }
     }
     fn affect_neighbors_after_removal(
