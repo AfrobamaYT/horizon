@@ -1346,7 +1346,7 @@ impl Game<'_> {
     ) {
         if self.remote.is_none()
             && mod_api::__private::effect_index(effect)
-                .and_then(crate::potions::effect_by_index)
+                .and_then(horizon_client_core::potions::effect_by_index)
                 .is_some_and(|def| def.index >= brewing::EFFECTS.len())
         {
             if new {

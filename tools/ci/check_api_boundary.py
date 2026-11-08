@@ -236,6 +236,8 @@ def source_findings(path: Path, source: str):
             if not in_private:
                 if kind == "use" and public:
                     for imported, _ in use_paths([t.value for t in ts[i + 1:j]]):
+                        if "__private" in resolve(imported, aliases):
+                            findings.append(Finding(str(path), ts[i].line, "private-export", "::".join(imported)))
                         inspect([Token(v, ts[i].line) for v in _join_path(imported)], aliases)
                 elif public or kind == "type" or (kind == "fn" and path.parent.name == "hooks"):
                     inspect(ts[i:j], aliases, name if kind == "fn" else "", owner=owner)
@@ -250,7 +252,8 @@ def source_findings(path: Path, source: str):
             if i <= begin:
                 raise AssertionError("scanner made no progress")
 
-    walk(0, len(ts), private=path.name == "__private.rs" or "__private" in path.parts)
+    walk(0, len(ts), private=(path.name == "__private.rs" and path.parent.name == "src")
+         or "__private" in path.parts)
     return sorted(set(findings), key=lambda f: (f.path, f.line, f.rule, f.detail))
 
 
@@ -310,6 +313,7 @@ pub use horizon_client_core::text::*;
 pub fn stack() -> Borrowed { todo!() }
 pub fn json() -> serde_json::Value { todo!() }
 pub mod __private { pub use horizon_world::fluid::FluidState; }
+pub use crate::__private::FluidState as Public;
 '''
 
 
@@ -321,7 +325,7 @@ def negative_control():
         (crate / "Cargo.toml").write_text('[dependencies]\nrenamed = { package = "horizon-world", version = "1" }\n')
         (crate / "src/exports/probe.rs").write_text(NEGATIVE)
         found = check(crate)
-        required = {"engine-dependency", "engine-type", "json-signature"}
+        required = {"engine-dependency", "engine-type", "json-signature", "private-export"}
         return required <= {f.rule for f in found} and sum(f.rule == "engine-type" for f in found) == 3
 
 

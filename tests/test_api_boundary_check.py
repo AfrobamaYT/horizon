@@ -20,7 +20,7 @@ class ApiBoundaryCheckTests(unittest.TestCase):
 
     def test_negative_control_kills_disabled_rules(self):
         real_check = boundary.check
-        for rule in ("engine-type", "engine-dependency", "json-signature"):
+        for rule in ("engine-type", "engine-dependency", "json-signature", "private-export"):
             with self.subTest(rule=rule):
                 def mutant(crate):
                     return [f for f in real_check(crate) if f.rule != rule]
@@ -74,6 +74,11 @@ class ApiBoundaryCheckTests(unittest.TestCase):
         self.assertEqual(self.findings("pub mod __private { pub use horizon_world::fluid::*; }"), [])
         self.assertEqual(self.findings("pub use horizon_world::fluid::*;", "src/__private.rs"), [])
         self.assert_rule("pub mod __private { pub use horizon_world::fluid::*; } pub use horizon_items::*;")
+
+    def test_private_reexports_cannot_be_laundered_through_aliases(self):
+        self.assert_rule('pub use crate::__private::FluidState as Fluid;', "private-export")
+        self.assert_rule('use crate::__private as hidden; pub use hidden::FluidState as Fluid;', "private-export")
+        self.assert_rule('pub use horizon_world::*;', path="src/exports/__private.rs")
 
     def test_json_signature_and_alias(self):
         self.assert_rule("pub fn f() -> serde_json::Value {}", "json-signature")
