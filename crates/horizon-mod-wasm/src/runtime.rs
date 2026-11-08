@@ -274,6 +274,17 @@ fn host(
             .remove(id)
             .map(|_| ())
             .map_err(|e| wasmtime::Error::msg(format!("{e:?}")))
+    } else if id == mod_api::wire::HOST_LOG {
+        let mut reader = Reader::new(&input);
+        let message: String = reader.take()?;
+        if !reader.rest().is_empty() {
+            return Err(WireError::Trailing.into());
+        }
+        // Release the Cx borrow before entering a possibly reentrant logger.
+        let module = unsafe { (&*cx).module.as_ref().map(|module| module.id.clone()) }
+            .ok_or_else(|| wasmtime::Error::msg("no calling module"))?;
+        log::error!("wasm mod {module}: {message}");
+        Ok(())
     } else {
         // SAFETY: Cx is boxed and stable; serve must release its frame borrows before
         // invoking native code that can synchronously reenter the guest.
@@ -288,7 +299,7 @@ fn host(
         return Err(error.into());
     }
     let size = u32::try_from(reply.bytes().len())?;
-    if size <= cap {
+    if size != 0 && size <= cap {
         memory.write(&mut caller, out as usize, reply.bytes())?;
     }
     caller.data_mut().replies[depth] = reply;
