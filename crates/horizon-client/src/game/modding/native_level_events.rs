@@ -96,7 +96,7 @@ impl Game<'_> {
         a: i32,
         b: i32,
     ) -> bool {
-        let Some(resolved) = mod_api::__private::resolved_block(block) else {
+        let Some(block) = super::api_values::behavior_block(block, self.res.behaviours()) else {
             return false;
         };
         if !self.level_in_place(level) {
@@ -104,7 +104,7 @@ impl Game<'_> {
         }
         self.block_ticks.queue_block_event(BlockEventData {
             pos: horizon_core::position::BlockPos::new(pos[0], pos[1], pos[2]),
-            block: resolved.block,
+            block,
             param_a: a,
             param_b: b,
         });
