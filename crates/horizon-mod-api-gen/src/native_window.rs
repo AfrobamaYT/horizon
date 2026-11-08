@@ -62,6 +62,20 @@ pub fn generate(
                 let child = emit(rule, to, quote!(*__horizon_item), exposure, depth + 1)?;
                 quote!(mod_points::native_nodes::Sequence { items: &(#place), key: #key, wrap: |__horizon_item, __horizon_visit| __horizon_visit(mod_points::locators::Step::Index(0), 0, &#child) })
             }
+            Shape::Option(to) => {
+                let child = emit(rule, to, quote!(*__horizon_some), exposure, depth + 1)?;
+                let some = format!("{identity};variant(1)");
+                let none = format!("{identity};variant(0)");
+                quote!({
+                    let __horizon_tag: u32 = u32::from((#place).is_some());
+                    mod_points::native_nodes::Variant { key: #key, tag: __horizon_tag, visit: |__horizon_visit| {
+                        match &(#place) {
+                            Some(__horizon_some) => __horizon_visit(mod_points::locators::Step::Variant(1), 1, &mod_points::native_nodes::Record { key: mod_points::snapshot::key(#some), count: 1, visit: |__horizon_index, __horizon_visit| match __horizon_index { 0 => __horizon_visit(mod_points::locators::Step::Field(0), 0, &#child), _ => Err(mod_api::RowError::Bounds) } }),
+                            None => __horizon_visit(mod_points::locators::Step::Variant(0), 0, &mod_points::native_nodes::Record { key: mod_points::snapshot::key(#none), count: 0, visit: |_, _| Err(mod_api::RowError::Bounds) }),
+                        }
+                    } }
+                })
+            }
             Shape::Tuple(parts) => {
                 let mut arms = Vec::new();
                 for (index, part) in parts.iter().enumerate() {

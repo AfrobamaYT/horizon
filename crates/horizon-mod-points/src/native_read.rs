@@ -30,11 +30,13 @@ pub trait NativeNode {
 /// The caller checks call and root leases before invoking this function.
 pub fn read(
     root: &dyn NativeNode,
+    prefix: u32,
     paths: &mut Locators,
     request: RowWindow,
 ) -> Result<Vec<Row>, RowError> {
+    let prefix = paths.path(prefix)?;
     let (mut out, path) = WindowBuilder::new(paths, request)?;
-    if path.first() != Some(&Step::Root(0)) {
+    if !path.starts_with(&prefix) {
         return Err(RowError::Bounds);
     }
     fn resolve(
@@ -110,7 +112,7 @@ pub fn read(
         Step::Root(n) | Step::Field(n) | Step::Variant(n) => n,
         Step::Index(n) => u32::try_from(n).map_err(|_| RowError::Bounds)?,
     };
-    resolve(root, &path[1..], &mut |node| {
+    resolve(root, &path[prefix.len()..], &mut |node| {
         node.value(&mut |value| {
             out.root(parent, field, node.key(), value)?;
             Ok(())

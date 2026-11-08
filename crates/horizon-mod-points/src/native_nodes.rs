@@ -46,6 +46,33 @@ where
     }
 }
 
+/// A tagged enum node with its currently active variant as the single child.
+pub struct Variant<F> {
+    pub key: u64,
+    pub tag: u32,
+    pub visit: F,
+}
+impl<F> NativeNode for Variant<F>
+where
+    F: Fn(&mut Visitor<'_>) -> Result<(), RowError>,
+{
+    fn key(&self) -> u64 {
+        self.key
+    }
+    fn value(&self, f: &mut Header<'_>) -> Result<(), RowError> {
+        f(Some(&self.tag))
+    }
+    fn len(&self) -> u64 {
+        1
+    }
+    fn child(&self, ordinal: u64, f: &mut Visitor<'_>) -> Result<(), RowError> {
+        if ordinal != 0 {
+            return Err(RowError::Bounds);
+        }
+        (self.visit)(&mut |_, _, node| f(Step::Variant(self.tag), self.tag, node))
+    }
+}
+
 /// A borrowed UTF-16 view of a native UTF-8 string. Indexes are UTF-16 code units.
 pub struct Text<'a>(pub &'a str, pub u64, pub u64);
 impl NativeNode for Text<'_> {

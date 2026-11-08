@@ -69,13 +69,13 @@ fn resolves_paths_against_current_value_and_refuses_removed_element() {
         rows,
         depth,
     };
-    let first = read(&Numbers(vec![10, 20]), &mut paths, req(root, 1, 2, 1)).unwrap();
+    let first = read(&Numbers(vec![10, 20]), root, &mut paths, req(root, 1, 2, 1)).unwrap();
     assert_eq!(Reader::decode::<u32>(&first[1].4), Ok(20));
     let id = first[1].0;
-    let second = read(&Numbers(vec![30, 40]), &mut paths, req(id, 0, 1, 0)).unwrap();
+    let second = read(&Numbers(vec![30, 40]), root, &mut paths, req(id, 0, 1, 0)).unwrap();
     assert_eq!(Reader::decode::<u32>(&second[0].4), Ok(40));
     assert!(matches!(
-        read(&Numbers(vec![30]), &mut paths, req(id, 0, 1, 0)),
+        read(&Numbers(vec![30]), root, &mut paths, req(id, 0, 1, 0)),
         Err(RowError::Bounds)
     ));
 }
