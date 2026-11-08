@@ -210,6 +210,16 @@ pub fn set_sea_levels(levels: Vec<(LevelKey, i32)>) {
     *SEA_LEVELS.write().unwrap_or_else(|e| e.into_inner()) = levels.into_iter().collect();
 }
 
+/// Registers one level's sea level, as a server told a client the level of a mod or a data pack
+/// has (`CommonPlayerSpawnInfo.seaLevel`); the levels of a world's own load are set by
+/// `set_sea_levels`.
+pub fn register_sea_level(level: LevelKey, sea_level: i32) {
+    SEA_LEVELS
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(level, sea_level);
+}
+
 /// The sea level a mod's level was registered with, if it has one.
 pub fn registered_sea_level(level: LevelKey) -> Option<i32> {
     SEA_LEVELS
