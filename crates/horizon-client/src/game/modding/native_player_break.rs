@@ -121,7 +121,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_mod_breaks_stone_as_the_player_with_their_pickaxe() {
-        with_game(|mut game| {
+        with_game(|game| {
             game.world.chunks.insert(
                 (0, 0),
                 std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
@@ -142,7 +142,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn drops_go_into_the_inventory_rolled_for_the_tools_enchantments() {
-        with_game(|mut game| {
+        with_game(|game| {
             game.world.chunks.insert(
                 (0, 0),
                 std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
@@ -170,7 +170,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn the_players_checks_hold() {
-        with_game(|mut game| {
+        with_game(|game| {
             game.world.chunks.insert(
                 (0, 0),
                 std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
