@@ -781,6 +781,12 @@ fn decoration_type(sprite: &str) -> Option<&'static str> {
         .map(|(name, _)| *name)
         .or_else(|| horizon_client::map_decoration_types::registered().id_of(sprite))
 }
+impl Game<'_> {
+    /// Whether `sprite` draws one of vanilla's decoration types: a mod's type may not take it.
+    pub(in crate::game) fn is_vanilla_decoration_sprite(sprite: &str) -> bool {
+        DECORATION_TYPES.iter().any(|(_, s)| *s == sprite)
+    }
+}
 /// A named `minecraft:map_decorations` entry: key, sprite, x, z, rotation.
 type StaticDecoration = (JavaString, &'static str, f64, f64, f32);
 

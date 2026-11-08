@@ -326,7 +326,7 @@ pub(super) fn register_debug_entries(role: ExecutionRole) {
 pub(super) fn register_map_decoration_types() {
     let mut types = Vec::new();
     Game::native_map_decoration_types(&RegistrationContext::new(), &mut types);
-    horizon_client::map_decoration_types::register(types);
+    horizon_client::map_decoration_types::register(types, Game::is_vanilla_decoration_sprite);
 }
 /// The native mods' HUD layers (`native_register_gui_layers`), placed among vanilla's once at
 /// start.
