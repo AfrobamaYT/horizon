@@ -6,10 +6,14 @@ use std::{rc::Rc, sync::Arc};
 mod boundary {
     include!(concat!(env!("OUT_DIR"), "/wire_host_generated.rs"));
 }
-#[derive(Debug)]
 struct WasmMod {
     subscribed: &'static [Option<mod_api::HookId>],
     corrupt: bool,
+}
+impl std::fmt::Debug for WasmMod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Loopback")
+    }
 }
 #[derive(Debug)]
 struct WasmHandler {
@@ -113,6 +117,7 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
         ) {
             // This is a plain import made through the generated Guest, not a stubbed reply.
             assert!(matches!(context.side(), mod_api::LoopSide::Server));
+            event.entity = 99;
             event.power = 7.25;
             event.kind = "must not write back";
         }
@@ -151,6 +156,7 @@ fn wire_loopback_roundtrip_and_atomic_writeback() {
         subscribed: &[],
         corrupt: true,
     };
+    event.entity = 42;
     event.power = 2.0;
     bad.living_jump_power(&Context, &mut event);
     assert_eq!(
