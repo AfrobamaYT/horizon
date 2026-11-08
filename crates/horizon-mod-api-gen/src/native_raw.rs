@@ -20,6 +20,8 @@ pub struct Frame {
 /// A native projection plan. Return frames contain only the native return listener's outcome;
 /// consumed by-value arguments are never read after the original function runs.
 pub struct Plan {
+    /// Registered call layout whose endpoint `exposure::Plan` the frames read through.
+    pub plan: Option<usize>,
     pub head: Frame,
     pub tail: Option<Frame>,
 }
@@ -36,6 +38,89 @@ pub fn generate(
     if signature.receiver().is_some() {
         return Err("receiver requires the manifest-selected field policy".into());
     }
+    build(rule, module, None, signature, shape, None)
+}
+
+/// Registration-time identity of one point's virtual call layouts in the shared catalog graph.
+#[derive(Clone, Copy, Debug)]
+pub struct Call {
+    pub head: usize,
+    pub tail: Option<usize>,
+}
+
+/// Add one point's roots and its per-phase virtual call layouts to the ordered catalog graph.
+/// The receiver is the first head root and is never writable: its members come only from
+/// explicit manifest grants, and only the producer's record authority permits writes.
+pub fn register(
+    rule: &Rule,
+    module: &str,
+    owner: Option<&Type>,
+    signature: &Signature,
+    shape: &point_shape::Shape,
+    graph: &mut crate::native_policy::Graph,
+) -> Result<Call, String> {
+    let (head, tail) = roots(rule, module, owner, signature, shape)?;
+    let mut call = |name: String, roots: &[(Type, bool)]| -> Result<usize, String> {
+        let mut fields = Vec::new();
+        for (ordinal, (ty, _)) in roots.iter().enumerate() {
+            let target = graph.add(rule, &rule.shape(module, owner_name(owner).as_deref(), ty));
+            fields.push(crate::exposure::Field {
+                case: None,
+                ordinal: ordinal as u32,
+                name: format!("root{ordinal}"),
+                target,
+            });
+        }
+        graph.layouts.push(crate::exposure::Layout {
+            name: name.clone(),
+            signature: name,
+            fields,
+            children: Vec::new(),
+            opaque: None,
+        });
+        Ok(graph.layouts.len() - 1)
+    };
+    let target = format!("{module}::{}", signature.ident);
+    Ok(Call {
+        head: call(format!("call:{target}:head"), &head)?,
+        tail: match tail {
+            Some(roots) => Some(call(format!("call:{target}:tail"), &roots)?),
+            None => None,
+        },
+    })
+}
+
+/// The runtime-policy form of [`generate`]: every root, including a receiver, is read through
+/// the endpoint's registration-time `Plan` named `__raw_plan`, never an implicit full view.
+pub fn generate_runtime(
+    rule: &Rule,
+    module: &str,
+    owner: Option<&Type>,
+    signature: &Signature,
+    shape: &point_shape::Shape,
+    graph: &crate::native_policy::Graph,
+    call: Call,
+) -> Result<Plan, String> {
+    build(rule, module, owner, signature, shape, Some((graph, call)))
+}
+
+fn owner_name(owner: Option<&Type>) -> Option<String> {
+    owner.map(|ty| quote!(#ty).to_string())
+}
+
+type Roots = Vec<(Type, bool)>;
+
+fn roots(
+    rule: &Rule,
+    module: &str,
+    owner: Option<&Type>,
+    signature: &Signature,
+    shape: &point_shape::Shape,
+) -> Result<(Roots, Option<Roots>), String> {
+    let _ = rule;
+    if module.split("::").next() != Some("horizon_client") {
+        return Err("lower-crate raw points need their own once-per-crate helper module".into());
+    }
     if shape.borrowed_return {
         return Err("borrowed-return projection integration pending".into());
     }
@@ -44,7 +129,18 @@ pub fn generate(
     }
     let authority = point_shape::raw_shape(shape, signature, None);
     let mut inputs = Vec::new();
-    for (argument, permission) in signature.inputs.iter().zip(&authority.args) {
+    if let (Some(receiver), Some(owner)) = (signature.receiver(), owner) {
+        if receiver.reference.is_none() {
+            return Err("by-value receivers have no raw projection".into());
+        }
+        inputs.push((owner.clone(), false));
+    }
+    for (argument, permission) in signature
+        .inputs
+        .iter()
+        .filter(|argument| matches!(argument, syn::FnArg::Typed(_)))
+        .zip(&authority.args)
+    {
         let syn::FnArg::Typed(argument) = argument else {
             unreachable!()
         };
@@ -59,20 +155,52 @@ pub fn generate(
     if let Some(result) = result {
         inputs.push((result, authority.outcome_record_mutable == Some(true)));
     }
-    let head = frame(rule, module, &inputs)?;
     let tail = if shape.has_return() {
-        let result = match outcome {
+        Some(match outcome {
             point_shape::RawOutcome::Result(ty) => {
                 vec![(ty, authority.return_record_mutable)]
             }
             // Native unit return listeners have no mutable cancellation control.
             point_shape::RawOutcome::Cancel | point_shape::RawOutcome::None => Vec::new(),
-        };
-        Some(frame(rule, module, &result)?)
+        })
     } else {
         None
     };
-    Ok(Plan { head, tail })
+    Ok((inputs, tail))
+}
+
+fn build(
+    rule: &Rule,
+    module: &str,
+    owner: Option<&Type>,
+    signature: &Signature,
+    shape: &point_shape::Shape,
+    runtime: Option<(&crate::native_policy::Graph, Call)>,
+) -> Result<Plan, String> {
+    let (head, tail) = roots(rule, module, owner, signature, shape)?;
+    let owner_text = owner_name(owner);
+    let head = frame(
+        rule,
+        module,
+        owner_text.as_deref(),
+        &head,
+        runtime.map(|(graph, call)| (graph, call.head)),
+    )?;
+    let tail = match (tail, runtime.and_then(|(_, call)| call.tail)) {
+        (Some(roots), call) => Some(frame(
+            rule,
+            module,
+            owner_text.as_deref(),
+            &roots,
+            runtime.zip(call).map(|((graph, _), call)| (graph, call)),
+        )?),
+        (None, _) => None,
+    };
+    Ok(Plan {
+        plan: runtime.map(|(_, call)| call.head),
+        head,
+        tail,
+    })
 }
 
 impl Plan {
@@ -83,11 +211,18 @@ impl Plan {
             .tail
             .as_ref()
             .map(|Frame { roots, read, apply }| quote!(, #roots, { #read }, { #apply }));
-        quote!(#[horizon_raw_plan(#roots, { #read }, { #apply } #tail)])
+        let plan = self.plan.map(|plan| quote!(plan #plan,));
+        quote!(#[horizon_raw_plan(#plan #roots, { #read }, { #apply } #tail)])
     }
 }
 
-fn frame(rule: &Rule, module: &str, roots: &[(Type, bool)]) -> Result<Frame, String> {
+fn frame(
+    rule: &Rule,
+    module: &str,
+    owner: Option<&str>,
+    roots: &[(Type, bool)],
+    runtime: Option<(&crate::native_policy::Graph, usize)>,
+) -> Result<Frame, String> {
     let mut visitors = Vec::new();
     let mut plans = Vec::new();
     let mut prefixes = Vec::new();
@@ -99,21 +234,34 @@ fn frame(rule: &Rule, module: &str, roots: &[(Type, bool)]) -> Result<Frame, Str
         let member = syn::Index::from(index);
         let ordinal = index as u64;
         let field = index as u32;
-        let resolved = rule.shape(module, None, ty);
-        schema.push_str(&native_schema::identity(
-            rule,
-            &resolved,
-            &native_schema::All,
-        )?);
-        schema.push(';');
-        let node = native_window::generate(
-            rule,
-            module,
-            None,
-            ty,
-            quote!(*__roots.#member),
-            &native_schema::All,
-        )?;
+        let node = if let Some((graph, _)) = runtime {
+            {}
+            native_window::generate_runtime(
+                rule,
+                module,
+                owner,
+                ty,
+                quote!(*__roots.#member),
+                graph,
+                quote!(__raw_plan),
+            )?
+        } else {
+            let resolved = rule.shape(module, owner, ty);
+            schema.push_str(&native_schema::identity(
+                rule,
+                &resolved,
+                &native_schema::All,
+            )?);
+            schema.push(';');
+            native_window::generate(
+                rule,
+                module,
+                owner,
+                ty,
+                quote!(*__roots.#member),
+                &native_schema::All,
+            )?
+        };
         visitors.push(quote! {
             #ordinal => __visitor(mod_points::locators::Step::Field(#field), #field, &#node),
         });
@@ -122,19 +270,39 @@ fn frame(rule: &Rule, module: &str, roots: &[(Type, bool)]) -> Result<Frame, Str
                 .ok_or(mod_api::wire::WireError::Invalid("missing raw root locator"))?,
         });
         let slot = &slots[index];
-        plans.push(native_patch::generate(
-            rule,
-            module,
-            None,
-            ty,
-            quote!(**#slot),
-            quote!(&__trees[#member]),
-            quote!(__plan),
-            *writable,
-            &native_schema::All,
-        )?);
+        plans.push(if let Some((graph, _)) = runtime {
+            {}
+            native_patch::generate_runtime(
+                rule,
+                module,
+                owner,
+                ty,
+                quote!(**#slot),
+                quote!(&__trees[#member]),
+                quote!(__plan),
+                *writable,
+                graph,
+                quote!(__raw_plan),
+            )?
+        } else {
+            native_patch::generate(
+                rule,
+                module,
+                owner,
+                ty,
+                quote!(**#slot),
+                quote!(&__trees[#member]),
+                quote!(__plan),
+                *writable,
+                &native_schema::All,
+            )?
+        });
     }
     schema.push(')');
+    let record_key = match runtime {
+        Some((_, call)) => quote!((__raw_plan).key(#call).unwrap_or(0)),
+        None => quote!(const { mod_points::snapshot::key(#schema) }),
+    };
     let count = roots.len() as u64;
     let read = quote! {
         let __guard = __raw_state.0.try_borrow()
@@ -143,7 +311,7 @@ fn frame(rule: &Rule, module: &str, roots: &[(Type, bool)]) -> Result<Frame, Str
         let mut __paths = __raw_state.1.try_borrow_mut()
             .map_err(|_| mod_api::RowError::Unsupported)?;
         let __node = mod_points::native_nodes::Record {
-            key: const { mod_points::snapshot::key(#schema) },
+            key: #record_key,
             count: #count,
             visit: |__index, __visitor: &mut mod_points::native_nodes::Visitor<'_>| match __index {
                 #(#visitors)*
@@ -167,8 +335,8 @@ fn frame(rule: &Rule, module: &str, roots: &[(Type, bool)]) -> Result<Frame, Str
     };
     Ok(Frame {
         roots: roots.len(),
-        read: local_paths(read, module)?,
-        apply: local_paths(apply, module)?,
+        read: { local_paths(read, module)? },
+        apply: { local_paths(apply, module)? },
     })
 }
 

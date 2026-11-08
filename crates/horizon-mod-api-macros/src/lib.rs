@@ -12,6 +12,7 @@ struct RawFramePlan {
     apply: syn::Block,
 }
 struct RawPlan {
+    plan: Option<usize>,
     head: RawFramePlan,
     tail: Option<RawFramePlan>,
 }
@@ -25,6 +26,17 @@ impl syn::parse::Parse for RawPlan {
             let apply = input.parse()?;
             Ok(RawFramePlan { roots, read, apply })
         }
+        let plan = if input.peek(syn::Ident) {
+            let word: syn::Ident = input.parse()?;
+            if word != "plan" {
+                return Err(syn::Error::new(word.span(), "expected `plan`"));
+            }
+            let id = input.parse::<syn::LitInt>()?.base10_parse()?;
+            input.parse::<Token![,]>()?;
+            Some(id)
+        } else {
+            None
+        };
         let head = frame(input)?;
         let tail = if input.is_empty() {
             None
@@ -32,7 +44,7 @@ impl syn::parse::Parse for RawPlan {
             input.parse::<Token![,]>()?;
             Some(frame(input)?)
         };
-        Ok(Self { head, tail })
+        Ok(Self { plan, head, tail })
     }
 }
 
@@ -483,6 +495,14 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
             let read = &plan.read;
             let apply = &plan.apply;
             let mut inputs = Vec::new();
+            if !at_return && raw_plan.as_ref().is_some_and(|plan| plan.plan.is_some()) {
+                // A registration policy projects the receiver, as the first root.
+                match shape.receiver {
+                    point_shape::Receiver::Shared => inputs.push(quote!(self,)),
+                    point_shape::Receiver::Mut => inputs.push(quote!(&mut *self,)),
+                    point_shape::Receiver::None => {}
+                }
+            }
             if !at_return {
                 for field in point_shape::raw_fields(&function.sig) {
                     let place = &places[&field.input];
@@ -505,10 +525,22 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
                 .to_compile_error();
             }
             let rows = (roots + 1) as u32;
+            // A registration policy rides in the leased state: readers are plain functions.
+            let (bind, extra, read, apply) = match raw_plan.as_ref().and_then(|plan| plan.plan) {
+                Some(id) => (
+                    quote!(let ::std::option::Option::Some(__raw_policy) = __endpoint.plan(#id) else { return; };),
+                    quote!(__raw_policy,),
+                    quote!({ let __raw_plan = &__raw_state.2; #read }),
+                    quote!({ let __raw_plan = &__raw_state.2; #apply }),
+                ),
+                None => (quote!(), quote!(), quote!(#read), quote!(#apply)),
+            };
             return quote! {
+                #bind
                 let __raw_state = (
                     ::std::cell::RefCell::new((#(#inputs)*)),
                     ::std::cell::RefCell::new(mod_points::locators::Locators::default()),
+                    #extra
                 );
                 __raw_state.1.borrow_mut().intern(None, mod_points::locators::Step::Root(0))
                     .expect("the first raw root fits the locator arena");
