@@ -5049,7 +5049,9 @@ impl Game<'_> {
             );
         }
         for (owner, guest, at) in shoot_events {
-            self.projectile_shoot_event(owner, guest, at);
+            self.with_projectile_dispatch(&mut projectiles, |game| {
+                game.projectile_shoot_event(owner, guest, at);
+            });
         }
         self.smoke_trails(trails);
         for pos in bubble_tops {
