@@ -323,7 +323,7 @@ fn build_in(root: &Path) -> Result<PathBuf, String> {
 fn pack_into(root: &Path, dir: &Path) -> Result<PathBuf, String> {
     let package = Package::read(root)?;
     let bytes = Package::pack_directory(root)?;
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let path = dir.join(format!("{}.hmod", package.manifest.id));
     // Write then rename, so a running game never reads half a file.
     let partial = path.with_extension("hmod.partial");

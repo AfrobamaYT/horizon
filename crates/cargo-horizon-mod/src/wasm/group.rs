@@ -673,16 +673,14 @@ mod tests {
         let ordinary = root.join("ordinary");
         std::fs::create_dir_all(&library).unwrap();
         std::fs::create_dir_all(&ordinary).unwrap();
-        let source = format!(
-            r#"
+        let source = r#"
 [dependencies]
-renamed = {{ package = "library-package", path = "library", features = ["special"], optional = true }}
+renamed = { package = "library-package", path = "library", features = ["special"], optional = true }
 registry_mod = "^1.2"
-git_mod = {{ package = "another-library", git = "https://invalid.test/library", rev = "abc", features = ["extra"] }}
+git_mod = { package = "another-library", git = "https://invalid.test/library", rev = "abc", features = ["extra"] }
 [target.'cfg(target_arch = "wasm32")'.build-dependencies]
-ordinary = {{ path = "ordinary", default-features = false }}
-"#
-        );
+ordinary = { path = "ordinary", default-features = false }
+"#;
         let mut manifest: toml_edit::DocumentMut = source.parse().unwrap();
         let relocated = root.join("staged/library");
         let staged = BTreeMap::from([(library.canonicalize().unwrap(), relocated.clone())]);
