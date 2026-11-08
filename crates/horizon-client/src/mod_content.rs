@@ -121,7 +121,7 @@ pub fn set_fluid_looks(mods: &[ContentMod]) {
 /// Returns their registry names, source and flowing, for the fluid keys.
 pub fn register_world_fluids(
     mods: &[ContentMod],
-) -> Result<Vec<String>, horizon_world::fluid::ModFluidRegistrationError> {
+) -> std::result::Result<Vec<String>, horizon_world::fluid::ModFluidRegistrationError> {
     let mut names = Vec::new();
     for look in mods.iter().flat_map(|m| &m.content.fluids) {
         let Some(world) = look.world else { continue };
