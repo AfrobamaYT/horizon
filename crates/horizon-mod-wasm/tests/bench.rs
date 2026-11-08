@@ -67,6 +67,18 @@ fn measure(label: &str, mods: Vec<ModEntry>) {
 #[test]
 #[ignore = "measurement; requires a built fixture and shared std"]
 fn block_entity_ticks() {
+    struct TestLog;
+    impl log::Log for TestLog {
+        fn enabled(&self, _: &log::Metadata<'_>) -> bool {
+            true
+        }
+        fn log(&self, record: &log::Record<'_>) {
+            eprintln!("{}: {}", record.level(), record.args());
+        }
+        fn flush(&self) {}
+    }
+    log::set_logger(&TestLog).unwrap();
+    log::set_max_level(log::LevelFilter::Warn);
     let path = std::env::var("HORIZON_WASM_FIXTURE").unwrap();
     let path = std::path::Path::new(&path);
     let std = std::fs::read(std::env::var("HORIZON_WASM_STD").unwrap()).unwrap();
