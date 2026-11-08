@@ -103,7 +103,7 @@ sys.exit(subprocess.call([{self.cargo!r}, *args]))
 
     def test_source_map_guard_rejects_changed_added_and_deleted_files(self):
         for name, change in [
-            ("changed", '(client / "game.rs").write_bytes((client / "game.rs").read_bytes() + b"\\n// changed\\n")'),
+            ("changed", '(client / "src/game.rs").write_bytes((client / "src/game.rs").read_bytes() + b"\\n// changed\\n")'),
             ("added", '(source / "unexpected").write_bytes(b"extra")'),
             ("deleted", '(source / "Cargo.lock").unlink()'),
         ]:
