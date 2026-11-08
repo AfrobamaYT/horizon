@@ -12,8 +12,8 @@ NeoForge source or Javadoc is copied. Counts exclude each interface's private `s
 
 | Verdict | Meaning |
 | --- | --- |
-| **Covered** | A mod can set the answer for its own object, at the same moment, through content data, a handle or a Part method. NeoForge's extra arguments (a level, position, direction, entity or explosion) may go unused; the row's note says what the answer cannot use. |
-| **Partial** | The game lets a mod answer something close, but one of these differs: the object (a global hook instead of a per-block/item method), the moment, or the answer (a factor or notice where NeoForge returns a decision). |
+| **Covered** | A mod can answer the same question for its own object, at the same moment, through content data, a handle or a Part method. |
+| **Partial** | The game lets a mod answer something close, but one of these differs: the object (a global hook instead of a per-block/item method), the moment, the arguments, or the answer (a factor or notice where NeoForge returns a decision). |
 | **Missing** | Neither data, a handle nor a hook exposes the question. |
 | **n/a** | The method has no Horizon equivalent because the architecture removes its reason to exist. |
 
@@ -31,9 +31,9 @@ It does not answer `IEntityExtension` methods; those are covered only where a gl
 
 | Interface | Public methods | Covered | Partial | Missing | n/a |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `IBlockExtension` | 60 | 9 | 17 | 34 | 0 |
-| `IBlockStateExtension` | 57 | 7 | 17 | 33 | 0 |
-| `IItemExtension` | 46 | 9 | 14 | 23 | 0 |
+| `IBlockExtension` | 60 | 3 | 23 | 34 | 0 |
+| `IBlockStateExtension` | 57 | 2 | 22 | 33 | 0 |
+| `IItemExtension` | 46 | 7 | 16 | 23 | 0 |
 | `IEntityExtension` | 33 | 1 | 16 | 16 | 0 |
 | `ILivingEntityExtension` | 6 | 0 | 3 | 3 | 0 |
 | `IBlockEntityExtension` | 9 | 1 | 3 | 4 | 1 |
@@ -53,15 +53,14 @@ counts each declared public method, so the entity total is 33 rather than 30.
 ## `IBlockExtension`
 
 Data fields are static values from a block's content declaration, inherited from its template when unset. They
-answer the method for a mod block but cannot vary by level, position or entity; where the NeoForge method takes
-those arguments, the row's note says so. The engine's own copy of the same facts is `StateFacts` in
-`crates/horizon-items/src/blocks.rs`.
+answer the method for a mod block but cannot vary by level, position or entity. The engine's own copy of the
+same facts is `StateFacts` in `crates/horizon-items/src/blocks.rs`.
 
 | Method | Verdict | Horizon | Notes |
 | --- | --- | --- | --- |
-| `getFriction(state, level, pos, entity)` | Covered | `BlockProperties.friction` → `StateFacts.friction` | Static; the entity is not consulted. |
+| `getFriction(state, level, pos, entity)` | Partial | `BlockProperties.friction` → `StateFacts.friction` | Static; the entity is not consulted. |
 | `hasDynamicLightEmission(state)` | Missing | — | `StateFacts.emission` is a fixed level, not a dynamic emission. |
-| `getLightEmission(state, level, pos)` | Covered | `BlockProperties.light` → `StateFacts.emission` | Static; no level or position. |
+| `getLightEmission(state, level, pos)` | Partial | `BlockProperties.light` → `StateFacts.emission` | Static; no level or position. |
 | `ignitedByLava(state, level, pos, direction)` | Partial | template state flag (`StateFacts`, `state_flags::IGNITED_BY_LAVA`) | Inherited from the template's prepared data; no content field or Part changes it. |
 | `isLadder(state, level, pos, entity)` | Missing | — | Climbing reads vanilla tags and block classes. [#1038](https://github.com/arismoko/horizon/issues/1038). |
 | `makesOpenTrapdoorAboveClimbable(state, level, pos, stateAbove)` | Missing | — | Engine rule in the climbing code; not exposed. |
@@ -70,7 +69,7 @@ those arguments, the row's note says so. The engine's own copy of the same facts
 | `onDestroyedByPlayer(state, level, pos, player, stack, willHarvest, fluid)` | Partial | `break_block` (`hooks/base.rs`), `block_drops` (`hooks/block_drops.rs`) | `break_block` cancels the break or replaces the XP sample; `block_drops` edits drops. Neither returns "the block was destroyed" for the caller. [#1038](https://github.com/arismoko/horizon/issues/1038). |
 | `onDestroyedByPushReaction(state, level, pos, direction, fluid)` | Missing | — | No hook at the piston/fluid destruction point. |
 | `getRespawnPosition(state, entityType, level, pos, angle)` | Partial | `player_respawn_position` (`hooks/base.rs`) | The global `PlayerRespawnPositionEvent` moves the player after vanilla found the bed or anchor; the per-block search is engine-owned. |
-| `getExplosionResistance(state, level, pos, explosion)` | Covered | `BlockProperties.explosion_resistance` → `StateFacts.explosion_resistance` | Static; the explosion is not consulted. |
+| `getExplosionResistance(state, level, pos, explosion)` | Partial | `BlockProperties.explosion_resistance` → `StateFacts.explosion_resistance` | Static; the explosion is not consulted. |
 | `getCloneItemStack(level, pos, state, includeData, player)` | Covered | `BlockPart::clone_item_stack` (`hooks/clone_item_stack.rs`) | `include_data` and the player are passed; leaving the stack unset keeps the game's item. |
 | `addLandingEffects(state, level, pos, stateBelow, entity, count)` | Missing | — | `fall_on` edits fall damage, not the landing particle/sound burst. |
 | `addRunningEffects(state, level, pos, entity)` | Missing | — | No hook for the running dust burst. |
@@ -94,8 +93,8 @@ those arguments, the row's note says so. The engine's own copy of the same facts
 | `isStickyBlock(state)` | Missing | — | Same. [#1038](https://github.com/arismoko/horizon/issues/1038). |
 | `canStickTo(state, otherState)` | Missing | — | Same. [#1038](https://github.com/arismoko/horizon/issues/1038). |
 | `isFlammable(state, level, pos, direction)` | Partial | `BlockPart::fire_odds` (`hooks/base.rs`) | Sets ignite and burn odds (`0, 0` = never burns), but there is no boolean flammable predicate. [#1038](https://github.com/arismoko/horizon/issues/1038). |
-| `getFireSpreadSpeed(state, level, pos, direction)` | Covered | `BlockPart::fire_odds` (`hooks/base.rs`) | Ignite/spread odds (the first element of `fire_odds`'s `(ignite, burn)` tuple) replace vanilla's table for the block. The answer is state-based, with no position or direction as in NeoForge's contextual override. |
-| `getFlammability(state, level, pos, direction)` | Covered | `BlockPart::fire_odds` (`hooks/base.rs`) | Burn/destruction odds (the second element of `fire_odds`'s `(ignite, burn)` tuple) replace vanilla's table for the block. The answer is state-based, with no position or direction as in NeoForge's contextual override. |
+| `getFireSpreadSpeed(state, level, pos, direction)` | Partial | `BlockPart::fire_odds` (`hooks/base.rs`) | Ignite/spread odds (the first element of `fire_odds`'s `(ignite, burn)` tuple) replace vanilla's table for the block. The answer is state-based, with no position or direction as in NeoForge's contextual override. |
+| `getFlammability(state, level, pos, direction)` | Partial | `BlockPart::fire_odds` (`hooks/base.rs`) | Burn/destruction odds (the second element of `fire_odds`'s `(ignite, burn)` tuple) replace vanilla's table for the block. The answer is state-based, with no position or direction as in NeoForge's contextual override. |
 | `onCaughtFire(state, level, pos, direction, igniter, stack)` | Missing | — | No per-block caught-fire callback. |
 | `isFireSource(state, level, pos, direction)` | Missing | — | Fire-source rules are engine-owned. |
 | `canEntityDestroy(state, level, pos, entity)` | Missing | — | Mob-grief checks are engine rules; `entity_mob_griefing` is a global event at a different moment. |
@@ -109,7 +108,7 @@ those arguments, the row's note says so. The engine's own copy of the same facts
 | `supportsExternalFaceHiding(state)` | Missing | — | No per-face culling query. |
 | `onBlockStateChange(level, pos, oldState, newState)` | Partial | `block_changed` (`hooks/base.rs`, a global server hook) | Fires after the commit but before block side effects and neighbour updates, and only on an authoritative server; NeoForge's runs after neighbours on both sides. Neither may modify the level here. |
 | `canBeHydrated(state, level, pos, fluid)` | Missing | — | Farmland hydration is engine-owned; fluid `canHydrate` is data. |
-| `getMapColor(state, level, pos, defaultColor)` | Covered | `BlockProperties.map_color` → `StateFacts.map_color` | Static; no position. |
+| `getMapColor(state, level, pos, defaultColor)` | Partial | `BlockProperties.map_color` → `StateFacts.map_color` | Static; no position. |
 | `getAppearance(state, level, pos, direction, neighborState, neighborPos)` | Missing | — | No appearance query. |
 | `getPistonPushReaction(state)` | Covered | `BlockProperties.push_reaction` | Static; `PUSH_PULL`, `PUSH`, `POPPED`, `IMMOVEABLE`, `IGNORE_ENTITY`. |
 | `isEmpty(state)` | Missing | — | Air/replaceable facts exist (`block_states().replaceable`), but no `isEmpty` answer for a state. |
@@ -129,10 +128,10 @@ the parameters shifted by one. Three block methods have no state-receiver form:
 | Block-only method | Verdict there |
 | --- | --- |
 | `getPistonPushReaction(state)` | Covered (content `push_reaction`) |
-| `getMapColor(state, level, pos, defaultColor)` | Covered (content `map_color`) |
+| `getMapColor(state, level, pos, defaultColor)` | Partial (content `map_color`) |
 | `makesOpenTrapdoorAboveClimbable(state, level, pos, stateAbove)` | Missing |
 
-Counts: 7 covered, 17 partial, 33 missing among the 57. The handful of signature differences (`canStickTo` takes
+Counts: 2 covered, 22 partial, 33 missing among the 57. The handful of signature differences (`canStickTo` takes
 the neighbour state; `getCloneItemStack` reorders its arguments; `getEnchantPowerBonus` takes a `LevelReader`)
 do not change any verdict.
 
@@ -164,11 +163,11 @@ which is the same place NeoForge's item components live. Reads are on `host` (`h
 | `getEquipmentSlot(stack)` | Covered | `ItemResource::equippable_slot`, `host.item_equippable_slot` | Read from the effective `equippable` component. |
 | `onEntitySwing(stack, entity, hand)` | Missing | — | No per-item swing callback. [#1039](https://github.com/arismoko/horizon/issues/1039). |
 | `getDamage(stack)` | Covered | `ItemStack::damage` | The stack's numeric damage override. |
-| `getMaxDamage(stack)` | Covered | `minecraft:max_damage` effective component, `host.max_damage` | The stack's effective component includes a patch over the item default; `host.max_damage` reads that default only. |
+| `getMaxDamage(stack)` | Partial | `minecraft:max_damage` effective component, `host.max_damage` | The stack's effective component includes a patch over the item default; `host.max_damage` reads that default only. |
 | `isDamaged(stack)` | Covered | `ItemStack::damage`, `damage_component` | Distinguishes explicit zero from absent. |
 | `setDamage(stack, damage)` | Partial | `ItemStack::set_damage` | Stores the requested value; the game checks it against the effective maximum when it accepts the write instead of clamping here. |
 | `canPerformAction(instance, ability)` | Partial | `block_tool_modification` (`hooks/block_tool_modification.rs`) | Covers the block-side tool action (strip, wax, path, ...); no item-side ability query. [#1039](https://github.com/arismoko/horizon/issues/1039). |
-| `getMaxStackSize(stack)` | Covered | `max_stack_size` component, `host.max_stack_size` | The stack's effective component includes a patch over the item default; `host.max_stack_size` reads that default only, and invalid values are refused at the write. |
+| `getMaxStackSize(stack)` | Partial | `max_stack_size` component, `host.max_stack_size` | The stack's effective component includes a patch over the item default; `host.max_stack_size` reads that default only, and invalid values are refused at the write. |
 | `isPrimaryItemFor(stack, enchantment)` | Partial | `host.enchantment_supports` | Answers supported items; the narrower "primary item" distinction is not exposed. |
 | `supportsEnchantment(stack, enchantment)` | Partial | `host.enchantment_supports` | A client-side read of `Enchantment.isSupportedItem` for an item id; not per stack and without NeoForge's enchanted-book special case. |
 | `getEnchantmentLevel(instance, enchantment)` | Covered | `get_enchantment_level` (`hooks/get_enchantment_level.rs`) | Edits the level gameplay sees. |
