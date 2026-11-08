@@ -550,6 +550,9 @@ pub(super) struct Remote {
     /// sent none the game takes): owned by the connection, so entering a level touches no other
     /// level's facts, the integrated server's included.
     pub(in crate::game) level_facts: Option<Arc<horizon_world::dimension_type::DimensionFacts>>,
+    /// The sky, fog and cloud attributes (and timelines) of the level from the server's type, for a
+    /// level of a mod or a pack (`None` for a built-in level, or when the type is refused).
+    pub(in crate::game) level_environment: Option<horizon_client::environment::Environment>,
     /// Connection-owned facts, cached by level and the full named type identity.
     facts_cache: HashMap<
         String,
@@ -1166,6 +1169,7 @@ impl Game<'_> {
             level: "minecraft:overworld".into(),
             level_key: mod_api::DimensionKey::OVERWORLD,
             level_facts: None,
+            level_environment: None,
             facts_cache: Default::default(),
             hashed_seed: 0,
             chunk_format: Arc::new(ChunkFormat::new(
@@ -1415,6 +1419,7 @@ impl Game<'_> {
             level: "minecraft:overworld".into(),
             level_key: mod_api::DimensionKey::OVERWORLD,
             level_facts: None,
+            level_environment: None,
             facts_cache: Default::default(),
             hashed_seed: 0,
             chunk_format: Arc::new(ChunkFormat::new(
@@ -2612,6 +2617,19 @@ impl Game<'_> {
         keep_world: bool,
         reason: horizon_client::level_loading::Reason,
     ) {
+        // Every level has the sea level its server says (`CommonPlayerSpawnInfo.seaLevel`): the
+        // table may still hold a local world's (a superflat Overworld's).
+        if let Ok(key) = horizon_core::LevelKey::parse(&spawn.dimension) {
+            horizon_world::level::register_sea_level(key, spawn.sea_level);
+            if !matches!(
+                key,
+                horizon_core::LevelKey::OVERWORLD
+                    | horizon_core::LevelKey::NETHER
+                    | horizon_core::LevelKey::END
+            ) {
+                Dim::add_extra(&spawn.dimension);
+            }
+        }
         // The replacement player starts with its inventory menu, even if the
         // server switched levels without closing the previous container.
         self.remote_close_local();
@@ -2655,7 +2673,17 @@ impl Game<'_> {
         // beds and time), not only its shape: a level of a mod the server runs is no
         // longer taken for the Overworld.
         r.level_facts = None;
+        r.level_environment = None;
         if let Some((name, json)) = r.registries.dimension_json(spawn.dimension_type) {
+            if !matches!(
+                spawn.dimension.as_str(),
+                "minecraft:overworld" | "minecraft:the_nether" | "minecraft:the_end"
+            ) {
+                r.level_environment = horizon_client::environment::Environment::with_type(
+                    self.res.environment(),
+                    &json,
+                );
+            }
             let cached = r
                 .facts_cache
                 .get(&spawn.dimension)
@@ -2928,8 +2956,10 @@ impl Game<'_> {
         let block = self.world.block(pos[0], pos[1], pos[2]);
         if let Some(BlockEntity::Mod(m)) = self.world.block_entities.get_mut(&key) {
             if m.id() == name
-                && horizon_client::block_entity_types::type_for(&self.res.facts().get(block).name)
-                    == Some(name)
+                && horizon_client::block_entity_types::valid(
+                    &self.res.facts().get(block).name,
+                    name,
+                ) == Some(true)
             {
                 m.merge_update_tag(fields);
             }

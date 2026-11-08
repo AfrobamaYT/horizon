@@ -90,21 +90,30 @@ impl LevelAccess for RainView<'_> {
 impl Game<'_> {
     /// `Level.getSkyDarken`: the same dimension, time and weather calculation used by gameplay.
     pub(super) fn sky_darken_in(&self, world: &World, dimension: Dim) -> i32 {
-        let environment = match dimension {
-            Dim::Overworld => self.res.environment(),
-            Dim::Extra(_) => horizon_client::environment::Environment::for_level(
-                dimension.id(),
-                self.res.environment(),
-            ),
-            Dim::Nether => self.res.nether_environment(),
-            Dim::End => self.res.end_environment(),
+        // A client of a server has the environment its server's type made for a mod's level.
+        let environment = match self
+            .remote
+            .as_ref()
+            .and_then(|r| r.level_environment.as_ref())
+        {
+            Some(own) => own,
+            None => match dimension {
+                Dim::Overworld => self.res.environment(),
+                Dim::Extra(_) => horizon_client::environment::Environment::for_level(
+                    dimension.id(),
+                    self.res.environment(),
+                ),
+                Dim::Nether => self.res.nether_environment(),
+                Dim::End => self.res.end_environment(),
+            },
         };
         let (rain, thunder) = weather_for_level(
             world.shape,
             dimension == Dim::End,
             self.world.weather.levels(1.0),
         );
-        horizon_client::environment::sky_darken(environment, self.world.day_time, rain, thunder)
+        let day_time = self.command_clock_time(&self.level_clock_name(dimension));
+        horizon_client::environment::sky_darken(environment, day_time, rain, thunder)
     }
 
     /// `Level.getSkyDarken` for an active or parked level, without switching dimensions.
@@ -177,7 +186,23 @@ impl Game<'_> {
             snow_golem_melts: facts.snow_golem_melts,
             can_start_raid: facts.can_start_raid,
             sky_light_level: facts.sky_light_level,
+            timelines: facts.timelines.clone(),
+            default_clock: facts.default_clock.clone(),
+            bed_can_sleep: facts.bed_rule.can_sleep.name().to_owned(),
+            bed_can_set_spawn: facts.bed_rule.can_set_spawn.name().to_owned(),
+            bed_destroy_on_use: facts.bed_rule.destroy_on_use,
+            bed_destroy_on_leave: facts.bed_rule.destroy_on_leave,
+            straw_bed_can_sleep: facts.straw_bed_rule.can_sleep.name().to_owned(),
+            straw_bed_can_set_spawn: facts.straw_bed_rule.can_set_spawn.name().to_owned(),
+            straw_bed_destroy_on_use: facts.straw_bed_rule.destroy_on_use,
+            straw_bed_destroy_on_leave: facts.straw_bed_rule.destroy_on_leave,
         })
+    }
+
+    /// The sea level the game uses for the level (`Dim::sea_level`). None as the host call says.
+    pub(super) fn level_sea_level(&self, level: LevelRef) -> Option<i32> {
+        self.native_level_world(level)?;
+        Some(Dim::sea_level_of_id(level.dimension_id()))
     }
 
     /// The world's seed (`WorldOptions.seed`), as `/seed` shows it.
