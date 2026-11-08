@@ -35,6 +35,8 @@ jobs:
         with:
           workspaces: launcher
           shared-key: launcher-windows-check
+      - run: "cargo test --release --locked -p horizon-mod-package --features runtime-process --lib output::"
+        working-directory: .
       # Every test target (the library, the binary, tests/), as launcher.yml runs them.
       - run: cargo test --release --locked
 
