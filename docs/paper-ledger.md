@@ -404,3 +404,44 @@ Decisions follow the documented moment, side, information and result; only Cover
 [paper-InventoryClickEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/inventory/InventoryClickEvent.html
 [paper-InventoryCloseEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/inventory/InventoryCloseEvent.html
 [paper-EntityAddToWorldEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/entity/EntityAddToWorldEvent.html
+
+## Event counterparts: base player hooks (#1015)
+
+Paper API 26.3 (paper-api `26.3.build.244-stable`), public Javadoc; Horizon cited by function name; scope = the 20 `base.rs` player hooks below.
+Server side is assumed except for the two `both` tick hooks; Covered means moment, side, information and result all agree, and only those rows get a `paper` key.
+
+| Horizon hook | Paper event / status | Evidence and porting boundary |
+|---|---|---|
+| `player_riptide` | **Partial:** [`PlayerRiptideEvent`][paper-PlayerRiptideEvent] | The server's riptide launch and the player match, but the event is cancellable and also carries the trident item and velocity, while the hook is a listen-only notification fired after the launch is applied and passes neither. No key. |
+| `player_save_to_file` | **Partial:** [`WorldSaveEvent`][paper-WorldSaveEvent] | Non-cancellable like the hook, but it is one event per world with no player, name or player-data directory, so the per-player save and file location the hook reports are not identified. No key. |
+| `player_shear_entity` | **Covered:** [`PlayerShearEntityEvent`][paper-PlayerShearEntityEvent] | Fired on the server when a player shears an entity, before the mob changes, with `getEntity()` and `getHand()` mapping the hook's entity id and off-hand flag, and `Cancellable` matching the hook's `cancel`. Key added. |
+| `player_shield_disable` | **Partial:** [`PlayerShieldDisableEvent`][paper-PlayerShieldDisableEvent] | Same server moment, just before the shield cooldown, and `getCooldown()`/`setCooldown()` expose the hook's `ticks`. The event is cancellable and lets listeners change the cooldown, which the listen-only hook cannot express. No key. |
+| `player_sprint` | **Partial:** [`PlayerToggleSprintEvent`][paper-PlayerToggleSprintEvent] | The server-side sprint toggle and the new `isSprinting()` state match. The event is cancellable, so it is the about-to-change call, while the hook hears the change after the player is already sprinting and cannot cancel. No key. |
+| `player_start_tracking` | **Gap:** none | No Paper event for a client beginning to track a server entity; per-player entity tracking is not evented in the cited API, and the dossier lists no candidate. No key. |
+| `player_stat_award` | **Gap:** none | The dossier lists no Paper event for awarding a statistic; nothing fires before the count and scoreboard criteria change with the stat type, key, amount and a cancel. No key. |
+| `player_stonecutter_recipe_select` | **Partial:** [`PlayerStonecutterRecipeSelectEvent`][paper-PlayerStonecutterRecipeSelectEvent] | Name and the stonecutter selection match, but the class has no Javadoc to confirm the moment, it reports a `StonecuttingRecipe` where the hook reports a button index, and it is cancellable and rewritable while the hook is listen-only. No key. |
+| `player_stop_spectating_entity` | **Partial:** [`PlayerStopSpectatingEntityEvent`][paper-PlayerStopSpectatingEntityEvent] | Same stop-spectating moment and spectated entity on the server. The event is cancellable (it precedes the camera return the hook reports after it), and the listen-only hook cannot cancel. No key. |
+| `player_stop_tracking` | **Gap:** none | No Paper event for a client ceasing to track an entity; the dossier's `PlayerStopSpectatingEntityEvent`, `PlayerStopUsingItemEvent` and `RaidStopEvent` are different moments. No key. |
+| `player_stop_using_item` | **Covered:** [`PlayerStopUsingItemEvent`][paper-PlayerStopUsingItemEvent] | Fired on the server when a player stops using an item before it finishes, non-cancellable like the listen-only hook, and it adds the item and held ticks for the same player. Key added. |
+| `player_swap_hands` | **Covered:** [`PlayerSwapHandItemsEvent`][paper-PlayerSwapHandItemsEvent] | Fired on the server for the swap-hands hotkey before the hands swap, exposing both items and cancellable exactly as the hook's `cancel` keeps them in place. Key added. |
+| `player_swap_with_equipment_slot` | **Partial:** [`PlayerSwapWithEquipmentSlotEvent`][paper-PlayerSwapWithEquipmentSlotEvent] | Covers an equipment-slot swap on the server with the slot exposed, but it is a cancellable pre-swap event with swappable items, whereas the hook is a non-cancellable notification after both slots changed, and the event is any equipment slot rather than the hands. No key. |
+| `player_switch_hotbar_slot_post` | **Gap:** none (nearest [`PlayerInventorySlotChangeEvent`][paper-PlayerInventorySlotChangeEvent]) | The nearest cited event reports a slot's contents changing, not the selected hotbar slot changing, and it is no post-selection notification. No key. |
+| `player_switch_hotbar_slot_pre` | **Gap:** none (nearest [`PlayerInventorySlotChangeEvent`][paper-PlayerInventorySlotChangeEvent]) | Same reason: Paper's cited inventory event is about contents changing, not a cancellable about-to-change hotbar selection. No key. |
+| `player_take_lectern_book` | **Partial:** [`PlayerTakeLecternBookEvent`][paper-PlayerTakeLecternBookEvent] | The player, lectern and book match on the server. The event is cancellable before the book leaves the lectern, while the hook is a listen-only notification after the menu and block entity changed. No key. |
+| `player_teleport_end_gateway` | **Covered:** [`PlayerTeleportEndGatewayEvent`][paper-PlayerTeleportEndGatewayEvent] | Fired on the server when an End gateway teleport is triggered, before the travel, exposing `getGateway()` and cancellable like the hook's `cancel`. Key added. |
+| `player_teleported` | **Gap:** none (nearest [`PlayerTeleportEvent`][paper-PlayerTeleportEvent]) | Paper's nearest event is the cancellable about-to-teleport check; the hook is a listen-only notification after the command teleport has reached the player and their client, which no cited event covers. No key. |
+| `player_tick_post` | **Gap:** none | No Paper player-tick event; the hook is `both`, and this server-only API could at most cover its server half. No candidate in the dossier. No key. |
+| `player_tick_pre` | **Gap:** none | No Paper event before a player's tick, and a server-only event could not cover the hook's client half. No candidate in the dossier. No key. |
+
+[paper-PlayerRiptideEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerRiptideEvent.html
+[paper-WorldSaveEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/world/WorldSaveEvent.html
+[paper-PlayerShearEntityEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerShearEntityEvent.html
+[paper-PlayerShieldDisableEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/PlayerShieldDisableEvent.html
+[paper-PlayerToggleSprintEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerToggleSprintEvent.html
+[paper-PlayerStonecutterRecipeSelectEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/PlayerStonecutterRecipeSelectEvent.html
+[paper-PlayerStopSpectatingEntityEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/player/PlayerStopSpectatingEntityEvent.html
+[paper-PlayerSwapHandItemsEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerSwapHandItemsEvent.html
+[paper-PlayerSwapWithEquipmentSlotEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/PlayerSwapWithEquipmentSlotEvent.html
+[paper-PlayerInventorySlotChangeEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/PlayerInventorySlotChangeEvent.html
+[paper-PlayerTakeLecternBookEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerTakeLecternBookEvent.html
+[paper-PlayerTeleportEndGatewayEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/player/PlayerTeleportEndGatewayEvent.html
