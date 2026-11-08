@@ -9,7 +9,7 @@ use std::fmt::Write;
 fn spell(types: &Types<'_>, ty: &Ty) -> Option<String> {
     Some(match ty {
         Ty::Unit => "()".into(),
-        Ty::Prim(rust, _) | Ty::Wide(rust) => (*rust).into(),
+        Ty::Prim(rust) | Ty::Wide(rust) => (*rust).into(),
         Ty::Duration => "::std::time::Duration".into(),
         Ty::Handler(..) => super::calls::rust_ty(types, ty, false),
         Ty::Str(Str::Static) => "&'static str".into(),
@@ -323,7 +323,7 @@ fn variants(types: &Types<'_>, rust: &str, cases: &[Case]) -> Option<String> {
                 let takes: String = binds.iter().map(|_| "input.take()?,".to_string()).collect();
                 writeln!(take, "{i} => Self::{name}({takes}),").unwrap();
             }
-            Payload::Record(_, list) => {
+            Payload::Record(list) => {
                 fields(types, list)?;
                 let names: Vec<&str> = list.iter().map(|f| f.rust.as_str()).collect();
                 let puts: String = names.iter().map(|n| format!("out.put({n});")).collect();
