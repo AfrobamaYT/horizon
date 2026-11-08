@@ -315,7 +315,7 @@ fn every_extra_area_loads_however_the_areas_change() {
     let visibility = models::load_visibility(&root, assets.registry).unwrap();
     let context = Arc::new(WorkerContext {
         hidden_states: Default::default(),
-        tables: Arc::new(MeshTables::new(&assets, &render, &facts, visibility).unwrap()),
+        tables: Arc::new(MeshTables::new(&assets, &render, &facts, visibility, None).unwrap()),
         light: Arc::new(LightTables::load(&root, assets.registry, &facts).unwrap()),
         biomes: Arc::new(
             Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(

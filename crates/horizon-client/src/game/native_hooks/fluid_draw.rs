@@ -5,7 +5,7 @@ impl Game<'_> {
     pub(in crate::game) fn fluid_tooltip_lines(&self, stack: &FluidStack) -> Vec<(Text, u32)> {
         let mut lines =
             horizon_client::fluid_tooltip::lines(stack, self.options_advanced_tooltips());
-        self.native_fluid_tooltip(mod_api::__private::FluidTooltipCall {
+        self.native_fluid_tooltip(super::fire::FluidTooltipCall {
             stack,
             lines: &mut lines,
         });
@@ -78,7 +78,9 @@ mod tests {
     impl Hooks for Relabel {
         fn fluid_tooltip(&self, _: &dyn ClientHost, event: &mut FluidTooltipEvent<'_>) {
             event.lines.remove(0);
-            event.lines.push((Text::literal("Tank 3"), 0xff55ffff));
+            event
+                .lines
+                .push((mod_api::Text::literal("Tank 3"), 0xff55ffff));
         }
     }
 

@@ -8681,11 +8681,9 @@ fn to_loot(stack: &ItemStack) -> horizon_world::loot::LootStack {
     let components = stack
         .custom_data()
         .map(|data| {
-            let snbt =
-                horizon_world::snbt_text::to_snbt(&horizon_core::nbt::Tag::Compound(data.clone()));
             (
                 "minecraft:custom_data".to_owned(),
-                serde_json::Value::String(snbt),
+                Some(horizon_core::nbt::Tag::Compound(data.clone())),
             )
         })
         .into_iter()

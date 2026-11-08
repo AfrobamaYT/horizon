@@ -1765,7 +1765,7 @@ impl<R: RandomSource> Context<'_, R> {
             // loot random), flags and strings as they are written.
             "minecraft:set_custom_model_data" => {
                 let id = "minecraft:custom_model_data";
-                let content = stack.components.iter().find(|(k, _)| k == id);
+                let content = stack.components.iter().rev().find(|(k, _)| k == id);
                 let mut content = content
                     .and_then(|(_, v)| match v {
                         Some(Tag::Compound(map)) => Some(map.clone()),
@@ -1774,7 +1774,25 @@ impl<R: RandomSource> Context<'_, R> {
                     .unwrap_or_default();
                 let old = |key: &str| -> Vec<Tag> {
                     match content.get(&key.into()) {
-                        Some(Tag::List(values)) => values.clone(),
+                        Some(Tag::List(values)) => values
+                            .iter()
+                            .map(|value| {
+                                let number = match value {
+                                    Tag::Byte(v) => Some(f64::from(*v)),
+                                    Tag::Short(v) => Some(f64::from(*v)),
+                                    Tag::Int(v) => Some(f64::from(*v)),
+                                    Tag::Long(v) => Some(*v as f64),
+                                    Tag::Float(v) => Some(f64::from(f32::from_bits(*v))),
+                                    Tag::Double(v) => Some(f64::from_bits(*v)),
+                                    _ => None,
+                                };
+                                match (key, number) {
+                                    ("floats", Some(v)) => Tag::Float((v as f32).to_bits()),
+                                    ("colors", Some(v)) => Tag::Int(v as i32),
+                                    _ => value.clone(),
+                                }
+                            })
+                            .collect(),
                         _ => Vec::new(),
                     }
                 };
@@ -1824,6 +1842,7 @@ impl<R: RandomSource> Context<'_, R> {
                     stack
                         .components
                         .iter()
+                        .rev()
                         .find(|(k, _)| k == id)
                         .and_then(|(_, v)| match v {
                             Some(Tag::List(values)) => Some(values.clone()),
@@ -1852,6 +1871,7 @@ impl<R: RandomSource> Context<'_, R> {
                 let mut content = stack
                     .components
                     .iter()
+                    .rev()
                     .find(|(k, _)| k == id)
                     .and_then(|(_, v)| match v {
                         Some(Tag::Compound(map)) => Some(map.clone()),
@@ -2356,6 +2376,7 @@ mod namespace_tests {
         let table = r#"{"pools": [{"rolls": 1, "entries": [{"type": "minecraft:item", "name": "minecraft:stick",
             "modifier": [
                 {"type": "minecraft:set_components", "components": {"minecraft:custom_model_data": {"floats": [1.0], "strings": ["old"]}}},
+                {"type": "minecraft:set_components", "components": {"minecraft:custom_model_data": {"floats": [3.0], "strings": ["old"]}}},
                 {"type": "minecraft:set_custom_model_data",
                  "floats": {"mode": "append", "values": [{"type": "minecraft:constant", "value": 2.0}]},
                  "flags": {"mode": "replace_all", "values": [true]},
@@ -2387,7 +2408,7 @@ mod namespace_tests {
         assert_eq!(component.len(), 1, "{:?}", stack.components);
         let component =
             horizon_core::json_nbt::tag_to_json(component[0].1.as_ref().unwrap()).unwrap();
-        assert_eq!(component["floats"], serde_json::json!([1.0, 2.0]));
+        assert_eq!(component["floats"], serde_json::json!([3.0, 2.0]));
         assert_eq!(component["flags"], serde_json::json!([true]));
         assert_eq!(component["strings"], serde_json::json!(["new"]));
         assert_eq!(component["colors"], serde_json::json!([16711680]));

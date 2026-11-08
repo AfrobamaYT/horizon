@@ -1,6 +1,6 @@
 //! Game-owned dimension codec and registered pack-entry conversion.
 use horizon_world::worldgen::overrides::{LevelHeight, ModDimension};
-use mod_api::DimensionSettings;
+use mod_api::{BiomeSourceKind, DimensionSettings};
 use serde_json::{Value, json};
 
 /// The dimension type's fields these settings set.
@@ -649,7 +649,7 @@ mod visual_tests {
 
     #[test]
     fn the_sky_fog_and_clouds_are_written_only_when_set() {
-        let plain = DimensionSettings::default().dimension_type();
+        let plain = dimension_type(&DimensionSettings::default());
         assert!(
             plain["attributes"]
                 .get("minecraft:visual/sky_color")

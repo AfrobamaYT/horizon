@@ -2560,10 +2560,8 @@ mod tests {
         // Saved as before: the patch's contents, with the codec's icon flag.
         let saved = encode_components(&custom).unwrap();
         assert_eq!(
-            horizon_client_core::scoreboard::tag_to_json(
-                saved.get("minecraft:potion_contents").unwrap()
-            ),
-            json!({"custom_effects": [{"id": "minecraft:resistance", "amplifier": 1, "duration": 1800, "show_icon": true}]})
+            saved.get("minecraft:potion_contents").unwrap(),
+            &horizon_core::json_nbt::json_to_tag(&json!({"custom_effects": [{"id": "minecraft:resistance", "amplifier": 1, "duration": 1800, "show_icon": true}]})).unwrap()
         );
         // A null value takes the potion away again.
         swift
