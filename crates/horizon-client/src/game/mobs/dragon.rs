@@ -378,7 +378,7 @@ impl Phase {
         }
     }
 }
-pub(super) struct Dragon {
+pub(in crate::game) struct Dragon {
     pub join: horizon_client::join_seq::JoinSeq,
     /// `Entity.id` once tracked to guests (0 before); its parts take the
     /// eight ids after it (`EnderDragon`'s constructor reserves them).
@@ -1586,7 +1586,7 @@ impl Game<'_> {
     /// `by` is the direct entity, `cause` the causing one (`by` without `from`), and `from`
     /// the source position (`at`, else the direct entity's), which `dealDefaultKnockback`
     /// pushes away from for a type not in `#no_knockback`.
-    pub(super) fn command_damage_dragon(
+    pub(in crate::game) fn command_damage_dragon(
         &mut self,
         id: u32,
         amount: f32,
@@ -1606,6 +1606,13 @@ impl Game<'_> {
             Some(Target::Trident(_)) => Some(ProjectileKind::Trident),
             _ => None,
         };
+        // `Entity.isInvulnerableToBase` over the saved flag and window
+        // (#916), with the attacker's creative mode as `isCreativePlayer`,
+        // before the dragon's own borrow of the game.
+        let creative = self.creative_source_of(cause.or(by));
+        if self.saved_refuses_damage(id, ty, creative) {
+            return false;
+        }
         let Some(d) = self.dragon.as_mut().filter(|d| d.id == id) else {
             return false;
         };
@@ -2512,6 +2519,11 @@ impl Game<'_> {
     }
     /// `EnderDragon.aiStep` (and `tickDeath`) for the dragon.
     fn tick_dragon(&mut self) {
+        // Entity.baseTick: the saved invulnerability window counts down
+        // (#916), before the dragon's own borrow of the game.
+        if let Some(id) = self.dragon.as_ref().map(|d| d.id) {
+            self.tick_saved_invulnerable_time(id);
+        }
         let Some(d) = self.dragon.as_mut() else {
             return;
         };
