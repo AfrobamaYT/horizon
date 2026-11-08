@@ -41,25 +41,40 @@ impl std::error::Error for JsonNbtError {}
 /// spelling, already rounded by serde_json. UTF-8 input preserves valid UTF-16
 /// pairs; lone surrogates cannot reach this function through JSON Value.
 pub fn json_to_tag(value: &Value) -> Result<Tag, JsonNbtError> {
-    build_tag(JsonInput::Value(value))
+    build_tag(JsonInput::Value(value), 0)
 }
 
 /// Convert a borrowed object without cloning the JSON tree. The object itself
 /// counts toward the same 512-container limit as an object in json_to_tag.
 pub fn json_to_compound(values: &Map<String, Value>) -> Result<Compound, JsonNbtError> {
-    let Tag::Compound(values) = build_tag(JsonInput::Object(values))? else {
+    let Tag::Compound(values) = build_tag(JsonInput::Object(values), 0)? else {
         unreachable!("an object builds a compound")
     };
     Ok(values)
+}
+
+/// Convert a projection of borrowed object fields without cloning JSON payloads.
+/// `parent_depth` counts surrounding NBT containers in the caller's output
+/// schema. It includes synthetic metadata wrappers not present in the input.
+pub fn json_fields_to_compound<'a>(
+    fields: impl IntoIterator<Item = (&'a str, &'a Value)>,
+    parent_depth: usize,
+) -> Result<Compound, JsonNbtError> {
+    let fields: Vec<_> = fields.into_iter().collect();
+    let Tag::Compound(compound) = build_tag(JsonInput::Fields(&fields), parent_depth)? else {
+        unreachable!("fields build a compound")
+    };
+    Ok(compound)
 }
 
 #[derive(Clone, Copy)]
 enum JsonInput<'a> {
     Value(&'a Value),
     Object(&'a Map<String, Value>),
+    Fields(&'a [(&'a str, &'a Value)]),
 }
-fn validate_json(root: JsonInput<'_>) -> Result<(), JsonNbtError> {
-    let mut pending = vec![(root, 0, false)];
+fn validate_json(root: JsonInput<'_>, parent_depth: usize) -> Result<(), JsonNbtError> {
+    let mut pending = vec![(root, parent_depth, false)];
     while let Some((input, depth, nested)) = pending.pop() {
         match input {
             JsonInput::Value(Value::Null) if nested => return Err(JsonNbtError::NestedNull),
@@ -85,13 +100,24 @@ fn validate_json(root: JsonInput<'_>) -> Result<(), JsonNbtError> {
                         .map(|v| (JsonInput::Value(v), depth + 1, true)),
                 );
             }
+            JsonInput::Fields(fields) => {
+                if depth >= MAX_DEPTH {
+                    return Err(JsonNbtError::TooDeep);
+                }
+                pending.extend(
+                    fields
+                        .iter()
+                        .rev()
+                        .map(|(_, v)| (JsonInput::Value(v), depth + 1, true)),
+                );
+            }
             _ => {}
         }
     }
     Ok(())
 }
-fn build_tag(root: JsonInput<'_>) -> Result<Tag, JsonNbtError> {
-    validate_json(root)?;
+fn build_tag(root: JsonInput<'_>, parent_depth: usize) -> Result<Tag, JsonNbtError> {
+    validate_json(root, parent_depth)?;
     enum Work<'a> {
         Enter(JsonInput<'a>),
         List(usize),
@@ -124,6 +150,17 @@ fn build_tag(root: JsonInput<'_>) -> Result<Tag, JsonNbtError> {
                             .values()
                             .rev()
                             .map(|v| Work::Enter(JsonInput::Value(v))),
+                    );
+                }
+                JsonInput::Fields(fields) => {
+                    work.push(Work::Object(
+                        fields.iter().map(|(key, _)| (*key).into()).collect(),
+                    ));
+                    work.extend(
+                        fields
+                            .iter()
+                            .rev()
+                            .map(|(_, value)| Work::Enter(JsonInput::Value(value))),
                     );
                 }
             },
@@ -612,5 +649,26 @@ mod tests {
             .unwrap()
             .join()
             .unwrap();
+    }
+    #[test]
+    fn borrowed_projection_counts_wrappers_and_skips_unselected_data() {
+        let map: Map<_, _> = [
+            ("selected".into(), nested_json(511)),
+            ("ignored".into(), nested_json(4096)),
+        ]
+        .into_iter()
+        .collect();
+        let selected = || {
+            map.iter()
+                .filter(|(k, _)| k.as_str() == "selected")
+                .map(|(k, v)| (k.as_str(), v))
+        };
+        let compound = json_fields_to_compound(selected(), 0).unwrap();
+        discard_tag(Tag::Compound(compound));
+        assert!(matches!(
+            json_fields_to_compound(selected(), 1),
+            Err(JsonNbtError::TooDeep)
+        ));
+        discard_json(Value::Object(map));
     }
 }
