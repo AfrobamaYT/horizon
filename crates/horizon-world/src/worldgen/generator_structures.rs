@@ -956,15 +956,14 @@ mod tests {
     #[test]
     fn saved_jigsaw_round_trip_and_whole_start_fallback() {
         use crate::{
-            nbt::Tag,
             registry::BlockRegistry,
             worldgen::structure::{
-                BoundingBox, Rotation, StateTransforms,
+                Rotation, StateTransforms,
                 jigsaw::{Junction, PoolElement, Projection},
                 start::StructureKind,
             },
         };
-        use horizon_core::density::TerrainAdjustment;
+        use horizon_core::{bounding_box::BoundingBox, density::TerrainAdjustment, nbt::Tag};
         let names = ["minecraft:air", "minecraft:cave_air", "minecraft:void_air"];
         let registry = Box::leak(Box::new(
             BlockRegistry::from_nbt(&Tag::compound([

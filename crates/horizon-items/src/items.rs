@@ -3464,7 +3464,8 @@ mod tests {
         let root = std::env::temp_dir().join(format!("h036-items-matcher-{}", std::process::id()));
         std::fs::create_dir_all(root.join("data/minecraft/loot_table")).unwrap();
         std::fs::write(root.join("items.json"), "{}").unwrap();
-        let data = LootData::load(&root, &PackOverlay::NONE).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let data = LootData::load(&root, &PackOverlay::NONE, &defaults).unwrap();
         std::fs::remove_dir_all(&root).unwrap();
         let matcher = |p: &Value, e: &LootEntity| data.entity_matches(p, Some(e));
         let mut items = Items::for_tests(HashMap::new());

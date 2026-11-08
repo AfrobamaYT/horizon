@@ -1039,9 +1039,17 @@ pub mod tests {
             ),
             ("tags/wpenchant:enchantment/fixture".to_owned(), vec![tag]),
         ];
-        let base = Enchantments::load(&root);
-        let loaded =
-            Enchantments::load_with(&root, &horizon_world::loot::PackOverlay { files: &files });
+        write("items.json", &json!({}));
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let base = Enchantments::load(&root, &defaults);
+        let loaded = Enchantments::load_with(
+            &root,
+            &horizon_world::loot::PackOverlay {
+                files: &files,
+                ..horizon_world::loot::PackOverlay::NONE
+            },
+            &defaults,
+        );
         assert_eq!(
             loaded.get("minecraft:mending").unwrap().description,
             "Vanilla retained"
@@ -1075,7 +1083,11 @@ pub mod tests {
             ),
             3.0
         );
-        assert!(Enchantments::load(&root).get("wpenchant:loaded").is_none());
+        assert!(
+            Enchantments::load(&root, &defaults)
+                .get("wpenchant:loaded")
+                .is_none()
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 
