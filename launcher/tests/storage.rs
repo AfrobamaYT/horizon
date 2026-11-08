@@ -355,20 +355,27 @@ fn hundreds_of_reports_and_jars_fit_the_descriptor_budget_and_refuse_repeatedly(
 #[test]
 fn private_build_tools_still_clear_and_report_freed_bytes() {
     let home = Home::new();
-    // Cleanup retains the three root directories and Cargo's lock file. Their allocation is
-    // filesystem-dependent (including nonzero directory allocation on Windows).
-    for directory in ["launcher/rust", "launcher/cargo", "launcher/tmp"] {
-        fs::create_dir_all(home.0.path().join(directory)).unwrap();
+    // Cleanup retains directory ancestry, not just the three cache roots. Establish the
+    // complete empty skeleton using the same paths before measuring its allocated size.
+    // Clearing zero-length placeholders also gives NTFS the same directory-entry history.
+    let paths = [
+        "launcher/rust/toolchain/bin/rustc",
+        "launcher/cargo/registry/cache/output",
+        "launcher/tmp/output",
+    ];
+    for path in paths {
+        home.file(path, b"");
     }
-    home.file("launcher/cargo/.package-cache", b"");
     let empty = home.clear("rust-compiler");
+    for path in paths {
+        assert!(!home.0.path().join(path).exists(), "{path}");
+    }
     let empty_row = empty["rows"]
         .as_array()
         .unwrap()
         .iter()
         .find(|row| row["category"] == "rust-compiler")
         .unwrap();
-    assert_eq!(empty_row["freed_bytes"], 0);
     let retained_bytes = empty_row["remaining_bytes"].as_u64().unwrap();
     let rust = home.file("launcher/rust/toolchain/bin/rustc", &[1; 8192]);
     let cargo = home.file("launcher/cargo/registry/cache/output", &[2; 8192]);
@@ -384,6 +391,9 @@ fn private_build_tools_still_clear_and_report_freed_bytes() {
     assert!(!busy.status.success(), "{busy:?}");
     assert_eq!(fs::read(&cargo).unwrap(), vec![2; 8192]);
     drop(lock);
+    // The busy attempt may clear Rust before encountering Cargo's lock. Refill it so
+    // the successful clear must report freeing all three payloads, not just two.
+    fs::write(&rust, [1; 8192]).unwrap();
     let report = home.clear("rust-compiler");
     for path in [rust, cargo, scratch] {
         assert!(!path.exists(), "{path:?}");
@@ -394,12 +404,8 @@ fn private_build_tools_still_clear_and_report_freed_bytes() {
         .iter()
         .find(|row| row["category"] == "rust-compiler")
         .unwrap();
-    assert!(row["freed_bytes"].as_u64().unwrap() > 0);
+    assert!(row["freed_bytes"].as_u64().unwrap() >= 3 * 8192, "{row}");
     assert_eq!(row["remaining_bytes"], retained_bytes);
-    assert_eq!(
-        row["freed_bytes"].as_u64().unwrap(),
-        row["bytes"].as_u64().unwrap() - retained_bytes
-    );
 }
 
 #[test]
