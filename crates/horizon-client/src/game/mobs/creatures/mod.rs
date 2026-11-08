@@ -268,11 +268,13 @@ impl ProjectileWorld for ProjWorld<'_, '_> {
         )
         .map(|c| (c.drag, c.surface))
     }
-    fn solid(&self, p: [i32; 3]) -> bool {
-        self.w
-            .facts
-            .get(self.w.world.block(p[0], p[1], p[2]))
-            .full_collision
+    fn can_stand_on(&self, p: [i32; 3], entity_y: f64) -> bool {
+        horizon_client::collisions::projectile_can_stand_on(
+            self.w.world,
+            self.w.collision,
+            BlockPos::new(p[0], p[1], p[2]),
+            entity_y,
+        )
     }
 }
 
@@ -435,7 +437,9 @@ impl Game<'_> {
                 p.position.z,
             ],
             alive: !p.health.dead_or_dying(),
-            invulnerable: p.invulnerable,
+            invulnerable: p.invulnerable
+                || p.health.permanently_invulnerable
+                || p.health.invulnerable_time > 0,
             // EntitySelector.NO_CREATIVE_OR_SPECTATOR.
             creative: self.creative || self.spectator(),
             sneaking: self.keys.held(Action::Sneak),
@@ -1887,7 +1891,7 @@ impl Game<'_> {
         cancel
     }
     /// LivingEntity.die / dropAllDeathLoot.
-    fn mob_died(&mut self, m: &Mob) {
+    pub(super) fn mob_died(&mut self, m: &Mob) {
         if self.mob_death_canceled(m) {
             return;
         }
@@ -2751,7 +2755,7 @@ impl Game<'_> {
         self.handle_mob_events_reusable(&mut events)
     }
 
-    fn handle_mob_events_reusable(&mut self, events: &mut Vec<MobEvent>) -> Result<()> {
+    pub(super) fn handle_mob_events_reusable(&mut self, events: &mut Vec<MobEvent>) -> Result<()> {
         let mut broke: Vec<u32> = Vec::new();
         for e in events.drain(..) {
             match e {
@@ -3160,6 +3164,7 @@ impl Game<'_> {
                         Some(from),
                         "minecraft:mob_attack",
                         Some(Some(cube)),
+                        false,
                     ) && let Some(m) = self.mobs.iter_mut().find(|m| m.id == cube)
                     {
                         let pitch = (m.random.next_float() - m.random.next_float()) * 0.2 + 1.0;
@@ -4556,7 +4561,7 @@ impl Game<'_> {
         kind: &str,
         cause: Option<u32>,
     ) {
-        self.hurt_player_from(amount, Some(from), kind, Some(cause));
+        self.hurt_player_from(amount, Some(from), kind, Some(cause), false);
     }
     pub(super) fn mob_hits_player(
         &mut self,
@@ -4564,7 +4569,19 @@ impl Game<'_> {
         from: [f64; 3],
         damage_type: &str,
     ) -> bool {
-        self.hurt_player_from(amount, Some(from), damage_type, None)
+        self.hurt_player_from(amount, Some(from), damage_type, None, false)
+    }
+    /// [`mob_hits_player`](Self::mob_hits_player) whose hit was a creative
+    /// player's, which passes the victim's invulnerability
+    /// (`DamageSource.isCreativePlayer`, #916).
+    pub(in crate::game) fn mob_hits_player_from(
+        &mut self,
+        amount: f32,
+        from: [f64; 3],
+        damage_type: &str,
+        by_creative_player: bool,
+    ) -> bool {
+        self.hurt_player_from(amount, Some(from), damage_type, None, by_creative_player)
     }
     /// `hurtServer` on the player. `from` is the source's position (none: no
     /// direction), `known`: the causing mob when it is given (`/damage`),
@@ -4575,6 +4592,7 @@ impl Game<'_> {
         from: Option<[f64; 3]>,
         damage_type: &str,
         known: Option<Option<u32>>,
+        by_creative_player: bool,
     ) -> bool {
         let post_attack_if_alive = std::mem::take(&mut self.combat.post_attack_if_alive);
         let rocket = std::mem::take(&mut self.combat.rocket_hit);
@@ -4653,7 +4671,15 @@ impl Game<'_> {
                 .damage
                 .in_tag(id, "minecraft:damages_helmet")
             {
-                self.hurt_player_equipment(id, amount, blocking, living_cause, causing, &attack)
+                self.hurt_player_equipment(
+                    id,
+                    amount,
+                    blocking,
+                    living_cause,
+                    causing,
+                    by_creative_player,
+                    &attack,
+                )
             } else if let Some(player) = self.player.as_mut() {
                 player.hurt_caused_by(
                     crate::game::entity::damage_level_of!(self, &attack),
@@ -4664,6 +4690,7 @@ impl Game<'_> {
                     blocking,
                     living_cause,
                     causing,
+                    by_creative_player,
                 )
             } else {
                 Ok(Default::default())
@@ -4830,7 +4857,7 @@ impl Game<'_> {
         }
         self.give_player_effect("minecraft:wither", 40, 0);
     }
-    pub(super) fn hurt_player_by(&mut self, damage_type: &str, amount: f32) {
+    pub(in crate::game) fn hurt_player_by(&mut self, damage_type: &str, amount: f32) {
         let mut canceled = false;
         let rules = self.world.health_rules;
         if !self.creative

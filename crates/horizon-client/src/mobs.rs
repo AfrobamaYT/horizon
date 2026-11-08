@@ -1466,6 +1466,10 @@ pub struct Extra {
     /// attachment (`getPassengerRidingPosition(this).y` is its feet plus this)
     /// and the vehicle's box (`Mob.getAttackBoundingBox`, `getHitbox`).
     pub seat: Option<(u32, f64, Aabb)>,
+    /// The living vehicle `positionRider` last seated this rider on, with
+    /// its `yBodyRotO` and `yBodyRot`: a rider of a living vehicle is drawn
+    /// from that body (`LivingEntityRenderer.solveBodyRot`), not its own.
+    pub vehicle_body: Option<(u32, f32, f32)>,
     /// `Entity.boardingCooldown`: ticks after leaving a boat before a boat
     /// can pick this mob up again.
     pub boarding_cooldown: i32,
@@ -1742,7 +1746,13 @@ pub struct Mob {
     pub gear_knockback_resistance: Option<f64>,
     pub health: f32,
     pub hurt_time: i32,
+    /// `LivingEntity.damageCooldownTime`: 20 after a hit, counting down;
+    /// while it is above 10 a weaker hit does only the difference.
     pub invulnerable: i32,
+    /// `Entity.invulnerableTime` (#916): the entity-level invulnerability
+    /// window, its own field — never the damage cooldown beside it
+    /// (`Entity.isTemporarilyInvulnerable`), decremented by the base tick.
+    pub invulnerable_time: i32,
     pub death_time: i32,
     pub age: u32,
     pub limb_position: f32,
@@ -2796,8 +2806,9 @@ pub struct Seen {
     pub bounds: Aabb,
     pub eye_y: f64,
     pub alive: bool,
-    /// `invulnerable_flag`, which `asValidTarget` refuses a target by
-    /// (#1175): a valid-target rule the tick's view asks.
+    /// `Entity.isInvulnerable` (the ability flag or the temporary window,
+    /// #916), which `asValidTarget` refuses a target by (#1175): a
+    /// valid-target rule the tick's view asks.
     pub invulnerable: bool,
     pub baby: bool,
     pub in_love: bool,
@@ -3050,7 +3061,7 @@ impl Mob {
             hitbox: m.hitbox(),
             eye_y: m.eye_y(),
             alive: m.alive(),
-            invulnerable: m.invulnerable_flag,
+            invulnerable: m.is_invulnerable(),
             baby: m.is_baby(),
             // A villager is "in love" when it is willing to breed (`canBreed`).
             in_love: if villager {
@@ -3140,12 +3151,17 @@ impl Mob {
 /// `events[from..]` into `pending`, which the caller adds to each mob's
 /// velocity before its tick (and to every mob once all have ticked). The
 /// other events keep their order.
-/// The part of `Entity.canUsePortal` a mob's own state decides: it is alive,
+/// The part of `LivingEntity.canUsePortal` a mob's own state decides: it is alive,
+/// not sleeping (including fox sleep, but not bat resting or cat lying),
 /// it is not a boss that never travels, and — over `Monster.canUsePortal` —
 /// it is not a creaking bound to a heart (`Creaking.canUsePortal`). The
 /// rides and the players a side carries are the caller's half.
 pub fn mob_can_use_portal(m: &Mob) -> bool {
-    m.alive() && m.species() != Species::Wither && creaking::can_use_portal(m)
+    m.alive()
+        && !villager::sleeping(m)
+        && !(m.species() == Species::Fox && fox::flag(m, fox::SLEEPING))
+        && m.species() != Species::Wither
+        && creaking::can_use_portal(m)
 }
 pub fn take_mob_pushes(events: &mut Vec<MobEvent>, from: usize, pending: &mut PendingPushes) {
     // One pass: a crowd's tick holds a push per neighbour, and removing each
@@ -3368,8 +3384,9 @@ pub struct PlayerView {
     pub bounds: Aabb,
     pub eye: [f64; 3],
     pub alive: bool,
-    /// The `invulnerable` ability, which `asValidTarget` refuses a target
-    /// by (#1175): a valid-target rule a goal tick's view asks.
+    /// The `invulnerable` ability, the `Invulnerable` flag or its window,
+    /// which `asValidTarget` refuses a target by (#1175, #916): a
+    /// valid-target rule a goal tick's view asks.
     pub invulnerable: bool,
     pub creative: bool,
     pub sneaking: bool,
@@ -3740,6 +3757,7 @@ impl Mob {
             gear_knockback_resistance: None,
             hurt_time: 0,
             invulnerable: 0,
+            invulnerable_time: 0,
             death_time: 0,
             age: 0,
             limb_position: 0.0,
@@ -3910,6 +3928,13 @@ impl Mob {
     pub fn alive(&self) -> bool {
         self.health > 0.0
     }
+    /// `Entity.isInvulnerable` (#916): the permanent `Invulnerable` flag or
+    /// the temporary window `invulnerableTime > 0` — what damage refusal
+    /// (`isInvulnerableToBase`) and enemy targeting (`canBeSeenAsEnemy`)
+    /// both read.
+    pub fn is_invulnerable(&self) -> bool {
+        self.invulnerable_flag || self.invulnerable_time > 0
+    }
     pub fn hostile(&self) -> bool {
         self.kind.category == "monster"
     }
@@ -3993,10 +4018,11 @@ impl Mob {
     pub fn refuses_damage(&self, source: &Damage) -> bool {
         !self.alive()
             || self.removed
-            || (self.invulnerable_flag && !source.kind.bypasses_invulnerability())
+            || (self.is_invulnerable() && !source.kind.bypasses_invulnerability())
             || (source.is_fire() && self.kind.flags.fire_immune && !self.reflected_fireball(source))
     }
-    /// `Ghast.isReflectedFireball`: its fire immunity does not refuse a player's return hit.
+    /// `Ghast.isReflectedFireball`: its fire immunity does not refuse a
+    /// player's return hit.
     fn reflected_fireball(&self, source: &Damage) -> bool {
         &*self.kind.id == "minecraft:ghast"
             && source.kind == DamageKind::Fireball
@@ -4117,6 +4143,17 @@ impl Mob {
         if !amount.is_finite() {
             amount = f32::MAX;
         }
+        // LivingEntity.hurtServer: inside the hurt cooldown a hit is compared
+        // with `lastHurt` by this incoming amount, before armor and Resistance,
+        // and `actuallyHurt` gets only what it adds.
+        let incoming = amount;
+        let cooldown = self.invulnerable as f32 > 10.0;
+        if cooldown {
+            if incoming <= self.last_hurt {
+                return false;
+            }
+            amount = incoming - self.last_hurt;
+        }
         // LivingEntity.getDamageAfterArmorAbsorb asks `hurtArmor` *before*
         // `CombatRules.getDamageAfterAbsorb`, so a worn piece wears by the
         // damage the armour, toughness and enchantment reductions have not
@@ -4213,22 +4250,12 @@ impl Mob {
         // Wolf.actuallyHurt: wolf armor takes the damage instead of the wolf.
         let absorbed = self.wolf_armor_absorbs(&source);
         let mut knock = true;
-        let window = self.invulnerable as f32 > 10.0;
+        let window = cooldown;
         container.record_should_cause_side_effects(!window);
-        if window && amount <= self.last_hurt {
-            return false;
+        if window {
+            container.record_reduction(Reduction::Invulnerability, self.last_hurt);
         }
-        let mut dealt = if window {
-            container.reduce(
-                Reduction::Invulnerability,
-                amount,
-                self.last_hurt,
-                amount - self.last_hurt,
-                true,
-            )
-        } else {
-            amount
-        };
+        let mut dealt = amount;
         // The cooldown the hit leaves: what is left of it within it, else vanilla's 20 or
         // what `LivingIncomingDamageEvent` set.
         if window {
@@ -4250,7 +4277,7 @@ impl Mob {
         }
         // NeoForge bubbles what Pre left up to `lastHurt`: vanilla's value plus what Pre
         // added, so a hit no listener changes keeps vanilla's.
-        self.last_hurt = amount + container.pre_change();
+        self.last_hurt = incoming + container.pre_change();
         self.invulnerable = container.post_attack_invulnerability_ticks();
         if window {
             knock = false;
@@ -7279,6 +7306,107 @@ mod visibility_percent_tests {
         sneaking.head = Some(Arc::from("minecraft:skeleton_skull"));
         sneaking.sneaking = true;
         assert_eq!(sneaking.visibility_percent(Species::Skeleton), 0.4);
+    }
+}
+
+/// Added controls (H248): `LivingEntity.hurtServer` compares a hit inside
+/// the hurt cooldown, and keeps `lastHurt`, by its incoming amount; the
+/// reductions (`actuallyHurt`) get only the accepted difference.
+#[cfg(test)]
+mod hurt_cooldown_incoming_tests {
+    use super::*;
+
+    fn mob(species: Species) -> Mob {
+        let mut kind = (*sensor_scan_tests::kind()).clone();
+        kind.species = species;
+        let mut m = Mob::new(1, Arc::new(kind), Vec3::ZERO, 0.0);
+        m.attrs.max_health = 40.0;
+        m.health = 40.0;
+        m
+    }
+
+    #[test]
+    fn full_resistance_keeps_the_incoming_amounts_and_takes_a_stronger_hit() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
+        let mut m = mob(Species::Pig);
+        m.extra
+            .effects
+            .push(StoredEffect::new("minecraft:resistance", 600, 4));
+        assert!(m.damage(level, 1.0, Damage::of(DamageKind::Generic)));
+        assert_eq!((m.health, m.invulnerable, m.last_hurt), (40.0, 20, 1.0));
+        assert!(!m.damage(level, 1.0, Damage::of(DamageKind::Generic)));
+        assert!(m.damage(level, 2.0, Damage::of(DamageKind::Generic)));
+        assert_eq!((m.health, m.invulnerable, m.last_hurt), (40.0, 20, 2.0));
+        assert!(!m.damage(level, 1.5, Damage::of(DamageKind::Generic)));
+        assert_eq!(m.last_hurt, 2.0);
+    }
+
+    #[test]
+    fn the_armor_effectiveness_callback_runs_only_for_accepted_hits() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
+        let mut m = mob(Species::Pig);
+        // This damage-boundary fixture supplies effective armor directly;
+        // equipment attributes are normally prepared by the equipment tick.
+        Arc::make_mut(&mut m.kind).armor = 6.0;
+        let mut calls = 0;
+        let mut breach = |f: f32, _: &mut LegacyRandom| {
+            calls += 1;
+            f
+        };
+        assert!(m.damage_with(
+            level,
+            4.0,
+            Damage::of(DamageKind::Cactus),
+            Some(&mut breach)
+        ));
+        assert!(!m.damage_with(
+            level,
+            4.0,
+            Damage::of(DamageKind::Cactus),
+            Some(&mut breach)
+        ));
+        assert!(m.damage_with(
+            level,
+            8.0,
+            Damage::of(DamageKind::Cactus),
+            Some(&mut breach)
+        ));
+        assert_eq!(calls, 2);
+        assert_eq!(m.last_hurt, 8.0);
+    }
+
+    #[test]
+    fn absorption_soaks_the_accepted_difference() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
+        let mut m = mob(Species::Pig);
+        m.absorption = 1.5;
+        assert!(m.damage(level, 1.0, Damage::of(DamageKind::Generic)));
+        assert_eq!((m.health, m.absorption), (40.0, 0.5));
+        // 3 after 1: the difference 2, the last 0.5 absorption first.
+        assert!(m.damage(level, 3.0, Damage::of(DamageKind::Generic)));
+        assert_eq!((m.health, m.absorption, m.last_hurt), (38.5, 0.0, 3.0));
+    }
+
+    #[test]
+    fn a_horse_armor_wears_by_the_accepted_difference() {
+        let mut test_level = crate::health::TestLevel::new(0);
+        let level = &mut test_level.level();
+        let mut m = mob(Species::Horse);
+        m.extra.set_body(Some("minecraft:iron_horse_armor".into()));
+        assert!(m.damage(level, 4.0, Damage::of(DamageKind::Cactus)));
+        assert!(m.damage(level, 8.0, Damage::of(DamageKind::Cactus)));
+        let worn: Vec<f32> = m
+            .outbox
+            .iter()
+            .filter_map(|e| match e {
+                MobEvent::ArmorHurt { amount, .. } => Some(*amount),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(worn, [4.0, 4.0]);
     }
 }
 
