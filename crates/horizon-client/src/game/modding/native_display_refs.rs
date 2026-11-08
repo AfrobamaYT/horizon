@@ -731,17 +731,29 @@ mod tests {
             assert_eq!(text.text_shadow(game), Some(false));
             assert_eq!(text.see_through(game), Some(true));
 
-            let stone = game.block_state_id("minecraft:stone").unwrap();
+            let stone = game
+                .block_state_id("minecraft:stone")
+                .unwrap()
+                .try_into_api()
+                .unwrap();
             let stairs = game
                 .block_state_id("minecraft:oak_stairs[facing=east]")
+                .unwrap()
+                .try_into_api()
                 .unwrap();
-            let air = game.block_state_id("minecraft:air").unwrap();
+            let air = game
+                .block_state_id("minecraft:air")
+                .unwrap()
+                .try_into_api()
+                .unwrap();
             assert_eq!(block.block_state(game), Some(air));
             assert!(block.set_block_state(game, stone));
             assert_eq!(block.block_state(game), Some(stone));
             assert!(block.set_block_state(game, stairs));
             assert_eq!(block.block_state(game), Some(stairs));
-            assert!(!block.set_block_state(game, BlockStateId(u32::MAX as _)));
+            let invalid = mod_api::BlockStateRecord::new(stairs.block(), u16::MAX).into();
+            assert!(!block.set_block_state(game, invalid));
+            assert_eq!(block.block_state(game), Some(stairs));
 
             let sword = ItemStack {
                 item: "minecraft:diamond_sword".into(),
