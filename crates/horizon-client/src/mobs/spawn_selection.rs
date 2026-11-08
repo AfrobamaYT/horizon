@@ -799,7 +799,13 @@ pub fn weighted_pick(list: &[SpawnEntry], random: &mut impl RandomSource) -> Opt
     if total <= 0 {
         return None;
     }
-    let mut selection = i64::from(random.next_int_bound(total as i32).ok()?);
+    // Keep vanilla's exact draw for representable totals. Larger modded lists use
+    // one unsigned long modulo the total, a bounded, slightly biased fallback.
+    let mut selection = if total <= i64::from(i32::MAX) {
+        i64::from(random.next_int_bound(total as i32).ok()?)
+    } else {
+        ((random.next_long() as u64) % total as u64) as i64
+    };
     for e in list {
         selection -= i64::from(e.weight);
         if selection < 0 {
@@ -1609,6 +1615,24 @@ mod tests {
             3 * i64::from(i32::MAX)
         );
         assert_eq!(total_weight(&[]), 0);
+        let mut random = horizon_core::random::LegacyRandom::new(42);
+        assert!(
+            weighted_pick(
+                &[entry_for_test(), entry_for_test(), entry_for_test()],
+                &mut random
+            )
+            .is_some()
+        );
+    }
+
+    fn entry_for_test() -> SpawnEntry {
+        SpawnEntry {
+            entity: "minecraft:zombie".into(),
+            weight: i32::MAX as u32,
+            min: 1,
+            max: 1,
+            constant: true,
+        }
     }
 
     /// Vanilla's limits stand until a part answers; an answer replaces them, higher or lower,
