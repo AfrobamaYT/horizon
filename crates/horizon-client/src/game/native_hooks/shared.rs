@@ -2452,13 +2452,7 @@ impl Game<'_> {
             (None, None)
         };
         let (mut successful, mut canceled) = (false, false);
-        let Ok(snapshot) = stack.try_into_api() else {
-            return BonemealAsk {
-                crop: None,
-                check: Some(check),
-            };
-        };
-        let mut snapshot = Some(snapshot);
+        let mut snapshot = Some(stack.clone());
         self.native_bonemeal(crate::game::native_hooks::fire::BonemealCall {
             dimension: self.dim.level(),
             player,
@@ -2471,15 +2465,9 @@ impl Game<'_> {
             successful: &mut successful,
             canceled: &mut canceled,
         });
-        match snapshot.try_into_engine(self.items()) {
-            Ok(Some(next)) => *stack = next,
-            Ok(None) => stack.count = 0,
-            Err(_) => {
-                return BonemealAsk {
-                    crop: None,
-                    check: Some(check),
-                };
-            }
+        match snapshot {
+            Some(next) => *stack = next,
+            None => stack.count = 0,
         }
         BonemealAsk {
             crop: canceled.then_some(successful),
