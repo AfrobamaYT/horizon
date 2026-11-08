@@ -51,6 +51,19 @@ mod tests {
             .fold(root, |id, s| l.intern(Some(id), *s).unwrap())
     }
     #[test]
+    fn opaque_root_refuses_at_runtime() {
+        let mut l = Locators::default();
+        let root = l.intern(None, Step::Root(1)).unwrap();
+        let mut patch = RecordPatch::default();
+        patch.set(root, &9u32).unwrap();
+        let trees = PatchTree::roots(&l, &[root], &patch).unwrap();
+        let mut value = model::Opaque { value: 3 };
+        let mut plan = PatchPlan::default();
+        assert!(plan_opaque(&mut value, &trees[0], &mut plan).is_err());
+        drop(plan);
+        assert_eq!(value.value, 3);
+    }
+    #[test]
     fn partial_policy_is_atomic() {
         let policy = policy();
         let mut l = Locators::default();

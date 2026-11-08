@@ -1,4 +1,4 @@
-use horizon_mod_api_gen::{crossing::Rule, internals::Internal, native_patch, native_schema::All};
+use horizon_mod_api_gen::{crossing::Rule, internals::Internal, native_patch};
 use quote::quote;
 use std::{collections::BTreeMap, fs, path::PathBuf};
 fn main() {
@@ -50,6 +50,7 @@ fn main() {
     let mut funcs = Vec::new();
     for (name, ty, writable) in [
         ("plan_data", "Data", true),
+        ("plan_opaque", "Opaque", true),
         ("plan_readonly", "Data", false),
         ("plan_shared", "&u32", true),
         ("plan_ref", "&mut u32", true),
@@ -62,7 +63,10 @@ fn main() {
     ] {
         let name = quote::format_ident!("{name}");
         let ty: syn::Type = syn::parse_str(ty).unwrap();
-        let body = native_patch::generate(
+        let mut graph = horizon_mod_api_gen::native_policy::Graph::default();
+        let root = graph.add(&rule, &rule.shape("horizon_client::model", None, &ty));
+        let layouts = graph.tokens();
+        let body = native_patch::generate_runtime(
             &rule,
             "horizon_client::model",
             None,
@@ -71,15 +75,17 @@ fn main() {
             quote!(tree),
             quote!(*plan),
             writable,
-            &All,
+            &graph,
+            quote!(policy),
         )
         .unwrap();
         let native_ty = match name.to_string().as_str() {
             "plan_data" | "plan_readonly" => quote!(model::Data),
+            "plan_opaque" => quote!(model::Opaque),
             "plan_ref_data" => quote!(&mut model::Data),
             _ => quote!(#ty),
         };
-        funcs.push(quote!(fn #name<'a>(value: &'a mut #native_ty, tree: &mod_points::native_patch::PatchTree<'_>, plan: &mut mod_api::wire::PatchPlan<'a>) -> Result<(), mod_api::wire::WireError> { #body Ok(()) }));
+        funcs.push(quote!(fn #name<'a>(value: &'a mut #native_ty, tree: &mod_points::native_patch::PatchTree<'_>, plan: &mut mod_api::wire::PatchPlan<'a>) -> Result<(), mod_api::wire::WireError> { let policy = mod_points::exposure::Plan::build(&#layouts, None, &[], &[#root]).unwrap(); #body Ok(()) }));
     }
     fs::write(
         PathBuf::from(std::env::var_os("OUT_DIR").unwrap()).join("patch.rs"),

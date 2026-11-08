@@ -69,7 +69,14 @@ pub fn generate_runtime(
         &crate::native_schema::All,
         Some((graph, &policy)),
         0,
-    )?;
+    )
+    .unwrap_or_else(|_| {
+        quote!(if !__np_tree.is_empty() {
+            return Err(mod_api::wire::WireError::Invalid(
+                "unsupported native patch root",
+            ));
+        })
+    });
     Ok(
         quote!({ let __np_value = &mut (#place); let __np_tree = #tree; let __np_plan = &mut (#plan); #body; }),
     )

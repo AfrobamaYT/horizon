@@ -53,7 +53,8 @@ pub struct Plan {
 impl Plan {
     /// Register one endpoint's policy. The receiver remains partial even when an argument graph
     /// refers back to its type. Ordinary argument roots and selected receiver members otherwise
-    /// reach complete accessible layouts. Unknown grants and reachable opaque layouts fail closed.
+    /// reach accessible layouts, with opaque argument layouts retained as nonconstructible leaves.
+    /// Unknown grants and explicitly granted opaque receiver members fail closed.
     pub fn build(
         layouts: &[Layout],
         receiver: Option<usize>,
@@ -226,5 +227,55 @@ impl Plan {
         self.fields
             .get(id)
             .is_some_and(|f| f.contains(&(case, ordinal)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn complete_tracks_cycles_partial_members_and_opaque_arguments() {
+        let mut layouts = vec![Layout {
+            name: "Node".into(),
+            signature: "Node".into(),
+            fields: vec![Field {
+                case: None,
+                ordinal: 0,
+                name: "next".into(),
+                target: 0,
+            }],
+            children: vec![],
+            opaque: None,
+        }];
+        let full = Plan::build(&layouts, None, &[], &[0]).unwrap();
+        assert!(full.complete(0));
+        let partial = Plan::build(&layouts, Some(0), &[], &[]).unwrap();
+        assert!(!partial.complete(0));
+        assert!(!partial.complete(99));
+        layouts.push(Layout {
+            name: "Opaque".into(),
+            signature: "opaque".into(),
+            fields: vec![],
+            children: vec![],
+            opaque: Some("opaque".into()),
+        });
+        layouts[0].fields[0].target = 1;
+        let opaque = Plan::build(&layouts, None, &[], &[0]).unwrap();
+        assert!(opaque.key(1).is_some());
+        assert!(!opaque.complete(0));
+        assert!(!opaque.complete(1));
+        assert!(
+            Plan::build(
+                &layouts,
+                Some(0),
+                &[Grant {
+                    case: None,
+                    ordinal: 0
+                }],
+                &[]
+            )
+            .is_err()
+        );
     }
 }
