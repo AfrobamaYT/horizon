@@ -246,11 +246,24 @@ fn body(
     }
     let args = native_value::codec(rule, &Shape::Tuple(shapes))
         .map_err(|reason| format!("argument tuple: {reason}"))?;
-    let result = native_value::codec(rule, &rule.shape(module, owner, output))
+    // A borrowed string result crosses as the owned string it is a view of.
+    let borrowed_str = matches!(output, Type::Reference(r) if r.mutability.is_none()
+        && matches!(&*r.elem, Type::Path(p) if p.path.is_ident("str")));
+    let owned_output: Type = if borrowed_str {
+        syn::parse_quote!(String)
+    } else {
+        output.clone()
+    };
+    let result = native_value::codec(rule, &rule.shape(module, owner, &owned_output))
         .map_err(|reason| format!("result `{}`: {reason}", quote!(#output)))?;
     let decode = args.decode;
     let encode = result.encode;
     let call = call(&lend);
+    let call = if borrowed_str {
+        quote!(#call.to_owned())
+    } else {
+        call
+    };
     Ok(quote! {
         let mut __reader = mod_api::wire::Reader::new(__bytes);
         let __arguments: (#(#owned_types,)*) = { let input = &mut __reader; #decode };

@@ -1381,6 +1381,48 @@ mod tests {
         for (reason, count) in refusals.iter().take(40) {
             println!("runtime admission {count}: {reason}");
         }
+        {
+            // Trait-object arguments that cross as method tables, by trait, with how many of
+            // the trait's methods cross; the rest stay opaque leaves.
+            let rule = crate::crossing::Rule::new(&crate::internals::rule_catalog(&root).unwrap());
+            let mut tables = std::collections::BTreeMap::<String, usize>::new();
+            let mut leaves = std::collections::BTreeMap::<String, usize>::new();
+            for point in &points {
+                // `module::Owner<..>::method` or `module::function`.
+                let segments: Vec<_> = point.target.split("::").collect();
+                let owned = segments
+                    .iter()
+                    .position(|s| s.contains('<') || s.starts_with(char::is_uppercase));
+                let module = segments[..owned.unwrap_or(segments.len() - 1)].join("::");
+                for arg in point.raw_shape.iter().flat_map(|shape| &shape.args) {
+                    if arg.class != "unclassified" {
+                        continue;
+                    }
+                    let ty: syn::Type = syn::parse_str(&arg.ty).unwrap();
+                    match rule.trait_object(&module, &ty) {
+                        Some(path) => *tables.entry(path).or_default() += 1,
+                        None => *leaves.entry(arg.ty.clone()).or_default() += 1,
+                    }
+                }
+            }
+            for (path, count) in &tables {
+                let methods = crate::native_callable::methods(&rule, path);
+                let crossing = methods
+                    .iter()
+                    .filter(|m| {
+                        crate::native_callable::method_gap(&rule, path, &m.name.to_string())
+                            .is_none()
+                    })
+                    .count();
+                println!(
+                    "trait table {count} args: {path} ({crossing}/{} methods cross)",
+                    methods.len()
+                );
+            }
+            for (ty, count) in &leaves {
+                println!("trait object leaf {count} args: {ty}");
+            }
+        }
         for class in ["plain", "callback", "unclassified"] {
             let functions = points
                 .iter()

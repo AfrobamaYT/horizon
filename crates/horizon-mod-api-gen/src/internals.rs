@@ -116,6 +116,32 @@ impl<'ast> Visit<'ast> for TypeUses {
         syn::visit::visit_type_path(self, ty);
     }
 
+    // A `dyn Trait` names a listed trait: the object crosses as its method table. A bound of
+    // a generic does not.
+    fn visit_type_trait_object(&mut self, object: &'ast syn::TypeTraitObject) {
+        for bound in &object.bounds {
+            if let syn::TypeParamBound::Trait(bound) = bound
+                && bound.path.leading_colon.is_none()
+                && bound
+                    .path
+                    .segments
+                    .iter()
+                    .all(|s| matches!(s.arguments, syn::PathArguments::None))
+            {
+                self.paths.insert(
+                    bound
+                        .path
+                        .segments
+                        .iter()
+                        .map(|s| s.ident.to_string())
+                        .collect::<Vec<_>>()
+                        .join("::"),
+                );
+            }
+        }
+        syn::visit::visit_type_trait_object(self, object);
+    }
+
     fn visit_type_param(&mut self, param: &'ast syn::TypeParam) {
         self.parameters.insert(param.ident.to_string());
         syn::visit::visit_type_param(self, param);
@@ -213,8 +239,29 @@ fn clean_fields(fields: &Fields) -> Fields {
     fields
 }
 
+/// A trait's signature: its items without docs, defaults or visibility, which are not contract.
+fn trait_signature(value: &syn::ItemTrait) -> syn::ItemTrait {
+    let mut signature = value.clone();
+    signature.attrs.clear();
+    signature.vis = Visibility::Inherited;
+    for member in &mut signature.items {
+        match member {
+            syn::TraitItem::Fn(method) => {
+                method.attrs.retain(|attr| !attr.path().is_ident("doc"));
+                method.default = None;
+                method.semi_token = Some(Default::default());
+            }
+            syn::TraitItem::Const(value) => value.attrs.retain(|attr| !attr.path().is_ident("doc")),
+            syn::TraitItem::Type(value) => value.attrs.retain(|attr| !attr.path().is_ident("doc")),
+            _ => {}
+        }
+    }
+    signature
+}
+
 pub(crate) fn shape_signature(item: &Item) -> Option<Item> {
     match item {
+        Item::Trait(value) => Some(Item::Trait(trait_signature(value))),
         Item::Struct(value) => {
             let mut value = value.clone();
             value
@@ -437,7 +484,10 @@ impl Shapes {
                     let cfg: Vec<_> = cfg.iter().cloned().chain(conditions(attrs)).collect();
                     self.items(&path, &cfg, inner);
                 }
-            } else if matches!(item, Item::Struct(_) | Item::Enum(_) | Item::Type(_)) {
+            } else if matches!(
+                item,
+                Item::Struct(_) | Item::Enum(_) | Item::Type(_) | Item::Trait(_)
+            ) {
                 self.definitions.entry(path).or_default().push(Definition {
                     module: module.to_owned(),
                     cfg: cfg.to_vec(),
@@ -888,27 +938,7 @@ impl Pass {
                 expose!(value, "type", value.type_token.span(), signature);
             }
             Item::Trait(value) => {
-                let mut signature = value.clone();
-                signature.attrs.clear();
-                signature.vis = Visibility::Inherited;
-                // Trait method defaults are implementations, and docs aren't contract: neither is
-                // part of the signature.
-                for member in &mut signature.items {
-                    match member {
-                        syn::TraitItem::Fn(method) => {
-                            method.attrs.retain(|attr| !attr.path().is_ident("doc"));
-                            method.default = None;
-                            method.semi_token = Some(Default::default());
-                        }
-                        syn::TraitItem::Const(value) => {
-                            value.attrs.retain(|attr| !attr.path().is_ident("doc"))
-                        }
-                        syn::TraitItem::Type(value) => {
-                            value.attrs.retain(|attr| !attr.path().is_ident("doc"))
-                        }
-                        _ => {}
-                    }
-                }
+                let signature = trait_signature(value);
                 expose!(value, "trait", value.trait_token.span(), signature);
             }
             Item::Mod(value) => {
@@ -1106,6 +1136,7 @@ impl Pass {
                             Item::Struct(value) => ("struct", &value.attrs),
                             Item::Enum(value) => ("enum", &value.attrs),
                             Item::Type(value) => ("type", &value.attrs),
+                            Item::Trait(value) => ("trait", &value.attrs),
                             _ => unreachable!("type definition"),
                         };
                         let cfg = configuration(&definition.cfg, attrs);

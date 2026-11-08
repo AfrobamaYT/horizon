@@ -64,7 +64,11 @@ fn generate_inner(
         }
         if let Some((graph, plan)) = runtime {
             let id = graph.id(shape).ok_or("missing runtime schema")?;
-            if graph.layouts[id].opaque.is_some() {
+            // A trait object outside an argument root is only a typed header: its method table
+            // is made where the call's lease is.
+            if graph.layouts[id].opaque.is_some()
+                || matches!(shape, Shape::Opaque(Some(name)) if name.starts_with("dyn "))
+            {
                 return Ok(quote!(mod_points::native_nodes::Opaque((#plan).key(#id).unwrap_or(0))));
             }
         }
