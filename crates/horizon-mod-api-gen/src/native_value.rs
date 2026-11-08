@@ -59,13 +59,45 @@ fn build(rule: &Rule, shape: &Shape, stack: &mut Vec<String>) -> Result<ValueCod
                 encode: quote!(#(#es)*),
             }
         }
-        Shape::Collection(Collection::Vec, parts) if parts.len() == 1 => {
+        Shape::Array(inner, len) => {
+            let c = build(rule, inner, stack)?;
+            let d = c.decode;
+            let e = c.encode;
+            ValueCodec {
+                decode: quote!(input.nested(|input| { let mut values = Vec::new(); for _ in 0..#len { values.push(#d); } values.try_into().map_err(|_| mod_api::wire::WireError::Length) })?),
+                encode: quote!(for value in value.iter() { #e }),
+            }
+        }
+        Shape::Collection(kind, parts)
+            if parts.len() == 1
+                && matches!(
+                    kind,
+                    Collection::Vec
+                        | Collection::VecDeque
+                        | Collection::HashSet
+                        | Collection::BTreeSet
+                ) =>
+        {
             let c = build(rule, &parts[0], stack)?;
             let d = c.decode;
             let e = c.encode;
             ValueCodec {
-                decode: quote!(input.nested(|input| { let len = input.take_len(1)?; if len > 65_536 { return Err(mod_api::wire::WireError::Length); } let mut values = Vec::with_capacity(len); for _ in 0..len { values.push(#d); } Ok(values) })?),
+                decode: quote!(input.nested(|input| { let len = input.take_len(1)?; let mut values = Vec::with_capacity(len); for _ in 0..len { values.push(#d); } Ok(values.into_iter().collect()) })?),
                 encode: quote!({ out.put_len(value.len()); for value in value.iter() { #e } }),
+            }
+        }
+        Shape::Collection(kind, parts)
+            if parts.len() == 2 && matches!(kind, Collection::HashMap | Collection::BTreeMap) =>
+        {
+            let key = build(rule, &parts[0], stack)?;
+            let val = build(rule, &parts[1], stack)?;
+            let kd = key.decode;
+            let vd = val.decode;
+            let ke = key.encode;
+            let ve = val.encode;
+            ValueCodec {
+                decode: quote!(input.nested(|input| { let len = input.take_len(1)?; let mut values = Vec::with_capacity(len); for _ in 0..len { values.push((#kd, #vd)); } Ok(values.into_iter().collect()) })?),
+                encode: quote!({ out.put_len(value.len()); for (key, val) in value.iter() { { let value = key; #ke } { let value = val; #ve } } }),
             }
         }
         Shape::Named(path, _) => {
