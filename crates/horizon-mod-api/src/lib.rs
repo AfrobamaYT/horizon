@@ -3563,7 +3563,7 @@ pub type Mods = Arc<[ModEntry]>;
 
 pub(crate) struct Installed {
     mods: Mods,
-    subscribers: horizon_client_core::subscribers::Subscribers,
+    subscribers: horizon_mod_runtime::subscribers::Subscribers,
     disabled: Box<[std::sync::atomic::AtomicBool]>,
 }
 
@@ -3577,7 +3577,7 @@ impl Installed {
                 .flatten()
                 .map(move |hook| (index, *hook as usize))
         });
-        let subscribers = horizon_client_core::subscribers::Subscribers::new(
+        let subscribers = horizon_mod_runtime::subscribers::Subscribers::new(
             generated::HOOK_COUNT,
             mods.len(),
             subscriptions,
