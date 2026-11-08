@@ -658,6 +658,7 @@ impl Shape {
             }
             ty
         };
+        let record_mut = record_mutability();
         let fields = raw_fields(sig);
         let names: Vec<_> = fields.iter().map(|field| &field.name).collect();
         let params: Vec<_> = (0..fields.len()).map(|i| format_ident!("T{i}")).collect();
@@ -678,7 +679,7 @@ impl Shape {
             RawOutcome::Cancel => (
                 quote! {
                     /// Set by a head listener: the function returns at once, skipping its body.
-                    pub cancel: &'r mut bool,
+                    pub cancel: &'r #record_mut bool,
                 },
                 quote!(),
                 quote!(),
@@ -690,7 +691,7 @@ impl Shape {
                         /// Set by a head listener: the function returns it at once, skipping its
                         /// body. A return listener finds the value returned here, and may change it
                         /// but not take it.
-                        pub result: &'r mut Option<R>,
+                        pub result: &'r #record_mut Option<R>,
                     },
                     quote!(R,),
                     quote!(#ty,),
@@ -725,7 +726,7 @@ impl Shape {
             #[doc = #doc]
             #[doc(hidden)]
             pub struct #record #generics {
-                #( pub #names: &'r mut #params, )*
+                #( pub #names: &'r #record_mut #params, )*
                 #outcome
             }
             #[doc = #listener_doc]
@@ -763,6 +764,12 @@ pub enum RawOutcome {
     None,
 }
 
+// Raw listeners may replace every argument (including by-value and shared-reference arguments)
+// and the outcome. Keep the emitted reference and the catalog flag on this one policy.
+fn record_mutability() -> Option<syn::token::Mut> {
+    Some(Default::default())
+}
+
 /// One field of a raw record: a parameter, by its binding, or `arg<i>` for a pattern.
 pub struct RawField {
     pub name: syn::Ident,
@@ -792,9 +799,248 @@ pub fn raw_fields(sig: &syn::Signature) -> Vec<RawField> {
         .collect()
 }
 
+/// Staging metadata for a raw point; type strings use the catalog's token spelling.
+#[derive(Debug, serde::Serialize)]
+pub struct RawShape {
+    pub receiver: RawReceiver,
+    pub args: Vec<RawArg>,
+    pub outcome: &'static str,
+    /// Mutability of the record's cancel/result field, absent when there is no outcome field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outcome_record_mutable: Option<bool>,
+    pub return_ty: String,
+    pub return_class: &'static str,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct RawReceiver {
+    pub kind: &'static str,
+    /// The pointee type, absent for a free or associated function.
+    pub ty: Option<String>,
+    pub write_back: bool,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct RawArg {
+    pub name: String,
+    pub ty: String,
+    pub write_back: bool,
+    /// Whether the native raw record permits replacement, independent of pointee write-back.
+    pub record_mutable: bool,
+    pub class: &'static str,
+}
+
+/// Describe the raw listener contract, not the API-filtered arguments. Call only for raw-able
+/// signatures. Mutable references permit pointee write-back; moving a value does not.
+/// Callable syntax is a callback, including FnOnce: syntax alone cannot prove a continuation.
+/// Borrowed returns follow the same predicate that suppresses the API return place. Nominal
+/// types are plain (no alias resolution); unsupported syntax is explicitly unclassified.
+pub fn raw_shape(shape: &Shape, sig: &syn::Signature, owner: Option<&Type>) -> RawShape {
+    use quote::ToTokens;
+    let spelling = |ty: &Type| ty.to_token_stream().to_string().replace("& ", "&");
+    fn class(ty: &Type) -> &'static str {
+        match ty {
+            Type::BareFn(_) => "callback",
+            Type::Reference(r) => class(&r.elem),
+            Type::Paren(p) => class(&p.elem),
+            Type::Group(g) => class(&g.elem),
+            Type::TraitObject(t) => bounds_class(&t.bounds),
+            Type::ImplTrait(t) => bounds_class(&t.bounds),
+            Type::Path(p) => {
+                if let Some(segment) = p.path.segments.last()
+                    && segment.ident == "Box"
+                    && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
+                    && let Some(syn::GenericArgument::Type(inner)) = args.args.first()
+                {
+                    return class(inner);
+                }
+                "plain"
+            }
+            Type::Array(_) | Type::Slice(_) | Type::Tuple(_) | Type::Ptr(_) | Type::Never(_) => {
+                "plain"
+            }
+            _ => "unclassified",
+        }
+    }
+    fn bounds_class(
+        bounds: &syn::punctuated::Punctuated<syn::TypeParamBound, syn::token::Plus>,
+    ) -> &'static str {
+        if bounds.iter().any(|bound| matches!(bound, syn::TypeParamBound::Trait(t)
+            if t.path.segments.last().is_some_and(|s| matches!(s.ident.to_string().as_str(), "Fn" | "FnMut" | "FnOnce"))))
+        {
+            "callback"
+        } else {
+            "unclassified"
+        }
+    }
+    RawShape {
+        receiver: RawReceiver {
+            kind: match shape.receiver {
+                Receiver::None => "none",
+                Receiver::Shared => "shared",
+                Receiver::Mut => "mut",
+            },
+            ty: (shape.receiver != Receiver::None)
+                .then(|| owner.map_or_else(|| "Self".into(), spelling)),
+            write_back: shape.receiver == Receiver::Mut,
+        },
+        args: raw_fields(sig)
+            .into_iter()
+            .map(|field| RawArg {
+                name: field.name.to_string(),
+                ty: spelling(&field.ty),
+                write_back: matches!(&field.ty, Type::Reference(r) if r.mutability.is_some()),
+                record_mutable: record_mutability().is_some(),
+                class: class(&field.ty),
+            })
+            .collect(),
+        outcome: match shape.raw_outcome(sig) {
+            RawOutcome::Cancel => "cancel",
+            RawOutcome::Result(_) => "result",
+            RawOutcome::None => "none",
+        },
+        outcome_record_mutable: (!matches!(shape.raw_outcome(sig), RawOutcome::None))
+            .then(|| record_mutability().is_some()),
+        return_ty: match &sig.output {
+            syn::ReturnType::Default => "()".into(),
+            syn::ReturnType::Type(_, ty) => spelling(ty),
+        },
+        return_class: if shape.borrowed_return {
+            "borrowed_return"
+        } else {
+            "plain"
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn record_mutability_matches_native_record() {
+        for sig in [
+            syn::parse_quote!(fn f(value: u8, shared: &u8, mutable: &mut u8)),
+            syn::parse_quote!(fn f(value: u8, shared: &u8, mutable: &mut u8) -> bool),
+            syn::parse_quote!(fn f(value: u8, shared: &u8, mutable: &mut u8) -> &u8),
+        ] {
+            let shape = shape(quote!(raw), &sig).unwrap();
+            let metadata = raw_shape(&shape, &sig, None);
+            let file: syn::File = syn::parse2(shape.raw_items(&sig, None, None)).unwrap();
+            let record = file
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    syn::Item::Struct(record) => Some(record),
+                    _ => None,
+                })
+                .unwrap();
+            let fields = record
+                .fields
+                .iter()
+                .map(|field| {
+                    let Type::Reference(reference) = &field.ty else {
+                        panic!("record field must borrow")
+                    };
+                    (
+                        field.ident.as_ref().unwrap().to_string(),
+                        reference.mutability.is_some(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let mut expected = metadata
+                .args
+                .iter()
+                .map(|arg| (arg.name.clone(), arg.record_mutable))
+                .collect::<Vec<_>>();
+            if metadata.outcome != "none" {
+                expected.push((
+                    metadata.outcome.into(),
+                    metadata.outcome_record_mutable.expect("outcome flag"),
+                ));
+            } else {
+                assert_eq!(metadata.outcome_record_mutable, None);
+            }
+            assert_eq!(fields, expected);
+            assert!(metadata.args.iter().all(|arg| arg.record_mutable));
+            assert_eq!(
+                metadata
+                    .args
+                    .iter()
+                    .map(|arg| arg.write_back)
+                    .collect::<Vec<_>>(),
+                [false, false, true]
+            );
+        }
+    }
+
+    #[test]
+    fn raw_shape_contract() {
+        let describe = |sig: syn::Signature| {
+            let shape = shape(quote!(raw), &sig).unwrap();
+            raw_shape(&shape, &sig, Some(&syn::parse_quote!(Game<'_>)))
+        };
+        for (sig, kind, ty, writable) in [
+            (syn::parse_quote!(fn f()), "none", None, false),
+            (
+                syn::parse_quote!(fn f(&self)),
+                "shared",
+                Some("Game < '_ >"),
+                false,
+            ),
+            (
+                syn::parse_quote!(fn f(&mut self)),
+                "mut",
+                Some("Game < '_ >"),
+                true,
+            ),
+        ] {
+            let got = describe(sig);
+            assert_eq!(got.receiver.kind, kind);
+            assert_eq!(got.receiver.ty.as_deref(), ty);
+            assert_eq!(got.receiver.write_back, writable);
+            assert_eq!(got.outcome, "cancel");
+        }
+        let got = describe(
+            syn::parse_quote!(fn f(a: &mut u8, b: &u8, c: *const u8, d: u8,
+            fire: fn(&mut Self, u8), boxed: Box<dyn FnOnce()>, borrowed: &dyn FnMut(),
+            unknown: opaque!(), other: &dyn std::any::Any, other_mut: &mut dyn std::any::Any) -> bool),
+        );
+        assert_eq!(
+            got.args.iter().map(|a| a.write_back).collect::<Vec<_>>(),
+            [
+                true, false, false, false, false, false, false, false, false, true
+            ]
+        );
+        assert_eq!(
+            got.args.iter().map(|a| a.class).collect::<Vec<_>>(),
+            [
+                "plain",
+                "plain",
+                "plain",
+                "plain",
+                "callback",
+                "callback",
+                "callback",
+                "unclassified",
+                "unclassified",
+                "unclassified"
+            ]
+        );
+        assert_eq!(got.args[0].name, "a");
+        assert_eq!(got.args[0].ty, "&mut u8");
+        assert_eq!(got.outcome, "result");
+        assert_eq!(got.return_ty, "bool");
+        assert_eq!(got.return_class, "plain");
+        for sig in [
+            syn::parse_quote!(fn f(&self) -> &u8),
+            syn::parse_quote!(fn f(&self) -> Ref<'_, u8>),
+        ] {
+            let got = describe(sig);
+            assert_eq!(got.outcome, "none");
+            assert_eq!(got.return_class, "borrowed_return");
+        }
+    }
 
     /// `impl Game<'_>`'s lifetime is one lifetime: the receiver and a `Self` in a parameter name
     /// the same one, so a function such as `fn(&mut Self, u8)` matches the function's own.
