@@ -52,6 +52,9 @@ jobs:
         with:
           workspaces: .
           shared-key: runtime-leases-windows-check
-      - run: "cargo test --release --locked -p horizon-mod-package --features runtime-process --lib runtime_leases::"
+      - run: cargo build --release --locked -p horizon-mod-package --features runtime-process --example holder_actor
+        working-directory: .
+        shell: bash
+      - run: cargo test --release --locked -p horizon-mod-package --features runtime-process --lib
         working-directory: .
         shell: bash

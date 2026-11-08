@@ -37,7 +37,11 @@ socket2 = { version = "0.6", optional = true }
 rustix = { version = "1.1", features = ["fs", "net"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_Storage_FileSystem"], optional = true }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_Storage_FileSystem", "Win32_Security_Authorization", "Win32_System_Pipes", "Win32_System_Threading", "Win32_System_JobObjects"], optional = true }
+
+[[example]]
+name = "holder_actor"
+required-features = ["runtime-process"]
 
 [features]
 runtime-process = ["dep:cap-std", "dep:cap-fs-ext", "dep:os_pipe", "dep:libc", "dep:windows-sys", "dep:getrandom", "dep:subtle", "dep:socket2", "dep:rustix"]

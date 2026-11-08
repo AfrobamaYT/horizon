@@ -7,7 +7,7 @@ use std::{
 };
 use subtle::ConstantTimeEq;
 
-const VERSION: u8 = 1;
+pub(crate) const VERSION: u8 = 1;
 const LIMIT: usize = 64 * 1024 * 1024;
 /// A private bootstrap marker. Deliberately not Debug: it contains a secret.
 #[derive(Clone, Serialize, Deserialize)]
@@ -19,17 +19,20 @@ pub struct Marker {
     #[serde(serialize_with = "path_out", deserialize_with = "path_in")]
     directory: PathBuf,
 }
-fn version<'de, D: serde::Deserializer<'de>>(input: D) -> Result<u8, D::Error> {
+pub(crate) fn version<'de, D: serde::Deserializer<'de>>(input: D) -> Result<u8, D::Error> {
     let version = u8::deserialize(input)?;
     if version != VERSION {
         return Err(serde::de::Error::custom("unknown control version"));
     }
     Ok(version)
 }
-fn path_out<S: serde::Serializer>(path: &std::path::Path, output: S) -> Result<S::Ok, S::Error> {
+pub(crate) fn path_out<S: serde::Serializer>(
+    path: &std::path::Path,
+    output: S,
+) -> Result<S::Ok, S::Error> {
     path.as_os_str().serialize(output)
 }
-fn path_in<'de, D: serde::Deserializer<'de>>(input: D) -> Result<PathBuf, D::Error> {
+pub(crate) fn path_in<'de, D: serde::Deserializer<'de>>(input: D) -> Result<PathBuf, D::Error> {
     let path = PathBuf::from(std::ffi::OsString::deserialize(input)?);
     if !path.is_absolute() {
         return Err(serde::de::Error::custom("control path must be absolute"));
@@ -51,7 +54,8 @@ impl Marker {
     }
 }
 
-#[path = "local_control/unix.rs"]
+#[cfg_attr(unix, path = "local_control/unix.rs")]
+#[cfg_attr(windows, path = "local_control/windows.rs")]
 mod platform;
 pub use platform::{Endpoint, Stream, connect};
 
@@ -152,5 +156,5 @@ fn pause(deadline: Instant) -> io::Result<()> {
     std::thread::sleep(Duration::from_millis(2));
     Ok(())
 }
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests;

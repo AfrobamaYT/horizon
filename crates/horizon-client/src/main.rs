@@ -6,7 +6,9 @@
 static GAME_IDENTITY: [u8; horizon_mod_package::game_identity::MARK.len()] =
     horizon_mod_package::game_identity::MARK;
 
+static HOLDER_CAPABILITY: [u8; 26] = horizon_mod_package::holder::CAPABILITY;
 fn main() {
-    std::hint::black_box(&GAME_IDENTITY);
+    horizon_mod_package::holder::enter();
+    std::hint::black_box((&GAME_IDENTITY, &HOLDER_CAPABILITY));
     horizon_client::entry::main();
 }

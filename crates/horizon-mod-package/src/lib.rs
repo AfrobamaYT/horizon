@@ -5,6 +5,11 @@ pub mod content;
 pub mod dependencies;
 pub mod enabled;
 pub mod game_identity;
+#[cfg(all(
+    feature = "runtime-process",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
+pub mod holder;
 pub mod icon;
 #[cfg(feature = "index")]
 pub mod index;
@@ -12,7 +17,7 @@ pub mod install_lock;
 pub mod internals;
 #[cfg(all(
     feature = "runtime-process",
-    any(target_os = "linux", target_os = "macos")
+    any(target_os = "linux", target_os = "macos", windows)
 ))]
 pub mod local_control;
 #[cfg(feature = "runtime-process")]
