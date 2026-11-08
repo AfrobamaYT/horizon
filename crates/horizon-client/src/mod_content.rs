@@ -736,8 +736,8 @@ struct NewBlock<'a> {
 impl NewBlock<'_> {
     /// The item its gameplay row names when that is not the template's item
     /// renamed: `block_item`, or `minecraft:air` for a block with no item
-    /// (a sign's wall form keeps the paired sign's). Pick-block and
-    /// `Block.asItem` both read this one value.
+    /// (a sign's wall form keeps the paired sign's). `Block.asItem` and, unless
+    /// the block has a `pick_item` row of its own, pick-block read this value.
     fn item_row(&self) -> Option<&str> {
         match &self.decl.block_item {
             Some(item) => Some(item),
@@ -1557,6 +1557,9 @@ impl<'a> Plan<'a> {
                     if let Some(item) = b.item_row() {
                         row.set("item", J::Str(item.into()));
                     }
+                    if let Some(item) = &b.decl.pick_item {
+                        row.set("pick_item", J::Str(item.clone()));
+                    }
                     self.override_gameplay(b, combo, &mut row);
                     if let Some(shapes) = &b.shapes {
                         let shape = &shapes[state_index];
@@ -1750,10 +1753,15 @@ impl<'a> Plan<'a> {
         }
         if components {
             for b in &self.blocks {
-                if let Some(item) = &b.decl.block_item
-                    && map.get(item).is_none()
-                {
-                    return Err(format!("{}: block_item {item:?} is not an item", b.decl.id).into());
+                for (key, item) in [
+                    ("block_item", &b.decl.block_item),
+                    ("pick_item", &b.decl.pick_item),
+                ] {
+                    if let Some(item) = item
+                        && map.get(item).is_none()
+                    {
+                        return Err(format!("{}: {key} {item:?} is not an item", b.decl.id).into());
+                    }
                 }
             }
             for i in &self.items {
