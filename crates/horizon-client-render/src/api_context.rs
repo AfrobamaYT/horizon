@@ -140,6 +140,10 @@ mod tests {
                     assert_eq!(context.registry("missing"), None);
                     assert_eq!(context.setting("missing", "key"), None);
                     assert_eq!(
+                        context.setting("active", "mode").as_deref(),
+                        Some("captured")
+                    );
+                    assert_eq!(
                         context.mods().ids().collect::<Vec<_>>(),
                         ["second", "first"]
                     );
