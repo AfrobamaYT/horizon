@@ -38,9 +38,10 @@ impl Game<'_> {
             self.forget_gone_hoppers();
         }
         let ticking = self.block_ticking_area();
-        let mut spawners = Vec::new();
-        let mut trial_spawners = Vec::new();
+        self.spawner_tick_positions.clear();
+        self.trial_spawner_tick_positions.clear();
         self.item_columns = Some(Default::default());
+        self.pass_mobs = Some(Default::default());
         for slot in self.world.block_entity_tickers().iter().copied() {
             let pos = slot.0;
             // Ticks before this one can remove it (`TickingBlockEntity.isRemoved`).
@@ -61,11 +62,11 @@ impl Game<'_> {
                 Some(BlockEntity::CreakingHeart(_)) => self.tick_creaking_heart(pos)?,
                 Some(BlockEntity::Spawner(_)) => {
                     self.tick_spawner(pos)?;
-                    spawners.push(pos);
+                    self.spawner_tick_positions.push(pos);
                 }
                 Some(BlockEntity::TrialSpawner(_)) => {
                     self.tick_trial_spawner(pos)?;
-                    trial_spawners.push(pos);
+                    self.trial_spawner_tick_positions.push(pos);
                 }
                 Some(BlockEntity::Vault(_)) => self.tick_vault(pos)?,
                 Some(BlockEntity::Beehive(_)) => self.tick_beehive(pos),
@@ -87,15 +88,20 @@ impl Game<'_> {
         }
         // Items move between passes: the columns hold for this one only.
         self.item_columns = None;
+        self.pass_mobs = None;
         self.update_song_volumes();
         self.scan_for_hearts();
         // The client ticks (particles, sounds, the turning mob) are for a
         // window; a dedicated or integrated server has none.
         if self.options.dedicated.is_none() {
+            let spawners = std::mem::take(&mut self.spawner_tick_positions);
             self.client_tick_spawners(&spawners);
-            for key in trial_spawners {
+            self.spawner_tick_positions = spawners;
+            let trial_spawners = std::mem::take(&mut self.trial_spawner_tick_positions);
+            for key in trial_spawners.iter().copied() {
                 self.client_tick_trial_spawner(key);
             }
+            self.trial_spawner_tick_positions = trial_spawners;
         }
         // `ShulkerBoxBlockEntity.tick`: the lids of the boxes this level
         // animates. Their grown collision shape reaches the collision queries
@@ -154,13 +160,14 @@ impl Game<'_> {
     /// `BlockState.getTicker` of every state, for the block entities ticked
     /// here. A creaking heart keeps its slot while uprooted (see
     /// `tick_creaking_heart`).
-    fn ticking_states(&self) -> Vec<Ticking> {
+    pub(in crate::game) fn ticking_states(&self) -> Vec<Ticking> {
         let registry = self.pack.assets.registry;
         (0..registry.len())
             .map(|i| {
                 let state = BlockStateId(i as u32);
                 let name: &str = &self.res.facts().get(state).name;
-                match name {
+                let factory = horizon_client::block_entity_types::factory_block(name);
+                match factory {
                     "minecraft:hopper"
                     | "minecraft:crafter"
                     | "minecraft:beacon"
@@ -191,18 +198,19 @@ impl Game<'_> {
                         if record { Ticking::Yes } else { Ticking::Idle }
                     }
                     n if FurnaceKind::from_block(n).is_some() => Ticking::Yes,
-                    n if !n.starts_with("minecraft:") && self.native_ticks(n) => Ticking::Yes,
+                    _ if !name.starts_with("minecraft:") && self.native_ticks(name) => Ticking::Yes,
                     _ => Ticking::No,
                 }
             })
             .collect()
     }
-    /// `ServerLevel.shouldTickBlocksAt` in a block-ticking chunk
-    /// (`LevelChunk.isTicking`, block coordinates), from every player's
-    /// tickets (`update_chunk_tickets`).
-    fn block_ticking_area(&self) -> impl Fn(i32, i32) -> bool + use<> {
+    /// `LevelChunk.isTicking` (block coordinates): a block-ticking chunk from
+    /// every player's tickets (`update_chunk_tickets`), its entities loaded
+    /// (`ServerLevel.areEntitiesLoaded`).
+    pub(super) fn block_ticking_area(&self) -> impl Fn(i32, i32) -> bool + use<> {
         let levels = self.tickets.levels();
-        move |x, z| levels.block_ticking_at(x, z)
+        let pending = self.world.entities_pending.clone();
+        move |x, z| levels.block_ticking_at(x, z) && !pending.contains(&(x >> 4, z >> 4))
     }
     /// `DaylightDetectorBlock.tickEntity` of the detector at `pos`.
     fn tick_daylight_detector(&mut self, pos: Pos) {
@@ -283,5 +291,394 @@ impl Game<'_> {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod jukebox_stop_tests {
+    use super::Game;
+    use horizon_client::items::ItemStack;
+
+    /// A windowless game from the prepared resources with a resident chunk and
+    /// a jukebox at (0, 64, 0), recording its game events; `None` without the
+    /// resources. `f` gets the game and the disc.
+    fn with_jukebox(f: impl FnOnce(&mut Game<'_>, &ItemStack)) -> Option<Vec<String>> {
+        use crate::game::{Audio, Options, Progress, Settings, load_resources};
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES")?);
+        let settings = Settings::default();
+        let loaded = load_resources(
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .ok()?;
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            )),
+            None,
+        )
+        .unwrap();
+        game.world.chunks.insert(
+            (0, 0),
+            std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+        );
+        let jukebox = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:jukebox")?;
+        game.world.set(0, 64, 0, jukebox).unwrap();
+        let disc = ItemStack::new("minecraft:music_disc_cat", 1);
+        crate::game::dispense_fixture::start_recording();
+        f(&mut game, &disc);
+        Some(crate::game::dispense_fixture::stop_recording())
+    }
+
+    fn stops(lines: &[String]) -> Vec<&String> {
+        lines
+            .iter()
+            .filter(|l| l.ends_with("minecraft:jukebox_stop_play"))
+            .collect()
+    }
+
+    /// `JukeboxSongPlayer.stop` posts `JUKEBOX_STOP_PLAY` at the jukebox, and
+    /// `popOutTheItem` (the disc taken out by hand) and the end of a song both
+    /// reach it. Horizon stopped the sound and told the parrots but posted the
+    /// vibration only when the block itself was broken, so pulling the disc out
+    /// was silent to a sculk sensor beside it.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_jukebox_that_stops_tells_the_listeners() {
+        let Some(lines) = with_jukebox(|game, disc| {
+            assert!(
+                game.use_jukebox(
+                    [0, 64, 0],
+                    game.world.block(0, 64, 0),
+                    Some(disc),
+                    horizon_world::level::UseBranch::ItemOn,
+                ) == Some(mod_api::NativeInteractionResult::Success),
+                "the disc goes in"
+            );
+            assert!(
+                game.use_jukebox(
+                    [0, 64, 0],
+                    game.world.block(0, 64, 0),
+                    None,
+                    horizon_world::level::UseBranch::WithoutItem,
+                ) == Some(mod_api::NativeInteractionResult::Success),
+                "the empty hand pops it out"
+            );
+        }) else {
+            return;
+        };
+        assert_eq!(
+            stops(&lines),
+            vec![&"G 0,64,0 minecraft:jukebox_stop_play".to_owned()],
+            "{lines:?}"
+        );
+
+        // The end of a song is the same stop: tick until the song is over.
+        let Some(lines) = with_jukebox(|game, disc| {
+            assert!(
+                game.use_jukebox(
+                    [0, 64, 0],
+                    game.world.block(0, 64, 0),
+                    Some(disc),
+                    horizon_world::level::UseBranch::ItemOn,
+                ) == Some(mod_api::NativeInteractionResult::Success),
+                "the disc goes in"
+            );
+            for _ in 0..40_000 {
+                let playing = matches!(
+                    game.world.block_entities.get(&(0, 64, 0)),
+                    Some(horizon_client::containers::BlockEntity::Jukebox(j)) if j.playing
+                );
+                if !playing {
+                    break;
+                }
+                game.tick_jukebox((0, 64, 0));
+            }
+            // JukeboxSongPlayer.stop posts only while a song plays: taking
+            // the finished disc out is silent.
+            assert!(
+                game.use_jukebox(
+                    [0, 64, 0],
+                    game.world.block(0, 64, 0),
+                    None,
+                    horizon_world::level::UseBranch::WithoutItem,
+                ) == Some(mod_api::NativeInteractionResult::Success),
+                "the empty hand pops it out"
+            );
+        }) else {
+            return;
+        };
+        assert_eq!(
+            stops(&lines).len(),
+            1,
+            "the song's own end posts it once, its removal after it nothing: {lines:?}"
+        );
+
+        // A broken jukebox posts it from the world's spill instead, and a
+        // jukebox that never held a disc posts nothing at all.
+        let Some(lines) = with_jukebox(|game, disc| {
+            assert!(
+                game.use_jukebox(
+                    [0, 64, 0],
+                    game.world.block(0, 64, 0),
+                    Some(disc),
+                    horizon_world::level::UseBranch::ItemOn,
+                ) == Some(mod_api::NativeInteractionResult::Success),
+                "the disc goes in"
+            );
+            game.jukebox_removed([0, 64, 0]);
+        }) else {
+            return;
+        };
+        assert!(stops(&lines).is_empty(), "not twice: {lines:?}");
+        let Some(lines) = with_jukebox(|game, _| {
+            for _ in 0..41 {
+                game.tick_jukebox((0, 64, 0));
+            }
+        }) else {
+            return;
+        };
+        assert!(lines.is_empty(), "{lines:?}");
+    }
+}
+
+#[cfg(test)]
+mod add_blocks_tests {
+    use super::*;
+    use mod_api::*;
+    use std::sync::{Arc, OnceLock};
+
+    #[test]
+    #[ignore = "needs prepared resources; isolates process-wide registries"]
+    fn vanilla_template_membership_creates_ticks_and_saves() {
+        const FLAG: &str = "HORIZON_ADD_BLOCKS_CASE";
+        const BLOCK: &str = "add_blocks_test:vault";
+        const SIGN: &str = "add_blocks_test:sign";
+        const DECLARED: &str = "add_blocks_test:declared";
+        if std::env::var_os(FLAG).is_none() {
+            for case in ["valid", "quiet", "bad_class", "bad_block", "bad_type"] {
+                let scratch = std::env::temp_dir()
+                    .join(format!("horizon-add-blocks-{}-{case}", std::process::id()));
+                std::fs::create_dir_all(&scratch).unwrap();
+                let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+                child.args(["--ignored", "--exact", "game::block_entity_ticks::add_blocks_tests::vanilla_template_membership_creates_ticks_and_saves", "--nocapture"])
+                    .current_dir(&scratch).env(FLAG, case).env("HORIZON_NO_AUDIO", "1").env("HORIZON_LAUNCHER_NO_SELF_UPDATE", "1");
+                for key in [
+                    "HORIZON_HOME",
+                    "HORIZON_LAUNCHER_HOME",
+                    "XDG_DATA_HOME",
+                    "XDG_CONFIG_HOME",
+                ] {
+                    child.env(key, scratch.join(key));
+                }
+                let status = child.status().unwrap();
+                std::fs::remove_dir_all(&scratch).unwrap();
+                assert!(status.success(), "case {case}");
+            }
+            return;
+        }
+        let case = std::env::var(FLAG).unwrap();
+        #[derive(Default)]
+        struct Keys(
+            OnceLock<(BlockEntityTypeKey, BlockEntityTypeKey, BlockKey, BlockKey)>,
+            std::sync::atomic::AtomicUsize,
+        );
+        struct Listener(Arc<Keys>, String);
+        #[mod_api::__subscriptions]
+        impl Hooks for Listener {
+            fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+                let kind = r.block_entity_type_key(if self.1 == "bad_type" {
+                    "minecraft:missing"
+                } else {
+                    "minecraft:vault"
+                });
+                let extra = r.block_entity_type("extra").blocks(&[]).build();
+                r.block_entity_type("own").blocks(&[DECLARED]).build();
+                let declared = r.block_key(DECLARED);
+                let block = r.block_key(if self.1 == "bad_block" {
+                    "add_blocks_test:missing"
+                } else {
+                    BLOCK
+                });
+                assert_eq!(
+                    *self.0.0.get_or_init(|| (kind, extra, block, declared)),
+                    (kind, extra, block, declared)
+                );
+            }
+            fn blocks(&self, _: &RegistrationContext, event: &mut BlocksEvent<'_>) {
+                for (id, template) in [
+                    (
+                        BLOCK,
+                        if self.1 == "bad_class" {
+                            "minecraft:stone"
+                        } else {
+                            "minecraft:vault"
+                        },
+                    ),
+                    (SIGN, "minecraft:oak_sign"),
+                    (DECLARED, "minecraft:vault"),
+                ] {
+                    event.blocks.push(mod_api::Block::new(id, template));
+                }
+            }
+            fn block_entity_type_add_blocks(
+                &self,
+                _: &RegistrationContext,
+                event: &mut BlockEntityTypeAddBlocksEvent<'_>,
+            ) {
+                self.0.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let &(kind, extra, block, declared) = self.0.0.get().unwrap();
+                event.modify(kind, &[block, declared]);
+                event.modify_matching(|key| key == kind || key == extra, &[block]);
+            }
+        }
+        struct Quiet(Listener);
+        #[mod_api::__subscriptions]
+        impl Hooks for Quiet {
+            fn register(&self, r: &mut dyn Registrar, context: &RegistrationContext) {
+                self.0.register(r, context);
+            }
+            fn blocks(&self, context: &RegistrationContext, event: &mut BlocksEvent<'_>) {
+                self.0.blocks(context, event);
+            }
+        }
+        let observed = Arc::new(Keys::default());
+        let listener = Listener(observed.clone(), case.clone());
+        let hooks: Box<dyn Hooks> = if case == "quiet" {
+            Box::new(Quiet(listener))
+        } else {
+            Box::new(listener)
+        };
+        let mods: Mods = vec![ModEntry::new("add_blocks_test", hooks)].into();
+        mod_api::__private::install(mods.clone());
+        crate::game::api_values::install_parts(&mods).unwrap();
+        let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let root = crate::game::mods::content_root(&base, &Default::default());
+        if case.starts_with("bad_") {
+            let error = root
+                .expect_err("invalid addition must fail startup")
+                .to_string();
+            assert!(
+                error.contains(match case.as_str() {
+                    "bad_class" => "must inherit VaultBlock",
+                    "bad_block" => "unknown block",
+                    _ => "unknown block entity type",
+                }),
+                "{error}"
+            );
+            return;
+        }
+        let root = root.unwrap();
+        // Reload reuses frozen validity without redispatching registration.
+        crate::game::mods::content_root(&base, &Default::default()).unwrap();
+        assert_eq!(
+            observed.1.load(std::sync::atomic::Ordering::SeqCst),
+            usize::from(case != "quiet")
+        );
+        crate::game::native_entity_refs::tests::with_game_at(
+            root.prepared().to_path_buf(),
+            |game| {
+                game.options.dedicated = Some(Vec::new());
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+                let registry = game.pack.assets.registry;
+                let state = registry.default_state(BLOCK).unwrap();
+                let level = game.level(game.dim.id()).unwrap();
+                assert!(
+                    game.level_set_block(level, [1, 64, 1], state, NativeBlockUpdateFlags::NONE)
+                        .unwrap()
+                );
+                assert!(matches!(
+                    BlockEntity::for_block(SIGN),
+                    Some(BlockEntity::Sign(_))
+                ));
+                assert!(matches!(
+                    BlockEntity::for_block("minecraft:vault"),
+                    Some(BlockEntity::Vault(_))
+                ));
+                if case == "quiet" {
+                    assert!(game.world.block_entities.get(&(1, 64, 1)).is_none());
+                    return;
+                }
+                let states = game.ticking_states();
+                assert_eq!(states[state.0 as usize], Ticking::Yes);
+                game.world.block_entities.set_states(states);
+                assert!(
+                    game.world
+                        .block_entity_tickers()
+                        .iter()
+                        .any(|slot| slot.0 == (1, 64, 1))
+                );
+                game.world.game_time = 100;
+                game.tick_vault((1, 64, 1)).unwrap();
+                let entity = game.world.block_entities.get(&(1, 64, 1)).unwrap();
+                let BlockEntity::Vault(vault) = entity else {
+                    panic!("must create vanilla vault")
+                };
+                assert_eq!(vault.state_updating_resumes_at, 120);
+                let tag = horizon_client::save::encode_block_entity((1, 64, 1), entity, BLOCK);
+                let (_, restored) =
+                    horizon_client::save::decode_block_entity_for_block(&tag, BLOCK).unwrap();
+                assert_eq!(
+                    horizon_client::save::encode_block_entity((1, 64, 1), &restored, BLOCK),
+                    tag
+                );
+                let BlockEntity::Vault(restored) = restored else {
+                    panic!("saved type must stay vanilla")
+                };
+                assert_eq!(restored.state_updating_resumes_at, 120);
+                assert!(matches!(
+                    horizon_client::save::decode_block_entity_for_block(&tag, DECLARED),
+                    Some((_, BlockEntity::Vault(_)))
+                ));
+                let own_state = registry.default_state(DECLARED).unwrap();
+                assert!(
+                    game.level_set_block(
+                        level,
+                        [3, 64, 1],
+                        own_state,
+                        NativeBlockUpdateFlags::NONE
+                    )
+                    .unwrap()
+                );
+                assert!(
+                    matches!(game.world.block_entities.get(&(3, 64, 1)), Some(BlockEntity::Mod(entity)) if entity.id() == "add_blocks_test:own")
+                );
+                assert_eq!(
+                    horizon_client::block_entity_types::valid(BLOCK, "minecraft:vault"),
+                    Some(true)
+                );
+                assert_eq!(
+                    horizon_client::block_entity_types::valid(BLOCK, "add_blocks_test:extra"),
+                    Some(true)
+                );
+                assert_eq!(horizon_client::block_entity_types::type_for(BLOCK), None);
+                assert_eq!(
+                    horizon_client::block_entity_types::factory_block(BLOCK),
+                    "minecraft:vault"
+                );
+            },
+        );
     }
 }

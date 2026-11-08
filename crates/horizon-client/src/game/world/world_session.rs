@@ -37,6 +37,7 @@ impl Game<'_> {
             Action::Credits => {
                 self.open_options_at(true, horizon_client::options_ui::Page::Credits)
             }
+            Action::Mods => self.open_options_at(true, horizon_client::options_ui::Page::Mods),
             Action::OpenUri(uri) => packs::open_uri(&uri),
             Action::CopyText(text) => {
                 use horizon_client::clipboard::Clipboard;
@@ -129,6 +130,14 @@ impl Game<'_> {
                 if let Err(e) = std::fs::write(&file, json.to_string()) {
                     log::warn!("Horizon: data packs for {folder}: {}: {e}", file.display());
                 }
+            }
+        }
+        // A new world opened without the Create screen still gets the game folder's packs.
+        if create.is_none() {
+            let game_dir = std::env::current_dir()?;
+            let world = game_dir.join("saves").join(folder);
+            if let Err(e) = horizon_client::datapack::install_new_world_packs(&game_dir, &world) {
+                log::warn!("Horizon: data packs for {folder}: {e}");
             }
         }
         // IntegratedServer.initServer's line, which other launchers read in `latest.log` to
