@@ -2943,7 +2943,7 @@ mod gui_draw_boundary_tests {
     #[test]
     fn gui_commands_keep_every_variant_field_order_and_text_source() {
         let text = Text::from(
-            json!({"translate":"test.hud", "fallback":"%s", "with":[{"text":"name"}], "bold":false, "test:meta":{"n":null}}),
+            json!({"translate":"test.hud", "fallback":"%s", "with":[{"text":"name"}], "bold":false, "test:meta":{"n":1}}),
         );
         let commands = vec![
             D::Sprite {
