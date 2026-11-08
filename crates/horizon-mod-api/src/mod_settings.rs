@@ -84,7 +84,7 @@ pub enum SettingError {
     InvalidChoice,
     /// A range's `min` is not below its `max`, or a bound is not finite.
     EmptyRange,
-    /// A range's `step` is zero, negative or not finite.
+    /// A range's `step` is zero, negative, not finite or wider than the range.
     InvalidStep,
     /// A range's default is outside `min..=max`.
     DefaultOutOfRange,
@@ -100,7 +100,7 @@ impl std::fmt::Display for SettingError {
             Self::EmptyLabel => f.write_str("a setting's label or option is empty"),
             Self::InvalidChoice => f.write_str("a choice needs options and a default among them"),
             Self::EmptyRange => f.write_str("a range needs finite bounds with min below max"),
-            Self::InvalidStep => f.write_str("a range's step must be above zero"),
+            Self::InvalidStep => f.write_str("a range's step must be above zero and fit in it"),
             Self::DefaultOutOfRange => f.write_str("a range's default is outside min..=max"),
             Self::ColorAlpha => f.write_str("a colour is 0xRRGGBB, without alpha"),
         }
@@ -198,7 +198,7 @@ impl SettingSpec {
             } => {
                 if !(min.is_finite() && max.is_finite() && min < max) {
                     Err(SettingError::EmptyRange)
-                } else if !(step.is_finite() && *step > 0.0) {
+                } else if !(step.is_finite() && *step > 0.0 && *step <= max - min) {
                     Err(SettingError::InvalidStep)
                 } else if !(min..=max).contains(&default) {
                     Err(SettingError::DefaultOutOfRange)
@@ -284,6 +284,8 @@ mod tests {
         assert_eq!(range(0.0, f64::INFINITY, 1.0, 0.0).check(), Err(SettingError::EmptyRange));
         assert_eq!(range(0.0, 1.0, 0.0, 0.5).check(), Err(SettingError::InvalidStep));
         assert_eq!(range(0.0, 1.0, -0.5, 0.5).check(), Err(SettingError::InvalidStep));
+        assert_eq!(range(0.0, 1.0, 5.0, 0.5).check(), Err(SettingError::InvalidStep));
+        assert_eq!(range(0.0, 1.0, 1.0, 0.5).check(), Ok(()));
         assert_eq!(range(0.0, 1.0, 0.1, 1.5).check(), Err(SettingError::DefaultOutOfRange));
         assert_eq!(range(0.0, 1.0, 0.1, 1.0).check(), Ok(()));
         assert_eq!(SettingSpec::color("c", "l", 0xFF00_0000).check(), Err(SettingError::ColorAlpha));
