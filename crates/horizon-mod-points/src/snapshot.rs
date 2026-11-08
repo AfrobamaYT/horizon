@@ -86,7 +86,8 @@ pub struct Built {
     pooled: bool,
 }
 impl Built {
-    fn into_rows(mut self) -> Rows {
+    /// Take the owned rows out of this completed snapshot.
+    pub fn into_rows(mut self) -> Rows {
         self.pooled = false;
         self.rows.truncate(self.used);
         std::mem::take(&mut self.rows)

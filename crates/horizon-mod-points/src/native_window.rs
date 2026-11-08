@@ -1,68 +1,44 @@
-//! Checked output for generated native row projections.
-//!
-//! A reader obtains a path from `Locators`, resolves it afresh against its live root, and
-//! emits rows with this builder. The call/value lease must be checked before resolving the
-//! path. The builder contains only owned row data and source-local path metadata.
+//! Path-aware adapter to the common bounded snapshot builder.
+use crate::{
+    locators::{Locators, Step},
+    snapshot::{Builder, Window},
+};
+use mod_api::{Row, RowError, RowWindow, wire::Put};
 
-use crate::locators::{Locators, MAX_DEPTH, MAX_LOCATORS, MAX_WINDOW_BYTES, Step};
-use mod_api::wire::{Put, Writer};
-use mod_api::{Row, RowError, RowWindow};
-
-/// Stable 64-bit FNV-1a key for a canonical row schema identity.
-pub const fn key(name: &str) -> u64 {
-    let bytes = name.as_bytes();
-    let mut hash = 0xcbf29ce484222325u64;
-    let mut index = 0;
-    while index < bytes.len() {
-        hash = (hash ^ bytes[index] as u64).wrapping_mul(0x100000001b3);
-        index += 1;
-    }
-    hash
-}
-
-/// A bounded, all-or-error row window under construction.
+/// A source-local locator table and the common owned-output builder for one window.
 pub struct WindowBuilder<'a> {
     locators: &'a mut Locators,
     request: RowWindow,
-    rows: Vec<Row>,
-    bytes: usize,
+    builder: Builder,
+    used: usize,
 }
-
 impl<'a> WindowBuilder<'a> {
-    /// Validate the request and obtain its source-local path before reading native data.
+    /// Validate resource limits and resolve the requested locator.
     pub fn new(
         locators: &'a mut Locators,
         request: RowWindow,
     ) -> Result<(Self, Vec<Step>), RowError> {
-        if request.depth as usize > MAX_DEPTH {
-            return Err(RowError::Depth);
-        }
-        if request.rows as usize > MAX_LOCATORS {
-            return Err(RowError::Budget);
-        }
+        let window = Window::try_from(request)?;
         let path = locators.path(request.node)?;
         Ok((
             Self {
                 locators,
                 request,
-                rows: Vec::new(),
-                bytes: 0,
+                builder: window.builder(),
+                used: 0,
             },
             path,
         ))
     }
-
-    /// The requested node's source-local parent and final path step.
+    /// Return the requested node's source-local parent and final step.
     pub fn root_entry(&self) -> Result<(Option<u32>, Step), RowError> {
         self.locators.entry(self.request.node)
     }
-
-    /// Requested maximum number of rows, including the requested node itself.
+    /// Number of rows still available in this window.
     pub fn remaining(&self) -> usize {
-        self.request.rows as usize - self.rows.len()
+        self.request.rows as usize - self.used
     }
-
-    /// Add the requested node itself. Its id is already interned in this source.
+    /// Append the requested node.
     pub fn root(
         &mut self,
         parent: Option<u32>,
@@ -70,57 +46,33 @@ impl<'a> WindowBuilder<'a> {
         ty: u64,
         value: Option<&dyn Put>,
     ) -> Result<u32, RowError> {
-        if !self.rows.is_empty() {
-            return Err(RowError::Bounds);
-        }
-        self.push(self.request.node, parent, field, ty, value)?;
-        Ok(self.request.node)
+        let id = self
+            .builder
+            .external(self.request.node, parent, field, ty, 0, value)?;
+        self.used += 1;
+        Ok(id)
     }
-
-    /// Add an immediate or nested child, assigning a stable id to its path.
+    /// Intern and append a child at its window-relative depth.
     pub fn child(
         &mut self,
         parent: u32,
         step: Step,
         field: u32,
         ty: u64,
+        depth: u16,
         value: Option<&dyn Put>,
     ) -> Result<u32, RowError> {
         if self.remaining() == 0 {
             return Err(RowError::Budget);
         }
         let id = self.locators.intern(Some(parent), step)?;
-        self.push(id, Some(parent), field, ty, value)?;
+        self.builder
+            .external(id, Some(parent), field, ty, depth, value)?;
+        self.used += 1;
         Ok(id)
     }
-
-    fn push(
-        &mut self,
-        id: u32,
-        parent: Option<u32>,
-        field: u32,
-        ty: u64,
-        value: Option<&dyn Put>,
-    ) -> Result<(), RowError> {
-        if self.remaining() == 0 {
-            return Err(RowError::Budget);
-        }
-        let mut writer = Writer::new();
-        writer.limit(MAX_WINDOW_BYTES - self.bytes);
-        if let Some(value) = value {
-            writer.put(value);
-        }
-        if let Some(error) = writer.error() {
-            return Err(error.into());
-        }
-        let bytes = writer.into_bytes();
-        self.bytes += bytes.len();
-        self.rows.push((id, parent, field, ty, bytes));
-        Ok(())
-    }
-
-    /// Complete an owned result. On any earlier error the caller discards the builder.
+    /// Complete the owned rows.
     pub fn finish(self) -> Vec<Row> {
-        self.rows
+        self.builder.finish().into_rows()
     }
 }

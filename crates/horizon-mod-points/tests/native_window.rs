@@ -21,7 +21,7 @@ fn rows_use_stable_source_ids_and_owned_values() {
     assert_eq!(path, [Step::Root(0)]);
     out.root(None, 0, 11, None).unwrap();
     let child = out
-        .child(root, Step::Field(3), 3, 12, Some(&42u32))
+        .child(root, Step::Field(3), 3, 12, 1, Some(&42u32))
         .unwrap();
     let rows = out.finish();
     assert_eq!(rows[1].0, child);
@@ -31,7 +31,7 @@ fn rows_use_stable_source_ids_and_owned_values() {
     let (mut out, _) = WindowBuilder::new(&mut paths, request(root, 2, 1)).unwrap();
     out.root(None, 0, 11, None).unwrap();
     assert_eq!(
-        out.child(root, Step::Field(3), 3, 12, Some(&43u32)),
+        out.child(root, Step::Field(3), 3, 12, 1, Some(&43u32)),
         Ok(child)
     );
 }

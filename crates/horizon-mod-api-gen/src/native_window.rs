@@ -28,7 +28,7 @@ pub fn generate(
             return Err("unimplemented: recursive native projection".into());
         }
         let identity = native_schema::identity(rule, shape, exposure)?;
-        let key = quote!(mod_points::native_window::key(#identity));
+        let key = quote!(mod_points::snapshot::key(#identity));
         Ok(match shape {
             Shape::Scalar(Scalar::String | Scalar::Str) => {
                 let unit = native_schema::identity(
@@ -36,7 +36,7 @@ pub fn generate(
                     &Shape::Scalar(Scalar::Unsigned("u16")),
                     exposure,
                 )?;
-                quote!(mod_points::native_nodes::Text((#place).as_ref(), #key, mod_points::native_window::key(#unit)))
+                quote!(mod_points::native_nodes::Text((#place).as_ref(), #key, mod_points::snapshot::key(#unit)))
             }
             Shape::Scalar(Scalar::Signed("isize")) => {
                 return Err("unimplemented: isize has no Wire encoding".into());
@@ -77,7 +77,7 @@ pub fn generate(
                         let pair = format!("{identity};pair");
                         quote! {
                             let (__horizon_first, __horizon_second) = (#place).iter().nth(usize::try_from(__horizon_index).map_err(|_| mod_api::RowError::Bounds)?).ok_or(mod_api::RowError::Bounds)?;
-                            __horizon_visit(mod_points::locators::Step::Index(0), 0, &mod_points::native_nodes::Record { key: mod_points::native_window::key(#pair), count: 2, visit: |__horizon_index, __horizon_visit: &mut mod_points::native_nodes::Visitor<'_>| match __horizon_index {
+                            __horizon_visit(mod_points::locators::Step::Index(0), 0, &mod_points::native_nodes::Record { key: mod_points::snapshot::key(#pair), count: 2, visit: |__horizon_index, __horizon_visit: &mut mod_points::native_nodes::Visitor<'_>| match __horizon_index {
                                 0 => __horizon_visit(mod_points::locators::Step::Field(0), 0, &#key_child),
                                 1 => __horizon_visit(mod_points::locators::Step::Field(1), 1, &#value_child),
                                 _ => Err(mod_api::RowError::Bounds),
@@ -96,8 +96,8 @@ pub fn generate(
                     let __horizon_tag: u32 = u32::from((#place).is_some());
                     mod_points::native_nodes::Variant { key: #key, tag: __horizon_tag, visit: |__horizon_visit: &mut mod_points::native_nodes::Visitor<'_>| {
                         match &(#place) {
-                            Some(__horizon_some) => __horizon_visit(mod_points::locators::Step::Variant(1), 1, &mod_points::native_nodes::Record { key: mod_points::native_window::key(#some), count: 1, visit: |__horizon_index, __horizon_visit: &mut mod_points::native_nodes::Visitor<'_>| match __horizon_index { 0 => __horizon_visit(mod_points::locators::Step::Field(0), 0, &#child), _ => Err(mod_api::RowError::Bounds) } }),
-                            None => __horizon_visit(mod_points::locators::Step::Variant(0), 0, &mod_points::native_nodes::Record { key: mod_points::native_window::key(#none), count: 0, visit: |_, _: &mut mod_points::native_nodes::Visitor<'_>| Err(mod_api::RowError::Bounds) }),
+                            Some(__horizon_some) => __horizon_visit(mod_points::locators::Step::Variant(1), 1, &mod_points::native_nodes::Record { key: mod_points::snapshot::key(#some), count: 1, visit: |__horizon_index, __horizon_visit: &mut mod_points::native_nodes::Visitor<'_>| match __horizon_index { 0 => __horizon_visit(mod_points::locators::Step::Field(0), 0, &#child), _ => Err(mod_api::RowError::Bounds) } }),
+                            None => __horizon_visit(mod_points::locators::Step::Variant(0), 0, &mod_points::native_nodes::Record { key: mod_points::snapshot::key(#none), count: 0, visit: |_, _: &mut mod_points::native_nodes::Visitor<'_>| Err(mod_api::RowError::Bounds) }),
                         }
                     } }
                 })
@@ -150,7 +150,7 @@ pub fn generate(
                         }
                         let count = arms.len() as u64;
                         let variant_key = format!("{identity};variant({tag})");
-                        variants.push(quote!(#path::#name { #(#bindings,)* .. } => __horizon_visit(mod_points::locators::Step::Variant(#tag), #tag, &mod_points::native_nodes::Record { key: mod_points::native_window::key(#variant_key), count: #count, visit: |__horizon_index, __horizon_visit: &mut mod_points::native_nodes::Visitor<'_>| match __horizon_index { #(#arms)* _ => Err(mod_api::RowError::Bounds) } }),));
+                        variants.push(quote!(#path::#name { #(#bindings,)* .. } => __horizon_visit(mod_points::locators::Step::Variant(#tag), #tag, &mod_points::native_nodes::Record { key: mod_points::snapshot::key(#variant_key), count: #count, visit: |__horizon_index, __horizon_visit: &mut mod_points::native_nodes::Visitor<'_>| match __horizon_index { #(#arms)* _ => Err(mod_api::RowError::Bounds) } }),));
                     }
                     let tags = item.variants.iter().enumerate().map(|(i, v)| {
                         let name = &v.ident;

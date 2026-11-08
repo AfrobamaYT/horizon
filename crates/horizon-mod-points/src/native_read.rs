@@ -74,6 +74,7 @@ pub fn read(
         id: u32,
         depth: u16,
         start: u64,
+        level: u16,
         out: &mut WindowBuilder<'_>,
     ) -> Result<(), RowError> {
         if depth == 0 || out.remaining() == 0 {
@@ -90,7 +91,7 @@ pub fn read(
             node.child(ordinal, &mut |step, field, child| {
                 let mut child_id = None;
                 child.value(&mut |value| {
-                    child_id = Some(out.child(id, step, field, child.key(), value)?);
+                    child_id = Some(out.child(id, step, field, child.key(), level + 1, value)?);
                     Ok(())
                 })?;
                 descend(
@@ -98,6 +99,7 @@ pub fn read(
                     child_id.ok_or(RowError::Unsupported)?,
                     depth - 1,
                     0,
+                    level + 1,
                     out,
                 )
             })?;
@@ -117,7 +119,14 @@ pub fn read(
             out.root(parent, field, node.key(), value)?;
             Ok(())
         })?;
-        descend(node, request.node, request.depth, request.start, &mut out)
+        descend(
+            node,
+            request.node,
+            request.depth,
+            request.start,
+            0,
+            &mut out,
+        )
     })?;
     Ok(out.finish())
 }
