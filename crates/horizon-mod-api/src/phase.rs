@@ -804,14 +804,20 @@ pub trait WorldgenHost {
 #[doc(hidden)]
 // exhaustive: its fields are private; only the game builds it
 pub struct OwningWorldgen<'a> {
-    source: &'a horizon_world::native_load_context::WorldgenContext,
+    registry: &'a dyn Fn(&str) -> Option<Arc<[String]>>,
+    setting: &'a dyn Fn(&str, &str) -> Option<String>,
     mods: LoadedMods,
 }
 
 impl<'a> OwningWorldgen<'a> {
-    pub fn new(source: &'a horizon_world::native_load_context::WorldgenContext) -> Self {
+    /// The server's registries and mod settings, read through the game's worldgen context.
+    pub fn new(
+        registry: &'a dyn Fn(&str) -> Option<Arc<[String]>>,
+        setting: &'a dyn Fn(&str, &str) -> Option<String>,
+    ) -> Self {
         Self {
-            source,
+            registry,
+            setting,
             mods: LoadedMods::new(),
         }
     }
@@ -819,10 +825,10 @@ impl<'a> OwningWorldgen<'a> {
 
 impl WorldgenHost for OwningWorldgen<'_> {
     fn registry(&self, name: &str) -> Option<Arc<[String]>> {
-        self.source.registry(name)
+        (self.registry)(name)
     }
     fn setting(&self, mod_id: &str, key: &str) -> Option<String> {
-        self.source.setting(mod_id, key)
+        (self.setting)(mod_id, key)
     }
     fn mods(&self) -> LoadedMods {
         self.mods.clone()
