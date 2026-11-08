@@ -6096,7 +6096,10 @@ mod tests {
             engine
                 .pending
                 .iter()
-                .map(|p| p.lifetime)
+                .map(|p| p
+                    .ordinary()
+                    .expect("trail is an ordinary particle")
+                    .lifetime)
                 .collect::<Vec<_>>(),
             [20, 13, 18, 14, 20]
         );
@@ -6105,7 +6108,16 @@ mod tests {
             [0.0; 3],
             [0.0; 3],
         );
-        assert_eq!(engine.pending.last().unwrap().lifetime, 37);
+        assert_eq!(
+            engine
+                .pending
+                .last()
+                .unwrap()
+                .ordinary()
+                .expect("trail is an ordinary particle")
+                .lifetime,
+            37
+        );
     }
     #[test]
     fn sizes_follow_vanilla_curves() {
