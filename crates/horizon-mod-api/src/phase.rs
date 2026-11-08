@@ -484,7 +484,7 @@ pub trait DataLoadContext {
 }
 
 /// Immutable resource-generation reads supplied by an owning loader.
-pub trait LoadReader {
+pub trait LoadReader: Sync {
     /// Registry names in ID order.
     fn registry(&self, name: &str) -> Option<Arc<[String]>>;
     /// Fluid tags and their members in source order.
@@ -567,7 +567,7 @@ pub trait LoopContext {
 }
 
 /// Immutable resource-generation reads supplied by an owning loop.
-pub trait LoopReader {
+pub trait LoopReader: Sync {
     /// Registry names in ID order.
     fn registry(&self, name: &str) -> Option<Arc<[String]>>;
     /// A captured setting, without file I/O.
@@ -617,7 +617,6 @@ mod tests {
     #[test]
     fn resolved_dispatch_slice_keeps_order_in_registration_config_and_reload() {
         use crate::*;
-        use horizon_mod_package::dependencies;
         use std::sync::Mutex;
         struct Trace {
             id: &'static str,
@@ -647,25 +646,8 @@ mod tests {
         mod_api::impl_host_areas!(Server);
         impl ServerHost for Server {}
         mod_api::impl_server_host_areas!(Server);
-        let declarations: Vec<_> = ["z", "lib", "a"].into_iter().map(|id| {
-            let deps = if id == "lib" { "" } else { "[dependencies]\nlib='^1'" };
-            horizon_mod_package::Manifest::parse(&format!("id='{id}'\nname='{id}'\nversion='1'\napi='0.2'\ncapabilities=['registries']\n{deps}")).unwrap()
-        }).collect();
-        let declared: Vec<_> = declarations
-            .iter()
-            .map(|m| dependencies::from_manifest(&m.dependencies))
-            .collect();
-        let inputs: Vec<_> = declarations
-            .iter()
-            .zip(&declared)
-            .map(|(m, dependencies)| dependencies::Mod {
-                id: &m.id,
-                version: &m.version,
-                has_api: true,
-                dependencies,
-            })
-            .collect();
-        let order = dependencies::resolve(&inputs).unwrap().order;
+        // The loader supplies a dependency-resolved slice; phase dispatch must retain it.
+        let order = [1, 0, 2];
         let calls = Arc::new(Mutex::new(Vec::new()));
         let ids = ["z", "lib", "a"];
         let mods: Mods = order
@@ -889,17 +871,15 @@ mod tests {
 
     #[test]
     fn a_loop_context_reads_its_side_registries_and_mods() {
-        use horizon_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs};
-        let registries =
-            std::collections::BTreeMap::from([("item".to_owned(), vec!["a:b".into()])]);
-        let load = LoadContext::new(
-            DataLoadOrigin::ClientPreload,
-            std::sync::Arc::new(LoadInputs::new(registries, Default::default())),
-            [],
-        );
-        let source = load.loop_context(LoopSide::Client, []);
+        let source = TestReader {
+            registries: std::collections::BTreeMap::from([(
+                "item".to_owned(),
+                vec!["a:b".into()].into(),
+            )]),
+            tags: Arc::from([]),
+        };
         with_test_packages(&["one", "two"], || {
-            let context = OwningLoop::new(&source);
+            let context = OwningLoop::new(LoopSide::Client, &source);
             assert_eq!(context.side(), LoopSide::Client);
             assert_eq!(
                 context.registry("item").as_deref(),
@@ -909,5 +889,33 @@ mod tests {
             assert_eq!(context.setting("one", "mode"), None);
             assert_eq!(context.mods().ids().collect::<Vec<_>>(), ["one", "two"]);
         });
+    }
+}
+
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct TestReader {
+    pub registries: std::collections::BTreeMap<String, Arc<[String]>>,
+    pub tags: Arc<[(String, Arc<[String]>)]>,
+}
+#[cfg(test)]
+impl LoadReader for TestReader {
+    fn registry(&self, name: &str) -> Option<Arc<[String]>> {
+        self.registries.get(name).cloned()
+    }
+    fn fluid_tags(&self) -> Arc<[(String, Arc<[String]>)]> {
+        self.tags.clone()
+    }
+    fn setting(&self, _: &str, _: &str) -> Option<String> {
+        None
+    }
+}
+#[cfg(test)]
+impl LoopReader for TestReader {
+    fn registry(&self, name: &str) -> Option<Arc<[String]>> {
+        self.registries.get(name).cloned()
+    }
+    fn setting(&self, _: &str, _: &str) -> Option<String> {
+        None
     }
 }

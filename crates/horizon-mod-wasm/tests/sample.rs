@@ -198,17 +198,22 @@ fn the_sample_mod_loads_subscribes_and_registers_its_part() {
     .unwrap();
     mod_api::__private::resolve_fluids(&["minecraft:empty", "minecraft:water", "minecraft:lava"])
         .unwrap();
-    let load = horizon_world::native_load_context::LoadContext::new(
-        mod_api::DataLoadOrigin::ServerDataLoad,
-        std::sync::Arc::new(horizon_world::native_load_context::LoadInputs::new(
-            Default::default(),
-            Default::default(),
-        )),
-        [],
-    );
+    struct EmptyLoad;
+    impl mod_api::LoadReader for EmptyLoad {
+        fn registry(&self, _: &str) -> Option<std::sync::Arc<[String]>> {
+            None
+        }
+        fn fluid_tags(&self) -> std::sync::Arc<[(String, std::sync::Arc<[String]>)]> {
+            std::sync::Arc::from([])
+        }
+        fn setting(&self, _: &str, _: &str) -> Option<String> {
+            None
+        }
+    }
+    let load = EmptyLoad;
     let mut table = mod_api::serde_json::json!({});
     entry.fields().hooks.loot_table_load(
-        &mod_api::OwningLoad::new(&load),
+        &mod_api::OwningLoad::new(mod_api::DataLoadOrigin::ServerDataLoad, &load),
         &mut mod_api::LootTableLoadEvent {
             id: "test:loot",
             table: &mut table,

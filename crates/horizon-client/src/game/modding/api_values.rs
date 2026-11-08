@@ -22,7 +22,11 @@ pub(crate) fn block_jump_factor(
     let Ok(state) = state.try_into_api() else {
         return;
     };
-    mod_api::dispatch_block_jump_factor(&mod_api::OwningLoop::new(context), state, factor);
+    mod_api::dispatch_block_jump_factor(
+        &horizon_client_render::api_context::LoopReader(context).context(),
+        state,
+        factor,
+    );
 }
 pub(crate) fn block_speed_factor(
     context: &horizon_world::native_load_context::LoopContext,
@@ -35,7 +39,11 @@ pub(crate) fn block_speed_factor(
     let Ok(state) = state.try_into_api() else {
         return;
     };
-    mod_api::dispatch_block_speed_factor(&mod_api::OwningLoop::new(context), state, factor);
+    mod_api::dispatch_block_speed_factor(
+        &horizon_client_render::api_context::LoopReader(context).context(),
+        state,
+        factor,
+    );
 }
 
 /// Resolve the metadata default through the sole numeric reverse index, without allocation.
@@ -1133,7 +1141,8 @@ pub(crate) fn menu_slot_rules(
     let Ok(stack) = stack.try_into_api() else {
         return;
     };
-    let context = mod_api::OwningLoop::new(context);
+    let reader = horizon_client_render::api_context::LoopReader(context);
+    let context = reader.context();
     mod_api::dispatch_menu_slot_rules(&context, menu, slot, &stack, may_place, max_stack);
 }
 
@@ -1168,7 +1177,7 @@ pub(crate) fn stacked_on_other(
             cancellation_result,
         };
         mod_api::dispatch_item_stacked_on_other(
-            &mod_api::OwningLoop::new(context),
+            &horizon_client_render::api_context::LoopReader(context).context(),
             &mut api,
             &mut candidate_canceled,
         );
@@ -2914,5 +2923,7 @@ mod loot_values;
 #[path = "api_values/particle_values.rs"]
 mod particle_values;
 pub(crate) use loot_values::{dispatch_loot_condition, dispatch_loot_function};
+#[path = "api_values/phase_values.rs"]
+mod phase_values;
 #[path = "api_values/small_values.rs"]
 mod small_values;
