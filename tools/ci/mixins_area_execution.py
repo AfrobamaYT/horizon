@@ -89,6 +89,12 @@ bindings=[{{name="game",ty="&mut crate::game::Game<'_>",value="&mut *self"}}]
 '''
         put(mods, f"src/{ident}.rs", f"fn count(game: &mut crate::game::Game<'_>) {{ game.value += {effect}; }}\n")
     put(mods, "horizon-mixin.toml", manifest)
+
+    def source_files():
+        return {path.relative_to(source): path.read_bytes()
+                for path in source.rglob("*") if path.is_file()}
+
+    original = source_files()
     raw = run("raw", [tool, "apply", "--workspace", source, "--mods", mods.parent,
                       "--out", root / "raw-output"], success=False)
     if raw.returncode == 0 or "E_TARGET_NOT_FOUND" not in raw.stdout:
@@ -113,10 +119,8 @@ horizon-mod-api-gen={{path={generator}}}
     executed = run("execute", [build / "debug" / executable])
     if executed.stdout.strip() != "AREA_AND_NATIVE_HOOK_HELPERS=211":
         raise RuntimeError(f"Missing execution proof; see {root / 'execute.log'}")
-    if 'env!("OUT_DIR")' not in (client / "src/game.rs").read_text(encoding="utf-8"):
-        raise RuntimeError("Original download source was modified")
-    if 'env!("OUT_DIR")' not in (client / "src/game/native_hooks/mod.rs").read_text(encoding="utf-8"):
-        raise RuntimeError("Original native-hook source was modified")
+    if source_files() != original:
+        raise RuntimeError("Original download source file map was modified")
     print("Raw rejected; relocated output compiled and executed 1 + 10 + 97 + 103 = 211.")
 
 
