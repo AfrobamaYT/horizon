@@ -796,6 +796,98 @@ fn native_panic_stops_group_before_held_resources_drop() {
 }
 
 #[test]
+fn released_dispatch_receiver_cannot_reenter_guest_while_unwinding() {
+    struct Piece {
+        module: WeakWasmMod,
+        refused: Arc<AtomicBool>,
+    }
+    impl std::fmt::Debug for Piece {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("Piece")
+        }
+    }
+    impl Drop for Piece {
+        fn drop(&mut self) {
+            let result = self.module.call(
+                CallClass::Callback,
+                Frame::default(),
+                2,
+                None,
+                |_| {},
+                |r| r.take::<u32>(),
+            );
+            self.refused.store(result.is_none(), Ordering::Relaxed);
+        }
+    }
+    impl mod_api::EnergyHandler for Piece {
+        fn amount(&self, _: &mut dyn mod_api::ServerHost) -> u32 {
+            assert_eq!(
+                self.module.call(
+                    CallClass::Callback,
+                    Frame::default(),
+                    1,
+                    None,
+                    |_| {},
+                    |r| r.take::<()>()
+                ),
+                Some(())
+            );
+            panic!("last dispatch receiver unwinds");
+        }
+        fn capacity(&self, _: &mut dyn mod_api::ServerHost) -> u32 {
+            0
+        }
+        fn insert(&self, _: &mut dyn mod_api::ServerHost, _: &mod_api::Transaction, _: u32) -> u32 {
+            0
+        }
+        fn extract(
+            &self,
+            _: &mut dyn mod_api::ServerHost,
+            _: &mod_api::Transaction,
+            _: u32,
+        ) -> u32 {
+            0
+        }
+    }
+    let bounds = crate::boundary::import_id("EnergyHandler", "amount").unwrap();
+    let release = mod_api::wire::HOST_RELEASE;
+    let module = module(&format!(
+        r#"
+        local.get 0 i32.eqz if (result i64)
+          i32.const 0 local.get 1 i64.load i64.store
+          i32.const {bounds} i32.const 0 i32.const 8 i32.const 2048 i32.const 24 call $host drop
+          i64.const 0
+        else local.get 0 i32.const 1 i32.eq if (result i64)
+          i32.const {release} i32.const 0 i32.const 8 i32.const 0 i32.const 0 call $host drop
+          i64.const 0
+        else
+          i64.const 4398046511108
+        end end"#
+    ));
+    let refused = Arc::new(AtomicBool::new(false));
+    let piece: Arc<dyn mod_api::EnergyHandler> = Arc::new(Piece {
+        module: module.downgrade(),
+        refused: refused.clone(),
+    });
+    let mut host = mod_api::testing::FakeHost::new();
+    let mut frame = Frame::default();
+    frame.set_server_host_mut(&mut host);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        module.call(
+            CallClass::Hook,
+            frame,
+            0,
+            None,
+            |w| w.put_owned(piece),
+            |r| r.take::<()>(),
+        )
+    }));
+    assert!(result.is_err());
+    assert!(refused.load(Ordering::Relaxed));
+    assert!(module.is_stopped());
+}
+
+#[test]
 fn trap_clears_held_native_resources() {
     let module = module("unreachable");
     let dropped = hold_stop_probe(&module);

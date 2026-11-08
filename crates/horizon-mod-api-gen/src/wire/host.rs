@@ -275,7 +275,12 @@ pub(super) fn generate(surface: &mut super::Surface<'_>) -> Result<String, Strin
     code.push_str(
         "pub fn import_id(owner: &str, name: &str) -> Option<u32> { match (owner,name) {\n",
     );
-    for (id, m) in imports(&surface.methods).iter().enumerate() {
+    for (id, m) in imports(&surface.methods)
+        .iter()
+        .copied()
+        .chain(held_methods(&surface.methods))
+        .enumerate()
+    {
         writeln!(code, "({:?},{:?}) => Some({id}),", m.owner, m.name).unwrap();
     }
     code.push_str("_ => None } }\n");

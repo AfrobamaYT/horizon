@@ -514,6 +514,12 @@ impl WasmMod {
         args: impl FnOnce(&mut Writer),
         reply: impl FnOnce(&mut Reader<'_>) -> Result<R, WireError>,
     ) -> Option<R> {
+        // Dispatch-owned native receivers can unwind before our outer call
+        // guards. Their destructors must not reenter the still-lent guest.
+        if std::thread::panicking() {
+            self.running.poisoned.store(true, Ordering::Relaxed);
+            return None;
+        }
         if self.running.poisoned.load(Ordering::Relaxed) {
             return None;
         }
