@@ -1,4 +1,6 @@
 //! The build-tool fixture is a real shared module, not a component.
+#[path = "fixture/src/shutdown.rs"]
+mod shutdown;
 use horizon_mod_package::manifest::Package;
 use horizon_mod_wasm::{WasmPackage, load};
 
@@ -99,4 +101,19 @@ fn real_member() {
         args.cancel,
         "real wasm listener must modify the point record"
     );
+    // The real point's expansion: its `&mut` place copied in and out of the wasm listener's
+    // record, its by-value message changed, and its cancel skipping the body.
+    for (before, message, after) in shutdown::CASES {
+        let mut failure = before.map(String::from);
+        remember_shutdown(&mut failure, message.into());
+        assert_eq!(failure.as_deref(), after, "{message}");
+    }
+}
+
+/// `horizon_client::game::server_lifecycle::remember_shutdown`, as the staging pass marks it.
+#[horizon_mod_api_macros::point(name = "game_server_lifecycle_remember_shutdown", free)]
+fn remember_shutdown(failure: &mut Option<String>, message: String) {
+    if failure.is_none() {
+        *failure = Some(message);
+    }
 }

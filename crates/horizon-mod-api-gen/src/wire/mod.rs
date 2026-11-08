@@ -132,8 +132,6 @@ const EXPORTS: &[&str] = &[
     "PlaceProvider",
     "TooltipAppender",
     "CriterionTest",
-    "RowPages",
-    "RowFunction",
 ];
 
 /// Every exported trait: [`EXPORTS`], then the handler traits `mod_api`'s capability keys name
@@ -147,8 +145,7 @@ pub(super) fn exports() -> &'static [&'static str] {
 /// another mod's provider): the mod calls one through the `held-<interface>` imports, by the
 /// index the game keeps it under.
 pub(super) fn held(owner: &str) -> bool {
-    ["PlaceProvider", "RowPages", "RowFunction"].contains(&owner)
-        || (exports().contains(&owner) && !EXPORTS.contains(&owner))
+    owner == "PlaceProvider" || (exports().contains(&owner) && !EXPORTS.contains(&owner))
 }
 
 /// The contexts of the load phase: the catalog's registration and data-load contexts and a
@@ -579,6 +576,26 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Generated, Str
         guest,
         sources,
     })
+}
+
+/// Every `mod_api` type the boundary lays out, by the path the generated impls name it with
+/// (`mod_api::EntityRef`): each has a `Wire` impl, generated or checked beside it. A point record
+/// may hold exactly these and the std types.
+pub(crate) fn owned_types(
+    root: &Path,
+    included: &[(&str, &str)],
+) -> Result<std::collections::BTreeSet<String>, String> {
+    let providers = crate::capability_providers::generate(root, included)?.0;
+    let mut with_providers = included.to_vec();
+    with_providers.push(("capability_providers_generated.rs", providers.as_str()));
+    let surface = surface(root, &with_providers)?;
+    Ok(surface
+        .types
+        .defs
+        .iter()
+        .filter(|def| def.lifetimes == 0)
+        .map(|def| def.rust.replace(' ', ""))
+        .collect())
 }
 
 /// A hash of everything the two sides must agree on: every method's id and signature, and

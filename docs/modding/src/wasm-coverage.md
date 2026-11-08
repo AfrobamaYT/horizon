@@ -1650,8 +1650,6 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `PlaceProvider::extract` | crosses | Wire call |
 | `TooltipAppender::append` | crosses | Wire call |
 | `CriterionTest::test` | crosses | Wire call |
-| `RowPages::window` | crosses | Wire call |
-| `RowFunction::invoke` | crosses | Wire call |
 | `ResourceHandler<ItemResource>::size` | crosses | Wire call |
 | `ResourceHandler<ItemResource>::resource` | crosses | Wire call |
 | `ResourceHandler<ItemResource>::amount` | crosses | Wire call |

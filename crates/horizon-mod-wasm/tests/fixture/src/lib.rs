@@ -1,5 +1,8 @@
 use mod_api::Hooks;
 
+pub mod shutdown;
+pub use shutdown::on_shutdown;
+
 #[derive(Default)]
 pub struct Mod;
 
