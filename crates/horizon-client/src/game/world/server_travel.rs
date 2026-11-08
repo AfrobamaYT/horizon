@@ -432,7 +432,66 @@ impl Game<'_> {
             cause.id(),
             &mut cancel,
         );
-        !cancel
+        // A discard hides the handle immediately, even when physical removal
+        // waits for the entity sweep. Never serialize that deferred copy.
+        // Falling blocks tick held out of the level and cannot be addressed
+        // through a handle during this callback.
+        if cancel {
+            return false;
+        }
+        if self.held_out.contains(&id) {
+            return true;
+        }
+        if self
+            .native_entity_target(mod_api::EntityRef::new(epoch, id))
+            .is_none()
+        {
+            return false;
+        }
+        // teleportCrossDimension ejects passengers and teleports each in order.
+        // A refused passenger (and its own subtree) stays in the old level.
+        let riders: Vec<_> = self
+            .mobs
+            .iter()
+            .filter(|m| !m.removed && m.extra.mount == Some(id))
+            .map(|m| m.id)
+            .collect();
+        for rider in riders {
+            self.dismount_mob(rider);
+            if let Some(m) = self.mobs.iter_mut().find(|m| m.id == rider) {
+                m.extra.mount = None;
+                m.extra.passenger = false;
+            }
+            if self.entity_may_travel(rider, to, cause)
+                && let Some(m) = self.mobs.iter_mut().find(|m| m.id == rider)
+            {
+                // Retain accepted edges for the destination's NBT tree only.
+                m.extra.mount = Some(id);
+                m.extra.passenger = true;
+            }
+        }
+        if self.riding == Some(id)
+            && let Some(player) = self.network_entity_id(super::commands::Target::Player)
+            && !self.entity_may_travel(player as u32, to, cause)
+        {
+            self.riding = None;
+        }
+        let players: Vec<_> = self
+            .lan
+            .iter()
+            .flat_map(|h| h.hub.guests.iter())
+            .filter(|g| Some(g.conn) != self.lan_acting && g.vehicle == Some(id))
+            .map(|g| (g.conn, g.entity_id as u32))
+            .collect();
+        for (conn, player) in players {
+            if !self.entity_may_travel(player, to, cause)
+                && let Some(host) = self.lan.as_mut()
+            {
+                host.hub.update_guest(conn, |g| g.vehicle = None);
+            }
+        }
+        self.native_entity_target(mod_api::EntityRef::new(epoch, id))
+            .is_some()
     }
 
     /// `Entity.handlePortal` for one player, whose portal state is in place.
@@ -620,17 +679,21 @@ impl Game<'_> {
             }
             // The vehicle and each rider are asked; one cancel keeps them all.
             let cause = TravelCause::of_plan(&plan);
-            if !self.entity_may_travel(vehicle, plan.dim, cause)
-                || !riders
-                    .iter()
-                    .all(|&conn| self.server_player_travel_allowed(conn, plan.dim, cause))
-            {
+            if !self.entity_may_travel(vehicle, plan.dim, cause) {
                 continue;
             }
             // An End portal's exit is found as a player's (its own respawn
             // point out of the End).
             let (target, plan) = (plan.dim, (!plan.end).then_some(plan));
             for conn in riders {
+                if !self
+                    .lan
+                    .as_ref()
+                    .and_then(|h| h.hub.guest(conn))
+                    .is_some_and(|g| g.vehicle == Some(vehicle))
+                {
+                    continue;
+                }
                 self.start_server_trip(conn, target, plan, false);
             }
         }
