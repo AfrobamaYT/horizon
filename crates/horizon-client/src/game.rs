@@ -17457,6 +17457,7 @@ pub fn run_with(
     mods::register_range_select_item_model_properties(options.execution_role);
     mods::register_select_item_model_properties(options.execution_role);
     mods::register_item_tint_sources(options.execution_role);
+    mods::register_dimension_transition_screens(options.execution_role);
     mods::register_block_tint_sources(options.execution_role);
     mods::freeze_declarations();
     mod_phase.advance(mod_api::__private::ModPhase::Setup)?;
