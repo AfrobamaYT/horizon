@@ -140,6 +140,17 @@ impl StructurePiece for Piece {
     fn add_additional_save_data(&self, _: &mut mod_api::Compound) {}
 }
 #[test]
+fn wire_loopback_bad_import_bytes_are_typed_errors() {
+    let mut cx = boundary::Cx::default();
+    let mut out = Writer::new();
+    let id = boundary::import_id("StructureRandom", "next_int_bound").unwrap();
+    assert!(matches!(
+        unsafe { boundary::serve(id, &mut cx, &[0xff], &mut out) },
+        Err(boundary::ServeError::Decode(_))
+    ));
+    assert!(out.bytes().is_empty());
+}
+#[test]
 fn wire_loopback_owner_thread_guards_access_and_drop() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     struct Local {
