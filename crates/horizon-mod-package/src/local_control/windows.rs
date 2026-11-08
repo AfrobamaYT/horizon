@@ -171,7 +171,7 @@ impl Endpoint {
                 return Ok(stream);
             }
             let error = io::Error::last_os_error();
-            if !matches!(error.raw_os_error(), Some(code) if code == ERROR_PIPE_LISTENING as i32 || code == ERROR_PIPE_NOT_CONNECTED as i32)
+            if !matches!(error.raw_os_error(), Some(code) if code == ERROR_PIPE_LISTENING as i32 || code == ERROR_PIPE_NOT_CONNECTED as i32 || code == ERROR_NOT_FOUND as i32)
             {
                 return Err(error);
             }

@@ -169,7 +169,8 @@ fn malformed_entry_is_noncreating_and_versioned() {
 #[test]
 fn replaced_tree_completion_or_unreserved_image_never_starts_game() {
     for change in 0..3 {
-        let scene = Scene::new(false);
+        let mut scene = Scene::new(false);
+        scene.snapshots.clear(); // Model stale GUI descriptions without directory delete-denial.
         if change == 0 {
             let world = &scene.request.entry.trees[1].path;
             fs::rename(world, world.with_extension("old")).unwrap();
