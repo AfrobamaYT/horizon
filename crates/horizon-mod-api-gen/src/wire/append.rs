@@ -258,3 +258,76 @@ pub(super) fn equal(types: &Types<'_>, ty: &Ty, a: &str, b: &str) -> Option<Stri
         _ => return None,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn append_shape_requires_public_untransformed_typed_pushes() {
+        let run = || {
+            let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+            let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
+            let providers = crate::capability_providers::generate(&root, &[]).unwrap().0;
+            let included = [
+                ("mod_api_generated.rs", generated.hooks.as_str()),
+                ("mod_api_generated_host.rs", generated.host.as_str()),
+                ("mod_api_host_areas.rs", generated.areas.as_str()),
+                ("capability_providers_generated.rs", providers.as_str()),
+            ];
+            let mut types = super::Types::new(crate::index::Index::new(&root, &included)).unwrap();
+            let api = types.index.module("mod_api", &[]).unwrap();
+            let super::Found::Item(id) = types.index.resolve(api, "ApplyEffectTickEvent").unwrap()
+            else {
+                panic!("missing event")
+            };
+            let item = types.index.item(id).clone();
+            assert!(super::detect(&mut types, id, &item).unwrap().is_some());
+            let (module, at) = types.index.modules.iter().enumerate().find_map(|(module, m)| {
+                m.items.iter().position(|item| {
+                    let syn::Item::Impl(i) = item else { return false; };
+                    matches!(&*i.self_ty, syn::Type::Path(p)
+                        if p.path.segments.last().is_some_and(|s| s.ident == "ApplyEffectTickEvent"))
+                }).map(|at| (module, at))
+            }).unwrap();
+            let original = types.index.modules[module].items[at].clone();
+            for mutation in 0..3 {
+                let mut changed = original.clone();
+                let syn::Item::Impl(i) = &mut changed else {
+                    unreachable!()
+                };
+                let method = i
+                    .items
+                    .iter_mut()
+                    .find_map(|item| match item {
+                        syn::ImplItem::Fn(f) if f.sig.ident == "heal" => Some(f),
+                        _ => None,
+                    })
+                    .unwrap();
+                match mutation {
+                    0 => method.vis = syn::Visibility::Inherited,
+                    1 => {
+                        method.block = syn::parse_quote!({
+                            self.changes.push(EffectTickChange::Heal(amount.max(0.0)));
+                        })
+                    }
+                    2 => {
+                        method.block = syn::parse_quote!({
+                            self.changes.clear();
+                        })
+                    }
+                    _ => unreachable!(),
+                }
+                types.index.modules[module].items[at] = changed;
+                assert!(
+                    super::detect(&mut types, id, &item).unwrap().is_none(),
+                    "unproven append shape {mutation}"
+                );
+            }
+        };
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(run)
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+}
