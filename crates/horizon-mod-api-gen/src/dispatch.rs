@@ -867,6 +867,13 @@ fn stack_crossing_routed(
             _ => local.clone(),
         });
         if mutable {
+            // Owned stack records have value equality. Other boundary records retain
+            // their existing validation path until they provide comparable snapshots.
+            let comparable = contains_boundary(ty, &["ItemStack"]);
+            if comparable {
+                before.push_str(&format!("let __original_{name} = {local}.clone(); "));
+                validations.push_str(&format!("let __changed_{name} = {local} != __original_{name}; let __candidate_{name} = if __changed_{name} {{ "));
+            }
             let converted = format!("__engine_{name}");
             let value = if infallible {
                 format!(
@@ -887,8 +894,15 @@ fn stack_crossing_routed(
             } else {
                 local
             };
-            validations.push_str(&format!("let {converted} = {value}; "));
-            writes.push_str(&format!("*{name} = {converted}; "));
+            if comparable {
+                validations.push_str(&format!("Some({value}) }} else {{ None }}; "));
+                writes.push_str(&format!(
+                    "if let Some({converted}) = __candidate_{name} {{ *{name} = {converted}; }} "
+                ));
+            } else {
+                validations.push_str(&format!("let {converted} = {value}; "));
+                writes.push_str(&format!("*{name} = {converted}; "));
+            }
         }
     }
     Some(StackCrossing {
@@ -897,6 +911,10 @@ fn stack_crossing_routed(
         after: format!("{validations}{writes}"),
     })
 }
+
+#[cfg(test)]
+#[path = "writeback_tests.rs"]
+mod writeback_tests;
 
 #[cfg(test)]
 mod stack_crossing_tests {
