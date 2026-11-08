@@ -833,6 +833,8 @@ impl Game<'_> {
             self.eye = eye.1;
             std::mem::swap(&mut self.player, &mut player);
             if let Some(mut m) = player {
+                // Travel can end a glide on a climbable before the next action.
+                g.fall_flying = m.fall_flying;
                 g.health = m.health.health();
                 g.food = m.health.food.food;
                 g.saturation = m.health.food.saturation;
