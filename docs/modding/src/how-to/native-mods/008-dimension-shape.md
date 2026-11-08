@@ -56,6 +56,10 @@ refuses a value out of range (a `coordinate_scale` of 0, an `ambient_light` abov
 Nether and the End do, in `dimensions/mymod/pocket/` of the world, and clients receive its
 dimension type when they join.
 
+`sky_color`, `fog_color` (`#rrggbb`) and `cloud_height` set the sky overhead, the fog at the
+horizon and the clouds' height; left as None they are the Overworld's. They apply to the host's own
+world: a client of another server that has the mod's dimension shows the Overworld's sky there.
+
 The level's biomes are the one `biome` everywhere unless `biome_source` says otherwise:
 `BiomeSourceKind::Checkerboard` alternates the `biomes` in cells `2^biome_scale` chunks wide,
 `MultiNoise` uses the Overworld's or the Nether's biomes (`biome_preset`) and `End` the End's islands.
