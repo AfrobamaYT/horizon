@@ -19,6 +19,19 @@ its compiled slots at load without rebuilding the game or invoking the Rust comp
 Wasm supports compiled function slots, not source rebuilding or call-site injections
 ([Building a mod to `mod.wasm`](how-to/wasm-mods.md#listening-at-points)).
 
+## Adding a pinned declaration
+
+Run `cargo horizon-mod inject add <at> --kind <kind> --with <listener>` in a native mod's folder.
+The tool appends `[[inject]]`, preserving comments, formatting and permissions. A symlinked
+manifest is replaced, not its referent. Checked `[native].horizon` metadata supplies `hash`.
+`--with` supplies both listener and unique inject id (default `on_inject`); implement it separately.
+Access defaults to `api`; edit it to `internals` when needed. The launcher validates route support.
+Call kinds copy canonical `call`, `nth` and `ctx` from the pinned `points.json`. Use
+`--call <canonical callee> --nth N` (default 0, per callee). Omitting `--call` requires one callee
+at that ordinal. Ambiguous identities and unlisted source calls are refused; no discovery runs.
+Unknown places return `E_INJECT_MISSING` naming the target. Invalid kinds, callbacks,
+duplicate ids, or call flags on function kinds leave the manifest untouched.
+
 ## Function-slot declarations
 
 API listeners use `access = "api"` (the default) and the host/API record shown below. Native internals

@@ -494,6 +494,7 @@ dependencies = [
  "horizon-mod-api-gen",
  "horizon-mod-package",
  "horizon-port-pack",
+ "serde",
  "serde_json",
  "sha2",
  "toml",
