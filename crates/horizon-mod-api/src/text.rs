@@ -1,5 +1,6 @@
 //! Owned component trees. No language is resolved until the game displays a component.
 use crate::Tag;
+use horizon_core::nbt::clone_tag;
 
 /// A component tree, retaining translation keys, styles and ordered children.
 #[derive(Clone, Debug, PartialEq)]
@@ -533,51 +534,6 @@ impl Text {
     }
 }
 
-/// Clone only the opaque tag tree, not a recursive component edge. Callers have
-/// preflighted its 512-container bound before any payload is cloned.
-fn clone_tag(root: &Tag) -> Tag {
-    enum Work<'a> {
-        Enter(&'a Tag),
-        List(usize),
-        Compound(Vec<horizon_core::nbt::JavaString>),
-    }
-    let mut work = vec![Work::Enter(root)];
-    let mut done = Vec::new();
-    while let Some(step) = work.pop() {
-        match step {
-            Work::Enter(Tag::List(values)) => {
-                work.push(Work::List(values.len()));
-                work.extend(values.iter().rev().map(Work::Enter));
-            }
-            Work::Enter(Tag::Compound(values)) => {
-                work.push(Work::Compound(values.keys().cloned().collect()));
-                work.extend(values.values().rev().map(Work::Enter));
-            }
-            Work::Enter(
-                value @ (Tag::End
-                | Tag::Byte(_)
-                | Tag::Short(_)
-                | Tag::Int(_)
-                | Tag::Long(_)
-                | Tag::Float(_)
-                | Tag::Double(_)
-                | Tag::String(_)
-                | Tag::ByteArray(_)
-                | Tag::IntArray(_)
-                | Tag::LongArray(_)),
-            ) => done.push(value.clone()),
-            Work::List(len) => {
-                let values = done.split_off(done.len() - len);
-                done.push(Tag::List(values));
-            }
-            Work::Compound(keys) => {
-                let values = done.split_off(done.len() - keys.len());
-                done.push(Tag::Compound(keys.into_iter().zip(values).collect()));
-            }
-        }
-    }
-    done.pop().expect("one opaque root")
-}
 fn clone_profile(source: &TextProfile) -> TextProfile {
     TextProfile {
         name: source.name.clone(),
@@ -750,23 +706,11 @@ fn validate_payload(
         roots.push(tag);
     }
     roots.extend(item);
-    let mut pending: Vec<_> = roots.into_iter().map(|t| (t, 0)).collect();
-    while let Some((tag, depth)) = pending.pop() {
-        match tag {
-            Tag::List(values) => {
-                if depth >= MAX_TEXT_DEPTH {
-                    return Err(TextFormError::TooDeep);
-                }
-                pending.extend(values.iter().map(|v| (v, depth + 1)));
-            }
-            Tag::Compound(values) => {
-                if depth >= MAX_TEXT_DEPTH {
-                    return Err(TextFormError::TooDeep);
-                }
-                pending.extend(values.values().map(|v| (v, depth + 1)));
-            }
-            _ => {}
-        }
+    if roots
+        .into_iter()
+        .any(|tag| !horizon_core::nbt::within_depth(tag, MAX_TEXT_DEPTH))
+    {
+        return Err(TextFormError::TooDeep);
     }
     Ok(())
 }

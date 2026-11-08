@@ -52,11 +52,11 @@ pub enum ClickEvent {
     CopyToClipboard(String),
     /// `ClickEvent.ShowDialog`: a `minecraft:dialog` registry id, or the
     /// dialog itself as the component carried it.
-    ShowDialog(horizon_core::nbt::Tag),
+    ShowDialog(std::sync::Arc<horizon_core::nbt::Tag>),
     /// `ClickEvent.Custom`: a server-defined action with an optional NBT payload.
     Custom {
         id: String,
-        payload: Option<horizon_core::nbt::Tag>,
+        payload: Option<std::sync::Arc<horizon_core::nbt::Tag>>,
     },
     /// A local file to open with the system handler.
     /// Only allow this in locally constructed messages, never server/LAN text.
@@ -67,7 +67,7 @@ pub enum ClickEvent {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InlineObject {
     Player {
-        profile: Value,
+        profile: std::sync::Arc<Value>,
         hat: bool,
         fallback: String,
     },
@@ -166,11 +166,19 @@ pub(crate) fn discard_text(text: Text) {
 enum Discard {
     Style(Style),
     Text(Text),
+    Tag(horizon_core::nbt::Tag),
 }
 fn discard(root: Discard) {
     let mut pending = vec![root];
     while let Some(value) = pending.pop() {
         match value {
+            Discard::Tag(tag) => match tag {
+                horizon_core::nbt::Tag::List(v) => pending.extend(v.into_iter().map(Discard::Tag)),
+                horizon_core::nbt::Tag::Compound(v) => {
+                    pending.extend(v.into_values().map(Discard::Tag))
+                }
+                _ => {}
+            },
             Discard::Text(text) => {
                 if let Some(source) = text.source
                     && let Ok(source) = std::sync::Arc::try_unwrap(source)
@@ -184,6 +192,19 @@ fn discard(root: Discard) {
                 );
             }
             Discard::Style(mut style) => {
+                match style.click.take() {
+                    Some(
+                        ClickEvent::ShowDialog(tag)
+                        | ClickEvent::Custom {
+                            payload: Some(tag), ..
+                        },
+                    ) => {
+                        if let Ok(tag) = std::sync::Arc::try_unwrap(tag) {
+                            pending.push(Discard::Tag(tag));
+                        }
+                    }
+                    _ => {}
+                }
                 if let Some(hover) = style.hover.take()
                     && let Ok(text) = std::sync::Arc::try_unwrap(hover)
                 {
@@ -198,7 +219,9 @@ fn discard(root: Discard) {
                     }
                 }
                 if let Some(InlineObject::Player { profile, .. }) = style.inline_object.take() {
-                    crate::component::discard_component(profile);
+                    if let Ok(profile) = std::sync::Arc::try_unwrap(profile) {
+                        crate::component::discard_component(profile);
+                    }
                 }
             }
         }
@@ -690,34 +713,65 @@ fn style_json_with(
             out.push((key.to_owned(), f.into()));
         }
     }
+    if let Some(object) = &style.inline_object {
+        match object {
+            InlineObject::Player {
+                profile,
+                hat,
+                fallback,
+            } => {
+                out.extend([
+                    ("object".into(), "player".into()),
+                    ("player".into(), crate::component::clone_value(profile)),
+                    ("hat".into(), (*hat).into()),
+                    ("fallback".into(), fallback.clone().into()),
+                ]);
+            }
+            InlineObject::Atlas {
+                atlas,
+                sprite,
+                fallback,
+            } => out.extend([
+                ("object".into(), "atlas".into()),
+                ("atlas".into(), atlas.clone().into()),
+                ("sprite".into(), sprite.clone().into()),
+                ("fallback".into(), fallback.clone().into()),
+            ]),
+        }
+    }
     if let Some(click) = &style.click {
-        let event = match click {
-            ClickEvent::OpenUrl(url) => json!({ "action": "open_url", "url": url }),
-            ClickEvent::ChangePage(page) => json!({ "action": "change_page", "page": page }),
-            ClickEvent::SuggestCommand(command) => {
-                json!({ "action": "suggest_command", "command": command })
-            }
-            ClickEvent::CopyToClipboard(value) => {
-                json!({ "action": "copy_to_clipboard", "value": value })
-            }
-            ClickEvent::RunCommand(command) => {
-                json!({ "action": "run_command", "command": command })
-            }
-            // ClickEvent.ShowDialog.CODEC: the dialog the server sent it with.
-            ClickEvent::ShowDialog(dialog) => json!({
-                "action": "show_dialog",
-                "dialog": crate::scoreboard::tag_to_json(dialog),
-            }),
-            ClickEvent::Custom { id, payload } => {
-                let mut event = json!({ "action": "custom", "id": id });
-                if let Some(payload) = payload {
-                    event["payload"] = crate::scoreboard::tag_to_json(payload);
+        let event = (|| {
+            Some(match click {
+                ClickEvent::OpenUrl(url) => json!({ "action": "open_url", "url": url }),
+                ClickEvent::ChangePage(page) => json!({ "action": "change_page", "page": page }),
+                ClickEvent::SuggestCommand(command) => {
+                    json!({ "action": "suggest_command", "command": command })
                 }
-                event
-            }
-            ClickEvent::OpenFile(path) => json!({ "action": "open_file", "path": path }),
-        };
-        out.push(("click_event".to_owned(), event));
+                ClickEvent::CopyToClipboard(value) => {
+                    json!({ "action": "copy_to_clipboard", "value": value })
+                }
+                ClickEvent::RunCommand(command) => {
+                    json!({ "action": "run_command", "command": command })
+                }
+                // ClickEvent.ShowDialog.CODEC: the dialog the server sent it with.
+                ClickEvent::ShowDialog(dialog) => {
+                    let mut event = json!({ "action": "show_dialog" });
+                    event["dialog"] = horizon_core::json_nbt::tag_to_json(dialog).ok()?;
+                    event
+                }
+                ClickEvent::Custom { id, payload } => {
+                    let mut event = json!({ "action": "custom", "id": id });
+                    if let Some(payload) = payload {
+                        event["payload"] = horizon_core::json_nbt::tag_to_json(payload).ok()?;
+                    }
+                    event
+                }
+                ClickEvent::OpenFile(path) => json!({ "action": "open_file", "path": path }),
+            })
+        })();
+        if let Some(event) = event {
+            out.push(("click_event".to_owned(), event));
+        }
     }
     if let Some(hover) = &style.hover {
         out.push(("hover_event".to_owned(), {

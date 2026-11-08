@@ -899,7 +899,7 @@ impl Game<'_> {
         let encoded_component = snbt::to_snbt(&Tag::compound([("player", profile_tag)]));
         let mut head = Text::literal("\u{FFFC}");
         head.spans[0].style.inline_object = Some(InlineObject::Player {
-            profile: json,
+            profile: json.into(),
             hat: true,
             fallback: format!("[{} head]", profile.name),
         });
