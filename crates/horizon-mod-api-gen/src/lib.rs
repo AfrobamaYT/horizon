@@ -608,6 +608,7 @@ mod host_param;
 mod index;
 /// Generate codecs for ordinary scoped native callable resources.
 pub mod native_callable;
+pub mod native_crate;
 pub mod native_patch;
 pub mod native_policy;
 /// Native raw-point frame projection plans used by staging.

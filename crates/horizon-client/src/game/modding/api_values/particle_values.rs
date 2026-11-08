@@ -58,8 +58,6 @@ impl<C: ?Sized> TryIntoEngine<C> for ApiOptions {
         Ok(EngineOptions {
             ty,
             mod_particle: custom,
-            legacy_entity_effect: self.legacy_entity_effect,
-            legacy_trail_lifetime: self.legacy_trail_lifetime,
             block: self.block.clone(),
             color: self.color,
             scale: self.scale,
@@ -84,8 +82,6 @@ impl TryIntoApi for EngineOptions {
         .ok_or(ParticleValueError::UnknownProvider)?;
         Ok(ApiOptions {
             ty: key,
-            legacy_entity_effect: self.legacy_entity_effect,
-            legacy_trail_lifetime: self.legacy_trail_lifetime,
             block: self.block.clone(),
             color: self.color,
             scale: self.scale,

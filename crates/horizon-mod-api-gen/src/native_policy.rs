@@ -29,6 +29,13 @@ pub struct Graph {
     ids: BTreeMap<String, usize>,
 }
 impl Graph {
+    /// Every layout a helper module can emit: named and not opaque.
+    pub fn emittable(&self, rule: &Rule) -> Vec<bool> {
+        self.layouts
+            .iter()
+            .map(|layout| layout.opaque.is_none() && rule.named(&layout.name).is_some())
+            .collect()
+    }
     /// Auxiliary node ID for a variant payload, map entry or UTF-16 unit.
     pub fn auxiliary(&self, shape: &Shape, role: &str) -> Option<usize> {
         self.id(shape).and_then(|id| {

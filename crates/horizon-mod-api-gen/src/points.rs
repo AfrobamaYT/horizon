@@ -639,12 +639,17 @@ fn all_points<'a>(
 
 type Calls = std::collections::BTreeMap<String, Result<crate::native_raw::Call, String>>;
 
+/// What each crate owning points cannot name in the graph, by layout (see `native_crate`).
+type Blocked = std::collections::BTreeMap<String, Vec<Option<usize>>>;
+
 /// One ordered graph over the whole catalog, before any name selection, and each raw point's
-/// virtual call layouts in it. Guest and native generators share these descriptor IDs.
+/// virtual call layouts in it. Guest and native generators share these descriptor IDs. A point
+/// reaching a layout its own crate cannot name is refused.
 fn catalog_graph(
+    root: &Path,
     rule: &crate::crossing::Rule,
     ordered: &[(usize, Found<'_>)],
-) -> Result<(crate::native_policy::Graph, Calls), String> {
+) -> Result<(crate::native_policy::Graph, Calls, Blocked), String> {
     let mut graph = crate::native_policy::Graph::default();
     let mut calls = Calls::new();
     for (_, found) in ordered {
@@ -663,7 +668,27 @@ fn catalog_graph(
             );
         }
     }
-    Ok((graph, calls))
+    let crates: std::collections::BTreeSet<String> = ordered
+        .iter()
+        .map(|(_, found)| crate::native_crate::owner(&found.module).to_owned())
+        .chain(["horizon_client".to_owned()])
+        .collect();
+    let blocked: Blocked = crate::native_crate::read(root, &crates)?
+        .into_iter()
+        .map(|(krate, names)| (krate, names.blocked(rule, &graph)))
+        .collect();
+    for (_, found) in ordered {
+        let krate = crate::native_crate::owner(&found.module);
+        if let Some(Ok(call)) = calls.get(&found.target()) {
+            let layouts: Vec<usize> = std::iter::once(call.head).chain(call.tail).collect();
+            if let Some(reason) =
+                crate::native_crate::refusal(&graph, &blocked[krate], krate, &layouts)
+            {
+                calls.insert(found.target(), Err(reason));
+            }
+        }
+    }
+    Ok((graph, calls, blocked))
 }
 
 /// The game's points, by name: every point function of the game module, and the listed ones of
@@ -677,7 +702,7 @@ pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
     let rule = crate::crossing::Rule::new(&crate::internals::rule_catalog(root)?);
     let mut points = Vec::new();
     let ordered = all_points(&scanned, &list)?;
-    let (graph, calls) = catalog_graph(&rule, &ordered)?;
+    let (graph, calls, _) = catalog_graph(root, &rule, &ordered)?;
     for (_, found) in ordered {
         let target = found.target();
         if private.contains(&plain_path(&target)) {
@@ -776,6 +801,40 @@ pub(crate) fn offset(source: &str, lines: &[usize], at: proc_macro2::LineColumn)
         .map_or(source.len(), |(i, _)| line + i)
 }
 
+/// The game crate root's no-op the source tree carries; staging gives it the catalog install.
+const INSTALL_STUB: &str = "pub fn install_points_catalog() {}";
+
+/// The head call layout of every raw point's head and return places, in `PointId` terms, and the
+/// installer the staged game runs before the wasm host initializes. Both phases of a point share
+/// the plan its head call names.
+fn install_items(points: &[(usize, Found<'_>)], calls: &Calls) -> proc_macro2::TokenStream {
+    let mut pairs = Vec::new();
+    for (_, found) in points {
+        let Some(Ok(call)) = calls.get(&found.target()) else {
+            continue;
+        };
+        let head = call.head;
+        let name = found.name();
+        for place in [name.clone(), format!("{name}_return")] {
+            let variant = quote::format_ident!("{}", point_shape::camel(&place));
+            pairs.push(quote::quote!((mod_points::PointId::#variant, #head)));
+        }
+    }
+    quote::quote! {
+        /// Each raw place and the head call layout its staged plan is keyed by.
+        pub fn head_calls() -> Vec<(mod_points::PointId, usize)> {
+            vec![#(#pairs),*]
+        }
+        /// Gives the wasm host this catalog, to resolve manifest internals against.
+        pub fn install() {
+            horizon_mod_wasm::install_catalog(horizon_mod_wasm::InternalsCatalog {
+                schema: catalog(),
+                head_calls: head_calls(),
+            });
+        }
+    }
+}
+
 /// The once-per-source readers, planners and decoders, and the pure schema catalog the loader
 /// resolves manifest declarations against, appended to the game crate's root.
 fn emit_runtime_module(
@@ -785,9 +844,8 @@ fn emit_runtime_module(
     graph: &crate::native_policy::Graph,
     points: &[(usize, Found<'_>)],
     calls: &Calls,
+    blocked: &Blocked,
 ) -> Result<(), String> {
-    let windows = crate::native_window::helpers(rule, graph)?;
-    let patches = crate::native_patch::helpers(rule, graph)?;
     let layouts = graph.tokens();
     let mut specs = Vec::new();
     for (_, found) in points {
@@ -818,27 +876,71 @@ fn emit_runtime_module(
         let (path, hash) = (&entry.path, &entry.hash);
         fields.push(quote::quote!(mod_points::endpoint_policy::InternalField { path: String::from(#path), kind: String::from("field"), hash: String::from(#hash), receiver: #receiver, field: String::from(#field) }));
     }
-    let module = quote::quote! {
-        #[doc(hidden)]
-        #[allow(dead_code, clippy::all)]
-        pub mod __horizon_points {
-            #windows
-            #patches
-            /// The exact catalog the generated readers were emitted from.
-            pub fn catalog() -> mod_points::endpoint_policy::SchemaCatalog {
-                mod_points::endpoint_policy::SchemaCatalog {
-                    layouts: #layouts,
-                    points: vec![#(#specs),*],
-                    fields: vec![#(#fields),*],
-                }
+    let install = install_items(points, calls);
+    let catalog = quote::quote! {
+        #install
+        /// The exact catalog the generated readers were emitted from.
+        pub fn catalog() -> mod_points::endpoint_policy::SchemaCatalog {
+            mod_points::endpoint_policy::SchemaCatalog {
+                layouts: #layouts,
+                points: vec![#(#specs),*],
+                fields: vec![#(#fields),*],
             }
         }
     };
-    let (_, lib) = crate_root(root, "horizon_client")?;
-    let mut source = fs::read_to_string(&lib).map_err(|e| format!("{}: {e}", lib.display()))?;
-    source.push_str("\n");
-    source.push_str(&module.to_string());
-    fs::write(&lib, source).map_err(|e| format!("{}: {e}", lib.display()))
+    // One helper module per crate that owns admitted points, and the game's, which also holds the
+    // catalog. Each emits the layouts its own points reach, spelled from its own crate.
+    let mut crates = std::collections::BTreeMap::<&str, Vec<usize>>::new();
+    crates.entry("horizon_client").or_default();
+    for (_, found) in points {
+        if let Some(Ok(call)) = calls.get(&found.target()) {
+            crates
+                .entry(crate::native_crate::owner(&found.module))
+                .or_default()
+                .extend(std::iter::once(call.head).chain(call.tail));
+        }
+    }
+    for (krate, calls) in crates {
+        let emit = crate::native_crate::emitted(rule, graph, &blocked[krate], &calls);
+        let windows = crate::native_window::helpers(rule, graph, &emit)?;
+        let patches = crate::native_patch::helpers(rule, graph, &emit)?;
+        let (catalog, alias) = if krate == "horizon_client" {
+            (catalog.clone(), quote::quote!())
+        } else {
+            // A lower crate names its own layouts by the catalog's paths, as its dependents do.
+            let name = quote::format_ident!("{krate}");
+            (
+                quote::quote!(),
+                quote::quote!(#[allow(unused_extern_crates)] extern crate self as #name;),
+            )
+        };
+        let module = quote::quote! {
+            #alias
+            #[doc(hidden)]
+            #[allow(dead_code, clippy::all)]
+            pub mod __horizon_points {
+                #windows
+                #patches
+                #catalog
+            }
+        };
+        let (_, lib) = crate_root(root, krate)?;
+        let mut source = fs::read_to_string(&lib).map_err(|e| format!("{}: {e}", lib.display()))?;
+        if krate == "horizon_client" {
+            if !source.contains(INSTALL_STUB) {
+                return Err(format!("{}: no `{INSTALL_STUB}` to stage", lib.display()));
+            }
+            source = source.replacen(
+                INSTALL_STUB,
+                "pub fn install_points_catalog() { __horizon_points::install() }",
+                1,
+            );
+        }
+        source.push('\n');
+        source.push_str(&module.to_string());
+        fs::write(&lib, source).map_err(|e| format!("{}: {e}", lib.display()))?;
+    }
+    Ok(())
 }
 
 /// The staging pass: puts `#[point]` on every point function of the staged copy at `root`, in
@@ -850,7 +952,7 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
     let entries = crate::internals::rule_catalog(root)?;
     let rule = crate::crossing::Rule::new(&entries);
     let points = all_points(&scanned, &list)?;
-    let (graph, calls) = catalog_graph(&rule, &points)?;
+    let (graph, calls, blocked) = catalog_graph(root, &rule, &points)?;
     let mut staged = Staged::default();
     let mut packages = std::collections::BTreeSet::new();
     for (index, file) in scanned.iter().enumerate() {
@@ -950,7 +1052,7 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
             packages.insert(package.clone());
         }
     }
-    emit_runtime_module(root, &rule, &entries, &graph, &points, &calls)?;
+    emit_runtime_module(root, &rule, &entries, &graph, &points, &calls, &blocked)?;
     dependencies(root, packages)?;
     Ok(staged)
 }
@@ -960,7 +1062,11 @@ pub(crate) fn dependencies(
     root: &Path,
     packages: std::collections::BTreeSet<PathBuf>,
 ) -> Result<(), String> {
-    const ADDED: [&str; 2] = ["horizon-mod-points", "horizon-mod-api-macros"];
+    const ADDED: [&str; 3] = [
+        "horizon-mod-points",
+        "horizon-mod-api-macros",
+        "horizon-mod-api",
+    ];
     if packages.is_empty() {
         return Ok(());
     }
@@ -1376,6 +1482,18 @@ mod tests {
                 .map_or("admitted", |reason| &reason[..reason.len().min(110)]);
             *refusals.entry(reason.to_owned()).or_default() += 1;
         }
+        let mut lower = std::collections::BTreeMap::<(&str, &str), usize>::new();
+        for point in points
+            .iter()
+            .filter(|point| point.raw && !point.target.starts_with("horizon_client::"))
+        {
+            let krate = crate::native_crate::owner(&point.target);
+            let reason = point.runtime_refusal.as_deref().unwrap_or("admitted");
+            *lower.entry((krate, reason)).or_default() += 1;
+        }
+        for ((krate, reason), count) in lower {
+            println!("lower crate {krate}: {count} {reason}");
+        }
         let mut refusals: Vec<_> = refusals.into_iter().collect();
         refusals.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
         for (reason, count) in refusals.iter().take(40) {
@@ -1593,7 +1711,26 @@ mod tests {
             json.as_object_mut().unwrap().remove("raw_shape");
         }
         assert_eq!(serde_json::to_vec(&after).unwrap(), before_json);
-        assert_eq!(records(&points, &sources), before_records);
+        // Raw shape metadata participates in the layout fingerprint, but does not change
+        // the records or dispatch code emitted for these same points.
+        let split_layout = |code: &str| {
+            let mut file = syn::parse_file(code).unwrap();
+            let index = file
+                .items
+                .iter()
+                .position(|item| {
+                    matches!(item,
+                        syn::Item::Const(item) if item.ident == "POINT_LAYOUT"
+                    )
+                })
+                .unwrap();
+            let layout = file.items.remove(index).to_token_stream().to_string();
+            (layout, file.to_token_stream().to_string())
+        };
+        let (before_layout, before_code) = split_layout(&before_records);
+        let (after_layout, after_code) = split_layout(&records(&points, &sources));
+        assert_ne!(before_layout, after_layout);
+        assert_eq!(before_code, after_code);
         if let Ok(path) = std::env::var("RAW_SHAPE_BASELINE") {
             let baseline = fs::read(path).unwrap();
             assert!(
@@ -1715,7 +1852,10 @@ mod tests {
             "crates/horizon-client/Cargo.toml",
             "[package]\nname = 'horizon-client'\n",
         );
-        put("crates/horizon-client/src/lib.rs", "mod game; mod entry;\n");
+        put(
+            "crates/horizon-client/src/lib.rs",
+            "mod game; mod entry;\npub fn install_points_catalog() {}\n",
+        );
         put("crates/horizon-client/src/entry.rs", "");
         put(
             "crates/horizon-client/src/game.rs",
@@ -1838,7 +1978,7 @@ mod tests {
         let api = records(&points, &[]);
         assert!(
             api.contains("fn tick_return")
-                && !api.contains("fn slot_return")
+                && api.contains("fn slot_return")
                 && api.contains("SlotReturn")
                 && api.contains("fn game_remote_other_send (args"),
             "{api}"
@@ -1853,11 +1993,38 @@ mod tests {
             }
         );
         let game = std::fs::read_to_string(root.join("crates/horizon-client/src/game.rs")).unwrap();
+        let parsed = syn::parse_file(&game).unwrap();
+        for name in ["tick", "slot"] {
+            let method = parsed
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    syn::Item::Impl(item) => Some(&item.items),
+                    _ => None,
+                })
+                .flatten()
+                .find_map(|item| match item {
+                    syn::ImplItem::Fn(method) if method.sig.ident == name => Some(method),
+                    _ => None,
+                })
+                .unwrap();
+            assert!(
+                method
+                    .attrs
+                    .iter()
+                    .any(|attr| attr.to_token_stream().to_string()
+                        == "# [horizon_mod_api_macros :: point (side = \"both\" , raw)]")
+            );
+            assert!(
+                method
+                    .attrs
+                    .iter()
+                    .any(|attr| attr.path().is_ident("horizon_raw_plan"))
+            );
+        }
         assert!(
-            game.contains("    #[horizon_mod_api_macros::point(side = \"both\", raw)] fn tick(")
-                && game.contains(
-                    "#[horizon_mod_api_macros::point(side = \"both\", raw)] pub(super) fn slot("
-                )
+            game.contains("fn tick(")
+                && game.contains("pub(super) fn slot(")
                 && !game.contains("raw)] fn native_tick")
                 // `Game`'s associated functions are named and hosted like any other type's.
                 && game.contains("point(name = \"game_game_new\"")
@@ -1875,7 +2042,8 @@ mod tests {
         let render = root.join("crates/horizon-client-render");
         let mesher = std::fs::read_to_string(render.join("src/mesher.rs")).unwrap();
         assert!(
-            mesher.contains("point(name = \"client_render_mesher_mesher_mesh\", raw)] pub fn mesh")
+            mesher.contains("point(name = \"client_render_mesher_mesher_mesh\", raw)]")
+                && mesher.contains("pub fn mesh")
                 && !mesher.contains("client_render_mesher_mesher_face")
                 && mesher.contains("& 'r mut Mesher < '__self0 >"),
             "{mesher}"
@@ -1888,8 +2056,31 @@ mod tests {
         // The lock file lists them too, in order, so a `--locked` build accepts the manifest.
         let lock = std::fs::read_to_string(root.join("Cargo.lock")).unwrap();
         assert!(
-            lock.contains("name = \"horizon-client-render\"\nversion = \"0.1.0\"\ndependencies = [\n \"horizon-mod-api-macros\",\n \"horizon-mod-points\",\n \"log\",\n]\n\n[[package]]\nname = \"log\""),
+            lock.contains("name = \"horizon-client-render\"\nversion = \"0.1.0\"\ndependencies = [\n \"horizon-mod-api\",\n \"horizon-mod-api-macros\",\n \"horizon-mod-points\",\n \"log\",\n]\n\n[[package]]\nname = \"log\""),
             "{lock}"
+        );
+        // One helper module per crate that owns points: the game's holds the catalog, a lower
+        // crate's names its own layouts by the catalog's paths and has none.
+        let lib =
+            |krate: &str| std::fs::read_to_string(root.join(krate).join("src/lib.rs")).unwrap();
+        let (client, lower) = (
+            lib("crates/horizon-client"),
+            lib("crates/horizon-client-render"),
+        );
+        assert_eq!(
+            client.matches("pub mod __horizon_points").count(),
+            1,
+            "{client}"
+        );
+        assert_eq!(
+            lower.matches("pub mod __horizon_points").count(),
+            1,
+            "{lower}"
+        );
+        assert!(client.contains("fn catalog") && !lower.contains("fn catalog"));
+        assert!(
+            lower.contains("extern crate self as horizon_client_render")
+                && !client.contains("extern crate self")
         );
         // A second pass finds the attribute and refuses: the source tree never carries one.
         assert!(stage(&root).unwrap_err().contains("already has"));

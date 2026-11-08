@@ -1066,7 +1066,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::entity_leave_level` | crosses | Wire call |
 | `Hooks::block_entity_fluids` | crosses | Wire call |
 | `Hooks::should_apply_effect_tick_this_tick` | crosses | Wire call |
-| `Hooks::apply_effect_tick` | gap | borrow/resource shape not yet supported |
+| `Hooks::apply_effect_tick` | crosses | Wire call |
 | `Hooks::on_effect_added` | crosses | Wire call |
 | `Hooks::mob_effect_added` | crosses | Wire call |
 | `Hooks::chunk_load` | crosses | Wire call |
@@ -1687,7 +1687,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 
 | Library mod plain `pub fn` / `pub static` called by a dependent | crosses | shared dependency rlib, stable crate identity, and retained public exports; production-loader library fixture covers separate library/observer/dependent builds |
 
-Required gap total: 1.
+Required gap total: 0.
 
 ## Entity snapshot revision boundary
 

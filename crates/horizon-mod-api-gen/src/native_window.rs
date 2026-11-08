@@ -401,11 +401,16 @@ fn generate_inner(
 }
 
 /// One helper per named layout of the graph, emitted once per source rather than once per
-/// point body. Each takes the native value and the endpoint's registration `Plan`.
-pub fn helpers(rule: &Rule, graph: &crate::native_policy::Graph) -> Result<TokenStream, String> {
+/// point body. Each takes the native value and the endpoint's registration `Plan`. Only the
+/// layouts `emit` marks (see `native_crate::emitted`) get one: the emitting crate's.
+pub fn helpers(
+    rule: &Rule,
+    graph: &crate::native_policy::Graph,
+    emit: &[bool],
+) -> Result<TokenStream, String> {
     let mut helpers = Vec::new();
     for (id, layout) in graph.layouts.iter().enumerate() {
-        if rule.named(&layout.name).is_none() || layout.opaque.is_some() {
+        if !emit[id] {
             continue;
         }
         let helper = quote::format_ident!("__horizon_node_{id}");

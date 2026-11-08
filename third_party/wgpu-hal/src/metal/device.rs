@@ -4,10 +4,10 @@ use core::{mem::align_of, ptr::NonNull};
 use bytemuck::TransparentWrapper;
 use objc2::{
     available,
-    rc::{Retained, autoreleasepool},
+    rc::{autoreleasepool, Retained},
     runtime::ProtocolObject,
 };
-use objc2_foundation::{NSError, NSRange, NSString, NSUInteger, ns_string};
+use objc2_foundation::{ns_string, NSError, NSRange, NSString, NSUInteger};
 use objc2_metal::{
     MTLAccelerationStructure, MTLAccelerationStructureInstanceOptions, MTLBuffer,
     MTLCaptureManager, MTLCaptureScope, MTLCompileOptions, MTLComputePipelineDescriptor,
@@ -24,8 +24,8 @@ use objc2_metal::{
 };
 use parking_lot::{Condvar, Mutex, RwLock};
 
-use super::{PassthroughShader, ShaderModuleSource, adapter::MAX_BUFFERS, conv};
-use crate::{DropCallback, DropGuard, TlasInstance, auxil::map_naga_stage};
+use super::{adapter::MAX_BUFFERS, conv, PassthroughShader, ShaderModuleSource};
+use crate::{auxil::map_naga_stage, DropCallback, DropGuard, TlasInstance};
 
 type DeviceResult<T> = Result<T, crate::DeviceError>;
 

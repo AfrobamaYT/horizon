@@ -52,7 +52,7 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
                     .join()
                     .map_err(|_| "generating the wire impls panicked".to_string())?
             })?;
-            for path in &sources {
+            for path in sources.iter().chain(&generated_wire.sources) {
                 println!("cargo:rerun-if-changed={}", path.display());
             }
             vec![

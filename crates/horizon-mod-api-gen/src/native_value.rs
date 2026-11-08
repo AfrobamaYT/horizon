@@ -129,6 +129,9 @@ fn build(
         Shape::Scalar(Scalar::Str) | Shape::Ref { .. } | Shape::Slice(_) | Shape::Opaque(_) => {
             return Err(format!("non-owned or opaque shape: {shape:?}"));
         }
+        Shape::Scalar(Scalar::Signed("isize")) => {
+            return Err("isize has no Wire encoding".into());
+        }
         Shape::Scalar(_) | Shape::Unit => ValueCodec {
             decode: quote!(input.take()?),
             encode: quote!(out.put(value);),

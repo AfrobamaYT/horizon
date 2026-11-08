@@ -1616,7 +1616,7 @@ fn cap_msl_version(version: MTLLanguageVersion, legacy_intel: bool) -> MTLLangua
 
 #[cfg(test)]
 mod compatibility_tests {
-    use super::{MTLLanguageVersion, cap_msl_version, is_legacy_intel};
+    use super::{cap_msl_version, is_legacy_intel, MTLLanguageVersion};
 
     #[test]
     fn only_intel_without_metal3_uses_legacy_compatibility() {
@@ -1654,8 +1654,8 @@ impl super::PrivateCapabilities {
 
 impl super::PrivateTextureFormatCapabilities {
     pub fn map_format(&self, format: wgt::TextureFormat) -> MTLPixelFormat {
-        use MTLPixelFormat as MTL;
         use wgt::TextureFormat as Tf;
+        use MTLPixelFormat as MTL;
         match format {
             Tf::R8Unorm => MTL::R8Unorm,
             Tf::R8Snorm => MTL::R8Snorm,
@@ -1805,8 +1805,8 @@ impl super::PrivateTextureFormatCapabilities {
         aspects: crate::FormatAspects,
     ) -> MTLPixelFormat {
         use crate::FormatAspects as Fa;
-        use MTLPixelFormat as MTL;
         use wgt::TextureFormat as Tf;
+        use MTLPixelFormat as MTL;
         match (format, aspects) {
             // map combined depth-stencil format to their stencil-only format
             // see https://developer.apple.com/library/archive/documentation/Miscellaneous/Conceptual/MetalProgrammingGuide/WhatsNewiniOS10tvOS10andOSX1012/WhatsNewiniOS10tvOS10andOSX1012.html#//apple_ref/doc/uid/TP40014221-CH14-DontLinkElementID_77
