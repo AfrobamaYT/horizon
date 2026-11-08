@@ -98,7 +98,7 @@ impl BiomeSourceCatalog {
     }
     fn inline(&self, raw: &RawValue) -> Result<BiomeSourceDefinition, DecodeError> {
         let entries: Vec<Object> = serde_json::from_str(raw.get())?;
-        if entries.is_empty() || entries.len() > 65536 {
+        if entries.is_empty() {
             return Err(DecodeError::Field("multi-noise entry count"));
         }
         let mut result = Vec::with_capacity(entries.len());

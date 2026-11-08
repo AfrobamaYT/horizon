@@ -110,6 +110,38 @@ fn direct_biome_tag_and_preset_catalogs_have_no_size_ceiling() {
 }
 
 #[test]
+fn inline_multi_noise_biome_list_has_no_size_ceiling() {
+    let catalog = BiomeSourceCatalog::new(
+        &BTreeSet::from(["test:biome".into()]),
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+    )
+    .unwrap();
+    let entry = serde_json::json!({
+        "parameters": {
+            "temperature":0.0, "humidity":0.0, "continentalness":0.0,
+            "erosion":0.0, "depth":0.0, "weirdness":0.0, "offset":0.0,
+        },
+        "biome":"test:biome",
+    });
+    let json = serde_json::json!({"type":"multi_noise", "biomes":vec![entry; 65_537]}).to_string();
+    let BiomeSourceDefinition::MultiNoise(entries) = catalog.decode(&json).unwrap() else {
+        panic!("wrong source")
+    };
+    assert_eq!(entries.len(), 65_537);
+    assert!(
+        entries
+            .iter()
+            .all(|(point, name)| point == &entries[0].0 && name == "test:biome")
+    );
+    assert!(
+        catalog
+            .decode(r#"{"type":"multi_noise","biomes":[]}"#)
+            .is_err()
+    );
+}
+
+#[test]
 fn direct_biome_empty_sampling_is_refused() {
     let source = CheckerboardBiomeSource::<()>::new(vec![], 0).unwrap();
     assert_eq!(
