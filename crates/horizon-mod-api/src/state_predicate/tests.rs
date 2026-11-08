@@ -53,6 +53,23 @@ fn strict_block_predicates_validate_schema_without_default_bias() {
         .unwrap_err(),
         BlockStateError::DuplicateProperty(1)
     );
+    for (name, value, error) in [
+        ("missing", "true", BlockStateError::UnknownProperty(1)),
+        ("right", "invalid", BlockStateError::InvalidValue(1)),
+    ] {
+        assert_eq!(
+            StatePredicate::block(
+                &metadata,
+                key,
+                &[
+                    StateConstraint::new("left", "true"),
+                    StateConstraint::new(name, value)
+                ]
+            )
+            .unwrap_err(),
+            error
+        );
+    }
     let decoded = StatePredicate::from(StatePredicateRecord::new(
         StatePredicateTarget::Block(key),
         vec![StateConstraint::new("left", "invalid")],
