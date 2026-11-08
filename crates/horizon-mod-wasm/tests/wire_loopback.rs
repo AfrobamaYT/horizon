@@ -676,7 +676,7 @@ fn wire_loopback_resource_load_restores_module_after_cross_group_unwind() {
         // Resume directly to avoid depending on the process-wide guest panic logger.
         std::panic::resume_unwind(Box::new(()));
     }));
-    assert!(unwind.is_err());
+    assert!(unwind.unwrap_err().is::<()>());
     assert_eq!(
         load(id).bounding_box(),
         mod_api::BoundingBox::new([1, 2, 3], [4, 5, 6])
