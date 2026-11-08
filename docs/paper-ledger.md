@@ -144,3 +144,34 @@ Paper API 26.3 (paper-api `26.3.build.244-stable`), public Javadoc; Horizon cite
 
 [paper-BrewEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/inventory/BrewEvent.html
 [paper-BlockFromToEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/BlockFromToEvent.html
+
+## Event counterparts: base item hooks (#1015)
+
+Paper API 26.3 (paper-api `26.3.build.244-stable`), public Javadoc only: no Paper server source is used and no Bukkit compatibility layer is proposed. Horizon hooks are cited by function name; scope is the 20 `base-item` hooks below.
+
+| Horizon hook | Paper event / status | Evidence and porting boundary |
+|---|---|---|
+| `item_spawn` | **Gap:** none cited | None of the cited events covers an item entity being added to the level: the three candidates are world spawn points and raid waves, and none carries the item id, count or position the hook passes. No key. |
+| `items` | **Gap:** none cited | Item declarations are collected once at registration; no cited Paper event fires when content is registered or offers the declared items as an out-value. No key. |
+| `left_click_block` | **Covered:** [`PlayerInteractEvent`][paper-PlayerInteractEvent] | `Action.LEFT_CLICK_BLOCK` is the documented field narrowing the generic interaction event to a left click on a block, the moment `ServerPlayerGameMode.handleBlockBreakAction` takes the dig's start; `getClickedBlock()`/`getBlockFace()` give the block and face, it is server-side and cancellable, and a cancel stops the click from attacking, digging or breaking. It can fire once per hand, so a listener filters the action. Key added. |
+| `level_load` | **Gap:** none cited | No cited Paper event announces that a level has opened; the hook's timing before the level's first chunk and its dimension id have no cited counterpart. No key. |
+| `level_tick_post` | **Gap:** none cited | No cited Paper event marks the end of one dimension's tick pass, and the cited set has no per-level tick event at all, so Horizon's per-dimension ordering cannot be expressed. No key. |
+| `level_tick_pre` | **Gap:** none cited | As `level_tick_post`: the cited set has no per-level tick event, so the start of a dimension's tick pass is not observable through the cited events. No key. |
+| `level_unload` | **Gap:** none cited | No cited Paper event marks a level closing after its last save, and no cited event carries the dimension id or the pairing with the level's load. No key. |
+| `lightning_strike` | **Covered:** [`LightningStrikeEvent`][paper-LightningStrikeEvent] | Paper's weather event is server-side, cancellable and carries the strike and a cause, matching a bolt about to be created and a cancel that prevents the bolt and its effects; `getLightning()` gives the strike's position. Paper's cause enum is coarser than Horizon's weather/trident/command/mod values. Key added. |
+| `living_breathe` | **Gap:** none cited | No cited Paper event fires inside the per-tick air update, and the hook's mutable `can_breathe`, `consume` and `refill` have no cited counterpart. No key. |
+| `living_drown` | **Partial:** [`EntityDamageEvent`][paper-EntityDamageEvent] | The generic damage event shares the server side, the cancellation and an editable damage amount, but it fires when drowning damage is applied rather than at the air tick that decides whether the entity drowns, and it exposes neither the bubble count (read-only in the hook) nor the `is_drowning` flag. No key. |
+| `living_entity_use_item_finish` | **Gap:** none cited | No cited Paper event fires when a use completes (`completeUsingItem`) or hands the listener the stack left in the hand; the cited interaction and raid events are different moments. No key. |
+| `living_entity_use_item_start` | **Partial:** [`PlayerInteractEvent`][paper-PlayerInteractEvent] | A player's right-click with the stack is the moment the interaction event describes, with `getItem()`/`getHand()` and a cancel that would stop the interaction, but the hook's `duration` out-value, its mobs and its client half have no counterpart. No key. |
+| `living_entity_use_item_stop` | **Gap:** none cited | No cited Paper event fires when a living entity releases an item use before its time or carries the ticks left and the release outcome; `PlayerStopSpectatingEntityEvent` is spectator-mode only. No key. |
+| `living_entity_use_item_tick` | **Gap:** none cited | No cited Paper event fires on every tick of an item use or lets a listener move the remaining duration; the cited click events are a different moment. No key. |
+| `living_equipment_change` | **Covered:** [`EntityEquipmentChangedEvent`][paper-EntityEquipmentChangedEvent] | Paper fires after an equipment change is detected, server-side, for a living entity, and its changed-slot map carries each slot's old and new stack, matching the hook's `from`/`to`; it is listen-only (non-cancellable) like the hook. Paper batches the slots where Horizon reports one per slot. Key added. |
+| `living_equipment_listened` | **Gap:** none cited | It is a Horizon-only opt-in gate asked once a tick, not a game moment; no cited event expresses it, and the equipment events it gates are unrelated to the gate itself. No key. |
+| `living_fall` | **Gap:** none (nearest [`EntityDamageEvent`][paper-EntityDamageEvent]) | Paper's damage event fires when fall damage lands, after fall handling, and exposes neither the fall distance nor the damage multiplier the hook lets mods change; the both-side pre-damage moment has no cited event. No key. |
+| `living_heal` | **Gap:** none cited | The dossier lists no Paper candidate, and no event cited elsewhere fires before a heal is applied or carries the heal amount as a changeable out-value with a cancel. No key. |
+| `living_incoming_damage` | **Partial:** [`EntityDamageEvent`][paper-EntityDamageEvent] | The hit moment, server side, cancellation and a settable damage amount match, but Horizon also passes and lets mods change the invulnerability ticks a fresh hit leaves and passes the attacker's weapon, neither of which the event exposes. No key. |
+| `living_jump` | **Partial:** [`EntityJumpEvent`][paper-EntityJumpEvent] | `EntityJumpEvent` detects a living entity's jump server-side and identifies the entity, but it is cancellable (a listen-only hook cannot express its cancel) and fires at the jump decision rather than after the velocity write; `HorseJumpEvent` and `PlayerJumpEvent` are narrower. No key. |
+
+[paper-LightningStrikeEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/weather/LightningStrikeEvent.html
+[paper-EntityEquipmentChangedEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/entity/EntityEquipmentChangedEvent.html
+[paper-EntityJumpEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/entity/EntityJumpEvent.html

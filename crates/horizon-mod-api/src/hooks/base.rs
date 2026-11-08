@@ -829,7 +829,8 @@ pub trait Hooks {
         side = "server",
         contract = "cancel",
         out = "canceled",
-        neoforge = "PlayerInteractEvent.LeftClickBlock"
+        neoforge = "PlayerInteractEvent.LeftClickBlock",
+        paper = "PlayerInteractEvent"
     )]
     fn left_click_block();
     /// Before a player's tick on both logical sides (NeoForge 26.3
@@ -2608,6 +2609,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "listen",
         neoforge = "LivingEquipmentChangeEvent",
+        paper = "EntityEquipmentChangedEvent",
         cancellable = false
     )]
     fn living_equipment_change();
@@ -3494,6 +3496,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
+        paper = "LightningStrikeEvent",
         cancellable = true
     )]
     fn lightning_strike();
