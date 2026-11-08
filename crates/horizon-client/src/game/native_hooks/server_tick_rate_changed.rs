@@ -14,7 +14,6 @@ mod server_tick_rate_changed_tests {
     use crate::game::native_guest_turn_tests::with_guests;
     use mod_api::{Hooks, ModEntry, ServerHost, ServerTickRateChangedEvent, testing::with_mods};
     use std::sync::{Arc, Mutex};
-    use std::time::Instant;
 
     /// A scheduling mod: logs the rate each notification reads, and runs `retune` on the first.
     struct Scheduler {
@@ -85,14 +84,19 @@ mod server_tick_rate_changed_tests {
             assert!(game.native_run_command("tick unfreeze"));
             assert!(heard().is_empty());
 
+            assert!(game.native_run_command("tick rate 20"));
+            assert_eq!(heard(), [20.0]);
             assert!(game.native_run_command("tick sprint 1"));
             game.ticks_until_autosave = 100_000;
             game.clock.world_runs();
-            game.clock.world_runs();
             assert!(heard().is_empty());
-            game.wait_for_next_server_tick(&mut Instant::now(), false);
-            assert_eq!(heard(), [40.0]);
-            assert_eq!(game.ticks_until_autosave, 12_000);
+            game.tick_server(false).unwrap();
+            assert_eq!(heard(), [20.0]);
+            // Completion shortens the wait before this tick decrements it.
+            assert_eq!(game.ticks_until_autosave, 5999);
+            game.tick_server(false).unwrap();
+            assert!(heard().is_empty());
+            assert_eq!(game.ticks_until_autosave, 5998);
         });
     }
 
