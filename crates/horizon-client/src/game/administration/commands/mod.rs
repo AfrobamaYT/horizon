@@ -5766,7 +5766,8 @@ mod item_damage_range_tests {
                 _ => panic!("source chest changed"),
             };
             assert_eq!(
-                actual, stacks,
+                actual.as_slice(),
+                stacks.as_slice(),
                 "queries must leave the authoritative loaded stacks unchanged"
             );
             assert_eq!(game.world.game_time, clock);
