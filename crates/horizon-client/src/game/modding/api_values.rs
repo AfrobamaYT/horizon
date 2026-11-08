@@ -2891,6 +2891,15 @@ pub(in crate::game) fn register_game_keys(ids: impl IntoIterator<Item = String>)
             super::native_dimensions::valid_shape,
         )
     });
+    mod_api::__private::resolve_effects(
+        horizon_client_core::potions::all_effects()
+            .map(|def| horizon_client_core::potions::namespaced(def.id)),
+        |id| horizon_client_core::potions::effect(id).map(|def| def.index),
+    )
+    .unwrap();
+    if let Some(types) = horizon_client_core::block_entity_types::current() {
+        mod_api::__private::resolve_block_entity_types(types.names(), |id| types.key(id)).unwrap();
+    }
 }
 
 pub(in crate::game) fn game_rule_registry() -> horizon_client_core::gamerules::RuleRegistry {
