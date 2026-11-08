@@ -203,6 +203,15 @@ impl Environment {
         .unwrap_or(base)
     }
 
+    /// `base` with the dimension type `extra` (its `attributes` and `timelines`) over it, owned:
+    /// what a client of a server keeps for the level the server's type describes. None when the
+    /// type's attributes are refused.
+    pub fn with_type(base: &Environment, extra: &Json) -> Option<Environment> {
+        Self::load_dimension_with(&base.source, &base.dimension, extra)
+            .map_err(|e| log::warn!("the server's dimension type: attributes refused: {e}"))
+            .ok()
+    }
+
     /// `EnvironmentAttributeSystem.getValue` of one attribute, or its dimension value without
     /// a biome.
     pub fn value(&self, id: &str, at: &Sample) -> Option<Value> {
@@ -350,6 +359,28 @@ mod tests {
         ));
         Environment::set_level_attributes(Vec::new());
         assert!(std::ptr::eq(Environment::for_level(id, &base), &base));
+    }
+
+    /// A client's own environment for a server's type: its attributes over the base's, owned.
+    #[test]
+    fn a_servers_type_makes_an_owned_environment() {
+        use horizon_assets::resource_source::Resource;
+        let source = ResourceSource::indexed(std::collections::BTreeMap::from([(
+            "data/minecraft/dimension_type/overworld.json".into(),
+            Resource::bytes(
+                br#"{"attributes":{"minecraft:gameplay/sky_light_level":15.0}}"#.to_vec(),
+            ),
+        )]));
+        let base = Environment::load(&source).unwrap();
+        let darken = |e: &Environment| sky_darken(e, 0, 0.0, 0.0);
+        let own = Environment::with_type(
+            &base,
+            &serde_json::json!({"attributes": {"minecraft:gameplay/sky_light_level": 4.0}}),
+        )
+        .unwrap();
+        assert_eq!((darken(&base), darken(&own)), (0, 11));
+        let bad = serde_json::json!({"attributes": {"minecraft:visual/not_an_attribute": 1}});
+        assert!(Environment::with_type(&base, &bad).is_none());
     }
 
     /// Attributes the game refuses leave the level on the Overworld's environment.

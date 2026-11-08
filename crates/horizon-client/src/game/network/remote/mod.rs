@@ -553,6 +553,9 @@ pub(super) struct Remote {
     /// The facts made for each level of this connection, by level, with the type they came from:
     /// a level entered again with the same type reuses them, so a reconnect-free session leaks
     /// one set per distinct type.
+    /// The sky, fog and cloud attributes (and timelines) of the level from the server's type, for a
+    /// level of a mod or a pack (`None` for a built-in level, or when the type is refused).
+    pub(in crate::game) level_environment: Option<horizon_client::environment::Environment>,
     facts_cache: HashMap<
         String,
         (
@@ -1164,6 +1167,7 @@ impl Game<'_> {
             level: "minecraft:overworld".into(),
             level_key: mod_api::DimensionKey::OVERWORLD,
             level_facts: None,
+            level_environment: None,
             facts_cache: Default::default(),
             hashed_seed: 0,
             chunk_format: Arc::new(ChunkFormat::new(
@@ -1412,6 +1416,7 @@ impl Game<'_> {
             level: "minecraft:overworld".into(),
             level_key: mod_api::DimensionKey::OVERWORLD,
             level_facts: None,
+            level_environment: None,
             facts_cache: Default::default(),
             hashed_seed: 0,
             chunk_format: Arc::new(ChunkFormat::new(
@@ -2651,7 +2656,17 @@ impl Game<'_> {
         // beds and time), not only its shape: a level of a mod the server runs is no
         // longer taken for the Overworld.
         r.level_facts = None;
+        r.level_environment = None;
         if let Some((name, json)) = r.registries.dimension_json(spawn.dimension_type) {
+            if !matches!(
+                spawn.dimension.as_str(),
+                "minecraft:overworld" | "minecraft:the_nether" | "minecraft:the_end"
+            ) {
+                r.level_environment = horizon_client::environment::Environment::with_type(
+                    self.res.environment(),
+                    &json,
+                );
+            }
             let cached = r
                 .facts_cache
                 .get(&spawn.dimension)
