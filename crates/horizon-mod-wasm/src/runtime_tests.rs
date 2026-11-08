@@ -1121,6 +1121,67 @@ fn returned_builtin_proxy_does_not_keep_its_group_alive() {
     );
 }
 
+#[test]
+fn ordinary_callable_loopback_invokes_native_and_refuses_expired_value() {
+    use mod_api::wire::{Reader, WireError, Writer};
+    use mod_points::{callable::FunctionSource, snapshot::with_root};
+    use std::cell::{Cell, RefCell};
+    fn decode(input: &mut Reader<'_>) -> Result<u32, WireError> {
+        input.take()
+    }
+    fn encode(value: &u32, out: &mut Writer) {
+        out.put(value);
+    }
+    let invoke = crate::boundary::import_id("RowFunction", "invoke").unwrap();
+    let module = module(&format!(
+        r#"
+        local.get 0 i32.eqz if
+          i32.const 0 local.get 1 i64.load i64.store
+        end
+        i32.const 8 i32.const 4 i32.store
+        i32.const 12 i32.const 41 i32.store
+        i64.const 8796093022208
+        i32.const {invoke} i32.const 0 i32.const 16 i32.const 2048 i32.const 512 call $host
+        i64.extend_i32_u i64.or
+    "#
+    ));
+    let count = Cell::new(0);
+    let callback = RefCell::new(|x: u32| {
+        count.set(count.get() + 1);
+        x + 1
+    });
+    let result = with_root(&callback, |root| {
+        module
+            .call(
+                CallClass::Hook,
+                Frame::default(),
+                0,
+                None,
+                |out| {
+                    let source = unsafe { FunctionSource::new(&root, decode, encode) }.unwrap();
+                    out.put(&source);
+                },
+                |input| input.take::<Result<Vec<u8>, mod_api::RowError>>(),
+            )
+            .unwrap()
+            .unwrap()
+    });
+    assert_eq!(result, 42u32.to_le_bytes());
+    assert_eq!(count.get(), 1);
+    let refused = module
+        .call(
+            CallClass::Hook,
+            Frame::default(),
+            1,
+            None,
+            |_| {},
+            |input| input.take::<Result<Vec<u8>, mod_api::RowError>>(),
+        )
+        .unwrap();
+    assert!(matches!(refused, Err(mod_api::RowError::Stale)));
+    assert_eq!(count.get(), 1);
+}
+
 fn row_window_guest() -> WasmMod {
     let window = crate::boundary::import_id("RowPages", "window").unwrap();
     module(&format!(

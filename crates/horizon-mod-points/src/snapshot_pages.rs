@@ -8,8 +8,8 @@ use std::{cell::RefCell, sync::Arc};
 /// forgetting this handle cannot leak that lease or extend the value's lifetime.
 #[doc(hidden)]
 pub struct Root<'a, T> {
-    value: &'a T,
-    token: ValueToken,
+    pub(crate) value: &'a T,
+    pub(crate) token: ValueToken,
     lease: &'a RefCell<Option<ValueLease>>,
 }
 impl<T> Root<'_, T> {
