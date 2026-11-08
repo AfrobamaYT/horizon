@@ -616,6 +616,8 @@ pub mod wasm_imports;
 pub use build::{generate, generate_points, generate_render};
 pub use notes::generate as generate_hook_notes;
 pub use wasm::{Wasm, generate as generate_wasm};
+mod staged;
+pub use staged::{MODS_STAGE, staged_mods};
 
 /// Generate the dispatch test fixture without preventing xtask from filling new placeholders.
 #[doc(hidden)]

@@ -635,10 +635,15 @@ impl Game<'_> {
                         moved = true;
                     }
                 }
-                if moved {
+                if moved && k + 1 < n {
                     self.enter_level(dim)?;
                 }
             }
+        }
+        if let Some(&first) = order.first()
+            && self.dim != first
+        {
+            let _ = self.enter_level(first);
         }
         self.level_pass = Pass::default();
         if result.is_err() {

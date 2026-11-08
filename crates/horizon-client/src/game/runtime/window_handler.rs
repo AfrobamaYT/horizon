@@ -1381,6 +1381,25 @@ impl Game<'_> {
                     let between = now.saturating_duration_since(self.frame_end);
                     self.frame_ticks = elapsed.as_secs_f32() * 20.0;
                     self.previous = now;
+                    if self.studio_freecam.active
+                        && self.screen == Screen::Playing
+                        && !self.dialog_open()
+                    {
+                        let held = |key| f64::from(u8::from(self.keys.raw(&key)));
+                        let forward = held(KeyCode::KeyW) - held(KeyCode::KeyS);
+                        let strafe = held(KeyCode::KeyD) - held(KeyCode::KeyA);
+                        let vertical = held(KeyCode::Space)
+                            - f64::from(u8::from(self.keys.raw(&KeyCode::ShiftLeft)));
+                        let fast = self.keys.raw(&KeyCode::ControlLeft)
+                            || self.keys.raw(&KeyCode::ControlRight);
+                        self.studio_freecam.update_flight_motion(
+                            forward,
+                            strafe,
+                            vertical,
+                            fast,
+                            elapsed.as_secs_f64().min(0.1),
+                        );
+                    }
                     // Arrow-key camera controls belong to gameplay; chat and
                     // other screens use the same keys for their own navigation.
                     if self.screen == Screen::Playing

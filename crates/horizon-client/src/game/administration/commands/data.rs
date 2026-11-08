@@ -161,15 +161,7 @@ impl Game<'_> {
                 let uuid = self.uuid_for(id);
                 let i = self.boats.iter().position(|b| b.id == id)?;
                 let b = &self.boats[i];
-                let mut tag = entity_nbt::boat_to_nbt(
-                    &b.entity_type(),
-                    b.position,
-                    b.velocity,
-                    [b.yaw, b.pitch],
-                    uuid,
-                    self.persist.raw.get(&id),
-                    b.chest.then_some(&b.items[..]),
-                );
+                let mut tag = b.to_nbt(uuid, self.persist.raw.get(&id));
                 // AbstractBoat.addAdditionalSaveData: the live or pending leash.
                 self.write_boat_leash(&mut tag, i);
                 tag
@@ -247,6 +239,11 @@ impl Game<'_> {
             Target::Tnt(id) => {
                 let i = self.tnts.iter().position(|t| t.id == id)?;
                 self.tnt_nbt(i)
+            }
+            Target::Cushion(id) => {
+                let uuid = self.uuid_for(id);
+                let c = self.cushions.iter().find(|c| c.id == id)?;
+                entity_nbt::cushion_to_nbt(c, uuid, self.persist.raw.get(&id))
             }
             Target::Falling(id) => {
                 let f = self.falling.iter().find(|f| f.id == id)?.clone();
@@ -394,6 +391,11 @@ impl Game<'_> {
                     if keep_liked_player {
                         slot.extra.tame = old.extra.tame;
                         slot.extra.owner = old.extra.owner;
+                        if let (Some(st), Some(was)) =
+                            (slot.extra.allay.as_mut(), old.extra.allay.as_ref())
+                        {
+                            st.liked_player_ttl = was.liked_player_ttl;
+                        }
                     }
                     // Entity.load mutates the existing living entity; its damage
                     // cooldown and previous-hit amount are not read from saved NBT.
@@ -501,7 +503,7 @@ impl Game<'_> {
             }
             Target::Boat(id) => {
                 // AbstractBoat.readAdditionalSaveData over Entity.load: the
-                // position, rotation, motion, NoGravity and a chest boat's items.
+                // position, rotation, motion, NoGravity, Fire and a chest boat's items.
                 let (position, velocity, yaw) =
                     entity_nbt::boat_from_nbt(&tag).ok_or_else(stale)?;
                 let uuid = self.uuid_for(id);
@@ -518,6 +520,7 @@ impl Game<'_> {
                     b.previous_yaw = yaw;
                     b.pitch = entity_nbt::rotation(&tag)[1];
                     b.no_gravity = entity_nbt::flag(&tag, "NoGravity");
+                    b.fire_ticks = crate::game::boats::saved_fire(&tag);
                     if b.chest {
                         b.items =
                             save::decode_items(tag.get("Items"), crate::game::boats::CHEST_SLOTS);
@@ -619,6 +622,7 @@ impl Game<'_> {
         | Target::Boat(id)
         | Target::Cart(id)
         | Target::Tnt(id)
+        | Target::Cushion(id)
         | Target::Other(id)
         | Target::Fangs(id) = t
         {
@@ -654,6 +658,7 @@ impl Game<'_> {
             // `tags_of` reads a primed TNT's compound; without this arm
             // `/tag` wrote nothing and still reported success.
             | Target::Tnt(id)
+            | Target::Cushion(id)
             | Target::Orb(id)
             | Target::Projectile(id)
             | Target::Crystal(id)
@@ -1395,6 +1400,8 @@ impl Game<'_> {
             Some(Target::Other(id))
         } else if self.tnts.iter().any(|t| t.id == id) {
             Some(Target::Tnt(id))
+        } else if self.cushions.iter().any(|c| c.id == id) {
+            Some(Target::Cushion(id))
         } else if self.falling.iter().any(|f| f.id == id) {
             Some(Target::Falling(id))
         } else if self.rockets.iter().any(|r| r.id == id) {
