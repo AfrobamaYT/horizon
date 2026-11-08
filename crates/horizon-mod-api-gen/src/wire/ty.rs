@@ -102,8 +102,8 @@ pub(crate) enum Kind {
     Variant(Vec<Case>),
     /// Crosses as JSON through its own serde derives.
     Json,
-    /// It can't cross; why.
-    Opaque(String),
+    /// It can't cross.
+    Opaque,
 }
 
 impl Kind {
@@ -385,7 +385,7 @@ impl<'a> Types<'a> {
             view: None,
             rust,
             lifetimes,
-            kind: Kind::Opaque("recursive".into()),
+            kind: Kind::Opaque,
         });
         self.by_item.insert(id, def);
         let outer = self.current.replace(def);
@@ -661,11 +661,7 @@ impl<'a> Types<'a> {
     fn kind(&mut self, id: ItemId, item: &Item, name: &str) -> Result<Kind, String> {
         let serde = derives(item, "Serialize") && derives(item, "Deserialize");
         if generics(item).type_params().next().is_some() {
-            return Ok(if serde {
-                Kind::Json
-            } else {
-                Kind::Opaque(format!("{name} is generic"))
-            });
+            return Ok(if serde { Kind::Json } else { Kind::Opaque });
         }
         let structural = match item {
             Item::Struct(item) => match &item.fields {
@@ -727,7 +723,7 @@ impl<'a> Types<'a> {
         Ok(match structural {
             Ok(kind) => kind,
             Err(_) if serde => Kind::Json,
-            Err(why) => Kind::Opaque(why),
+            Err(_) => Kind::Opaque,
         })
     }
 

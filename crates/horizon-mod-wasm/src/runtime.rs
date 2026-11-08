@@ -418,9 +418,6 @@ impl WasmMod {
             subscriptions: self.subscriptions.clone(),
         }
     }
-    pub(crate) fn same_group(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.running, &other.running)
-    }
     pub(crate) fn mod_id(&self) -> &str {
         &self.id
     }

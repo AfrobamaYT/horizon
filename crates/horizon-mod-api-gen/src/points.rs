@@ -1160,6 +1160,7 @@ fn locked_with(lock: &str, name: &str, added: &[&str]) -> Option<String> {
 }
 
 /// `mod_points`: records, typed function constructors, dispatchers and place ids.
+#[cfg(test)]
 pub(crate) fn records(points: &[GamePoint], sources: &[source::Point]) -> String {
     records_selected(points, sources, None)
 }

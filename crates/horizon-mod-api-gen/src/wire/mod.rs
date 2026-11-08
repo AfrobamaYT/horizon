@@ -552,6 +552,7 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Generated, Str
     let mut with_providers = included.to_vec();
     with_providers.push(("capability_providers_generated.rs", providers.as_str()));
     let surface = surface(root, &with_providers)?;
+    coverage(&surface)?;
     let mut wire = emit::types(&surface.types);
     let mut guest = calls::guest(
         &surface.types,
@@ -655,7 +656,7 @@ mod tests {
                 .unwrap();
             assert!(matches!(
                 surface.types.defs[append].kind,
-                super::ty::Kind::Opaque(_)
+                super::ty::Kind::Opaque
             ));
             surface.types.defs[append].append.as_mut().unwrap().field += 1;
             assert_ne!(baseline, super::layout(&surface));
@@ -666,7 +667,7 @@ mod tests {
                 .iter_mut()
                 .find(|d| d.projection.is_some())
                 .unwrap();
-            assert!(matches!(projection.kind, super::ty::Kind::Opaque(_)));
+            assert!(matches!(projection.kind, super::ty::Kind::Opaque));
             projection.projection.as_mut().unwrap()[0].ty = super::ty::Ty::Unit;
             assert_ne!(baseline, super::layout(&surface));
         };
