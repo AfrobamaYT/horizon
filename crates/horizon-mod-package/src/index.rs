@@ -20,6 +20,8 @@ use std::{io::Read, path::Path};
 pub const SCHEMA: u32 = 1;
 /// The biggest file the registry takes (a `.hmod` with content, a `.hpack`).
 pub const MAX_FILE: u64 = 64 << 20;
+/// The biggest native binary build ID, in bytes.
+pub const MAX_NATIVE_BUILD: usize = 128;
 /// Where files may be downloaded from: the registry's release assets.
 pub const FILE_HOST: &str = "https://github.com/horizon-rust/horizon-mods/releases/download/";
 
@@ -329,7 +331,9 @@ impl Index {
                 }
                 let mut pairs = std::collections::HashSet::new();
                 for b in &v.native_binaries {
-                    if b.build.is_empty()
+                    if b.build.len() > MAX_NATIVE_BUILD
+                        || b.build.bytes().any(|c| c.is_ascii_control())
+                        || b.build.is_empty()
                         || b.build.trim() != b.build
                         || b.target.split('-').count() < 3
                         || !b.target.bytes().all(|c| {

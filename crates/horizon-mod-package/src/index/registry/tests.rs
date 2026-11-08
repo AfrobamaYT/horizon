@@ -629,3 +629,35 @@ fn native_binaries_round_trip_and_exact_lookup() {
         assert!(bad.check().is_err(), "{field}");
     }
 }
+
+#[test]
+fn native_binary_build_limits() {
+    let mut index = sample();
+    let version = &mut index
+        .projects
+        .iter_mut()
+        .find(|p| p.id == "coords_hud")
+        .unwrap()
+        .versions[0];
+    version.native_binaries.push(super::super::NativeBinary {
+        build: "a".repeat(128),
+        target: "x86_64-unknown-linux-gnu".into(),
+        file: version.file.clone(),
+    });
+    assert!(index.check().is_ok());
+    for build in ["a".repeat(129), "build\nid".into()] {
+        let mut bad = index.clone();
+        bad.projects
+            .iter_mut()
+            .find(|p| p.id == "coords_hud")
+            .unwrap()
+            .versions[0]
+            .native_binaries[0]
+            .build = build;
+        assert!(
+            bad.check()
+                .unwrap_err()
+                .contains("invalid native build or canonical target triple")
+        );
+    }
+}

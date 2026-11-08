@@ -59,7 +59,7 @@ Readers ignore fields they don't know, so an optional field can be added to sche
 changing what one means, makes schema 2.
 
 Each version may list `native_binaries`, an array of records with `build` (the
-exact game build ID), `target` (the canonical Rust target triple), and `file`.
+exact game build ID, at most 128 bytes with no ASCII control characters), `target` (the canonical Rust target triple), and `file`.
 The file uses the index's existing name, URL, size, SHA-256 and minisign signature
 fields; the signature is required. Records live only in the registry, never in
 `horizon-mod.toml`. Duplicate build/target pairs are rejected. Lookup returns a
