@@ -165,6 +165,7 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             _: &mod_api::RegistrationContext,
         ) {
             REGISTERED_ITEM.set(Some(registrar.item_key("minecraft:stone")));
+            REGISTERED_BLOCK.set(Some(registrar.block_key("minecraft:stone")));
             REGISTERED_EFFECT.set(Some(registrar.effect_key("minecraft:poison")));
             let kind = registrar.block_entity_type("counter").blocks(&[]).build();
             REGISTERED_KIND.set(Some(kind));
@@ -343,6 +344,44 @@ fn wire_loopback_machine_tick_uses_checked_snapshot_writeback() {
     assert_eq!(entity.revision().changes(), before);
 }
 #[test]
+fn borrowed_view_reply_is_byte_identical_to_owned_snapshot() {
+    use horizon_core::nbt::Tag;
+    install_counter();
+    let stack = mod_api::ItemStack::new(REGISTERED_ITEM.get().unwrap(), 17).unwrap();
+    let mut entity = mod_api::ModBlockEntity::default();
+    entity.items = vec![Some(stack), None];
+    entity.data = vec![i32::MIN, 7, i32::MAX];
+    entity.nbt.insert(
+        "nested".into(),
+        Tag::compound([
+            ("float", Tag::Float(0x7fc01234)),
+            ("double", Tag::Double(0x7ff8000000001234)),
+            ("negative_zero", Tag::Float((-0.0f32).to_bits())),
+            (
+                "list",
+                Tag::List(vec![
+                    Tag::Double((-0.0f64).to_bits()),
+                    Tag::String("payload".into()),
+                ]),
+            ),
+        ]),
+    );
+    let mut update = mod_api::Compound::new();
+    update.insert("display".into(), Tag::Int(42));
+    mod_api::ModBlockEntityView::new(&mut entity).set_client_update_fields(update);
+    let mut owned = Writer::new();
+    owned.put(&mod_api::containers::ModBlockEntitySnapshot::from(&entity));
+    let mut borrowed = Writer::new();
+    borrowed.put(&mod_api::ModBlockEntityView::new(&mut entity));
+    assert!(owned.error().is_none());
+    assert!(borrowed.error().is_none());
+    assert_eq!(borrowed.bytes(), owned.bytes());
+    let mut reply = Writer::new();
+    mod_api::ModBlockEntityView::new(&mut entity).__wire_put_snapshot(&mut reply);
+    assert!(reply.error().is_none());
+    assert_eq!(reply.bytes(), owned.bytes());
+}
+#[test]
 fn wire_loopback_readonly_private_projection() {
     use horizon_core::nbt::Tag;
     struct Client;
@@ -401,8 +440,12 @@ fn wire_loopback_checked_append_is_atomic_and_bit_exact() {
             corrupt: false,
         }),
     )];
-    mod_api::__private::install_parts(&mods, &mod_api::__private::part_tests::rule_schema())
-        .unwrap();
+    mod_api::__private::install_parts(
+        &mods,
+        &mod_api::__private::part_tests::rule_schema(),
+        |_| false,
+    )
+    .unwrap();
     let holder = mod_api::LivingRef::new(mod_api::EntityRef::new(
         mod_api::NativeWorldEpoch::new(1),
         7,
@@ -637,6 +680,7 @@ fn wire_loopback_nested_tuple_reference_writes_back() {
 }
 thread_local! {
     static REGISTERED_ITEM:std::cell::Cell<Option<mod_api::ItemKey>> = const {std::cell::Cell::new(None)};
+    static REGISTERED_BLOCK:std::cell::Cell<Option<mod_api::BlockKey>> = const {std::cell::Cell::new(None)};
     static REGISTERED_EFFECT:std::cell::Cell<Option<mod_api::EffectKey>> = const {std::cell::Cell::new(None)};
     static APPEND_ATTACK:std::cell::Cell<u8> = const {std::cell::Cell::new(0)};
     static REGISTERED_KIND:std::cell::Cell<Option<mod_api::BlockEntityTypeKey>> = const {std::cell::Cell::new(None)};
@@ -650,8 +694,12 @@ fn install_counter() {
             corrupt: false,
         }),
     )];
-    mod_api::__private::install_parts(&mods, &mod_api::__private::part_tests::rule_schema())
-        .unwrap();
+    mod_api::__private::install_parts(
+        &mods,
+        &mod_api::__private::part_tests::rule_schema(),
+        |_| false,
+    )
+    .unwrap();
 }
 #[test]
 fn wire_loopback_registration_attaches_subscribed_part() {
@@ -668,6 +716,7 @@ fn wire_loopback_registration_attaches_subscribed_part() {
 #[test]
 fn wire_loopback_tagged_frame_enum_preserves_side() {
     use mod_api::BlockEntityPart;
+    install_counter();
     let index = guest::add_handler(vec![guest::view::<dyn mod_api::BlockEntityPart>(Arc::new(
         MachineBlock,
     ))]);
@@ -681,6 +730,7 @@ fn wire_loopback_tagged_frame_enum_preserves_side() {
     };
     let mut event = mod_api::BlockEntityEvent {
         block: "test:machine",
+        state: mod_api::BlockStateRecord::new(REGISTERED_BLOCK.get().unwrap(), 0).into(),
     };
     assert!(
         proxy
@@ -766,6 +816,9 @@ fn wire_loopback_returned_frame_resource_uses_source_permissions() {
         }
     }
     impl mod_api::GenerationContext for Start {
+        fn metadata(&self) -> &dyn mod_api::BlockMetadata {
+            unreachable!()
+        }
         fn random(&mut self) -> &mut dyn mod_api::StructureRandom {
             self
         }
@@ -799,7 +852,7 @@ fn wire_loopback_returned_frame_resource_uses_source_permissions() {
         fn column_has_valid_biome(&mut self, _: i32, _: i32, _: i32, _: i32) -> bool {
             unreachable!()
         }
-        fn config(&self) -> Arc<serde_json::Value> {
+        fn config(&self) -> Arc<mod_api::Tag> {
             unreachable!()
         }
     }

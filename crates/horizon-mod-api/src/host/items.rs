@@ -33,12 +33,12 @@ pub trait ItemsHost {
     /// component, the data pack's context int provider resolved), None where it is no fuel. API
     /// @API:item_components@.
     #[access(Metadata)]
-    fn item_burn_time(&self, item: &str) -> Option<i32>;
+    fn item_burn_time(&self, item: ItemKey) -> Option<i32>;
     /// Side: both.
     /// Item `item`'s chance to raise a composter's level (its `compostable` component's layers provider
     /// resolved), None where it is not compostable. API @API:item_components@.
     #[access(Metadata)]
-    fn item_compost_chance(&self, item: &str) -> Option<f32>;
+    fn item_compost_chance(&self, item: ItemKey) -> Option<f32>;
     /// Side: both.
     /// Whether enchantments `a` and `b` may share an item (`Enchantment.areCompatible`), by the
     /// world's enchantment definitions. API @API:item_components@.
@@ -76,7 +76,7 @@ pub trait ItemsClientHost {
     /// (`ServerboundSetCreativeModeSlot`): the selected slot first, then the
     /// hotbar, then the inventory. The count is cut to one stack.
     #[access(WorldOnly)]
-    fn give(&mut self, item: &str, count: u32) -> Result<(), String>;
+    fn give(&mut self, item: ItemKey, count: u32) -> Result<(), String>;
     /// Side: client.
     /// Registered enchantments, in registry order.
     #[access(ClientSetup)]
@@ -88,7 +88,7 @@ pub trait ItemsClientHost {
     /// Side: client.
     /// Whether enchantment `id` can go on `item` (`Enchantment.isSupportedItem`).
     #[access(ClientSetup)]
-    fn enchantment_supports(&self, id: &str, item: &str) -> bool;
+    fn enchantment_supports(&self, id: &str, item: ItemKey) -> bool;
 }
 /// The handles' reads of the `items` area, implemented by the game and reached through [`Backend`].
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
@@ -111,6 +111,14 @@ pub trait ItemsBackend {
     /// Side: both. The effective vanilla bar, before client drawing hooks.
     #[access(WorldOnly)]
     fn item_resource_bar(&self, stack: &ItemStack) -> Option<ItemBar>;
+    /// Side: client. The item's standard tooltip lines before mod callbacks or drawing.
+    #[access(WorldOnly)]
+    fn item_resource_tooltip(
+        &self,
+        stack: &ItemStack,
+        advanced: bool,
+        creative: bool,
+    ) -> Option<Vec<TooltipElement>>;
     /// Side: server.
     /// How many slots of the block entity at `at` its side reaches (none: every slot), by its
     /// `WorldlyContainer` rules: a furnace's top reaches its input only. None where no block
@@ -202,12 +210,29 @@ pub trait ItemsBackend {
     /// chested mount is not one): none for any other entity, and on a client.
     #[access(WorldOnly)]
     fn entity_automation_size(&self, entity: u32) -> Option<usize>;
+    /// Side: server.
+    /// How many equipment slots living entity `entity`'s [`ENTITY_ITEMS`](crate::ENTITY_ITEMS)
+    /// answers (#932, NeoForge's `LivingEntityEquipmentWrapper`): a mob's or an armor stand's
+    /// seven (main hand, off hand, feet, legs, chest, head and body, by `EquipmentSlot`'s
+    /// ordinal; the saddle is not automation's to move), none for any other entity, and on a
+    /// client.
+    #[access(WorldOnly)]
+    fn entity_equipment_size(&self, entity: u32) -> Option<usize>;
 }
 /// The handles' writes of the `items` area, implemented by the game and reached through [`BackendMut`].
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 #[horizon_mod_api_macros::host_area]
 pub trait ItemsBackendMut {
+    /// Side: server. Roll an enchantment result with the named level's random source.
+    #[access(WorldOnly)]
+    fn item_resource_enchant_randomly(
+        &mut self,
+        stack: &ItemStack,
+        level: LevelRef,
+        power: i32,
+        pool: &Identifier,
+    ) -> Result<Option<ItemStack>, StackWriteError>;
     /// Side: server.
     /// Puts up to `amount` of `resource` into slot `slot` of those `at`'s side reaches, as a hopper
     /// would (`canPlaceItem`, the slot's limit, the same item and components), in transaction

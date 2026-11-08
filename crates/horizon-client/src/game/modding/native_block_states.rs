@@ -4,10 +4,12 @@ use super::Game;
 use horizon_client::command::{Reader, args::Registries, block};
 use horizon_client::items::ItemStack;
 use horizon_world::chunk::BlockState;
+use horizon_world::fluid::FluidKind;
 use horizon_world::registry::{BlockRegistry, BlockStateId};
 use mod_api::{
     BlockEntityTypeKey, BlockKey, BlockSoundType, BlockStateRange, EffectKey, FluidDefinition,
-    FluidKey, FluidStateError, ItemKey, StateConstraint, StateMatchError, StateProperty,
+    FluidKey, FluidStateError, FluidTypeProperties, ItemKey, StateConstraint, StateMatchError,
+    StateProperty,
 };
 use std::sync::{Arc, Mutex};
 
@@ -27,6 +29,41 @@ impl Game<'_> {
         Some(FluidDefinition::World {
             default,
             properties,
+        })
+    }
+
+    /// A registered fluid's type properties: its block's light and name for a world fluid,
+    /// vanilla's `FluidTags.WATER` and `FluidTags.LAVA` behaviours by its family. None for a
+    /// key the registry doesn't hold.
+    pub(super) fn fluid_type_properties(&self, fluid: FluidKey) -> Option<FluidTypeProperties> {
+        let id = mod_api::__private::fluid_id(fluid)?;
+        let behaviours = self.res.behaviours();
+        let block = behaviours.fluid_definitions().get(id).map(|definition| {
+            self.res
+                .facts()
+                .get(behaviours.legacy_block(definition.default))
+        });
+        let description_id = match &block {
+            Some(block) => description_id("block", &block.name)?,
+            None => description_id("fluid_type", id)?,
+        };
+        let kind = FluidKind::from_name(id);
+        let water = kind.is_some_and(|kind| kind.same_family(FluidKind::Water));
+        let lava = kind.is_some_and(|kind| kind.same_family(FluidKind::Lava));
+        Some(FluidTypeProperties {
+            description_id,
+            light_level: block.map_or(0, |block| block.emission),
+            fall_distance_modifier: match (water, lava) {
+                (true, _) => 0.0,
+                (_, true) => 0.5,
+                _ => 1.0,
+            },
+            can_push_entity: water || lava,
+            can_swim: water,
+            can_drown: water,
+            can_extinguish: water,
+            can_hydrate: water,
+            supports_boating: water,
         })
     }
 
@@ -115,7 +152,7 @@ impl Game<'_> {
     /// `Block.defaultBlockState`, the one a block takes when nothing else
     /// says. None for an unknown block.
     pub(super) fn block_state_default(&self, block: BlockKey) -> Option<BlockStateId> {
-        Some(mod_api::__private::resolved_block(block)?.default)
+        super::api_values::default_state(block)
     }
     /// `BlockState.canBeReplaced()`: whether placing a block where this state stands
     /// replaces it (air, grass, water, snow layers). None for an unknown state.
@@ -156,8 +193,8 @@ impl Game<'_> {
 
     /// The properties of a resolved block, copied for the mod as plain data.
     pub(super) fn block_state_definition(&self, block: BlockKey) -> Option<Vec<StateProperty>> {
-        let resolved = mod_api::__private::resolved_block(block)?;
-        let state = self.pack.assets.registry.state(resolved.default)?;
+        let default = super::api_values::default_state(block)?;
+        let state = self.pack.assets.registry.state(default)?;
         let properties = self.pack.block_registries.blocks.get(&state.name)?;
         Some(
             properties
@@ -174,9 +211,9 @@ impl Game<'_> {
         block: BlockKey,
         constraints: &[StateConstraint],
     ) -> Option<Result<bool, StateMatchError>> {
-        let resolved = mod_api::__private::resolved_block(block)?;
+        let default = super::api_values::default_state(block)?;
         let registry = self.pack.assets.registry;
-        let target = registry.state(resolved.default)?;
+        let target = registry.state(default)?;
         let state = registry.state(state)?;
         let definition = self.pack.block_registries.blocks.get(&target.name)?;
         Some(match_state_properties(
@@ -202,10 +239,10 @@ impl Game<'_> {
 
     /// `Block.asItem`: the block's item name, including air for a block with
     /// no item; None if the block name is unknown.
-    pub(super) fn block_item(&self, block: BlockKey) -> Option<String> {
+    pub(super) fn block_item(&self, block: BlockKey) -> Option<mod_api::ItemKey> {
         let behaviours = self.res.behaviours();
-        let id = mod_api::__private::resolved_block(block)?.block;
-        Some(behaviours.block_data(id).item.to_string())
+        let id = super::api_values::behavior_block(block, behaviours)?;
+        mod_api::__private::item_key(&behaviours.block_data(id).item)
     }
 }
 
@@ -278,6 +315,12 @@ pub(super) fn serialize(state: &BlockState) -> String {
     format!("{}[{}]", state.name, properties.join(","))
 }
 
+/// `Util.makeDescriptionId`: `<kind>.<namespace>.<path>`, `/` in the path as `.`.
+fn description_id(kind: &str, id: &str) -> Option<String> {
+    let (namespace, path) = id.split_once(':')?;
+    Some(format!("{kind}.{namespace}.{}", path.replace('/', ".")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,14 +370,77 @@ mod tests {
             );
             assert_eq!(
                 host.block_item(mod_api::__private::part_tests::block_key("minecraft:stone"))
-                    .as_deref(),
+                    .and_then(mod_api::__private::item_key_id),
                 Some("minecraft:stone")
             );
             assert_eq!(
                 host.block_item(mod_api::__private::part_tests::block_key("minecraft:water"))
-                    .as_deref(),
+                    .and_then(mod_api::__private::item_key_id),
                 Some("minecraft:air")
             );
+        });
+    }
+
+    #[test]
+    fn description_ids_write_a_path_separator_as_a_dot() {
+        assert_eq!(
+            super::description_id("fluid_type", "ruby:molten/iron").as_deref(),
+            Some("fluid_type.ruby.molten.iron")
+        );
+        assert_eq!(super::description_id("block", "no_namespace"), None);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn fluid_type_properties_answer_each_fluid_family() {
+        use mod_api::{Host, HostFluidStates};
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let host: &dyn Host = game;
+            let service = host.fluid_states();
+            let read = |id| {
+                service
+                    .type_properties(host.fluid_key(id).unwrap())
+                    .unwrap()
+            };
+            let water = FluidTypeProperties {
+                description_id: "block.minecraft.water".into(),
+                light_level: 0,
+                fall_distance_modifier: 0.0,
+                can_push_entity: true,
+                can_swim: true,
+                can_drown: true,
+                can_extinguish: true,
+                can_hydrate: true,
+                supports_boating: true,
+            };
+            let lava = FluidTypeProperties {
+                description_id: "block.minecraft.lava".into(),
+                light_level: 15,
+                fall_distance_modifier: 0.5,
+                can_push_entity: true,
+                can_swim: false,
+                can_drown: false,
+                can_extinguish: false,
+                can_hydrate: false,
+                supports_boating: false,
+            };
+            let inert = |description_id: &str| FluidTypeProperties {
+                description_id: description_id.into(),
+                light_level: 0,
+                fall_distance_modifier: 1.0,
+                can_push_entity: false,
+                ..lava.clone()
+            };
+            assert_eq!(read("minecraft:water"), water);
+            assert_eq!(read("minecraft:flowing_water"), water);
+            assert_eq!(read("minecraft:lava"), lava);
+            assert_eq!(read("minecraft:flowing_lava"), lava);
+            assert_eq!(read("minecraft:empty"), inert("block.minecraft.air"));
+            assert_eq!(
+                read("horizon:definition_test"),
+                inert("fluid_type.horizon.definition_test")
+            );
+            assert_eq!(host.fluid_key("minecraft:no_such_fluid"), None);
         });
     }
 
@@ -533,39 +639,28 @@ mod tests {
 
     #[test]
     fn a_block_key_resolves_its_default_state() {
-        use mod_api::__private::{ResolvedBlock, part_tests, resolve_blocks, resolved_block};
+        use mod_api::__private::part_tests;
         let (_, registry) = blocks();
         mod_api::__private::install(Default::default());
         crate::game::api_values::register_game_keys([
             "minecraft:oak_stairs".to_owned(),
             "minecraft:wheat".to_owned(),
         ]);
-        resolve_blocks(|id| {
-            let default = registry.default_state(id)?;
-            Some(ResolvedBlock {
-                default,
-                states: horizon_world::registry::BlockStateRange::new(default, 1),
-                block: horizon_world::level::states::BlockId(0),
-            })
-        })
-        .unwrap();
+        crate::game::api_values::resolve_block_definitions(registry).unwrap();
         assert_eq!(
-            resolved_block(part_tests::block_key("oak_stairs"))
-                .unwrap()
-                .default,
+            crate::game::api_values::default_state(part_tests::block_key("oak_stairs")).unwrap(),
             BlockStateId(1)
         );
         assert_eq!(
-            resolved_block(part_tests::block_key("minecraft:wheat"))
-                .unwrap()
-                .default,
+            crate::game::api_values::default_state(part_tests::block_key("minecraft:wheat"))
+                .unwrap(),
             BlockStateId(5)
         );
         // A valid key has no mapping on a different owning thread. Raw unknown slots are
         // refused by the generated host boundary, not revalidated by typed operations.
         let key = part_tests::block_key("minecraft:wheat");
         assert!(
-            std::thread::spawn(move || resolved_block(key))
+            std::thread::spawn(move || crate::game::api_values::default_state(key))
                 .join()
                 .unwrap()
                 .is_none()
@@ -575,13 +670,22 @@ mod tests {
 
 #[cfg(test)]
 mod facts_tests {
-    use mod_api::{BlockStateId, HostBlockStates};
+    use crate::game::api_values::TryIntoApi;
+    use mod_api::{BlockStateRecord, HostBlockStates};
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn block_state_facts_read_vanillas_tables_through_the_host() {
         super::super::native_entity_refs::tests::with_game(|game| {
-            let state = |name: &str| game.pack.assets.registry.default_state(name).unwrap();
+            let state = |name: &str| {
+                game.pack
+                    .assets
+                    .registry
+                    .default_state(name)
+                    .unwrap()
+                    .try_into_api()
+                    .unwrap()
+            };
             let (stone, obsidian, bedrock) = (
                 state("minecraft:stone"),
                 state("minecraft:obsidian"),
@@ -616,8 +720,7 @@ mod facts_tests {
                 ))
                 .unwrap();
             assert_eq!(range.len(), 80);
-            use crate::game::api_values::TryIntoApi;
-            assert!(range.contains(stairs.try_into_api().unwrap()));
+            assert!(range.contains(stairs));
             let key = mod_api::__private::part_tests::block_key("minecraft:oak_stairs");
             assert!(range.iter().all(|state| state.block() == key));
             assert_eq!(
@@ -631,12 +734,12 @@ mod facts_tests {
                 facts
                     .states_of(mod_api::__private::part_tests::block_key("minecraft:stone"))
                     .map(|r| (r.first(), r.len())),
-                Some((stone.try_into_api().unwrap(), 1))
+                Some((stone, 1))
             );
-            // Unknown state ids: None.
-
-            assert_eq!(facts.destroy_speed(BlockStateId(u32::MAX)), None);
-            assert_eq!(facts.sound(BlockStateId(u32::MAX)), None);
+            // A forged local ordinal refuses at the generated Game crossing.
+            let invalid = BlockStateRecord::new(stone.block(), u16::MAX).into();
+            assert_eq!(facts.destroy_speed(invalid), None);
+            assert_eq!(facts.sound(invalid), None);
         });
     }
 }

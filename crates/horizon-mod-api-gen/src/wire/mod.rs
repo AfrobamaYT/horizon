@@ -26,6 +26,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "DrawContext",
     "BlockEntityDrawContext",
     "WorldDrawContext",
+    "CameraDrawContext",
     "LevelHost",
     "LevelRandomHost",
     "LevelTicksHost",
@@ -126,6 +127,7 @@ const EXPORTS: &[&str] = &[
     "TooltipAppender",
     "CriterionTest",
     "RowPages",
+    "RowFunction",
 ];
 
 /// Every exported trait: [`EXPORTS`], then the handler traits `mod_api`'s capability keys name
@@ -139,7 +141,7 @@ pub(super) fn exports() -> &'static [&'static str] {
 /// another mod's provider): the mod calls one through the `held-<interface>` imports, by the
 /// index the game keeps it under.
 pub(super) fn held(owner: &str) -> bool {
-    ["PlaceProvider", "RowPages"].contains(&owner)
+    ["PlaceProvider", "RowPages", "RowFunction"].contains(&owner)
         || (exports().contains(&owner) && !EXPORTS.contains(&owner))
 }
 
@@ -578,6 +580,8 @@ fn layout(surface: &Surface<'_>) -> u64 {
     feed(
         "resource generation zero reserved; Any identity zero is Unsupported/cross-group capability",
     );
+    // The group's mods share one handler table, which lives in a word of the std member.
+    feed("handler table: one per group, in the std member's horizon_handler_table");
     for method in &surface.methods {
         feed(&format!("{method:?}"));
     }

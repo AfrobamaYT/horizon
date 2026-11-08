@@ -31,7 +31,7 @@ pub trait DrawContext {
     /// Item `item`'s icon drawn with model `model` (`minecraft:paper` as
     /// `mymod:wheel_icon`, an `item_model` of a content mod's), as `native_item`
     /// draws one; false for an unknown item.
-    fn item_model(&mut self, item: &str, model: &str, at: [f32; 2], size: f32) -> bool {
+    fn item_model(&mut self, item: ItemKey, model: &str, at: [f32; 2], size: f32) -> bool {
         unimplemented!("DrawContext::item_model")
     }
     /// A quad of corners `points` (in order round it) in GUI pixels, `argb`:
@@ -53,7 +53,7 @@ pub trait DrawContext {
     }
     /// Item `item`'s icon (`mymod:machine`) with its top left at `at`,
     /// `size` GUI pixels square (16 in a slot); false for an unknown item.
-    fn item(&mut self, item: &str, at: [f32; 2], size: f32) -> bool {
+    fn item(&mut self, item: ItemKey, at: [f32; 2], size: f32) -> bool {
         unimplemented!("DrawContext::item")
     }
     /// A line of text at `(x, y)` in GUI pixels, in `argb` as vanilla's `GuiGraphics` takes it
@@ -68,7 +68,8 @@ pub trait DrawContext {
         unimplemented!("DrawContext::item_stack")
     }
     /// Paint GUI extraction calls through this window's atlas, including player faces.
-    fn gui_paint(&mut self, draws: &[GuiDraw]) {
+    /// Refuses text deeper than 512 component nodes before applying any changes.
+    fn gui_paint(&mut self, draws: &[GuiDraw]) -> Result<(), TextFormError> {
         unimplemented!("DrawContext::gui_paint")
     }
     /// Vanilla's nine-slice widget rendering. `color` is ARGB, as `fill` uses.
@@ -76,7 +77,8 @@ pub trait DrawContext {
         unimplemented!("DrawContext::gui_nine_slice")
     }
     /// A vanilla tooltip at the cursor, in GUI pixels.
-    fn gui_tooltip(&mut self, lines: &[Text], at: [f32; 2]) {
+    /// Refuses text deeper than 512 component nodes before applying any changes.
+    fn gui_tooltip(&mut self, lines: &[Text], at: [f32; 2]) -> Result<(), TextFormError> {
         unimplemented!("DrawContext::gui_tooltip")
     }
     /// The width of `text` in GUI pixels, as `native_text` draws it on `draw` (`Font.width`).
@@ -127,7 +129,14 @@ pub trait DrawContext {
     /// grey when not `active`), scrolling when it doesn't fit, and recorded for the narrator and
     /// a controller's focus. `rect` is `[x, y, w, h]` in GUI pixels. What
     /// [`crate::widgets::Widgets`] draws its buttons with.
-    fn widget_button(&mut self, rect: [f32; 4], label: &Text, active: bool, highlighted: bool) {
+    /// Refuses text deeper than 512 component nodes before applying any changes.
+    fn widget_button(
+        &mut self,
+        rect: [f32; 4],
+        label: &Text,
+        active: bool,
+        highlighted: bool,
+    ) -> Result<(), TextFormError> {
         unimplemented!("DrawContext::widget_button")
     }
     /// A text field as the game's screens draw one (`EditBox`): its text from the first
@@ -221,7 +230,7 @@ pub trait BlockEntityDrawContext {
     /// an entity's place: a block's baked model, with its default tints. A
     /// moving part that is no block is a standalone model
     /// (`native_draw_model`). False for an unknown block or property.
-    fn block(&mut self, block: &str, properties: &[(&str, &str)]) -> bool {
+    fn block(&mut self, block: BlockKey, properties: &[(&str, &str)]) -> bool {
         unimplemented!("BlockEntityDrawContext::draw_block")
     }
     /// Draws `stack` under `draw`'s pose as an item is drawn in the world
@@ -272,7 +281,15 @@ pub trait BlockEntityDrawContext {
     /// `draw.light`; a nonzero 0xRRGGBB `outline` rings each glyph, as glowing
     /// sign text's. Returns the width drawn, in font pixels: centre a line
     /// by starting it at minus half its width. API @API:draw_text@.
-    fn text(&mut self, text: &Text, at: [f32; 2], color: u32, glowing: bool, outline: u32) -> f32 {
+    /// Refuses text deeper than 512 component nodes before applying any changes.
+    fn text(
+        &mut self,
+        text: &Text,
+        at: [f32; 2],
+        color: u32,
+        glowing: bool,
+        outline: u32,
+    ) -> Result<f32, TextFormError> {
         unimplemented!("BlockEntityDrawContext::draw_text")
     }
     /// The width of `text` in font pixels, as `draw_text` draws it, to centre a
@@ -296,10 +313,32 @@ pub trait BlockEntityDrawContext {
         unimplemented!("BlockEntityDrawContext::draw_model_part")
     }
 }
+/// What `block_screen_effect_draw` draws with, one per hook call: quads in camera space, in
+/// blocks, with `+x` right, `+y` up and the camera at the origin looking down `-z`. It is the
+/// space of `ScreenEffectRenderer`'s own quads, whose whole-view quad has corners at `(±1, ±1, -0.5)`,
+/// under the first-person hand's projection. Quads draw in the order given, after the level and
+/// the hand and before the GUI, alpha-blended with no depth test; give corners in order round the quad.
+pub trait CameraDrawContext {
+    /// A quad of corners `corners` in solid `argb`. False, with nothing drawn, for a coordinate
+    /// that is not finite.
+    fn quad(&mut self, corners: [[f32; 3]; 4], argb: u32) -> bool {
+        unimplemented!("CameraDrawContext::quad")
+    }
+    /// A quad of corners `corners` showing sprite `name` of the game's 2D atlas (`block/fire_1`,
+    /// `misc/underwater`), with `uv` the texture coordinates of each corner in sprite units (0 to
+    /// 1 is the sprite once; beyond that it repeats), every texel multiplied by `argb`. False,
+    /// with nothing drawn, when there is no such sprite or a coordinate is not finite.
+    fn sprite(&mut self, name: &str, corners: [[f32; 3]; 4], uv: [[f32; 2]; 4], argb: u32) -> bool {
+        unimplemented!("CameraDrawContext::sprite")
+    }
+}
 /// Per-view untextured geometry, cleared even without listeners; `usage` reports fixed setup-time limits shared across listeners and depth modes.
 pub trait WorldDrawContext {
     /// Draw a retained group once per view, with per-view culling and the batch route rules.
     /// Repeated submissions in one view are ignored. Only visible copies consume its budget.
+    /// The shared limit is 16,384 visible copies and 16,384 groups per view. Refusal is atomic.
+    /// Shader packs and overlays use the same CPU path as transient model batches.
+    /// Retired or foreign groups return [`GroupError::Stale`], even if drawn earlier this view.
     fn draw_instance_group(&mut self, group: InstanceGroupRef) -> Result<(), GroupError> {
         unimplemented!("WorldDrawContext::draw_instance_group")
     }

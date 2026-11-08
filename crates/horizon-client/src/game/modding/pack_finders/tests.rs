@@ -250,6 +250,17 @@ fn refused_registrations_leave_the_repository_unchanged() {
     };
     let valid = format!("packmod:{ASSET_PACK}");
     registry.add_pack_finders(entry(&valid)).unwrap();
+    let mut refused = entry("packmod:missing");
+    let mut title = mod_api::Text::literal("leaf");
+    for _ in 1..513 {
+        title = mod_api::Text::literal("parent").append(title);
+    }
+    refused.title = title;
+    assert_eq!(
+        registry.add_pack_finders(refused),
+        Err(PackFinderError::Text(mod_api::TextFormError::TooDeep))
+    );
+    assert_eq!(registry.packs.len(), 1);
     for (path, error) in [
         (valid.as_str(), PackFinderError::Duplicate),
         ("packmod:../outside", PackFinderError::InvalidPath),
@@ -443,6 +454,7 @@ fn a_mods_pack_is_on_the_screen_and_applies_through_client_reload() {
                 &[],
                 &game.mods,
                 game.register_client_reload_listeners(),
+                &[],
                 &game.pack.assets,
                 &game.res,
                 &game.worker_context(),
@@ -477,6 +489,7 @@ fn a_mods_pack_is_on_the_screen_and_applies_through_client_reload() {
                     &[],
                     &game.mods,
                     listeners,
+                    &[],
                     &game.pack.assets,
                     &game.res,
                     &game.worker_context(),

@@ -13,6 +13,9 @@ pub struct ModBlockEntity {
     pub(crate) id: String,
     pub(crate) fields: ModBlockEntityFields,
     pub(crate) revision: ModRevision,
+    /// What a callback asked for with `ModBlockEntityView::set_client_update_fields`, on its
+    /// way to the runtime's queue. The queue itself never reaches a snapshot.
+    pub(crate) client_update_fields: Option<Compound>,
 }
 /// What a `ModBlockEntity` can change: its saved compound without `id`,
 /// `x`, `y`, `z` and `Items`, its item slots
@@ -28,6 +31,8 @@ pub struct ModBlockEntityFields {
 }
 /// Which contents a `ModBlockEntity` has had: one per entity made (a clone
 /// is another), counted on by each change. Equal revisions, equal contents.
+/// Rejected callback writebacks also advance the engine revision to invalidate stale copies;
+/// this may cause one extra client redraw even though the fields were retained.
 /// Neither saved nor compared.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
@@ -41,6 +46,7 @@ pub struct ModBlockEntitySnapshot {
     pub(crate) id: String,
     pub(crate) fields: ModBlockEntityFields,
     pub(crate) revision: ModRevision,
+    pub(crate) client_update_fields: Option<Compound>,
 }
 impl From<&ModBlockEntity> for ModBlockEntitySnapshot {
     fn from(entity: &ModBlockEntity) -> Self {
@@ -48,6 +54,7 @@ impl From<&ModBlockEntity> for ModBlockEntitySnapshot {
             id: entity.id.clone(),
             fields: entity.fields.clone(),
             revision: entity.revision,
+            client_update_fields: entity.client_update_fields.clone(),
         }
     }
 }
@@ -57,6 +64,7 @@ impl From<ModBlockEntitySnapshot> for ModBlockEntity {
             id: snapshot.id,
             fields: snapshot.fields,
             revision: snapshot.revision,
+            client_update_fields: snapshot.client_update_fields,
         }
     }
 }
@@ -66,6 +74,7 @@ impl ModBlockEntity {
         if self.fields != snapshot.fields {
             *std::ops::DerefMut::deref_mut(self) = snapshot.fields;
         }
+        self.client_update_fields = snapshot.client_update_fields;
     }
 }
 
@@ -96,7 +105,14 @@ impl ModBlockEntity {
             id,
             fields,
             revision,
+            client_update_fields: None,
         }
+    }
+
+    // hidden: the game moves what a callback asked for to the runtime's queue
+    #[doc(hidden)]
+    pub fn client_update_fields(&self) -> Option<&Compound> {
+        self.client_update_fields.as_ref()
     }
 
     pub fn new(id: String, fields: ModBlockEntityFields) -> Self {
@@ -107,6 +123,7 @@ impl ModBlockEntity {
                 born: horizon_mod_runtime::block_entities::new_identity(),
                 changes: 0,
             },
+            client_update_fields: None,
         }
     }
     /// The block entity's immutable type id (`mymod:machine`).
@@ -267,6 +284,50 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_preserves_negative_zero_writes() {
+        for (positive, negative) in [
+            (
+                Tag::Float(0.0f32.to_bits()),
+                Tag::Float((-0.0f32).to_bits()),
+            ),
+            (
+                Tag::Double(0.0f64.to_bits()),
+                Tag::Double((-0.0f64).to_bits()),
+            ),
+        ] {
+            let mut entity = ModBlockEntity::default();
+            entity.nbt.insert("value".into(), positive);
+            let before = entity.revision();
+            let mut snapshot = ModBlockEntitySnapshot::from(&entity);
+            snapshot.fields.nbt.insert("value".into(), negative.clone());
+            entity.apply_snapshot(snapshot);
+            assert_eq!(entity.nbt.get(&"value".into()), Some(&negative));
+            assert_ne!(entity.revision(), before);
+        }
+    }
+
+    #[test]
+    fn unchanged_nan_snapshots_do_not_advance_revision() {
+        let mut entity = ModBlockEntity::default();
+        entity.nbt.insert("float".into(), Tag::Float(0x7fc0_0123));
+        entity
+            .nbt
+            .insert("double".into(), Tag::Double(0x7ff8_0000_0000_0123));
+        let before = entity.revision();
+        for _ in 0..20 {
+            entity.apply_snapshot(ModBlockEntitySnapshot::from(&entity));
+            assert_eq!(entity.revision(), before);
+        }
+        let mut snapshot = ModBlockEntitySnapshot::from(&entity);
+        snapshot
+            .fields
+            .nbt
+            .insert("float".into(), Tag::Float(0x7fc0_0124));
+        entity.apply_snapshot(snapshot);
+        assert_ne!(entity.revision(), before);
+    }
+
+    #[test]
     fn returned_snapshot_changes_only_fields_and_keeps_native_revision_bookkeeping() {
         let mut entity = ModBlockEntity::new("test:machine".into(), Default::default());
         let revision = entity.revision();
@@ -284,6 +345,25 @@ mod tests {
         assert_ne!(entity.revision(), revision);
         let restored = ModBlockEntity::from(ModBlockEntitySnapshot::from(&entity));
         assert_eq!(restored.revision(), entity.revision());
+    }
+
+    #[test]
+    fn client_update_fields_come_back_with_a_snapshot_and_change_nothing_else() {
+        let mut entity = ModBlockEntity::new("test:machine".into(), Default::default());
+        let revision = entity.revision();
+        let batch = Compound::from([("effect".into(), Tag::Int(23))]);
+        crate::ModBlockEntityView::new(&mut entity).set_client_update_fields(batch.clone());
+        assert_eq!(entity.revision(), revision);
+        assert_eq!(entity.clone().client_update_fields(), None);
+        let snapshot = ModBlockEntitySnapshot::from(&entity);
+        let mut returned = ModBlockEntity::from_snapshot(
+            entity.id().to_owned(),
+            ModBlockEntityFields::default(),
+            revision,
+        );
+        returned.apply_snapshot(snapshot);
+        assert_eq!(returned.client_update_fields(), Some(&batch));
+        assert_eq!(returned.revision(), revision);
     }
 
     #[test]

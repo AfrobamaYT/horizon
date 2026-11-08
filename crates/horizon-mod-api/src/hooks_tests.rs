@@ -96,15 +96,8 @@ fn eager_subscribers_are_shared_across_dispatch_threads() {
         [1]
     );
     let barrier = Barrier::new(2);
-    let load = horizon_world::native_load_context::LoadContext::new(
-        horizon_world::native_load_context::DataLoadOrigin::ServerDataLoad,
-        std::sync::Arc::new(horizon_world::native_load_context::LoadInputs::new(
-            Default::default(),
-            std::path::PathBuf::new(),
-        )),
-        [],
-    );
-    let context = crate::OwningLoad::new(&load);
+    let load = crate::phase::TestReader::default();
+    let context = crate::OwningLoad::new(crate::DataLoadOrigin::ServerDataLoad, &load);
     let context = &context;
     std::thread::scope(|scope| {
         for _ in 0..2 {
@@ -362,6 +355,25 @@ fn server_inventory_operations_take_a_server_host(
         player.drop_stack(host, stack, false),
         menu.close_container(host),
     )
+}
+
+/// Compile-only: the world data, tick, sky and sight queries as a mod calls them, the reads on any
+/// host and the writes (which move the level's random or its saved data) on a server host.
+#[allow(dead_code)]
+fn world_data_and_tick_queries_take_their_hosts(
+    read: &dyn Host,
+    server: &mut dyn ServerHost,
+    level: LevelRef,
+) {
+    let _: Option<RespawnData> = level.respawn_data(read);
+    let _: Option<MapState> = level.map_data(read, 0);
+    let _: Option<bool> = level.can_see_sky(read, [0, 64, 0]);
+    let _: Option<bool> = level.line_of_sight(read, [0.0, 65.0, 0.0], [8.0, 65.0, 0.0]);
+    let _: bool = level.set_respawn_data(server, [0, 64, 0], 90.0, 0.0);
+    let _: bool = level.set_map_data(server, 0, &[0; 128 * 128]);
+    let _: bool = level.block_tick(server, [0, 64, 0]);
+    let _: bool = level.block_random_tick(server, [0, 64, 0]);
+    let _: Option<[i32; 3]> = level.lightning_target(server, [0, 64, 0]);
 }
 
 /// Compile-only: the level queries as a mod calls them, the reads on any host and the drop
