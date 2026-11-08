@@ -255,6 +255,7 @@ pub(crate) fn atomic_write(path: &Path, contents: String) -> Result<(), String> 
         })
 }
 
+/// The `number`th candidate temporary name for `path`, in the same directory.
 fn temporary_path(path: &Path, number: u64) -> PathBuf {
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     path.with_file_name(format!(".{name}.{}.{number}.tmp", std::process::id()))
@@ -501,40 +502,62 @@ pub fn load(dir: &Path, revision: &str) -> Result<Vec<ListedInternal>, String> {
 mod tests {
     use super::*;
 
-    fn scratch(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("horizon-mod-atomic-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        dir
+    /// A fresh directory under the system temp dir, removed on drop (also when a test panics).
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(name: &str) -> Self {
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            let unique = format!(
+                "horizon-mod-atomic-{name}-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            );
+            let dir = std::env::temp_dir().join(unique);
+            // `create_dir` fails on an existing path, a symlink included.
+            fs::create_dir(&dir).unwrap();
+            Self(dir)
+        }
+    }
+
+    impl std::ops::Deref for Scratch {
+        type Target = Path;
+
+        fn deref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
     }
 
     #[test]
     fn atomic_write_replaces_contents_and_leaves_no_temporary_file() {
-        let dir = scratch("replace");
+        let dir = Scratch::new("replace");
         let path = dir.join("horizon-mod.toml");
         atomic_write(&path, "first".into()).unwrap();
         atomic_write(&path, "second".into()).unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), "second");
-        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
-        fs::remove_dir_all(dir).unwrap();
+        assert_eq!(fs::read_dir(&*dir).unwrap().count(), 1);
     }
 
     #[test]
     fn atomic_write_ignores_files_planted_at_the_old_temporary_name() {
-        let dir = scratch("planted");
+        let dir = Scratch::new("planted");
         let path = dir.join("horizon-mod.toml");
         let planted = dir.join("horizon-mod.toml.sync");
         fs::write(&planted, "planted").unwrap();
         atomic_write(&path, "written".into()).unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), "written");
         assert_eq!(fs::read_to_string(&planted).unwrap(), "planted");
-        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
     fn create_temporary_skips_names_that_already_exist() {
-        let dir = scratch("skip");
+        let dir = Scratch::new("skip");
         let path = dir.join("horizon-mod.toml");
         fs::write(temporary_path(&path, 7), "taken").unwrap();
         let (temporary, file) = create_temporary(&path, 7).unwrap();
@@ -544,25 +567,41 @@ mod tests {
             fs::read_to_string(temporary_path(&path, 7)).unwrap(),
             "taken"
         );
-        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
     fn create_temporary_gives_up_when_every_name_is_taken() {
-        let dir = scratch("exhausted");
+        let dir = Scratch::new("exhausted");
         let path = dir.join("horizon-mod.toml");
         for number in 0..TEMPORARY_ATTEMPTS {
             fs::write(temporary_path(&path, number), "taken").unwrap();
         }
         let error = create_temporary(&path, 0).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
-        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn atomic_write_removes_its_temporary_file_when_the_rename_fails() {
+        let dir = Scratch::new("rename-fails");
+        let path = dir.join("horizon-mod.toml");
+        // A non-empty directory at `path` cannot be replaced by a file.
+        fs::create_dir(&path).unwrap();
+        fs::write(path.join("keep"), "keep").unwrap();
+        assert!(atomic_write(&path, "x".into()).is_err());
+        assert!(fs::read_dir(&*dir).unwrap().all(|entry| {
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".tmp")
+        }));
+        assert_eq!(fs::read_to_string(path.join("keep")).unwrap(), "keep");
     }
 
     #[cfg(unix)]
     #[test]
     fn atomic_write_does_not_follow_symlinks_at_temporary_names() {
-        let dir = scratch("symlink");
+        let dir = Scratch::new("symlink");
         let path = dir.join("horizon-mod.toml");
         let referent = dir.join("referent");
         let dangling = dir.join("dangling");
@@ -578,7 +617,6 @@ mod tests {
         assert_eq!(fs::read_to_string(&path).unwrap(), "written");
         assert_eq!(fs::read_to_string(&referent).unwrap(), "keep");
         assert!(!dangling.exists());
-        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
