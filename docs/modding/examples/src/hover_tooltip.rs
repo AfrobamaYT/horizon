@@ -17,10 +17,12 @@ impl Hooks for HoverTooltip {
             return Flow::Continue;
         };
         let lines = [Text::literal(format!("{id} x{count}"))];
-        event
-            .draw
-            .gui_tooltip(&lines, [event.x as f32, event.y as f32]);
-        Flow::Cancel
+        let at = [event.x as f32, event.y as f32];
+        // If the lines don't go through, the game draws the hover as usual.
+        match event.draw.gui_tooltip(&lines, at) {
+            Ok(()) => Flow::Cancel,
+            Err(_) => Flow::Continue,
+        }
     }
 }
 // ANCHOR_END: hover_tooltip
