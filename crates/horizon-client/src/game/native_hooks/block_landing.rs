@@ -15,7 +15,7 @@ impl HitLevel<'_> {
     /// `fall_distance` blocks. `movement` is the movement the bounce leaves it, before
     /// vanilla sets it: change it to change what the entity keeps. Players and mobs bounce
     /// here; dropped items and the other entities do not yet.
-    pub(in crate::game) fn native_bounce_on(&mut self, call: mod_api::__private::BounceOnCall<'_>) {
+    pub(in crate::game) fn native_bounce_on(&mut self, call: super::fire::BounceOnCall<'_>) {
         self.fire_bounce_on(call);
     }
 }

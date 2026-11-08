@@ -215,6 +215,10 @@ impl Game<'_> {
             e.leash = self.boat_leash_link(b, &guests);
             e.velocity = [b.velocity.x, b.velocity.y, b.velocity.z];
             vehicle_meta(&mut e, b.hurt_time, b.hurt_dir, b.damage);
+            if b.fire_ticks > 0 {
+                e.meta.push((0, serializer::BYTE, Value::Byte(1)));
+            }
+
             // AbstractBoat.DATA_ID_PADDLE_LEFT and DATA_ID_PADDLE_RIGHT.
             // Omitted false values must reset clients that saw a true value,
             // including when the controlling passenger dismounts mid-stroke.
@@ -917,7 +921,7 @@ impl Game<'_> {
         // DATA_WAITING for its 20-tick wait, and DATA_PARTICLE): the
         // client draws them from these (`tick_remote_clouds`).
         let breath = hub.particle(
-            &mod_api::particles::ParticleOptions::simple(
+            &horizon_client::particles::ParticleOptions::simple(
                 horizon_client::particles::ParticleType::DragonBreath,
             ),
             None,

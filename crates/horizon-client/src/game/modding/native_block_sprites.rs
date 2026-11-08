@@ -14,9 +14,18 @@ impl Game<'_> {
     /// its tint source and whether it is cut out, translucent or animated; its particle sprite; whether it is a plain
     /// cube. None for a block the game does not know. The model is the state's first random variant. API
     /// 380.
-    pub(super) fn block_sprites(&self, blocks: &[&str]) -> Vec<Option<BlockSprites>> {
+    pub(super) fn block_sprites(
+        &self,
+        blocks: &[horizon_world::registry::BlockStateId],
+    ) -> Vec<Option<BlockSprites>> {
         let lookup = self.native_sprite_lookup();
-        blocks.iter().map(|block| lookup.block(block)).collect()
+        blocks
+            .iter()
+            .map(|state| {
+                self.pack.context.assets.registry.state(*state)?;
+                Some(lookup.state(*state))
+            })
+            .collect()
     }
     /// For a client mod: each texture's sprite by name (`minecraft:block/stone`, `block/stone`), none for one no
     /// model uses. API 380.
@@ -81,8 +90,9 @@ impl Game<'_> {
 #[cfg(test)]
 mod texture_atlas_stitched_tests {
     use mod_api::{
-        AtlasRegion, ClientHost, Hooks, Identifier, ModEntry, SpriteRef, TextureAtlas,
-        TextureAtlasStitchedEvent, testing::with_mods,
+        AtlasRegion, ClientHost, Hooks, Identifier, ModEntry, RegisterRuntimeSpritesEvent,
+        RegistrationContext, RuntimeSprite, SpriteRef, TextureAtlas, TextureAtlasStitchedEvent,
+        testing::with_mods,
     };
     use std::sync::{Arc, Mutex};
 
@@ -92,10 +102,35 @@ mod texture_atlas_stitched_tests {
         atlases: Vec<TextureAtlas>,
         stone: Option<SpriteRef>,
         slot: Option<AtlasRegion>,
+        registrations: u32,
+        runtime_block: Option<SpriteRef>,
+        runtime_gui: Option<AtlasRegion>,
     }
     struct Keeper(Arc<Mutex<Kept>>);
     #[mod_api::__subscriptions]
     impl Hooks for Keeper {
+        fn register_runtime_sprites(
+            &self,
+            _: &RegistrationContext,
+            event: &mut RegisterRuntimeSpritesEvent<'_>,
+        ) {
+            use crate::game::client_reload::fixture_png;
+            let mut kept = self.0.lock().unwrap();
+            kept.registrations += 1;
+            if kept.registrations == 1 {
+                event.sprites.push(RuntimeSprite {
+                    atlas: TextureAtlas::Blocks,
+                    id: id("keeper:block/marker"),
+                    png: fixture_png(2, 2, 32),
+                });
+            }
+            event.sprites.push(RuntimeSprite {
+                atlas: TextureAtlas::Gui,
+                id: id("keeper:gui/marker"),
+                png: fixture_png(kept.registrations + 2, 3, 64),
+            });
+        }
+
         fn texture_atlas_stitched(
             &self,
             host: &mut dyn ClientHost,
@@ -106,8 +141,12 @@ mod texture_atlas_stitched_tests {
             match event.atlas {
                 TextureAtlas::Blocks => {
                     kept.stone = host.texture_sprites(&["minecraft:block/stone"])[0];
+                    kept.runtime_block = host.texture_sprites(&["keeper:block/marker"])[0];
                 }
-                TextureAtlas::Gui => kept.slot = host.gui_sprite(&id("gui/sprites/container/slot")),
+                TextureAtlas::Gui => {
+                    kept.slot = host.gui_sprite(&id("gui/sprites/container/slot"));
+                    kept.runtime_gui = host.gui_sprite(&id("keeper:gui/marker"));
+                }
                 _ => {}
             }
         }
@@ -133,6 +172,11 @@ mod texture_atlas_stitched_tests {
                     let kept = kept.lock().unwrap();
                     assert_eq!(kept.atlases, [TextureAtlas::Blocks, TextureAtlas::Gui]);
                     assert!(kept.stone.is_some(), "stone is in the block arrays");
+                    assert!(
+                        kept.runtime_block.is_some(),
+                        "no model references this block sprite"
+                    );
+                    assert_eq!(kept.runtime_gui.map(|sprite| sprite.size), Some([3, 3]));
                     let slot = kept.slot.expect("the slot sprite is in the GUI atlas");
                     assert_eq!(slot.size, [18, 18], "the slot's own pixels");
                     let [u0, v0, u1, v1] = slot.uv;
@@ -160,6 +204,12 @@ mod texture_atlas_stitched_tests {
                 }
                 let kept = kept.lock().unwrap();
                 assert_eq!(kept.atlases, [TextureAtlas::Blocks, TextureAtlas::Gui]);
+                assert_eq!(kept.registrations, 2);
+                assert!(
+                    kept.runtime_block.is_none(),
+                    "omitted sprite leaves the new atlas"
+                );
+                assert_eq!(kept.runtime_gui.map(|sprite| sprite.size), Some([4, 3]));
                 assert_eq!(
                     kept.slot.map(|s| s.size),
                     Some([18, 18]),

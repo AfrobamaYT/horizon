@@ -205,11 +205,11 @@ pub trait Hooks {
     fn update_shape(
         dimension: LevelDimension,
         pos: BlockPos,
-        state: BlockStateId,
+        state: BlockState,
         direction: Direction,
         neighbour_pos: BlockPos,
-        neighbour: BlockStateId,
-        new: &mut Option<BlockStateId>,
+        neighbour: BlockState,
+        new: &mut Option<BlockState>,
     );
     /// A command the local player typed or clicked in chat, without its
     /// slash, before the server and Horizon's commands see it: set `ran`
@@ -281,9 +281,12 @@ pub trait Hooks {
     fn panel_event();
     /// Initial saved data for a declared block entity (`EntityBlock.newBlockEntity`),
     /// fired inside the write that creates it (`LevelChunk.setBlockState`), on
-    /// a server and on a client of one. The declaration owns the type id; no
-    /// answer starts with an empty compound. The level is read-only, as
-    /// `newBlockEntity` gets no level.
+    /// a server and on a client of one. `state` is the actual placed state for a
+    /// block declared through `stateful_block_entity`; its properties are available
+    /// through the Host's state registry. The declaration owns the type id. No
+    /// answer creates no entity for a state-aware factory; other declared types
+    /// start with an empty compound. The level is read-only, as `newBlockEntity`
+    /// gets no level.
     #[hook(
         side = "both",
         contract = "replace",
@@ -331,7 +334,8 @@ pub trait Hooks {
     /// sent and whenever its block changes, on the server thread or, for a
     /// saved chunk sent past the view distance (`lan::far`), another one; a client's copy of the block
     /// entity (made by `native_block_entity` there) merges it into its `nbt`.
-    /// Leave it unset to send nothing.
+    /// Leave it unset to send no tag of yours. A block change puts the one-shot fields of
+    /// `ModBlockEntityView::set_client_update_fields` over it, and sends them alone when it is unset.
     #[hook(
         side = "server",
         contract = "replace",
@@ -1294,7 +1298,7 @@ pub trait Hooks {
     fn block_step_on();
     /// A consumable's effect of a mod's own kind: the item's `on_consume_effects`
     /// entry is of a type in a namespace of its own, and the loader kept it
-    /// for this call. The kind and the JSON the file wrote are here; the acting
+    /// for this call. The kind and the definition payload as a borrowed `Tag` are here; the acting
     /// player is the one consuming, and the game's own effects,
     /// sounds, teleports and drops are open. An unclaimed kind does
     /// nothing. This is the runtime `ConsumeEffect.apply` moment, not effect
@@ -1385,7 +1389,7 @@ pub trait Hooks {
     /// player's weapon hit: the entry says `enchanted` attacker and `affected`
     /// victim, its `requirements` passed, and its `effect` names a `type` in a
     /// namespace outside `minecraft:`. Told the enchantment id, the kind, the
-    /// `effect` JSON, the level and the mob's id (it may have just died). The
+    /// `effect` payload as a borrowed `Tag`, the level and the mob's id (it may have just died). The
     /// acting player is the one whose weapon carries the enchantment. Each
     /// such entry is told once a hit, and once for each mob a sweep lands on.
     /// A hit on a player, and an entry inside `minecraft:all_of`, aren't told
@@ -1590,13 +1594,15 @@ pub trait Hooks {
     )]
     fn use_animation();
     /// `Player.canEat` for the food `stack`, from `Consumable.canConsume`
-    /// when eating starts: `can_eat` arrives with vanilla's (creative,
-    /// `can_always_eat`, or hungry). Clear it to refuse the food, set it to
-    /// let a full player eat. Both sides (the client starts eating as the
+    /// when eating starts: `vanilla_can_eat` is vanilla's answer (creative,
+    /// `can_always_eat`, or hungry). Answer `Some(false)` to refuse the food,
+    /// `Some(true)` to let a full player eat; `can_eat` left `None` keeps
+    /// `vanilla_can_eat`. Both sides (the client starts eating as the
     /// server does), so answer from the stack and the player alone.
     #[hook(
         side = "both",
-        contract = "listen",
+        contract = "replace",
+        out = "can_eat",
         host = "read",
         neoforge = "none (vanilla Player.canEat; NeoForge adds no event or extension for it)"
     )]
@@ -1720,9 +1726,21 @@ pub trait Hooks {
     fn screen_key_pressed_pre();
     /// A character was typed at the open screen
     /// (`ScreenEvent.CharacterTyped.Pre`, vanilla's `Screen.charTyped`):
-    /// `screen` is the screen it is, `c` the character, and `modifiers` GLFW's
-    /// bits (shift 1, control 2, alt 4, super 8). Set `canceled` and that one
-    /// character never reaches a text box.
+    /// `screen` is the screen it is, `c` the character, `modifiers` GLFW's
+    /// bits (shift 1, control 2, alt 4, super 8), and `field` a copy of the
+    /// focused text box. Set `canceled` and that one character never reaches
+    /// a text box.
+    ///
+    /// `field` is `None` with no box focused, and for the boxes that keep
+    /// their own validators: Options' and World Options' fields, the game
+    /// rules' and the block editor's. `cursor` and `highlight` count Unicode
+    /// scalar characters, and a character sees the box as the one before it
+    /// left it. Change `value`, `cursor` or `highlight` and the box takes the
+    /// change, cancelled or not, so cancel to replace the character yourself.
+    /// New text goes through the box's own filter and length limit, and what
+    /// follows the box (chat suggestions, a search's results, the anvil's
+    /// name) follows it. `max_length`, `multiline` and whether `field` is
+    /// `None` stay the box's: a change to them does nothing.
     ///
     /// It fires once per printable character of a key press's text and once
     /// per character of the input method's committed text, never for a control
@@ -1784,24 +1802,6 @@ pub trait Hooks {
         neoforge = "none (NeoForge adds ColorResolvers with RegisterColorHandlersEvent.ColorResolvers; it does not retint a biome's own colours)"
     )]
     fn biome_colors();
-    /// The server's data tables are built (NeoForge's `TagsUpdatedEvent`
-    /// with `SERVER_DATA_LOAD`): the recipes, tags, loot and advancements of
-    /// the world's data packs, and the files mods added through
-    /// `native_data_pack_files`, are what the helpers read from now on.
-    /// `reload` is false on a world's first open, before its chunks and
-    /// players are loaded, and true after `/reload` rebuilt them, once the
-    /// players were sent the new data. The place to
-    /// drop caches derived from the data and to rebind what depends on it.
-    /// Server-side (the single player's integrated server included); a client
-    /// connected to a server never fires it. Runs in Reloading: published
-    /// asset/data queries can rebind caches, including on first open; world
-    /// handles and transactions remain unavailable.
-    #[hook(
-        side = "server",
-        contract = "listen",
-        neoforge = "TagsUpdatedEvent.ServerDataLoad"
-    )]
-    fn server_data_loaded();
     /// World field of view, after normal calculation and zoom and before projection/Nausea.
     /// Called for world rendering and near-plane overlays; hand/HUD FOV uses its own path.
     /// Only finite values in 1..=179 degrees replace the computed FOV.
@@ -2192,7 +2192,9 @@ pub trait Hooks {
     fn release_using();
     /// A loot function of a mod's own kind: the entry named a `type` in a
     /// namespace outside `minecraft:`, and the roll kept it for this call.
-    /// The kind, the JSON, the context and the stack to change are here.
+    /// The kind and JSON file input accompany owned API context and candidate snapshots.
+    /// Candidate counts remain signed; ordered NBT patches preserve removals and types.
+    /// Conversion happens only for subscribed hooks, and refused writeback leaves the roll unchanged.
     #[hook(
         side = "server",
         contract = "collect",
@@ -2204,7 +2206,7 @@ pub trait Hooks {
     /// A loot condition of a mod's own kind: the entry named a `type` in a
     /// namespace outside `minecraft:`. The kind, the JSON, the context and
     /// whether it holds are here (`holds` starts `false`; a mod that claims
-    /// the kind sets it).
+    /// the kind sets it). The context is an owned snapshot, captured after the subscription guard.
     #[hook(
         side = "server",
         contract = "collect",
@@ -2349,12 +2351,16 @@ pub trait Hooks {
         mounting: bool,
         canceled: &mut bool,
     );
-    /// A player's click is about to act on what the crosshair points at. `event.key` says which: `Attack` (when an attack is allowed, and each tick a held key keeps digging a block), `Use` (once for each hand tried, main hand first, before the hand's target and item) or `PickBlock` (only with a block or entity aimed at). Cancel to skip the action; a cancelled use also gives the other hand no turn. A cancelled attack or use still swings `event.hand` unless the listener clears `event.swing_hand`. Client side: a single player's window and a server's player.
+    /// An interaction mapping is about to act on the tick's crosshair target. `attempt`
+    /// distinguishes a queued press from held use or mining. Use asks for each hand tried,
+    /// main first. Cancelling the main hand ends the click. A cancelled attack or use still
+    /// swings unless the listener clears `swing_hand`. Fires on the window client.
     #[hook(
         side = "client",
         contract = "cancel",
         out = "canceled",
         neoforge = "InputEvent.InteractionKeyMappingTriggered",
+        version = 2,
         cancellable = true
     )]
     fn interaction_key_mapping_triggered();
@@ -2505,7 +2511,7 @@ pub trait Hooks {
     fn living_breathe();
     /// Blocks this mod adds, declared in code rather than one file each
     /// (NeoForge's `DeferredRegister.Blocks` drained by `RegisterEvent`):
-    /// push a `horizon_mod_package::content::Block` per block, the same declaration
+    /// push a `mod_api::Block` per block, the same declaration
     /// a content mod's `data/<id>/horizon/block/<path>.json` holds (a
     /// vanilla `template`, `properties`, `state_properties`, `shapes`...),
     /// with its id in your mod's namespace. `item: true` gives it a block
@@ -2537,7 +2543,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     fn blocks();
     /// Items this mod adds, declared in code (NeoForge's
     /// `DeferredRegister.Items`), as `native_blocks` declares blocks: a
-    /// `horizon_mod_package::content::Item` per item, a content mod's
+    /// `mod_api::Item` per item, a content mod's
     /// `data/<id>/horizon/item/<path>.json` (a vanilla `template`,
     /// `max_stack_size`, `rarity`, `components`, `crafting_remainder`). A
     /// block's item comes with its block (`item: true`), not from here.
@@ -3403,7 +3409,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         out = "items",
         context = "data_load",
         version = 3,
-        target = "mod_api::crafting::native_ingredient",
+        target = "horizon_client_lib::crafting::native_hooks::native_ingredient",
         neoforge = "ICustomIngredient"
     )]
     fn ingredient();
