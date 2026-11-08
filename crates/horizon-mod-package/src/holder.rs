@@ -41,7 +41,9 @@ fn identity(directory: &Dir) -> io::Result<[u64; 2]> {
 fn completion(directory: &Dir) -> io::Result<File> {
     let mut options = OpenOptions::new();
     options.read(true).follow(FollowSymlinks::No);
-    let file = directory.open_with(".installed", &options)?;
+    let file = File::from_std(crate::runtime_leases::retained(
+        directory.open_with(".installed", &options)?.into_std(),
+    )?);
     let meta = file.metadata()?;
     if !meta.is_file() || meta.len() != 0 {
         return Err(io::ErrorKind::InvalidData.into());
@@ -123,6 +125,7 @@ pub struct Entry {
 }
 /// Independently opened tree and completion objects prevent identity reuse for this process.
 pub struct Acquired {
+    _record: Option<File>,
     _claims: Vec<Claim>,
     _snapshots: Vec<Snapshot>,
 }
@@ -155,6 +158,7 @@ impl Entry {
             .collect::<io::Result<_>>()?;
         self.check_image(&std::env::current_exe()?)?;
         Ok(Acquired {
+            _record: None,
             _claims: claims,
             _snapshots: snapshots,
         })
@@ -230,5 +234,8 @@ fn lease_error(error: crate::runtime_leases::Error) -> io::Error {
         _ => io::ErrorKind::InvalidInput.into(),
     }
 }
+#[cfg(test)]
+mod entry_tests;
+mod record;
 #[cfg(test)]
 mod tests;
