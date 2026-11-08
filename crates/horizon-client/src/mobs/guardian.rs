@@ -310,11 +310,13 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     {
         let from = [m.position.x, m.position.y, m.position.z];
         match d.attacker {
-            Some(Who::Player) => events.push(w.route_initial_player_event(MobEvent::DamagePlayer {
-                amount: 2.0,
-                from,
-                kind: "minecraft:thorns",
-            })),
+            Some(Who::Player) => {
+                events.push(w.route_initial_player_event(MobEvent::DamagePlayer {
+                    amount: 2.0,
+                    from,
+                    kind: "minecraft:thorns",
+                }))
+            }
             Some(Who::Mob(id)) => events.push(MobEvent::AttackMob {
                 target: id,
                 amount: 2.0,

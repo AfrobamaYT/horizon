@@ -20,13 +20,13 @@ impl GoalCx<'_, '_> {
         living: LivingRef,
         effect: EffectKey,
     ) -> Option<NativeActiveEffect> {
-        let def = mod_api::__private::resolved_effect(effect)?;
+        let index = mod_api::__private::effect_index(effect)?;
         let mob = self.live_living_mob(living)?;
         let e = mob
             .extra
             .effects
             .iter()
-            .find(|e| e.registry_index == Some(def.index))?;
+            .find(|e| e.registry_index == Some(index))?;
         Some(super::super::native_living_effects::mob_effect(mob, e))
     }
 
@@ -42,14 +42,14 @@ impl GoalCx<'_, '_> {
     }
 
     pub(super) fn r_living_potion_affected(&self, living: LivingRef, effect: EffectKey) -> bool {
-        let Some(def) = mod_api::__private::resolved_effect(effect) else {
+        let Some(index) = mod_api::__private::effect_index(effect) else {
             return false;
         };
         self.live_living_mob(living).is_some_and(|mob| {
             mob.extra
                 .effects
                 .iter()
-                .any(|e| e.registry_index == Some(def.index))
+                .any(|e| e.registry_index == Some(index))
         })
     }
 
