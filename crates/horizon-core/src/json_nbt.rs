@@ -224,75 +224,94 @@ fn validate_tag(root: &Tag) -> Result<(), JsonNbtError> {
 /// cannot hold those numbers or UTF-16 strings, and Gson's strict writer also
 /// refuses non-finite numbers. No replacement with null, strings or U+FFFD.
 pub fn tag_to_json(root: &Tag) -> Result<Value, JsonNbtError> {
-    validate_tag(root)?;
-    enum Work<'a> {
-        Enter(&'a Tag),
-        List(usize),
-        Object(Vec<String>),
+    JsonTag::new(root).map(JsonTag::to_json)
+}
+
+/// Borrowed proof that a tag fits the JSON representation and nesting bound.
+/// Construct all proofs before building a larger output to avoid partial JSON
+/// temporaries when a later payload is refused.
+#[derive(Clone, Copy)]
+pub struct JsonTag<'a> {
+    root: &'a Tag,
+}
+impl<'a> JsonTag<'a> {
+    /// Check without cloning payloads or constructing JSON.
+    pub fn new(root: &'a Tag) -> Result<Self, JsonNbtError> {
+        validate_tag(root)?;
+        Ok(Self { root })
     }
-    let mut work = vec![Work::Enter(root)];
-    let mut done = Vec::new();
-    while let Some(step) = work.pop() {
-        match step {
-            Work::Enter(tag) => {
-                let value = match tag {
-                    Tag::End => Value::Null,
-                    Tag::Byte(v) => Value::from(*v),
-                    Tag::Short(v) => Value::from(*v),
-                    Tag::Int(v) => Value::from(*v),
-                    Tag::Long(v) => Value::from(*v),
-                    Tag::Float(bits) => Value::Number(
-                        Number::from_f64(
-                            crate::java_number::java_float(f32::from_bits(*bits))
-                                .parse::<f64>()
-                                .expect("validated finite float"),
-                        )
-                        .expect("validated finite float"),
-                    ),
-                    // Do not reparse through serde_json: its optional parser
-                    // features must not affect an already typed double's bits.
-                    Tag::Double(bits) => Value::Number(
-                        Number::from_f64(f64::from_bits(*bits)).expect("validated finite double"),
-                    ),
-                    Tag::String(s) => Value::String(s.to_string().expect("validated UTF-16")),
-                    Tag::ByteArray(values) => {
-                        Value::Array(values.iter().map(|v| Value::from(*v as i8)).collect())
-                    }
-                    Tag::IntArray(values) => {
-                        Value::Array(values.iter().copied().map(Value::from).collect())
-                    }
-                    Tag::LongArray(values) => {
-                        Value::Array(values.iter().copied().map(Value::from).collect())
-                    }
-                    Tag::List(values) => {
-                        work.push(Work::List(values.len()));
-                        work.extend(values.iter().rev().map(Work::Enter));
-                        continue;
-                    }
-                    Tag::Compound(values) => {
-                        work.push(Work::Object(
-                            values
-                                .keys()
-                                .map(|k| k.to_string().expect("validated UTF-16"))
-                                .collect(),
-                        ));
-                        work.extend(values.values().rev().map(Work::Enter));
-                        continue;
-                    }
-                };
-                done.push(value);
-            }
-            Work::List(len) => {
-                let values = done.split_off(done.len() - len);
-                done.push(Value::Array(values));
-            }
-            Work::Object(keys) => {
-                let values = done.split_off(done.len() - keys.len());
-                done.push(Value::Object(keys.into_iter().zip(values).collect()));
+    /// Construct JSON from the validated, immutably borrowed tag.
+    pub fn to_json(self) -> Value {
+        enum Work<'a> {
+            Enter(&'a Tag),
+            List(usize),
+            Object(Vec<String>),
+        }
+        let mut work = vec![Work::Enter(self.root)];
+        let mut done = Vec::new();
+        while let Some(step) = work.pop() {
+            match step {
+                Work::Enter(tag) => {
+                    let value = match tag {
+                        Tag::End => Value::Null,
+                        Tag::Byte(v) => Value::from(*v),
+                        Tag::Short(v) => Value::from(*v),
+                        Tag::Int(v) => Value::from(*v),
+                        Tag::Long(v) => Value::from(*v),
+                        Tag::Float(bits) => Value::Number(
+                            Number::from_f64(
+                                crate::java_number::java_float(f32::from_bits(*bits))
+                                    .parse::<f64>()
+                                    .expect("validated finite float"),
+                            )
+                            .expect("validated finite float"),
+                        ),
+                        // Do not reparse through serde_json: its optional parser
+                        // features must not affect an already typed double's bits.
+                        Tag::Double(bits) => Value::Number(
+                            Number::from_f64(f64::from_bits(*bits))
+                                .expect("validated finite double"),
+                        ),
+                        Tag::String(s) => Value::String(s.to_string().expect("validated UTF-16")),
+                        Tag::ByteArray(values) => {
+                            Value::Array(values.iter().map(|v| Value::from(*v as i8)).collect())
+                        }
+                        Tag::IntArray(values) => {
+                            Value::Array(values.iter().copied().map(Value::from).collect())
+                        }
+                        Tag::LongArray(values) => {
+                            Value::Array(values.iter().copied().map(Value::from).collect())
+                        }
+                        Tag::List(values) => {
+                            work.push(Work::List(values.len()));
+                            work.extend(values.iter().rev().map(Work::Enter));
+                            continue;
+                        }
+                        Tag::Compound(values) => {
+                            work.push(Work::Object(
+                                values
+                                    .keys()
+                                    .map(|k| k.to_string().expect("validated UTF-16"))
+                                    .collect(),
+                            ));
+                            work.extend(values.values().rev().map(Work::Enter));
+                            continue;
+                        }
+                    };
+                    done.push(value);
+                }
+                Work::List(len) => {
+                    let values = done.split_off(done.len() - len);
+                    done.push(Value::Array(values));
+                }
+                Work::Object(keys) => {
+                    let values = done.split_off(done.len() - keys.len());
+                    done.push(Value::Object(keys.into_iter().zip(values).collect()));
+                }
             }
         }
+        done.pop().expect("one root was built")
     }
-    Ok(done.pop().expect("one root was built"))
 }
 
 fn number(number: &Number) -> Tag {

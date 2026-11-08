@@ -166,19 +166,11 @@ pub(crate) fn discard_text(text: Text) {
 enum Discard {
     Style(Style),
     Text(Text),
-    Tag(horizon_core::nbt::Tag),
 }
 fn discard(root: Discard) {
     let mut pending = vec![root];
     while let Some(value) = pending.pop() {
         match value {
-            Discard::Tag(tag) => match tag {
-                horizon_core::nbt::Tag::List(v) => pending.extend(v.into_iter().map(Discard::Tag)),
-                horizon_core::nbt::Tag::Compound(v) => {
-                    pending.extend(v.into_values().map(Discard::Tag))
-                }
-                _ => {}
-            },
             Discard::Text(text) => {
                 if let Some(source) = text.source
                     && let Ok(source) = std::sync::Arc::try_unwrap(source)
@@ -200,7 +192,7 @@ fn discard(root: Discard) {
                         },
                     ) => {
                         if let Ok(tag) = std::sync::Arc::try_unwrap(tag) {
-                            pending.push(Discard::Tag(tag));
+                            horizon_core::nbt::discard_tag(tag);
                         }
                     }
                     _ => {}

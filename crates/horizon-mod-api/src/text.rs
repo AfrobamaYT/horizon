@@ -498,7 +498,35 @@ impl crate::NoBackend for TextFormError {
 }
 
 impl Text {
-    fn visit_children<'a>(&'a self, mut visit: impl FnMut(&'a Text, TextRelation)) {
+    /// Validate component paths, opaque NBT containers and typed profile fields
+    /// before constructing owned conversion payloads. This does not impose JSON
+    /// representation restrictions on NBT data; engine emission may refuse those.
+    pub fn validate(&self) -> Result<(), TextFormError> {
+        self.validate_depth()?;
+        let mut pending = vec![self];
+        while let Some(text) = pending.pop() {
+            let profile = match &text.content {
+                TextContent::Object(TextObject::Player { profile, .. }) => Some(profile),
+                _ => None,
+            };
+            let item = match &text.style.hover {
+                Some(TextHover::Item { components, .. }) => components.as_ref(),
+                _ => None,
+            };
+            validate_payload(
+                &text.metadata,
+                &text.style.metadata,
+                text.style.click.as_ref(),
+                item,
+                profile,
+            )?;
+            text.visit_children(|child, _| pending.push(child));
+        }
+        Ok(())
+    }
+    /// Visit recursive component slots in their relation order, without cloning.
+    /// Opaque NBT data is not a component edge.
+    pub fn visit_children<'a>(&'a self, mut visit: impl FnMut(&'a Text, TextRelation)) {
         for child in &self.children {
             visit(child, TextRelation::Child);
         }
@@ -718,26 +746,7 @@ fn validate_payload(
 impl TryFrom<&Text> for TextForm {
     type Error = TextFormError;
     fn try_from(value: &Text) -> Result<Self, Self::Error> {
-        value.validate_depth()?;
-        let mut pending = vec![value];
-        while let Some(text) = pending.pop() {
-            let profile = match &text.content {
-                TextContent::Object(TextObject::Player { profile, .. }) => Some(profile),
-                _ => None,
-            };
-            let item = match &text.style.hover {
-                Some(TextHover::Item { components, .. }) => components.as_ref(),
-                _ => None,
-            };
-            validate_payload(
-                &text.metadata,
-                &text.style.metadata,
-                text.style.click.as_ref(),
-                item,
-                profile,
-            )?;
-            text.visit_children(|child, _| pending.push(child));
-        }
+        value.validate()?;
         let mut nodes = Vec::new();
         let mut pending = vec![(value, None, TextRelation::Child)];
         while let Some((text, parent, relation)) = pending.pop() {
@@ -902,12 +911,8 @@ fn discard_form(form: TextForm) {
             tags.extend(profile.properties.into_iter().map(|p| p.metadata));
         }
     }
-    while let Some(tag) = tags.pop() {
-        match tag {
-            Tag::List(v) => tags.extend(v),
-            Tag::Compound(v) => tags.extend(v.into_values()),
-            _ => {}
-        }
+    for tag in tags {
+        horizon_core::nbt::discard_tag(tag);
     }
 }
 impl TryFrom<TextForm> for Text {

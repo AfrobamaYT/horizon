@@ -72,8 +72,12 @@ impl TryIntoApi for engine::LootStack {
         value.names = self
             .names
             .iter()
-            .map(|(id, name)| (id.clone(), super::text_boundary::captured_text(name)))
-            .collect();
+            .map(|(id, name)| {
+                super::text_boundary::captured_text(name)
+                    .map(|name| (id.clone(), name))
+                    .map_err(|_| LootValueError::InvalidName)
+            })
+            .collect::<Result<_, _>>()?;
         value.components = self.components.clone();
         Ok(value)
     }

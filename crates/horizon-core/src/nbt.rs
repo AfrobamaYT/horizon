@@ -142,6 +142,18 @@ pub fn clone_tag(root: &Tag) -> Tag {
     done.pop().expect("one opaque root")
 }
 
+/// Release a boundary-owned tag without recursive list/compound drops.
+pub fn discard_tag(root: Tag) {
+    let mut pending = vec![root];
+    while let Some(tag) = pending.pop() {
+        match tag {
+            Tag::List(values) => pending.extend(values),
+            Tag::Compound(values) => pending.extend(values.into_values()),
+            _ => {}
+        }
+    }
+}
+
 /// Whether recursive lists/compounds fit the supplied NBT container bound.
 /// Scalars and primitive arrays consume no recursive nesting.
 pub fn within_depth(root: &Tag, limit: usize) -> bool {
