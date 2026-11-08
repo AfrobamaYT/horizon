@@ -40,6 +40,15 @@ impl BedRuleTest {
         }
     }
 
+    /// The name a dimension type's JSON gives it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Always => "always",
+            Self::WhenDark => "when_dark",
+            Self::Never => "never",
+        }
+    }
+
     fn parse(name: &str) -> Result<Self, String> {
         match name {
             "always" => Ok(Self::Always),
@@ -315,7 +324,9 @@ impl DimensionFacts {
             id: id.to_owned(),
             has_fixed_time: flag("has_fixed_time", false),
             has_ender_dragon_fight: flag("has_ender_dragon_fight", false),
-            coordinate_scale: number("coordinate_scale")?,
+            coordinate_scale: Some(number("coordinate_scale")?)
+                .filter(|scale| Self::valid_coordinate_scale(*scale))
+                .ok_or_else(|| format!("{id} coordinate_scale is outside 1.0E-5 to 3.0E7"))?,
             height,
             infiniburn: name("infiniburn")
                 .ok_or_else(|| format!("{id} needs infiniburn"))?
@@ -373,6 +384,9 @@ impl DimensionFacts {
             out.has_ender_dragon_fight = v;
         }
         if let Some(v) = json["coordinate_scale"].as_f64() {
+            if !Self::valid_coordinate_scale(v) {
+                return Err(format!("{id} coordinate_scale is outside 1.0E-5 to 3.0E7"));
+            }
             out.coordinate_scale = v;
         }
         if let Some(v) = json["infiniburn"].as_str() {
@@ -439,6 +453,12 @@ impl DimensionFacts {
 
     pub fn has_timeline(&self, id: &str) -> bool {
         self.timelines.iter().any(|t| t == id)
+    }
+
+    /// Whether `scale` is a coordinate scale the codec takes: `Codec.doubleRange(1.0E-5F, 3.0E7)`
+    /// (`DimensionType.java:89`, the float widened). Inside it the ratio of two scales is finite.
+    pub fn valid_coordinate_scale(scale: f64) -> bool {
+        (f64::from(1.0e-5_f32)..=3.0e7).contains(&scale)
     }
 
     /// `DimensionType.getTeleportationScale`.
@@ -595,6 +615,17 @@ mod level_type_tests {
         };
         assert!(bad(serde_json::json!({"skybox": "moon"})));
         assert!(bad(serde_json::json!({"cardinal_light": "up"})));
+        // a scale outside the codec's range would make a portal's ratio infinite or NaN
+        for scale in [0.0, f64::from_bits(1), 1.0e-6, 3.1e7, -1.0] {
+            assert!(
+                bad(serde_json::json!({"coordinate_scale": scale})),
+                "{scale}"
+            );
+        }
+        assert!(!bad(
+            serde_json::json!({"coordinate_scale": f64::from(1.0e-5_f32)})
+        ));
+        assert!(!bad(serde_json::json!({"coordinate_scale": 3.0e7})));
         assert!(
             DimensionFacts::patched(
                 DimensionFacts::overworld(),
