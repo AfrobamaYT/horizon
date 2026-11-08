@@ -73,6 +73,15 @@ pub(crate) struct Def {
     pub(super) host_constructor: Option<String>,
     /// A via form applied by the type, preserving its native mutation contract.
     pub(super) writeback: Option<String>,
+    pub(super) view: Option<View>,
+}
+
+#[derive(Debug)]
+pub(super) struct View {
+    pub(super) field: String,
+    pub(super) pointee: Ty,
+    pub(super) mutable: bool,
+    pub(super) snapshot: Ty,
 }
 
 #[derive(Debug)]
@@ -300,6 +309,7 @@ impl<'a> Types<'a> {
                 let def = self.push(Def {
                     host_constructor: None,
                     writeback: None,
+                    view: None,
                     rust: format!("mod_api::{std}"),
                     wit,
                     lifetimes: 0,
@@ -381,6 +391,7 @@ impl<'a> Types<'a> {
         Ok(self.push(Def {
             host_constructor: None,
             writeback: None,
+            view: None,
             rust: rust.into(),
             wit: format!("json-{}", name.to_kebab_case()),
             lifetimes: 0,
@@ -411,6 +422,7 @@ impl<'a> Types<'a> {
             let def = self.push(Def {
                 host_constructor: None,
                 writeback: None,
+                view: None,
                 rust,
                 wit,
                 lifetimes: generics(&item).lifetimes().count(),
@@ -443,6 +455,7 @@ impl<'a> Types<'a> {
         let def = self.push(Def {
             host_constructor: None,
             writeback: None,
+            view: None,
             rust,
             wit: wit.clone(),
             lifetimes,
@@ -461,7 +474,85 @@ impl<'a> Types<'a> {
         }
         self.defs[def].host_constructor = constructor;
         self.defs[def].kind = kind;
+        self.defs[def].view = self.view(id, &item)?;
         Ok(Ty::Named(def))
+    }
+
+    fn view(&mut self, id: ItemId, item: &Item) -> Result<Option<View>, String> {
+        let Item::Struct(record) = item else {
+            return Ok(None);
+        };
+        if record.generics.lifetimes().count() == 0 {
+            return Ok(None);
+        }
+        let Fields::Named(fields) = &record.fields else {
+            return Ok(None);
+        };
+        let [field] = fields.named.iter().collect::<Vec<_>>()[..] else {
+            return Ok(None);
+        };
+        let syn::Type::Reference(reference) = &field.ty else {
+            return Ok(None);
+        };
+        let name = &record.ident;
+        let items = self.index.modules[id.module].items.clone();
+        let ctor = items.iter().filter_map(|item| match item {
+            Item::Impl(i) if matches!(&*i.self_ty, syn::Type::Path(p) if p.path.segments.last().is_some_and(|s| s.ident == *name)) => Some(i),
+            _ => None,
+        }).flat_map(|i| &i.items).any(|item| matches!(item,syn::ImplItem::Fn(f) if f.sig.ident == "new" && f.sig.inputs.len() == 1));
+        if !ctor {
+            return Ok(None);
+        }
+        let pointee = self.ty(id.module, &reference.elem, &[])?;
+        let Ty::Named(d) = &pointee else {
+            return Ok(None);
+        };
+        let target = self.defs[*d].rust.split("::").last().unwrap().to_string();
+        let snapshot_arg = self.index.modules.iter().flat_map(|m| m.items.iter().map(move |i| (m,i))).find_map(|(module,item)| {
+            let Item::Impl(i) = item else { return None; };
+            if !matches!(&*i.self_ty,syn::Type::Path(p) if p.path.segments.last().is_some_and(|s| s.ident == target)) { return None; }
+            i.items.iter().find_map(|item| {
+                let syn::ImplItem::Fn(f) = item else { return None; };
+                if f.sig.ident != "apply_snapshot" || f.sig.inputs.len() != 2 { return None; }
+                let syn::FnArg::Typed(arg) = f.sig.inputs.last()? else { return None; };
+                Some((module.path.clone(),(*arg.ty).clone()))
+            })
+        });
+        let Some((module_path, arg)) = snapshot_arg else {
+            return Ok(None);
+        };
+        let module = self
+            .index
+            .modules
+            .iter()
+            .position(|m| m.path == module_path)
+            .unwrap();
+        let snapshot = self.ty(module, &arg, &[])?;
+        // Snapshot records are type-owned transport state, not constructors of live
+        // objects. Their crate-visible fields are accessible to the generated Wire impl.
+        if let Ty::Named(d) = snapshot
+            && let syn::Type::Path(path) = &arg
+        {
+            let name = &path.path.segments.last().unwrap().ident;
+            let record = self.index.modules[module]
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    Item::Struct(s) if s.ident == *name => Some(s.clone()),
+                    _ => None,
+                });
+            if let Some(record) = record
+                && let Fields::Named(fields) = record.fields
+            {
+                self.defs[d].kind = Kind::Record(self.fields(module, fields.named.iter())?);
+            }
+        }
+        Ok(Some(View {
+            field: field.ident.as_ref().unwrap().to_string(),
+            pointee,
+            mutable: reference.mutability.is_some(),
+            snapshot,
+        }))
     }
 
     fn kind(&mut self, id: ItemId, item: &Item, name: &str, wit: &str) -> Result<Kind, String> {
@@ -556,6 +647,7 @@ impl<'a> Types<'a> {
             let frame = Def {
                 host_constructor: None,
                 writeback: None,
+                view: None,
                 rust: def.rust.clone(),
                 wit: format!("{}-frame", def.wit),
                 lifetimes: def.lifetimes,
@@ -587,6 +679,7 @@ impl<'a> Types<'a> {
         let frame = Def {
             host_constructor: None,
             writeback: None,
+            view: None,
             rust: def.rust.clone(),
             wit: format!("{}-frame", def.wit),
             lifetimes: def.lifetimes,
