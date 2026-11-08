@@ -6721,7 +6721,7 @@ fn structure_modifiers_unknown_targets_and_types_warn_and_preserve_base() {
         ],
     );
     let warnings = build_fixture(&base, Path::new(""), &[m], &out).unwrap();
-    assert_eq!(warnings.len(), 3, "{warnings:?}");
+    assert_eq!(warnings.len(), 2, "{warnings:?}");
     assert!(
         warnings
             .iter()
@@ -6948,4 +6948,44 @@ fn structure_modifiers_prepared_root_reloads_spawn_overrides() {
             .is_none()
     );
     fs::remove_dir_all(scratch).unwrap();
+}
+
+#[test]
+fn structure_modifiers_bundle_spawns_without_modifier_preserve_individual_files() {
+    use crate::mobs::spawn_selection::StructureSpawns;
+    let base = structure_modifier_base("structure-modifiers-bundle-only");
+    let out = base.parent().unwrap().join("out");
+    let m = folder_mod(
+        &base.parent().unwrap().join("zinc"),
+        &[
+            ("horizon-mod.toml", &manifest("zinc", "")),
+            (
+                "data/zinc/worldgen/structure/tower.json",
+                r#"{"spawn_overrides":{"monster":{"bounding_box":"piece","spawns":[{"type":"minecraft:zombie","weight":17,"count":{"type":"minecraft:uniform","min_inclusive":2,"max_inclusive":4}}]}}}"#,
+            ),
+        ],
+    );
+    assert!(
+        build_fixture(&base, Path::new(""), &[m], &out)
+            .unwrap()
+            .is_empty()
+    );
+    let loaded = StructureSpawns::load(&out);
+    let tower = loaded.get("zinc:tower", "monster").unwrap();
+    assert!(tower.piece);
+    assert_eq!(
+        tower.spawns,
+        vec![crate::biome::SpawnEntry {
+            entity: "minecraft:zombie".into(),
+            weight: 17,
+            min: 2,
+            max: 4,
+            constant: false,
+        }]
+    );
+    assert_eq!(
+        loaded.get("minecraft:hut", "monster").unwrap().spawns[0].weight,
+        10
+    );
+    fs::remove_dir_all(base.parent().unwrap()).unwrap();
 }

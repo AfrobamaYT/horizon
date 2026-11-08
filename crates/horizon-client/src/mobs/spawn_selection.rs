@@ -660,7 +660,41 @@ pub struct StructureSpawns {
 impl StructureSpawns {
     /// Read a fresh generation, including mod namespaces and nested structure ids.
     pub fn load(root: &Path) -> Self {
+        fn insert(
+            overrides: &mut FxHashMap<String, FxHashMap<String, Override>>,
+            id: String,
+            v: &Value,
+        ) {
+            let map: FxHashMap<String, Override> = v["spawn_overrides"]
+                .as_object()
+                .into_iter()
+                .flatten()
+                .map(|(category, o)| {
+                    (
+                        category.clone(),
+                        Override {
+                            piece: o["bounding_box"].as_str() == Some("piece"),
+                            spawns: parse_entries(&o["spawns"]),
+                        },
+                    )
+                })
+                .collect();
+            overrides.insert(id, map);
+        }
         let mut overrides = FxHashMap::default();
+        if let Some(Value::Object(entries)) = fs::read(root.join("worldgen/structures.json"))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        {
+            for (id, value) in entries {
+                if let Some(value) = value
+                    .as_str()
+                    .and_then(|text| serde_json::from_str::<Value>(text).ok())
+                {
+                    insert(&mut overrides, id, &value);
+                }
+            }
+        }
         for ns in fs::read_dir(root.join("data"))
             .into_iter()
             .flatten()
@@ -677,26 +711,11 @@ impl StructureSpawns {
                 else {
                     continue;
                 };
-                let map: FxHashMap<String, Override> = v["spawn_overrides"]
-                    .as_object()
-                    .into_iter()
-                    .flatten()
-                    .map(|(category, o)| {
-                        (
-                            category.clone(),
-                            Override {
-                                piece: o["bounding_box"].as_str() == Some("piece"),
-                                spawns: parse_entries(&o["spawns"]),
-                            },
-                        )
-                    })
-                    .collect();
-                if !map.is_empty() {
-                    overrides.insert(
-                        format!("{}:{}", ns.file_name().to_string_lossy(), name),
-                        map,
-                    );
-                }
+                insert(
+                    &mut overrides,
+                    format!("{}:{}", ns.file_name().to_string_lossy(), name),
+                    &v,
+                );
             }
         }
         Self { overrides }

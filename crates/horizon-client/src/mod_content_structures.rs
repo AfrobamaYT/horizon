@@ -40,6 +40,7 @@ impl Modifier {
         let doc: Value = serde_json::from_str(text).map_err(|e| at(e.to_string()))?;
         let field = |key: &str| doc.get(key).cloned().ok_or_else(|| at(format!("no {key}")));
         let action = match doc["type"].as_str().ok_or_else(|| at("no type".into()))? {
+            "neoforge:none" => return Ok(None),
             "neoforge:add_spawns" => {
                 let raw = field("spawners")?;
                 let values = match &raw {
