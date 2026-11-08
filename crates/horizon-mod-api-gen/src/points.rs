@@ -904,11 +904,29 @@ fn locked_with(lock: &str, name: &str, added: &[&str]) -> Option<String> {
 
 /// `mod_points`: records, typed function constructors, dispatchers and place ids.
 pub(crate) fn records(points: &[GamePoint], sources: &[source::Point]) -> String {
+    records_selected(points, sources, None)
+}
+
+pub(crate) fn records_selected(
+    points: &[GamePoint],
+    sources: &[source::Point],
+    selected: Option<&std::collections::BTreeSet<String>>,
+) -> String {
+    let enabled = |point: &GamePoint| {
+        selected.is_none_or(|names| {
+            names.contains(&point.name) || names.contains(&format!("{}_return", point.name))
+        })
+    };
     let parse = |code: &str| {
         code.parse::<proc_macro2::TokenStream>()
             .expect("generated points")
     };
-    let records = points.iter().map(|point| parse(&point.record_item));
+    let records = points.iter().map(|point| {
+        if enabled(point) { return parse(&point.record_item); }
+        let mut file: syn::File = syn::parse_str(&point.record_item).expect("point record");
+        file.items.retain(|item| !matches!(item, syn::Item::Impl(imp) if imp.trait_.as_ref().is_some_and(|(_, path, _)| path.segments.last().is_some_and(|segment| segment.ident == "Wire"))));
+        quote!(#file)
+    });
     let listeners = points.iter().map(|point| parse(&point.api[0]));
     let variants = points.iter().map(|point| parse(&point.api[1]));
     let dispatch = points.iter().map(|point| parse(&point.api[2]));
@@ -939,7 +957,8 @@ pub(crate) fn records(points: &[GamePoint], sources: &[source::Point]) -> String
         let function = quote::format_ident!("point_{}", point.name);
         let listener = quote::format_ident!("{}Listener", point_shape::camel(&point.name));
         let side = (point.host == "both").then(|| quote!(let server: bool = input.take()?;));
-        guest_functions.extend(quote! {
+        if enabled(point) {
+            guest_functions.extend(quote! {
             fn #function(place: PointId, input: &mut ::mod_api::wire::Reader<'_>, out: &mut ::mod_api::wire::Writer) -> Result<(), ::mod_api::wire::WireError> {
                 let listener: u32 = input.take()?;
                 #side
@@ -955,6 +974,7 @@ pub(crate) fn records(points: &[GamePoint], sources: &[source::Point]) -> String
                 Ok(())
             }
         });
+        }
         for name in std::iter::once(point.name.clone())
             .chain(point.at_return.then(|| format!("{}_return", point.name)))
         {
@@ -962,6 +982,9 @@ pub(crate) fn records(points: &[GamePoint], sources: &[source::Point]) -> String
             let target = &point.target;
             let at_return = name.ends_with("_return") && name != point.name;
             api_places.extend(quote! { (PointId::#variant, #target, #at_return), });
+            if selected.is_some_and(|names| !names.contains(&name)) {
+                continue;
+            }
             guest_entries.extend(quote! {
                 table[PointId::#variant as usize] = Some((PointId::#variant, #function as Dispatch));
             });
@@ -1020,6 +1043,60 @@ pub(crate) fn records(points: &[GamePoint], sources: &[source::Point]) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selected_guest_exports_keep_the_full_layout() {
+        let make = |name: &str| {
+            let sig: syn::Signature = syn::parse_str(&format!("fn {name}()")).unwrap();
+            let shape = point_shape::shape(quote!(), &sig).unwrap();
+            let api = shape.api_items(name);
+            GamePoint {
+                name: name.into(),
+                target: name.into(),
+                side: "none",
+                host: "none",
+                record: shape.record().to_string(),
+                args: vec![],
+                returns: "cancel",
+                at_return: true,
+                raw: false,
+                raw_shape: None,
+                listener: None,
+                return_listener: None,
+                record_item: shape.record_item(name).to_string(),
+                api: [
+                    api.listeners.to_string(),
+                    api.variants.to_string(),
+                    api.dispatch.to_string(),
+                ],
+            }
+        };
+        let points = [make("first"), make("second")];
+        let selected = std::collections::BTreeSet::from(["first_return".to_string()]);
+        let all = records(&points, &[]);
+        let selected = records_selected(&points, &[], Some(&selected));
+        let layout = |source: &str| {
+            syn::parse_file(source)
+                .unwrap()
+                .items
+                .into_iter()
+                .find_map(|item| match item {
+                    syn::Item::Const(c) if c.ident == "POINT_LAYOUT" => {
+                        Some(c.expr.to_token_stream().to_string())
+                    }
+                    _ => None,
+                })
+                .unwrap()
+        };
+        assert_eq!(layout(&all), layout(&selected));
+        let file = syn::parse_file(&selected).unwrap();
+        let wires = file.items.iter().filter(|item| matches!(item, syn::Item::Impl(imp) if imp.trait_.as_ref().is_some_and(|(_, path, _)| path.segments.last().unwrap().ident == "Wire"))).count();
+        assert_eq!(wires, 1);
+        assert!(selected.contains("fn point_first"));
+        assert!(!selected.contains("fn point_second"));
+        assert!(selected.contains("table [PointId :: FirstReturn as usize]"));
+        assert!(!selected.contains("table [PointId :: First as usize]"));
+    }
 
     #[test]
     fn raw_point_inventory() {
