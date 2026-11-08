@@ -1034,7 +1034,8 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "PlayerEvent.PlayerLoggedInEvent"
+        neoforge = "PlayerEvent.PlayerLoggedInEvent",
+        paper = "PlayerJoinEvent"
     )]
     fn player_logged_in();
     /// `player` (`name`) left the game (NeoForge's `PlayerLoggedOutEvent`), by
@@ -1046,7 +1047,8 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "PlayerEvent.PlayerLoggedOutEvent"
+        neoforge = "PlayerEvent.PlayerLoggedOutEvent",
+        paper = "PlayerQuitEvent"
     )]
     fn player_logged_out();
     /// The world is drawn (see [`WorldDrawn`]). Not called on the title screen's panorama.
@@ -1907,7 +1909,8 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "PlayerEvent.PlayerRespawnEvent"
+        neoforge = "PlayerEvent.PlayerRespawnEvent",
+        paper = "PlayerPostRespawnEvent"
     )]
     fn player_respawned();
     /// Final world fog, after the computed color hook, ordinary calculations and Horizon's fog
@@ -4324,7 +4327,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        paper = "PlayerMapFilledEvent"
     )]
     fn player_map_filled();
     /// A server player named a mob with a name tag, after its name and persistence changed and the tag
@@ -4395,7 +4399,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's PlayerRecipeBookSettingsChange)"
+        neoforge = "none (NeoForge has no such event; Bukkit's PlayerRecipeBookSettingsChange)",
+        paper = "PlayerRecipeBookSettingsChangeEvent"
     )]
     fn player_recipe_book_settings_change();
     /// A recipe is about to be unlocked for a server player. Set `cancel` to keep it locked. The
@@ -4405,6 +4410,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event; Bukkit's PlayerRecipeDiscoverEvent)",
+        paper = "PlayerRecipeDiscoverEvent",
         cancellable = true
     )]
     fn player_recipe_discovered();
