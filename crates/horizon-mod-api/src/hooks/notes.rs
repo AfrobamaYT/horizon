@@ -1526,7 +1526,13 @@ mod mixin or use it replaces in its design or PR."#]
   clamps them. It fires for the players, mobs and the ender dragon the game hurts, and runs on the thread that ticks
   the world (the server thread), so state a mod shares with its render thread hooks needs synchronising. `/kill` and
   `native_kill_mob` don't reach it yet: they set the health to 0 instead of hurting with `minecraft:generic_kill` as
-  vanilla does. NeoForge's reduction modifiers (`addReductionModifier`) aren't there yet.
+  vanilla does. A mod may also register reduction modifiers on the container
+  (`container.add_reduction_modifier(Reduction::Armor, ReductionChange::Scale(0.5))`, NeoForge's
+  `addReductionModifier`): each changes what one reduction (the damage cooldown, armor, Resistance, protection
+  enchantments, a witch's innate resistance, the absorption hearts) takes off this hit, in the order added, and
+  the recorded reduction and the damage the sequence goes on with are the changed ones, kept between 0 and what
+  there was to take. A step the hit skips (a source that bypasses armor, no Resistance effect) runs none. They
+  last for the hit.
 
 - `living_damage_post` (NeoForge's `LivingDamageEvent.Post`) observes the hit after it takes health.
   Its `container.should_cause_side_effects()` is `hurtServer`'s fresh-hit decision
