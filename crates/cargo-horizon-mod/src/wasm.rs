@@ -47,14 +47,8 @@ const STD_CRATES: &[&str] = &[
     "panic_unwind",
 ];
 
-/// Whether a member exports `name` to its group: only the component's own exports (the mod
-/// API's, `<interface>#<function>`, and the canonical ABI's `cabi_*`). Every other symbol a
-/// crate exports (the guest glue's entry into the mod, a JS runtime's glue from a dependency
-/// such as `getrandom`) is the member's own, and left out so the linker drops what only it
-/// reached.
-fn group_export(name: &str) -> bool {
-    name.contains('#') || name.starts_with("cabi_")
-}
+/// Guest boundary exports, kept even though they originate in an rlib dependency.
+const GUEST_EXPORTS: &[&str] = &["horizon_layout", "horizon_in", "horizon_hook"];
 
 /// The pinned toolchain's version line, its sysroot's linker, installing it first if needed.
 struct Toolchain {
@@ -70,7 +64,19 @@ fn pinned(tool: &str) -> Command {
         c.args(["run", TOOLCHAIN, tool]);
         c
     } else {
-        Command::new(tool)
+        let home = std::env::var_os("RUSTUP_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/opt/rustup"));
+        let directory = home.join("toolchains");
+        let installed = std::fs::read_dir(directory).ok().and_then(|entries| {
+            entries.filter_map(Result::ok).find_map(|entry| {
+                let name = entry.file_name();
+                let name = name.to_str()?;
+                let binary = entry.path().join("bin").join(tool);
+                (name.starts_with(&format!("{TOOLCHAIN}-")) && binary.is_file()).then_some(binary)
+            })
+        });
+        Command::new(installed.unwrap_or_else(|| PathBuf::from(tool)))
     };
     command.env_remove("RUSTC").env_remove("RUSTC_WRAPPER");
     command
@@ -410,11 +416,6 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
             continue;
         } else if role == "std" && arg == "--gc-sections" {
             out.push("--no-gc-sections".to_owned());
-        } else if arg == "--export" {
-            let name = args.next().unwrap_or_default();
-            if role == "std" || group_export(&name) {
-                out.extend([arg, name]);
-            }
         } else {
             out.push(arg);
         }
@@ -429,6 +430,10 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
     );
     if role == "std" {
         out.push("--export-all".to_owned());
+    } else {
+        for name in GUEST_EXPORTS {
+            out.push(format!("--export={name}"));
+        }
     }
     let status = Command::new(&lld)
         .args(&out)
@@ -447,7 +452,24 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
         {
             continue;
         }
-        // A member imports the mod API (`<package>:<name>/…`) and its group (`env`, `GOT.*`).
+        // The hook factory is an implementation detail of this member, not a group symbol.
+        // Every mod defines it, so publishing it would make unrelated mods collide.
+        if role == "member"
+            && let wasmparser::Payload::ExportSection(reader) = &payload
+        {
+            let mut section = wasm_encoder::ExportSection::new();
+            for export in reader.clone() {
+                let export = export.map_err(|e| e.to_string())?;
+                if export.name != "__horizon_mod_hooks" {
+                    let kind = wasm_encoder::ExportKind::try_from(export.kind)
+                        .map_err(|e| format!("{e:?}"))?;
+                    section.export(export.name, kind, export.index);
+                }
+            }
+            module.section(&section);
+            continue;
+        }
+        // A member imports the host ABI (`horizon`) and its group (`env`, `GOT.*`).
         // Any other import a crate declared (a JS runtime's, from `getrandom` under `zip`,
         // some under `env` itself) is never called in the game: it becomes a group import the
         // linker stubs to trap, named for this member, as the linker makes one stub per
@@ -464,8 +486,8 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
                 let js = import.name.starts_with("__wbindgen") || import.name.starts_with("__wbg");
                 let ours = !js
                     && (import.module == "env"
-                        || import.module.starts_with("GOT.")
-                        || import.module.contains(':'));
+                        || import.module == "horizon"
+                        || import.module.starts_with("GOT."));
                 let ty =
                     wasm_encoder::EntityType::try_from(import.ty).map_err(|e| format!("{e:?}"))?;
                 if ours {
@@ -473,22 +495,6 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
                 } else {
                     let name = format!("{member}:{}.{}", import.module, import.name);
                     section.import("env", &name, ty);
-                }
-            }
-            module.section(&section);
-            continue;
-        }
-        // `--shared` exports every visible symbol; a member keeps only its group exports and
-        // the linker's own (`__wasm_*`), so two members' copies of a crate's `#[no_mangle]`
-        // items (a JS runtime's glue, the guest entry) don't collide in one group.
-        if let wasmparser::Payload::ExportSection(reader) = &payload
-            && role != "std"
-        {
-            let mut section = wasm_encoder::ExportSection::new();
-            for export in reader.clone() {
-                let export = export.map_err(|e| e.to_string())?;
-                if group_export(export.name) || export.name.starts_with("__wasm_") {
-                    section.export(export.name, export.kind.into(), export.index);
                 }
             }
             module.section(&section);
