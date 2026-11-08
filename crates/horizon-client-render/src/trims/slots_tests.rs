@@ -1,6 +1,6 @@
 use super::*;
 use crate::hud::{HudAtlas, Rect, TRIM_SLOTS};
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
 struct Fixture(PathBuf);
 

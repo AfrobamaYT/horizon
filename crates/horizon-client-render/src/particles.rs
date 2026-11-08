@@ -6078,7 +6078,11 @@ mod tests {
     }
     #[test]
     fn legacy_trails_choose_a_lifetime_for_each_particle_from_the_level_random() {
-        let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        let mut engine = ParticleEngine::new(
+            &ResourceSource::indexed(Default::default()),
+            &HashMap::new(),
+            &HashSet::new(),
+        );
         engine.seed_randoms(1, 42, 2);
         for _ in 0..5 {
             engine.create(
