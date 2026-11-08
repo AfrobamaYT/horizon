@@ -9,6 +9,8 @@
 //! std whole and exports it; a mod leaves std and its library mods out, to resolve to theirs.
 use horizon_mod_package::manifest::{MANIFEST, WASM, sha512_of};
 use serde_json::Value;
+mod group;
+pub use group::rustc;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -278,103 +280,10 @@ pub fn wasm_std(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// A library mod this mod depends on: its crate, and its built `mod.wasm`.
-struct Library {
-    id: String,
-    /// Declared `optional = true`: the mod is built with the Cargo feature of its id.
-    optional: bool,
-    krate: String,
-    sha512: String,
-}
-
-/// The mod's `[dependencies]` that are wasm library mods among its crate's dependencies.
-fn libraries(root: &Path, manifest: &toml_edit::DocumentMut) -> Result<Vec<Library>, String> {
-    let wanted: Vec<(&str, bool)> = manifest
-        .get("dependencies")
-        .and_then(|d| d.as_table_like())
-        .map(|d| {
-            d.iter()
-                .map(|(id, item)| {
-                    let optional = item
-                        .as_table_like()
-                        .and_then(|t| t.get("optional"))
-                        .and_then(|o| o.as_bool());
-                    (id, optional == Some(true))
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    if wanted.is_empty() {
-        return Ok(Vec::new());
-    }
-    let metadata: Value = serde_json::from_str(&output({
-        let mut c = pinned("cargo");
-        c.args(["metadata", "--format-version", "1"]);
-        c.current_dir(root);
-        c
-    })?)
-    .map_err(|e| e.to_string())?;
-    let mut found = Vec::new();
-    for package in metadata["packages"].as_array().into_iter().flatten() {
-        let Some(dir) = package["manifest_path"]
-            .as_str()
-            .and_then(|p| Path::new(p).parent())
-        else {
-            continue;
-        };
-        // The mod itself has no `[wasm]` before its first build, so it isn't read as one.
-        if dir.canonicalize().ok() == root.canonicalize().ok() {
-            continue;
-        }
-        let Ok(text) = std::fs::read_to_string(dir.join(MANIFEST)) else {
-            continue;
-        };
-        let theirs = horizon_mod_package::Manifest::parse(&text)
-            .map_err(|e| format!("{}: {e}", dir.display()))?;
-        let Some(&(_, optional)) = wanted.iter().find(|(id, _)| *id == theirs.id) else {
-            continue;
-        };
-        let wasm = theirs.wasm.ok_or_else(|| {
-            format!(
-                "{}: a wasm mod's dependency must be a wasm mod too",
-                theirs.id
-            )
-        })?;
-        let module = std::fs::read(dir.join(WASM))
-            .map_err(|e| format!("{}: build it with --wasm first ({e})", theirs.id))?;
-        wasm.check(&module)
-            .map_err(|e| format!("{}: {e}; rebuild it with --wasm", theirs.id))?;
-        found.push(Library {
-            id: theirs.id,
-            optional,
-            krate: lib_name(package).ok_or("a library mod has no [lib]")?,
-            sha512: wasm.sha512().to_owned(),
-        });
-    }
-    Ok(found)
-}
-
-/// `build --wasm`: builds `mod.wasm` beside `horizon-mod.toml` and records it in `[wasm]`.
-pub fn build(root: &Path, catalog: Option<&Path>) -> Result<(), String> {
-    let manifest_path = root.join(MANIFEST);
-    let text = std::fs::read_to_string(&manifest_path).map_err(|e| format!("{MANIFEST}: {e}"))?;
-    let mut manifest: toml_edit::DocumentMut =
-        text.parse().map_err(|e| format!("{MANIFEST}: {e}"))?;
-    if manifest.contains_key("native") {
-        return Err(format!(
-            "{MANIFEST}: a [native] mod builds through the launcher, not --wasm"
-        ));
-    }
-    let toolchain = toolchain()?;
-    let target = std::path::absolute(root.join("target/horizon-mod")).map_err(|e| e.to_string())?;
-    let libraries = libraries(root, &manifest)?;
-    let provided: Vec<String> = libraries.iter().map(|l| l.krate.clone()).collect();
-    // An optional library is linked when installed and guarded at the call (`if_installed!`).
-    let features: Vec<String> = libraries
-        .iter()
-        .filter(|l| l.optional)
-        .map(|l| l.id.clone())
-        .collect();
+fn registrations(
+    manifest: &toml_edit::DocumentMut,
+    catalog: Option<&Path>,
+) -> Result<(String, String), String> {
     let mut parsed = manifest.clone();
     if !parsed.contains_key("wasm") {
         let mut wasm = toml_edit::Table::new();
@@ -420,29 +329,12 @@ pub fn build(root: &Path, catalog: Option<&Path>) -> Result<(), String> {
             serde_json::to_string(&names).map_err(|e| e.to_string())?,
         )
     };
-    let module = cargo_member(
-        root,
-        &target,
-        &toolchain,
-        "member",
-        &provided,
-        &features,
-        &registrations,
-        &point_names,
-    )?;
-    std::fs::write(root.join(WASM), &module).map_err(|e| format!("{WASM}: {e}"))?;
-    let mut wasm = toml_edit::Table::new();
-    wasm["sha512"] = toml_edit::value(sha512_of(&module));
-    wasm["toolchain"] = toml_edit::value(&toolchain.version);
-    if !libraries.is_empty() {
-        let mut linked = toml_edit::Table::new();
-        for library in &libraries {
-            linked[&library.id] = toml_edit::value(&library.sha512);
-        }
-        wasm["linked"] = toml_edit::Item::Table(linked);
-    }
-    manifest["wasm"] = toml_edit::Item::Table(wasm);
-    std::fs::write(&manifest_path, manifest.to_string()).map_err(|e| format!("{MANIFEST}: {e}"))
+    Ok((registrations, point_names))
+}
+
+/// `build --wasm`: builds `mod.wasm` beside `horizon-mod.toml` and records it in `[wasm]`.
+pub fn build(root: &Path, catalog: Option<&Path>) -> Result<(), String> {
+    group::build(root, catalog)
 }
 
 /// The link step, run by cargo as the linker: rust-lld linking a shared module, then rustc's
@@ -458,7 +350,11 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
     let crate_of = |arg: &str| -> Option<String> {
         let file = Path::new(arg).file_name()?.to_str()?;
         let stem = file.strip_prefix("lib")?.strip_suffix(".rlib")?;
-        Some(stem.rsplit_once('-')?.0.to_owned())
+        Some(
+            stem.rsplit_once('-')
+                .map_or(stem, |(name, _)| name)
+                .to_owned(),
+        )
     };
     let mut args = args
         .into_iter()
@@ -502,9 +398,10 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
         ]
         .map(str::to_owned),
     );
-    if role == "std" {
+    if role == "std" || std::env::var_os("HORIZON_GROUP_PACKAGE").is_some() {
         out.push("--export-all".to_owned());
-    } else {
+    }
+    if role != "std" {
         for name in GUEST_EXPORTS {
             out.push(format!("--export={name}"));
         }

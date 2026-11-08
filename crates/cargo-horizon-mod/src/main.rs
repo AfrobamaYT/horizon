@@ -31,6 +31,17 @@ use std::{
 fn main() -> ExitCode {
     // Cargo runs `cargo-horizon-mod horizon-mod <args>`.
     let mut args: Vec<String> = std::env::args().skip(1).collect();
+    if std::env::var_os("HORIZON_GROUP_WRAPPER").is_some()
+        && args.first().is_some_and(|a| a.ends_with("rustc"))
+    {
+        return match wasm::rustc(args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("error: {e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     // Cargo runs this tool as the linker of a `build --wasm`.
     if let Ok(role) = std::env::var(wasm::LINK_ENV) {
         return match wasm::link(&role, args) {
