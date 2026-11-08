@@ -286,8 +286,18 @@ impl BlockEntityPart for BothPaths {
 /// declaration, whose type declares no ticker, never reaches the level's
 /// ticking list.
 #[test]
-#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; runs in an isolated scratch process"]
 fn a_declared_type_ticks_once_whichever_path_named_it() {
+    // The overlay's `.horizon-cache` lives under the working directory and
+    // `native_declared()` caches the first fire per process, so tests sharing
+    // one process poison each other's mod content (`mods::tests::run_in_child`).
+    if super::native_entity_refs::tests::run_fresh_cases(
+        "game::native_live_holder_tests::a_declared_type_ticks_once_whichever_path_named_it",
+        "HORIZON_TICK_PATHS_GAME_CHILD",
+        &["run"],
+    ) {
+        return;
+    }
     let mods: mod_api::Mods =
         vec![mod_api::ModEntry::new("tick_paths", Box::new(TickPaths))].into();
     mod_api::testing::with_mods(mods.clone(), || {
