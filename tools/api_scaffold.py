@@ -33,6 +33,34 @@ class Refuse(Exception):
     pass
 
 
+KEYWORDS = set('as break const continue crate else enum extern false fn for if impl in let loop match mod move mut '
+               'pub ref return self Self static struct super trait true type unsafe use where while async await dyn '
+               'abstract become box do final macro override priv typeof unsized virtual yield try gen'.split())
+IDENT = re.compile(r'[A-Za-z][A-Za-z0-9_]*$')
+
+
+def ident(what, value):
+    if not isinstance(value, str) or not IDENT.match(value) or value in KEYWORDS:
+        raise Refuse(f'{what} {value!r} is not a plain Rust identifier')
+    return value
+
+
+def check_entry(e):
+    """Validate an allow-list entry once, where it enters; everything after trusts it."""
+    if e.get('kind') not in ('struct', 'enum', 'handle'):
+        raise Refuse(f"{e.get('engine')}: kind must be struct, enum or handle")
+    ident('topic', e.get('topic'))
+    if e['topic'] != e['topic'].lower():
+        raise Refuse(f"topic {e['topic']!r} must be a lower-case module name")
+    ident('api name', api_name(e))
+    for v in e.get('variants', []):
+        ident('variant', v)
+    for f in e.get('fields', []):
+        ident('field', split_field(f)[0])
+    for m in e.get('methods', []):
+        ident('method', m['name'])
+
+
 def snake(name):
     return re.sub(r'(?<!^)(?=[A-Z])', '_', name).lower()
 
@@ -180,6 +208,7 @@ class Plan:
 
 
 def scaffold(entry, plan):
+    check_entry(entry)
     name, topic = api_name(entry), entry['topic']
     if topic == 'lib':
         raise Refuse(f'{name}: lib.rs is never a target')

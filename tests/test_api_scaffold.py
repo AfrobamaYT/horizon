@@ -110,6 +110,20 @@ class ScaffoldTest(unittest.TestCase):
         self.config.write_text(CONFIG.replace('ret = "Option<bool>"', 'ret = "bool"'))
         self.assertIn('returns Option', self.run_tool('--dry-run').stderr)
 
+    def test_bad_names_are_refused_without_writing(self):
+        for old, new in [('topic = "dir"', 'topic = "../../escaped"'), ('topic = "dir"', 'topic = "host/../lib"'),
+                         ('topic = "dir"', 'topic = "/tmp/abs"'), ('topic = "dir"', 'topic = "type"'),
+                         ('variants = ["Up", "Down"]', 'variants = ["Up", "fn"]'),
+                         ('fields = ["x: i32", "y: i32"]', 'fields = ["x: i32", "y z: i32"]'),
+                         ('name = "is_wet"', 'name = "bad name"')]:
+            with self.subTest(new=new):
+                self.config.write_text(CONFIG.replace(old, new))
+                before = sorted(p.relative_to(self.root) for p in self.root.rglob('*') if p.is_file())
+                done = self.run_tool('--apply')
+                self.assertNotEqual(done.returncode, 0)
+                self.assertIn('refused', done.stderr)
+                self.assertEqual(before, sorted(p.relative_to(self.root) for p in self.root.rglob('*') if p.is_file()))
+
     def test_second_apply_refuses(self):
         self.assertEqual(self.run_tool('--apply').returncode, 0)
         done = self.run_tool('--apply')
