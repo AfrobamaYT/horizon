@@ -605,14 +605,16 @@ pub mod crossing;
 mod dispatch;
 mod host_param;
 mod index;
-pub mod native_patch;
 /// Generate codecs for ordinary scoped native callable resources.
 pub mod native_callable;
+pub mod native_patch;
 /// Canonical identities for native row layouts.
 pub mod native_schema;
 pub mod native_value;
 /// Generated lazy native row projections.
 pub mod native_window;
+/// Owned typed guest row wrapper generation.
+pub mod row_views;
 mod wire;
 pub use wire::generate as generate_wire;
 pub use wire::generate_host as generate_wire_host;
