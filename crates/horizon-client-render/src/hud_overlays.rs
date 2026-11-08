@@ -1576,7 +1576,7 @@ mod boss_bar_room_tests {
             })
             .collect();
         for h in [60, 120, 152, 153, 240, 300, 600] {
-            let bottom = boss_overlay(400, h, &bars, &font, |_, _| false)
+            let bottom = boss_overlay(400, h, &bars, &font, |_, _| true)
                 .iter()
                 .filter_map(|d| match d {
                     GuiDraw::Sprite { y, h, .. } => Some(y + h),
