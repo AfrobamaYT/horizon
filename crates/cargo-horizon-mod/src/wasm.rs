@@ -158,6 +158,10 @@ fn cargo_command(
         ])
         .args(["--config", &format!("profile.{PROFILE}.panic=\"abort\"")])
         .args(["--config", &format!("profile.{PROFILE}.codegen-units=1")])
+        .args([
+            "--config",
+            &format!("profile.{PROFILE}.build-override.codegen-units=1"),
+        ])
         .current_dir(root)
         .env("CARGO_TARGET_DIR", target_dir)
         .env("CARGO_INCREMENTAL", "0")
