@@ -203,11 +203,11 @@ impl Environment {
         .unwrap_or(base)
     }
 
-    /// `base` with the dimension type `extra` (its `attributes` and `timelines`) over it, owned:
-    /// what a client of a server keeps for the level the server's type describes. None when the
-    /// type's attributes are refused.
+    /// `base` with the `attributes` of the dimension type `extra` over it, owned: what a client
+    /// of a server keeps for the level the server's type describes. None when the type's
+    /// attributes are refused.
     pub fn with_type(base: &Environment, extra: &Json) -> Option<Environment> {
-        Self::load_dimension_with(&base.source, &base.dimension, extra)
+        Self::load_dimension_with(&base.source, &base.dimension, &extra["attributes"])
             .map_err(|e| log::warn!("the server's dimension type: attributes refused: {e}"))
             .ok()
     }
