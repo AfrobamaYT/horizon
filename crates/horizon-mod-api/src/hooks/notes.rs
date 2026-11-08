@@ -2997,7 +2997,7 @@ registration path.
   (`DiodeBlock.updateNeighborsInFront`). Both act on the level in place and are refused elsewhere.
 
 - Item behaviour, on the server for every player: `native_hurt_enemy` hears a player's hit land on a mob with the
-  held stack, `native_inventory_tick` runs each tick for every stack a player carries (armour and off hand included), and
+  held stack, `native_inventory_tick` runs each tick, on the `ItemPart`s of every stack a player carries (armour and off hand included), and
   the stack is the place `ItemPlace::PlayerSlot { player, slot }`, read and written as any item place, and
   `native_on_equip` hears an equipment slot take a different item.
 
