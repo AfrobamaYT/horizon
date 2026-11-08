@@ -95,7 +95,16 @@ fn generate_inner(
                 Ok(quote!(const { mod_points::snapshot::key(#fallback) }))
             }
         };
-        Ok(match shape {
+        // A node's move closures own only a copied reference to the native place, never
+        // an enclosing Box, collection or aggregate reached by that place expression.
+        let capture = |node: TokenStream| {
+            quote!({
+                let __horizon_place = &(#place);
+                #node
+            })
+        };
+        let place = quote!(*__horizon_place);
+        let node = match shape {
             Shape::Scalar(Scalar::String | Scalar::Str) => {
                 let unit = native_schema::identity(
                     rule,
@@ -113,18 +122,16 @@ fn generate_inner(
             }
             Shape::Ref { to, .. }
             | Shape::Wrapped(Wrapper::Box | Wrapper::Arc | Wrapper::Rc, to) => {
-                return emit(rule, to, quote!(*(#place)), exposure, depth + 1, runtime);
+                emit(rule, to, quote!(*(#place)), exposure, depth + 1, runtime)?
             }
-            Shape::Wrapped(Wrapper::Cow, to) => {
-                return emit(
-                    rule,
-                    to,
-                    quote!(*(#place).as_ref()),
-                    exposure,
-                    depth + 1,
-                    runtime,
-                );
-            }
+            Shape::Wrapped(Wrapper::Cow, to) => emit(
+                rule,
+                to,
+                quote!(*(#place).as_ref()),
+                exposure,
+                depth + 1,
+                runtime,
+            )?,
             Shape::Array(_, _) | Shape::Slice(_) | Shape::Collection(Collection::Vec, _) => {
                 let to = match shape {
                     Shape::Collection(_, args) => {
@@ -289,9 +296,9 @@ fn generate_inner(
                         let i = i as u32;
                         quote!(#path::#name { .. } => #i,)
                     });
-                    return Ok(
+                    return Ok(capture(
                         quote!({ let __horizon_tag = match &(#place) { #(#tags)* _ => u32::MAX }; mod_points::native_nodes::Variant { key: #key, tag: __horizon_tag, visit: move |__horizon_visit: &mut mod_points::native_nodes::Visitor<'_>| match &(#place) { #(#variants)* _ => Err(mod_api::RowError::Unsupported) } } }),
-                    );
+                    ));
                 }
                 let mut arms = Vec::new();
                 let declared = rule.fields(path).len() as u64;
@@ -333,7 +340,8 @@ fn generate_inner(
                     "unimplemented: native row projection for {shape:?}"
                 ));
             }
-        })
+        };
+        Ok(capture(node))
     }
     {
         let body = emit(
