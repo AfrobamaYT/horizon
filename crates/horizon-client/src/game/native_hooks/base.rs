@@ -1081,15 +1081,10 @@ impl Game<'_> {
     ) {
         Self::fire_standalone_models(context, models);
     }
-    /// The buttons of mod `mod_id`'s settings page, under its keys: push
-    /// their labels when it is yours. Asked again each time the page opens
-    /// and after each click.
-    pub(in crate::game) fn native_settings(&mut self, mod_id: &str, buttons: &mut Vec<String>) {
-        self.fire_settings(mod_id, buttons);
-    }
-    /// Button `button` of mod `mod_id`'s settings page was clicked.
-    pub(in crate::game) fn native_settings_click(&mut self, mod_id: &str, button: usize) {
-        self.fire_settings_click(mod_id, button);
+    /// The player changed setting `key` of mod `mod_id` on its page in Options > Mods; the new
+    /// value is kept already.
+    pub(in crate::game) fn native_setting_changed(&mut self, mod_id: &str, key: &str) {
+        self.fire_setting_changed(mod_id, key);
     }
     /// The player did `event` on mod `mod_id`'s panel (`panel_items`):
     /// act on it when it is yours.

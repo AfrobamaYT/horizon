@@ -3517,8 +3517,7 @@ impl Game<'_> {
             .installed
             .retain(|row| !rows.iter().any(|code| code.id == row.id));
         for mut row in rows {
-            let mut buttons = Vec::new();
-            self.native_settings(&row.id, &mut buttons);
+            let settings = self.native_page_settings(&row.id);
             let mappings: Vec<KeyMapping> = registered
                 .iter()
                 .filter(|(owner, _)| *owner == row.id)
@@ -3531,30 +3530,69 @@ impl Game<'_> {
                     category: k.category.clone(),
                 })
                 .collect();
-            row.native = Some(NativePage { mappings, buttons });
+            row.native = Some(NativePage { mappings, settings });
             self.settings.mods.installed.push(row);
         }
     }
-    /// A click on button `button` of native mod `i`'s page (its index in
-    /// Options > Mods), and the page's labels after it.
-    pub(super) fn native_settings_event(&mut self, i: usize, button: usize) {
-        let Some(id) = self.settings.mods.installed.get(i).map(|m| m.id.clone()) else {
+    /// The settings mod `mod_id` registered, with their kept values, as its page shows them.
+    fn native_page_settings(&self, mod_id: &str) -> Vec<NativeSetting> {
+        mod_api::__private::settings()
+            .iter()
+            .filter(|(owner, _)| *owner == mod_id)
+            .map(|(_, spec)| {
+                let kept = self.setting(mod_id, &spec.key);
+                let value = match (&spec.kind, spec.read(kept.as_deref())) {
+                    (_, mod_api::SettingValue::Toggle(on)) => NativeSettingValue::Toggle(on),
+                    (mod_api::SettingKind::Choice { options, .. }, mod_api::SettingValue::Choice(index)) => {
+                        NativeSettingValue::Choice { options: options.clone(), index }
+                    }
+                    (mod_api::SettingKind::Range { min, max, step, .. }, mod_api::SettingValue::Range(value)) => {
+                        NativeSettingValue::Range { min: *min, max: *max, step: *step, value }
+                    }
+                    (_, mod_api::SettingValue::Color(rgb)) => NativeSettingValue::Color(rgb),
+                    _ => NativeSettingValue::Toggle(false),
+                };
+                NativeSetting {
+                    key: spec.key.clone(),
+                    label: spec.label.clone(),
+                    tooltip: spec.tooltip.clone(),
+                    value,
+                }
+            })
+            .collect()
+    }
+    /// Setting `j` of native mod `i`'s page (its index in Options > Mods) changed on the page:
+    /// kept as the mod registered it, then the mod is told (`setting_changed`).
+    pub(super) fn native_setting_event(&mut self, i: usize, j: usize) {
+        let Some(row) = self.settings.mods.installed.get(i) else {
             return;
         };
-        self.native_settings_click(&id, button);
-        self.native_settings_refresh(i);
+        let Some(setting) = row.native.as_ref().and_then(|page| page.settings.get(j)) else {
+            return;
+        };
+        let (id, key) = (row.id.clone(), setting.key.clone());
+        let value = match &setting.value {
+            NativeSettingValue::Toggle(on) => mod_api::SettingValue::Toggle(*on),
+            NativeSettingValue::Choice { index, .. } => mod_api::SettingValue::Choice(*index),
+            NativeSettingValue::Range { value, .. } => mod_api::SettingValue::Range(*value),
+            NativeSettingValue::Color(rgb) => mod_api::SettingValue::Color(*rgb),
+        };
+        let kept = mod_api::__private::setting(&id, &key).and_then(|spec| spec.store(value));
+        let Some(kept) = kept else {
+            return;
+        };
+        self.set_setting(&id, &key, &kept);
+        self.native_setting_changed(&id, &key);
     }
-    /// Native mod `i`'s page opened: its labels asked again, so that they
-    /// follow the language (and the mod's state) since the list was made.
+    /// Native mod `i`'s page opened: its settings' kept values read again.
     pub(super) fn native_settings_refresh(&mut self, i: usize) {
         let Some(id) = self.settings.mods.installed.get(i).map(|m| m.id.clone()) else {
             return;
         };
-        let mut buttons = Vec::new();
-        self.native_settings(&id, &mut buttons);
+        let settings = self.native_page_settings(&id);
         let row = self.settings.mods.installed.get_mut(i);
         if let Some(page) = row.and_then(|m| m.native.as_mut()) {
-            page.buttons = buttons;
+            page.settings = settings;
         }
     }
     /// `ClientHooks.onClickInput`: tells `native_interaction_key_mapping_triggered` that

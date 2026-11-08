@@ -56,6 +56,32 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
     }
     lines
 }
+/// Setting `j` of the native mod in row `i` of Options > Mods.
+fn mod_setting(s: &Settings, i: u16, j: u16) -> Option<&crate::mod_list::NativeSetting> {
+    s.mods
+        .installed
+        .get(usize::from(i))?
+        .native
+        .as_ref()?
+        .settings
+        .get(usize::from(j))
+}
+/// A native mod's setting as its row says it: the label, then the value.
+fn mod_setting_label(setting: &crate::mod_list::NativeSetting) -> Text {
+    use crate::mod_list::NativeSettingValue as V;
+    let value = match &setting.value {
+        V::Toggle(on) => on_off(*on),
+        V::Choice { options, index } => options
+            .get(*index)
+            .map_or_else(|| Text::literal(""), |o| tr(o)),
+        V::Range { value, .. } => {
+            let shown = format!("{value:.2}");
+            Text::literal(shown.trim_end_matches('0').trim_end_matches('.'))
+        }
+        V::Color(rgb) => Text::literal(format!("#{rgb:06X}")).with_color(*rgb),
+    };
+    Text::option_name_value(tr(&setting.label), value)
+}
 fn on_off(v: bool) -> Text {
     tr(if v { "options.on" } else { "options.off" })
 }
@@ -212,6 +238,7 @@ impl Opt {
             Opt::DiscreteScroll => "options.discrete_mouse_scroll",
             Opt::AllowCursorChanges => "options.allowCursorChanges",
             Opt::Volume(_) => "soundCategory.master",
+            Opt::ModSetting(..) => "horizon.mods.settings",
             Opt::SoundDevice => "options.audioDevice",
             Opt::GuiScale => "options.guiScale",
             Opt::ViewBobbing => "options.viewBobbing",
@@ -335,6 +362,9 @@ impl Opt {
     pub(crate) fn kind(self, s: &Settings) -> Kind {
         let unit = |v: f32, lo: f32, hi: f32| Kind::Slider(((v - lo) / (hi - lo)).clamp(0.0, 1.0));
         match self {
+            Opt::ModSetting(i, j) => {
+                Kind::Slider(mod_setting(s, i, j).map_or(0.0, |m| m.value.fraction()))
+            }
             Opt::FovEffects | Opt::DarknessPulsing => {
                 Kind::Slider(s.file.double(self.file_key().unwrap()).sqrt() as f32)
             }
@@ -398,6 +428,11 @@ impl Opt {
     }
     /// OptionInstance's static or value-dependent tooltip translation.
     fn tooltip_key(self, s: &Settings) -> String {
+        if let Opt::ModSetting(i, j) = self {
+            return mod_setting(s, i, j)
+                .and_then(|m| m.tooltip.clone())
+                .unwrap_or_default();
+        }
         let key = match self {
             Opt::InactivityFps => {
                 if s.inactivity_fps_limit == "minimized" {
@@ -490,6 +525,9 @@ impl Opt {
     }
     /// The widget message (OptionInstance.toString / CycleButton full name).
     pub fn label(self, s: &Settings) -> Text {
+        if let Opt::ModSetting(i, j) = self {
+            return mod_setting(s, i, j).map_or_else(|| Text::literal(""), mod_setting_label);
+        }
         let c = self.caption();
         match self {
             Opt::ChatDelay => tr("options.chat.delay_none"),
@@ -874,6 +912,18 @@ impl Opt {
     }
     /// Set a slider from its 0..1 position (OptionInstance value sets).
     pub fn set_slider(self, s: &mut Settings, v: f32) {
+        if let Opt::ModSetting(i, j) = self {
+            let setting = s
+                .mods
+                .installed
+                .get_mut(usize::from(i))
+                .and_then(|m| m.native.as_mut())
+                .and_then(|page| page.settings.get_mut(usize::from(j)));
+            if let Some(setting) = setting {
+                setting.value.slide(v);
+            }
+            return;
+        }
         if !self.available() {
             return;
         }
@@ -1220,6 +1270,9 @@ fn drag_slider(opt: Opt, s: &mut Settings, v: f32, events: &mut Vec<Event>) {
     let before = volume(s);
     set_slider(opt, s, v);
     events.push(Event::SliderDrag);
+    if let Opt::ModSetting(i, j) = opt {
+        events.push(Event::NativeSetting(usize::from(i), usize::from(j)));
+    }
     if let (Opt::Volume(source), Some(after)) = (opt, volume(s))
         && before != Some(after)
     {
@@ -1476,7 +1529,8 @@ enum Act {
     /// A key a native mod registered (mod, mapping) waits for a key, or is reset.
     ModKey(usize, usize),
     ResetModKey(usize, usize),
-    NativeButton(usize, usize),
+    /// Setting `.1` of native mod `.0`'s page clicked: a toggle, choice or colour steps on.
+    NativeSetting(usize, usize),
     OpenModFolder,
     /// Browse mods: the page of listing `.0` of `mod_browser`.
     ModProject(usize),
@@ -1623,12 +1677,11 @@ pub enum Event {
     /// The options of `shader_packs[.0]`, a Horizon pack, changed: save them (the pack reloads
     /// with them).
     NativePackOptions(usize),
-    /// Native mod `.0`'s page opened: the game asks the mod for its labels
-    /// again (they were made with the list, maybe in another language).
+    /// Native mod `.0`'s page opened: the game reads its settings' kept values again.
     NativeSettings(usize),
-    /// Button `.1` of native mod `.0`'s page was pressed: the game tells the
-    /// mod and refreshes the page.
-    NativeButton(usize, usize),
+    /// Setting `.1` of native mod `.0`'s page changed (`settings.mods`): the game keeps it and
+    /// tells the mod (`setting_changed`).
+    NativeSetting(usize, usize),
     /// Roll the credits (`CreditsAndAttributionScreen.openCreditsScreen`).
     Credits,
     /// PvP & HUD's Edit HUD: open the HUD editor over the game.
@@ -2784,14 +2837,29 @@ impl OptionsUi {
         let Some(page) = &m.native else {
             return rows;
         };
-        for (b, label) in page.buttons.iter().enumerate() {
-            let widget = button(
-                0.0,
-                0.0,
-                310.0,
-                Text::literal(label.clone()),
-                Act::NativeButton(i, b),
-            );
+        for (j, setting) in page.settings.iter().enumerate() {
+            let widget = match (&setting.value, u16::try_from(i), u16::try_from(j)) {
+                (crate::mod_list::NativeSettingValue::Range { .. }, Ok(i), Ok(j)) => Widget {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 310.0,
+                    h: 20.0,
+                    kind: WKind::Slider {
+                        label: mod_setting_label(setting),
+                        value: setting.value.fraction(),
+                        opt: Opt::ModSetting(i, j),
+                    },
+                    list: false,
+                    row: 0,
+                },
+                _ => button(
+                    0.0,
+                    0.0,
+                    310.0,
+                    mod_setting_label(setting),
+                    Act::NativeSetting(i, j),
+                ),
+            };
             rows.push(Row::Buttons(widget, None));
         }
         rows
@@ -3163,7 +3231,7 @@ impl OptionsUi {
                     if installed
                         .native
                         .as_ref()
-                        .is_some_and(|page| !page.buttons.is_empty())
+                        .is_some_and(|page| !page.settings.is_empty())
                     {
                         let toggle = button(0.0, 0.0, 150.0, label, Act::ToggleMod(i));
                         let settings = button(
@@ -4532,7 +4600,18 @@ impl OptionsUi {
                                 events.push(Event::Changed);
                             }
                         }
-                        Act::NativeButton(i, b) => events.push(Event::NativeButton(i, b)),
+                        Act::NativeSetting(i, j) => {
+                            let setting = s
+                                .mods
+                                .installed
+                                .get_mut(i)
+                                .and_then(|m| m.native.as_mut())
+                                .and_then(|page| page.settings.get_mut(j));
+                            if let Some(setting) = setting {
+                                setting.value.click();
+                                events.push(Event::NativeSetting(i, j));
+                            }
+                        }
                         Act::OpenModFolder => events.push(Event::OpenModFolder),
                         Act::ModProject(i) => {
                             if let Some(listing) = self.mod_browser.listings.get(i) {
@@ -5519,7 +5598,18 @@ impl OptionsUi {
                                 events.push(Event::Changed);
                             }
                         }
-                        Act::NativeButton(i, b) => events.push(Event::NativeButton(i, b)),
+                        Act::NativeSetting(i, j) => {
+                            let setting = s
+                                .mods
+                                .installed
+                                .get_mut(i)
+                                .and_then(|m| m.native.as_mut())
+                                .and_then(|page| page.settings.get_mut(j));
+                            if let Some(setting) = setting {
+                                setting.value.click();
+                                events.push(Event::NativeSetting(i, j));
+                            }
+                        }
                         Act::OpenModFolder => events.push(Event::OpenModFolder),
                         Act::ModProject(i) => {
                             if let Some(listing) = self.mod_browser.listings.get(i) {
@@ -6187,7 +6277,12 @@ mod tests {
             problem: None,
             dev: false,
             native: Some(crate::mod_list::NativePage {
-                buttons: vec!["Setting".into()],
+                settings: vec![crate::mod_list::NativeSetting {
+                    key: "trails".into(),
+                    label: "Trails".into(),
+                    tooltip: None,
+                    value: crate::mod_list::NativeSettingValue::Toggle(true),
+                }],
                 ..Default::default()
             }),
         });
@@ -6218,6 +6313,103 @@ mod tests {
         // Its labels were made with the list, maybe in another language.
         assert_eq!(events.last(), Some(&Event::NativeSettings(0)));
         assert_eq!(ui.page(), Page::NativeMod(0));
+    }
+
+    #[test]
+    fn a_mod_page_draws_its_settings_and_a_change_reaches_the_game() {
+        use crate::mod_list::{NativeSetting, NativeSettingValue as V};
+        let atlas = atlas();
+        let mut s = Settings::default();
+        let mut ui = OptionsUi::default();
+        let size = (480.0, 240.0);
+        let setting = |key: &str, value: V| NativeSetting {
+            key: key.into(),
+            label: key.into(),
+            tooltip: None,
+            value,
+        };
+        s.mods.installed.push(crate::mod_list::Installed {
+            id: "native".into(),
+            title: "Native 1.0".into(),
+            description: String::new(),
+            problem: None,
+            dev: false,
+            native: Some(crate::mod_list::NativePage {
+                settings: vec![
+                    setting("trails", V::Toggle(true)),
+                    setting(
+                        "speed",
+                        V::Range {
+                            min: 0.0,
+                            max: 4.0,
+                            step: 1.0,
+                            value: 1.0,
+                        },
+                    ),
+                ],
+                ..Default::default()
+            }),
+        });
+        ui.show(Page::NativeMod(0));
+        let (widgets, ..) = ui.layout(&s, size.0, size.1);
+        let toggle = widgets
+            .iter()
+            .find(|w| {
+                matches!(
+                    w.kind,
+                    WKind::Button {
+                        act: Act::NativeSetting(0, 0),
+                        ..
+                    }
+                )
+            })
+            .expect("a toggle is a button");
+        let slider = widgets
+            .iter()
+            .find(|w| {
+                matches!(
+                    w.kind,
+                    WKind::Slider {
+                        opt: Opt::ModSetting(0, 1),
+                        ..
+                    }
+                )
+            })
+            .expect("a range is a slider");
+        let (slider_x, slider_y, slider_w) = (slider.x, slider.y, slider.w);
+        let events = ui.click(
+            &mut s,
+            &atlas,
+            toggle.x + 1.0,
+            toggle.y + 1.0,
+            size,
+            [480, 240],
+            false,
+            false,
+        );
+        assert!(events.contains(&Event::NativeSetting(0, 0)), "{events:?}");
+        let page = |s: &Settings| s.mods.installed[0].native.clone().unwrap();
+        assert_eq!(page(&s).settings[0].value, V::Toggle(false));
+        let events = ui.click(
+            &mut s,
+            &atlas,
+            slider_x + slider_w - 1.0,
+            slider_y + 1.0,
+            size,
+            [480, 240],
+            false,
+            false,
+        );
+        assert!(events.contains(&Event::NativeSetting(0, 1)), "{events:?}");
+        assert_eq!(
+            page(&s).settings[1].value,
+            V::Range {
+                min: 0.0,
+                max: 4.0,
+                step: 1.0,
+                value: 4.0
+            }
+        );
     }
 
     #[test]
@@ -6524,7 +6716,7 @@ mod tests {
                     key: "key.keyboard.z".into(),
                     ..Default::default()
                 }],
-                buttons: Vec::new(),
+                settings: Vec::new(),
             }),
         });
         ui.show(Page::KeyBinds);
@@ -6710,7 +6902,12 @@ mod tests {
             dev: false,
             native: Some(crate::mod_list::NativePage {
                 mappings: Vec::new(),
-                buttons: vec!["Zoom".into()],
+                settings: vec![crate::mod_list::NativeSetting {
+                    key: "trails".into(),
+                    label: "Trails".into(),
+                    tooltip: None,
+                    value: crate::mod_list::NativeSettingValue::Toggle(true),
+                }],
             }),
         });
         let labels = lang::scoped(english(), || ui.extras.row_labels(&s)).0;

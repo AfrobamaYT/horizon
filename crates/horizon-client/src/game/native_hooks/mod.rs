@@ -45,7 +45,7 @@ use horizon_client::{
     lan::menu::Slots,
     merchant::MerchantOffer,
     mobs::{Damage, Who},
-    mod_list::{self, Installed, KeyMapping, NativePage},
+    mod_list::{self, Installed, KeyMapping, NativePage, NativeSetting, NativeSettingValue},
     music::{Music, MusicLayer},
     particles::{ParticleOptions, ParticleType},
     text::Text,
