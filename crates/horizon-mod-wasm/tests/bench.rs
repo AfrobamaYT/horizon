@@ -21,10 +21,27 @@ fn measure(label: &str, mods: Vec<ModEntry>) {
             &mod_api::__private::part_tests::rule_schema(),
         )
         .unwrap();
+        assert!(
+            mod_api::__private::block_entity_types()
+                .iter()
+                .any(|kind| kind.id == "wasm_fixture:counter"),
+            "{label}: register did not declare wasm_fixture:counter"
+        );
         mod_api::__private::mark_game_thread();
         let mut entities: Vec<_> = (0..1000)
             .map(|_| ModBlockEntity::new("wasm_fixture:counter".into(), Default::default()))
             .collect();
+        mod_api::dispatch_block_entity_tick(&mut World, [0, 64, 0], &mut entities[0]);
+        assert_eq!(
+            entities[0].data,
+            [23],
+            "{label}: registered tick did not write entity data"
+        );
+        assert_eq!(
+            entities[0].nbt.get(&"counter".into()),
+            Some(&mod_api::Tag::Int(17)),
+            "{label}: registered tick did not write entity NBT"
+        );
         let mut samples = Vec::with_capacity(100);
         for round in 0..120 {
             let now = Instant::now();
@@ -53,13 +70,25 @@ fn block_entity_ticks() {
     let path = std::env::var("HORIZON_WASM_FIXTURE").unwrap();
     let path = std::path::Path::new(&path);
     let std = std::fs::read(std::env::var("HORIZON_WASM_STD").unwrap()).unwrap();
+    let manifest = Package::read(path).unwrap().manifest;
+    let info = mod_api::PackageInfo::new(
+        manifest.id.clone(),
+        manifest.version.clone(),
+        mod_api::PackageKind::Code,
+        mod_api::Side::Both,
+        vec![manifest.id.clone()],
+        manifest.dependencies.keys().cloned().collect(),
+    );
     let package = WasmPackage {
-        manifest: Package::read(path).unwrap().manifest,
+        manifest,
         module: Package::read_wasm(path).unwrap(),
     };
     let loaded = load(&std, vec![package]);
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
     assert_eq!(loaded.mods.len(), 1);
+    loaded
+        .initialize(&[info])
+        .expect("wasm initialization failed");
     measure(
         "native",
         vec![ModEntry::new("wasm_fixture", Box::new(fixture::Mod))],
