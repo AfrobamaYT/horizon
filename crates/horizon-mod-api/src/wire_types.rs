@@ -147,7 +147,14 @@ macro_rules! slot_keys {
             const MIN: usize = <$width as Wire>::MIN;
             fn put(&self, out: &mut Writer) { out.put(&self.0); }
             fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
-                Self::from_slot(input.take::<$width>()?).map_err(WireError::Invalid)
+                let slot=input.take::<$width>()?;
+                // Slots belong to the host's registry. A wasm guest carries the opaque
+                // token back; its separate registry tables cannot validate a host slot.
+                // Host decoding remains the authoritative validation boundary.
+                #[cfg(target_arch="wasm32")]
+                { Ok(Self(slot)) }
+                #[cfg(not(target_arch="wasm32"))]
+                { Self::from_slot(slot).map_err(WireError::Invalid) }
             }
         }
     )+};
