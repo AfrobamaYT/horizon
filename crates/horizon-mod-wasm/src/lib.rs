@@ -377,13 +377,41 @@ pub struct Loaded {
     modules: Vec<WasmMod>,
 }
 
+impl Loaded {
+    /// Initializes programmatically loaded mods with the final inventory, then installs
+    /// their point listeners. Call once, before sealing the point registry.
+    pub fn initialize(
+        &self,
+        inventory: &[mod_api::PackageInfo],
+    ) -> Result<(), Vec<(String, Refusal)>> {
+        let refused = initialize_selected(self.manifests.iter().zip(&self.modules), inventory);
+        if refused.is_empty() {
+            Ok(())
+        } else {
+            Err(refused)
+        }
+    }
+}
+
 static MODULES: OnceLock<Vec<(Manifest, WasmMod)>> = OnceLock::new();
 
 /// Supplies the complete native/content inventory after the game's dispatch order is installed,
 /// before registration. Constructors and subscription queries run before this, as on native.
 pub fn initialize(inventory: &[mod_api::PackageInfo]) {
     let mut refused = REFUSED.get().cloned().unwrap_or_default();
-    for (manifest, module) in MODULES.get().map_or(&[][..], Vec::as_slice) {
+    let modules = MODULES.get().map_or(&[][..], Vec::as_slice);
+    refused.extend(initialize_selected(
+        modules.iter().map(|(manifest, module)| (manifest, module)),
+        inventory,
+    ));
+    let _ = INITIALIZED_REFUSALS.set(refused);
+}
+fn initialize_selected<'a>(
+    modules: impl Iterator<Item = (&'a Manifest, &'a WasmMod)>,
+    inventory: &[mod_api::PackageInfo],
+) -> Vec<(String, Refusal)> {
+    let mut refused = Vec::new();
+    for (manifest, module) in modules {
         let result = if initialize_modules(std::slice::from_ref(module), inventory) {
             points::listen(manifest, module)
         } else {
@@ -395,7 +423,7 @@ pub fn initialize(inventory: &[mod_api::PackageInfo]) {
             refused.push((manifest.id.clone(), Refusal::Runtime(why)));
         }
     }
-    let _ = INITIALIZED_REFUSALS.set(refused);
+    refused
 }
 fn initialize_modules(modules: &[WasmMod], inventory: &[mod_api::PackageInfo]) -> bool {
     let mut succeeded = true;
