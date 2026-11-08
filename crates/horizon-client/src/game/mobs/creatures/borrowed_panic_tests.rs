@@ -458,10 +458,17 @@ fn run_output(family: Family, output: Output) {
                     );
                     if output == Output::Reset {
                         assert_eq!(eggs(game), 0);
+                        let variant = game.mobs[0].extra.variant;
                         game.clear_entities();
-                        let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+                        let kind = game
+                            .res
+                            .mob_types()
+                            .get("minecraft:chicken")
+                            .unwrap()
+                            .clone();
                         let mut replacement = Mob::new(71, kind, Vec3::new(1.0, 80.0, 0.5), 0.0);
                         replacement.no_ai = true;
+                        replacement.extra.variant = variant;
                         game.mobs.push(replacement);
                         game.tick_creature_entities().unwrap();
                         assert_eq!(
