@@ -288,7 +288,9 @@ pub struct ModBlockEntityView<'a> {
     entity: &'a mut ModBlockEntity,
 }
 impl<'a> ModBlockEntityView<'a> {
-    pub(crate) fn new(entity: &'a mut ModBlockEntity) -> Self {
+    // hidden: a game-side helper lending the checked view to a hook
+    #[doc(hidden)]
+    pub fn new(entity: &'a mut ModBlockEntity) -> Self {
         Self { entity }
     }
     /// Id.
@@ -4203,9 +4205,7 @@ pub fn backend_mut_of(host: &mut dyn ServerHost) -> Option<&mut dyn BackendMut> 
 
 // hidden: a game-side helper, the wasm host half serves backend calls through it
 #[doc(hidden)]
-pub fn client_backend_mut_of(
-    host: &mut dyn ClientHost,
-) -> Option<&mut dyn ClientBackendMut> {
+pub fn client_backend_mut_of(host: &mut dyn ClientHost) -> Option<&mut dyn ClientBackendMut> {
     host.client_backend_mut().map(|wrapper| wrapper.open())
 }
 

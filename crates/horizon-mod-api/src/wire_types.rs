@@ -747,6 +747,16 @@ impl Wire for crate::ItemEnchantments {
         })
     }
 }
+impl Wire for crate::containers::ModRevision {
+    const MIN: usize = 16;
+    fn put(&self, out: &mut Writer) {
+        out.put(&self.identity());
+        out.put(&self.changes());
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        Ok(Self::from_snapshot(input.take()?, input.take()?))
+    }
+}
 impl Wire for crate::ModBlockEntity {
     const MIN: usize = 32;
     fn put(&self, out: &mut Writer) {

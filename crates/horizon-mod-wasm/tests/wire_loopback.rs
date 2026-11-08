@@ -139,6 +139,69 @@ impl StructurePiece for Piece {
     }
     fn add_additional_save_data(&self, _: &mut mod_api::Compound) {}
 }
+struct MachineBlock;
+impl mod_api::BlockPart for MachineBlock {
+    fn block_subscribed(&self) -> &'static [Option<mod_api::HookId>] {
+        &[]
+    }
+}
+impl mod_api::BlockEntityPart for MachineBlock {
+    fn block_entity_subscribed(&self) -> &'static [Option<mod_api::HookId>] {
+        &[]
+    }
+    fn block_entity_tick(
+        &self,
+        _: &mut dyn mod_api::ServerHost,
+        event: &mut mod_api::BlockEntityTickEvent<'_>,
+    ) {
+        event.entity.data[0] += 3;
+    }
+}
+#[test]
+fn wire_loopback_machine_tick_uses_checked_snapshot_writeback() {
+    use mod_api::BlockEntityPart;
+    let id = guest::add_handler(vec![guest::view::<dyn mod_api::BlockEntityPart>(Arc::new(
+        MachineBlock,
+    ))]);
+    let mut entity = mod_api::ModBlockEntity::default();
+    entity.data = vec![5];
+    let identity = entity.id().to_string();
+    let born = entity.revision().identity();
+    let proxy = WasmHandler {
+        index: id,
+        module: WasmMod {
+            subscribed: &[],
+            corrupt: false,
+        },
+    };
+    proxy.block_entity_tick(
+        &mut guest::Guest,
+        &mut mod_api::BlockEntityTickEvent {
+            pos: [1, 2, 3],
+            entity: mod_api::ModBlockEntityView::new(&mut entity),
+        },
+    );
+    assert_eq!(entity.data, vec![8]);
+    assert_eq!(entity.id(), identity);
+    assert_eq!(entity.revision().identity(), born);
+    let before = entity.revision().changes();
+    let bad = WasmHandler {
+        index: id,
+        module: WasmMod {
+            subscribed: &[],
+            corrupt: true,
+        },
+    };
+    bad.block_entity_tick(
+        &mut guest::Guest,
+        &mut mod_api::BlockEntityTickEvent {
+            pos: [1, 2, 3],
+            entity: mod_api::ModBlockEntityView::new(&mut entity),
+        },
+    );
+    assert_eq!(entity.data, vec![8]);
+    assert_eq!(entity.revision().changes(), before);
+}
 #[test]
 fn wire_loopback_bad_import_bytes_are_typed_errors() {
     let mut cx = boundary::Cx::default();
