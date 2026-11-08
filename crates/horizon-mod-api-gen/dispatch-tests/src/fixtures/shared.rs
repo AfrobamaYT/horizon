@@ -123,10 +123,12 @@ fn install(mods: Arc<[ModEntry]>) {
     let subscriptions = mods.iter().enumerate().flat_map(|(index, entry)| {
         let listeners = entry.hooks.listeners();
         entry.hooks.subscribed().iter().flatten().map(move |hook| {
-            let listener = listeners
-                .iter()
-                .find(|listener| listener.hook.is_some_and(|id| id as usize == *hook as usize));
-            horizon_client_core::subscribers::Subscription {
+            let listener = listeners.iter().find(|listener| {
+                listener
+                    .hook
+                    .is_some_and(|id| id as usize == *hook as usize)
+            });
+            horizon_mod_runtime::subscribers::Subscription {
                 index,
                 hook: *hook as usize,
                 priority: listener.map_or(0, |listener| listener.priority),
@@ -164,11 +166,22 @@ fn listening(hook_id: HookId) -> impl Iterator<Item = (bool, &'static ModEntry)>
         installed
             .subscribers
             .subscribers(hook_id as usize)
-            .map(move |subscriber| (subscriber.receives_cancelled, &installed.mods[subscriber.index]))
+            .map(move |subscriber| {
+                (
+                    subscriber.receives_cancelled,
+                    &installed.mods[subscriber.index],
+                )
+            })
     })
 }
 fn enter_listener(entry: &'static ModEntry, hook: &'static str) -> ((), &'static dyn Hooks) {
-    let index = MODS.get().unwrap().mods.iter().position(|e| std::ptr::eq(e, entry)).unwrap();
+    let index = MODS
+        .get()
+        .unwrap()
+        .mods
+        .iter()
+        .position(|e| std::ptr::eq(e, entry))
+        .unwrap();
     ENTERED.with(|entered| entered.borrow_mut().push((index, hook)));
     ((), &*entry.hooks)
 }

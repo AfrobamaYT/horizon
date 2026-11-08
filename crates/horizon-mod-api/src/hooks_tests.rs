@@ -347,7 +347,12 @@ fn gui_dispatch(
     (cancelled, heard)
 }
 
-fn answer(heard: &Heard, name: &'static str, answer: Answer, event: &mut RenderGuiPreEvent) -> Flow {
+fn answer(
+    heard: &Heard,
+    name: &'static str,
+    answer: Answer,
+    event: &mut RenderGuiPreEvent,
+) -> Flow {
     heard.lock().unwrap().push((name, event.cancelled));
     match answer {
         Answer::Continues => Flow::Continue,
@@ -368,7 +373,10 @@ fn plain(name: &'static str, kind: Answer) -> (&'static str, Box<dyn Fn(Heard) -
             answer(&self.0, self.1, self.2, event)
         }
     }
-    (name, Box::new(move |heard| Box::new(Plain(heard, name, kind))))
+    (
+        name,
+        Box::new(move |heard| Box::new(Plain(heard, name, kind))),
+    )
 }
 
 #[test]
@@ -422,8 +430,14 @@ impl Hooks for Receiver {
     }
 }
 
-fn receiver(name: &'static str, kind: Answer) -> (&'static str, Box<dyn Fn(Heard) -> Box<dyn Hooks>>) {
-    (name, Box::new(move |heard| Box::new(Receiver(heard, name, kind))))
+fn receiver(
+    name: &'static str,
+    kind: Answer,
+) -> (&'static str, Box<dyn Fn(Heard) -> Box<dyn Hooks>>) {
+    (
+        name,
+        Box::new(move |heard| Box::new(Receiver(heard, name, kind))),
+    )
 }
 
 #[test]
@@ -452,7 +466,10 @@ fn a_listener_receiving_a_cancel_can_undo_it() {
     );
     assert!(!cancelled, "the undone cancel does not reach the game");
     // Once the cancel is undone, the listeners after it are told again.
-    assert_eq!(heard, [("canceller", false), ("undoer", true), ("after", false)]);
+    assert_eq!(
+        heard,
+        [("canceller", false), ("undoer", true), ("after", false)]
+    );
 }
 
 #[test]
@@ -462,7 +479,10 @@ fn an_event_cancelled_before_dispatch_reaches_only_listeners_receiving_cancelled
     assert!(heard.is_empty(), "no listener receives cancelled events");
     let (cancelled, heard) = gui_dispatch(
         true,
-        vec![plain("plain", Answer::Continues), receiver("undoer", Answer::Uncancels)],
+        vec![
+            plain("plain", Answer::Continues),
+            receiver("undoer", Answer::Uncancels),
+        ],
     );
     assert!(!cancelled);
     assert_eq!(heard, [("undoer", true)]);

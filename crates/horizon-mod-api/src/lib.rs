@@ -3820,7 +3820,7 @@ impl Installed {
                         .hook
                         .is_some_and(|id| id as usize == *hook as usize)
                 });
-                horizon_client_core::subscribers::Subscription {
+                horizon_mod_runtime::subscribers::Subscription {
                     index,
                     hook: *hook as usize,
                     priority: listener.map_or(0, |listener| listener.priority),

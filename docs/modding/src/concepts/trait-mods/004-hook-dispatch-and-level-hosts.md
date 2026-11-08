@@ -2,7 +2,7 @@
 <!-- separator: 1 -->
 
 A linked trait mod implements `mod_api::Hooks`. Helper injections run first.
-An injection that returns early skips trait mods. A claimed cancellation also skips trait mods.
+An injection that returns early skips trait mods. A claimed cancellation reaches only trait listeners that receive cancelled events.
 Otherwise, trait mods run by priority, then in dependency order. Once a mod cancels, later mods are skipped unless
 they receive cancelled events. For replacement hooks, the first `Some` wins. Collection hooks call every mod.
 Receiverless hooks have no `Host`.
@@ -40,6 +40,8 @@ installed. Every cancellable hook's event has a `cancelled` field: a mod without
 `false` lets the game's behaviour run, and the mods after it are told again. An event the game hands over already
 cancelled reaches only mods that receive cancelled events. `receive_cancelled` on a hook without a cancel does not
 compile, and `#[listener]` is for a trait mod's hooks only: a part is called for its own thing, in no order.
+
+Native and wasm trait mods use the same listener ordering and cancellation rules. Wasm subscription records carry the hook name, signed priority, and receive-cancelled flag through the shared-memory Wire boundary at load time. The event's `cancelled` field crosses with its other writable fields. No component-model adapter is involved.
 
 Each hook method takes its host, where it has one, and one event:
 
