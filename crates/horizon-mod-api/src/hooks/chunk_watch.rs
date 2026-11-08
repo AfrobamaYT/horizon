@@ -24,8 +24,7 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "ChunkWatchEvent.Sent",
-        paper = "PlayerChunkLoadEvent"
+        neoforge = "ChunkWatchEvent.Sent"
     )]
     fn chunk_sent();
     /// `player` stopped watching `chunk` (NeoForge's `ChunkWatchEvent.UnWatch`,
