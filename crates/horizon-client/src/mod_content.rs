@@ -2476,46 +2476,8 @@ fn place_in_biomes(
     let biome_tags = bundle(biome_tags, BIOME_TAGS)?;
     let placed: BTreeSet<String> = bundle(placed, PLACED_FEATURES)?.into_keys().collect();
     let feature_tags = bundle(None, FEATURE_TAGS)?;
-    let entities_path = out_path(overlay, "entity-types.json");
-    let entity_categories: BTreeMap<String, String> = match entities_path.exists() {
-        true => match read_json(&entities_path)? {
-            J::Obj(entries) => entries
-                .into_iter()
-                .map(|(k, v)| {
-                    let cat = v
-                        .get("category")
-                        .and_then(J::as_str)
-                        .unwrap_or("misc")
-                        .to_owned();
-                    (k, cat)
-                })
-                .collect(),
-            _ => return Err("entity-types.json: not an object".into()),
-        },
-        false => BTreeMap::new(),
-    };
-    let entity_ids: BTreeSet<String> = entity_categories.keys().cloned().collect();
-    let mut entity_tags = BTreeMap::new();
-    let vanilla_entity_tags = base.join("data/minecraft/tags/entity_type");
-    if vanilla_entity_tags.is_dir() {
-        for file in &crate::json_folder::read(&vanilla_entity_tags)?.files {
-            let text = std::str::from_utf8(file.bytes()?)
-                .map_err(|e| format!("entity_type/{}: {e}", file.name))?;
-            entity_tags.insert(format!("minecraft:{}", file.name), text.to_owned());
-        }
-    }
-    for file in tags.keys() {
-        if let Some((ns, path)) = file
-            .strip_prefix("data/")
-            .and_then(|r| r.split_once("/tags/entity_type/"))
-            .and_then(|(ns, p)| Some((ns, p.strip_suffix(".json")?)))
-        {
-            entity_tags.insert(
-                format!("{ns}:{path}"),
-                fs::read_to_string(out_path(overlay, file))?,
-            );
-        }
-    }
+    let (entity_categories, entity_tags) = modifier_entities(base, overlay, tags)?;
+    let entity_ids = entity_categories.keys().cloned().collect();
     let changed = biomes::apply(
         &mut doc,
         modifiers,
@@ -2545,6 +2507,77 @@ fn place_in_biomes(
     }
     overlay.write(BIOMES, &serde_json::to_vec(&doc)?)
 }
+
+/// Registry metadata shared by both modifier loaders, after tag overlays are merged.
+fn modifier_entities(
+    base: &Path,
+    overlay: &Overlay<'_>,
+    tags: &BTreeMap<String, TagMerge>,
+) -> Result<(BTreeMap<String, String>, BTreeMap<String, String>)> {
+    let entities_path = out_path(overlay, "entity-types.json");
+    let entity_categories: BTreeMap<String, String> = match entities_path.exists() {
+        true => match read_json(&entities_path)? {
+            J::Obj(entries) => entries
+                .into_iter()
+                .map(|(k, v)| {
+                    let cat = v
+                        .get("category")
+                        .and_then(J::as_str)
+                        .unwrap_or("misc")
+                        .to_owned();
+                    (k, cat)
+                })
+                .collect(),
+            _ => return Err("entity-types.json: not an object".into()),
+        },
+        false => BTreeMap::new(),
+    };
+    let entity_tags = modifier_tags(base, overlay, tags, "entity_type")?;
+    Ok((entity_categories, entity_tags))
+}
+
+/// Registry tags after all accepted layers, shared by both modifier loaders.
+fn modifier_tags(
+    base: &Path,
+    overlay: &Overlay<'_>,
+    tags: &BTreeMap<String, TagMerge>,
+    registry: &str,
+) -> Result<BTreeMap<String, String>> {
+    let mut result = BTreeMap::new();
+    for ns in fs::read_dir(base.join("data"))
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        let dir = ns.path().join("tags").join(registry);
+        if !dir.is_dir() {
+            continue;
+        }
+        for file in &crate::json_folder::read(&dir)?.files {
+            result.insert(
+                format!("{}:{}", ns.file_name().to_string_lossy(), file.name),
+                std::str::from_utf8(file.bytes()?)?.to_owned(),
+            );
+        }
+    }
+    let prefix = format!("/tags/{registry}/");
+    for file in tags.keys() {
+        if let Some((ns, path)) = file
+            .strip_prefix("data/")
+            .and_then(|s| s.split_once(&prefix))
+            .and_then(|(ns, p)| Some((ns, p.strip_suffix(".json")?)))
+        {
+            result.insert(
+                format!("{ns}:{path}"),
+                fs::read_to_string(out_path(overlay, file))?,
+            );
+        }
+    }
+    Ok(result)
+}
+
+#[path = "mod_content_structures.rs"]
+mod structures;
 
 #[path = "mod_content_biomes.rs"]
 mod biomes;
@@ -3002,6 +3035,7 @@ pub fn build(
     let mut worldgen: BTreeMap<&str, Vec<(String, String)>> = BTreeMap::new();
     let mut additions: BTreeMap<&str, Vec<Addition>> = BTreeMap::new();
     let mut modifiers = Vec::new();
+    let mut structure_modifiers = Vec::new();
     let mut namespaces: std::collections::BTreeSet<String> = mods
         .iter()
         .flat_map(|m| m.content.namespaces.iter().cloned())
@@ -3031,7 +3065,9 @@ pub fn build(
                 let is_tag = file.contains("/tags/") && file.ends_with(".json");
                 if !is_tag
                     && (file.starts_with(&declarations)
-                        || (!biomes::is_modifier(&file) && worldgen_entry(&file).is_none()))
+                        || (!biomes::is_modifier(&file)
+                            && !structures::is_modifier(&file)
+                            && worldgen_entry(&file).is_none()))
                 {
                     continue;
                 }
@@ -3041,6 +3077,15 @@ pub fn build(
                         format!("{}: {file}", layer.assets.id),
                     )
                 })?;
+                // Dynamic registry entries use the same owning-load conditions as tags.
+                // Evaluate before parsing required modifier fields.
+                if biomes::is_modifier(&file) || structures::is_modifier(&file) {
+                    let doc: J = serde_json::from_slice(&bytes)
+                        .map_err(|e| format!("mod {}: {file}: {e}", m.id))?;
+                    if !tag_conditions_hold(&doc, &mod_loaded)? {
+                        continue;
+                    }
+                }
                 if is_tag {
                     let doc: J =
                         serde_json::from_slice(&bytes).map_err(|e| format!("{file}: {e}"))?;
@@ -3056,7 +3101,15 @@ pub fn build(
                     let merge = tags.entry(file.clone()).or_default();
                     warnings.extend(merge.add(&m.id, &file, replace, shared, values));
                 } else if !file.starts_with(&declarations) {
-                    if biomes::is_modifier(&file) {
+                    if structures::is_modifier(&file) {
+                        let text = String::from_utf8(bytes).map_err(|e| format!("{file}: {e}"))?;
+                        structure_modifiers.extend(structures::Modifier::read(
+                            &m.id,
+                            &file,
+                            &text,
+                            &mut warnings,
+                        )?);
+                    } else if biomes::is_modifier(&file) {
                         let text = String::from_utf8(bytes).map_err(|e| format!("{file}: {e}"))?;
                         modifiers.extend(biomes::Modifier::read(
                             &m.id,
@@ -3177,6 +3230,9 @@ pub fn build(
             &tags,
             &mut warnings,
         )?;
+    }
+    if !structure_modifiers.is_empty() {
+        structures::apply(base, &overlay, &structure_modifiers, &tags, &mut warnings)?;
     }
     // The commands suggest ids from `command-registries.json`: add the
     // structures, pools, sets and features the mods bring.
@@ -3518,7 +3574,9 @@ pub fn live_switch(content: &Content) -> std::result::Result<(), &'static str> {
             && parts.nth(1).is_some_and(|folder| {
                 matches!(folder, "worldgen" | "dimension" | "dimension_type")
                     || folder == "tags" && file.contains("/tags/worldgen/")
-                    || matches!(folder, "neoforge" | "forge") && file.contains("/biome_modifier/")
+                    || matches!(folder, "neoforge" | "forge")
+                        && (file.contains("/biome_modifier/")
+                            || file.contains("/structure_modifier/"))
             })
     };
     if content.files.iter().any(|f| worldgen(&f)) {

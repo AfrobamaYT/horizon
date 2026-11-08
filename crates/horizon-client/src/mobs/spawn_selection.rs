@@ -658,25 +658,13 @@ pub struct StructureSpawns {
     pub overrides: FxHashMap<String, FxHashMap<String, Override>>,
 }
 impl StructureSpawns {
-    /// The overrides of the resource root first asked for, loaded once.
-    pub fn shared(root: &Path) -> &'static Self {
-        static SHARED: std::sync::OnceLock<StructureSpawns> = std::sync::OnceLock::new();
-        SHARED.get_or_init(|| Self::load(root))
-    }
+    /// Read a fresh generation, including mod namespaces and nested structure ids.
     pub fn load(root: &Path) -> Self {
-        let mut overrides = FxHashMap::default();
-        let dir = root.join("data/minecraft/worldgen/structure");
-        for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
-            let path = entry.path();
-            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-                continue;
-            };
-            let Some(v) = fs::read(&path)
-                .ok()
-                .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
-            else {
-                continue;
-            };
+        fn insert(
+            overrides: &mut FxHashMap<String, FxHashMap<String, Override>>,
+            id: String,
+            v: &Value,
+        ) {
             let map: FxHashMap<String, Override> = v["spawn_overrides"]
                 .as_object()
                 .into_iter()
@@ -691,8 +679,43 @@ impl StructureSpawns {
                     )
                 })
                 .collect();
-            if !map.is_empty() {
-                overrides.insert(format!("minecraft:{stem}"), map);
+            overrides.insert(id, map);
+        }
+        let mut overrides = FxHashMap::default();
+        if let Some(Value::Object(entries)) = fs::read(root.join("worldgen/structures.json"))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        {
+            for (id, value) in entries {
+                if let Some(value) = value
+                    .as_str()
+                    .and_then(|text| serde_json::from_str::<Value>(text).ok())
+                {
+                    insert(&mut overrides, id, &value);
+                }
+            }
+        }
+        for ns in fs::read_dir(root.join("data"))
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            let dir = ns.path().join("worldgen/structure");
+            let Ok(files) = crate::json_folder::list(&dir) else {
+                continue;
+            };
+            for (name, path) in files {
+                let Some(v) = fs::read(path)
+                    .ok()
+                    .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+                else {
+                    continue;
+                };
+                insert(
+                    &mut overrides,
+                    format!("{}:{}", ns.file_name().to_string_lossy(), name),
+                    &v,
+                );
             }
         }
         Self { overrides }

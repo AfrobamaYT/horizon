@@ -2181,6 +2181,7 @@ struct PreparedParts {
 }
 
 struct PreparedWorldReload {
+    structure_spawns: horizon_client::mobs::spawn_selection::StructureSpawns,
     tables: Option<WorldTables>,
     health: horizon_client::health::HealthResources,
     parts: PreparedParts,
@@ -3213,6 +3214,7 @@ struct Game<'a> {
     /// `StructureTemplateManager.structureRepository`: the templates in memory
     /// by id, a miss included (game/administration/structure_blocks.rs).
     structure_templates: HashMap<String, Option<structure_blocks::TemplateEntry>>,
+    structure_spawns: horizon_client::mobs::spawn_selection::StructureSpawns,
     /// The game tests read so far, by id (the test instance registry).
     test_defs: std::cell::RefCell<HashMap<String, Option<test_instances::TestDef>>>,
     /// `test_defs` holds the world's whole test instance registry
@@ -3491,6 +3493,20 @@ impl Dim {
             "minecraft:the_nether" => Self::Nether,
             "minecraft:the_end" => Self::End,
             _ => Self::extra(id).unwrap_or(Self::Overworld),
+        }
+    }
+    /// `DimensionType.getTeleportationScale`: how a coordinate in `source` scales into `target`,
+    /// the source's `coordinate_scale` over the target's (8 into the Overworld from the Nether).
+    fn teleportation_scale(source: Self, target: Self) -> f64 {
+        use horizon_world::dimension_type::DimensionFacts;
+        let facts = |dim: Self| {
+            horizon_core::LevelKey::parse(dim.id())
+                .ok()
+                .map(DimensionFacts::of_level)
+        };
+        match (facts(source), facts(target)) {
+            (Some(from), Some(to)) => DimensionFacts::teleportation_scale(from, to),
+            _ => 1.0,
         }
     }
     /// The open world's dimension `id` past vanilla's three.
@@ -11773,6 +11789,8 @@ impl Game<'_> {
             self.build_world_tables(&stack, false, &root, self.mods.data_switched)?;
         self.damage_tag_generation = self.damage_tag_generation.wrapping_add(1);
         self.resolve_parts()?;
+        // A code-mod switch can have rebuilt the root since `Game::new`.
+        self.structure_spawns = horizon_client::mobs::spawn_selection::StructureSpawns::load(&root);
         // Native tag reads use the lock to tell that the tag tables are ready.
         self.session_lock = Some(session_lock);
         // Keep the no-pack preload; a world's packs replace it atomically.
@@ -16311,6 +16329,9 @@ impl<'a> Game<'a> {
         );
         let resource_source = pack.source.clone();
         let game = Game {
+            structure_spawns: horizon_client::mobs::spawn_selection::StructureSpawns::load(
+                &options.resources,
+            ),
             world_biomes: None,
             world_biomes_base: None,
             res: res.clone(),
