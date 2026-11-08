@@ -355,6 +355,21 @@ fn hundreds_of_reports_and_jars_fit_the_descriptor_budget_and_refuse_repeatedly(
 #[test]
 fn private_build_tools_still_clear_and_report_freed_bytes() {
     let home = Home::new();
+    // Cleanup retains the three root directories and Cargo's lock file. Their allocation is
+    // filesystem-dependent (including nonzero directory allocation on Windows).
+    for directory in ["launcher/rust", "launcher/cargo", "launcher/tmp"] {
+        fs::create_dir_all(home.0.path().join(directory)).unwrap();
+    }
+    home.file("launcher/cargo/.package-cache", b"");
+    let empty = home.clear("rust-compiler");
+    let empty_row = empty["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["category"] == "rust-compiler")
+        .unwrap();
+    assert_eq!(empty_row["freed_bytes"], 0);
+    let retained_bytes = empty_row["remaining_bytes"].as_u64().unwrap();
     let rust = home.file("launcher/rust/toolchain/bin/rustc", &[1; 8192]);
     let cargo = home.file("launcher/cargo/registry/cache/output", &[2; 8192]);
     let scratch = home.file("launcher/tmp/output", &[3; 8192]);
@@ -380,7 +395,11 @@ fn private_build_tools_still_clear_and_report_freed_bytes() {
         .find(|row| row["category"] == "rust-compiler")
         .unwrap();
     assert!(row["freed_bytes"].as_u64().unwrap() > 0);
-    assert_eq!(row["remaining_bytes"], 0);
+    assert_eq!(row["remaining_bytes"], retained_bytes);
+    assert_eq!(
+        row["freed_bytes"].as_u64().unwrap(),
+        row["bytes"].as_u64().unwrap() - retained_bytes
+    );
 }
 
 #[test]
