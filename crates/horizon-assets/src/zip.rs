@@ -16,29 +16,7 @@ use zip::{CompressionMethod, ZipArchive};
 /// bomb stops here.
 const MAX_ENTRY: usize = 1 << 30;
 
-/// File identity/change stamps for resource-cache keys, following symlinks.
-pub(crate) fn metadata_fingerprint(metadata: &fs::Metadata) -> io::Result<u64> {
-    let mut hash = DefaultHasher::new();
-    metadata.len().hash(&mut hash);
-    metadata.modified()?.hash(&mut hash);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        (
-            metadata.dev(),
-            metadata.ino(),
-            metadata.ctime(),
-            metadata.ctime_nsec(),
-        )
-            .hash(&mut hash);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        metadata.creation_time().hash(&mut hash);
-    }
-    Ok(hash.finish())
-}
+use crate::resource_source::metadata_fingerprint;
 
 /// One archive with its entries indexed by name (`\` read as `/`), files
 /// and folders apart.

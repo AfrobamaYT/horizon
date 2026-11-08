@@ -16,13 +16,22 @@
 include!(concat!(env!("OUT_DIR"), "/points_generated.rs"));
 
 mod registry;
-pub use registry::{RegisterError, register, stop};
+#[cfg(target_arch = "wasm32")]
+pub use guest::register;
+#[cfg(not(target_arch = "wasm32"))]
+pub use registry::register;
+pub use registry::{RegisterError, stop};
+
+#[cfg(any(target_arch = "wasm32", feature = "wasm-guest"))]
+pub mod guest;
 
 // hidden: the game's side of the points, not part of the API a mod is written against
 #[doc(hidden)]
 pub mod __private {
     use crate::PointId;
-    pub use crate::registry::{ApiKind, POINTS, RawKind, SITES, SlotListener, seal, wrap};
+    pub use crate::registry::{
+        ApiKind, Forward, POINTS, PointHost, RawKind, SITES, SlotListener, seal, wrap,
+    };
 
     /// Runs the checked API functions and forwarding endpoints under their owner guards.
     #[cold]

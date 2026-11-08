@@ -248,6 +248,40 @@ pub fn resource_scope() -> crate::wire::ResourceScope {
     generated::resource_scope()
 }
 
+/// A generated export table sharing the hook transport and call arena.
+pub type Extension = fn(u32, &mut Reader<'_>, &mut Writer) -> Result<(), WireError>;
+
+thread_local! {
+    static EXTENSIONS: RefCell<Vec<(u32, u32, Extension)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Installs a generated export table for ids matching `(id & mask) == base`.
+/// Called while the guest loads, before any of its listeners run.
+pub fn extend(base: u32, mask: u32, dispatch: Extension) {
+    EXTENSIONS.with(|tables| {
+        let mut tables = tables.borrow_mut();
+        if let Some(table) = tables.iter_mut().find(|(b, m, _)| *b == base && *m == mask) {
+            table.2 = dispatch;
+        } else {
+            tables.push((base, mask, dispatch));
+        }
+    });
+}
+
+fn dispatch(id: u32, input: &mut Reader<'_>, out: &mut Writer) -> Result<(), WireError> {
+    let extension = EXTENSIONS.with(|tables| {
+        tables
+            .borrow()
+            .iter()
+            .find(|(base, mask, _)| id & mask == *base)
+            .map(|(_, _, f)| *f)
+    });
+    match extension {
+        Some(call) => call(id, input, out),
+        None => hook(id, input, out),
+    }
+}
+
 /// Runs export `id` on the input the game wrote and returns where its reply is: the pointer in
 /// the high half, the length in the low. A refused call answers `u32::MAX` as the length and
 /// its reason, as a string, at the pointer.
@@ -270,7 +304,7 @@ pub fn run(id: u32) -> (*const u8, u32) {
             .take::<Vec<crate::PackageInfo>>()
             .map(crate::phase::install_guest_packages),
         crate::wire::RELEASE => reader.take::<Vec<Id>>().map(release),
-        id => hook(id, &mut reader, &mut reply),
+        id => dispatch(id, &mut reader, &mut reply),
     };
     let result = result.and_then(|()| reply.error().map_or(Ok(()), Err));
     let result = result.and_then(|()| match reader.rest().is_empty() {
