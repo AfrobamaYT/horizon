@@ -8,8 +8,13 @@ impl GameLevel<'_> {
     /// answer starts with an empty compound. The level is read-only, as
     /// `newBlockEntity` gets no level.
     #[inline(always)]
-    pub(in crate::game) fn native_block_entity(&self, block: &str, entity: &mut Option<Compound>) {
-        self.fire_block_entity(block, entity);
+    pub(in crate::game) fn native_block_entity(
+        &self,
+        block: &str,
+        state: BlockStateId,
+        entity: &mut Option<Compound>,
+    ) {
+        self.fire_block_entity(block, state, entity);
     }
     /// A hopper at `pos` is about to pick up `count` of `item`. Set `cancel` to leave the dropped stack in the world. Server-side.
     #[inline(always)]
@@ -641,23 +646,6 @@ impl Game<'_> {
     pub(in crate::game) fn native_recipes_received(&mut self, recipe_types: &[String]) {
         self.fire_recipes_received(recipe_types);
     }
-    /// The server's data tables are built (NeoForge's `TagsUpdatedEvent`
-    /// with `SERVER_DATA_LOAD`): the recipes, tags, loot and advancements of
-    /// the world's data packs, and the files mods added through
-    /// `native_data_pack_files`, are what the helpers read from now on.
-    /// `reload` is false on a world's first open, before its chunks and
-    /// players are loaded, and true after `/reload` rebuilt them, once the
-    /// players were sent the new data. The place to
-    /// drop caches derived from the data and to rebind what depends on it.
-    /// Server-side (the single player's integrated server included); a client
-    /// connected to a server never fires it.
-    pub(in crate::game) fn native_server_data_loaded(&mut self, reload: bool) {
-        let phase = self.mod_phase.clone();
-        let _reload = phase
-            .reloading()
-            .expect("server data notice on its owning thread");
-        self.fire_server_data_loaded(reload);
-    }
     /// The folders of JSON files native mods read from the data
     /// (`AddServerReloadListenersEvent`): push yours, each a listener id and a
     /// folder under `data/<namespace>/`. Asked at the start of every data load
@@ -1213,7 +1201,8 @@ impl Game<'_> {
     /// sent and whenever its block changes, on the server thread or, for a
     /// saved chunk sent past the view distance (`lan::far`), another one; a client's copy of the block
     /// entity (made by `native_block_entity` there) merges it into its `nbt`.
-    /// Leave it unset to send nothing.
+    /// Leave it unset to send no tag of yours. A block change puts the one-shot fields of
+    /// `ModBlockEntityView::set_client_update_fields` over it, and sends them alone when it is unset.
     pub(in crate::game) fn native_block_entity_update_tag(
         pos: [i32; 3],
         entity: &ModBlockEntity,
@@ -1530,9 +1519,21 @@ impl Game<'_> {
     }
     /// A character was typed at the open screen
     /// (`ScreenEvent.CharacterTyped.Pre`, vanilla's `Screen.charTyped`):
-    /// `screen` is the screen it is, `c` the character, and `modifiers` GLFW's
-    /// bits (shift 1, control 2, alt 4, super 8). Set `canceled` and that one
-    /// character never reaches a text box.
+    /// `screen` is the screen it is, `c` the character, `modifiers` GLFW's
+    /// bits (shift 1, control 2, alt 4, super 8), and `field` a copy of the
+    /// focused text box. Set `canceled` and that one character never reaches
+    /// a text box.
+    ///
+    /// `field` is `None` with no box focused, and for the boxes that keep
+    /// their own validators: Options' and World Options' fields, the game
+    /// rules' and the block editor's. `cursor` and `highlight` count Unicode
+    /// scalar characters, and a character sees the box as the one before it
+    /// left it. Change `value`, `cursor` or `highlight` and the box takes the
+    /// change, cancelled or not, so cancel to replace the character yourself.
+    /// New text goes through the box's own filter and length limit, and what
+    /// follows the box (chat suggestions, a search's results, the anvil's
+    /// name) follows it. `max_length`, `multiline` and whether `field` is
+    /// `None` stay the box's: a change to them does nothing.
     ///
     /// It fires once per printable character of a key press's text and once
     /// per character of the input method's committed text, never for a control
@@ -1555,9 +1556,10 @@ impl Game<'_> {
         screen: &NativeScreenView<'_>,
         c: char,
         modifiers: u32,
+        field: &mut Option<mod_api::widgets::TextEdit>,
         canceled: &mut bool,
     ) {
-        self.fire_screen_char_typed_pre(screen, c, modifiers, canceled);
+        self.fire_screen_char_typed_pre(screen, c, modifiers, field, canceled);
     }
     /// A left or right (`right`) press at `at` (GUI pixels from the screen's
     /// top left, so outside it too) on block `block`'s screen, a mod's, over
@@ -4738,7 +4740,8 @@ impl Game<'_> {
     /// do (`ServerLevel.tick` broadcasts chunks before it ticks block
     /// entities). Call it when what clients show changed (a machine started),
     /// not for every tick's progress: a menu's data slots carry that. Nothing
-    /// happens for an unloaded block.
+    /// happens for an unloaded block. It also sends the one-shot fields of
+    /// `ModBlockEntityView::set_client_update_fields`.
     pub(in crate::game) fn block_entity_sync(&mut self, pos: [i32; 3]) {
         if !self.world.loaded(pos[0], pos[2]) {
             return;
