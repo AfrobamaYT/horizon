@@ -1034,8 +1034,7 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "PlayerEvent.PlayerLoggedInEvent",
-        paper = "PlayerJoinEvent"
+        neoforge = "PlayerEvent.PlayerLoggedInEvent"
     )]
     fn player_logged_in();
     /// `player` (`name`) left the game (NeoForge's `PlayerLoggedOutEvent`), by
@@ -1047,8 +1046,7 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "PlayerEvent.PlayerLoggedOutEvent",
-        paper = "PlayerQuitEvent"
+        neoforge = "PlayerEvent.PlayerLoggedOutEvent"
     )]
     fn player_logged_out();
     /// The world is drawn (see [`WorldDrawn`]). Not called on the title screen's panorama.
@@ -4311,7 +4309,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's PlayerLevelChangeEvent)"
+        neoforge = "none (NeoForge has no such event; Bukkit's PlayerLevelChangeEvent)",
+        paper = "PlayerLevelChangeEvent"
     )]
     fn player_level_change();
     /// A server player selected a loom pattern, after the loom menu accepted the button. `pattern` is
@@ -4327,8 +4326,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)",
-        paper = "PlayerMapFilledEvent"
+        neoforge = "none (NeoForge has no such event)"
     )]
     fn player_map_filled();
     /// A server player named a mob with a name tag, after its name and persistence changed and the tag
@@ -4410,7 +4408,6 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event; Bukkit's PlayerRecipeDiscoverEvent)",
-        paper = "PlayerRecipeDiscoverEvent",
         cancellable = true
     )]
     fn player_recipe_discovered();
