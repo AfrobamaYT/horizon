@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 
 /// BlockProperties in a load-time content declaration.
 #[derive(Clone, Debug, PartialEq, Default)]
+// exhaustive: declaration drafts mirror the closed content schema and support record construction.
 pub struct BlockProperties {
     /// Destroy time in seconds of hand mining (-1: unbreakable).
     pub hardness: Option<f32>,
@@ -38,6 +39,7 @@ pub struct BlockProperties {
 
 /// PushReaction in a load-time content declaration.
 #[derive(Clone, Debug, PartialEq)]
+// exhaustive: these variants are the closed content declaration vocabulary.
 pub enum PushReaction {
     /// Declaration option.
     PushPull,
@@ -53,6 +55,7 @@ pub enum PushReaction {
 
 /// RenderShape in a load-time content declaration.
 #[derive(Clone, Debug, PartialEq)]
+// exhaustive: these variants are the closed content declaration vocabulary.
 pub enum RenderShape {
     /// Declaration option.
     Model,
@@ -64,6 +67,7 @@ pub enum RenderShape {
 
 /// RandomTicks in a load-time content declaration.
 #[derive(Clone, Debug, PartialEq)]
+// exhaustive: these variants are the closed content declaration vocabulary.
 pub enum RandomTicks {
     /// Every state (`true`), or none (`false`, for a template that ticks).
     All(bool),
@@ -78,6 +82,7 @@ pub enum RandomTicks {
 
 /// BlockShapes in a load-time content declaration.
 #[derive(Clone, Debug, PartialEq)]
+// exhaustive: declaration drafts mirror the closed content schema and support record construction.
 pub struct BlockShapes {
     /// properties.
     pub properties: Vec<String>,
@@ -89,6 +94,7 @@ pub struct BlockShapes {
 
 /// BlockStateProperty in a load-time content declaration.
 #[derive(Clone, Debug, PartialEq)]
+// exhaustive: these variants are the closed content declaration vocabulary.
 pub enum BlockStateProperty {
     /// `false` and `true`, in vanilla's spelling.
     Boolean,
@@ -101,6 +107,7 @@ pub enum BlockStateProperty {
 
 /// Block in a load-time content declaration.
 #[derive(Clone, Debug, PartialEq, Default)]
+// exhaustive: declaration drafts mirror the closed content schema and support record construction.
 pub struct Block {
     /// `<mod id>:<path>`.
     pub id: String,
@@ -156,6 +163,7 @@ pub struct Block {
 
 /// Rarity in a load-time content declaration.
 #[derive(Clone, Debug, PartialEq)]
+// exhaustive: these variants are the closed content declaration vocabulary.
 pub enum Rarity {
     /// Declaration option.
     Common,
@@ -169,6 +177,7 @@ pub enum Rarity {
 
 /// Item in a load-time content declaration.
 #[derive(Clone, Debug, PartialEq, Default)]
+// exhaustive: declaration drafts mirror the closed content schema and support record construction.
 pub struct Item {
     /// id.
     pub id: String,
