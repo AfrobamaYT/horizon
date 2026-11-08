@@ -80,6 +80,8 @@ pub struct BlockEventData {
     pub block: BlockId,
     pub param_a: i32,
     pub param_b: i32,
+    /// Hook-selected instrument and note, never decoded from raw event parameters.
+    pub note_override: Option<(u8, i32)>,
 }
 
 #[derive(PartialEq, Eq)]
@@ -134,6 +136,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             block,
             param_a,
             param_b,
+            note_override: None,
         });
     }
     /// `BlockState.triggerEvent`.
@@ -142,7 +145,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         if data.is(super::classes::Class::PistonBase) {
             self.piston_trigger_event(pos, state, a, b)
         } else if data.is(super::classes::Class::Note) {
-            self.note_trigger_event(pos, state, a, b);
+            self.note_trigger_event(pos, state);
             true
         } else if data.is(super::classes::Class::Bell) {
             // BellBlockEntity.triggerEvent handles event 1; the caller
@@ -830,7 +833,14 @@ impl Behaviours {
             let mut sim = self.sim(level, ticks);
             let state = sim.state(event.pos);
             if self.block(state) == event.block
-                && sim.trigger_event(state, event.pos, event.param_a, event.param_b)
+                && sim.trigger_event(
+                    event.note_override.map_or(state, |(instrument, note)| {
+                        sim.note_played_state(state, instrument, note)
+                    }),
+                    event.pos,
+                    event.param_a,
+                    event.param_b,
+                )
             {
                 // ServerLevel.runBlockEvents broadcasts a handled event to
                 // the clients (`ClientboundBlockEventPacket`); their copy of
@@ -938,7 +948,14 @@ impl Behaviours {
             let mut sim = self.sim(level, ticks);
             let state = sim.state(event.pos);
             if self.block(state) == event.block
-                && sim.trigger_event(state, event.pos, event.param_a, event.param_b)
+                && sim.trigger_event(
+                    event.note_override.map_or(state, |(instrument, note)| {
+                        sim.note_played_state(state, instrument, note)
+                    }),
+                    event.pos,
+                    event.param_a,
+                    event.param_b,
+                )
             {
                 sim.emit(LevelEvent::BlockEntityEvent {
                     pos: event.pos,

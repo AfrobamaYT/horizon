@@ -108,6 +108,7 @@ impl Game<'_> {
             block,
             param_a: a,
             param_b: b,
+            note_override: None,
         });
         true
     }

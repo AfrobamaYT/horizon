@@ -4525,13 +4525,26 @@ fn note_events_accept_arbitrary_parameters() {
     let pos = BlockPos::new(0, 1, 0);
     let state = w.id("note_block", &[("instrument", "harp"), ("note", "0")]);
     w.put(pos, state);
-    for a in [i32::MIN, -1, 0, i32::MAX] {
+    for a in [i32::MIN, -1, 0, 2, i32::MAX] {
         for b in [i32::MIN, 0, i32::MAX] {
             w.level.events.clear();
             assert!(
                 w.f.behaviours
                     .client_block_event(&mut w.level, &mut w.ticks, pos, a, b)
             );
+            assert!(w.level.events.iter().any(|event| matches!(event,
+                LevelEvent::Sound { sound, pitch, .. }
+                    if sound.as_ref() == "minecraft:block.note_block.harp" && *pitch == 0.5
+            )));
+            w.level.events.clear();
+            w.ticks.queue_block_event(BlockEventData {
+                pos,
+                block: w.f.behaviours.block(state),
+                param_a: a,
+                param_b: b,
+                note_override: None,
+            });
+            w.f.behaviours.run_block_events(&mut w.level, &mut w.ticks);
             assert!(w.level.events.iter().any(|event| matches!(event,
                 LevelEvent::Sound { sound, pitch, .. }
                     if sound.as_ref() == "minecraft:block.note_block.harp" && *pitch == 0.5
