@@ -49,11 +49,10 @@ impl<C: ?Sized> TryIntoEngine<C> for ApiOptions {
             ),
             ParticleKind::Custom => (
                 ParticleType::Smoke,
-                Some(
+                Some(std::borrow::Cow::Borrowed(
                     mod_api::__private::particle_name(self.ty)
-                        .ok_or(ParticleValueError::UnknownProvider)?
-                        .to_owned(),
-                ),
+                        .ok_or(ParticleValueError::UnknownProvider)?,
+                )),
             ),
         };
         Ok(EngineOptions {
@@ -118,7 +117,6 @@ mod tests {
         original.to_color = [0.1, 0.3, 0.7];
         original.block = Some(("test:sprite".into(), 0x123456));
         original.item = Some(vec!["test:layer".into()]);
-        original.geyser = Some((7, 1.25));
         original.vibration = Some((
             mod_api::particles::PositionSource::Entity {
                 id: -7,
@@ -143,7 +141,6 @@ mod tests {
         assert_eq!(result.to_color, [0.1, 0.3, 0.7]);
         assert_eq!(result.block, Some(("test:sprite".into(), 0x123456)));
         assert_eq!(result.item, Some(vec!["test:layer".into()]));
-        assert_eq!(result.geyser, Some((7, 1.25)));
         assert_eq!(
             result.vibration,
             Some((
@@ -155,11 +152,26 @@ mod tests {
                 11
             ))
         );
-        let custom = EngineOptions::named("test:spark").try_into_api().unwrap();
-        assert_eq!(
-            custom.try_into_engine(&()).unwrap().mod_particle.as_deref(),
-            Some("test:spark")
-        );
+    }
+    #[test]
+    fn particle_geyser_options_cross_the_boundary() {
+        prepare();
+        let value = EngineOptions::geyser_base(ParticleType::Smoke, 7, 1.25)
+            .try_into_api()
+            .unwrap();
+        assert_eq!(value.try_into_engine(&()).unwrap().geyser, Some((7, 1.25)));
+    }
+    #[test]
+    fn particle_custom_provider_borrows_its_retained_name() {
+        prepare();
+        let value = EngineOptions::named("test:spark").try_into_api().unwrap();
+        let published = mod_api::__private::particle_name(value.ty).unwrap();
+        let output = value.try_into_engine(&()).unwrap();
+        assert_eq!(output.mod_particle.as_deref(), Some("test:spark"));
+        assert!(std::ptr::eq(
+            output.mod_particle.as_deref().unwrap(),
+            published
+        ));
     }
     #[test]
     fn particle_boundary_refuses_nonfinite_nested_input() {

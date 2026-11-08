@@ -343,8 +343,6 @@ mod tests {
                 game.right = true;
                 let player = game.living(game.entity(20).unwrap()).unwrap();
                 test(game, &uses, player);
-                crate::game::api_values::install_parts(&[]).unwrap();
-                crate::game::native_entity_refs::tests::resolve_parts(game).unwrap();
             });
         });
     }
