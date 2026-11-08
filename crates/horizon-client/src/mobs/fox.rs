@@ -1454,7 +1454,7 @@ mod pickup_tests {
             world.player = Some(crate::mobs::world::test_player(Vec3::new(1.0, 0.0, 0.0)));
             let w = &world;
             let mut f = fox();
-            f.ai.target = Some(Who::Player);
+            f.ai.target = Some(crate::mobs::Who::Player);
             set_flag(&mut f, CROUCHING, true);
             let mut events = Vec::new();
             assert!(ai_step_until_consumption(&mut f, w, &mut events).is_none());
