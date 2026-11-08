@@ -86,7 +86,7 @@ impl WasmMod {
     ) -> Option<R> {
         let mut cx = Box::new(boundary::Cx::default());
         cx.frames.push(frame);
-        cx.module = Some(self.clone());
+        cx.module = self as *const Self;
         let pointer = &mut *cx as *mut boundary::Cx;
         let _resources = unsafe { boundary::resource_scope(pointer, true) };
         // The pointer remains live until this synchronous call finishes; guest callbacks never retain it.
@@ -399,11 +399,12 @@ fn wire_loopback_owned_box_handlers_inside_result_and_vec() {
     }
     assert_eq!(out.error(), None);
     let mut cx = boundary::Cx::default();
-    cx.module = Some(WasmMod {
+    let module = WasmMod {
         subscribed: &[],
         group: 0,
         corrupt: false,
-    });
+    };
+    cx.module = &module;
     {
         let _resources = unsafe { boundary::resource_scope(&mut cx, true) };
         let value = Reader::decode::<Result<Box<dyn ReloadApply>, u32>>(out.bytes())
@@ -547,11 +548,12 @@ fn wire_loopback_erased_resource_restores_identity_and_refuses_other_groups() {
         outbound.put(&original);
     }
     let mut cx = boundary::Cx::default();
-    cx.module = Some(WasmMod {
+    let module = WasmMod {
         group: 0,
         subscribed: &[],
         corrupt: false,
-    });
+    };
+    cx.module = &module;
     let native: mod_api::OwnProvider = {
         let _scope = unsafe { boundary::resource_scope(&mut cx, true) };
         Reader::decode(outbound.bytes()).unwrap()
@@ -571,11 +573,12 @@ fn wire_loopback_erased_resource_restores_identity_and_refuses_other_groups() {
         assert!(Arc::ptr_eq(&original, &restored));
         assert_eq!(restored.downcast_ref::<u32>(), Some(&97));
     }
-    cx.module = Some(WasmMod {
+    let other_module = WasmMod {
         group: 1,
         subscribed: &[],
         corrupt: false,
-    });
+    };
+    cx.module = &other_module;
     for _ in 0..2 {
         back.clear();
         {
@@ -648,11 +651,12 @@ fn wire_loopback_builtin_provider_invokes_nested_box_handler() {
         out.put(&ItemProviderOf::EnergyHandler(provider));
     }
     let mut cx = boundary::Cx::default();
-    cx.module = Some(WasmMod {
+    let module = WasmMod {
         group: 0,
         subscribed: &[],
         corrupt: false,
-    });
+    };
+    cx.module = &module;
     let decoded: ItemProviderOf = {
         let _scope = unsafe { boundary::resource_scope(&mut cx, true) };
         Reader::decode(out.bytes()).unwrap()
@@ -829,17 +833,19 @@ fn wire_loopback_resource_load_restores_module_after_cross_group_unwind() {
     }
     let id = guest::add_handler(vec![guest::view::<dyn StructurePiece>(Arc::new(Piece))]);
     let mut first = Box::new(boundary::Cx::default());
-    first.module = Some(WasmMod {
+    let first_module = WasmMod {
         group: 1,
         subscribed: &[],
         corrupt: false,
-    });
+    };
+    first.module = &first_module;
     let mut second = Box::new(boundary::Cx::default());
-    second.module = Some(WasmMod {
+    let second_module = WasmMod {
         group: 2,
         subscribed: &[],
         corrupt: true,
-    });
+    };
+    second.module = &second_module;
     let _outer = unsafe { boundary::resource_scope(&mut *first, true) };
     let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _inner = unsafe { boundary::resource_scope(&mut *second, true) };
