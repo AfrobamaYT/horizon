@@ -20,8 +20,12 @@ fn guest_block_entity_tick_updates_host_fields_without_replacing_identity() {
         }],
     );
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
-    mod_api::__private::install_parts(&loaded.mods, &mod_api::__private::part_tests::rule_schema())
-        .unwrap();
+    mod_api::__private::install_parts(
+        &loaded.mods,
+        &mod_api::__private::part_tests::rule_schema(),
+        |_| false,
+    )
+    .unwrap();
     mod_api::__private::install(loaded.mods.into());
     mod_api::__private::mark_game_thread();
     let mut entity = mod_api::ModBlockEntity::new("bench_mod:counter".into(), Default::default());

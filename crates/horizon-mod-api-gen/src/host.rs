@@ -389,11 +389,13 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
                 } else {
                     call
                 };
-                let access = if result_error(&entry.sig.output)
-                    .is_some_and(|error| outer_type(error, "LevelReadError"))
-                {
+                let typed_access_error = result_error(&entry.sig.output).filter(|error| {
+                    outer_type(error, "LevelReadError") || outer_type(error, "LevelWriteError")
+                });
+                let access = if let Some(error) = typed_access_error {
+                    let error = error.to_token_stream();
                     format!(
-                        "if !mod_api::__private::access_allowed({name:?}, mod_api::__private::LoadAccess::{level}) {{ return Err(mod_api::LevelReadError::Unavailable); }}"
+                        "if !mod_api::__private::access_allowed({name:?}, mod_api::__private::LoadAccess::{level}) {{ return Err({error}::Unavailable); }}"
                     )
                 } else {
                     format!(
@@ -422,6 +424,7 @@ fn boundary_value(ty: &Type) -> bool {
         ty,
         &[
             "ItemStack",
+            "BlockState",
             "GameRuleValue",
             "ItemResource",
             "ItemCost",

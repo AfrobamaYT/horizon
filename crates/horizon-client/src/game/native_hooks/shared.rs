@@ -1313,7 +1313,7 @@ impl Game<'_> {
             // `Level.setBlockAndUpdate`: flag 3, the neighbours and the clients.
             horizon_world::level::LandingWrite::SetBlock(state) => {
                 let flags = NativeBlockUpdateFlags::NEIGHBORS | NativeBlockUpdateFlags::CLIENTS;
-                self.level_set_block(level, at, state, flags);
+                let _ = self.level_set_block(level, at, state, flags);
             }
             horizon_world::level::LandingWrite::DestroyBlock { drop } => {
                 self.level_destroy_block(level, at, drop, None, false);
@@ -4117,18 +4117,14 @@ mod tests {
                 (5, "minecraft:chest"),
             ] {
                 let state = game.pack.assets.registry.default_state(block).unwrap();
-                assert!(game.level_set_block(
-                    level,
-                    [x, 63, 0],
-                    stone,
-                    NativeBlockUpdateFlags::NONE
-                ));
-                assert!(game.level_set_block(
-                    level,
-                    [x, 64, 0],
-                    state,
-                    NativeBlockUpdateFlags::NONE
-                ));
+                assert_eq!(
+                    game.level_set_block(level, [x, 63, 0], stone, NativeBlockUpdateFlags::NONE),
+                    Ok(true)
+                );
+                assert_eq!(
+                    game.level_set_block(level, [x, 64, 0], state, NativeBlockUpdateFlags::NONE),
+                    Ok(true)
+                );
                 let pos = (x, 64, 0);
                 let handle = game.block_entity(level, [x, 64, 0]).unwrap();
                 if block == "minecraft:chest" {

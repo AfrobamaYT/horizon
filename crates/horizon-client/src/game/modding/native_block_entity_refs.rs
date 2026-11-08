@@ -612,6 +612,7 @@ fn menu_holds(menu: &Menu, key: (i32, i32, i32)) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::api_values::TryIntoApi;
     use horizon_client::chunk::Chunk;
     use horizon_world::registry::BlockStateId;
     use mod_api::HostTransaction;
@@ -751,12 +752,15 @@ mod tests {
                 let level = host.level("minecraft:overworld").unwrap();
                 for block in ["minecraft:stone", "minecraft:chest"] {
                     let state = host.block_state_id(block).unwrap();
-                    assert!(level.set_block(
-                        host,
-                        [0, 64, 0],
-                        state,
-                        NativeBlockUpdateFlags::NEIGHBORS
-                    ));
+                    assert_eq!(
+                        level.set_block(
+                            host,
+                            [0, 64, 0],
+                            state.try_into_api().unwrap(),
+                            NativeBlockUpdateFlags::NEIGHBORS
+                        ),
+                        Ok(true)
+                    );
                 }
             }
         }
@@ -812,12 +816,15 @@ mod tests {
                 (4, "minecraft:oak_sign"),
             ] {
                 let state = game.pack.assets.registry.default_state(name).unwrap();
-                assert!(game.level_set_block(
-                    level,
-                    [x, 64, 0],
-                    state,
-                    NativeBlockUpdateFlags::NEIGHBORS
-                ));
+                assert_eq!(
+                    game.level_set_block(
+                        level,
+                        [x, 64, 0],
+                        state,
+                        NativeBlockUpdateFlags::NEIGHBORS
+                    ),
+                    Ok(true)
+                );
             }
             let player = game.player(12).unwrap();
             let chest = game.block_entity(level, [0, 64, 0]).unwrap();
@@ -830,12 +837,15 @@ mod tests {
                 });
                 let previous = if case != "replacement" {
                     let state = game.world.block(0, 64, 0);
-                    assert!(game.level_set_block(
-                        level,
-                        [5, 64, 0],
-                        state,
-                        NativeBlockUpdateFlags::NEIGHBORS
-                    ));
+                    assert_eq!(
+                        game.level_set_block(
+                            level,
+                            [5, 64, 0],
+                            state,
+                            NativeBlockUpdateFlags::NEIGHBORS
+                        ),
+                        Ok(true)
+                    );
                     let other = game.block_entity(level, [5, 64, 0]).unwrap();
                     assert!(player.open_menu(game, other).unwrap());
                     game.tick_player_menus();
@@ -969,12 +979,15 @@ mod tests {
                         .collect(),
                     })
                     .unwrap();
-                assert!(game.level_set_block(
-                    level,
-                    [x, 64, 0],
-                    state,
-                    NativeBlockUpdateFlags::NEIGHBORS
-                ));
+                assert_eq!(
+                    game.level_set_block(
+                        level,
+                        [x, 64, 0],
+                        state,
+                        NativeBlockUpdateFlags::NEIGHBORS
+                    ),
+                    Ok(true)
+                );
             }
             let left = game.block_entity(level, [6, 64, 0]).unwrap();
             let right = game.block_entity(level, [7, 64, 0]).unwrap();
@@ -1025,12 +1038,15 @@ mod tests {
                         .collect(),
                     })
                     .unwrap();
-                assert!(game.level_set_block(
-                    level,
-                    [x, 64, 0],
-                    state,
-                    NativeBlockUpdateFlags::NEIGHBORS
-                ));
+                assert_eq!(
+                    game.level_set_block(
+                        level,
+                        [x, 64, 0],
+                        state,
+                        NativeBlockUpdateFlags::NEIGHBORS
+                    ),
+                    Ok(true)
+                );
                 game.block_entity(level, [x, 64, 0]).unwrap()
             };
             let single = chest(game, level, 0, "single");
@@ -1140,7 +1156,10 @@ mod tests {
             let states = ["minecraft:chest", "minecraft:daylight_detector"];
             for (i, name) in states.into_iter().enumerate() {
                 let state = game.pack.assets.registry.default_state(name).unwrap();
-                assert!(game.level_set_block(level, [i as i32 * 2, 64, 0], state, flags));
+                assert_eq!(
+                    game.level_set_block(level, [i as i32 * 2, 64, 0], state, flags),
+                    Ok(true)
+                );
             }
             let chest = game.block_entity(level, [0, 64, 0]).unwrap();
             let sensor = game.block_entity(level, [2, 64, 0]).unwrap();
@@ -1267,7 +1286,10 @@ mod tests {
             let level = game.level("minecraft:overworld").unwrap();
             let chest = game.pack.assets.registry.default_state("minecraft:chest");
             let flags = NativeBlockUpdateFlags::NEIGHBORS;
-            assert!(game.level_set_block(level, [0, 64, 0], chest.unwrap(), flags));
+            assert_eq!(
+                game.level_set_block(level, [0, 64, 0], chest.unwrap(), flags),
+                Ok(true)
+            );
             let chest = game.block_entity(level, [0, 64, 0]).unwrap();
             let key = (0, 64, 0);
             let lock = compound("{lock:{items:\"minecraft:stick\"}}");

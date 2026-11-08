@@ -47,6 +47,13 @@ numeric IDs. `BlockStateRange::new(first, count)` returns a typed error if the s
 exceed the u16 ordinal domain, and decoded transport spans obey the same check. Membership
 checks both the block key and the ordinal. A zero-count span is empty.
 
+`LevelRef::set_block`, `update_neighbors` and `neighbor_changed` take owned block states
+and return `Result<bool, LevelWriteError>`. `Stale` identifies a closed or reopened level;
+`Unavailable` identifies the wrong side, phase or nonactive write target; `InvalidState`
+retains the block-state refusal. Errors do not mutate the level. `Ok(false)` is still
+vanilla refusal, such as an unloaded or out-of-height position or an unchanged block,
+not a lost handle or a guessed replacement state. Update flags retain their vanilla effect.
+
 Keys are small, private `u32` registration slots on both native and wasm. `key.id(host)`
 returns an owned canonical `String` through the generated read backend for diagnostics; it
 requires a game-backed host and an invalid slot is a boundary error, not an empty name.

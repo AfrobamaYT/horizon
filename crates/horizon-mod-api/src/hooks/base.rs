@@ -2192,7 +2192,9 @@ pub trait Hooks {
     fn release_using();
     /// A loot function of a mod's own kind: the entry named a `type` in a
     /// namespace outside `minecraft:`, and the roll kept it for this call.
-    /// The kind, the JSON, the context and the stack to change are here.
+    /// The kind and JSON file input accompany owned API context and candidate snapshots.
+    /// Candidate counts remain signed; ordered NBT patches preserve removals and types.
+    /// Conversion happens only for subscribed hooks, and refused writeback leaves the roll unchanged.
     #[hook(
         side = "server",
         contract = "collect",
@@ -2204,7 +2206,7 @@ pub trait Hooks {
     /// A loot condition of a mod's own kind: the entry named a `type` in a
     /// namespace outside `minecraft:`. The kind, the JSON, the context and
     /// whether it holds are here (`holds` starts `false`; a mod that claims
-    /// the kind sets it).
+    /// the kind sets it). The context is an owned snapshot, captured after the subscription guard.
     #[hook(
         side = "server",
         contract = "collect",

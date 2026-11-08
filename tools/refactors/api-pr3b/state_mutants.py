@@ -5,11 +5,12 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import tempfile
 
 root = Path(__file__).resolve().parents[3]
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--output", type=Path, required=True)
-parser.add_argument("--group", choices=["state", "range"], default="state")
+parser.add_argument("--group", choices=["state", "range", "write"], default="state")
 args = parser.parse_args()
 args.output.mkdir(parents=True, exist_ok=True)
 facade = root / "crates/horizon-mod-api/src/block_state.rs"
@@ -38,6 +39,17 @@ if args.group == "range":
         ("transport_skips_span_check", span, "Self::new(value.first, value.count)", "Ok(Self { first: value.first, count: value.count })", focused),
         ("metadata_drops_last_state", definitions, "self.states.len() as u32", "self.states.len().saturating_sub(1) as u32", service),
     ]
+if args.group == "write":
+    native = root / "crates/horizon-client/src/game/modding/native_entity_refs.rs"
+    errors = root / "crates/horizon-mod-api/src/level_write_error.rs"
+    generator = root / "crates/horizon-mod-api-gen/src/host.rs"
+    focused = ["cargo", "test", "-p", "horizon-client", "--lib", "level_block_writes_validate_and_change_world"]
+    cases = [
+        ("write_ignores_residency", native, "let world = self.native_level_world_result(level)?;", "let world = self.native_level_world_result(level).unwrap_or(&self.world);", focused),
+        ("write_disables_phase_refusal", generator, "if !mod_api::__private::access_allowed({name:?}", "if false && !mod_api::__private::access_allowed({name:?}", focused),
+        ("write_collapses_invalid_state", errors, "error => Self::InvalidState(error),", "_ => Self::Unavailable,", focused),
+        ("write_claims_changed_without_mutation", native, "Ok(self.native_set_block(level.dimension_id(), pos, state, flags.bits()))", "Ok(true)", focused),
+    ]
 results = []
 for name, path, old, new, command in cases:
     original = path.read_text()
@@ -45,7 +57,27 @@ for name, path, old, new, command in cases:
         raise RuntimeError(f"{name}: mutation target is not unique")
     try:
         path.write_text(original.replace(old, new))
-        run = subprocess.run(command, cwd=root, env=dict(os.environ, CARGO_TARGET_DIR=str(root / "target"), CARGO_BUILD_JOBS="4", HORIZON_TEST_RESOURCES="/box/cache/horizon-local/horizon-client/26.3"), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=600)
+        env = dict(os.environ, CARGO_TARGET_DIR=str(root / "target"), CARGO_BUILD_JOBS="4", HORIZON_TEST_RESOURCES=str(root / ".local/horizon-client/26.3"))
+        if args.group == "write":
+            # Build from the mutated production source, then run the exact game test outside
+            # the checkout, never in a player's home or the prepared resource directory.
+            build = subprocess.run(command + ["--no-run", "--message-format=json"], cwd=root, env=env, capture_output=True, text=True, timeout=600)
+            if build.returncode:
+                run = subprocess.CompletedProcess(command, build.returncode, build.stdout + build.stderr)
+            else:
+                artifacts = [json.loads(line) for line in build.stdout.splitlines()]
+                binaries = [row["executable"] for row in artifacts if row.get("reason") == "compiler-artifact" and row.get("target", {}).get("name") == "horizon_client" and row.get("executable")]
+                if len(binaries) != 1:
+                    raise RuntimeError(f"unexpected test executables: {binaries}")
+                scratch = Path(tempfile.mkdtemp(prefix="write-mutant-", dir=root / "target"))
+                for key in ["HORIZON_HOME", "HORIZON_LAUNCHER_HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "HORIZON_LAUNCHER_TRASH", "HORIZON_LAUNCHER_CLIPBOARD", "HORIZON_LAUNCHER_DESKTOP"]:
+                    home = scratch / key
+                    home.mkdir()
+                    env[key] = str(home)
+                env.update(HORIZON_LAUNCHER_NO_SELF_UPDATE="1", HORIZON_NO_AUDIO="1")
+                run = subprocess.run([binaries[0], command[-1], "--ignored", "--test-threads=1", "--nocapture"], cwd=scratch, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=540)
+        else:
+            run = subprocess.run(command, cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=600)
         (args.output / f"{name}.log").write_text(run.stdout)
         killed = run.returncode != 0 and "panicked at" in run.stdout and ("assertion" in run.stdout or "no face tinted" in run.stdout) and "test result: FAILED." in run.stdout
         results.append({"name": name, "killed_by_assertion": killed, "exit_code": run.returncode})
