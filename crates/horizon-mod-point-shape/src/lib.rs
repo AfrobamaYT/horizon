@@ -458,6 +458,7 @@ impl Shape {
                 #( #[doc = #field_docs] pub #names: #fields, )*
                 #extra
             }
+            #[cfg(any(target_arch = "wasm32", feature = "wasm-guest"))]
             impl #lifetime ::mod_api::wire::Wire for #record #lifetime {
                 const MIN: usize = 0;
                 fn put(&self, out: &mut ::mod_api::wire::Writer) {
@@ -520,6 +521,16 @@ impl Shape {
             }
             (_, Some(_)) => quote!(crate::__private::PointHost::Read(host)),
         };
+        let mut wire_fields: Vec<_> = self.args.iter().map(|arg| arg.name.clone()).collect();
+        match self.returns {
+            Returns::Unit | Returns::UnitResult => wire_fields.push(format_ident!("cancel")),
+            Returns::Value(_) => wire_fields.push(format_ident!("result")),
+            Returns::Opaque => {}
+        }
+        let wire_fields = wire_fields
+            .iter()
+            .rev()
+            .fold(quote!(()), |tail, field| quote!((&mut args.#field, #tail)));
         let mut places = vec![(self.name.clone(), "head")];
         if self.has_return() {
             places.push((format!("{}_return", self.name), "return"));
@@ -550,7 +561,7 @@ impl Shape {
                             function(#passed args);
                         }
                         crate::__private::ApiKind::Forwarded(endpoint, id) => {
-                            endpoint.forward(id, #forwarded_host, args);
+                            endpoint.forward(id, #forwarded_host, &mut ::mod_api::wire::Fields(#wire_fields));
                         }
                     });
                 }
