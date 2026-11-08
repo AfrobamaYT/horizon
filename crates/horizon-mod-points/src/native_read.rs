@@ -88,7 +88,9 @@ pub fn read(
             if out.remaining() == 0 {
                 break;
             }
+            let mut visited = false;
             node.child(ordinal, &mut |step, field, child| {
+                visited = true;
                 let mut child_id = None;
                 child.value(&mut |value| {
                     child_id = Some(out.child(id, step, field, child.key(), level + 1, value)?);
@@ -103,6 +105,10 @@ pub fn read(
                     out,
                 )
             })?;
+            // A hidden field is skipped in a scan, but never shifted onto when it is requested.
+            if !visited && level == 0 && ordinal == start {
+                return Err(RowError::Bounds);
+            }
         }
         Ok(())
     }

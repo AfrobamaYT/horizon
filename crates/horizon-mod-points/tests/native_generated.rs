@@ -10,6 +10,14 @@ enum Choice {
     Named { value: String },
 }
 
+struct Pair {
+    a: u32,
+    b: u32,
+}
+enum Later {
+    Both { a: u32, b: u32 },
+}
+
 #[test]
 fn emitted_native_projections_compile_and_read() {
     let mut paths = Locators::default();
@@ -58,4 +66,21 @@ fn emitted_native_projections_compile_and_read() {
         let node = include!(concat!(env!("OUT_DIR"), "/native_window_choice.rs"));
         assert!(read(&node, root, &mut paths, request).unwrap().len() >= 2);
     }
+    let value = Pair { a: 1, b: 2 };
+    let node = include!(concat!(env!("OUT_DIR"), "/native_window_pair.rs"));
+    let by = |start| RowWindow { start, ..request };
+    let rows = read(&node, root, &mut paths, by(1)).unwrap();
+    assert_eq!((rows.len(), rows[1].2), (2, 1));
+    assert_eq!(mod_api::wire::Reader::decode::<u32>(&rows[1].4), Ok(2));
+    assert_eq!(
+        read(&node, root, &mut paths, by(0)).map(|r| r.len()),
+        Err(mod_api::RowError::Bounds)
+    );
+    assert_eq!(read(&node, root, &mut paths, by(2)).unwrap().len(), 1);
+    let value = Later::Both { a: 1, b: 2 };
+    let node = include!(concat!(env!("OUT_DIR"), "/native_window_later.rs"));
+    let rows = read(&node, root, &mut paths, request).unwrap();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[2].2, 1);
+    assert_eq!(mod_api::wire::Reader::decode::<u32>(&rows[2].4), Ok(2));
 }
