@@ -814,7 +814,8 @@ pub trait Hooks {
         side = "server",
         contract = "cancel",
         out = "claimed",
-        neoforge = "PlayerInteractEvent.EntityInteract"
+        neoforge = "PlayerInteractEvent.EntityInteract",
+        paper = "PlayerInteractEntityEvent"
     )]
     fn entity_interact();
     /// A player left-clicks the block `state` at `pos`, `face` the face hit
@@ -919,7 +920,8 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "EntityLeaveLevelEvent"
+        neoforge = "EntityLeaveLevelEvent",
+        paper = "EntityRemoveFromWorldEvent"
     )]
     fn entity_leave_level();
     /// Block `block`'s block entity has fluid tanks: set `fluids` when the
@@ -3077,6 +3079,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
+        paper = "DragonEggFormEvent",
         cancellable = true,
         target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_dragon_egg_form"
     )]
