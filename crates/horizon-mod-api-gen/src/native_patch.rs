@@ -205,6 +205,25 @@ fn emit(
                 }
             }
         }
+        Shape::Result(ok, err) => {
+            let ok_body = child(ok, quote!(*__np_payload))?;
+            let err_body = child(err, quote!(*__np_payload))?;
+            quote! {
+                let tag = u32::from((#place).is_err());
+                for (step, tree) in __np_tree.children() {
+                    if step != mod_points::locators::Step::Variant(tag) || tree.value().is_some() { #reject; }
+                    for (step,_) in tree.children() { if step != mod_points::locators::Step::Field(0) { #reject; } }
+                }
+                match &mut (#place) {
+                    Ok(__np_payload) => if let Some(variant) = __np_tree.child(mod_points::locators::Step::Variant(0)) {
+                        if let Some(__np_tree) = variant.child(mod_points::locators::Step::Field(0)) { #ok_body }
+                    },
+                    Err(__np_payload) => if let Some(variant) = __np_tree.child(mod_points::locators::Step::Variant(1)) {
+                        if let Some(__np_tree) = variant.child(mod_points::locators::Step::Field(0)) { #err_body }
+                    },
+                }
+            }
+        }
         Shape::Named(path, _) => {
             if runtime.is_some_and(|(graph, _)| graph.id(shape).is_none()) {
                 return Err("missing runtime patch layout".into());
@@ -290,6 +309,7 @@ fn emit(
         }
         Shape::Scalar(_)
         | Shape::Unit
+        | Shape::DynError
         | Shape::Ref { mutable: false, .. }
         | Shape::Collection(Collection::HashSet | Collection::BTreeSet, _) => {
             quote!(if __np_tree.children().next().is_some() { #reject; })
@@ -311,6 +331,7 @@ fn fully_exposed(rule: &Rule, shape: &Shape, exposure: &dyn Exposure, depth: usi
             })
         }),
         Shape::Tuple(parts) | Shape::Collection(_, parts) => parts.iter().all(child),
+        Shape::Result(ok, err) => child(ok) && child(err),
         Shape::Array(inner, _)
         | Shape::Slice(inner)
         | Shape::Option(inner)

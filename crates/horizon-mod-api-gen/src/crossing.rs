@@ -79,6 +79,12 @@ pub enum Shape {
     Array(Box<Shape>, usize),
     Slice(Box<Shape>),
     Option(Box<Shape>),
+    /// `Result<T, E>` (and the game's `Result<T>` alias, whose error is `Box<dyn Error>`): a
+    /// two-case tagged enum, Ok = 0 and Err = 1, each with one payload field.
+    Result(Box<Shape>, Box<Shape>),
+    /// `dyn Error`: crosses as its `Display` text, so a `Box<dyn Error>` is read as a string and
+    /// replaced by building a boxed error from one.
+    DynError,
     Wrapped(Wrapper, Box<Shape>),
     /// A collection, with its written arguments (a map's key and value, and any hasher, as types
     /// from the crate's root).
@@ -97,11 +103,12 @@ impl Shape {
             Self::Ref { .. } | Self::Opaque(_) | Self::Wrapped(Wrapper::Cow, _) => true,
             Self::Named(_, lifetimes) => *lifetimes != 0,
             Self::Tuple(parts) | Self::Collection(_, parts) => parts.iter().any(Self::may_borrow),
+            Self::Result(ok, err) => ok.may_borrow() || err.may_borrow(),
             Self::Array(inner, _)
             | Self::Slice(inner)
             | Self::Option(inner)
             | Self::Wrapped(_, inner) => inner.may_borrow(),
-            Self::Scalar(_) | Self::Unit => false,
+            Self::Scalar(_) | Self::Unit | Self::DynError => false,
         }
     }
 }
@@ -143,6 +150,9 @@ const COLLECTIONS: &[(&str, Collection)] = &[
     ("HashMap", Collection::HashMap),
     ("BTreeMap", Collection::BTreeMap),
 ];
+
+/// Type aliases of `Result<T, Box<dyn Error>>`, by resolved path.
+const ERROR_RESULTS: &[&str] = &["horizon_client_core::Result", "horizon_client::Result"];
 
 /// Crates whose types never cross: the GPU, the window, input devices, audio. Only the
 /// [`CROSSING_FOREIGN`] types of them do.
@@ -642,6 +652,31 @@ impl Rule {
             },
             Type::Slice(s) => Shape::Slice(Box::new(self.shape(module, this, &s.elem))),
             Type::Path(p) if p.qself.is_none() => self.path(module, this, &p.path),
+            Type::TraitObject(object) => {
+                let mut error = false;
+                for bound in &object.bounds {
+                    let syn::TypeParamBound::Trait(bound) = bound else {
+                        continue;
+                    };
+                    let spelled = bound
+                        .path
+                        .segments
+                        .iter()
+                        .map(|s| s.ident.to_string())
+                        .collect::<Vec<_>>()
+                        .join("::");
+                    match self
+                        .resolve(module, &bound.path)
+                        .as_deref()
+                        .unwrap_or(&spelled)
+                    {
+                        "std::error::Error" | "core::error::Error" => error = true,
+                        "Send" | "Sync" | "std::marker::Send" | "std::marker::Sync" => {}
+                        _ => return opaque,
+                    }
+                }
+                if error { Shape::DynError } else { opaque }
+            }
             _ => opaque,
         }
     }
@@ -700,7 +735,8 @@ impl Rule {
         // names must identify the actual standard type, not just share its last segment.
         let prelude = path.segments.len() == 1
             && (SCALARS.iter().any(|(n, _)| *n == name)
-                || matches!(name.as_str(), "Option" | "Box" | "Vec"));
+                || matches!(name.as_str(), "Option" | "Box" | "Vec")
+                || (name == "Result" && args.len() == 2));
         let builtin = resolved.as_deref().map_or(prelude, |p| {
             let Some((head, tail)) = p.split_once("::") else {
                 return false;
@@ -724,7 +760,7 @@ impl Rule {
                     | "collections::BTreeSet"
                     | "collections::btree_set::BTreeSet",
                 ) => true,
-                ("std" | "core", "option::Option") => true,
+                ("std" | "core", "option::Option" | "result::Result") => true,
                 (
                     "std",
                     "collections::HashMap"
@@ -742,6 +778,19 @@ impl Rule {
                 _ => false,
             }
         });
+        // The game's `Result<T>` alias: `Result<T, Box<dyn Error>>`.
+        if resolved
+            .as_deref()
+            .is_some_and(|p| ERROR_RESULTS.contains(&p))
+        {
+            return match <[Shape; 1]>::try_from(args) {
+                Ok([ok]) => Shape::Result(
+                    Box::new(ok),
+                    Box::new(Shape::Wrapped(Wrapper::Box, Box::new(Shape::DynError))),
+                ),
+                Err(_) => opaque,
+            };
+        }
         if !builtin {
             return opaque;
         }
@@ -758,6 +807,12 @@ impl Rule {
                 Shape::Scalar(*scalar)
             } else {
                 opaque
+            };
+        }
+        if name == "Result" {
+            return match <[Shape; 2]>::try_from(args) {
+                Ok([ok, err]) => Shape::Result(Box::new(ok), Box::new(err)),
+                Err(_) => opaque,
             };
         }
         if name == "Option" {
@@ -829,6 +884,16 @@ impl Rule {
             },
             // Nodes erase pointers to `*mut ()`; a slice's metadata cannot survive that.
             Shape::Slice(_) => Crossing::Opaque,
+            // A tagged case holds either payload, so the whole is walked, never copied; an
+            // unprojectable payload is a leaf, not a reason to hide the other.
+            Shape::Result(ok, err) => {
+                if self.of(ok, open) == Crossing::Opaque && self.of(err, open) == Crossing::Opaque {
+                    Crossing::Opaque
+                } else {
+                    Crossing::Handle
+                }
+            }
+            Shape::DynError => Crossing::Copy(1),
             Shape::Collection(collection, args) => {
                 // Sets have no stable addressable element nodes, even though their owned
                 // value shape can be used by a native codec.
@@ -1005,6 +1070,52 @@ pub(crate) mod tests {
 
     fn of(rule: &Rule, module: &str, ty: &str) -> Crossing {
         rule.crossing(module, &syn::parse_str(ty).unwrap())
+    }
+
+    #[test]
+    fn result_is_a_two_case_enum_with_a_display_text_for_dyn_error() {
+        let mut thing = internal("horizon_client::game::Thing", "struct", "struct Thing;");
+        thing
+            .refs
+            .insert("Result".into(), "horizon_client_core::Result".into());
+        let rule = Rule::new(&[thing]);
+        let shape = |ty: &str| rule.shape("horizon_client::game", None, &syn::parse_str(ty).unwrap());
+        let boxed = Shape::Wrapped(Wrapper::Box, Box::new(Shape::DynError));
+        let unit = Shape::Unit;
+        // The game's alias fixes the error to `Box<dyn Error>`.
+        assert_eq!(
+            shape("Result<bool>"),
+            Shape::Result(Box::new(Shape::Scalar(Scalar::Bool)), Box::new(boxed.clone()))
+        );
+        assert_eq!(
+            shape("std::result::Result<(), Box<dyn std::error::Error + Send + Sync>>"),
+            Shape::Result(Box::new(unit), Box::new(boxed))
+        );
+        assert_eq!(
+            shape("Result<u8, String>"),
+            Shape::Result(
+                Box::new(Shape::Scalar(Scalar::Unsigned("u8"))),
+                Box::new(Shape::Scalar(Scalar::String))
+            )
+        );
+        // An Err type that does not cross stays a leaf: the Result is still walked.
+        assert!(matches!(
+            shape("Result<u8, wgpu::Error>"),
+            Shape::Result(_, err) if matches!(*err, Shape::Opaque(_))
+        ));
+        assert_eq!(
+            rule.crossing_of(&shape("Result<u8, wgpu::Error>")),
+            Crossing::Handle
+        );
+        assert_eq!(
+            rule.crossing_of(&shape("Result<wgpu::A, wgpu::B>")),
+            Crossing::Opaque
+        );
+        // A one-argument `Result` that is not the game's alias is some other type.
+        assert!(matches!(
+            Rule::new(&[]).shape("m", None, &syn::parse_str("Result<u8>").unwrap()),
+            Shape::Opaque(_)
+        ));
     }
 
     #[test]
