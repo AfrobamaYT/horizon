@@ -68,6 +68,11 @@ impl<'a> PatchTree<'a> {
         self.value
     }
 
+    /// Resolve one metadata child without borrowing any native destination.
+    pub fn child(&self, step: Step) -> Option<&Self> {
+        self.children.get(&step)
+    }
+
     /// Requested child steps. The generated planner must reject any unrecognized step.
     pub fn children(&self) -> impl Iterator<Item = (Step, &Self)> {
         self.children.iter().map(|(step, tree)| (*step, tree))
