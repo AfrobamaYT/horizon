@@ -341,23 +341,24 @@ fn brain(m: &Mob) -> Option<&Brain> {
 }
 fn brain_mut(m: &mut Mob) -> &mut Brain {
     let (baby, farmer) = (m.is_baby(), super::villager::is_farmer(m));
+    let id = m.kind.id.clone();
     let e = super::villager::ext_mut(m);
     e.brain
-        .get_or_insert_with(|| Box::new(Brain::new(baby, 0, farmer)))
+        .get_or_insert_with(|| Box::new(Brain::new(&id, baby, 0, farmer)))
 }
-fn mem(m: &mut Mob) -> &mut Memories {
+pub(super) fn mem(m: &mut Mob) -> &mut Memories {
     &mut brain_mut(m).mem
 }
 /// `CANT_REACH_WALK_TARGET_SINCE`, for `compute_path`.
 fn cant_reach(m: &mut Mob) -> &mut Slot<i64> {
     &mut mem(m).cant_reach_walk_target_since
 }
-fn mem_ref(m: &Mob) -> Option<&Memories> {
+pub(super) fn mem_ref(m: &Mob) -> Option<&Memories> {
     brain(m).map(|b| &b.mem)
 }
 
 impl Brain {
-    fn new(baby: bool, shuffle_seed: i64, farmer: bool) -> Self {
+    fn new(mob_id: &str, baby: bool, shuffle_seed: i64, farmer: bool) -> Self {
         let mut b = Brain {
             mem: Memories::default(),
             sensors: [0; 9],
@@ -371,6 +372,14 @@ impl Brain {
             scan_items: false,
         };
         b.list = packages(baby, shuffle_seed, farmer);
+        // The parts' behaviors join before the sort, so each lands after
+        // vanilla's of its priority and activity (#824). Nothing joins a
+        // type no part attached to, and nothing is asked or built then.
+        let before = b.list.len();
+        attach_behaviors(mob_id, &mut b.list);
+        if b.list.len() > before {
+            b.list.sort_by_key(|e| (e.prio, e.act.slot()));
+        }
         b
     }
     fn requirements_met(&self, a: Act) -> bool {
@@ -424,7 +433,12 @@ fn schedule(baby: bool, day_time: i64) -> Act {
 /// from the packed memories (the sensors' first scans are delayed by draws
 /// from the mob's random), on the timeline's activity.
 fn make_brain(m: &mut Mob, packed: Memories, shuffle_seed: i64, w_times: (i64, i64)) -> Brain {
-    let mut b = Brain::new(m.is_baby(), shuffle_seed, super::villager::is_farmer(m));
+    let mut b = Brain::new(
+        &m.kind.id,
+        m.is_baby(),
+        shuffle_seed,
+        super::villager::is_farmer(m),
+    );
     for (i, rate) in SENSOR_RATES.iter().enumerate() {
         b.sensors[i] = i64::from(m.random.next_int_bound(*rate as i32).unwrap_or(0));
     }
@@ -1325,6 +1339,8 @@ enum B {
         what: LookAt,
     },
     UpdateActivity(bool),
+    /// A mod's behavior (#824), wrapped by `mod_behaviors`.
+    Mod(super::mod_behaviors::ModBehavior),
     WorkAtPoi {
         t: Timed,
         last_check: i64,
@@ -1508,6 +1524,7 @@ impl B {
             | B::RingBell(r)
             | B::ResetRaidStatus(r)
             | B::PlayTag(r) => *r,
+            B::Mod(e) => e.running(),
             B::Gate(g) => g.running,
         }
     }
@@ -1560,6 +1577,7 @@ impl B {
         let now = cx.now;
         match self {
             B::Gate(g) => g.try_start(m, cx),
+            B::Mod(e) => e.try_start(m, cx.w, cx.level.random(), cx.now),
             // -- Behaviours with a duration.
             B::Swim(t) => {
                 if !swim_condition(m) {
@@ -2897,6 +2915,7 @@ impl B {
         let now = cx.now;
         match self {
             B::Gate(g) => g.tick_or_stop(m, cx),
+            B::Mod(e) => e.tick_or_stop(m, cx.w, cx.now),
             B::Swim(t) => {
                 if now > t.end || !swim_condition(m) {
                     self.do_stop(m, cx);
@@ -3305,6 +3324,7 @@ impl B {
         let now = cx.now;
         match self {
             B::Gate(g) => g.do_stop(m, cx),
+            B::Mod(e) => e.do_stop(m, cx.w),
             B::Swim(t) | B::PanicTrigger(t) | B::DoNothing(t) => t.running = false,
             B::JumpOnBed {
                 t,
@@ -4480,6 +4500,65 @@ fn packages(baby: bool, seed: i64, farmer: bool) -> Vec<Entry> {
     add(5, h, look_minimal(seed));
     v.sort_by_key(|e| (e.prio, e.act.slot()));
     v
+}
+
+// ---- Mod behaviors ------------------------------------------------------
+
+/// The parts' behaviors for this villager's brain (#824): each joins the
+/// list with its activity and priority, refused where the villager brain has
+/// no such activity.
+fn attach_behaviors(mob_id: &str, list: &mut Vec<Entry>) {
+    struct Reg<'a> {
+        list: &'a mut Vec<Entry>,
+        mob_id: &'a str,
+    }
+    impl mod_api::BehaviorRegistrarBackend for Reg<'_> {
+        fn add_behavior(
+            &mut self,
+            r: mod_api::RegisteredBehavior,
+        ) -> Result<(), mod_api::BehaviorRefusal> {
+            let act = act_of(r.activity)?;
+            self.list.push(Entry {
+                prio: r.priority,
+                act,
+                b: B::Mod(super::mod_behaviors::ModBehavior::new(r)),
+            });
+            Ok(())
+        }
+        fn mob_id(&self) -> &str {
+            self.mob_id
+        }
+    }
+    super::mod_behaviors::attach(mob_id, &mut Reg { list, mob_id });
+}
+
+/// The villager brain's slot for a mod-api activity.
+fn act_of(activity: mod_api::Activity) -> Result<Act, mod_api::BehaviorRefusal> {
+    use mod_api::Activity as A;
+    Ok(match activity {
+        A::Core => Act::Core,
+        A::Idle => Act::Idle,
+        A::Work => Act::Work,
+        A::Play => Act::Play,
+        A::Rest => Act::Rest,
+        A::Meet => Act::Meet,
+        A::Panic => Act::Panic,
+        A::Raid => Act::Raid,
+        A::PreRaid => Act::PreRaid,
+        A::Hide => Act::Hide,
+        other => return Err(mod_api::BehaviorRefusal::UnknownActivity(other)),
+    })
+}
+
+/// The list's `(prio, activity, is a mod's)` keys, in `Brain.tick`'s start
+/// order — the inspection the goal selector's `entries` gives goals' tests.
+pub fn entry_keys(m: &Mob) -> Option<Vec<(i32, Act, bool)>> {
+    brain(m).map(|b| {
+        b.list
+            .iter()
+            .map(|e| (e.prio, e.act, matches!(e.b, B::Mod(_))))
+            .collect()
+    })
 }
 
 // ---- The probe's view ---------------------------------------------------

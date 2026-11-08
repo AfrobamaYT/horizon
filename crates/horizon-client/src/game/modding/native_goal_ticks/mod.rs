@@ -10,10 +10,13 @@
 //! (`nav_move_to`, `ai.target`), behind the same input boundaries the mob
 //! handles take, and the write handles a `ServerHost` takes do not exist here.
 use super::Game;
-use crate::mobs::{self, Mob, MobWorld, Seen, TargetInfo, Who, part_goals::GoalOp};
+use crate::mobs::{
+    self, Mob, MobWorld, Seen, TargetInfo, Who,
+    part_goals::{BehaviorOp, GoalOp},
+};
 use horizon_core::geometry::Axis;
 use mod_api::{
-    EntityRef, GoalCxBackend, Host, LegacyRandom, LivingRef, MobRef, PlayerRef,
+    BehaviorCxBackend, EntityRef, GoalCxBackend, Host, LegacyRandom, LivingRef, MobRef, PlayerRef,
     crash::{NativeModCall, enter_native_mod},
 };
 
@@ -75,6 +78,17 @@ impl GoalCx<'_, '_> {
     }
 
     // --- the entity lookups the generated Host impl forwards to ----------
+
+    /// The ticking mob's own handle, as both the goal and the behavior
+    /// context build it: the goal host's epoch around the mob in hand.
+    fn mob_handle(&self) -> MobRef {
+        let host = self
+            .w
+            .goal_host
+            .expect("a goal context is built only where a goal host is");
+        let epoch = host.epoch().expect("a goal host is built only in a world");
+        MobRef::new(EntityRef::new(epoch, self.m.id))
+    }
 
     /// `Host::entity`: the id resolves in the tick's view — the ticking mob,
     /// the player it sees, a mob of the snapshot, the dragon — or none.
@@ -266,12 +280,7 @@ impl GoalCxBackend for GoalCx<'_, '_> {
     }
 
     fn mob(&self) -> MobRef {
-        let host = self
-            .w
-            .goal_host
-            .expect("a goal context is built only where a goal host is");
-        let epoch = host.epoch().expect("a goal host is built only in a world");
-        MobRef::new(EntityRef::new(epoch, self.m.id))
+        self.mob_handle()
     }
 
     fn random(&mut self) -> &mut LegacyRandom {
@@ -378,6 +387,58 @@ impl GoalCxBackend for GoalCx<'_, '_> {
     }
 }
 
+impl BehaviorCxBackend for GoalCx<'_, '_> {
+    fn host(&self) -> &dyn Host {
+        self
+    }
+
+    fn mob(&self) -> MobRef {
+        self.mob_handle()
+    }
+
+    fn walk_target(&self) -> Option<mod_api::BrainWalkTarget> {
+        mobs::mod_behaviors::walk_target(self.m, self.w)
+    }
+
+    fn look_target(&self) -> Option<[f64; 3]> {
+        mobs::mod_behaviors::look_target(self.m, self.w)
+    }
+
+    fn attack_target(&self) -> Option<LivingRef> {
+        // The brain's own target read through the engine's path, the handle
+        // resolved in the tick's view.
+        let who = mobs::ai::brain_target(self.m)??;
+        let host = self.w.goal_host?;
+        let epoch = host.epoch()?;
+        let id = match who {
+            Who::Mob(id) => id,
+            Who::Player => self.w.player_identity?.1,
+        };
+        let entity = EntityRef::new(epoch, id);
+        self.resolve(entity)?;
+        Some(LivingRef::new(entity))
+    }
+
+    fn set_brain_target(&mut self, target: Option<LivingRef>) -> bool {
+        // The write handle's own setter rules, over the tick's view: the mob
+        // itself, the player it sees, or a snapshot mob.
+        let who = match target {
+            None => None,
+            Some(living) => match self.resolve(living.entity()) {
+                Some(Resolved::Own) => Some(Who::Mob(self.m.id)),
+                Some(Resolved::Player) => Some(Who::Player),
+                Some(Resolved::Seen(seen)) => Some(Who::Mob(seen.id)),
+                Some(Resolved::Dragon(_)) | None => return false,
+            },
+        };
+        mobs::ai::set_brain_target(self.m, who)
+    }
+
+    fn set_walk_target(&mut self, at: [i32; 3], speed: f64, close: i32) {
+        mobs::mod_behaviors::set_walk_target(self.m, at, speed, close)
+    }
+}
+
 impl mobs::part_goals::GoalHost for Game<'_> {
     fn epoch(&self) -> Option<mod_api::NativeWorldEpoch> {
         self.native_lifecycle.epoch()
@@ -423,6 +484,51 @@ impl mobs::part_goals::GoalHost for Game<'_> {
             }
         })
     }
+
+    fn run_behavior(
+        &self,
+        behavior: &mut Box<dyn mod_api::Behavior>,
+        m: &mut Mob,
+        w: &MobWorld<'_>,
+        op: BehaviorOp,
+        mod_id: &'static str,
+        part: &'static str,
+    ) -> Option<bool> {
+        let call = match op {
+            BehaviorOp::CheckExtraStartConditions => "behavior_check_extra_start_conditions",
+            BehaviorOp::Start => "behavior_start",
+            BehaviorOp::CanStillUse => "behavior_can_still_use",
+            BehaviorOp::Tick => "behavior_tick",
+            BehaviorOp::Stop => "behavior_stop",
+        };
+        // The same view a goal runs on (#824): one boundary, the brain's
+        // memories typed on top.
+        let mut gcx = GoalCx { m, w, host: self };
+        let mut context = mod_api::BehaviorCx::new(&mut gcx);
+        let _guard = enter_native_mod(NativeModCall {
+            id: mod_id,
+            hook: call,
+            part: Some(part),
+        });
+        Some(match op {
+            BehaviorOp::CheckExtraStartConditions => {
+                behavior.check_extra_start_conditions(&mut context)
+            }
+            BehaviorOp::Start => {
+                behavior.start(&mut context);
+                true
+            }
+            BehaviorOp::CanStillUse => behavior.can_still_use(&mut context),
+            BehaviorOp::Tick => {
+                behavior.tick(&mut context);
+                true
+            }
+            BehaviorOp::Stop => {
+                behavior.stop(&mut context);
+                true
+            }
+        })
+    }
 }
 
 pub(super) mod generated {
@@ -435,3 +541,7 @@ pub(super) mod generated {
 #[cfg(test)]
 #[path = "native_goal_ticks_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "native_behavior_tests.rs"]
+mod behavior_tests;

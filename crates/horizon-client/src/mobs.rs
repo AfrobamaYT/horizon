@@ -56,6 +56,7 @@ pub mod landing;
 pub mod leash;
 pub mod living;
 pub mod llama;
+pub mod mod_behaviors;
 pub mod model_layers;
 pub mod monster_brain;
 pub mod nautilus;
@@ -3721,8 +3722,11 @@ impl Mob {
         let mut mob = Self::new_remote(id, kind, position, yaw);
         // The parts a mod attached to this entity type add their goals right
         // after the species' own (#1077): vanilla's `registerGoals` moment,
-        // which belongs to the authoritative construction.
+        // which belongs to the authoritative construction. A type with no
+        // brain is told so at the same moment (#824); a brain-driven type
+        // registers its behaviors at the brain's own construction.
         part_goals::attach(&mut mob);
+        mod_behaviors::attach_at_construction(&mob);
         mob
     }
     /// The same construction without the mod parts' goals: a client's copy of
