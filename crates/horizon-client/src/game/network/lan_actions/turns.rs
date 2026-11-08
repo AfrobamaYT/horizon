@@ -92,6 +92,12 @@ impl Game<'_> {
         conn: u32,
         outer_dimension: Dim,
     ) -> Result<GuestSwap, TurnRefused> {
+        let spawn_protection = self.lan.as_ref().and_then(|host| {
+            host.hub
+                .guests
+                .get(i)
+                .and_then(|g| self.spawn_protection_for(host, g.uuid))
+        });
         let outer = BuildingPlayer {
             conn: self.lan_acting,
             dimension: outer_dimension,
@@ -365,6 +371,7 @@ impl Game<'_> {
             self.lan_acting_uuid.replace(g.uuid),
             self.lan_acting_permission.replace(g.permission),
             self.lan_acting_entity.replace(g.entity_id as u32),
+            std::mem::replace(&mut self.lan_acting_spawn_protection, spawn_protection),
         );
         let acting_fake = std::mem::replace(&mut self.lan_acting_fake, !g.participates_online());
         let packets = std::mem::take(&mut self.guest_packets);
@@ -696,6 +703,7 @@ impl Game<'_> {
             self.lan_acting_uuid,
             self.lan_acting_permission,
             self.lan_acting_entity,
+            self.lan_acting_spawn_protection,
         ) = acting;
         self.lan_acting_fake = acting_fake;
         self.known_movement = known_movement;

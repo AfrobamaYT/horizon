@@ -1077,9 +1077,7 @@ impl Game<'_> {
             source,
             recently_hit: false,
         };
-        self.drop_death_items(&dying, Vec::new(), 10, |_| {
-            super::dispenser::new_item_motion()
-        });
+        self.drop_death_items(&dying, Vec::new(), 10, |_| None);
     }
     /// `ArmorStand.brokenByAnything`, then `kill`, as burning out or a blast
     /// breaks a stand: its equipment pops above its block, the stand item does
