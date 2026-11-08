@@ -4,17 +4,17 @@ use std::{cell::RefCell, ops::Deref};
 
 /// A row's node id, parent id, declaration-order field/index id, type key and encoded plain value.
 /// A node without a plain value has an empty value buffer and is read through its child rows.
-pub type Row = (u32, Option<u32>, u32, u32, Vec<u8>);
+pub use mod_api::Row;
 /// The raw call's snapshot. Generic tuple/list Wire impls carry it without a second codec.
 pub type Rows = Vec<Row>;
 
 /// A stable key for the type spellings in a generated view. Calls use constant keys, not text.
-pub const fn key(name: &str) -> u32 {
+pub const fn key(name: &str) -> u64 {
     let bytes = name.as_bytes();
-    let mut key = 0x811c9dc5u32;
+    let mut key = 0xcbf29ce484222325u64;
     let mut i = 0;
     while i < bytes.len() {
-        key = (key ^ bytes[i] as u32).wrapping_mul(0x01000193);
+        key = (key ^ bytes[i] as u64).wrapping_mul(0x100000001b3);
         i += 1;
     }
     key
@@ -45,7 +45,7 @@ impl<'a> Snapshot<'a> {
         Reader::decode(&row.4)
     }
     /// The generated type key, resolved by the per-mod view rather than sent as text per call.
-    pub fn ty(&self, node: u32) -> Option<u32> {
+    pub fn ty(&self, node: u32) -> Option<u64> {
         self.0
             .get(node as usize)
             .filter(|row| row.0 == node)
@@ -118,7 +118,7 @@ impl Drop for Builder {
 }
 impl Builder {
     /// Add an owned node. Node ids are assigned in row order.
-    pub fn node(&mut self, parent: Option<u32>, field: u32, ty: u32) -> Result<u32, WireError> {
+    pub fn node(&mut self, parent: Option<u32>, field: u32, ty: u64) -> Result<u32, WireError> {
         if self.used >= 65_536 {
             return Err(WireError::Length);
         }
@@ -143,7 +143,7 @@ impl Builder {
         &mut self,
         parent: Option<u32>,
         field: u32,
-        ty: u32,
+        ty: u64,
         value: &T,
     ) -> Result<u32, WireError> {
         let before = self.bytes;
