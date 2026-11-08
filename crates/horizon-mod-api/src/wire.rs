@@ -18,7 +18,7 @@ pub use crate::wire_slots::{Id, Slots, Stale};
 #[path = "wire_resources.rs"]
 mod resources;
 pub use resources::{
-    ResourceCodec, ResourceScope, ScopeError, ScopeToken, Unsupported, borrow_token,
+    ResourceCodec, ResourceScope, ScopeError, ScopeLease, ScopeToken, Unsupported, borrow_token,
 };
 
 /// The guest's start-up call: its input is the package list.
