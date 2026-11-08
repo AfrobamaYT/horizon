@@ -8,6 +8,11 @@
 // own test doubles use them by path too.
 #![allow(macro_expanded_macro_exports_accessed_by_absolute_paths)]
 extern crate self as mod_api;
+mod content_declarations;
+pub use content_declarations::{
+    Block, BlockProperties, BlockShapes, BlockStateProperty, Item, PushReaction, RandomTicks,
+    Rarity, RenderShape,
+};
 
 /// A saved fluid name retained for the lifetime of the process.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
