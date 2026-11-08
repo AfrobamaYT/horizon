@@ -604,6 +604,8 @@ pub mod crossing;
 mod dispatch;
 mod host_param;
 mod index;
+/// Canonical identities for native row layouts.
+pub mod native_schema;
 mod wire;
 pub use wire::generate as generate_wire;
 pub use wire::generate_host as generate_wire_host;
