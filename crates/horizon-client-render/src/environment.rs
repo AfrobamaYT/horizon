@@ -10,7 +10,7 @@ use horizon_world::environment_system::{BiomeBlend, Builder, Conditions, System}
 use horizon_world::environment_timeline::Timeline;
 use serde_json::Value as Json;
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, LazyLock, OnceLock, RwLock};
 
 pub struct Environment {
     system: System,
@@ -21,7 +21,17 @@ pub struct Environment {
     biomes: HashMap<String, AttributeMap>,
     /// Packs' biome `post_process` maps by biome id: a biome layer after the weather.
     post: HashMap<String, AttributeMap>,
+    /// The data source and selected packs used to rebuild a level's environment.
+    source: ResourceSource,
+    dimension: String,
+    packs: PackModifiers,
 }
+
+/// The attributes a mod or a data pack set in the dimension types of the levels it added, by level
+/// id, and the environment each makes over the Overworld's the first time it is asked for
+/// (`None` when its attributes are refused, which falls back to the Overworld's).
+type LevelAttributes = HashMap<String, &'static (Json, OnceLock<Option<Environment>>)>;
+static LEVELS: LazyLock<RwLock<LevelAttributes>> = LazyLock::new(Default::default);
 
 #[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Sky {
@@ -67,7 +77,7 @@ pub struct Sample<'a> {
 
 /// Resource packs' Polytone biome and dimension modifiers (#11486): layers they add to, change
 /// in or remove from the attribute stack.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct PackModifiers {
     biomes: Vec<horizon_polytone::BiomeModifier>,
     dimensions: Vec<horizon_polytone::DimensionModifier>,
@@ -599,9 +609,27 @@ impl Environment {
         dimension: &str,
         packs: &PackModifiers,
     ) -> Result<Self> {
-        let json: Json = serde_json::from_slice(
+        Self::load_dimension_attributes(root, dimension, packs, &Json::Null)
+    }
+
+    /// Builds the data attributes first, then applies the selected resource packs.
+    fn load_dimension_attributes(
+        root: &ResourceSource,
+        dimension: &str,
+        packs: &PackModifiers,
+        extra: &Json,
+    ) -> Result<Self> {
+        let mut json: Json = serde_json::from_slice(
             &root.read(&format!("data/minecraft/dimension_type/{dimension}.json"))?,
         )?;
+        if let Some(extra) = extra.as_object() {
+            if !json["attributes"].is_object() {
+                json["attributes"] = Json::Object(Default::default());
+            }
+            if let Some(own) = json["attributes"].as_object_mut() {
+                own.extend(extra.iter().map(|(k, v)| (k.clone(), v.clone())));
+            }
+        }
         let id = format!("minecraft:{dimension}");
         let mine: Vec<_> = packs
             .dimensions
@@ -692,6 +720,9 @@ impl Environment {
         builder.constant_layer(&dimension_post);
         Ok(Self {
             system: builder.build(),
+            source: root.clone(),
+            dimension: dimension.to_owned(),
+            packs: packs.clone(),
             frame,
             biomes,
             post,
@@ -718,6 +749,39 @@ impl Environment {
     /// Whether packs added post-process biome layers (the frame then mixes them too).
     pub fn has_biome_post(&self) -> bool {
         !self.post.is_empty()
+    }
+
+    /// Replaces the levels' own attributes (a dimension type's `attributes` object), at a world's
+    /// load. The table is leaked: one small entry per level and world load.
+    pub fn set_level_attributes(levels: Vec<(String, Json)>) {
+        let table = levels
+            .into_iter()
+            .map(|(id, attributes)| {
+                let entry = Box::leak(Box::new((attributes, OnceLock::new())));
+                (id, &*entry)
+            })
+            .collect();
+        *LEVELS.write().unwrap_or_else(|e| e.into_inner()) = table;
+    }
+
+    /// `base` with the attributes a level's dimension type set over it, for a level a mod or a
+    /// data pack added; `base` itself for any other, or when the attributes are refused.
+    pub fn for_level<'a>(level: &str, base: &'a Environment) -> &'a Environment {
+        let entry = LEVELS
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(level)
+            .copied();
+        let Some((attributes, made)) = entry else {
+            return base;
+        };
+        made.get_or_init(|| {
+            Self::load_dimension_attributes(&base.source, &base.dimension, &base.packs, attributes)
+                .map_err(|e| log::warn!("dimension {level}: attributes refused: {e}"))
+                .ok()
+        })
+        .as_ref()
+        .unwrap_or(base)
     }
 
     /// `EnvironmentAttributeSystem.getValue` of one attribute, or its dimension value without
@@ -799,6 +863,9 @@ pub fn sky_darken(environment: &Environment, day_time: i64, rain: f32, thunder: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The level table is global, so the tests that set it take turns.
+    static LEVEL_TABLE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn resolved_dimension_data_and_raw_darkening_need_no_files() {
@@ -1063,5 +1130,57 @@ mod tests {
         assert_eq!(sky(1.0), [0.0, 0.0, 1.0]);
         // A transparent pixel keeps the colour the layers before gave (the dimension's #808080).
         assert_eq!(sky(0.7), [128.0 / 255.0; 3]);
+    }
+
+    /// A level's attributes go over the Overworld's one by one; only a registered level gets its
+    /// own environment, and the table clears.
+    #[test]
+    fn only_a_registered_level_gets_its_own_environment() {
+        let _turn = LEVEL_TABLE.lock().unwrap_or_else(|e| e.into_inner());
+        use horizon_assets::resource_source::Resource;
+        let source = ResourceSource::indexed(std::collections::BTreeMap::from([(
+            "data/minecraft/dimension_type/overworld.json".into(),
+            Resource::bytes(
+                br#"{"attributes":{"minecraft:gameplay/sky_light_level":15.0}}"#.to_vec(),
+            ),
+        )]));
+        let base = Environment::load(&source).unwrap();
+        let id = "test:env_pocket";
+        let darken = |e: &Environment| sky_darken(e, 0, 0.0, 0.0);
+        assert!(std::ptr::eq(Environment::for_level(id, &base), &base));
+        Environment::set_level_attributes(vec![(
+            id.to_owned(),
+            serde_json::json!({"minecraft:gameplay/sky_light_level": 4.0}),
+        )]);
+        let own = Environment::for_level(id, &base);
+        assert!(!std::ptr::eq(own, &base));
+        assert_eq!((darken(&base), darken(own)), (0, 11));
+        assert!(std::ptr::eq(
+            Environment::for_level("test:other", &base),
+            &base
+        ));
+        Environment::set_level_attributes(Vec::new());
+        assert!(std::ptr::eq(Environment::for_level(id, &base), &base));
+    }
+
+    /// Attributes the game refuses leave the level on the Overworld's environment.
+    #[test]
+    fn refused_attributes_fall_back_to_the_base() {
+        let _turn = LEVEL_TABLE.lock().unwrap_or_else(|e| e.into_inner());
+        use horizon_assets::resource_source::Resource;
+        let source = ResourceSource::indexed(std::collections::BTreeMap::from([(
+            "data/minecraft/dimension_type/overworld.json".into(),
+            Resource::bytes(br#"{"attributes":{}}"#.to_vec()),
+        )]));
+        let base = Environment::load(&source).unwrap();
+        Environment::set_level_attributes(vec![(
+            "test:bad_env".to_owned(),
+            serde_json::json!({"minecraft:visual/not_an_attribute": 1}),
+        )]);
+        assert!(std::ptr::eq(
+            Environment::for_level("test:bad_env", &base),
+            &base
+        ));
+        Environment::set_level_attributes(Vec::new());
     }
 }
