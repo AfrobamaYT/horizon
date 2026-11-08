@@ -152,6 +152,11 @@ that other item instead, an item of the mod or a vanilla one, such as `"minecraf
 `Block.asItem` both read it, and the load fails naming the block when no such item exists. `"none"` is not an item id;
 write `"item": false`. A sign's wall form takes its sign's item through `wall_block`, not `block_item`.
 
+Pick-block takes the block's item by default. `"pick_item": "<item id>"` names a different one, with any `item` and
+`block_item`: vanilla's `getCloneItemStack`, which lets a mature crop pick its seed while `Block.asItem` stays what it
+is (air for `"item": false`). It is an item of the mod or a vanilla one, and the load fails naming the block when no
+such item exists. A sign's wall form picks its sign's item through `wall_block`, so it declares no `pick_item`.
+
 `push_reaction` sets vanilla's `BlockBehaviour.Properties.pushReaction` to `"PUSH_PULL"`, `"PUSH"`, `"POPPED"`, `"IMMOVEABLE"`, or `"IGNORE_ENTITY"`.
 
 `random_ticks` makes a block tick randomly whatever its template does, as vanilla's
