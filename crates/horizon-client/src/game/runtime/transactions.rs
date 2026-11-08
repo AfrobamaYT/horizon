@@ -662,7 +662,10 @@ mod tests {
                 assert!(game.use_on_cauldron(pos).unwrap());
                 assert_eq!(
                     seen.lock().unwrap().as_slice(),
-                    &[(Some(empty), Some("minecraft:bucket".into()))]
+                    &[(
+                        Some(empty.try_into_api().unwrap()),
+                        Some("minecraft:bucket".into())
+                    )]
                 );
                 game.world.set(pos[0], pos[1], pos[2], empty).unwrap();
                 game.inventory[0] = Some(ItemStack::new("minecraft:water_bucket", 1));
