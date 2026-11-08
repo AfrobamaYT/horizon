@@ -25,6 +25,7 @@ manifest = manifest.replace('b5d6f467dc78deda3b072e700f767adb456cd349', '1975cf5
 shutil.copy(pathlib.Path(os.environ['BENCH_STD']), BIN.parent / 'horizon-wasm-std.wasm')
 
 def run(mode, count):
+    (ROOT / 'target').mkdir(exist_ok=True)
     home = pathlib.Path(tempfile.mkdtemp(prefix='wasm-world-', dir=ROOT / 'target'))
     env = lab.game_env(HORIZON_HOME=home/'home', HORIZON_LAUNCHER_HOME=home/'launcher', XDG_DATA_HOME=home/'data', XDG_CONFIG_HOME=home/'config')
     if mode == 'native': env['BENCH_NATIVE'] = '1'
