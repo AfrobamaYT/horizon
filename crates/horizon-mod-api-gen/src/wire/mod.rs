@@ -543,6 +543,8 @@ fn hidden(attrs: &[syn::Attribute]) -> bool {
 pub struct Generated {
     pub wire: String,
     pub guest: String,
+    /// Every source file read to derive them, for the build script to track.
+    pub sources: Vec<std::path::PathBuf>,
 }
 
 pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Generated, String> {
@@ -565,7 +567,12 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Generated, Str
         "#[doc(hidden)]\npub const WIRE_LAYOUT: u64 = {:#x};",
         layout(&surface)
     );
-    Ok(Generated { wire, guest })
+    let sources = surface.types.index.read.take();
+    Ok(Generated {
+        wire,
+        guest,
+        sources,
+    })
 }
 
 /// A hash of everything the two sides must agree on: every method's id and signature, and
@@ -601,6 +608,31 @@ fn layout(surface: &Surface<'_>) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    /// The generated impls depend on the hand-written `Wire` impls the generator skips, so an
+    /// edit to that file must rerun the build script.
+    #[test]
+    fn the_hand_written_wire_impls_are_tracked_sources() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| {
+                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+                let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
+                let included = [
+                    ("mod_api_generated.rs", generated.hooks.as_str()),
+                    ("mod_api_generated_host.rs", generated.host.as_str()),
+                    ("mod_api_host_areas.rs", generated.areas.as_str()),
+                ];
+                let sources = super::generate(&root, &included).unwrap().sources;
+                assert!(
+                    sources
+                        .iter()
+                        .any(|p| p.ends_with("crates/horizon-mod-api/src/wire_types.rs"))
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
     #[test]
     fn layout_includes_private_borrowed_shapes() {
         let run = || {
