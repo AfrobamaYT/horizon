@@ -1815,13 +1815,16 @@ mod tests {
     }
 
     fn atlas() -> HudAtlas {
-        HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap()
+        HudAtlas::build(&crate::resource_source::ResourceSource::directory(
+            "/nonexistent/horizon-test-assets".into(),
+        ))
+        .unwrap()
     }
 
     /// What one frame asks of a screen: a draw, then the stick's scroll, an arrow key and the wheel
     /// away from any row, at the size it was drawn at.
     fn frame(shell: &mut Shell<Probe>, s: &mut Settings, atlas: &HudAtlas) -> (f32, f32) {
-        let mut batch = HudBatch::new([1708, 960]);
+        let mut batch = HudBatch::scratch([1708, 960]);
         shell.draw(s, &mut batch, atlas, (0.0, 0.0), false, None);
         let size = (batch.width, batch.height);
         shell.scroll(s, size, -1.0);

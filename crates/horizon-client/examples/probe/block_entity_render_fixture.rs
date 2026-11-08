@@ -10,7 +10,7 @@ use horizon_client::{
     block_entity_anim::EnchantingBook,
     block_entity_render::{
         BlockAnim, BlockEntityRenderer, END_GATEWAY_LAYER, END_PORTAL_LAYER, Scene, TextCall,
-        text_vertices,
+        push_text,
     },
     chunk::{Chunk, Light},
     hud::{HudAtlas, Rect},
@@ -461,7 +461,7 @@ pub fn main() -> Result<()> {
                 let mut vertices = Vec::new();
                 let mut local = t.clone();
                 local.matrix = Mat4::IDENTITY;
-                text_vertices(&|c| atlas.font.glyph_styled(c, &t.style), Some(atlas.font.white()), &local, &mut vertices);
+                push_text(&|c| atlas.font.glyph_styled(c, &t.style), Some(atlas.font.white()), &local.run(), &mut vertices);
                 let vertices: Vec<_> = vertices.iter().map(|v| {
                     let c = v.color;
                     json!([v.pos[0], v.pos[1], v.pos[2], (c & 0xff00ff00) | (c & 255) << 16 | (c >> 16 & 255)])

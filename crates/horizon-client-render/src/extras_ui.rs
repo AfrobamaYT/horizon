@@ -223,10 +223,13 @@ mod tests {
     fn down_from_the_search_field_lands_on_the_first_row() {
         use crate::{hud::HudBatch, settings_shell::Columns, ui};
         use winit::keyboard::KeyCode as K;
-        let atlas = crate::hud::HudAtlas::build(std::path::Path::new("/nonexistent")).unwrap();
+        let atlas = crate::hud::HudAtlas::build(
+            &crate::resource_source::ResourceSource::directory("/nonexistent".into()),
+        )
+        .unwrap();
         let mut s = Settings::default();
         let mut shell = Shell::<ExtrasScreen>::default();
-        let mut batch = HudBatch::new([1708, 960]);
+        let mut batch = HudBatch::scratch([1708, 960]);
         shell.draw(&s, &mut batch, &atlas, (0.0, 0.0), false, None);
         crate::widgets::end_frame(1);
         let size = (batch.width, batch.height);

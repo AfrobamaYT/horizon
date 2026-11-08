@@ -3985,7 +3985,8 @@ mod tests {
             std::env::var_os("HORIZON_TEST_RESOURCES").expect("HORIZON_TEST_RESOURCES"),
         );
         let assets = Arc::new(Assets::load(&root)?);
-        let render = Arc::new(assets.reload(&root)?);
+        let resource_root = crate::resource_source::ResourceRoot::directory(root.clone());
+        let render = Arc::new(assets.reload(&resource_root)?);
         let facts = BlockFacts::load(&root, assets.registry)?;
         let context = WorkerContext {
             light: Arc::new(LightTables::load(&root, assets.registry, &facts)?),
@@ -3997,7 +3998,8 @@ mod tests {
             )?),
             assets: assets.clone(),
             render,
-            biomes: Arc::new(Biomes::load(&root)?),
+            biomes: Arc::new(Biomes::load(&resource_root)?),
+            hidden_states: Arc::from([]),
         };
         let kinds = state_kinds(&facts);
         let mut chunk = Chunk::empty(0, 0);

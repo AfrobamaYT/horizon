@@ -2830,10 +2830,13 @@ mod tests {
             assert_eq!(game.breath_clouds.len(), 1);
             assert_eq!(game.breath_clouds[0].age, 1);
             game.breath_clouds.update(0, |c| c.from_dragon = true);
-            assert!(collect_dragon_breath(
-                Aabb::new(Vec3::new(-0.3, 80.0, -0.3), Vec3::new(0.3, 81.8, 0.3)),
-                &mut game.breath_clouds
-            ));
+            assert!(
+                collect_dragon_breath(
+                    Aabb::new(Vec3::new(-0.3, 80.0, -0.3), Vec3::new(0.3, 81.8, 0.3)),
+                    &mut game.breath_clouds
+                )
+                .is_some()
+            );
             assert_eq!(game.breath_clouds[0].radius, 2.5);
             game.breath_clouds.clear();
             assert!(game.breath_clouds.is_empty());
@@ -2992,6 +2995,7 @@ mod tests {
     #[test]
     fn a_lingering_cloud_survives_a_save() {
         let cloud = Breath {
+            join: Default::default(),
             id: 7,
             at: [1.5, 64.0, -2.5],
             radius: 3.5,
