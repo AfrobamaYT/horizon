@@ -1992,6 +1992,8 @@ impl Game<'_> {
         self.restore_native_commands();
         self.ui.clock = WorldClock::default();
         self.ui.command_clocks.clear();
+        // PrimaryLevelData: the difficulty comes back from level.dat's difficulty_settings.
+        self.ui.difficulty = self.level.difficulty_id();
         self.ui.active_clock = OVERWORLD_CLOCK.to_owned();
         if let Ok(bytes) = std::fs::read(self.world_root.join("data/minecraft/world_clocks.dat"))
             && let Ok(raw) = horizon_world::compression::Compression::Gzip.decode(&bytes, 1 << 20)

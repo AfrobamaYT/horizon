@@ -2265,7 +2265,7 @@ impl Hub {
                             clock: id,
                             total_ticks: world.day_time,
                             partial_tick: 0.0,
-                            rate: if rate > 0.0 { level_rate } else { 0.0 },
+                            rate: level_rate,
                         }
                     } else {
                         play::ClockState {
