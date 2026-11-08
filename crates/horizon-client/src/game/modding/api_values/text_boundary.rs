@@ -1332,6 +1332,26 @@ mod text_capture_tests {
     use super::{TryIntoApi, TryIntoEngine};
 
     #[test]
+    fn missing_translation_template_survives_typed_iterative_boundary() {
+        let language = horizon_client_core::lang::Language::of(
+            "en_us",
+            [("Hi %s".into(), "Wrong translation".into())],
+        );
+        horizon_client_core::lang::scoped(language, || {
+            let engine = horizon_client_core::text::Text::translate_with_fallback(
+                "test.missing",
+                "Hi %s",
+                &[horizon_client_core::text::Text::literal("Steve")],
+            );
+            let api = engine.try_into_api().unwrap();
+            assert!(
+                matches!(&api.content, mod_api::text::TextContent::Translatable { fallback: Some(template), .. } if template == "Hi %s")
+            );
+            assert_eq!(api.try_into_engine(&()).unwrap().plain(), "Hi Steve");
+        });
+    }
+
+    #[test]
     fn native_translation_fallback_survives_noop_owned_round_trip() {
         let language = horizon_client_core::lang::Language::of(
             "en_us",
