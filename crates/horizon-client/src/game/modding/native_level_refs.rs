@@ -787,6 +787,7 @@ mod tests {
     use mod_api::{ChunkRef, LevelRef, LightLayer, NativeWorldEpoch};
 
     #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_level_with_its_own_clock_counts_apart_from_the_overworlds() {
         with_game(|game| {
             game.world.day_time = 100;
