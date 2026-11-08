@@ -228,7 +228,9 @@ mod tests {
     fn the_phase_is_read_set_synced_and_saved() {
         with_game(|game| {
             let (entity, dragon) = dragon_in(game);
-            assert_eq!(dragon.phase(game), Some(NativeDragonPhase::HoldingPattern));
+            // A constructed dragon (as with /summon) hovers; only the fight's
+            // create_new_dragon switches it to the holding pattern.
+            assert_eq!(dragon.phase(game), Some(NativeDragonPhase::Hover));
             for (i, phase) in [
                 NativeDragonPhase::HoldingPattern,
                 NativeDragonPhase::StrafePlayer,
