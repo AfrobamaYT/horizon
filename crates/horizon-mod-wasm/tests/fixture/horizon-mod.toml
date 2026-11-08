@@ -5,3 +5,11 @@ description = "Minimal shared-memory wasm fixture."
 api = "0.2"
 side = "both"
 capabilities = ["registries"]
+
+[[inject]]
+id = "tick"
+at = "horizon_client::game::Game<'_>::tick"
+kind = "head"
+with = "on_tick"
+access = "api"
+hash = "fixture"

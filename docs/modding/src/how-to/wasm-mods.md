@@ -29,6 +29,12 @@ my_library = "…"
 
 A mod carries native code or wasm code, not both. A wasm mod has no `[native]` table.
 
+A mod with `[[inject]]` listeners builds against the game's staged point catalog. Pass
+`--catalog path/to/points.json`, or set `HORIZON_WASM_STD` to the toolchain's std member
+with `points.json` beside it. Mods without listeners need no catalog. When packaging the
+wasm toolchain, `cargo horizon-mod wasm-std <out.wasm> --catalog <staged-points.json>`
+copies that catalog beside the std member.
+
 ## Dependencies
 
 `[dependencies]` work as for native mods. List the library mod in `horizon-mod.toml` and its

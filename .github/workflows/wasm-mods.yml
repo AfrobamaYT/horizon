@@ -33,8 +33,8 @@ jobs:
         run: |
           cargo build -p cargo-horizon-mod
           cd crates/horizon-mod-wasm/tests/fixture
-          "$GITHUB_WORKSPACE/target/debug/cargo-horizon-mod" horizon-mod build --wasm
-          "$GITHUB_WORKSPACE/target/debug/cargo-horizon-mod" horizon-mod wasm-std "$GITHUB_WORKSPACE/target/horizon-wasm-std.wasm"
+          "$GITHUB_WORKSPACE/target/debug/cargo-horizon-mod" horizon-mod build --wasm --catalog points.json
+          "$GITHUB_WORKSPACE/target/debug/cargo-horizon-mod" horizon-mod wasm-std "$GITHUB_WORKSPACE/target/horizon-wasm-std.wasm" --catalog points.json
       - name: Validate and load the fixture
         env:
           HORIZON_WASM_FIXTURE: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/fixture/target/horizon-mod/wasm_fixture.hmod

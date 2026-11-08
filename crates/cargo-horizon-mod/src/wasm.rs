@@ -201,7 +201,14 @@ fn cargo_member(
         .env(LINK_ENV, role)
         .env(LLD_ENV, &toolchain.lld)
         .env(PROVIDED_ENV, provided.join(","));
-    command.args(["--", "-Zdefault-visibility=interposable", &format!("--cfg=horizon_guest_registration=\"{}\"", sha512_of(registrations.as_bytes()))]);
+    command.args([
+        "--",
+        "-Zdefault-visibility=interposable",
+        &format!(
+            "--cfg=horizon_guest_registration=\"{}\"",
+            sha512_of(registrations.as_bytes())
+        ),
+    ]);
     let status = command.status().map_err(|e| format!("cargo: {e}"))?;
     if !status.success() {
         return Err("cargo build failed".into());
@@ -257,7 +264,16 @@ pub fn wasm_std(args: &[String]) -> Result<(), String> {
     let target = std::env::current_dir()
         .map_err(|e| e.to_string())?
         .join("target/horizon-mod");
-    std::fs::write(out, std_member(&target, &toolchain)?).map_err(|e| format!("{out}: {e}"))
+    std::fs::write(out, std_member(&target, &toolchain)?).map_err(|e| format!("{out}: {e}"))?;
+    if let Some(input) = super::flag(&args[1..], "--catalog") {
+        let path = Path::new(out)
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join("points.json");
+        let bytes = std::fs::read(input).map_err(|e| format!("{input}: {e}"))?;
+        std::fs::write(&path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+    }
+    Ok(())
 }
 
 /// A library mod this mod depends on: its crate, and its built `mod.wasm`.
@@ -337,7 +353,7 @@ fn libraries(root: &Path, manifest: &toml_edit::DocumentMut) -> Result<Vec<Libra
 }
 
 /// `build --wasm`: builds `mod.wasm` beside `horizon-mod.toml` and records it in `[wasm]`.
-pub fn build(root: &Path) -> Result<(), String> {
+pub fn build(root: &Path, catalog: Option<&Path>) -> Result<(), String> {
     let manifest_path = root.join(MANIFEST);
     let text = std::fs::read_to_string(&manifest_path).map_err(|e| format!("{MANIFEST}: {e}"))?;
     let mut manifest: toml_edit::DocumentMut =
@@ -357,8 +373,54 @@ pub fn build(root: &Path) -> Result<(), String> {
         .filter(|l| l.optional)
         .map(|l| l.id.clone())
         .collect();
+    let mut parsed = manifest.clone();
+    if !parsed.contains_key("wasm") {
+        let mut wasm = toml_edit::Table::new();
+        wasm["sha512"] = toml_edit::value("0".repeat(128));
+        wasm["toolchain"] = toml_edit::value("pending");
+        parsed["wasm"] = toml_edit::Item::Table(wasm);
+    }
+    let parsed = horizon_mod_package::Manifest::parse(&parsed.to_string())?;
+    let registrations = if parsed.inject.is_empty() {
+        String::new()
+    } else {
+        let std_member = std::env::var_os("HORIZON_WASM_STD")
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                std::env::current_exe()
+                    .ok()
+                    .map(|p| p.with_file_name("horizon-wasm-std.wasm"))
+            });
+        let default_catalog = std_member.and_then(|p| p.parent().map(|p| p.join("points.json")));
+        let path = catalog.map(Path::to_path_buf).or(default_catalog).ok_or(
+            "[[inject]] requires --catalog <points.json> or HORIZON_WASM_STD beside points.json",
+        )?;
+        let text = std::fs::read_to_string(&path)
+            .map_err(|e| format!("{}: {e}; supply --catalog <points.json>", path.display()))?;
+        let json: Value =
+            serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+        let points: Vec<horizon_mod_point_emit::Point> =
+            serde_json::from_value(json["points"].clone())
+                .map_err(|e| format!("{}: {e}", path.display()))?;
+        let expressions = horizon_mod_point_emit::api(&parsed, &points, "crate::")?;
+        if expressions.len() != parsed.inject.len() {
+            return Err("wasm supports API head and return injections only".into());
+        }
+        expressions
+            .iter()
+            .map(|e| {
+                format!("mod_points::register(&{e}).expect(\"validated guest API listener\");\n")
+            })
+            .collect()
+    };
     let module = cargo_member(
-        root, &target, &toolchain, "member", &provided, &features, "",
+        root,
+        &target,
+        &toolchain,
+        "member",
+        &provided,
+        &features,
+        &registrations,
     )?;
     std::fs::write(root.join(WASM), &module).map_err(|e| format!("{WASM}: {e}"))?;
     let mut wasm = toml_edit::Table::new();
@@ -437,6 +499,9 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
     } else {
         for name in GUEST_EXPORTS {
             out.push(format!("--export={name}"));
+        }
+        if std::env::var("HORIZON_GUEST_REGISTRATIONS").is_ok_and(|s| !s.is_empty()) {
+            out.push("--export=horizon_layout_ext".to_owned());
         }
     }
     let status = Command::new(&lld)

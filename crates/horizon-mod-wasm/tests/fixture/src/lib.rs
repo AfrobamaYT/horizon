@@ -11,6 +11,10 @@ impl Hooks for Mod {
     }
 }
 
+pub fn on_tick(_: mod_api::HostSide<'_>, args: &mut mod_points::TickArgs) {
+    args.cancel = true;
+}
+
 pub struct Counter;
 
 #[mod_api::horizon_part]

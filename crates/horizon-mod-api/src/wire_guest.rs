@@ -279,6 +279,7 @@ fn dispatch(id: u32, input: &mut Reader<'_>, out: &mut Writer) -> Result<(), Wir
 /// the high half, the length in the low. A refused call answers `u32::MAX` as the length and
 /// its reason, as a string, at the pointer.
 pub fn run(id: u32) -> (*const u8, u32) {
+    let _ = hooks();
     let (input, depth, mut reply) = RUNTIME.with(|rt| {
         let mut rt = rt.borrow_mut();
         let depth = rt.keeps.len();
