@@ -4,7 +4,8 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::{Game, execution_role::ExecutionRole};
+use super::{Game, execution_role::ExecutionRole, scheduled_tasks::ScheduledTasks};
+use mod_api::{ScheduleError, TaskId};
 // Their old home, for mixin code that names them here.
 pub(super) use mod_api::{
     NativeAuthority, NativeLifecycleContext, NativeTickId, NativeWorldEpoch, ServerTickPhase,
@@ -61,6 +62,8 @@ impl OpenAttempt {
 pub(super) struct NativeLifecycle {
     attempt: Option<OpenAttempt>,
     read_scope: bool,
+    /// The mods' delayed tasks (`schedule_task`): dropped whenever a world opens or closes.
+    tasks: ScheduledTasks,
 }
 
 impl NativeLifecycle {
@@ -82,6 +85,7 @@ impl NativeLifecycle {
     /// The open starts: a fresh process-wide epoch, never reused.
     pub(super) fn begin_open(&mut self, authority: NativeAuthority) {
         let epoch = fresh_epoch().get();
+        self.tasks.clear();
         self.attempt = Some(OpenAttempt {
             authority,
             epoch,
@@ -109,6 +113,7 @@ impl NativeLifecycle {
         }
         let context = attempt.server_context();
         self.attempt = None;
+        self.tasks.clear();
         context
     }
 
@@ -126,6 +131,7 @@ impl NativeLifecycle {
         }
         let context = attempt.server_context();
         self.attempt = None;
+        self.tasks.clear();
         context
     }
 
@@ -137,6 +143,7 @@ impl NativeLifecycle {
         }
         let context = attempt.server_context();
         self.attempt = None;
+        self.tasks.clear();
         context
     }
 
@@ -256,8 +263,30 @@ impl Game<'_> {
         if let Some((context, phase)) = self.native_lifecycle.server_tick_start(world_running) {
             self.native_lifecycle.read_scope = true;
             self.native_server_tick(&context, phase);
+            // Tasks come due after the start phase, still inside the tick's read scope.
+            for (id, owner, token) in self.native_lifecycle.tasks.advance() {
+                self.native_scheduled_task(id, owner, token);
+            }
             self.native_lifecycle.read_scope = false;
         }
+    }
+
+    /// `schedule_task`: a delayed call to `scheduled_task` for the mod whose hook is running.
+    pub(in crate::game) fn schedule_task(
+        &mut self,
+        delay_ticks: u32,
+        token: u64,
+    ) -> Result<TaskId, ScheduleError> {
+        let owner = mod_api::crash::current_native_mod();
+        self.native_lifecycle
+            .tasks
+            .schedule(owner, delay_ticks, token)
+    }
+
+    /// `cancel_task`: withdraws a task the running mod scheduled.
+    pub(in crate::game) fn cancel_task(&mut self, id: TaskId) -> bool {
+        let owner = mod_api::crash::current_native_mod();
+        self.native_lifecycle.tasks.cancel(owner, id)
     }
 
     /// An errored tick returned at `result?` before this site.
