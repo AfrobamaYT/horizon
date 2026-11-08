@@ -65,6 +65,8 @@ pub(crate) struct Def {
     pub(super) rust: String,
     /// Its lifetime parameters: it borrows when there are any.
     pub(super) lifetimes: usize,
+    /// It implements `Clone`, so a point record can hold a copy of a borrowed one.
+    pub(super) clone: bool,
     pub(super) kind: Kind,
     pub(super) append: Option<super::append::Append>,
     pub(super) projection: Option<Vec<Field>>,
@@ -348,6 +350,7 @@ impl<'a> Types<'a> {
             view: None,
             rust: rust.into(),
             lifetimes: 0,
+            clone: true,
             kind: Kind::Json,
         }))
     }
@@ -378,6 +381,13 @@ impl<'a> Types<'a> {
         }
         let rust = self.public_path(id, name);
         let lifetimes = generics(&item).lifetimes().count();
+        let krate = self.index.modules[id.module].krate;
+        let clone = derives(&item, "Clone")
+            || self.index.modules.iter().filter(|m| m.krate == krate).flat_map(|m| &m.items).any(|other| {
+                matches!(other, Item::Impl(i)
+                    if i.trait_.as_ref().is_some_and(|(_, t, _)| t.segments.last().is_some_and(|s| s.ident == "Clone"))
+                    && matches!(&*i.self_ty, syn::Type::Path(p) if p.path.segments.last().is_some_and(|s| s.ident == name)))
+            });
         // Reserve the slot first: a type may refer to itself.
         let def = self.push(Def {
             projection: None,
@@ -385,6 +395,7 @@ impl<'a> Types<'a> {
             view: None,
             rust,
             lifetimes,
+            clone,
             kind: Kind::Opaque,
         });
         self.by_item.insert(id, def);

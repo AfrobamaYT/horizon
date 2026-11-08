@@ -580,7 +580,8 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Generated, Str
 
 /// Every `mod_api` type the boundary lays out, by the path the generated impls name it with
 /// (`mod_api::EntityRef`): each has a `Wire` impl, generated or checked beside it. A point record
-/// may hold exactly these and the std types.
+/// may hold exactly these and the std types, when they are `Clone`: the record holds a copy, and a
+/// capability the game only lends (`Transaction`) is never copied.
 pub(crate) fn owned_types(
     root: &Path,
     included: &[(&str, &str)],
@@ -593,7 +594,7 @@ pub(crate) fn owned_types(
         .types
         .defs
         .iter()
-        .filter(|def| def.lifetimes == 0)
+        .filter(|def| def.lifetimes == 0 && def.clone)
         .map(|def| def.rust.replace(' ', ""))
         .collect())
 }
