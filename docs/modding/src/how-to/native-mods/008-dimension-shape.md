@@ -56,6 +56,11 @@ refuses a value out of range (a `coordinate_scale` of 0, an `ambient_light` abov
 Nether and the End do, in `dimensions/mymod/pocket/` of the world, and clients receive its
 dimension type when they join.
 
+The level's biomes are the one `biome` everywhere unless `biome_source` says otherwise:
+`BiomeSourceKind::Checkerboard` alternates the `biomes` in cells `2^biome_scale` chunks wide,
+`MultiNoise` uses the Overworld's or the Nether's biomes (`biome_preset`) and `End` the End's islands.
+Only `Fixed` suits a chunk generator of the mod's own, which writes terrain only.
+
 A dimension in another mod's namespace, an empty name, a name that is not a folder of the world
 (lowercase letters, digits and `_ . -` only, with `/` between segments that are not empty, `.` or
 `..`), a vanilla level's id, an id registered twice, a build height the dimension type codec refuses
