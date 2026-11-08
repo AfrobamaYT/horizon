@@ -454,8 +454,13 @@ impl Game<'_> {
                 simulated: true,
             },
         )?;
+        use crate::game::api_values::TryIntoApi;
         Some(BlockTransformPreview::new(
-            state, sound, loot, durability, particle,
+            state.try_into_api().ok()?,
+            sound,
+            loot,
+            durability,
+            particle,
         ))
     }
     /// `FluidState.getFlow` at `pos`: the current that pushes an entity there, after the
