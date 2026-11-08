@@ -140,7 +140,7 @@ impl Game<'_> {
             block.properties.get("ominous").is_some_and(|v| v == "true"),
         ))
     }
-    fn server_tick_trial_spawner(
+    pub(super) fn server_tick_trial_spawner(
         &mut self,
         key: Pos,
         spawner: &mut TrialSpawner,
@@ -159,7 +159,10 @@ impl Game<'_> {
         let mut ejected: Vec<(ItemStack, [f64; 3])> = Vec::new();
         let extras: (Vec<Mob>, Vec<(u32, u32)>);
         let next = {
-            let level = self.natural_level();
+            let mut level = self.natural_level();
+            level.spawner = Some(mod_api::Spawner::Trial {
+                pos: mod_api::BlockPos::new(key.0, key.1, key.2),
+            });
             let loot = self.server_loot.get();
             let seed = self.level.seed;
             let mut spawn = |l: &GameLevel, r: &SpawnerSpawn, rng: &mut LegacyRandom| {
