@@ -1048,7 +1048,15 @@ impl Game<'_> {
                     Rotation::Counterclockwise90 => 3,
                 },
             );
-            return match callback.run(self, &context) {
+            // A test exception fails this attempt, as GameTestInfo.startTest does;
+            // it must not unwind out of the server tick and stop the remaining tests.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                callback.run(self, &context)
+            }))
+            .map_err(|payload| {
+                TestError::Unknown(super::dedicated::panic_message(payload.as_ref()))
+            })?;
+            return match result {
                 mod_api::GameTestResult::Pass => {
                     info.succeed();
                     Ok(())
@@ -1721,6 +1729,13 @@ mod registered_game_test_tests {
             GameTestResult::Fail("registered failure".into())
         }
     }
+    struct Panics;
+    impl GameTestFunction for Panics {
+        fn run(&self, _: &mut dyn mod_api::ServerHost, _: &GameTestContext) -> GameTestResult {
+            let attempt = 1;
+            panic!("registered panic in attempt {attempt}");
+        }
+    }
     struct TestMod(horizon_world::registry::BlockStateId);
     #[mod_api::__subscriptions]
     impl mod_api::Hooks for TestMod {
@@ -1736,6 +1751,10 @@ mod registered_game_test_tests {
             event
                 .functions
                 .register("example:fail", Arc::new(Fail))
+                .unwrap();
+            event
+                .functions
+                .register("example:panic", Arc::new(Panics))
                 .unwrap();
             event
                 .functions
@@ -1784,8 +1803,8 @@ mod registered_game_test_tests {
             game.game_tests.runner = Some(Runner {
                 batches: Vec::new(),
                 current: 0,
-                batch_pending: 4,
-                tracked: (1..=4)
+                batch_pending: 5,
+                tracked: (1..=5)
                     .map(|id| Tracked {
                         id,
                         required: true,
@@ -1805,6 +1824,7 @@ mod registered_game_test_tests {
             });
             let mut outcomes = Vec::new();
             for (index, id) in [
+                "example:panic",
                 "example:pass",
                 "example:fail",
                 "example:missing",
@@ -1828,6 +1848,15 @@ mod registered_game_test_tests {
                 if info.error.is_some() {
                     info.finish();
                 }
+                if id == "example:panic" {
+                    let Some(TestError::Unknown(message)) = &info.error else {
+                        panic!("expected panic to become an unknown test failure");
+                    };
+                    assert!(
+                        message.contains("registered panic in attempt 1"),
+                        "{message}"
+                    );
+                }
                 if id == "example:fail" {
                     let Some(TestError::Assert { message, .. }) = &info.error else {
                         panic!("expected assertion");
@@ -1838,12 +1867,21 @@ mod registered_game_test_tests {
                 outcomes.push((info.done, info.error.is_none()));
             }
             let runner = game.game_tests.runner.as_ref().unwrap();
-            assert_eq!(runner.tracked.iter().filter(|t| t.done).count(), 4);
-            assert_eq!(runner.tracked.iter().filter(|t| t.failed).count(), 2);
-            assert_eq!(game.game_tests.failed, ["example:fail", "example:missing"]);
+            assert_eq!(runner.tracked.iter().filter(|t| t.done).count(), 5);
+            assert_eq!(runner.tracked.iter().filter(|t| t.failed).count(), 3);
+            assert_eq!(
+                game.game_tests.failed,
+                ["example:panic", "example:fail", "example:missing"]
+            );
             assert_eq!(
                 outcomes,
-                [(true, true), (true, false), (true, false), (true, true)]
+                [
+                    (true, false),
+                    (true, true),
+                    (true, false),
+                    (true, false),
+                    (true, true)
+                ]
             );
         });
     }
