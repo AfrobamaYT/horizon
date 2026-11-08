@@ -601,9 +601,9 @@ pub mod tests {
                     crate::__private::ConnectsToCall {
                         dimension: LevelDimension::Overworld,
                         pos: BlockPos::new(0, 64, 0),
-                        state: BlockState(state),
+                        state: value(state),
                         kind,
-                        neighbour: BlockState(1),
+                        neighbour: value(1),
                         direction: Direction::West,
                         face_solid: true,
                         connected: &mut connected,

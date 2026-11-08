@@ -1032,15 +1032,16 @@ pub mod tests {
             None
         }
         fn state_block(&self, state: BlockState) -> Option<&str> {
-            [
-                "minecraft:air",
-                "test:gauge",
-                "test:other",
-                "test:connector",
-                "test:press",
-            ]
-            .get(state.0 as usize)
-            .copied()
+            let metadata = crate::__private::block_definitions()?;
+            let slot = state.block().0 as usize;
+            if u32::from(state.ordinal()) >= metadata.definitions.get(slot)?.state_count() {
+                return None;
+            }
+            metadata
+                .names
+                .entries
+                .get(slot)
+                .map(|entry| entry.id.as_str())
         }
     }
 
