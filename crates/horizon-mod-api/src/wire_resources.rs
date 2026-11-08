@@ -235,9 +235,11 @@ impl ResourceScope {
     /// Marks the runtime's root call, from which native borrowed roots receive their lease.
     ///
     /// # Safety
-    /// Every native root exposed under this marker must remain at a stable address and
-    /// valid until the marker is dropped. Locators into mutable containers must be resolved
-    /// afresh from that root; this lease does not make element addresses stable.
+    /// Runtime context roots (the codec's Cx/frame pointees) must remain at a stable address
+    /// and valid until the marker drops. This marker does not cover shorter-lived encoded
+    /// values: before every access, those require an independently checked private ScopeLease
+    /// and must fail closed with typed Stale on expiry. Locators into mutable containers must
+    /// be resolved afresh; neither lease makes element addresses stable.
     #[doc(hidden)]
     pub unsafe fn native_root(codec: Rc<dyn ResourceCodec>) -> Self {
         let scope = Self::new(codec);
