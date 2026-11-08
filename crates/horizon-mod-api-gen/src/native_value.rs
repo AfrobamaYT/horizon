@@ -13,10 +13,65 @@ pub struct ValueCodec {
 
 /// Generate a codec for one complete owned value. Recursive and inaccessible layouts are gaps.
 pub fn codec(rule: &Rule, shape: &Shape) -> Result<ValueCodec, String> {
-    build(rule, shape, &mut Vec::new())
+    build(rule, shape, &mut Vec::new(), Mode::Inline)
 }
 
-fn build(rule: &Rule, shape: &Shape, stack: &mut Vec<String>) -> Result<ValueCodec, String> {
+/// How a named layout below the requested shape is spelled.
+#[derive(Clone, Copy, PartialEq)]
+enum Mode {
+    /// Every layout expands in place.
+    Inline,
+    /// A named layout is a call to its once-per-source decoder function.
+    Calls,
+    /// Expand this named layout now; its members are calls.
+    Body,
+}
+
+/// Decode expression whose named layouts are calls to [`decoders`] functions, so generated
+/// code grows with the layout graph once, not with each use.
+pub fn decode_call(rule: &Rule, shape: &Shape) -> Result<ValueCodec, String> {
+    build(rule, shape, &mut Vec::new(), Mode::Calls)
+}
+
+fn decoder_name(path: &str) -> proc_macro2::Ident {
+    let mangled: String = path
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '_' })
+        .collect();
+    quote::format_ident!("__horizon_decode_{mangled}")
+}
+
+/// One decoder function per decodable named layout, emitted once per source.
+pub fn decoders<'a>(rule: &Rule, paths: impl Iterator<Item = &'a str>) -> TokenStream {
+    let mut out = Vec::new();
+    for path in paths {
+        let Ok(codec) = build(
+            rule,
+            &Shape::Named(path.to_owned(), 0),
+            &mut Vec::new(),
+            Mode::Body,
+        ) else {
+            continue;
+        };
+        let name = decoder_name(path);
+        let native: syn::Path = syn::parse_str(
+            &path
+                .strip_prefix("horizon_client::")
+                .map_or_else(|| path.to_owned(), |p| format!("crate::{p}")),
+        )
+        .expect("a decodable layout has a path");
+        let decode = codec.decode;
+        out.push(quote!(fn #name(input: &mut mod_api::wire::Reader<'_>) -> Result<#native, mod_api::wire::WireError> { Ok(#decode) }));
+    }
+    quote!(#(#out)*)
+}
+
+fn build(
+    rule: &Rule,
+    shape: &Shape,
+    stack: &mut Vec<String>,
+    mode: Mode,
+) -> Result<ValueCodec, String> {
     let pair = match shape {
         Shape::Scalar(Scalar::Str) | Shape::Ref { .. } | Shape::Slice(_) | Shape::Opaque(_) => {
             return Err(format!("non-owned or opaque shape: {shape:?}"));
@@ -26,7 +81,7 @@ fn build(rule: &Rule, shape: &Shape, stack: &mut Vec<String>) -> Result<ValueCod
             encode: quote!(out.put(value);),
         },
         Shape::Wrapped(Wrapper::Box, inner) => {
-            let c = build(rule, inner, stack)?;
+            let c = build(rule, inner, stack, mode)?;
             let d = c.decode;
             let e = c.encode;
             ValueCodec {
@@ -35,7 +90,7 @@ fn build(rule: &Rule, shape: &Shape, stack: &mut Vec<String>) -> Result<ValueCod
             }
         }
         Shape::Option(inner) => {
-            let c = build(rule, inner, stack)?;
+            let c = build(rule, inner, stack, mode)?;
             let d = c.decode;
             let e = c.encode;
             ValueCodec {
@@ -46,7 +101,7 @@ fn build(rule: &Rule, shape: &Shape, stack: &mut Vec<String>) -> Result<ValueCod
         Shape::Tuple(parts) => {
             let cs = parts
                 .iter()
-                .map(|s| build(rule, s, stack))
+                .map(|s| build(rule, s, stack, mode))
                 .collect::<Result<Vec<_>, _>>()?;
             let ds = cs.iter().map(|c| &c.decode);
             let es = cs.iter().enumerate().map(|(i, c)| {
@@ -60,7 +115,7 @@ fn build(rule: &Rule, shape: &Shape, stack: &mut Vec<String>) -> Result<ValueCod
             }
         }
         Shape::Array(inner, len) => {
-            let c = build(rule, inner, stack)?;
+            let c = build(rule, inner, stack, mode)?;
             let d = c.decode;
             let e = c.encode;
             ValueCodec {
@@ -78,7 +133,7 @@ fn build(rule: &Rule, shape: &Shape, stack: &mut Vec<String>) -> Result<ValueCod
                         | Collection::BTreeSet
                 ) =>
         {
-            let c = build(rule, &parts[0], stack)?;
+            let c = build(rule, &parts[0], stack, mode)?;
             let d = c.decode;
             let e = c.encode;
             ValueCodec {
@@ -89,8 +144,8 @@ fn build(rule: &Rule, shape: &Shape, stack: &mut Vec<String>) -> Result<ValueCod
         Shape::Collection(kind, parts)
             if parts.len() == 2 && matches!(kind, Collection::HashMap | Collection::BTreeMap) =>
         {
-            let key = build(rule, &parts[0], stack)?;
-            let val = build(rule, &parts[1], stack)?;
+            let key = build(rule, &parts[0], stack, mode)?;
+            let val = build(rule, &parts[1], stack, mode)?;
             let kd = key.decode;
             let vd = val.decode;
             let ke = key.encode;
@@ -104,6 +159,30 @@ fn build(rule: &Rule, shape: &Shape, stack: &mut Vec<String>) -> Result<ValueCod
             if stack.contains(path) {
                 return Err(format!("recursive layout: {path}"));
             }
+            if mode == Mode::Calls {
+                let known = rule.decodable.borrow().get(path).copied();
+                let ok = match known {
+                    Some(ok) => ok,
+                    None => {
+                        let ok = build(rule, shape, stack, Mode::Body).is_ok();
+                        rule.decodable.borrow_mut().insert(path.clone(), ok);
+                        ok
+                    }
+                };
+                if !ok {
+                    return Err(format!("undecodable layout: {path}"));
+                }
+                let name = decoder_name(path);
+                return Ok(ValueCodec {
+                    decode: quote!(#name(input)?),
+                    encode: quote!(),
+                });
+            }
+            let mode = if mode == Mode::Body {
+                Mode::Calls
+            } else {
+                mode
+            };
             let named = rule
                 .named(path)
                 .ok_or_else(|| format!("unknown layout: {path}"))?;
@@ -122,7 +201,9 @@ fn build(rule: &Rule, shape: &Shape, stack: &mut Vec<String>) -> Result<ValueCod
                 syn::parse_str(&name).map_err(|_| format!("invalid path: {path}"))?;
             stack.push(path.clone());
             let result = match &named.item {
-                syn::Item::Struct(item) => fields(rule, named, path, &ty, &item.fields, stack),
+                syn::Item::Struct(item) => {
+                    fields(rule, named, path, &ty, &item.fields, stack, mode)
+                }
                 syn::Item::Enum(item) => {
                     let mut decoders = Vec::new();
                     let mut encoders = Vec::new();
@@ -137,6 +218,7 @@ fn build(rule: &Rule, shape: &Shape, stack: &mut Vec<String>) -> Result<ValueCod
                                 rule,
                                 &rule.shape(&named.module, Some(path), &field.ty),
                                 stack,
+                                mode,
                             )?;
                             let binding = quote::format_ident!("field_{i}");
                             let d = c.decode;
@@ -186,6 +268,7 @@ fn fields(
     ty: &syn::Path,
     fields: &syn::Fields,
     stack: &mut Vec<String>,
+    mode: Mode,
 ) -> Result<ValueCodec, String> {
     if named.foreign
         && fields
@@ -197,7 +280,12 @@ fn fields(
     let mut ds = Vec::new();
     let mut es = Vec::new();
     for (i, f) in fields.iter().enumerate() {
-        let c = build(rule, &rule.shape(&named.module, Some(path), &f.ty), stack)?;
+        let c = build(
+            rule,
+            &rule.shape(&named.module, Some(path), &f.ty),
+            stack,
+            mode,
+        )?;
         let member = f.ident.clone().map_or(
             syn::Member::Unnamed(syn::Index::from(i)),
             syn::Member::Named,

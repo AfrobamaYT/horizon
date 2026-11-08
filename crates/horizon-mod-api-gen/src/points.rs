@@ -18,6 +18,8 @@ pub mod source;
 /// One point, as `points.json` lists it.
 #[derive(Debug, serde::Serialize)]
 pub struct GamePoint {
+    /// Why the registration-policy reader cannot be generated, absent when it can.
+    pub runtime_refusal: Option<String>,
     pub name: String,
     /// The function, as an injection's `target` names it.
     pub target: String,
@@ -645,12 +647,46 @@ pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
     let (scanned, list) = scan(root)?;
     let rule = crate::crossing::Rule::new(&crate::internals::catalog(root)?);
     let mut points = Vec::new();
-    for (_, found) in all_points(&scanned, &list)? {
+    let ordered = all_points(&scanned, &list)?;
+    // One ordered graph over the whole catalog, before any name selection.
+    let mut graph = crate::native_policy::Graph::default();
+    let mut calls = std::collections::BTreeMap::new();
+    for (_, found) in ordered.iter() {
+        let shape = found.shape()?;
+        if shape.raw {
+            calls.insert(
+                found.target(),
+                crate::native_raw::register(
+                    &rule,
+                    &found.module,
+                    found.owner.map(|(ty, _)| ty),
+                    found.sig,
+                    &shape,
+                    &mut graph,
+                ),
+            );
+        }
+    }
+    for (_, found) in ordered {
         let target = found.target();
         if private.contains(&plain_path(&target)) {
             continue;
         }
         let shape = found.shape()?;
+        let runtime = calls.get(&target).map(|call| {
+            call.clone().and_then(|call| {
+                crate::native_raw::generate_runtime(
+                    &rule,
+                    &found.module,
+                    found.owner.map(|(ty, _)| ty),
+                    found.sig,
+                    &shape,
+                    &graph,
+                    call,
+                )
+                .map(|_| ())
+            })
+        });
         let api = shape.api_items(&target);
         points.push(GamePoint {
             record_item: shape.record_item(&target).to_string(),
@@ -665,6 +701,7 @@ pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
                 || (shape.raw
                     && crate::native_raw::generate(&rule, &found.module, found.sig, &shape)
                         .is_ok()),
+            runtime_refusal: runtime.and_then(Result::err),
             raw_shape: shape
                 .raw
                 .then(|| point_shape::raw_shape(&shape, found.sig, found.owner.map(|(ty, _)| ty))),
@@ -1153,6 +1190,7 @@ mod tests {
             let shape = point_shape::shape(quote!(), &sig).unwrap();
             let api = shape.api_items(name);
             GamePoint {
+                runtime_refusal: None,
                 name: name.into(),
                 target: name.into(),
                 side: "none",
@@ -1219,6 +1257,7 @@ mod tests {
                     "raw_shape": point.raw_shape,
                     "raw_status": if point.snapshot { "generated primitive rows" } else if point.raw { "staged nominal reader needed" } else { "no raw place" },
                     "raw_snapshot": point.snapshot,
+                    "runtime_refusal": point.runtime_refusal,
                 }));
             }
         }
@@ -1232,6 +1271,19 @@ mod tests {
             points.iter().filter(|point| point.raw).count(),
             points.iter().filter(|point| point.snapshot).count()
         );
+        let mut refusals = std::collections::BTreeMap::<String, usize>::new();
+        for point in points.iter().filter(|point| point.raw) {
+            let reason = point
+                .runtime_refusal
+                .as_deref()
+                .map_or("admitted", |reason| &reason[..reason.len().min(110)]);
+            *refusals.entry(reason.to_owned()).or_default() += 1;
+        }
+        let mut refusals: Vec<_> = refusals.into_iter().collect();
+        refusals.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
+        for (reason, count) in refusals.iter().take(40) {
+            println!("runtime admission {count}: {reason}");
+        }
         for class in ["plain", "callback", "unclassified"] {
             let functions = points
                 .iter()

@@ -310,6 +310,7 @@ fn generate_inner(
                         continue;
                     }
                     let member = &field.member;
+
                     let shape = rule.shape(&named.module, Some(path), field.ty);
                     let child = match emit(
                         rule,
@@ -346,43 +347,38 @@ fn generate_inner(
         };
         Ok(capture(node))
     }
-    {
-        let body = emit(
-            rule,
-            &rule.shape(module, owner, ty),
-            place,
-            exposure,
-            0,
-            &runtime,
-        )?;
-        if let Some((graph, _)) = &runtime {
-            let mut helpers = Vec::new();
-            for (id, layout) in graph.layouts.iter().enumerate() {
-                if rule.named(&layout.name).is_none() || layout.opaque.is_some() {
-                    continue;
-                }
-                let helper = quote::format_ident!("__horizon_node_{id}");
-                let shape = rule.shape(
-                    "",
-                    None,
-                    &syn::parse_str::<Type>(&layout.name).map_err(|e| e.to_string())?,
-                );
-                let native: Type =
-                    syn::parse_str(&layout.name.replace("horizon_client::", "crate::"))
-                        .map_err(|e| e.to_string())?;
-                let inner = emit(
-                    rule,
-                    &shape,
-                    quote!(*__value),
-                    exposure,
-                    0,
-                    &Some((*graph, quote!(__policy))),
-                )?;
-                helpers.push(quote!(fn #helper<'a>(__value: &'a #native, __policy: &'a mod_points::exposure::Plan) -> impl mod_points::native_read::NativeNode + 'a { #inner }));
-            }
-            Ok(quote!({ #(#helpers)* #body }))
-        } else {
-            Ok(body)
+    emit(
+        rule,
+        &rule.shape(module, owner, ty),
+        place,
+        exposure,
+        0,
+        &runtime,
+    )
+}
+
+/// One helper per named layout of the graph, emitted once per source rather than once per
+/// point body. Each takes the native value and the endpoint's registration `Plan`.
+pub fn helpers(rule: &Rule, graph: &crate::native_policy::Graph) -> Result<TokenStream, String> {
+    let mut helpers = Vec::new();
+    for (id, layout) in graph.layouts.iter().enumerate() {
+        if rule.named(&layout.name).is_none() || layout.opaque.is_some() {
+            continue;
         }
+        let helper = quote::format_ident!("__horizon_node_{id}");
+        let named: Type = syn::parse_str(&layout.name).map_err(|e| e.to_string())?;
+        let native: Type = syn::parse_str(&layout.name.replace("horizon_client::", "crate::"))
+            .map_err(|e| e.to_string())?;
+        let inner = generate_inner(
+            rule,
+            "",
+            None,
+            &named,
+            quote!(*__value),
+            &native_schema::All,
+            Some((graph, quote!(__policy))),
+        )?;
+        helpers.push(quote!(fn #helper<'a>(__value: &'a #native, __policy: &'a mod_points::exposure::Plan) -> impl mod_points::native_read::NativeNode + 'a { #inner }));
     }
+    Ok(quote!(#(#helpers)*))
 }

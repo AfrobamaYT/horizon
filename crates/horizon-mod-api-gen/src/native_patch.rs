@@ -100,7 +100,18 @@ fn emit(
     if matches!(shape, Shape::Ref { mutable: false, .. }) {
         return Ok(quote!(if !__np_tree.is_empty() { #reject; }));
     }
-    let codec = if fully_exposed(rule, shape, exposure, 0) {
+    if let (Some((graph, _)), Shape::Named(..)) = (runtime, shape)
+        && let Some(id) = graph.id(shape)
+        && graph.layouts[id].opaque.is_some()
+    {
+        // An opaque layout never takes a patch; its descendants are not expanded.
+        return Ok(
+            quote!(if __np_tree.value().is_some() || __np_tree.children().next().is_some() { #reject; }),
+        );
+    }
+    let codec = if runtime.is_some() {
+        native_value::decode_call(rule, shape)
+    } else if fully_exposed(rule, shape, exposure, 0) {
         native_value::codec(rule, shape)
     } else {
         Err("partial exposure forbids whole-value replacement".into())
@@ -121,6 +132,14 @@ fn emit(
     } else {
         whole
     };
+    if depth > 0
+        && let (Some((graph, policy)), Shape::Named(..)) = (runtime, shape)
+        && let Some(id) = graph.id(shape)
+        && graph.layouts[id].opaque.is_none()
+    {
+        let helper = quote::format_ident!("__horizon_patch_{id}");
+        return Ok(quote!(#helper(&mut (#place), __np_tree, __np_plan, &(#policy))?;));
+    }
     let child = |s: &Shape, p| {
         emit(rule, s, p, exposure, runtime, depth + 1)
             .or_else(|_| Ok::<_, String>(quote!(#reject;)))
@@ -305,4 +324,42 @@ fn sequence(body: TokenStream, place: TokenStream, reject: TokenStream) -> Token
             if let Some(__np_tree)=__np_tree.child(mod_points::locators::Step::Index(__np_index as u64)) { #body }
         }
     }
+}
+
+/// One patch planner per named layout, emitted once per source (see `native_window::helpers`).
+pub fn helpers(rule: &Rule, graph: &crate::native_policy::Graph) -> Result<TokenStream, String> {
+    let mut helpers = Vec::new();
+    for (id, layout) in graph.layouts.iter().enumerate() {
+        if rule.named(&layout.name).is_none() || layout.opaque.is_some() {
+            continue;
+        }
+        let helper = quote::format_ident!("__horizon_patch_{id}");
+        let named: Type = syn::parse_str(&layout.name).map_err(|e| e.to_string())?;
+        let native: Type = syn::parse_str(&layout.name.replace("horizon_client::", "crate::"))
+            .map_err(|e| e.to_string())?;
+        let policy = quote!(__policy);
+        let body = emit(
+            rule,
+            &rule.shape("", None, &named),
+            quote!(*__np_value),
+            &crate::native_schema::All,
+            Some((graph, &policy)),
+            0,
+        )
+        .unwrap_or_else(|_| {
+            quote!(return Err(mod_api::wire::WireError::Invalid(
+                "unsupported native patch layout"
+            ));)
+        });
+        helpers.push(quote!(fn #helper<'p>(__np_value: &'p mut #native, __np_tree: &mod_points::native_patch::PatchTree<'_>, __np_plan: &mut mod_api::wire::PatchPlan<'p>, __policy: &mod_points::exposure::Plan) -> Result<(), mod_api::wire::WireError> { #body; Ok(()) }));
+    }
+    let decoders = native_value::decoders(
+        rule,
+        graph
+            .layouts
+            .iter()
+            .filter(|layout| layout.opaque.is_none() && rule.named(&layout.name).is_some())
+            .map(|layout| layout.name.as_str()),
+    );
+    Ok(quote!(#decoders #(#helpers)*))
 }
