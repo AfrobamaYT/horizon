@@ -788,6 +788,7 @@ fn refused_client_context_keeps_pack_and_listeners() {
             &[],
             &game.mods,
             game.register_client_reload_listeners(),
+            &[],
             &game.pack.assets,
             &game.res,
             &game.pack.context,
@@ -845,7 +846,9 @@ fn client_completion_reads_published_resources_without_world_access() {
             host: &mut dyn ClientHost,
             _: &mut ClientResourcesReloadedEvent,
         ) {
-            assert!(host.block_sprites(&["minecraft:stone"])[0].is_some());
+            assert!(
+                host.block_sprites(&[host.block_state_id("minecraft:stone").unwrap()])[0].is_some()
+            );
             assert!(host.texture_sprites(&["minecraft:block/stone"])[0].is_some());
             let version = host.block_sprites_version();
             let refused =

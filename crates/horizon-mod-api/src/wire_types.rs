@@ -178,7 +178,7 @@ macro_rules! slot_keys {
         }
     )+};
 }
-slot_keys!(u32; BlockEntityTypeKey, BlockKey, BoolGameRuleKey, DimensionKey, EffectKey, FluidKey, ItemKey, TagKey);
+slot_keys!(u32; BlockEntityTypeKey, BlockKey, BoolGameRuleKey, DimensionKey, EffectKey, FluidKey, ItemKey, crate::particle_keys::ParticleKey, TagKey);
 slot_keys!(u64; UnresolvedFluid);
 
 impl Wire for crate::NativeWorldEpoch {
@@ -225,6 +225,7 @@ entity_handles!(
     crate::ItemEntityRef,
     crate::DisplayRef,
     crate::ProjectileRef,
+    crate::FishingHookRef,
     crate::MerchantRef,
     crate::MinecartRef
 );
@@ -630,7 +631,8 @@ impl Wire for crate::ParticleOptions {
         out.put(&self.item);
         out.put(&self.geyser);
         out.put(&self.vibration);
-        out.put(&self.mod_particle);
+        out.put(&self.legacy_entity_effect);
+        out.put(&self.legacy_trail_lifetime);
     }
     fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
         Ok(Self {
@@ -643,7 +645,8 @@ impl Wire for crate::ParticleOptions {
             item: input.take()?,
             geyser: input.take()?,
             vibration: input.take()?,
-            mod_particle: input.take()?,
+            legacy_entity_effect: input.take()?,
+            legacy_trail_lifetime: input.take()?,
         })
     }
 }
@@ -679,13 +682,39 @@ impl Wire for crate::DamageContainer {
     }
 }
 
-impl Wire for crate::ParticleType {
+impl Wire for crate::BiomeId {
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
-        out.put_str(self.name());
+        out.put(&self.0);
     }
     fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
-        Self::from_name(&input.take::<String>()?).ok_or(WireError::Invalid("unknown particle type"))
+        Ok(crate::__private::biome_id(input.take()?))
+    }
+}
+impl Wire for crate::StatePredicate {
+    const MIN: usize = 12;
+    fn put(&self, out: &mut Writer) {
+        let record = crate::StatePredicateRecord::from(self);
+        match record.target {
+            crate::StatePredicateTarget::Block(key) => {
+                out.put(&0u32);
+                out.put(&key);
+            }
+            crate::StatePredicateTarget::Tag(key) => {
+                out.put(&1u32);
+                out.put(&key);
+            }
+        }
+        out.put(&record.constraints);
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        let target = match input.take::<u32>()? {
+            0 => crate::StatePredicateTarget::Block(input.take()?),
+            1 => crate::StatePredicateTarget::Tag(input.take()?),
+            n => return Err(WireError::Tag(n)),
+        };
+        // The owning game boundary validates the constraints against its metadata.
+        Ok(crate::StatePredicateRecord::new(target, input.take()?).into())
     }
 }
 impl Wire for crate::particles::PositionSource {
@@ -792,6 +821,7 @@ impl Wire for crate::ModBlockEntity {
         out.put(&self.fields.data);
         out.put(&self.revision.identity());
         out.put(&self.revision.changes());
+        out.put(&self.client_update_fields);
     }
     fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
         Ok(Self {
@@ -802,6 +832,7 @@ impl Wire for crate::ModBlockEntity {
                 data: input.take()?,
             },
             revision: crate::containers::ModRevision::from_snapshot(input.take()?, input.take()?),
+            client_update_fields: input.take()?,
         })
     }
 }
@@ -856,6 +887,11 @@ impl Wire for crate::ItemPlace {
                 out.put(menu);
                 out.put(slot)
             }
+            Equipment { entity, slot } => {
+                out.put(&9u32);
+                out.put(entity);
+                out.put(slot)
+            }
             Mod { provider, key } => {
                 out.put(&8u32);
                 out.put_str(provider);
@@ -895,6 +931,10 @@ impl Wire for crate::ItemPlace {
                 },
                 7 => MenuSlot {
                     menu: input.take()?,
+                    slot: input.take()?,
+                },
+                9 => Equipment {
+                    entity: input.take()?,
                     slot: input.take()?,
                 },
                 8 => Mod {

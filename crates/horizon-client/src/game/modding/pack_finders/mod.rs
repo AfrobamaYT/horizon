@@ -73,7 +73,7 @@ impl PackFinders for Registry {
             PackType::ServerData => horizon_core::version::DATA_PACK_FORMAT,
             _ => return Err(PackFinderError::InvalidMetadata),
         };
-        let title = entry.title.try_into_engine(&()).unwrap();
+        let title = entry.title.try_into_engine(&())?;
         let mut pack = packs::pack_for(id, title, Source::Opened(source), format)
             .ok_or(PackFinderError::InvalidMetadata)?;
         pack.selection = Some(PackInfo {

@@ -1,7 +1,5 @@
 //! Load-owned declarations and resolved mappings for registration-slot keys.
-use crate::{
-    BlockEntityTypeKey, BlockKey, BlockStateId, DimensionKey, EffectKey, FluidKey, ItemKey,
-};
+use crate::{BlockEntityTypeKey, BlockKey, DimensionKey, EffectKey, FluidKey, ItemKey};
 
 impl BlockKey {
     /// Validate an incoming slot against declarations, not a world's resolved mappings.
@@ -196,7 +194,7 @@ impl std::fmt::Display for UnknownFluid {
 }
 
 /// Resolve fluid requests against the loaded behavior registry.
-pub fn resolve_fluids(ids: &[&str]) -> Result<(), Vec<UnknownFluid>> {
+pub fn resolve_fluids(ids: &[&str], world_fluids: &[&str]) -> Result<(), Vec<UnknownFluid>> {
     let requests = crate::parts::requested_keys();
     let mut names = requests.fluids.clone();
     let mut errors = Vec::new();
@@ -226,20 +224,20 @@ pub fn resolve_fluids(ids: &[&str]) -> Result<(), Vec<UnknownFluid>> {
                 .insert(path.encode_utf16().collect(), slot as u32);
         }
     }
-    names.world_fluids = horizon_world::fluid::FluidKind::ALL
+    names.world_fluids = world_fluids
         .iter()
-        .map(|kind| names.slots.get(kind.name()).copied())
+        .map(|name| names.slots.get(*name).copied())
         .collect();
     let _ = crate::parts::resolved_fluids().set(names);
     Ok(())
 }
 
 /// Resolve an engine fluid kind through the load-owned mapping.
-pub fn world_fluid_key(kind: horizon_world::fluid::FluidKind) -> Option<FluidKey> {
+pub fn world_fluid_key(index: usize) -> Option<FluidKey> {
     crate::parts::resolved_fluids()
         .get()?
         .world_fluids
-        .get(kind as usize)
+        .get(index)
         .copied()
         .flatten()
         .map(FluidKey)
@@ -310,57 +308,6 @@ pub(crate) fn block_entity_type_display_name(key: BlockEntityTypeKey) -> String 
     })
 }
 
-use horizon_world::registry::BlockStateRange;
-
-/// A block slot's mappings in one game's current tables.
-#[derive(Clone, Copy, Debug)]
-// exhaustive: the game builds this mapping at load; mods receive only BlockKey
-pub struct ResolvedBlock {
-    /// The block's default state.
-    pub default: BlockStateId,
-    /// Its consecutive state ids.
-    pub states: BlockStateRange,
-    /// Its index in the behaviour table.
-    pub block: horizon_world::level::states::BlockId,
-}
-
-thread_local! {
-    static BLOCKS: std::cell::RefCell<Option<Vec<ResolvedBlock>>> = const { std::cell::RefCell::new(None) };
-}
-
-/// Prepare this game's block slots without changing its current mapping.
-pub fn prepare_blocks(
-    mut resolve: impl FnMut(&str) -> Option<ResolvedBlock>,
-) -> Result<Vec<ResolvedBlock>, Vec<String>> {
-    block_names().resolve(&mut resolve, |mod_id, id| {
-        format!("mod {mod_id} requested unknown block {id}")
-    })
-}
-
-/// Install a prepared mapping on its owning game thread.
-pub fn install_blocks(values: Vec<ResolvedBlock>) {
-    BLOCKS.with(|blocks| *blocks.borrow_mut() = Some(values));
-}
-
-/// Rebind this game's slots at the owning load boundary.
-pub fn resolve_blocks(
-    resolve: impl FnMut(&str) -> Option<ResolvedBlock>,
-) -> Result<(), Vec<String>> {
-    install_blocks(prepare_blocks(resolve)?);
-    Ok(())
-}
-
-/// The current numeric mapping for a trusted key. None means this thread has no resolved
-/// world tables (startup or another owning thread), not an unknown slot.
-pub fn block(key: BlockKey) -> Option<ResolvedBlock> {
-    BLOCKS.with(|blocks| {
-        blocks
-            .borrow()
-            .as_ref()
-            .map(|values| values[key.0 as usize])
-    })
-}
-
 /// Resolve requested effects once, after every mod's content has been registered.
 pub fn resolve_effects<'a>(
     ids: impl IntoIterator<Item = &'a str>,
@@ -381,15 +328,13 @@ pub fn resolve_effects<'a>(
     Ok(())
 }
 
-/// Resolve an effect operation by numeric slot, never by a fresh name scan.
-pub fn effect(key: EffectKey) -> Option<&'static horizon_client_core::potions::EffectDef> {
-    let index = crate::parts::resolved_effects().get()?.indices[key.0 as usize];
-    let vanilla = horizon_client_core::potions::EFFECTS;
-    if index < vanilla.len() {
-        Some(&vanilla[index])
-    } else {
-        Some(&horizon_client_core::potions::mod_effects()[index - vanilla.len()])
-    }
+/// Resolve an effect operation to its load-owned engine registry index.
+pub fn effect_index(key: EffectKey) -> Option<usize> {
+    crate::parts::resolved_effects()
+        .get()?
+        .indices
+        .get(key.0 as usize)
+        .copied()
 }
 
 /// Canonical diagnostic name, unavailable until the process effect registry is resolved.
@@ -489,27 +434,6 @@ mod block_tests {
             assert_eq!(block_key(name), None);
         }
         assert_eq!(block_id(air), Some("minecraft:air"));
-        let mapping = prepare_blocks(|name| {
-            let state = match name {
-                "minecraft:air" => 0,
-                "minecraft:stone" => 1,
-                "minecraft:birch_log" => 2,
-                "minecraft:zombie_head" => 3,
-                "test:machine" => 4,
-                _ => return None,
-            };
-            Some(ResolvedBlock {
-                default: BlockStateId(state),
-                states: BlockStateRange::new(BlockStateId(state), 1),
-                block: horizon_world::level::states::BlockId(state as u16),
-            })
-        })
-        .unwrap();
-        install_blocks(mapping);
-        assert_eq!(block(air).unwrap().default, BlockStateId(0));
-        assert_eq!(block(stone).unwrap().default, BlockStateId(1));
-        assert!(prepare_blocks(|_| None).is_err());
-        assert_eq!(block(stone).unwrap().default, BlockStateId(1));
         // Reversing the registry's enumeration cannot change any completed key.
         crate::parts::tests::install_parts_fixture(&[ModEntry::new("test", Box::new(Requests))])
             .unwrap();
@@ -524,7 +448,7 @@ mod block_tests {
             assert_eq!(block_key(name), Some(BlockKey(slot)));
         }
         // Replacing Parts replaces the load-owned identities, not a second global registry.
-        crate::install_parts(&[], &crate::parts::tests::rule_schema()).unwrap();
+        crate::install_parts(&[], &crate::parts::tests::rule_schema(), |_| false).unwrap();
         assert!(block_key("minecraft:air").is_none());
         assert!(BlockKey::from_slot(air.0).is_err());
     }
@@ -548,6 +472,7 @@ mod item_tests {
         crate::install_parts(
             &[ModEntry::new("test", Box::new(Requests))],
             &crate::parts::tests::rule_schema(),
+            |_| false,
         )
         .unwrap();
         assert!(resolve_items(["minecraft:stone"]).is_err());
@@ -559,5 +484,43 @@ mod item_tests {
         assert_eq!(ItemKey::from_slot(apple.0), Ok(apple));
         assert_eq!(item_id(apple), Some("minecraft:apple"));
         assert!(ItemKey::from_slot(3).is_err());
+    }
+}
+
+#[cfg(test)]
+mod hot_call_key_tests {
+    use crate::*;
+    #[test]
+    fn hot_call_signatures_and_unknown_slots_are_typed() {
+        let _: fn(&dyn Host, ItemKey) -> Option<i32> = |h, k| h.item_burn_time(k);
+        let _: fn(&dyn Host, ItemKey) -> Option<f32> = |h, k| h.item_compost_chance(k);
+        let _: fn(&mut dyn ClientHost, ItemKey, u32) -> Result<(), String> = |h, k, n| h.give(k, n);
+        let _: fn(&dyn ClientHost, &str, ItemKey) -> bool = |h, e, k| h.enchantment_supports(e, k);
+        crate::testing::with_mods(Vec::new().into(), || {
+            assert!(ItemKey::from_slot(u32::MAX).is_err());
+            assert_eq!(__private::item_key_id(ItemKey(u32::MAX)), None);
+            assert_eq!(__private::block_key_id(BlockKey(u32::MAX)), None);
+        });
+    }
+}
+
+#[cfg(test)]
+mod fluid_mapping_tests {
+    #[test]
+    fn world_fluid_order_is_supplied_by_engine_not_key_order() {
+        crate::parts::tests::install_parts_fixture(&[]).unwrap();
+        super::resolve_fluids(
+            &["minecraft:lava", "minecraft:empty", "minecraft:water"],
+            &["minecraft:empty", "minecraft:water", "minecraft:lava"],
+        )
+        .unwrap();
+        for (index, expected) in ["minecraft:empty", "minecraft:water", "minecraft:lava"]
+            .iter()
+            .enumerate()
+        {
+            let key = super::world_fluid_key(index).unwrap();
+            assert_eq!(super::fluid_id(key), Some(*expected));
+        }
+        assert!(super::world_fluid_key(3).is_none());
     }
 }

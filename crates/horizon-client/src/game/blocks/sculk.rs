@@ -608,7 +608,11 @@ impl Game<'_> {
             player: mob.is_some_and(|m| m.rider.is_some()),
         }
     }
-    pub(super) fn who_context(&self, who: Option<Who>, state: Option<BlockStateId>) -> Context {
+    pub(in crate::game) fn who_context(
+        &self,
+        who: Option<Who>,
+        state: Option<BlockStateId>,
+    ) -> Context {
         match who {
             Some(Who::Player) => self.player_context(state),
             Some(Who::Mob(id)) => self.mob_context(id, state),
@@ -1989,7 +1993,7 @@ impl Game<'_> {
                 };
             }
             self.particles.add(
-                &mod_api::particles::ParticleOptions::dust([1.0, 0.0, 0.0], 1.0),
+                &horizon_client::particles::ParticleOptions::dust([1.0, 0.0, 0.0], 1.0),
                 [
                     f64::from(pos[0]) + at[0],
                     f64::from(pos[1]) + at[1],
@@ -2547,7 +2551,13 @@ mod tests {
                 _host: &mut dyn mod_api::ServerHost,
                 event: &mut VanillaGameEventEvent<'_>,
             ) -> mod_api::Flow {
-                self.0.lock().unwrap().push(event.affected_state);
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push(event.affected_state.map(|state| {
+                        crate::game::api_values::TryIntoEngine::try_into_engine(&state, &())
+                            .unwrap()
+                    }));
                 mod_api::Flow::Continue
             }
         }

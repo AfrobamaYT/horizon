@@ -90,3 +90,59 @@ fn ingredient_depth_128_matches_clones_and_drops_on_two_mib_stack() {
         .join()
         .unwrap();
 }
+
+#[test]
+#[ignore = "requires prepared vanilla recipe corpus"]
+fn vanilla_recipe_corpus_preserves_ingredient_membership_and_order() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../.local/horizon-client/26.3/data/minecraft/recipe");
+    let mut checked = 0;
+    for entry in std::fs::read_dir(root).unwrap() {
+        let entry = entry.unwrap();
+        if entry.path().extension().is_none_or(|ext| ext != "json") {
+            continue;
+        }
+        let json: Value = serde_json::from_slice(&std::fs::read(entry.path()).unwrap()).unwrap();
+        let mut sources = Vec::new();
+        if let Some(value) = json.get("ingredient") {
+            sources.push(value);
+        }
+        if let Some(values) = json.get("ingredients").and_then(Value::as_array) {
+            sources.extend(values);
+        }
+        if let Some(values) = json.get("key").and_then(Value::as_object) {
+            sources.extend(values.values());
+        }
+        for source in sources {
+            let names: Vec<&str> = match source {
+                Value::String(name) => vec![name],
+                Value::Array(values) => values.iter().map(|v| v.as_str().unwrap()).collect(),
+                _ => panic!("unexpected vanilla ingredient: {source}"),
+            };
+            // Independently expand tagged sources with sentinel members. This checks
+            // the real corpus's source shapes, not the separate tag loader.
+            let mut items = super::Items::for_tests(Default::default());
+            let mut expected = Vec::new();
+            for name in names {
+                let id = if let Some(tag) = name.strip_prefix('#') {
+                    items
+                        .item_tag_order
+                        .insert(tag.into(), vec!["fixture:tag_member".into()]);
+                    "fixture:tag_member"
+                } else {
+                    name
+                };
+                if !expected.contains(&id.to_owned()) {
+                    expected.push(id.to_owned());
+                }
+            }
+            let parsed = super::Ingredient::parse(source, &items).unwrap();
+            assert_eq!(parsed.order, expected, "{}", entry.path().display());
+            assert_eq!(parsed.items, expected.into_iter().collect());
+            assert!(parsed.children.is_none());
+            assert!(parsed.custom.is_none());
+            checked += 1;
+        }
+    }
+    assert!(checked > 1000, "incomplete recipe corpus: {checked}");
+}

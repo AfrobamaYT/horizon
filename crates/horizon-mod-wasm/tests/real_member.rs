@@ -91,6 +91,7 @@ fn real_library_dependency() {
         mod_api::__private::install_parts(
             mod_api::__private::mods(),
             &mod_api::__private::part_tests::rule_schema(),
+            |_| false,
         )
         .unwrap();
         mod_api::__private::mark_game_thread();
@@ -153,6 +154,7 @@ fn real_member() {
         mod_api::__private::install_parts(
             mod_api::__private::mods(),
             &mod_api::__private::part_tests::rule_schema(),
+            |_| false,
         )
         .unwrap();
         assert!(

@@ -80,6 +80,7 @@ impl AttributeTooltipListener for HookedAttributeTooltips<'_, '_> {
                 creative: ctx.creative,
                 lines: &mut lines,
             });
-        lines.try_into_engine(&()).unwrap()
+        // Refuse the appender's whole writeback if any line cannot cross.
+        lines.try_into_engine(&()).unwrap_or_default()
     }
 }

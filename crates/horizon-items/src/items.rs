@@ -16,6 +16,10 @@ use std::{
     sync::Arc,
 };
 
+fn tool_number(value: &horizon_core::nbt::Tag) -> Option<f32> {
+    horizon_world::datafix::dynamic::as_number(value).map(|n| n.float_value())
+}
+
 /// A fire starter's use sound: `SoundEvents.FIRECHARGE_USE` or
 /// `FLINTANDSTEEL_USE`.
 pub fn fire_starter_sound(fire_charge: bool) -> &'static str {
@@ -70,16 +74,19 @@ pub enum ConsumeEffect {
     /// it silently): the game hands it to `native_consume_effect`.
     Native {
         kind: String,
-        data: serde_json::Value,
+        data: Arc<horizon_core::nbt::Tag>,
     },
 }
 
 /// Typed consumable shared by item prototypes and stack component patches.
 pub type ItemConsumable = horizon_world::consumable::Consumable<String, ConsumeEffect>;
 
-/// Decode `Consumable.CODEC` defaults and ordered effects at the component boundary.
-pub(crate) fn parse_consumable(cons: &Value) -> ItemConsumable {
-    ItemConsumable {
+/// Decode `Consumable.CODEC` defaults and ordered effects at the load boundary.
+/// Opaque mod payloads are converted once to retained NBT; invalid payloads refuse admission.
+pub fn parse_consumable(
+    cons: &Value,
+) -> std::result::Result<ItemConsumable, horizon_core::json_nbt::JsonNbtError> {
+    Ok(ItemConsumable {
         seconds: cons["consume_seconds"].as_f64().map_or(1.6, |s| s as f32),
         animation: crate::use_animation::consumable_animation(cons),
         sound: cons["sound"]
@@ -91,9 +98,24 @@ pub(crate) fn parse_consumable(cons: &Value) -> ItemConsumable {
             .as_array()
             .into_iter()
             .flatten()
-            .filter_map(parse_consume_effect)
+            .map(|effect| {
+                if let Some(kind) = effect["type"].as_str().filter(|k| {
+                    k.contains(':') && !k.starts_with("minecraft:") && !k.starts_with(':')
+                }) {
+                    return horizon_core::json_nbt::json_to_tag(effect).map(|data| {
+                        Some(ConsumeEffect::Native {
+                            kind: kind.to_owned(),
+                            data: Arc::new(data),
+                        })
+                    });
+                }
+                Ok(parse_consume_effect(effect))
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()?
+            .into_iter()
+            .flatten()
             .collect(),
-    }
+    })
 }
 
 /// One `on_consume_effects` entry. A bare type name is minecraft's own, as
@@ -158,7 +180,7 @@ fn parse_consume_effect(effect: &serde_json::Value) -> Option<ConsumeEffect> {
             .map(|s| ConsumeEffect::PlaySound(s.to_string())),
         k if !k.starts_with("minecraft:") => Some(ConsumeEffect::Native {
             kind: k.to_owned(),
-            data: effect.clone(),
+            data: Arc::new(horizon_core::json_nbt::json_to_tag(effect).ok()?),
         }),
         _ => None,
     }
@@ -184,6 +206,8 @@ pub struct ItemInfo {
     pub can_always_eat: bool,
     /// `consumable`: its timing, sound, particles and `on_consume_effects`.
     pub consumable: Option<horizon_world::consumable::Consumable<String, ConsumeEffect>>,
+    /// Death protection effects decoded at definition load.
+    pub death_protection: Option<Vec<ConsumeEffect>>,
     /// Kinetic pose timing decoded once from the shared item prototype.
     pub kinetic_timing: Option<crate::kinetic_weapon::UseTiming>,
     /// `use_remainder`: what a finished use leaves (`UseRemainder`).
@@ -965,7 +989,16 @@ impl Items {
                         .get("minecraft:kinetic_weapon")
                         .and_then(crate::kinetic_weapon::UseTiming::from_json),
                     // Consumable.CODEC's defaults.
-                    consumable: c.get("minecraft:consumable").map(parse_consumable),
+                    death_protection: c
+                        .get("minecraft:death_protection")
+                        .map(parse_death_effects)
+                        .transpose()
+                        .map_err(|e| format!("{name}: {e}"))?,
+                    consumable: c
+                        .get("minecraft:consumable")
+                        .map(parse_consumable)
+                        .transpose()
+                        .map_err(|e| format!("{name}: {e}"))?,
                     use_remainder: c["minecraft:use_remainder"]["id"]
                         .as_str()
                         .map(str::to_owned),
@@ -1111,7 +1144,7 @@ impl Items {
             instruments: load_instruments(root, overlay),
             enchantments: Arc::new(crate::enchant::Enchantments::load_with(
                 root, overlay, defaults,
-            )),
+            )?),
         })
     }
     /// Use the server's loaded loot-table snapshot for item and block drops.
@@ -1171,24 +1204,20 @@ impl Items {
             instruments: HashMap::new(),
             enchantments: Arc::new(crate::enchant::Enchantments::load_with(
                 root, overlay, defaults,
-            )),
+            )?),
         })
     }
-    /// An item table with only tags, for unit tests of item rules.
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn for_tests(item_tags: HashMap<String, HashSet<String>>) -> Self {
+    /// A table with nothing in it: the tags a client was sent go in with `set_tags`.
+    pub fn empty() -> Self {
         Self {
             items: HashMap::new(),
             mob_visibility: HashMap::new(),
             order: Vec::new(),
             registry_order: Vec::new(),
             block_tags: HashMap::new(),
+            item_tags: HashMap::new(),
             fluid_tags: HashMap::new(),
-            item_tag_order: item_tags
-                .iter()
-                .map(|(k, v)| (k.clone(), v.iter().cloned().collect()))
-                .collect(),
-            item_tags,
+            item_tag_order: HashMap::new(),
             block_tag_order: HashMap::new(),
             fluid_tag_order: HashMap::new(),
             loot: Default::default(),
@@ -1196,6 +1225,31 @@ impl Items {
             instruments: HashMap::new(),
             enchantments: Arc::new(crate::enchant::Enchantments::default()),
         }
+    }
+    /// An item table with only tags, for unit tests of item rules.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn for_tests(item_tags: HashMap<String, HashSet<String>>) -> Self {
+        Self {
+            item_tag_order: item_tags
+                .iter()
+                .map(|(k, v)| (k.clone(), v.iter().cloned().collect()))
+                .collect(),
+            item_tags,
+            ..Self::empty()
+        }
+    }
+    /// Replace one registry's tags with `tags`, each tag's members in order.
+    pub fn set_tags(&mut self, registry: TagRegistry, tags: HashMap<String, Vec<String>>) {
+        let (sets, order) = match registry {
+            TagRegistry::Block => (&mut self.block_tags, &mut self.block_tag_order),
+            TagRegistry::Item => (&mut self.item_tags, &mut self.item_tag_order),
+            TagRegistry::Fluid => (&mut self.fluid_tags, &mut self.fluid_tag_order),
+        };
+        *sets = tags
+            .iter()
+            .map(|(tag, members)| (tag.clone(), members.iter().cloned().collect()))
+            .collect();
+        *order = tags;
     }
     /// Whether `block` is in the block tag `tag` (`minecraft:fire`, no `#`).
     pub fn block_in_tag(&self, tag: &str, block: &str) -> bool {
@@ -1239,6 +1293,12 @@ impl Items {
         let Some(held) = held.filter(|s| s.count > 0 && &*s.item != "minecraft:air") else {
             return true;
         };
+        if held
+            .data()
+            .is_some_and(|d| d.other("!minecraft:tool").is_some())
+        {
+            return true;
+        }
         if let Some(tool) = held.data().and_then(|d| d.other("minecraft:tool")) {
             return tool
                 .get("can_destroy_blocks_in_creative")
@@ -1253,6 +1313,22 @@ impl Items {
     }
     /// `Tool.getMiningSpeed` for the held item (1.0 without a tool component).
     pub fn mining_speed(&self, held: Option<&ItemStack>, block: &str) -> f32 {
+        let held = held.filter(|s| s.count > 0 && &*s.item != "minecraft:air");
+        if let Some(stack) = held {
+            if stack
+                .data()
+                .is_some_and(|d| d.other("!minecraft:tool").is_some())
+            {
+                return 1.0;
+            }
+            if let Some(tool) = stack.data().and_then(|d| d.other("minecraft:tool")) {
+                return self
+                    .stack_tool_rule(tool, block, "speed")
+                    .and_then(tool_number)
+                    .or_else(|| tool.get("default_mining_speed").and_then(tool_number))
+                    .unwrap_or(1.0);
+            }
+        }
         let Some(info) = held.and_then(|s| self.get(&s.item)) else {
             return 1.0;
         };
@@ -1271,6 +1347,21 @@ impl Items {
     }
     /// `Tool.isCorrectForDrops`.
     pub fn correct_for_drops(&self, held: Option<&ItemStack>, block: &str) -> bool {
+        let held = held.filter(|s| s.count > 0 && &*s.item != "minecraft:air");
+        if let Some(stack) = held {
+            if stack
+                .data()
+                .is_some_and(|d| d.other("!minecraft:tool").is_some())
+            {
+                return false;
+            }
+            if let Some(tool) = stack.data().and_then(|d| d.other("minecraft:tool")) {
+                return horizon_world::datafix::dynamic::as_bool(
+                    self.stack_tool_rule(tool, block, "correct_for_drops"),
+                    false,
+                );
+            }
+        }
         let Some(info) = held.and_then(|s| self.get(&s.item)) else {
             return false;
         };
@@ -1282,6 +1373,78 @@ impl Items {
             }
         }
         false
+    }
+    fn stack_tool_rule<'a>(
+        &self,
+        tool: &'a horizon_core::nbt::Tag,
+        block: &str,
+        field: &str,
+    ) -> Option<&'a horizon_core::nbt::Tag> {
+        use horizon_core::nbt::Tag;
+        let Tag::List(rules) = tool.get("rules")? else {
+            return None;
+        };
+        rules.iter().find_map(|rule| {
+            let value = rule.get(field)?;
+            let matches = |value: &Tag| match value {
+                Tag::String(spec) => spec.to_string().is_ok_and(|s| {
+                    let tag = s.starts_with('#');
+                    let id = s.strip_prefix('#').unwrap_or(&s);
+                    horizon_world::datafix::identifier(id).is_some_and(|(namespace, path)| {
+                        let id = format!("{namespace}:{path}");
+                        if tag {
+                            self.block_in_tag(&id, block)
+                        } else {
+                            id == block
+                        }
+                    })
+                }),
+                _ => false,
+            };
+            match rule.get("blocks")? {
+                Tag::List(blocks) if blocks.iter().any(matches) => Some(value),
+                spec if matches(spec) => Some(value),
+                _ => None,
+            }
+        })
+    }
+    /// The stack's TOOL component, including its default mining wear.
+    pub fn mining_damage(&self, stack: &ItemStack) -> Option<u32> {
+        if stack.count == 0 || &*stack.item == "minecraft:air" {
+            return None;
+        }
+        if stack
+            .data()
+            .is_some_and(|d| d.other("!minecraft:tool").is_some())
+        {
+            return None;
+        }
+        if let Some(tool) = stack.data().and_then(|d| d.other("minecraft:tool")) {
+            return Some(
+                horizon_world::datafix::dynamic::as_int(tool.get("damage_per_block"), 1).max(0)
+                    as u32,
+            );
+        }
+        self.get(&stack.item)?.tool_damage_per_block
+    }
+    /// Mining wear on an already durable item prototype. Custom durability on
+    /// non-durable items needs item-aware DAMAGE-presence decoding first.
+    pub fn mining_damage_capacity(&self, stack: &ItemStack) -> u32 {
+        let prototype_max = self.get(&stack.item).map_or(0, |info| info.max_damage);
+        let component = |id| stack.data().and_then(|d| d.other(id));
+        if prototype_max == 0
+            || stack.count == 0
+            || &*stack.item == "minecraft:air"
+            || component("!minecraft:max_damage").is_some()
+            || component("!minecraft:damage").is_some()
+            || component("minecraft:unbreakable").is_some()
+        {
+            return 0;
+        }
+        match component("minecraft:max_damage") {
+            Some(value) => horizon_world::datafix::dynamic::as_int(Some(value), 0).max(0) as u32,
+            _ => prototype_max,
+        }
     }
     /// Whether a loot table (`minecraft:blocks/stone`, ...) exists.
     pub fn has_loot_table(&self, id: &str) -> bool {
@@ -1323,6 +1486,7 @@ impl Items {
             this_entity: false,
             entity_levels: None,
             block_levels: None,
+            target: None,
             keep_empty,
         };
         ctx.evaluate(table, random)
@@ -1420,6 +1584,7 @@ impl Items {
             this_entity: roll.breaker,
             entity_levels: None,
             block_levels: roll.levels.map(|_| &ask as &LootLevels<'_, R>),
+            target: None,
             keep_empty: roll.keep_empty,
         };
         ctx.evaluate(table, random)
@@ -1458,6 +1623,7 @@ impl Items {
             this_entity: false,
             entity_levels: None,
             block_levels: None,
+            target: None,
             keep_empty,
         };
         // LootTable.getRandomItemsRaw visits the table itself first.
@@ -1513,6 +1679,7 @@ impl Items {
             this_entity: false,
             entity_levels: None,
             block_levels: None,
+            target: None,
             keep_empty: false,
         };
         ctx.evaluate(table, random)
@@ -1539,6 +1706,7 @@ impl Items {
             this_entity: false,
             entity_levels: None,
             block_levels: None,
+            target: None,
             keep_empty: false,
         };
         ctx.evaluate(table, random)
@@ -1550,7 +1718,7 @@ impl Items {
         held: Option<&ItemStack>,
         random: &mut R,
     ) -> Vec<ItemStack> {
-        self.entity_drops_for_command(entity, killed_by_player, held, random, false)
+        self.entity_drops_with(entity, killed_by_player, held, random, None, None, false)
     }
     /// Command output retains emitted empty positions when replacing slots.
     pub fn entity_drops_for_command<R: RandomSource>(
@@ -1561,7 +1729,15 @@ impl Items {
         random: &mut R,
         keep_empty: bool,
     ) -> Vec<ItemStack> {
-        self.entity_drops_with(entity, killed_by_player, held, random, None, keep_empty)
+        self.entity_drops_with(
+            entity,
+            killed_by_player,
+            held,
+            random,
+            None,
+            None,
+            keep_empty,
+        )
     }
     /// [`Self::entity_drops`] with `level` asked each time
     /// `enchanted_count_increase` or `random_chance_with_enchanted_bonus`
@@ -1586,6 +1762,57 @@ impl Items {
             held,
             random,
             Some(&levels),
+            None,
+            keep_empty,
+        )
+    }
+    /// Command drops with a live entity predicate context.
+    #[allow(clippy::too_many_arguments)]
+    pub fn entity_drops_with_target<R: RandomSource>(
+        &self,
+        entity: &str,
+        killed_by_player: bool,
+        held: Option<&ItemStack>,
+        target: &horizon_world::loot::LootEntity,
+        matcher: &dyn Fn(&Value, &horizon_world::loot::LootEntity) -> bool,
+        random: &mut R,
+        keep_empty: bool,
+    ) -> Vec<ItemStack> {
+        self.entity_drops_with(
+            entity,
+            killed_by_player,
+            held,
+            random,
+            None,
+            Some((target, matcher)),
+            keep_empty,
+        )
+    }
+    /// Command drops with a live target and an answer at each enchanted-level read.
+    #[allow(clippy::too_many_arguments)]
+    pub fn entity_drops_asked_with_target<R: RandomSource>(
+        &self,
+        entity: &str,
+        killed_by_player: bool,
+        held: Option<&ItemStack>,
+        target: &horizon_world::loot::LootEntity,
+        matcher: &dyn Fn(&Value, &horizon_world::loot::LootEntity) -> bool,
+        random: &mut R,
+        level: &mut horizon_world::loot::EnchantedLevel<'_, R>,
+        keep_empty: bool,
+    ) -> Vec<ItemStack> {
+        let level = std::cell::RefCell::new(level);
+        let levels = |random: &mut R, id: &str, read: u32| {
+            let read = read.min(i32::MAX as u32) as i32;
+            (level.borrow_mut())(random, id, read).max(0) as u32
+        };
+        self.entity_drops_with(
+            entity,
+            killed_by_player,
+            held,
+            random,
+            Some(&levels),
+            Some((target, matcher)),
             keep_empty,
         )
     }
@@ -1596,6 +1823,7 @@ impl Items {
         held: Option<&ItemStack>,
         random: &mut R,
         levels: Option<&LootLevels<'_, R>>,
+        target: Option<EntityTarget<'_>>,
         keep_empty: bool,
     ) -> Vec<ItemStack> {
         let name = entity.trim_start_matches("minecraft:");
@@ -1613,6 +1841,7 @@ impl Items {
             this_entity: false,
             entity_levels: levels,
             block_levels: None,
+            target,
             keep_empty,
         };
         ctx.evaluate(table, random)
@@ -1677,6 +1906,10 @@ pub struct BlockLootRoll<'a> {
     /// read, in the roll's order; none keeps the tool's.
     pub levels: Option<&'a BlockLootLevels<'a>>,
 }
+type EntityTarget<'a> = (
+    &'a horizon_world::loot::LootEntity,
+    &'a dyn Fn(&Value, &horizon_world::loot::LootEntity) -> bool,
+);
 struct LootContext<'a, R> {
     items: &'a Items,
     block: &'a str,
@@ -1691,6 +1924,7 @@ struct LootContext<'a, R> {
     entity_levels: Option<&'a LootLevels<'a, R>>,
     /// Asked only at block enchantment readers; None keeps vanilla's level.
     block_levels: Option<&'a LootLevels<'a, R>>,
+    target: Option<EntityTarget<'a>>,
     /// Command replacement consumes the emitted list positions, including empty stacks.
     keep_empty: bool,
 }
@@ -1899,6 +2133,12 @@ impl<R: RandomSource> LootContext<'_, R> {
                     c["unenchanted_chance"].as_f64().unwrap_or(0.0) as f32
                 };
                 random.next_float() < chance
+            }
+            "minecraft:entity_properties"
+                if c["entity"].as_str() == Some("this") && self.target.is_some() =>
+            {
+                let (target, matcher) = self.target.unwrap();
+                matcher(&c["predicate"], target)
             }
             // `this` with no checks (snow, chorus flower) holds when an entity
             // broke the block (LootItemEntityPropertyCondition needs the entity).
@@ -2419,8 +2659,20 @@ fn apply_loot(
     }
     // `SetComponentsFunction`'s patch: the components the hook changed or
     // added are set, and the ones it dropped (gone from the stack) removed.
-    if after.components != before.components {
-        for (id, value) in &after.components {
+    for (id, value) in &after.components {
+        // Replay changed per-ID sequences in order, not unchanged captured values:
+        // an unrelated patch must not undo a separately edited loot name.
+        let unchanged = before
+            .components
+            .iter()
+            .filter(|(key, _)| key == id)
+            .map(|(_, value)| value)
+            .eq(after
+                .components
+                .iter()
+                .filter(|(key, _)| key == id)
+                .map(|(_, value)| value));
+        if !unchanged {
             stack.data_mut().set_loot_component(id, value);
         }
     }
@@ -2511,14 +2763,10 @@ pub fn bucket_contents(
 /// `DeathProtection.CODEC`: the `death_effects` of a `minecraft:death_protection`
 /// component, in order (`applyEffects` runs each one). A missing or empty
 /// list, as in `death_protection={}`, has none.
-pub fn death_effects(component: &Value) -> Vec<ConsumeEffect> {
-    component
-        .get("death_effects")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(parse_consume_effect)
-        .collect()
+pub fn parse_death_effects(
+    component: &Value,
+) -> std::result::Result<Vec<ConsumeEffect>, horizon_core::json_nbt::JsonNbtError> {
+    parse_consumable(&serde_json::json!({"on_consume_effects": component.get("death_effects").cloned().unwrap_or_else(|| serde_json::json!([]))})).map(|value| value.effects)
 }
 
 #[cfg(test)]
@@ -2534,7 +2782,7 @@ mod death_effects_tests {
                 {"duration": 800, "id": "minecraft:fire_resistance", "show_icon": true}
             ]}
         ]});
-        let effects = death_effects(&totem);
+        let effects = parse_death_effects(&totem).unwrap();
         assert_eq!(effects.len(), 2);
         assert_eq!(effects[0], ConsumeEffect::ClearAllEffects);
         let ConsumeEffect::ApplyEffects {
@@ -2560,7 +2808,11 @@ mod death_effects_tests {
     }
     #[test]
     fn an_empty_component_has_no_effects() {
-        assert!(death_effects(&serde_json::json!({})).is_empty());
+        assert!(
+            parse_death_effects(&serde_json::json!({}))
+                .unwrap()
+                .is_empty()
+        );
     }
 }
 
@@ -2647,13 +2899,30 @@ mod consume_effect_tests {
     }
 
     #[test]
+    fn invalid_native_consume_payload_refuses_component() {
+        let bad =
+            serde_json::json!({"on_consume_effects": [{"type": "mymod:charge", "data": null}]});
+        assert!(parse_consumable(&bad).is_err());
+        let good =
+            serde_json::json!({"on_consume_effects": [{"type": "mymod:charge", "amount": 42}]});
+        let value = parse_consumable(&good).unwrap();
+        let copy = value.clone();
+        let (ConsumeEffect::Native { data: a, .. }, ConsumeEffect::Native { data: b, .. }) =
+            (&value.effects[0], &copy.effects[0])
+        else {
+            panic!("native payload")
+        };
+        assert!(Arc::ptr_eq(a, b));
+    }
+
+    #[test]
     fn a_mods_own_consume_effect_kind_is_kept() {
         let v = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap();
         // A mod's own kind: Native with its JSON.
         let native =
             parse_consume_effect(&v(r#"{"type":"mymod:energy_boost","amount":42}"#)).unwrap();
         assert!(matches!(&native, ConsumeEffect::Native { kind, data }
-            if kind == "mymod:energy_boost" && data["amount"] == 42));
+            if kind == "mymod:energy_boost" && data.get("amount") == Some(&horizon_core::nbt::Tag::Byte(42))));
         // A bare vanilla name and its namespaced form are the same kind.
         let bare = parse_consume_effect(&v(
             r#"{"type":"apply_effects","effects":[{"id":"minecraft:speed","duration":100}]}"#,
@@ -2727,10 +2996,11 @@ mod tests {
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         assert!(
             crate::enchant::Enchantments::load_with(&root, &off, &defaults)
+                .unwrap()
                 .list
                 .is_empty()
         );
-        let enchantments = crate::enchant::Enchantments::load_with(&root, &on, &defaults);
+        let enchantments = crate::enchant::Enchantments::load_with(&root, &on, &defaults).unwrap();
         assert_eq!(enchantments.list.len(), 1);
         assert_eq!(enchantments.list[0].max_level, 7);
         fs::remove_dir_all(root).unwrap();
@@ -2822,6 +3092,48 @@ mod tests {
                 "a skipped layer creates no tag"
             );
         }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn admitted_tool_rules_override_defaults_and_removals_survive_saving() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-tool-components-{}", std::process::id()));
+        fs::create_dir_all(root.join("data/minecraft/loot_table")).unwrap();
+        fs::write(root.join("items.json"), r#"{"minecraft:stick":{},"minecraft:diamond_pickaxe":{"minecraft:max_damage":1561,"minecraft:tool":{"rules":[{"blocks":"minecraft:stone","speed":8.0,"correct_for_drops":true}],"damage_per_block":1}}}"#).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let items = Items::catalog(&root, &PackOverlay::NONE, &defaults).unwrap();
+        let mut pick = ItemStack::new("minecraft:diamond_pickaxe", 1);
+        assert_eq!(items.mining_speed(Some(&pick), "minecraft:stone"), 8.0);
+        assert!(items.correct_for_drops(Some(&pick), "minecraft:stone"));
+        let removal = crate::item_data::command_components("[!tool]").unwrap();
+        (pick.damage, pick.extra) = crate::item_data::decode_components(Some(&removal));
+        let restored =
+            crate::item_nbt::item_from_nbt(&crate::item_nbt::item_to_nbt(&pick)).unwrap();
+        assert_eq!(items.mining_speed(Some(&restored), "minecraft:stone"), 1.0);
+        assert!(!items.correct_for_drops(Some(&restored), "minecraft:stone"));
+        assert_eq!(items.mining_damage(&restored), None);
+        let mut stick = ItemStack::new("minecraft:stick", 1);
+        let tool = crate::item_data::command_components(r#"[tool={rules:[{blocks:"stone",correct_for_drops:false},{blocks:["stone","dirt"],speed:7.0f,correct_for_drops:true},{blocks:"stone",speed:90.0f}],default_mining_speed:2.0f,damage_per_block:3}]"#).unwrap();
+        (stick.damage, stick.extra) = crate::item_data::decode_components(Some(&tool));
+        assert_eq!(items.mining_speed(Some(&stick), "minecraft:stone"), 7.0);
+        assert!(!items.correct_for_drops(Some(&stick), "minecraft:stone"));
+        assert_eq!(items.mining_speed(Some(&stick), "minecraft:cobweb"), 2.0);
+        assert_eq!(items.mining_damage(&stick), Some(3));
+        assert_eq!(items.mining_damage_capacity(&stick), 0);
+        stick.data_mut().set_other(
+            "minecraft:max_damage",
+            Some(horizon_core::nbt::Tag::Int(20)),
+        );
+        assert_eq!(
+            items.mining_damage_capacity(&stick),
+            0,
+            "MAX_DAMAGE alone does not supply DAMAGE"
+        );
+        stick.count = 0;
+        assert_eq!(items.mining_speed(Some(&stick), "minecraft:stone"), 1.0);
+        assert!(!items.correct_for_drops(Some(&stick), "minecraft:stone"));
+        assert_eq!(items.mining_damage(&stick), None);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -3171,6 +3483,96 @@ mod tests {
         );
     }
 
+    #[test]
+    fn entity_target_context_leaves_unaffected_rolls_and_rng_continuation_unchanged() {
+        let mut items = Items::for_tests(HashMap::new());
+        items.loot = Arc::new([("minecraft:entities/test".into(), json!({"pools":[{
+            "rolls":{"type":"minecraft:uniform","min":1,"max":3},
+            "condition":{"type":"minecraft:all_of","terms":[
+                {"type":"minecraft:killed_by_player"},
+                {"type":"minecraft:match_tool","predicate":{"items":"minecraft:stick"}}]},
+            "entries":[{"type":"minecraft:item","name":"minecraft:diamond","weight":1},
+                       {"type":"minecraft:item","name":"minecraft:iron_ingot","weight":3}],
+            "modifier":[{"type":"minecraft:set_count","count":{"type":"minecraft:uniform","min":1,"max":4}}]
+        }]}))].into_iter().collect());
+        let target = horizon_world::loot::LootEntity::new("minecraft:sheep");
+        let held = ItemStack::new("minecraft:stick", 1);
+        let unused = |_: &Value, _: &horizon_world::loot::LootEntity| -> bool {
+            panic!("no entity predicate on this unaffected path")
+        };
+        for seed in [0, 1, 99, i64::MAX] {
+            for by_player in [false, true] {
+                let mut old = LegacyRandom::new(seed);
+                let mut bound = old.clone();
+                let expected =
+                    items.entity_drops("minecraft:test", by_player, Some(&held), &mut old);
+                let actual = items.entity_drops_with_target(
+                    "minecraft:test",
+                    by_player,
+                    Some(&held),
+                    &target,
+                    &unused,
+                    &mut bound,
+                    false,
+                );
+                assert_eq!(actual, expected);
+                assert_eq!(bound.next_long(), old.next_long());
+                assert_eq!(bound.next_int_bound(137), old.next_int_bound(137));
+            }
+        }
+    }
+
+    #[test]
+    fn entity_target_context_reuses_the_loaded_matcher_only_for_this() {
+        use horizon_world::loot::{LootData, LootEntity};
+        let root = std::env::temp_dir().join(format!("h036-items-matcher-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("data/minecraft/loot_table")).unwrap();
+        std::fs::write(root.join("items.json"), "{}").unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let data = LootData::load(&root, &PackOverlay::NONE, &defaults).unwrap();
+        std::fs::remove_dir_all(&root).unwrap();
+        let matcher = |p: &Value, e: &LootEntity| data.entity_matches(p, Some(e));
+        let mut items = Items::for_tests(HashMap::new());
+        for who in ["this", "attacker"] {
+            items.loot = Arc::new(
+                [(
+                    "minecraft:entities/sheep".into(),
+                    json!({"pools":[{"rolls":1,"entries":[{
+                        "type":"minecraft:item","name":"minecraft:white_wool",
+                        "condition":{"type":"minecraft:entity_properties","entity":who,"predicate":{
+                            "minecraft:components":{"minecraft:sheep/color":"white"},
+                            "minecraft:type_specific/sheep":{"sheared":false}}}
+                    }]}]}),
+                )]
+                .into_iter()
+                .collect(),
+            );
+            for (color, sheared) in [("white", false), ("white", true), ("red", false)] {
+                let mut target = LootEntity::new("minecraft:sheep");
+                target.sheep = Some((color.into(), sheared));
+                let mut random = LegacyRandom::new(36);
+                let actual = items.entity_drops_with_target(
+                    "minecraft:sheep",
+                    true,
+                    None,
+                    &target,
+                    &matcher,
+                    &mut random,
+                    false,
+                );
+                assert_eq!(
+                    !actual.is_empty(),
+                    who == "this" && color == "white" && !sheared
+                );
+                assert!(
+                    items
+                        .entity_drops("minecraft:sheep", true, None, &mut LegacyRandom::new(36))
+                        .is_empty()
+                );
+            }
+        }
+    }
+
     fn ctx<'a>(
         items: &'a Items,
         held: Option<&'a ItemStack>,
@@ -3187,6 +3589,7 @@ mod tests {
             this_entity: false,
             entity_levels: None,
             block_levels: None,
+            target: None,
             keep_empty: false,
         }
     }
@@ -3283,6 +3686,68 @@ mod tests {
             Some(&Tag::ByteArray(vec![7]))
         );
         assert_eq!(stack.data().unwrap().other("test:byte"), None);
+    }
+
+    #[test]
+    fn loot_trim_patch_decodes_materializes_captures_and_removes() {
+        use horizon_core::nbt::Tag;
+        let mut stack = ItemStack::new("minecraft:iron_chestplate", 1);
+        let before = loot_of(&stack);
+        let mut after = before.clone();
+        let trim = horizon_core::json_nbt::json_to_tag(
+            &json!({"material": "minecraft:gold", "pattern": "minecraft:sentry"}),
+        )
+        .unwrap();
+        after.components.push(("minecraft:trim".into(), Some(trim)));
+        apply_loot(&before, &after, &mut stack);
+        assert_eq!(
+            stack
+                .data()
+                .unwrap()
+                .trim
+                .as_ref()
+                .map(|(material, pattern)| (material.as_ref(), pattern.as_ref())),
+            Some(("minecraft:gold", "minecraft:sentry"))
+        );
+        let captured = loot_of(&stack);
+        assert_eq!(
+            captured.components,
+            vec![(
+                "minecraft:trim".into(),
+                Some(Tag::Compound(
+                    [
+                        ("material".into(), Tag::String("minecraft:gold".into())),
+                        ("pattern".into(), Tag::String("minecraft:sentry".into())),
+                    ]
+                    .into()
+                ))
+            )]
+        );
+        let mut removed = captured.clone();
+        removed.components.push(("minecraft:trim".into(), None));
+        apply_loot(&captured, &removed, &mut stack);
+        assert!(stack.data().is_none_or(|data| data.trim.is_none()));
+    }
+
+    #[test]
+    fn an_unrelated_loot_patch_does_not_restore_a_captured_name() {
+        let mut stack = ItemStack::new("minecraft:stick", 1);
+        stack
+            .data_mut()
+            .set_loot_name("minecraft:custom_name", &json!("Old"));
+        let before = loot_of(&stack);
+        let mut after = before.clone();
+        after
+            .names
+            .push(("minecraft:custom_name".into(), json!("New")));
+        after
+            .components
+            .push(("test:byte".into(), Some(horizon_core::nbt::Tag::Byte(7))));
+        apply_loot(&before, &after, &mut stack);
+        assert_eq!(
+            stack.data().unwrap().custom_name,
+            Some(horizon_core::nbt::Tag::String("New".into()))
+        );
     }
 
     /// A function that leaves the stack alone keeps its own form: the round
@@ -3574,6 +4039,7 @@ mod tests {
         };
         let answered = |pick| LootContext {
             block_levels: Some(&levels),
+            target: None,
             ..ctx(&items, pick, &props, "minecraft:stone")
         };
         let count = json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:diamond","modifier":[{"type":"minecraft:apply_bonus","enchantment":"minecraft:fortune","formula":"minecraft:uniform_bonus_count","parameters":{"bonusMultiplier":2}}]}]}]});
@@ -3607,6 +4073,7 @@ mod tests {
         let levels = |_: &mut LegacyRandom, _: &str, _: u32| u32::MAX;
         let context = LootContext {
             block_levels: Some(&levels),
+            target: None,
             ..ctx(&items, None, &props, "minecraft:stone")
         };
         for bonus in [
