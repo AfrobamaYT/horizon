@@ -1792,6 +1792,8 @@ impl Game<'_> {
             .rules
             .bool_at(horizon_client::gamerules::vanilla::ADVANCE_TIME)
         {
+            // The rule may have just been turned off: tell the guests the clock stopped.
+            self.sync_hub_clocks();
             return;
         }
         let mut names: Vec<String> = self.ui.command_clocks.keys().cloned().collect();
@@ -1868,7 +1870,17 @@ impl Game<'_> {
     pub(in crate::game) fn sync_hub_clocks(&mut self) {
         let active = self.active_clock().to_owned();
         let overworld = self.command_clock_time(OVERWORLD_CLOCK);
-        let rate = self.command_clock_state(&active).rate;
+        let advancing = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::ADVANCE_TIME);
+        let state = *self.command_clock_state(&active);
+        // A paused clock, or `advance_time` off, is a rate of 0 to the guests, as for the Overworld's.
+        let rate = if advancing && !state.paused {
+            state.rate
+        } else {
+            0.0
+        };
         if let Some(host) = self.lan.as_mut() {
             if active == OVERWORLD_CLOCK {
                 host.hub.overworld_day = None;

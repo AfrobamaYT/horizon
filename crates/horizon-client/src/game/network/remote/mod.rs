@@ -2613,18 +2613,18 @@ impl Game<'_> {
         keep_world: bool,
         reason: horizon_client::level_loading::Reason,
     ) {
-        // A level past the three built-in ones has the sea level its server says
-        // (`CommonPlayerSpawnInfo.seaLevel`); the built-in levels' are fixed.
-        if let Ok(key) = horizon_core::LevelKey::parse(&spawn.dimension)
-            && !matches!(
+        // Every level has the sea level its server says (`CommonPlayerSpawnInfo.seaLevel`): the
+        // table may still hold a local world's (a superflat Overworld's).
+        if let Ok(key) = horizon_core::LevelKey::parse(&spawn.dimension) {
+            horizon_world::level::register_sea_level(key, spawn.sea_level);
+            if !matches!(
                 key,
                 horizon_core::LevelKey::OVERWORLD
                     | horizon_core::LevelKey::NETHER
                     | horizon_core::LevelKey::END
-            )
-        {
-            horizon_world::level::register_sea_level(key, spawn.sea_level);
-            Dim::add_extra(&spawn.dimension);
+            ) {
+                Dim::add_extra(&spawn.dimension);
+            }
         }
         // The replacement player starts with its inventory menu, even if the
         // server switched levels without closing the previous container.
