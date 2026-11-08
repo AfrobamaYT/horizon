@@ -48,6 +48,13 @@ class ApiBoundaryCheckTests(unittest.TestCase):
     def test_private_alias_chain(self):
         self.assert_rule("use horizon_world as engine; use engine::fluid::FluidState as X; pub fn f(x: X) {}")
 
+    def test_child_scope_cannot_mask_an_engine_import(self):
+        self.assert_rule('''use horizon_core::density::DensityFunction as X;
+            #[cfg(test)] mod tests { use crate::X; }
+            pub fn leak() -> X {}''')
+        self.assert_rule('''mod child { use horizon_world as engine;
+            pub fn leak() -> engine::fluid::FluidState {} }''')
+
     def test_fields_and_enum_payloads(self):
         self.assert_rule("pub struct S { pub x: horizon_items::items::ItemStack }")
         self.assert_rule("pub enum E { X(horizon_items::items::ItemStack) }")

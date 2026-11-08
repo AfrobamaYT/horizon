@@ -167,15 +167,24 @@ def use_paths(values, prefix=()):
 def source_findings(path: Path, source: str):
     ts = tokens(source)
     ps = pairs(ts)
-    aliases = {}
-    # Resolve imports before signatures, including private imports and aliases.
-    for i, t in enumerate(ts):
-        if t.value == "use":
-            end = next((j for j in range(i + 1, len(ts)) if ts[j].value == ";"), len(ts))
-            for imported, alias in use_paths([t.value for t in ts[i + 1:end]]):
-                aliases[alias] = imported
+    def imports(start, end):
+        # Imports are scope-wide, but imports in child/test scopes must not
+        # overwrite the meaning of a name in a public parent signature.
+        aliases = {}
+        i = start
+        while i < end:
+            if ts[i].value == "use":
+                stop = next(j for j in range(i + 1, end) if ts[j].value == ";")
+                for imported, alias in use_paths([t.value for t in ts[i + 1:stop]]):
+                    aliases[alias] = imported
+                i = stop + 1
+            elif ts[i].value in {"{", "(", "["}:
+                i = ps[i] + 1
+            else:
+                i += 1
+        return aliases
 
-    def resolve(parts):
+    def resolve(parts, aliases):
         seen = set()
         while parts and parts[0] in aliases and parts[0] not in seen:
             seen.add(parts[0])
@@ -187,7 +196,7 @@ def source_findings(path: Path, source: str):
 
     findings = []
 
-    def inspect(segment, function=""):
+    def inspect(segment, aliases, function=""):
         for i, token in enumerate(segment):
             if i and segment[i - 1].value == "::":
                 continue
@@ -196,7 +205,7 @@ def source_findings(path: Path, source: str):
             while j + 1 < len(segment) and segment[j].value == "::":
                 parts.append(segment[j + 1].value)
                 j += 2
-            parts = resolve(tuple(parts))
+            parts = resolve(tuple(parts), aliases)
             if not parts:
                 continue
             if parts[0] in ENGINE:
@@ -209,7 +218,9 @@ def source_findings(path: Path, source: str):
                 if not allowed:
                     findings.append(Finding(str(path), token.line, "json-signature", "::".join(parts)))
 
-    def walk(start, end, trait=False, private=False):
+    def walk(start, end, trait=False, private=False, inherited=None):
+        aliases = dict(inherited or {})
+        aliases.update(imports(start, end))
         i = start
         while i < end:
             begin = i
@@ -247,15 +258,15 @@ def source_findings(path: Path, source: str):
             if not in_private:
                 if kind == "use" and public:
                     for imported, _ in use_paths([t.value for t in ts[i + 1:j]]):
-                        inspect([Token(v, ts[i].line) for v in _join_path(imported)])
+                        inspect([Token(v, ts[i].line) for v in _join_path(imported)], aliases)
                 elif public or kind == "type" or (kind == "fn" and path.parent.name == "hooks"):
-                    inspect(ts[i:j], name if kind == "fn" else "")
+                    inspect(ts[i:j], aliases, name if kind == "fn" else "")
                     if kind in {"struct", "enum", "union"} and body_end > j:
                         # Includes public record fields and enum payloads. Conservative
                         # for private fields: an engine-backed API wrapper is forbidden.
-                        inspect(ts[j + 1:body_end])
+                        inspect(ts[j + 1:body_end], aliases)
                 if body_end > j and (kind in {"mod", "impl", "trait"} or path.parent.name == "hooks"):
-                    walk(j + 1, body_end, trait=kind == "trait", private=in_private)
+                    walk(j + 1, body_end, trait=kind == "trait", private=in_private, inherited=aliases)
             i = body_end + 1
             if i <= begin:
                 raise AssertionError("scanner made no progress")
