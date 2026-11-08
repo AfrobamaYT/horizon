@@ -77,6 +77,51 @@ fn a_member_cannot_bypass_group_limits_with_private_memories() {
 }
 
 #[test]
+fn boundary_exports_are_per_member_but_other_horizon_symbols_are_not() {
+    let bytes = guest(mod_api::wire::LAYOUT, "i64.const 0");
+    let engine = engine().unwrap();
+    let modules = WasmMod::instantiate(
+        &engine,
+        &[
+            Member {
+                name: "first",
+                module: &bytes,
+            },
+            Member {
+                name: "second",
+                module: &bytes,
+            },
+        ],
+    )
+    .unwrap();
+    assert_eq!(modules.len(), 2);
+    let bytes = wat::parse_str(
+        r#"(module (@custom "dylink.0" "\01\04\00\00\00\00") (func (export "horizon_shared")))"#,
+    )
+    .unwrap();
+    let refusal = WasmMod::instantiate(
+        &engine,
+        &[
+            Member {
+                name: "first",
+                module: &bytes,
+            },
+            Member {
+                name: "second",
+                module: &bytes,
+            },
+        ],
+    )
+    .err()
+    .unwrap();
+    assert!(
+        refusal
+            .to_string()
+            .contains("exports horizon_shared, which first already does")
+    );
+}
+
+#[test]
 fn loader_initializes_and_installs_a_wasm_entry() {
     use mod_api::__private::game::Fields;
     let std = wat::parse_str(

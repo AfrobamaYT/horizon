@@ -272,7 +272,10 @@ impl<T: 'static> Group<T> {
                 .collect();
             for (name, extern_) in exports {
                 if name.starts_with("__wasm_")
-                    || name.starts_with("horizon_")
+                    || matches!(
+                        name.as_str(),
+                        "horizon_layout" | "horizon_in" | "horizon_hook"
+                    )
                     || name == "memory"
                     || !matches!(extern_, Extern::Func(_) | Extern::Global(_))
                 {
