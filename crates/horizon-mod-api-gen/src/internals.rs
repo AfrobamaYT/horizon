@@ -1239,12 +1239,16 @@ pub fn discover(root: &Path) -> Result<Widened, String> {
 pub fn catalog(root: &Path) -> Result<Vec<Internal>, String> {
     let path = root.join("crates/horizon-mod-api-gen/internals.txt");
     let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let mut entries: Vec<Internal> = collect(root, &[("internals.txt", text)], false)?
+    Ok(collect(root, &[("internals.txt", text)], false)?
         .entries
         .into_values()
-        .collect();
-    // The listed foreign layouts (`winit::event_loop::ControlFlow`...) are part of the catalog
-    // a crossing rule reads, as in `internals.json`.
+        .collect())
+}
+
+/// [`catalog`] with the listed foreign layouts (`winit::event_loop::ControlFlow`...), as
+/// `internals.json` has them: what a crossing rule over the game reads.
+pub fn rule_catalog(root: &Path) -> Result<Vec<Internal>, String> {
+    let mut entries = catalog(root)?;
     entries.extend(crate::crossing::foreign_internals());
     Ok(entries)
 }

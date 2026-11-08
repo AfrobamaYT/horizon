@@ -674,7 +674,7 @@ pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
         .map(|point| plain_path(&point.target))
         .collect::<std::collections::BTreeSet<_>>();
     let (scanned, list) = scan(root)?;
-    let rule = crate::crossing::Rule::new(&crate::internals::catalog(root)?);
+    let rule = crate::crossing::Rule::new(&crate::internals::rule_catalog(root)?);
     let mut points = Vec::new();
     let ordered = all_points(&scanned, &list)?;
     let (graph, calls) = catalog_graph(&rule, &ordered)?;
@@ -847,7 +847,7 @@ fn emit_runtime_module(
 /// on a working tree: the source tree carries no `#[point]`.
 pub fn stage(root: &Path) -> Result<Staged, String> {
     let (scanned, list) = scan(root)?;
-    let entries = crate::internals::catalog(root)?;
+    let entries = crate::internals::rule_catalog(root)?;
     let rule = crate::crossing::Rule::new(&entries);
     let points = all_points(&scanned, &list)?;
     let (graph, calls) = catalog_graph(&rule, &points)?;
