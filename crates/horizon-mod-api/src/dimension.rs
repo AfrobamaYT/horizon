@@ -10,6 +10,11 @@ use serde_json::{Value, json};
 /// `NoiseBasedChunkGenerator`.
 pub(crate) const NOISE_GENERATOR: &str = "minecraft:noise";
 
+/// Whether `c` is `#rrggbb`.
+fn hex_color(c: &str) -> bool {
+    c.len() == 7 && c.starts_with('#') && c[1..].chars().all(|d| d.is_ascii_hexdigit())
+}
+
 /// How a dimension chooses its biomes (`BiomeSource`): the level stem's `biome_source`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[non_exhaustive]
@@ -97,6 +102,12 @@ pub struct DimensionSettings {
     pub can_start_raid: bool,
     /// `minecraft:gameplay/sky_light_level`: the sky light that daylight is measured against, 0 to 15.
     pub sky_light_level: f32,
+    /// `minecraft:visual/sky_color` as `#rrggbb`: the sky overhead; None is the Overworld's.
+    pub sky_color: Option<String>,
+    /// `minecraft:visual/fog_color` as `#rrggbb`: the fog at the horizon; None is the Overworld's.
+    pub fog_color: Option<String>,
+    /// `minecraft:visual/cloud_height`: the clouds' height in blocks; None is the Overworld's.
+    pub cloud_height: Option<f32>,
 }
 
 impl Default for DimensionSettings {
@@ -131,6 +142,9 @@ impl Default for DimensionSettings {
             snow_golem_melts: false,
             can_start_raid: true,
             sky_light_level: 15.0,
+            sky_color: None,
+            fog_color: None,
+            cloud_height: None,
         }
     }
 }
@@ -138,7 +152,7 @@ impl Default for DimensionSettings {
 impl DimensionSettings {
     /// The dimension type's fields these settings set.
     fn dimension_type(&self) -> Value {
-        json!({
+        let mut json = json!({
             "min_y": self.min_y,
             "height": self.height,
             "logical_height": self.logical_height,
@@ -167,7 +181,20 @@ impl DimensionSettings {
                 "minecraft:gameplay/can_start_raid": self.can_start_raid,
                 "minecraft:gameplay/sky_light_level": self.sky_light_level,
             },
-        })
+        });
+        let attributes = json["attributes"]
+            .as_object_mut()
+            .expect("attributes is an object");
+        if let Some(color) = &self.sky_color {
+            attributes.insert("minecraft:visual/sky_color".into(), json!(color));
+        }
+        if let Some(color) = &self.fog_color {
+            attributes.insert("minecraft:visual/fog_color".into(), json!(color));
+        }
+        if let Some(height) = self.cloud_height {
+            attributes.insert("minecraft:visual/cloud_height".into(), json!(height));
+        }
+        json
     }
     /// The level stem's `biome_source`.
     fn biome_source(&self) -> Value {
@@ -228,6 +255,15 @@ impl DimensionSettings {
             "cardinal_light must be default or nether"
         } else if !self.infiniburn.starts_with('#') || self.infiniburn.len() < 2 {
             "infiniburn must be a block tag, such as #minecraft:infiniburn_overworld"
+        } else if !self
+            .sky_color
+            .iter()
+            .chain(&self.fog_color)
+            .all(|c| hex_color(c))
+        {
+            "sky_color and fog_color must be #rrggbb"
+        } else if self.cloud_height.is_some_and(|h| !h.is_finite()) {
+            "cloud_height must be a number"
         } else {
             return None;
         };
@@ -455,5 +491,45 @@ mod biome_source_tests {
             }),
             ""
         );
+    }
+}
+
+#[cfg(test)]
+mod visual_tests {
+    use super::*;
+
+    #[test]
+    fn the_sky_fog_and_clouds_are_written_only_when_set() {
+        let plain = DimensionSettings::default().dimension_type();
+        assert!(
+            plain["attributes"]
+                .get("minecraft:visual/sky_color")
+                .is_none()
+        );
+        let settings = DimensionSettings {
+            sky_color: Some("#112233".into()),
+            fog_color: Some("#445566".into()),
+            cloud_height: Some(192.0),
+            ..Default::default()
+        };
+        assert_eq!(settings.invalid_field(), None);
+        let attributes = &settings.dimension_type()["attributes"];
+        assert_eq!(attributes["minecraft:visual/sky_color"], "#112233");
+        assert_eq!(attributes["minecraft:visual/fog_color"], "#445566");
+        assert_eq!(attributes["minecraft:visual/cloud_height"], 192.0);
+    }
+
+    #[test]
+    fn a_colour_that_is_not_rrggbb_is_refused() {
+        for bad in ["112233", "#12345", "#12345g", "#1234567"] {
+            let settings = DimensionSettings {
+                sky_color: Some(bad.into()),
+                ..Default::default()
+            };
+            assert!(
+                settings.invalid_field().unwrap().contains("#rrggbb"),
+                "{bad}"
+            );
+        }
     }
 }

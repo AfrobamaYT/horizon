@@ -374,6 +374,24 @@ impl WorldgenOverrides {
         };
         LevelHeight::of_type(&ty, types)
     }
+    /// The id and JSON of the dimension type a mod or a pack gave `level`, resolved as `level_height`
+    /// does: None when the level takes a vanilla type no pack changed.
+    pub fn level_type_json(&self, level: &str) -> Option<(String, Value)> {
+        let none = BTreeMap::new();
+        let types = self.entries.get(DIMENSION_TYPES).unwrap_or(&none);
+        let ty = match self.entries.get(DIMENSIONS).and_then(|d| d.get(level)) {
+            Some(stem) => serde_json::from_str::<Value>(stem).ok()?["type"].clone(),
+            None => Value::String(level.to_owned()),
+        };
+        match &ty {
+            Value::String(id) => Some((
+                id.clone(),
+                serde_json::from_str::<Value>(types.get(id)?).ok()?,
+            )),
+            inline @ Value::Object(_) => Some((level.to_owned(), inline.clone())),
+            _ => None,
+        }
+    }
     /// The dimension type a mod or a pack gave `level`, resolved as `level_height` does: a built-in
     /// type's facts with the fields the pack's JSON names over them. None when the level takes a vanilla
     /// type unchanged, and an error when a field the game reads is refused.
@@ -382,23 +400,10 @@ impl WorldgenOverrides {
         level: &str,
     ) -> Option<Result<crate::dimension_type::DimensionFacts, String>> {
         use crate::dimension_type::DimensionFacts;
-        let none = BTreeMap::new();
-        let types = self.entries.get(DIMENSION_TYPES).unwrap_or(&none);
-        let ty = match self.entries.get(DIMENSIONS).and_then(|d| d.get(level)) {
-            Some(stem) => serde_json::from_str::<Value>(stem).ok()?["type"].clone(),
-            None => Value::String(level.to_owned()),
-        };
-        let (id, json) = match &ty {
-            Value::String(id) => (
-                id.as_str(),
-                serde_json::from_str::<Value>(types.get(id)?).ok()?,
-            ),
-            inline @ Value::Object(_) => (level, inline.clone()),
-            _ => return None,
-        };
+        let (id, json) = self.level_type_json(level)?;
         // A pack's type for a vanilla id changes that type; any other starts from the Overworld's.
-        let base = DimensionFacts::base_for_type(id);
-        Some(DimensionFacts::patched(base, id, &json))
+        let base = DimensionFacts::base_for_type(&id);
+        Some(DimensionFacts::patched(base, &id, &json))
     }
     /// The entries packs give `bundle`.
     pub fn entries(&self, bundle: &str) -> impl Iterator<Item = (&str, &str)> {

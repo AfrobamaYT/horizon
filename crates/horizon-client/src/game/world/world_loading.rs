@@ -797,6 +797,17 @@ fn set_level_types(
         }
     }
     horizon_world::dimension_type::DimensionFacts::set_levels(facts);
+    // The sky, fog and cloud attributes of the levels a mod or a pack added.
+    let attributes = shapes
+        .extra
+        .iter()
+        .filter_map(|level| {
+            let (_, json) = overrides.level_type_json(level.id)?;
+            let attributes = json.get("attributes")?.clone();
+            Some((level.id.to_owned(), attributes))
+        })
+        .collect();
+    horizon_client::environment::Environment::set_level_attributes(attributes);
 }
 
 /// The terrain of a level whose stem names a generator a mod registered, the

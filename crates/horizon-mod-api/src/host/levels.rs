@@ -582,6 +582,16 @@ pub trait LevelsBackendMut {
     #[access(WorldOnly)]
     fn level_block_tick(&mut self, level: LevelRef, pos: [i32; 3]) -> bool;
     /// Side: server.
+    /// Ask for the level to be saved: its level data, chunks and entities, as the autosave and
+    /// `/save-all` save a level, with its chunks on disk when it ends. The save runs at the start
+    /// of the next server tick, not inside the call, which may be in a hook of the very tick that
+    /// is saving; a level asked for twice before then is saved once. True when the request was
+    /// taken: the call cannot tell whether the save worked. `level_save` fires with the level's
+    /// dimension once it was written; a save that fails fires nothing and is logged. False for a
+    /// stale handle and on a client.
+    #[access(WorldOnly)]
+    fn level_request_save(&mut self, level: LevelRef) -> bool;
+    /// Side: server.
     /// Random-tick `pos` now, as `ServerLevel.tickChunk` does for a position it picked: the
     /// block's `randomTick` when it ticks randomly (its part first), then lava's fluid random
     /// tick, with the same random draws and level events. False as for `block_tick`.

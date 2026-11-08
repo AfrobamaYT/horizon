@@ -95,7 +95,11 @@ impl Game<'_> {
     /// `Level.getSkyDarken`: the same dimension, time and weather calculation used by gameplay.
     pub(super) fn sky_darken_in(&self, world: &World, dimension: Dim) -> i32 {
         let environment = match dimension {
-            Dim::Overworld | Dim::Extra(_) => self.res.environment(),
+            Dim::Overworld => self.res.environment(),
+            Dim::Extra(_) => horizon_client::environment::Environment::for_level(
+                dimension.id(),
+                self.res.environment(),
+            ),
             Dim::Nether => self.res.nether_environment(),
             Dim::End => self.res.end_environment(),
         };
