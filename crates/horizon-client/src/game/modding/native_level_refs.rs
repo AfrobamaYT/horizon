@@ -759,7 +759,7 @@ mod tests {
                     .registry
                     .default_state("minecraft:stripped_oak_log")
                     .unwrap();
-                assert_eq!(preview.state, stripped);
+                assert_eq!(preview.state, stripped.try_into_api().unwrap());
                 assert_eq!(preview.durability, 1);
                 assert_eq!(game.world.block(pos[0], pos[1], pos[2]), log);
                 assert_eq!(
@@ -1019,9 +1019,15 @@ mod tests {
             let air = registry.default_state("minecraft:air").unwrap();
             for (pos, expected) in [([0, bottom, 0], stone), ([15, top - 1, 15], stairs)] {
                 game.world.set(pos[0], pos[1], pos[2], expected).unwrap();
-                assert_eq!(level.block_state(game, pos), Some(expected));
+                assert_eq!(
+                    level.block_state(game, pos),
+                    Some(expected.try_into_api().unwrap())
+                );
             }
-            assert_eq!(level.block_state(game, [1, bottom, 1]), Some(air));
+            assert_eq!(
+                level.block_state(game, [1, bottom, 1]),
+                Some(air.try_into_api().unwrap())
+            );
             assert_eq!(level.block_state(game, [16, bottom, 0]), None);
             assert_eq!(level.block_state(game, [0, bottom - 1, 0]), None);
             assert_eq!(level.block_state(game, [0, top, 0]), None);
