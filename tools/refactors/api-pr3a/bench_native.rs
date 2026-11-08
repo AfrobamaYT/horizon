@@ -106,8 +106,6 @@ fn install(subscribed: bool) {
         mod_api::__private::KnownIds {
             block: &|_| false,
             item: &|id| ["minecraft:stick", "minecraft:iron_sword"].contains(&id),
-            state_count: 0,
-            state_block: &|_| unreachable!(),
         },
     )
     .unwrap();

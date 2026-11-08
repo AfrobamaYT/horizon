@@ -1,14 +1,18 @@
 use super::*;
-/// Whether a part listens to the block hook `hook` (named `name`) for `state`: one table
-/// lookup, and only once some part listens at all.
-pub fn block_listens(hook: HookId, name: &'static str, state: BlockStateId) -> bool {
-    has_scoped_hook(hook)
-        && parts(hook, name)
-            .for_hook(hook)
-            .is_some_and(|table| !table.block_state(state).is_empty())
+/// Whether this hook has a prepared subscriber for an API block key.
+/// The caller owns validation of the routing key.
+pub fn block_key_listens(hook: HookId, key: crate::BlockKey) -> bool {
+    parts(hook, "block routing")
+        .for_hook(hook)
+        .is_some_and(|table| !table.block_key(Some(key)).is_empty())
 }
 
 impl HookParts {
+    /// Prepared subscribers for an API block key; missing keys have no subscribers.
+    pub fn block_key(&self, key: Option<crate::BlockKey>) -> &[Attached<dyn BlockPart>] {
+        key.and_then(|key| self.block_keys.get(&key))
+            .map_or(&[], |parts| parts.as_slice())
+    }
     /// Parts for a checked API state. Key lookup does not depend on world state numbers.
     pub fn block_value(&self, state: crate::BlockState) -> &[Attached<dyn BlockPart>] {
         let Some(blocks) = crate::__private::block_definitions() else {
@@ -20,19 +24,7 @@ impl HookParts {
         if definition.property(state.ordinal(), "").is_err() {
             return &[];
         }
-        crate::registry_keys::block_id(state.block())
-            .and_then(|name| self.blocks.get(name))
-            .map_or(&[], |parts| parts.as_slice())
-    }
-    /// The block Parts attached to a block state, in dispatch order.
-    pub fn block_state(&self, state: BlockStateId) -> &[Attached<dyn BlockPart>] {
-        self.block_states
-            .get(state.0 as usize)
-            .and_then(|index| *index)
-            .map_or(
-                &[],
-                |index| &self.block_slices[index.get() as usize - 1][..],
-            )
+        self.block_key(Some(state.block()))
     }
 }
 
@@ -70,8 +62,7 @@ pub mod tests {
 
     #[test]
     pub(crate) fn registry_keys_resolve_reused_parts_and_rebind_without_changing_identity() {
-        use crate::registry_keys::{ResolvedBlock, block, block_id, resolve_blocks};
-        use horizon_world::level::states::BlockId;
+        use crate::registry_keys::block_id;
         struct Keys(Arc<std::sync::Mutex<Vec<BlockKey>>>);
         #[mod_api::__subscriptions]
         impl Hooks for Keys {
@@ -101,77 +92,31 @@ pub mod tests {
         let keys = requested.lock().unwrap().clone();
         assert_eq!(BlockKey::from_slot(keys[0].0), Ok(keys[0]));
         assert!(BlockKey::from_slot(2).is_err());
-        assert!(block(keys[0]).is_none(), "startup has no world mapping");
         // The final registry contains content declared after the requester's registration.
         let states = ["minecraft:stone", "later:machine", "later:machine"];
-        resolve_parts(
-            &HashMap::new(),
-            &HashMap::new(),
-            KnownIds {
-                block: &|id| states.contains(&id),
-                item: &|_| false,
-                state_count: states.len(),
-                state_block: &|i| states[i],
-            },
-        )
-        .unwrap();
-        assert_eq!(read(0), 6);
-        assert_eq!(read(1), 6);
-        assert_eq!(read(2), 6);
         crate::registry_keys::resolve_block_keys(["minecraft:stone", "later:machine"], |_| {
             let properties = std::collections::BTreeMap::new();
             horizon_mod_runtime::block_definitions::BlockDefinition::new(&[&properties], 0)
                 .map_err(|error| format!("{error:?}"))
         })
         .unwrap();
+        resolve_parts(
+            &HashMap::new(),
+            &HashMap::new(),
+            KnownIds {
+                block: &|id| states.contains(&id),
+                item: &|_| false,
+            },
+        )
+        .unwrap();
         let table = parts(HookId::AnalogOutput, "analog_output");
         let table = table.for_hook(HookId::AnalogOutput).unwrap();
         let value = crate::BlockState::from(crate::BlockStateRecord::new(keys[0], 0));
-        assert_eq!(
-            table.block_value(value).len(),
-            table.block_state(BlockStateId(0)).len()
-        );
         assert_eq!(table.block_value(value).len(), 1);
         let invalid = crate::BlockState::from(crate::BlockStateRecord::new(keys[0], u16::MAX));
         assert!(table.block_value(invalid).is_empty());
-        let bind = |offset: u32| {
-            resolve_blocks(|id| {
-                let index: u32 = if id == "minecraft:stone" { 0 } else { 1 };
-                Some(ResolvedBlock {
-                    default: BlockStateId(index + offset),
-                    states: horizon_world::registry::BlockStateRange::new(
-                        BlockStateId(index + offset),
-                        1,
-                    ),
-                    block: BlockId(index as u16),
-                })
-            })
-        };
-        bind(0).unwrap();
-        assert_eq!(block(keys[0]).unwrap().default, BlockStateId(0));
-        let key = keys[0];
-        // Declarations are load-owned, but a mapping belongs to its resolving thread.
-        let installed_parts = super::TEST_PARTS.get();
-        std::thread::spawn(move || {
-            super::TEST_PARTS.set(installed_parts);
-            assert_eq!(BlockKey::from_slot(key.0), Ok(key));
-            assert_eq!(block_id(key), Some("minecraft:stone"));
-            assert!(block(key).is_none());
-        })
-        .join()
-        .unwrap();
-        bind(20).unwrap();
-        assert_eq!(block(keys[0]).unwrap().default, BlockStateId(20));
-        assert_eq!(block(keys[2]).unwrap().default, BlockStateId(21));
         assert_eq!(block_id(keys[0]), Some("minecraft:stone"));
         assert_eq!(block_id(keys[2]), Some("later:machine"));
-        let errors = resolve_blocks(|_| None).unwrap_err();
-        assert!(
-            errors
-                .iter()
-                .any(|error| error == "mod requester requested unknown block later:machine")
-        );
-        assert_eq!(block(keys[0]).unwrap().default, BlockStateId(20));
         assert!(BlockKey::from_slot(u32::MAX).is_err());
         assert_eq!(BlockKey::from_slot(keys[0].0), Ok(keys[0]));
         assert_eq!(block_id(keys[0]), Some("minecraft:stone"));
@@ -220,8 +165,10 @@ pub mod tests {
         impl BlockPart for Signal {
             fn block_signal(&self, level: &dyn LevelHost, event: &mut BlockSignalEvent) {
                 assert_eq!(
-                    level.block_state([event.pos.x, event.pos.y, event.pos.z]),
-                    event.state
+                    level
+                        .state_block(level.block_state([event.pos.x, event.pos.y, event.pos.z]))
+                        .and_then(crate::registry_keys::block_key),
+                    Some(event.state.block())
                 );
                 event.signal = if event.direct { -2 } else { 20 };
             }
@@ -444,6 +391,25 @@ pub mod tests {
     }
 
     #[cfg(test)]
+    fn value(state: u32) -> BlockState {
+        let name = [
+            "minecraft:air",
+            "test:gauge",
+            "test:other",
+            "test:connector",
+            "test:press",
+        ]
+        .get(state as usize)
+        .copied()
+        .unwrap_or("test:gauge");
+        let key = crate::registry_keys::block_key(name).unwrap();
+        BlockState::from(BlockStateRecord::new(
+            key,
+            if state > 4 { u16::MAX } else { 0 },
+        ))
+    }
+
+    #[cfg(test)]
     /// The comparator reading of state `state`, from 1.
     pub(crate) fn read(state: u32) -> i32 {
         let mut output = 1;
@@ -451,7 +417,7 @@ pub mod tests {
             &Level,
             LevelDimension::Overworld,
             BlockPos::new(0, 64, 0),
-            BlockStateId(state),
+            value(state),
             Direction::North,
             &mut output,
         );
@@ -461,6 +427,24 @@ pub mod tests {
     #[cfg(test)]
     /// Resolve this thread's parts with tag `test:gauged` holding `members`.
     pub(crate) fn resolve(members: &[&str]) -> Result<(), super::ResolvePartsError> {
+        crate::registry_keys::resolve_block_keys(
+            [
+                "minecraft:air",
+                "minecraft:granite",
+                "test:gauge",
+                "test:other",
+                "test:connector",
+                "test:press",
+            ],
+            |_| {
+                horizon_mod_runtime::block_definitions::BlockDefinition::new(
+                    &[&Default::default()],
+                    0,
+                )
+                .map_err(|e| format!("{e:?}"))
+            },
+        )
+        .unwrap();
         let tags = HashMap::from([(
             "test:gauged".to_owned(),
             members.iter().map(|m| m.to_string()).collect(),
@@ -471,16 +455,44 @@ pub mod tests {
             KnownIds {
                 block: &|_| true,
                 item: &|_| true,
-                state_count: 5,
-                state_block: &|state| match state {
-                    1 => "test:gauge",
-                    2 => "test:other",
-                    3 => "test:connector",
-                    4 => "test:press",
-                    _ => "minecraft:air",
-                },
             },
         )
+    }
+
+    #[test]
+    fn prepared_key_routing_tracks_tag_reload() {
+        game_thread();
+        crate::registry_keys::resolve_block_keys(
+            [
+                "minecraft:air",
+                "test:gauge",
+                "test:other",
+                "test:connector",
+                "test:press",
+                "minecraft:granite",
+            ],
+            |_| {
+                horizon_mod_runtime::block_definitions::BlockDefinition::new(
+                    &[&Default::default()],
+                    0,
+                )
+                .map_err(|e| format!("{e:?}"))
+            },
+        )
+        .unwrap();
+        let other = crate::registry_keys::block_key("test:other").unwrap();
+        resolve(&["test:other"]).unwrap();
+        assert!(block_key_listens(HookId::AnalogOutput, other));
+        resolve(&[]).unwrap();
+        assert!(!block_key_listens(HookId::AnalogOutput, other));
+        assert!(has_scoped_hook(HookId::AnalogOutput));
+        assert!(resolve(&["missing:block"]).is_err());
+        assert!(!block_key_listens(HookId::AnalogOutput, other));
+        assert_eq!(
+            read(1),
+            6,
+            "a refused preparation preserves the published Parts"
+        );
     }
 
     #[test]
@@ -533,10 +545,10 @@ pub mod tests {
         let parts = super::parts(HookId::AnalogOutput, "test");
         let analog = parts.for_hook(HookId::AnalogOutput).unwrap();
         let connect = parts.for_hook(HookId::ShouldRedstoneWireConnectTo).unwrap();
-        assert_eq!(analog.block_state(BlockStateId(1)).len(), 1);
-        assert!(connect.block_state(BlockStateId(1)).is_empty());
-        assert_eq!(connect.block_state(BlockStateId(3)).len(), 1);
-        assert!(analog.block_state(BlockStateId(3)).is_empty());
+        assert_eq!(analog.block_value(value(1)).len(), 1);
+        assert!(connect.block_value(value(1)).is_empty());
+        assert_eq!(connect.block_value(value(3)).len(), 1);
+        assert!(analog.block_value(value(3)).is_empty());
         // The block entity part's BlockPart override is indexed independently.
         assert_eq!(read(4), 41);
         assert!(!super::has_part_hook(HookId::ShouldCheckWeakPower));
@@ -546,7 +558,7 @@ pub mod tests {
             &Level,
             LevelDimension::Overworld,
             BlockPos::new(0, 64, 0),
-            BlockStateId(1),
+            value(1),
             Direction::East,
             &mut check,
         );
@@ -564,7 +576,7 @@ pub mod tests {
                 &Level,
                 LevelDimension::Overworld,
                 BlockPos::new(0, 64, 0),
-                BlockStateId(state),
+                value(state),
                 Some(Direction::East),
                 &mut connected,
             );
@@ -613,14 +625,14 @@ pub mod tests {
             super::parts(HookId::AnalogOutput, "analog_output")
                 .for_hook(HookId::AnalogOutput)
                 .unwrap()
-                .block_state(BlockStateId(99))
+                .block_value(value(99))
                 .is_empty()
         );
         assert!(
             super::parts(HookId::AnalogOutput, "analog_output")
                 .for_hook(HookId::AnalogOutput)
                 .unwrap()
-                .block_state(BlockStateId(0))
+                .block_value(value(0))
                 .is_empty()
         );
         // A scoped hook has no global method, so both keep vanilla's answer.
@@ -668,8 +680,6 @@ pub mod tests {
             KnownIds {
                 block: &|id| id != "test:gauge",
                 item: &|_| true,
-                state_count: 0,
-                state_block: &|_| unreachable!(),
             },
         )
         .unwrap_err();

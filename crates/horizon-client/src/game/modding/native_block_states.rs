@@ -115,7 +115,7 @@ impl Game<'_> {
     /// `Block.defaultBlockState`, the one a block takes when nothing else
     /// says. None for an unknown block.
     pub(super) fn block_state_default(&self, block: BlockKey) -> Option<BlockStateId> {
-        Some(mod_api::__private::resolved_block(block)?.default)
+        super::api_values::default_state(block)
     }
     /// `BlockState.canBeReplaced()`: whether placing a block where this state stands
     /// replaces it (air, grass, water, snow layers). None for an unknown state.
@@ -156,8 +156,8 @@ impl Game<'_> {
 
     /// The properties of a resolved block, copied for the mod as plain data.
     pub(super) fn block_state_definition(&self, block: BlockKey) -> Option<Vec<StateProperty>> {
-        let resolved = mod_api::__private::resolved_block(block)?;
-        let state = self.pack.assets.registry.state(resolved.default)?;
+        let default = super::api_values::default_state(block)?;
+        let state = self.pack.assets.registry.state(default)?;
         let properties = self.pack.block_registries.blocks.get(&state.name)?;
         Some(
             properties
@@ -174,9 +174,9 @@ impl Game<'_> {
         block: BlockKey,
         constraints: &[StateConstraint],
     ) -> Option<Result<bool, StateMatchError>> {
-        let resolved = mod_api::__private::resolved_block(block)?;
+        let default = super::api_values::default_state(block)?;
         let registry = self.pack.assets.registry;
-        let target = registry.state(resolved.default)?;
+        let target = registry.state(default)?;
         let state = registry.state(state)?;
         let definition = self.pack.block_registries.blocks.get(&target.name)?;
         Some(match_state_properties(
@@ -204,7 +204,7 @@ impl Game<'_> {
     /// no item; None if the block name is unknown.
     pub(super) fn block_item(&self, block: BlockKey) -> Option<mod_api::ItemKey> {
         let behaviours = self.res.behaviours();
-        let id = mod_api::__private::resolved_block(block)?.block;
+        let id = super::api_values::behavior_block(block, behaviours)?;
         mod_api::__private::item_key(&behaviours.block_data(id).item)
     }
 }
@@ -533,39 +533,28 @@ mod tests {
 
     #[test]
     fn a_block_key_resolves_its_default_state() {
-        use mod_api::__private::{ResolvedBlock, part_tests, resolve_blocks, resolved_block};
+        use mod_api::__private::part_tests;
         let (_, registry) = blocks();
         mod_api::__private::install(Default::default());
         crate::game::api_values::register_game_keys([
             "minecraft:oak_stairs".to_owned(),
             "minecraft:wheat".to_owned(),
         ]);
-        resolve_blocks(|id| {
-            let default = registry.default_state(id)?;
-            Some(ResolvedBlock {
-                default,
-                states: horizon_world::registry::BlockStateRange::new(default, 1),
-                block: horizon_world::level::states::BlockId(0),
-            })
-        })
-        .unwrap();
+        crate::game::api_values::resolve_block_definitions(registry).unwrap();
         assert_eq!(
-            resolved_block(part_tests::block_key("oak_stairs"))
-                .unwrap()
-                .default,
+            crate::game::api_values::default_state(part_tests::block_key("oak_stairs")).unwrap(),
             BlockStateId(1)
         );
         assert_eq!(
-            resolved_block(part_tests::block_key("minecraft:wheat"))
-                .unwrap()
-                .default,
+            crate::game::api_values::default_state(part_tests::block_key("minecraft:wheat"))
+                .unwrap(),
             BlockStateId(5)
         );
         // A valid key has no mapping on a different owning thread. Raw unknown slots are
         // refused by the generated host boundary, not revalidated by typed operations.
         let key = part_tests::block_key("minecraft:wheat");
         assert!(
-            std::thread::spawn(move || resolved_block(key))
+            std::thread::spawn(move || crate::game::api_values::default_state(key))
                 .join()
                 .unwrap()
                 .is_none()

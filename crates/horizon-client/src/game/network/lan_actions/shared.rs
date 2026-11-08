@@ -1128,10 +1128,11 @@ mod tests {
                     let player = host.player(event.click.player).unwrap();
                     assert!(player.set_food_level(host, level));
                 }
-                self.empty_clicks
-                    .lock()
-                    .unwrap()
-                    .push((event.state, event.click.player));
+                self.empty_clicks.lock().unwrap().push((
+                    crate::game::api_values::TryIntoEngine::try_into_engine(&event.state, &())
+                        .unwrap(),
+                    event.click.player,
+                ));
                 *self.empty_answer.lock().unwrap()
             }
         }
