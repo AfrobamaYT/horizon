@@ -115,13 +115,14 @@ impl Rideable for minecarts::Minecart {
 /// The hub's view of the server for packets sent outside its own tick.
 macro_rules! server_ctx {
     ($s:ident) => {{
-        let spawn = $s.spawn.map_or([0.5, 80.0, 0.5], |s| [s.x, s.y, s.z]);
+        let spawn = $s.world_spawn_position();
         let clock_rate = $s.network_clock_rate();
         TickCtx {
             world: &mut $s.world,
             entities: &[],
             next_entity: &mut $s.next_entity,
             spawn,
+            spawn_angle: $s.level.world_spawn_angle,
             difficulty: i32::from($s.ui.difficulty),
             difficulty_locked: $s.level.difficulty_locked,
             clock_rate,

@@ -388,8 +388,8 @@ impl Game<'_> {
                 self.level_shapes.get(dim.id()),
             );
             if !save.load_portal_tickets().is_empty() {
-                self.enter_level(None, dim)?;
-                self.enter_level(None, back)?;
+                self.enter_level(dim)?;
+                self.enter_level(back)?;
             }
         }
         Ok(())

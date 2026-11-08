@@ -2658,7 +2658,12 @@ impl Game<'_> {
                 if !creative {
                     self.entity_killed_event(at, false);
                 }
-                if !creative && self.ui.rules.bool("entity_drops") {
+                if !creative
+                    && self
+                        .ui
+                        .rules
+                        .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS)
+                {
                     // `spawnAtLocation`: an ItemEntity's own motion.
                     self.spawn_item_own(ItemStack::new(c.kind.item(), 1), at, 10);
                     // `chestVehicleDestroyed` drops the emptied container
