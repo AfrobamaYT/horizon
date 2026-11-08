@@ -57,6 +57,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "PackFinders",
     "ColorResolvers",
     "BlockTintSources",
+    "EnchantmentDamageEffects",
     "BlockAndTintGetter",
     "GroundLevel",
     "BlockMetadata",
@@ -130,6 +131,7 @@ const EXPORTS: &[&str] = &[
     "ClientReloadListener",
     "BiomeColorResolver",
     "BlockTintSource",
+    "EnchantmentDamageEffect",
     "GroundStateProvider",
     "PlaceProvider",
     "TooltipAppender",
@@ -623,6 +625,43 @@ fn layout(surface: &Surface<'_>) -> u64 {
 mod tests {
     /// The generated impls depend on the hand-written `Wire` impls the generator skips, so an
     /// edit to that file must rerun the build script.
+    #[test]
+    fn enchantment_damage_registrar_and_callback_cross_to_wire() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| {
+                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+                let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
+                let included = [
+                    ("mod_api_generated.rs", generated.hooks.as_str()),
+                    ("mod_api_generated_host.rs", generated.host.as_str()),
+                    ("mod_api_host_areas.rs", generated.areas.as_str()),
+                ];
+                let providers = crate::capability_providers::generate(&root, &included)
+                    .unwrap()
+                    .0;
+                let mut surface_included = included.to_vec();
+                surface_included.push(("capability_providers_generated.rs", providers.as_str()));
+                let surface = super::surface(&root, &surface_included).unwrap();
+                for (owner, name) in [
+                    ("EnchantmentDamageEffects", "register"),
+                    ("EnchantmentDamageEffect", "apply"),
+                    ("Hooks", "register_enchantment_damage_effects"),
+                ] {
+                    assert!(
+                        surface
+                            .methods
+                            .iter()
+                            .any(|method| method.owner == owner && method.name == name)
+                    );
+                }
+                super::generate(&root, &included).unwrap();
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
     #[test]
     fn the_hand_written_wire_impls_are_tracked_sources() {
         std::thread::Builder::new()

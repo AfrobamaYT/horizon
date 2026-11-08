@@ -2,6 +2,16 @@ use super::*;
 use crate::testing::FakeHost;
 
 #[test]
+fn chat_line_exposes_text_conversion_failure() {
+    // This function must type-check for every client host, so callers can
+    // propagate a refused text conversion instead of losing the error.
+    fn add_line(host: &mut dyn ClientHost, line: Text) -> Result<(), TextFormError> {
+        host.chat_line(line)
+    }
+    let _: fn(&mut dyn ClientHost, Text) -> Result<(), TextFormError> = add_line;
+}
+
+#[test]
 #[ignore = "optimized hot-hook microbenchmark"]
 fn subscriber_tick_benchmark() {
     use std::{hint::black_box, time::Instant};
@@ -488,6 +498,16 @@ fn entity_travel_takes_a_server_host(server: &mut dyn ServerHost, entity: Entity
 #[allow(dead_code)]
 fn level_save_takes_a_server_host(server: &mut dyn ServerHost, level: LevelRef) -> bool {
     level.request_save(server)
+}
+
+/// Compile-only: a block event is queued from a server host.
+#[allow(dead_code)]
+fn block_event_takes_a_server_host(
+    server: &mut dyn ServerHost,
+    level: LevelRef,
+    block: BlockKey,
+) -> bool {
+    level.block_event(server, [0, 64, 0], block, 0, 0)
 }
 
 /// Compile-only: the player rule reads on any host, and the writes on a server host.
