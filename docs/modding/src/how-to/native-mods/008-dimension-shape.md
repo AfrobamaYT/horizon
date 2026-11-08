@@ -114,7 +114,7 @@ ground first, or place one.
 `level.sea_level(host)` reads `Level.getSeaLevel`: 63 in the Overworld, 32 in the Nether, 0 in the End. For a level of
 the noise generator it is the `sea_level` of its noise settings, a data pack's too when it replaces them. A level
 of a chunk generator the mod wrote has no noise settings to read: set `DimensionSettings::sea_level` to give it one
-(it wins over the noise settings'), else it is 63. It is the sea level the game uses for the level: terrain and
+(a level of the noise generator keeps its noise settings'), else it is 63. It is the sea level the game uses for the level: terrain and
 aquifers, mob spawning and behaviour (drowned, turtles, phantoms), rain and snow, and maps.
 
 ### Which level a hook is in

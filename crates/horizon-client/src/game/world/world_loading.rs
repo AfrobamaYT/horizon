@@ -713,10 +713,12 @@ fn set_level_sea_levels(
     let mut levels: Vec<(horizon_core::LevelKey, i32)> = Vec::new();
     for (id, stem) in overrides.entries(DIMENSIONS) {
         let own = mods.iter().find(|d| d.id == id).and_then(|d| d.sea_level);
-        let sea = own.or_else(|| {
-            let stem: serde_json::Value = serde_json::from_str(stem).ok()?;
-            stem_sea_level(&stem, &read)
-        });
+        // The noise settings are what the terrain is built with; `sea_level` of the mod is for
+        // a generator that has none.
+        let sea = serde_json::from_str::<serde_json::Value>(stem)
+            .ok()
+            .and_then(|stem| stem_sea_level(&stem, &read))
+            .or(own);
         if let (Some(sea), Ok(key)) = (sea, horizon_core::LevelKey::parse(id)) {
             levels.push((key, sea));
         }
