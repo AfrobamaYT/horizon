@@ -2409,7 +2409,19 @@ mod namespace_tests {
         let component =
             horizon_core::json_nbt::tag_to_json(component[0].1.as_ref().unwrap()).unwrap();
         assert_eq!(component["floats"], serde_json::json!([3.0, 2.0]));
-        assert_eq!(component["flags"], serde_json::json!([true]));
+        let Some(Tag::Compound(fields)) = &stack
+            .components
+            .iter()
+            .find(|(id, _)| id == "minecraft:custom_model_data")
+            .unwrap()
+            .1
+        else {
+            panic!("model data must be a compound")
+        };
+        assert_eq!(
+            fields.get(&"flags".into()),
+            Some(&Tag::List(vec![Tag::Byte(1)]))
+        );
         assert_eq!(component["strings"], serde_json::json!(["new"]));
         assert_eq!(component["colors"], serde_json::json!([16711680]));
         let _ = fs::remove_dir_all(&root);

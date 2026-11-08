@@ -5,10 +5,18 @@ impl Game<'_> {
     pub(in crate::game) fn fluid_tooltip_lines(&self, stack: &FluidStack) -> Vec<(Text, u32)> {
         let mut lines =
             horizon_client::fluid_tooltip::lines(stack, self.options_advanced_tooltips());
-        self.native_fluid_tooltip(super::fire::FluidTooltipCall {
-            stack,
-            lines: &mut lines,
-        });
+        if mod_api::__private::listened(mod_api::HookId::FluidTooltip) {
+            use crate::game::api_values::{TryIntoApi, TryIntoEngine};
+            if let Ok(mut snapshot) = lines.try_into_api() {
+                self.native_fluid_tooltip(mod_api::__private::FluidTooltipCall {
+                    stack,
+                    lines: &mut snapshot,
+                });
+                if let Ok(replacement) = snapshot.try_into_engine(&()) {
+                    lines = replacement;
+                }
+            }
+        }
         lines
     }
     /// `stack`'s tooltip at `x`, `y`, laid out and drawn as every tooltip is.

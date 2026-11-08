@@ -470,7 +470,7 @@ pub(super) fn emit<'a>(
                     ty.to_token_stream()
                         .to_string()
                         .split(|c: char| !c.is_alphanumeric())
-                        .any(|word| matches!(word, "BlockState" | "LandingWrite" | "Text"))
+                        .any(|word| matches!(word, "BlockState" | "LandingWrite"))
                 });
             if block_carrier {
                 let engine: Vec<_> = carried
@@ -484,9 +484,6 @@ pub(super) fn emit<'a>(
                                     "BlockState" => {
                                         *ty =
                                             syn::parse_quote!(horizon_world::registry::BlockStateId)
-                                    }
-                                    "Text" => {
-                                        *ty = syn::parse_quote!(horizon_client_core::text::Text)
                                     }
                                     "LandingWrite" => {
                                         *ty = syn::parse_quote!(horizon_world::level::LandingWrite)
