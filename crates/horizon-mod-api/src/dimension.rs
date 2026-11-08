@@ -58,7 +58,7 @@ pub struct DimensionSettings {
     /// How the level chooses its biomes. Only `Fixed` suits a mod's own chunk generator, which
     /// writes terrain only.
     pub biome_source: BiomeSourceKind,
-    /// The biomes a `Checkerboard` source alternates, one to 64.
+    /// The biomes a `Checkerboard` source alternates, at least one (vanilla sets no maximum).
     pub biomes: Vec<String>,
     /// A `Checkerboard`'s cell size as a power of two of chunks, 0 to 62 (vanilla's default is 2).
     pub biome_scale: u32,
@@ -215,8 +215,8 @@ impl DimensionSettings {
     pub(crate) fn invalid_biome_source(&self) -> Option<String> {
         let reason = match self.biome_source {
             BiomeSourceKind::Fixed => return None,
-            BiomeSourceKind::Checkerboard if self.biomes.is_empty() || self.biomes.len() > 64 => {
-                "a checkerboard needs one to 64 biomes"
+            BiomeSourceKind::Checkerboard if self.biomes.is_empty() => {
+                "a checkerboard needs at least one biome"
             }
             BiomeSourceKind::Checkerboard if self.biome_scale > 62 => "biome_scale must be 0 to 62",
             BiomeSourceKind::MultiNoise
@@ -452,6 +452,14 @@ mod biome_source_tests {
             settings.invalid_biome_source().unwrap_or_default()
         };
         assert_eq!(refused(|_| {}), "");
+        // vanilla's codec takes a holder set of any size, so 65 biomes are accepted
+        assert_eq!(
+            refused(|s| {
+                s.biome_source = BiomeSourceKind::Checkerboard;
+                s.biomes = (0..65).map(|n| format!("test:biome_{n}")).collect();
+            }),
+            ""
+        );
         assert!(
             refused(|s| s.biome_source = BiomeSourceKind::Checkerboard).contains("checkerboard")
         );
