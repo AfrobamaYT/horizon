@@ -413,8 +413,8 @@ pub fn before_living_ai_step(m: &mut Mob, w: &MobWorld) {
 /// Eating and the living movement step have already finished.
 #[inline]
 pub fn finish_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
-    client_tick(m);
     if m.no_ai {
+        client_tick(m);
         return;
     }
     let in_water = m.fluids.in_water;
@@ -443,6 +443,7 @@ pub fn finish_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
             data: w.world.block(at[0], at[1], at[2]).0 as i32,
         });
     }
+    client_tick(m);
 }
 /// `Fox.aiStep` before the living step: a sleeping or immobile fox takes no input.
 pub fn pre_ai_step(m: &mut Mob) {
