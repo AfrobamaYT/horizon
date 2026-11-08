@@ -127,7 +127,7 @@ fn supported_resource(ty: &Ty) -> bool {
 }
 fn take_arg(types: &super::ty::Types<'_>, ty: &Ty) -> String {
     match ty {
-        Ty::Handler(name, boxed) => format!(
+        Ty::Handler(_, boxed) => format!(
             "{{ let index = input.take()?; let module = unsafe {{ (&*cx).module.clone() }}.ok_or(ServeError::Missing(\"module\"))?; {}::new(crate::WasmHandler {{ index, module }}) as {} }}",
             if *boxed { "Box" } else { "std::sync::Arc" },
             rust_ty(types, ty, false)
@@ -255,6 +255,7 @@ pub(super) fn generate(surface: &mut super::Surface<'_>) -> Result<String, Strin
     code.push_str("_ => None } }\n");
     code.push_str("pub unsafe fn serve(id: u32, cx: *mut Cx, bytes: &[u8], out: &mut Writer) -> Result<(), ServeError> { let mut input = Reader::new(bytes); match id {\n");
     let imports = imports(&surface.methods);
+    let mut import_gaps = Vec::new();
     for (id, m) in imports
         .iter()
         .copied()
@@ -274,6 +275,12 @@ pub(super) fn generate(surface: &mut super::Surface<'_>) -> Result<String, Strin
                     || (!matches!(t, Ty::Dyn(..)) && !resource(t) && held(types, t).is_none())
             })
         {
+            import_gaps.push(format!(
+                "{}{}::{}",
+                if is_held { "held-" } else { "" },
+                m.owner,
+                m.name
+            ));
             continue;
         }
         let mut body = if is_held {
@@ -316,6 +323,12 @@ pub(super) fn generate(surface: &mut super::Surface<'_>) -> Result<String, Strin
         let answer = if matches!(&m.ret,Ty::Result(t,_) if matches!(&**t,Ty::Option(s) if matches!(**s,Ty::Str(super::ty::Str::Borrowed))))
             || matches!(&m.ret, Ty::Option(t) if matches!(**t,Ty::Option(_)))
         {
+            import_gaps.push(format!(
+                "{}{}::{}",
+                if is_held { "held-" } else { "" },
+                m.owner,
+                m.name
+            ));
             continue;
         } else if resource(&m.ret) {
             put_resource(&m.ret, "answer")
@@ -340,6 +353,11 @@ pub(super) fn generate(surface: &mut super::Surface<'_>) -> Result<String, Strin
         writeln!(code, "{id} => {{ {body} if !input.rest().is_empty() {{ return Err(ServeError::Decode(WireError::Tag(u32::MAX))); }} let receiver = {receiver}; let answer = receiver.{}({}); {answer} }},",m.name,args.join(",")).unwrap();
     }
     code.push_str("_ => return Err(ServeError::Unsupported(id)) } Ok(()) }\n");
+    writeln!(
+        code,
+        "pub const UNSUPPORTED_IMPORTS: &[&str] = &{import_gaps:?};"
+    )
+    .unwrap();
     let mut gaps = Vec::new();
     for owner in super::exports() {
         let receiver = if super::mod_receiver(owner).is_some() {
@@ -416,7 +434,7 @@ pub(super) fn generate(surface: &mut super::Surface<'_>) -> Result<String, Strin
                             let Ty::Named(d) = &**inner else {
                                 unreachable!()
                             };
-                            let Kind::Record(fields) = &types.defs[*d].kind else {
+                            let Kind::Record(_) = &types.defs[*d].kind else {
                                 unreachable!()
                             };
                             event_input(types, *d, &format!("p{i}"), &mut setup, &mut put);
