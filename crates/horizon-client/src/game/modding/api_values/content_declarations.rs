@@ -232,7 +232,7 @@ mod tests {
                 (
                     "minecraft:custom_data".into(),
                     Some(Tag::Compound(
-                        [(mod_api::JavaString::from("energy"), Tag::Int(42))].into(),
+                        [(horizon_core::nbt::JavaString::from("energy"), Tag::Int(42))].into(),
                     )),
                 ),
                 ("minecraft:damage".into(), None),
@@ -252,7 +252,10 @@ mod tests {
             ])
         );
         let mut invalid = api;
-        invalid.components = vec![("minecraft:custom_data".into(), Some(Tag::Double(f64::NAN)))];
+        invalid.components = vec![(
+            "minecraft:custom_data".into(),
+            Some(Tag::Double(f64::NAN.to_bits())),
+        )];
         assert!(invalid.try_into_engine(&()).is_err());
     }
 
