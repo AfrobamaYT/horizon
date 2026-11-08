@@ -1,0 +1,11 @@
+{
+  "chunk_load": {
+    "seed": 12345,
+    "gamerules": {"respawn_radius": 0, "do_mob_spawning": false, "random_tick_speed": 0},
+    "setup": ["setworldspawn 0 100 0"],
+    "bot": {"behaviour": "explore", "speed": 4, "distance": 128, "height": 24},
+    "duration": 90,
+    "hooks": ["chunk_load"],
+    "tolerance": "set(dimension,x,z,new); ignore order and tick; join <= event < quit"
+  }
+}

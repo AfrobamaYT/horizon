@@ -120,14 +120,14 @@ def tree_usage(root):
 class Server:
     """A server with its console on stdin and its output collected."""
 
-    def __init__(self, command, directory, log_path):
+    def __init__(self, command, directory, log_path, env=None):
         self.lines = []
         self.lock = threading.Lock()
         self.log = log_path.open('w', encoding='utf-8')
         self.process = subprocess.Popen([str(c) for c in command], cwd=directory, stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                         encoding='utf-8', errors='replace',
-                                        env=lab.game_env())
+                                        env=lab.game_env(env))
         threading.Thread(target=self._read, daemon=True).start()
 
     def _read(self):
@@ -338,7 +338,7 @@ def server_command(kind, directory, args):
             shutil.copyfile(jars['server'].parent / 'server.jar', mojang)
         for name in ('cache', 'libraries', 'versions'):
             (shared / name).mkdir(exist_ok=True)
-            (directory / name).symlink_to(shared / name, target_is_directory=True)
+            lab.link_dir(shared / name, directory / name)
         # Paper refuses a second login from one address within 4 s (bukkit.yml's connection-throttle), and
         # every bot comes from the same one. Off, as on vanilla; Paper fills in the rest of the file.
         (directory / 'bukkit.yml').write_text('settings:\n  connection-throttle: -1\n')
