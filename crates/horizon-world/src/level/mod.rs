@@ -147,6 +147,10 @@ pub use bonemeal::{BonemealCheck, TemplateSettings};
 pub use buckets::{BucketContent, fluid_bucket, fluid_pickup_sound};
 pub use data::{BlockData, ItemBinding, ItemKind, Named, Props, PushReaction, StateFacts, Tags};
 pub use falling::Landing;
+pub use fluids::{
+    fluid_can_be_replaced_with, fluid_drip_particle, fluid_explosion_resistance,
+    fluid_randomly_ticks, fluid_tick_delay,
+};
 
 /// A write a block's part asks for when an entity lands on it (`Block.fallOn`'s own
 /// `setBlockAndUpdate` or `destroyBlock`), at the block the entity landed on. The level
