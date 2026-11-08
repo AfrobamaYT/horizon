@@ -413,6 +413,40 @@ impl Shape {
             }
             Returns::Opaque => (quote!(), quote!()),
         };
+        let mut wire_names: Vec<syn::Ident> = names.iter().map(|name| (*name).clone()).collect();
+        let mut wire_reads: Vec<_> = self
+            .args
+            .iter()
+            .map(|arg| {
+                if matches!(arg.ty, Type::Reference(_)) {
+                    quote!(::std::borrow::Cow::Owned(input.take::<String>()?))
+                } else {
+                    quote!(input.take()?)
+                }
+            })
+            .collect();
+        match self.returns {
+            Returns::Unit | Returns::UnitResult => {
+                wire_names.push(format_ident!("cancel"));
+                wire_reads.push(quote!(input.take()?));
+            }
+            Returns::Value(_) => {
+                wire_names.push(format_ident!("result"));
+                wire_reads.push(quote!(input.take()?));
+            }
+            Returns::Opaque => {}
+        }
+        let wire_puts = wire_names.iter().map(|name| {
+            if self
+                .args
+                .iter()
+                .any(|arg| arg.name == *name && matches!(arg.ty, Type::Reference(_)))
+            {
+                quote!(out.put(self.#name.as_ref());)
+            } else {
+                quote!(out.put(&self.#name);)
+            }
+        });
         let doc = format!(
             "The `{}` point's record: what its listeners get from `{target}`, a slot filled at load.",
             self.name
@@ -423,6 +457,15 @@ impl Shape {
             pub struct #record #lifetime {
                 #( #[doc = #field_docs] pub #names: #fields, )*
                 #extra
+            }
+            impl #lifetime ::mod_api::wire::Wire for #record #lifetime {
+                const MIN: usize = 0;
+                fn put(&self, out: &mut ::mod_api::wire::Writer) {
+                    #(#wire_puts)*
+                }
+                fn take(input: &mut ::mod_api::wire::Reader<'_>) -> Result<Self, ::mod_api::wire::WireError> {
+                    Ok(Self { #(#wire_names: #wire_reads,)* })
+                }
             }
             impl #lifetime #record #lifetime {
                 /// The record of a call, before its listeners run (the game's side of the point).
@@ -462,6 +505,19 @@ impl Shape {
             ),
             (_, Some(_)) => (quote!(host: &dyn ::mod_api::Host,), quote!(host,), quote!()),
         };
+        let forwarded_host = match (self.receiver, self.side) {
+            (_, None) => quote!(crate::__private::PointHost::None),
+            (Receiver::Mut, Some(Side::Server)) => {
+                quote!(crate::__private::PointHost::Server(&mut *host))
+            }
+            (Receiver::Mut, Some(Side::Client)) => {
+                quote!(crate::__private::PointHost::Client(&mut *host))
+            }
+            (Receiver::Mut, Some(Side::Both)) => {
+                quote!(crate::__private::PointHost::Side(host.reborrow()))
+            }
+            (_, Some(_)) => quote!(crate::__private::PointHost::Read(host)),
+        };
         let mut places = vec![(self.name.clone(), "head")];
         if self.has_return() {
             places.push((format!("{}_return", self.name), "return"));
@@ -490,6 +546,9 @@ impl Shape {
                             // SAFETY: the typed constructor checked this place's exact function type.
                             let function = unsafe { ::std::mem::transmute::<*const (), super::listeners::#listener>(function) };
                             function(#passed args);
+                        }
+                        crate::__private::ApiKind::Forwarded(endpoint, id) => {
+                            endpoint.forward(id, #forwarded_host, args);
                         }
                     });
                 }

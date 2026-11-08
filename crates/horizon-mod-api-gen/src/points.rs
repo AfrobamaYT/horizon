@@ -906,6 +906,55 @@ pub(crate) fn records(points: &[GamePoint], sources: &[source::Point]) -> String
     let listeners = points.iter().map(|point| parse(&point.api[0]));
     let variants = points.iter().map(|point| parse(&point.api[1]));
     let dispatch = points.iter().map(|point| parse(&point.api[2]));
+    let mut guest_arms = quote! { 0xBFFF_FFFF => { out.put(&crate::guest::subscriptions()); } };
+    let mut api_places = proc_macro2::TokenStream::new();
+    let mut layout = 0xcbf29ce484222325u64;
+    for point in points {
+        for byte in format!(
+            "{}:{}:{}:{}",
+            point.name, point.host, point.record_item, point.at_return
+        )
+        .bytes()
+        {
+            layout = (layout ^ u64::from(byte)).wrapping_mul(0x100000001b3);
+        }
+        let record = quote::format_ident!("{}", point.record);
+        let passed = match point.host {
+            "host" => quote!(&host,),
+            "server" | "client" => quote!(&mut host,),
+            "both" => quote!(if server {
+                ::mod_api::HostSide::Server(&mut host)
+            } else {
+                ::mod_api::HostSide::Client(&mut host)
+            },),
+            _ => quote!(),
+        };
+        for name in std::iter::once(point.name.clone())
+            .chain(point.at_return.then(|| format!("{}_return", point.name)))
+        {
+            let variant = quote::format_ident!("{}", point_shape::camel(&name));
+            let listener = quote::format_ident!("{}Listener", point_shape::camel(&name));
+            let target = &point.target;
+            let at_return = name.ends_with("_return") && name != point.name;
+            api_places.extend(quote! { (PointId::#variant, #target, #at_return), });
+            let side = (point.host == "both").then(|| quote!(let server: bool = input.take()?;));
+            guest_arms.extend(quote! {
+                id if id == 0x8000_0000 + PointId::#variant as u32 => {
+                    let listener: u32 = input.take()?;
+                    #side
+                    let mut args: #record = input.take()?;
+                    let mut host = ::mod_api::wire::guest::Guest;
+                    crate::guest::fire(PointId::#variant, listener, |function| {
+                        // SAFETY: the constructor checked the function's exact place type.
+                        let function = unsafe { ::std::mem::transmute::<*const (), listeners::#listener>(function) };
+                        function(#passed &mut args);
+                    })?;
+                    out.put(&());
+                    out.put(&args);
+                }
+            });
+        }
+    }
     let private_variants = sources.iter().map(|point| {
         let head = quote::format_ident!("{}", point_shape::camel(&point.name));
         let back = quote::format_ident!("{}Return", point_shape::camel(&point.name));
@@ -913,6 +962,17 @@ pub(crate) fn records(points: &[GamePoint], sources: &[source::Point]) -> String
     });
     quote! {
         #(#records)*
+        /// The generated point export table and record layout, checked separately from the API layout.
+        #[doc(hidden)]
+        pub const POINT_LAYOUT: u64 = #layout;
+        /// API places as (place, target function, return phase), for manifest validation.
+        #[doc(hidden)]
+        pub const API_PLACES: &[(PointId, &str, bool)] = &[#api_places];
+        #[cfg(any(target_arch = "wasm32", feature = "wasm-guest"))]
+        fn guest_dispatch(id: u32, input: &mut ::mod_api::wire::Reader<'_>, out: &mut ::mod_api::wire::Writer) -> Result<(), ::mod_api::wire::WireError> {
+            match id { #guest_arms _ => return Err(::mod_api::wire::WireError::Tag(id)) }
+            Ok(())
+        }
         /// A point's place: its head and return in catalog order.
         #[doc(hidden)]
         #[repr(usize)]
