@@ -118,7 +118,7 @@ pub(super) fn held_methods(methods: &[Method]) -> Vec<&Method> {
 
 pub(super) fn has_frame(ty: &Ty) -> bool {
     match ty {
-        Ty::Dyn(..) | Ty::Handler(..) => true,
+        Ty::Dyn(..) => true,
         Ty::List(t, _)
         | Ty::Option(t)
         | Ty::Array(t, _)
@@ -214,7 +214,7 @@ pub(super) fn guest(
             .enumerate()
             .filter(|(_, m)| m.via.as_deref().unwrap_or(m.owner) == owner)
         {
-            writeln!(out, "{}", import_body(types, m, id)).unwrap();
+            writeln!(out, "{}", import_body(types, m, id, "")).unwrap();
         }
         for m in dropped.iter().filter(|m| {
             !exports().contains(&m.owner) && m.via.as_deref().unwrap_or(m.owner) == owner
@@ -234,7 +234,51 @@ pub(super) fn guest(
         }
         out.push_str("}\n");
     }
+    for owner in super::exports().iter().filter(|owner| super::held(owner)) {
+        writeln!(
+            out,
+            "impl {} for crate::wire::guest::Held {{",
+            trait_path(owner)
+        )
+        .unwrap();
+        for (id, m) in held_methods(methods)
+            .into_iter()
+            .enumerate()
+            .filter(|(_, m)| m.owner == *owner)
+        {
+            out.push_str(&import_body(types, m, all.len() + id, "w.put(&self.0);"));
+        }
+        out.push_str("}\n");
+    }
+    out.push_str(&resource_codec(types));
     out
+}
+
+fn resource_codec(types: &Types<'_>) -> String {
+    let mut store = String::new();
+    let mut load = String::new();
+    for (owner, views) in &types.views {
+        let path = trait_path(owner);
+        let views = views
+            .iter()
+            .map(|v| {
+                format!(
+                    "crate::wire::guest::view::<dyn {}>(value.clone())",
+                    trait_path(v)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        writeln!(store,"if value.is::<std::sync::Arc<dyn {path}>>() {{ let value=*value.downcast::<std::sync::Arc<dyn {path}>>().map_err(|_|crate::wire::WireError::Invalid(\"wrong handler\"))?; return Ok(crate::wire::guest::add_handler(vec![{views}])); }}").unwrap();
+        if super::held(owner) {
+            for container in ["Box", "std::sync::Arc"] {
+                writeln!(load,"if view == std::any::TypeId::of::<{container}<dyn {path}>>() {{ return Ok(Box::new({container}::new(crate::wire::guest::Held(id)) as {container}<dyn {path}>)); }}").unwrap();
+            }
+        }
+    }
+    format!(
+        "struct GuestCodec; impl crate::wire::ResourceCodec for GuestCodec {{ fn store(&self,value:Box<dyn std::any::Any>)->Result<crate::wire::Id,crate::wire::WireError> {{ {store} Err(crate::wire::WireError::Invalid(\"unknown handler type\")) }} fn load(&self,id:crate::wire::Id,view:std::any::TypeId)->Result<Box<dyn std::any::Any>,crate::wire::WireError> {{ {load} Err(crate::wire::WireError::Invalid(\"unknown held view\")) }} }} pub fn resource_scope()->crate::wire::ResourceScope {{ crate::wire::ResourceScope::new(std::rc::Rc::new(GuestCodec)) }}\n"
+    )
 }
 
 /// Whether `ty` names a type that borrows (`CubeFace<'_>`), which has no owned wire form.
@@ -286,7 +330,7 @@ pub(super) fn has_ref_in_data(ty: &Ty) -> bool {
 /// The mod's body of import `id`: its arguments encoded, one crossing, the answer decoded. A
 /// frame object it returns is the zero-sized `Guest` itself, and a handler it passes is kept
 /// under every trait it answers as and crosses as its id. What it can't do yet traps.
-fn import_body(types: &Types<'_>, m: &Method, id: usize) -> String {
+fn import_body(types: &Types<'_>, m: &Method, id: usize, prefix: &str) -> String {
     let sig = rust_sig(types, m);
     let guest = "crate::wire::guest";
     if let Ty::Dyn(_, mutable) = &m.ret {
@@ -300,26 +344,8 @@ fn import_body(types: &Types<'_>, m: &Method, id: usize) -> String {
     let mut put = String::new();
     for (i, (_, ty)) in m.params.iter().enumerate() {
         match ty {
-            Ty::Handler(name, boxed) if name != super::ERASED => {
-                let views = types
-                    .views
-                    .iter()
-                    .find(|(o, _)| o == name)
-                    .map_or(&[][..], |(_, l)| l.as_slice());
-                let kept: Vec<String> = views
-                    .iter()
-                    .map(|v| format!("{guest}::view::<dyn {}>(h.clone())", trait_path(v)))
-                    .collect();
-                let arc = if *boxed {
-                    format!("::std::sync::Arc::<dyn {}>::from(p{i})", trait_path(name))
-                } else {
-                    format!("p{i}")
-                };
-                put.push_str(&format!(
-                    "{{ let h = {arc}; w.put(&{guest}::add_handler(vec![{}])); }}",
-                    kept.join(", ")
-                ));
-            }
+            Ty::Dyn(..) => {}
+            Ty::Handler(..) => put.push_str(&format!("w.put_owned(p{i});")),
             ty if has_frame(ty) || matches!(ty, Ty::Ref(_, true)) => {
                 return format!(
                     "{sig} {{ {guest}::unsupported(\"{}::{}\") }}",
@@ -343,7 +369,7 @@ fn import_body(types: &Types<'_>, m: &Method, id: usize) -> String {
             {
                 put.push_str(&format!("w.put_opt(p{i});"))
             }
-            _ => put.push_str(&format!("w.put(&p{i});")),
+            _ => put.push_str(&format!("w.put_owned(p{i});")),
         }
     }
     let lent =
@@ -362,7 +388,7 @@ fn import_body(types: &Types<'_>, m: &Method, id: usize) -> String {
         )
     };
     format!(
-        "{sig} {{ let mut w = {guest}::begin(); {put} let r = {guest}::host({id}u32, w); {take} }}"
+        "{sig} {{ let mut w = {guest}::begin(); {prefix} {put} let r = {guest}::host({id}u32, w); {take} }}"
     )
 }
 
@@ -374,7 +400,8 @@ fn held_in(types: &Types<'_>, ty: &Ty, statics: bool) -> Option<String> {
         Ty::Ref(inner, _) => held_in(types, inner, statics)?,
         Ty::Str(Str::Static) if statics => "String".into(),
         Ty::Named(def) if types.defs[*def].lifetimes != 0 => return None,
-        Ty::Dyn(..) | Ty::Handler(..) => return None,
+        Ty::Dyn(..) => return None,
+        Ty::Handler(..) => rust_ty(types, ty, false),
         Ty::Tuple(items) => format!(
             "({},)",
             items
@@ -395,6 +422,12 @@ fn held_in(types: &Types<'_>, ty: &Ty, statics: bool) -> Option<String> {
     })
 }
 
+pub(super) fn frame_cases<'t>(types: &'t Types<'_>, def: usize) -> Option<&'t [super::ty::Case]> {
+    let super::ty::Kind::Variant(cases) = &types.defs[def].kind else {
+        return None;
+    };
+    cases.iter().all(|case|matches!(&case.payload,super::ty::Payload::Tuple(v) if matches!(v.as_slice(),[Ty::Dyn(..)]))).then_some(cases.as_slice())
+}
 pub(super) fn held(types: &Types<'_>, ty: &Ty) -> Option<String> {
     held_in(types, ty, false)
 }
@@ -455,6 +488,9 @@ pub(super) fn writeback_fields(
     name: &str,
     mutable: bool,
 ) -> Option<Vec<Writeback>> {
+    if frame_cases(types, def).is_some() {
+        return Some(Vec::new());
+    }
     let super::ty::Kind::Record(fields) = &types.defs[def].kind else {
         return None;
     };
@@ -469,6 +505,11 @@ pub(super) fn writeback_fields(
             Ty::Ref(t, m) => (&**t, *m),
             ty => (ty, false),
         };
+        if let Ty::Named(d) = inner
+            && frame_cases(types, *d).is_some()
+        {
+            continue;
+        }
         if let Ty::Named(d) = inner
             && let Some(view) = &types.defs[*d].view
         {
@@ -524,6 +565,27 @@ fn borrowed(
     mutable: bool,
 ) -> Option<(String, String, String)> {
     let d = &types.defs[def];
+    if let Some(cases) = frame_cases(types, def) {
+        let mut arms = String::new();
+        for (i, case) in cases.iter().enumerate() {
+            let super::ty::Payload::Tuple(v) = &case.payload else {
+                unreachable!()
+            };
+            let Ty::Dyn(_, m) = &v[0] else { unreachable!() };
+            write!(
+                arms,
+                "{i} => {}::{}(&{}{name}_frame),",
+                d.rust,
+                case.rust,
+                if *m { "mut " } else { "" }
+            )
+            .unwrap();
+        }
+        let read = format!(
+            "let mut {name}_frame=Guest; let {name}=match input.take::<u32>()? {{ {arms} tag=>return Err(crate::wire::WireError::Tag(tag)) }};"
+        );
+        return Some((read, name.into(), String::new()));
+    }
     if let Some(view) = &d.view {
         let pointee = rust_ty(types, &view.pointee, false);
         let read = format!(
@@ -641,6 +703,9 @@ pub(super) fn dispatchable(types: &Types<'_>, m: &Method) -> bool {
                     }
                     _ => held(types, ty).is_some(),
                 },
+                Ty::Named(d) if types.defs[*d].lifetimes != 0 => {
+                    borrowed(types, *d, "e", false).is_some()
+                }
                 _ => held(types, ty).is_some(),
             })
 }
@@ -675,6 +740,11 @@ pub(super) fn dispatch(types: &Types<'_>, methods: &[Method]) -> (String, Vec<St
             match ty {
                 Ty::Dyn(_, true) => args.push("&mut host".to_string()),
                 Ty::Dyn(..) => args.push("&host".to_string()),
+                Ty::Named(d) if types.defs[*d].lifetimes != 0 => {
+                    let (read, name, _) = borrowed(types, *d, &format!("p{i}"), false).unwrap();
+                    body.push_str(&read);
+                    args.push(name);
+                }
                 Ty::Ref(inner, m) if matches!(&**inner, Ty::Named(d) if types.defs[*d].lifetimes != 0) =>
                 {
                     let Ty::Named(d) = &**inner else {
@@ -725,7 +795,7 @@ pub(super) fn dispatch(types: &Types<'_>, methods: &[Method]) -> (String, Vec<St
         };
         writeln!(
             arms,
-            "{id} => {{ let receiver = {receiver}; {body} let answer = {answer}; out.put(&answer); {back} }}"
+            "{id} => {{ let receiver = {receiver}; {body} let answer = {answer}; out.put_owned(answer); {back} }}"
         )
         .unwrap();
     }

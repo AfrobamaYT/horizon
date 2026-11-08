@@ -15,6 +15,9 @@ use std::hash::Hash;
 use std::sync::Arc;
 
 pub use crate::wire_slots::{Id, Slots, Stale};
+#[path = "wire_resources.rs"]
+mod resources;
+pub use resources::{ResourceCodec, ResourceScope};
 
 /// The guest's start-up call: its input is the package list.
 pub const INIT: u32 = 0xFFFF_FF00;
@@ -102,6 +105,7 @@ impl std::error::Error for WireError {}
 #[derive(Default)]
 pub struct Writer {
     bytes: Vec<u8>,
+    error: Option<WireError>,
 }
 
 impl Writer {
@@ -111,11 +115,13 @@ impl Writer {
     /// Empties it, keeping its allocation.
     pub fn clear(&mut self) {
         self.bytes.clear();
+        self.error = None;
     }
     /// Takes `buffer` as its storage, emptied.
     pub fn replace(&mut self, mut buffer: Vec<u8>) {
         buffer.clear();
         self.bytes = buffer;
+        self.error = None;
     }
     /// The bytes written, leaving the writer's storage to the caller.
     pub fn into_bytes(self) -> Vec<u8> {
@@ -148,6 +154,23 @@ impl Writer {
     }
     pub fn put<T: Put + ?Sized>(&mut self, value: &T) {
         value.put_to(self);
+    }
+    /// Transfers owned resources while leaving plain data on the normal zero-copy path.
+    pub fn put_owned<T: Wire>(&mut self, value: T) {
+        value.put_owned(self);
+    }
+    /// The first encoding failure; callers refuse the call rather than sending partial bytes.
+    pub fn error(&self) -> Option<WireError> {
+        self.error
+    }
+    pub fn fail(&mut self, error: WireError) {
+        self.error.get_or_insert(error);
+    }
+    pub fn put_resource(&mut self, value: Box<dyn std::any::Any>) {
+        match resources::store(value) {
+            Ok(id) => self.put(&id),
+            Err(error) => self.fail(error),
+        }
     }
 }
 
@@ -246,6 +269,9 @@ impl<'a> Reader<'a> {
     pub fn take<T: Wire>(&mut self) -> Result<T, WireError> {
         T::take(self)
     }
+    pub fn take_resource<T: 'static>(&mut self) -> Result<T, WireError> {
+        resources::load(self.take()?)
+    }
     /// Reads one level down: the depth the value may nest to is [`MAX_DEPTH`].
     pub fn nested<T>(
         &mut self,
@@ -275,6 +301,10 @@ pub trait Wire: Sized {
     /// The fewest bytes a value takes, so a length can be checked before anything is allocated.
     const MIN: usize;
     fn put(&self, out: &mut Writer);
+    /// Consumes owned data when a resource's ownership must cross the boundary.
+    fn put_owned(self, out: &mut Writer) {
+        self.put(out);
+    }
     fn take(input: &mut Reader<'_>) -> Result<Self, WireError>;
 }
 
@@ -393,6 +423,15 @@ impl<T: Wire> Wire for Option<T> {
             }
         }
     }
+    fn put_owned(self, out: &mut Writer) {
+        match self {
+            Some(value) => {
+                out.put(&1u8);
+                out.put_owned(value);
+            }
+            None => out.put(&0u8),
+        }
+    }
     fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
         match u8::take(input)? {
             0 => Ok(None),
@@ -413,6 +452,18 @@ impl<T: Wire, E: Wire> Wire for Result<T, E> {
             Err(error) => {
                 out.put(&1u8);
                 out.put(error);
+            }
+        }
+    }
+    fn put_owned(self, out: &mut Writer) {
+        match self {
+            Ok(value) => {
+                out.put(&0u8);
+                out.put_owned(value);
+            }
+            Err(error) => {
+                out.put(&1u8);
+                out.put_owned(error);
             }
         }
     }
@@ -456,6 +507,9 @@ impl<T: Wire> Wire for Box<T> {
     fn put(&self, out: &mut Writer) {
         (**self).put(out);
     }
+    fn put_owned(self, out: &mut Writer) {
+        out.put_owned(*self);
+    }
     fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
         input.nested(T::take).map(Box::new)
     }
@@ -479,6 +533,12 @@ impl<T: Wire> Wire for Vec<T> {
             item.put(out);
         }
     }
+    fn put_owned(self, out: &mut Writer) {
+        out.put_len(self.len());
+        for item in self {
+            out.put_owned(item);
+        }
+    }
     fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
         let len = input.take_len(T::MIN)?;
         let mut items = Vec::with_capacity(len);
@@ -497,6 +557,12 @@ impl<T: Wire> Wire for VecDeque<T> {
             item.put(out);
         }
     }
+    fn put_owned(self, out: &mut Writer) {
+        out.put_len(self.len());
+        for item in self {
+            out.put_owned(item);
+        }
+    }
     fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
         Vec::take(input).map(Into::into)
     }
@@ -507,6 +573,11 @@ impl<T: Wire, const N: usize> Wire for [T; N] {
     fn put(&self, out: &mut Writer) {
         for item in self {
             item.put(out);
+        }
+    }
+    fn put_owned(self, out: &mut Writer) {
+        for item in self {
+            out.put_owned(item);
         }
     }
     fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
@@ -531,7 +602,8 @@ macro_rules! sets {
                     item.put(out);
                 }
             }
-            fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+            fn put_owned(self,out:&mut Writer) { out.put_len(self.len()); for item in self { out.put_owned(item); } }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
                 let len = input.take_len(T::MIN)?;
                 let mut set = Self::default();
                 for _ in 0..len {
@@ -555,7 +627,8 @@ macro_rules! maps {
                     value.put(out);
                 }
             }
-            fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+            fn put_owned(self,out:&mut Writer) { out.put_len(self.len()); for (key,value) in self { out.put_owned(key); out.put_owned(value); } }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
                 let len = input.take_len(K::MIN + V::MIN)?;
                 let mut map = Self::default();
                 for _ in 0..len {
@@ -578,7 +651,8 @@ macro_rules! tuples {
                 let ($($name,)+) = self;
                 $($name.put(out);)+
             }
-            fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+            fn put_owned(self,out:&mut Writer) { let ($($name,)+)=self; $($name.put_owned(out);)+ }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
                 Ok(($($name::take(input)?,)+))
             }
         }
@@ -612,6 +686,49 @@ impl Wire for std::time::Duration {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn resource_context_is_scoped_and_encoding_keeps_first_error() {
+        use std::{
+            any::{Any, TypeId},
+            cell::RefCell,
+            rc::Rc,
+        };
+        struct Codec(RefCell<Option<Box<dyn Any>>>);
+        impl super::ResourceCodec for Codec {
+            fn store(&self, value: Box<dyn Any>) -> Result<super::Id, super::WireError> {
+                *self.0.borrow_mut() = Some(value);
+                Ok(super::Id(7))
+            }
+            fn load(&self, id: super::Id, _: TypeId) -> Result<Box<dyn Any>, super::WireError> {
+                if id != super::Id(7) {
+                    return Err(super::WireError::Invalid("stale resource"));
+                }
+                self.0
+                    .borrow_mut()
+                    .take()
+                    .ok_or(super::WireError::Invalid("stale resource"))
+            }
+        }
+        let mut out = super::Writer::new();
+        {
+            let _scope = super::ResourceScope::new(Rc::new(Codec(RefCell::new(None))));
+            out.put_resource(Box::new(42u32));
+            assert_eq!(out.error(), None);
+            assert_eq!(
+                super::Reader::new(out.bytes()).take_resource::<u32>(),
+                Ok(42)
+            );
+        }
+        assert_eq!(
+            super::Reader::new(out.bytes()).take_resource::<u32>(),
+            Err(super::WireError::Invalid("no resource context"))
+        );
+        out.fail(super::WireError::Trailing);
+        out.put_resource(Box::new(43u32));
+        assert_eq!(out.error(), Some(super::WireError::Trailing));
+        out.clear();
+        assert_eq!(out.error(), None);
+    }
     #[test]
     fn static_string_rows_roundtrip_through_intern() {
         let rows: Vec<(&'static str, &'static str)> =
