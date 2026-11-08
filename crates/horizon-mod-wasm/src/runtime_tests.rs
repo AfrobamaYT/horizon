@@ -52,6 +52,15 @@ fn hook_round_trip_and_malformed_reply_poison() {
     assert_eq!(call(&module), None);
 }
 #[test]
+fn calls_do_not_leave_an_active_module_ownership_cycle() {
+    let module = module("i64.const 2199023255556");
+    let running = Arc::downgrade(&module.running);
+    assert_eq!(call(&module), Some(42));
+    drop(module);
+    assert!(running.upgrade().is_none());
+}
+
+#[test]
 fn trap_and_deadline_stop_the_group() {
     let module = module("unreachable");
     assert_eq!(call(&module), None);

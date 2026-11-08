@@ -383,7 +383,7 @@ static MODULES: OnceLock<Vec<(Manifest, WasmMod)>> = OnceLock::new();
 /// before registration. Constructors and subscription queries run before this, as on native.
 pub fn initialize(inventory: &[mod_api::PackageInfo]) {
     let mut refused = REFUSED.get().cloned().unwrap_or_default();
-    for (manifest, module) in MODULES.get().map_or(&[], Vec::as_slice) {
+    for (manifest, module) in MODULES.get().map_or(&[][..], Vec::as_slice) {
         let result = if initialize_modules(std::slice::from_ref(module), inventory) {
             points::listen(manifest, module)
         } else {
