@@ -1,8 +1,7 @@
 use super::*;
-use std::{
-    io::{BufRead, Write},
-    process::{Command, Stdio},
-};
+#[cfg(unix)]
+use std::{io::BufRead, process::Stdio};
+use std::{io::Write, process::Command};
 
 fn directory(path: &Path) -> Dir {
     std::fs::create_dir_all(path).unwrap();
