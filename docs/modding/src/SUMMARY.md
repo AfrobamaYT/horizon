@@ -17,6 +17,7 @@
 - [Design: client action pipeline](concepts/client-action-pipeline.md)
 - [Design: moving structures](concepts/moving-structures.md)
 - [Design: custom recipe-book settings](concepts/recipe-book-types.md)
+- [Design: section meshing](concepts/section-meshing.md)
 - [Design: travel and move hooks](concepts/travel-and-move.md)
 
 # How-to
