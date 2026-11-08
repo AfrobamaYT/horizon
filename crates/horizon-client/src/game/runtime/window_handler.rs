@@ -1441,6 +1441,7 @@ impl Game<'_> {
                         self.clock.record(started.elapsed());
                         if let Some(report) = self.clock.take_sprint_report() {
                             self.sprint_report(&report);
+                            self.on_tick_rate_changed();
                         }
                     }
                     self.extras_frame(elapsed);
