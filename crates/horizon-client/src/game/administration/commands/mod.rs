@@ -3628,16 +3628,12 @@ impl Game<'_> {
         let level = self.dim;
         for &t in &targets {
             self.for_player(t, |g| {
-                if g.spawn_point_change(level, pos, true) {
-                    return;
-                }
-                g.spawn = None;
-                g.respawn_config = Some(super::respawn_anchor::RespawnConfig {
+                g.set_respawn_point(Some(super::respawn_anchor::RespawnConfig {
                     dim: level,
                     pos,
                     yaw,
                     forced: true,
-                });
+                }));
             });
         }
         let dim = Text::literal(self.dim.id());
