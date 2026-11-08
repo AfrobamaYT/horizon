@@ -89,7 +89,7 @@ pub struct ModDimension {
     /// are the overworld's.
     pub dimension_type: String,
     /// The sea level the mod gives the level, for a chunk generator whose terrain has none to
-    /// read. It wins over the noise settings' (`stem_sea_level`).
+    /// read (`stem_sea_level`); the noise settings' win for the noise generator.
     pub sea_level: Option<i32>,
 }
 

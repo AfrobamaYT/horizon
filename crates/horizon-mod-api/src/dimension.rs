@@ -105,7 +105,8 @@ pub struct DimensionSettings {
     /// `Level.getSeaLevel`: the sea level mob spawning, rain and snow, maps and phantoms use. With
     /// `None` it is the noise settings' own for `minecraft:noise`, and the Overworld's 63 for a
     /// chunk generator a mod registered, which reads none; `Some` is for that generator, whose
-    /// terrain the game cannot read a sea level from, and wins over the noise settings'.
+    /// terrain the game cannot read a sea level from. A level of `minecraft:noise` keeps its noise
+    /// settings' sea level, which the terrain is built with.
     pub sea_level: Option<i32>,
     /// `minecraft:visual/sky_color` as `#rrggbb`: the sky overhead; None is the Overworld's.
     pub sky_color: Option<String>,
