@@ -15,7 +15,6 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "LivingDeathEvent",
-        paper = "EntityDeathEvent",
         cancellable = true
     )]
     fn living_death();

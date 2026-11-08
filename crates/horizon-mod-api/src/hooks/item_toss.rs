@@ -7,7 +7,6 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "ItemTossEvent",
-        paper = "PlayerDropItemEvent",
         cancellable = true
     )]
     fn item_toss();
