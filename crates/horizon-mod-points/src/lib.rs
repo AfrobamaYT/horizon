@@ -41,6 +41,8 @@ pub mod native_read;
 #[doc(hidden)]
 pub mod native_nodes;
 
+/// Registration-time endpoint exposure policies.
+pub mod endpoint_policy;
 /// Endpoint-local receiver field grants and selected-layout schema keys.
 pub mod exposure;
 #[cfg(target_arch = "wasm32")]

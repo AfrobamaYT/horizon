@@ -65,6 +65,11 @@ pub trait Forward: Send + Sync {
 
 /// A raw hook endpoint; the record projects owned views during the ordinary marked call.
 pub trait RawForward: Send + Sync {
+    /// Returns the module-owned exposure plan for a raw point index, when registered.
+    fn plan(&self, _point_index: usize) -> Option<std::sync::Arc<crate::exposure::Plan>> {
+        None
+    }
+
     /// Dispatches the listener through the ordinary hook transport. Record writeback is atomic.
     fn forward(&self, id: u32, record: &mut dyn mod_api::wire::Record);
 }
