@@ -162,6 +162,7 @@ fn cargo_member(
     role: &str,
     provided: &[String],
     features: &[String],
+    registrations: &str,
 ) -> Result<Vec<u8>, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let mut command = pinned("cargo");
@@ -195,11 +196,12 @@ fn cargo_member(
             "RUSTFLAGS",
             "-Crelocation-model=pic -Zshare-generics=n -Zdefault-visibility=hidden",
         )
+        .env("HORIZON_GUEST_REGISTRATIONS", registrations)
         .env("CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER", exe)
         .env(LINK_ENV, role)
         .env(LLD_ENV, &toolchain.lld)
         .env(PROVIDED_ENV, provided.join(","));
-    command.args(["--", "-Zdefault-visibility=interposable"]);
+    command.args(["--", "-Zdefault-visibility=interposable", &format!("--cfg=horizon_guest_registration=\"{}\"", sha512_of(registrations.as_bytes()))]);
     let status = command.status().map_err(|e| format!("cargo: {e}"))?;
     if !status.success() {
         return Err("cargo build failed".into());
@@ -243,7 +245,7 @@ fn std_member(target_dir: &Path, toolchain: &Toolchain) -> Result<Vec<u8>, Strin
         "// The group's one std: linked whole and exported.\n",
     )
     .map_err(|e| e.to_string())?;
-    cargo_member(&dir, target_dir, toolchain, "std", &[], &[])
+    cargo_member(&dir, target_dir, toolchain, "std", &[], &[], "")
 }
 
 /// `wasm-std <out>`: the std member the game ships beside its executable.
@@ -355,7 +357,9 @@ pub fn build(root: &Path) -> Result<(), String> {
         .filter(|l| l.optional)
         .map(|l| l.id.clone())
         .collect();
-    let module = cargo_member(root, &target, &toolchain, "member", &provided, &features)?;
+    let module = cargo_member(
+        root, &target, &toolchain, "member", &provided, &features, "",
+    )?;
     std::fs::write(root.join(WASM), &module).map_err(|e| format!("{WASM}: {e}"))?;
     let mut wasm = toml_edit::Table::new();
     wasm["sha512"] = toml_edit::value(sha512_of(&module));
