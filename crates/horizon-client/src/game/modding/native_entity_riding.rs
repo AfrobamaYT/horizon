@@ -838,11 +838,11 @@ mod tests {
             assert!(game.start_riding_target(Target::Mob(74), Target::Mob(70), false));
             assert!(!game.start_riding_target(Target::Mob(75), Target::Mob(70), false));
             let mut riding = horizon_client::lan::entity::Riding::default();
-            game.lan_riding(&[(70, 1)], &mut riding);
+            game.lan_riding(&[(70, player_id)], &mut riding);
             assert_eq!(riding.passengers(70), &[player_id, 73, 74]);
             // Force bypasses mob capacity, without losing any existing passenger.
             assert!(game.start_riding_target(Target::Mob(75), Target::Mob(70), true));
-            game.lan_riding(&[(70, 1)], &mut riding);
+            game.lan_riding(&[(70, player_id)], &mut riding);
             assert_eq!(riding.passengers(70), &[player_id, 73, 74, 75]);
             game.dismount_mob(73);
             game.dismount_mob(74);
