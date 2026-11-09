@@ -20,6 +20,8 @@ use mod_api::{
     crash::{NativeModCall, enter_native_mod},
 };
 
+#[cfg(test)]
+mod interception_tests;
 mod live_backend;
 mod live_entity;
 mod live_living;
