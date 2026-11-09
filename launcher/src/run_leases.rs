@@ -1,9 +1,9 @@
-//! Kernel-owned game lifetime locks. Persistent files are lock inodes, never busy markers.
-use crate::native_cache::{locked, Error, LockMode, Locked};
+//! Shared tree-lock primitives. Persistent files are lock inodes, never busy markers.
+use crate::native_cache::{locked, Error, LockMode, Locked, Release};
 use cap_fs_ext::{DirExt, FollowSymlinks, MetadataExt, OpenOptionsFollowExt};
 use cap_std::fs::{Dir, OpenOptions};
 use sha2::{Digest, Sha256};
-use std::{fs, path::Path, process::Command};
+use std::{fs, path::Path, process::Command, sync::Arc};
 
 pub(crate) const SOURCE: &str = "HORIZON_RUNTIME_SOURCE";
 
@@ -21,49 +21,130 @@ fn override_value<'a>(command: &'a Command, key: &str) -> Option<Option<&'a std:
 
 pub(crate) struct Registry {
     directory: Dir,
+    gate: Locked,
+    release: Release,
+}
+
+// Field order releases the tree before the last reference can release the gate.
+pub(crate) struct Claim {
+    tree: Locked,
+    registry: Arc<Registry>,
+}
+
+impl Claim {
+    pub(crate) fn files(&self) -> [&fs::File; 2] {
+        [self.tree.file(), self.registry.gate.file()]
+    }
 }
 
 impl Registry {
-    fn at(data: &Path) -> Result<Self, Error> {
+    fn at(data: &Path) -> Result<Arc<Self>, Error> {
+        Self::with_release(data, Release::Unlock)
+    }
+
+    pub(crate) fn with_release(data: &Path, release: Release) -> Result<Arc<Self>, Error> {
         crate::native_cache::checked(data, true)?;
         fs::create_dir_all(data)?;
         let data = Dir::open_ambient_dir(data.canonicalize()?, cap_std::ambient_authority())?;
+        filesystem::local(&data)?;
         match data.create_dir("run-leases") {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(error) => return Err(error.into()),
         }
-        Ok(Self {
-            directory: data.open_dir_nofollow("run-leases")?,
-        })
+        let directory = data.open_dir_nofollow("run-leases")?;
+        let gate = open_lock(&directory, "gate", LockMode::Shared, release)?;
+        Ok(Arc::new(Self {
+            directory,
+            gate,
+            release,
+        }))
     }
 
-    pub(crate) fn open() -> Result<Self, Error> {
+    pub(crate) fn open() -> Result<Arc<Self>, Error> {
         Self::at(&crate::backend::data_dir())
     }
 
-    /// Identity comes from the held directory, not a path that could now name a replaced root.
-    pub(crate) fn lock(&self, tree: &Dir, mode: LockMode) -> Result<Locked, Error> {
+    /// Gate first; identity comes from a held directory, never a mutable path.
+    pub(crate) fn lock(self: &Arc<Self>, tree: &Dir, mode: LockMode) -> Result<Claim, Error> {
+        filesystem::local(tree)?;
         let metadata = tree.dir_metadata()?;
         let identity = format!("{}:{}", metadata.dev(), metadata.ino());
         let key = format!("{:x}", Sha256::digest(identity.as_bytes()));
-        let mut options = OpenOptions::new();
-        options
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .follow(FollowSymlinks::No);
-        let file = self.directory.open_with(&key, &options)?.into_std();
-        if !file.metadata()?.is_file() {
-            return Err(Error::Unsafe(key.into()));
-        }
-        locked(file, mode)
+        let tree = open_lock(&self.directory, &key, mode, self.release)?;
+        Ok(Claim {
+            tree,
+            registry: self.clone(),
+        })
     }
 }
 
-/// Acquire before spawn. The caller retains these guards through the child's exit.
-pub(crate) fn shared(command: &Command) -> Result<Vec<Locked>, Error> {
+// A creator must be compatible with shared readers even before its handle closes.
+fn initialize_lock(directory: &Dir, key: &str) -> std::io::Result<cap_std::fs::File> {
+    let mut initial = OpenOptions::new();
+    initial
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .follow(FollowSymlinks::No);
+    #[cfg(windows)]
+    {
+        use cap_std::fs::OpenOptionsExt;
+        initial
+            .access_mode(windows_sys::Win32::Foundation::GENERIC_READ)
+            .share_mode(1);
+    }
+    directory.open_with(key, &initial)
+}
+
+fn open_lock(
+    directory: &Dir,
+    key: &str,
+    mode: LockMode,
+    release: Release,
+) -> Result<Locked, Error> {
+    match initialize_lock(directory, key) {
+        Ok(file) => drop(file),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error.into()),
+    }
+    let mut options = OpenOptions::new();
+    options.read(true).follow(FollowSymlinks::No);
+    #[cfg(not(windows))]
+    options.write(true);
+    #[cfg(windows)]
+    {
+        use cap_std::fs::OpenOptionsExt;
+        options
+            .write(matches!(mode, LockMode::Exclusive))
+            .share_mode(if matches!(mode, LockMode::Shared) {
+                1
+            } else {
+                0
+            });
+    }
+    let file = directory
+        .open_with(key, &options)
+        .map_err(|error| {
+            #[cfg(windows)]
+            if matches!(error.raw_os_error(), Some(32 | 33)) {
+                return Error::Busy;
+            }
+            Error::Io(error)
+        })?
+        .into_std();
+    if !file.metadata()?.is_file() {
+        return Err(Error::Unsafe(key.into()));
+    }
+    let lock = locked(file, mode)?;
+    Ok(match release {
+        Release::Unlock => lock,
+        Release::Close => lock.close_only(),
+    })
+}
+
+/// Launcher-owned primitives-in-use; this is not a standalone cleanup safety guarantee.
+pub(crate) fn shared(command: &Command) -> Result<Vec<Claim>, Error> {
     let logs = override_value(command, "HORIZON_HOME").map_or_else(
         || std::env::var_os("HORIZON_HOME").map(std::path::PathBuf::from),
         |value| value.map(std::path::PathBuf::from),
@@ -104,6 +185,8 @@ pub(crate) fn shared(command: &Command) -> Result<Vec<Locked>, Error> {
         })
         .collect()
 }
+
+mod filesystem;
 
 #[cfg(test)]
 mod tests;

@@ -101,7 +101,7 @@ fn a_released_lock_is_free_while_a_spawned_child_still_holds_its_descriptor() {
     let path = dir.put("native/.build.lock", b"");
     let held = lock(&path).unwrap();
     // What a child spawned at this moment holds until its exec: a copy of the same descriptor.
-    let inherited = held.0.try_clone().unwrap();
+    let inherited = held.file().try_clone().unwrap();
     drop(held);
     assert!(lock(&path).is_ok());
     drop(inherited);

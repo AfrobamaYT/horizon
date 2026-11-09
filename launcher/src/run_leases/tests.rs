@@ -29,6 +29,26 @@ fn shared_readers_exclude_cleanup_but_not_an_unrelated_tree() {
     drop(registry.lock(&first, LockMode::Exclusive).unwrap());
 }
 
+#[cfg(windows)]
+#[test]
+fn an_open_initializer_allows_readers_but_excludes_cleanup() {
+    let root = tempfile::tempdir().unwrap();
+    let registry = Registry::at(root.path()).unwrap();
+    let initializing = initialize_lock(&registry.directory, "initializing").unwrap();
+    let acquire = |mode| open_lock(&registry.directory, "initializing", mode, Release::Unlock);
+    let reader = acquire(LockMode::Shared)
+        .expect("an entry creator must not spuriously refuse a concurrent shared launch");
+    drop(reader);
+    assert!(matches!(acquire(LockMode::Exclusive), Err(Error::Busy)));
+    drop(initializing);
+    drop(acquire(LockMode::Exclusive).unwrap());
+    // The old initializer's write access alone reproduces the sharing refusal.
+    let writable_initializer = registry.directory.create("initializing").unwrap();
+    assert!(acquire(LockMode::Shared).is_err());
+    drop(writable_initializer);
+    drop(acquire(LockMode::Shared).unwrap());
+}
+
 #[cfg(unix)]
 #[test]
 fn a_moved_tree_keeps_its_identity_and_redirected_registries_are_refused() {
@@ -157,6 +177,48 @@ fn killed_holder_releases_production_home_source_and_parent_leases() {
                 .unwrap(),
         );
     }
+}
+
+#[test]
+fn gate_excludes_collection_mid_acquire_and_until_last_claim_drops() {
+    let root = tempfile::tempdir().unwrap();
+    let registry = Registry::at(root.path()).unwrap();
+    let held = registry.directory.try_clone().unwrap();
+    assert!(matches!(
+        open_lock(&held, "gate", LockMode::Exclusive, Release::Unlock),
+        Err(Error::Busy)
+    ));
+    let claim = registry
+        .lock(&directory(&root.path().join("tree")), LockMode::Shared)
+        .unwrap();
+    drop(registry);
+    assert!(matches!(
+        open_lock(&held, "gate", LockMode::Exclusive, Release::Unlock),
+        Err(Error::Busy)
+    ));
+    drop(claim);
+    let exclusive = open_lock(&held, "gate", LockMode::Exclusive, Release::Unlock).unwrap();
+    assert!(matches!(Registry::at(root.path()), Err(Error::Busy)));
+    drop(exclusive);
+    assert!(Registry::at(root.path()).is_ok());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn unsupported_volume_refuses_registry_and_tree_without_creating_entries() {
+    assert!(matches!(
+        Registry::at(Path::new("/proc")),
+        Err(Error::UnsupportedFilesystem)
+    ));
+    let root = tempfile::tempdir().unwrap();
+    let registry = Registry::at(root.path()).unwrap();
+    let before = registry.directory.entries().unwrap().count();
+    let proc = Dir::open_ambient_dir("/proc", cap_std::ambient_authority()).unwrap();
+    assert!(matches!(
+        registry.lock(&proc, LockMode::Shared),
+        Err(Error::UnsupportedFilesystem)
+    ));
+    assert_eq!(registry.directory.entries().unwrap().count(), before);
 }
 
 #[test]
