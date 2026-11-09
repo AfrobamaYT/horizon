@@ -428,7 +428,10 @@ pub trait Hooks {
     /// name vanilla has is left out. Asked again after a mod calls
     /// `host.commands().refresh_commands()`. Each executable usage keeps its own
     /// permission level; a lower-level child only opens traversal through a
-    /// shared prefix, not execution of that prefix.
+    /// shared prefix, not execution of that prefix. An argument's kind is one
+    /// of `word`, `text`, `integer`, `number`, `boolean`, `player`, `item` and
+    /// `block_pos`, or a command argument type a mod registered
+    /// (`Registrar::register_command_argument`), named by its namespaced id.
     #[hook(
         side = "server",
         contract = "collect",

@@ -945,6 +945,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Registrar::block_key` | crosses | Wire call |
 | `Registrar::attach_block_part` | crosses | Wire call |
 | `Registrar::attach_block_part_tag` | crosses | Wire call |
+| `Registrar::add_command_argument` | crosses | Wire call |
 | `Registrar::add_dimension` | crosses | Wire call |
 | `Registrar::effect_key` | crosses | Wire call |
 | `Registrar::provide_entity_capability` | crosses | Wire call |
@@ -1721,6 +1722,9 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `BlockTintSource::relevant_properties` | crosses | Wire call |
 | `ParticleProvider::tick` | crosses | Wire call |
 | `EnchantmentDamageEffect::apply` | crosses | Wire call |
+| `CommandArgumentType::kind` | crosses | Wire call |
+| `CommandArgumentType::parse` | crosses | Wire call |
+| `CommandArgumentType::suggest` | crosses | Wire call |
 | `GroundStateProvider::state_at` | crosses | Wire call |
 | `PlaceProvider::stack` | crosses | Wire call |
 | `PlaceProvider::insert` | crosses | Wire call |
