@@ -444,16 +444,22 @@ fn state_light_from_native_declarations_invalidates_the_content_cache() {
         &[r#"{"template":"minecraft:test","state_light":{"default":8}}"#],
     );
     fs::write(base.join("horizon-resources.json"), b"{}").unwrap();
-    let initial = stamp(&base, &mods).unwrap();
+    let initial = stamp(&base, &base.join("jars"), &mods, &fixture_inventory(&mods)).unwrap();
     let declaration = &mut mods[0].content.blocks[0];
     declaration.state_light.as_mut().unwrap().default = Some(15);
-    assert_ne!(stamp(&base, &mods).unwrap(), initial);
+    assert_ne!(
+        stamp(&base, &base.join("jars"), &mods, &fixture_inventory(&mods)).unwrap(),
+        initial
+    );
     mods[0].content.blocks[0]
         .state_light
         .as_mut()
         .unwrap()
         .default = Some(8);
-    assert_eq!(stamp(&base, &mods).unwrap(), initial);
+    assert_eq!(
+        stamp(&base, &base.join("jars"), &mods, &fixture_inventory(&mods)).unwrap(),
+        initial
+    );
     fs::remove_dir_all(base.parent().unwrap()).unwrap();
 }
 
@@ -5386,7 +5392,7 @@ fn biome_modifiers_apply_over_world_packs() {
         )],
     );
     let out = scratch.join("out");
-    build(&base, &[m], &out).unwrap();
+    build_fixture(&base, &base.join("jars"), &[m], &out).unwrap();
     let mut packs = horizon_world::worldgen::overrides::WorldgenOverrides::default();
     let pack_plains =
         r#"{"temperature":0.5,"features":[[],[],[],[],[],[],["minecraft:ore_coal"]]}"#;

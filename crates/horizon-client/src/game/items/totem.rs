@@ -277,7 +277,7 @@ mod death_protection_tests {
     fn hand_lookup_matches_the_component_map() {
         let totem = json!({"death_effects": [{"type": "minecraft:clear_all_effects"}]});
         let mut models = ItemModels::default();
-        let prototypes = std::sync::std::sync::Arc::make_mut(&mut models.prototypes);
+        let prototypes = std::sync::Arc::make_mut(&mut models.prototypes);
         prototypes.insert(
             "minecraft:totem_of_undying".into(),
             [("minecraft:death_protection".to_owned(), totem.clone())].into(),

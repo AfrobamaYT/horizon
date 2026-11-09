@@ -2595,7 +2595,12 @@ mod namespace_tests {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, text).unwrap();
         }
-        let data = LootData::load(&root, &PackOverlay::NONE).unwrap();
+        let data = LootData::load(
+            &root,
+            &PackOverlay::NONE,
+            &crate::item_defaults::read(&root).unwrap(),
+        )
+        .unwrap();
         let filled = data.fill("minecraft:chests/lore", 3, 27, None);
         let stack = filled.iter().flatten().next().expect("a stick");
         let component: Vec<_> = stack
@@ -2605,7 +2610,7 @@ mod namespace_tests {
             .collect();
         assert_eq!(component.len(), 1, "{:?}", stack.components);
         assert_eq!(
-            component[0].1,
+            horizon_core::json_nbt::tag_to_json(component[0].1.as_ref().unwrap()).unwrap(),
             serde_json::json!([{"text": "old"}, {"text": "new"}])
         );
         // `replace_all`: the function's lines are the whole list.
@@ -2614,7 +2619,12 @@ mod namespace_tests {
             table.replace(r#""mode": "append""#, r#""mode": "replace_all""#),
         )
         .unwrap();
-        let data = LootData::load(&root, &PackOverlay::NONE).unwrap();
+        let data = LootData::load(
+            &root,
+            &PackOverlay::NONE,
+            &crate::item_defaults::read(&root).unwrap(),
+        )
+        .unwrap();
         let filled = data.fill("minecraft:chests/lore", 3, 27, None);
         let stack = filled.iter().flatten().next().expect("a stick");
         let component: Vec<_> = stack
@@ -2622,7 +2632,10 @@ mod namespace_tests {
             .iter()
             .filter(|(k, _)| k == "minecraft:lore")
             .collect();
-        assert_eq!(component[0].1, serde_json::json!([{"text": "new"}]));
+        assert_eq!(
+            horizon_core::json_nbt::tag_to_json(component[0].1.as_ref().unwrap()).unwrap(),
+            serde_json::json!([{"text": "new"}])
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -2762,7 +2775,12 @@ mod namespace_tests {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, text).unwrap();
         }
-        let data = LootData::load(&root, &PackOverlay::NONE).unwrap();
+        let data = LootData::load(
+            &root,
+            &PackOverlay::NONE,
+            &crate::item_defaults::read(&root).unwrap(),
+        )
+        .unwrap();
         let filled = data.fill("minecraft:chests/pages", 11, 27, None);
         let book = filled.iter().flatten().next().expect("a book");
         let content: Vec<_> = book
@@ -2772,7 +2790,7 @@ mod namespace_tests {
             .collect();
         assert_eq!(content.len(), 1, "{:?}", book.components);
         assert_eq!(
-            content[0].1,
+            horizon_core::json_nbt::tag_to_json(content[0].1.as_ref().unwrap()).unwrap(),
             serde_json::json!({
                 "title": {"raw": "A Guide"},
                 "author": "Cartographer",
@@ -2785,7 +2803,12 @@ mod namespace_tests {
             table.replace(r#""mode": "append""#, r#""mode": "replace_all""#),
         )
         .unwrap();
-        let data = LootData::load(&root, &PackOverlay::NONE).unwrap();
+        let data = LootData::load(
+            &root,
+            &PackOverlay::NONE,
+            &crate::item_defaults::read(&root).unwrap(),
+        )
+        .unwrap();
         let filled = data.fill("minecraft:chests/pages", 11, 27, None);
         let book = filled.iter().flatten().next().expect("a book");
         let content: Vec<_> = book
@@ -2794,7 +2817,7 @@ mod namespace_tests {
             .filter(|(k, _)| k == "minecraft:written_book_content")
             .collect();
         assert_eq!(
-            content[0].1,
+            horizon_core::json_nbt::tag_to_json(content[0].1.as_ref().unwrap()).unwrap(),
             serde_json::json!({
                 "title": {"raw": "A Guide"},
                 "author": "Cartographer",
@@ -2922,7 +2945,12 @@ mod namespace_tests {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, text).unwrap();
         }
-        let data = LootData::load(&root, &PackOverlay::NONE).unwrap();
+        let data = LootData::load(
+            &root,
+            &PackOverlay::NONE,
+            &crate::item_defaults::read(&root).unwrap(),
+        )
+        .unwrap();
         let filled = data.fill("minecraft:chests/tooltip", 13, 27, None);
         let stack = filled.iter().flatten().next().expect("a stick");
         let display: Vec<_> = stack
@@ -2932,7 +2960,7 @@ mod namespace_tests {
             .collect();
         assert_eq!(display.len(), 1, "{:?}", stack.components);
         assert_eq!(
-            display[0].1,
+            horizon_core::json_nbt::tag_to_json(display[0].1.as_ref().unwrap()).unwrap(),
             serde_json::json!({"hidden_components": ["minecraft:lore"]})
         );
         let _ = fs::remove_dir_all(&root);

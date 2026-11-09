@@ -4750,7 +4750,11 @@ mod armor_stand_motion_tests {
             return;
         }
         let assets = crate::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.clone(),
+            ))
+            .unwrap();
         let facts = BlockFacts::load(&root, assets.registry).unwrap();
         let collision = crate::collisions::load(&root, assets.registry).unwrap();
         let world = World::test_scene(&assets, &render, 3).unwrap();

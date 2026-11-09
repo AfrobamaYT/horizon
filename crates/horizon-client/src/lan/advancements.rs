@@ -1239,11 +1239,39 @@ mod tests {
             "recipe/pack:a_cut".to_owned(),
             vec![cut("minecraft:redstone").into_bytes()],
         )];
-        let overlay = horizon_world::loot::PackOverlay { files: &packs };
-        let vanilla = SyncData::load(&root, &horizon_world::loot::PackOverlay::NONE).unwrap();
-        let packed = SyncData::load(&root, &overlay).unwrap();
-        let over = SyncData::load_over(&root, &overlay, None, &packed).unwrap();
-        let full = SyncData::load_with_kept(&root, &overlay, None, Some(&packed)).unwrap();
+        let overlay = horizon_world::loot::PackOverlay::new(&packs);
+        let vanilla = SyncData::load(
+            &root,
+            &horizon_world::loot::PackOverlay::NONE,
+            &horizon_world::item_defaults::read(&root).unwrap(),
+            &crate::test_resources::server_sources(&root, &horizon_world::loot::PackOverlay::NONE),
+        )
+        .unwrap();
+        let packed = SyncData::load(
+            &root,
+            &overlay,
+            &horizon_world::item_defaults::read(&root).unwrap(),
+            &crate::test_resources::server_sources(&root, &overlay),
+        )
+        .unwrap();
+        let over = SyncData::load_over(
+            &root,
+            &overlay,
+            None,
+            &packed,
+            &horizon_world::item_defaults::read(&root).unwrap(),
+            &crate::test_resources::server_sources(&root, &overlay),
+        )
+        .unwrap();
+        let full = SyncData::load_with_kept(
+            &root,
+            &overlay,
+            None,
+            Some(&packed),
+            &horizon_world::item_defaults::read(&root).unwrap(),
+            &crate::test_resources::server_sources(&root, &overlay),
+        )
+        .unwrap();
         assert_ne!(full.recipes, vanilla.recipes, "the pack's recipe is sent");
         assert_eq!(over.recipes, full.recipes);
         assert_eq!(over.advancements.recipes, full.advancements.recipes);
@@ -1472,9 +1500,21 @@ mod tests {
             return;
         }
         let none = &horizon_world::loot::PackOverlay::NONE;
-        let sync = SyncData::load(&root, none).unwrap();
-        let items = Items::catalog(&root, none).unwrap();
-        let recipes = Recipes::load(&root, &items, none).unwrap();
+        let sync = SyncData::load(
+            &root,
+            none,
+            &horizon_world::item_defaults::read(&root).unwrap(),
+            &crate::test_resources::server_sources(&root, none),
+        )
+        .unwrap();
+        let items = Items::catalog(
+            &root,
+            none,
+            &horizon_world::item_defaults::read(&root).unwrap(),
+        )
+        .unwrap();
+        let recipes =
+            Recipes::load(&root, &items, none, &crate::test_resources::server_load()).unwrap();
         let mut book = Book::build(&recipes, &items);
         book.set_display_ids(&RecipeIndex::load(&root, none));
         let before: Vec<(String, i32, Option<String>)> = book

@@ -983,7 +983,12 @@ mod tests {
             r#"{"minecraft:diamond_sword":{"minecraft:max_stack_size":1,"minecraft:max_damage":1561}}"#,
         )
         .unwrap();
-        let items = Items::catalog(&root, &PackOverlay::NONE).unwrap();
+        let items = Items::catalog(
+            &root,
+            &PackOverlay::NONE,
+            &horizon_world::item_defaults::read(&root).unwrap(),
+        )
+        .unwrap();
         let e = sample();
         let mut a = ItemStack::new("minecraft:diamond_sword", 1);
         a.damage = 819;
@@ -1001,7 +1006,7 @@ mod tests {
         let out = grindstone_result(&e, &items, Some(&a), Some(&b)).unwrap();
         assert_eq!(
             out.data().unwrap().other("minecraft:max_damage"),
-            Some(&horizon_world::nbt::Tag::Int(2000))
+            Some(&horizon_core::nbt::Tag::Int(2000))
         );
         let _ = fs::remove_dir_all(&root);
     }
