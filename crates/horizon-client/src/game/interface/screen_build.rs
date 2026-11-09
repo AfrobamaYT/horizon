@@ -54,6 +54,7 @@ impl ObservedScreen {
 pub(super) struct ScreenBuild {
     /// Which screen this was built for.
     pub(super) screen: Screen,
+    identity: Option<&'static str>,
     /// The GUI-scaled size (`getGuiScaledWidth`/`getGuiScaledHeight`), in GUI pixels.
     pub(super) size: (f32, f32),
     /// The GUI scale (`narration`'s framebuffer space).
@@ -85,10 +86,11 @@ pub(super) enum BuildLayout {
 impl ScreenBuild {
     /// The build for `screen` at `gui`. Step 1's `Empty` screens know no panel
     /// and no widgets, so the rectangle is the window and the origin is zero.
-    fn new(screen: Screen, gui: GuiSize) -> Self {
+    fn new(screen: Screen, identity: Option<&'static str>, gui: GuiSize) -> Self {
         let size = (gui.size[0] as f32, gui.size[1] as f32);
         Self {
             screen,
+            identity,
             size,
             scale: gui.scale as f32,
             rect: [0.0, 0.0, size.0, size.1],
@@ -121,18 +123,25 @@ impl ScreenBuildState {
     /// different GUI size makes it, the same one keeps it, and nothing shown
     /// drops it. A call that changes nothing allocates nothing, so the frame
     /// path checks it every frame, and a menu swap on the same screen keeps it.
-    pub(super) fn sync(&mut self, screen: Screen, shown: bool, gui: GuiSize) {
+    pub(super) fn sync(
+        &mut self,
+        screen: Screen,
+        shown: bool,
+        identity: Option<&'static str>,
+        gui: GuiSize,
+    ) {
         if !shown {
             self.current = None;
             return;
         }
         let stale = self.current.as_ref().is_none_or(|build| {
             build.screen != screen
+                || build.identity != identity
                 || build.size != (gui.size[0] as f32, gui.size[1] as f32)
                 || build.scale != gui.scale as f32
         });
         if stale {
-            self.current = Some(ScreenBuild::new(screen, gui));
+            self.current = Some(ScreenBuild::new(screen, identity, gui));
             #[cfg(test)]
             {
                 self.builds += 1;
@@ -167,7 +176,18 @@ impl Game<'_> {
         let shown =
             self.screen != Screen::Playing || self.title.is_some() || self.screen_over_playing();
         let gui = self.gui_size_now();
-        self.screen_state.build.sync(self.screen, shown, gui);
+        let identity = self
+            .title
+            .as_ref()
+            .map(|title| title.mode.id())
+            .or_else(|| {
+                self.screen_over_playing()
+                    .then(|| self.observed_screen_view().map(|view| view.id))
+                    .flatten()
+            });
+        self.screen_state
+            .build
+            .sync(self.screen, shown, identity, gui);
     }
 }
 
@@ -188,28 +208,44 @@ mod tests {
     fn a_build_per_open_and_resize_only() {
         let mut state = ScreenBuildState::default();
         let small = gui([854, 480], 0);
-        state.sync(Screen::Inventory, true, small);
+        state.sync(Screen::Inventory, true, None, small);
         assert_eq!(state.builds, 1);
         // Frames pass with the same screen and size.
         for _ in 0..3 {
-            state.sync(Screen::Inventory, true, small);
+            state.sync(Screen::Inventory, true, None, small);
         }
         assert_eq!(state.builds, 1);
         // A menu swapped on the same screen keeps the build.
-        state.sync(Screen::Inventory, true, small);
+        state.sync(Screen::Inventory, true, None, small);
         assert_eq!(state.builds, 1);
         // A window resize rebuilds once.
         let large = gui([1920, 1080], 0);
-        state.sync(Screen::Inventory, true, large);
+        state.sync(Screen::Inventory, true, None, large);
         assert_eq!(state.builds, 2);
-        state.sync(Screen::Inventory, true, large);
+        state.sync(Screen::Inventory, true, None, large);
         assert_eq!(state.builds, 2);
         // A GUI scale change rebuilds once.
         let scaled = GuiSize::new([1920, 1080], 3, false);
-        state.sync(Screen::Inventory, true, scaled);
+        state.sync(Screen::Inventory, true, None, scaled);
         assert_eq!(state.builds, 3);
         // A different screen opens.
-        state.sync(Screen::Paused, true, scaled);
+        state.sync(Screen::Paused, true, None, scaled);
+        assert_eq!(state.builds, 4);
+    }
+
+    #[test]
+    fn distinct_title_and_overlay_identities_rebuild_at_the_same_size() {
+        let mut state = ScreenBuildState::default();
+        let size = gui([854, 480], 0);
+        state.sync(Screen::Playing, true, Some("title"), size);
+        assert_eq!(state.builds, 1);
+        state.sync(Screen::Playing, true, Some("multiplayer"), size);
+        assert_eq!(state.builds, 2);
+        state.sync(Screen::Playing, true, Some("sign_editor"), size);
+        assert_eq!(state.builds, 3);
+        state.sync(Screen::Playing, true, Some("book_view"), size);
+        assert_eq!(state.builds, 4);
+        state.sync(Screen::Playing, true, Some("book_view"), size);
         assert_eq!(state.builds, 4);
     }
 
@@ -217,13 +253,13 @@ mod tests {
     fn closing_drops_the_build() {
         let mut state = ScreenBuildState::default();
         let size = gui([1280, 720], 0);
-        state.sync(Screen::Paused, true, size);
+        state.sync(Screen::Paused, true, None, size);
         assert!(state.current.is_some());
-        state.sync(Screen::Playing, false, size);
+        state.sync(Screen::Playing, false, None, size);
         assert!(state.current.is_none());
         assert_eq!(state.builds, 1);
         // Nothing open builds nothing.
-        state.sync(Screen::Playing, false, size);
+        state.sync(Screen::Playing, false, None, size);
         assert_eq!(state.builds, 1);
     }
 
@@ -232,7 +268,7 @@ mod tests {
     #[test]
     fn a_title_or_overlay_over_playing_builds() {
         let mut state = ScreenBuildState::default();
-        state.sync(Screen::Playing, true, gui([854, 480], 0));
+        state.sync(Screen::Playing, true, None, gui([854, 480], 0));
         assert_eq!(state.builds, 1);
         assert_eq!(state.current.as_ref().unwrap().screen, Screen::Playing);
     }
@@ -259,7 +295,7 @@ mod tests {
                 },
             );
             let mut state = ScreenBuildState::default();
-            state.sync(Screen::Inventory, true, gui);
+            state.sync(Screen::Inventory, true, None, gui);
             let build = state.current.as_ref().unwrap();
             assert_eq!(
                 build.size,
