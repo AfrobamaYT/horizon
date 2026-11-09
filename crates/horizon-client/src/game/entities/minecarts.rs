@@ -4123,7 +4123,8 @@ mod tnt_impact_tests {
         // OldMinecartBehavior.moveAlongTrack places the cart at the rail's top
         // height, moves it horizontally (Entity.move records the step) and settles
         // it on the slope; the tick's applyEffectsFromBlocks still sweeps the step.
-        let mut game = crate::game::game_tests::tests::server_game();
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
         let registry = game.pack.assets.registry;
         let stone = registry.default_state("minecraft:stone").unwrap();
         let plate = registry

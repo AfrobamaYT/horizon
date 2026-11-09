@@ -6,7 +6,7 @@
 use super::*;
 use std::sync::Arc;
 
-fn game() -> Game<'static> {
+fn game(resources: &mut Option<std::sync::Arc<Resources>>) -> Game<'_> {
     let root = std::path::PathBuf::from(
         std::env::var_os("HORIZON_TEST_RESOURCES")
             .expect("set HORIZON_TEST_RESOURCES to prepared resources"),
@@ -28,7 +28,7 @@ fn game() -> Game<'static> {
     let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
     options.resources = root.clone();
     options.execution_role = execution_role::ExecutionRole::IntegratedServer;
-    let res: &'static _ = Box::leak(Box::new(loaded.resources));
+    let res = resources.insert(loaded.resources);
     let mut game = Game::new(
         res,
         loaded.pack,
@@ -98,7 +98,8 @@ fn stored(game: &mut Game<'_>, feature: &str) -> (i32, i32, bool) {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_malformed_inline_feature_fails_before_the_command_runs() {
-    let mut game = game();
+    let mut game_resources = None;
+    let mut game = game(&mut game_resources);
     assert!(game.run_command("fill 0 99 0 15 99 15 stone"));
     assert!(game.run_command("scoreboard objectives add h171 dummy"));
     // A valid inline feature places; one that decodes but does not place fails when it runs.
@@ -141,7 +142,8 @@ fn a_malformed_inline_feature_fails_before_the_command_runs() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn the_parse_check_is_the_live_feature_codec_and_only_where_it_exists() {
-    let mut game = game();
+    let mut game_resources = None;
+    let mut game = game(&mut game_resources);
     assert!(game.run_command("fill 0 99 0 15 99 15 stone"));
     assert!(game.run_command("scoreboard objectives add h171 dummy"));
     assert!(

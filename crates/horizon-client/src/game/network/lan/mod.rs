@@ -4309,9 +4309,9 @@ mod tests {
         let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
         options.resources = root.clone();
         options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
-        let res = Box::leak(Box::new(loaded.resources));
+        let res = loaded.resources;
         let mut game = super::Game::new(
-            res,
+            &res,
             loaded.pack,
             loaded.gui.unwrap(),
             options,
@@ -6003,7 +6003,8 @@ mod mob_pickup_sync_tests {
     #[test]
     #[ignore = "needs prepared resources and scratch homes/cwd"]
     fn a_mob_pickup_reaches_guests_as_a_take() {
-        let mut game = super::super::game_tests::tests::server_game();
+        let mut resources = None;
+        let mut game = super::super::game_tests::tests::server_game(&mut resources);
         game.build_registries();
         game.set_allow_commands(true);
         assert!(game.run_command("summon piglin 8.5 80 8.5 {NoAI:1b,PersistenceRequired:1b}"));
@@ -6106,7 +6107,8 @@ mod mob_swing_sync_tests {
     #[test]
     #[ignore = "needs prepared resources and scratch homes/cwd"]
     fn an_off_hand_mob_swing_reaches_guests_as_the_off_hand() {
-        let mut game = crate::game::game_tests::tests::server_game();
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
         game.build_registries();
         game.set_allow_commands(true);
         let piglin = "{NoAI:1b,PersistenceRequired:1b}";
@@ -6177,7 +6179,8 @@ mod owner_attachment_save_tests {
     #[test]
     #[ignore = "needs prepared resources and scratch homes/cwd"]
     fn an_autosave_writes_the_owners_live_attachments_to_the_file_it_loads() {
-        let mut game = crate::game::game_tests::tests::server_game();
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
         let _rx = super::world_spawn_sync_tests::host_for(&mut game);
         let uuid = 1;
         game.lan.as_mut().unwrap().owner = Some(Owner { uuid, saved: None });
@@ -6221,8 +6224,11 @@ mod connected_statistics_save_tests {
     fn connected_stats_save_control(stale: bool) {
         use super::super::{execution_role::ExecutionRole, stats};
         use std::sync::{Arc, Mutex};
-        let mut game = crate::game::game_tests::tests::server_game();
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
         game.options.execution_role = ExecutionRole::DedicatedServer;
+        // The command's dedicated-only guard also checks the launch mode.
+        game.options.dedicated = Some(Vec::new());
         let dir = std::env::current_dir().unwrap().join(if stale {
             "stats-stale"
         } else {
@@ -6327,7 +6333,8 @@ mod connected_statistics_save_exclusion_tests {
     #[test]
     #[ignore = "needs prepared resources and scratch homes/cwd"]
     fn excluded_guest_records_are_not_invented_or_written() {
-        let mut game = crate::game::game_tests::tests::server_game();
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
         let _rx = super::world_spawn_sync_tests::host_for(&mut game);
         game.world_root = std::env::current_dir().unwrap().join("stats-excluded");
         std::fs::create_dir_all(&game.world_root).unwrap();

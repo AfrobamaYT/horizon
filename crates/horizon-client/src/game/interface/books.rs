@@ -1639,7 +1639,8 @@ mod lectern_books_tag_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_packs_lectern_books_entry_goes_onto_the_lectern() {
-        let mut game = server_game();
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
         let dir =
             std::env::temp_dir().join(format!("horizon-lectern-books-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -1729,7 +1730,8 @@ mod lectern_signal_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_lecterns_signal_adds_one_only_for_a_book() {
-        let mut game = server_game();
+        let mut resources = None;
+        let mut game = server_game(&mut resources);
         assert_eq!(signal(&mut game, None, 0), 0, "no book");
         assert_eq!(
             signal(&mut game, Some(ItemStack::new("minecraft:stone", 1)), 0),
