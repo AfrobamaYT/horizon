@@ -2515,15 +2515,22 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated process for native mods"]
     fn entity_parts_answer_the_spawn_cluster_size() {
-        use super::super::native_entity_refs::tests::with_game;
+        use super::super::native_entity_refs::tests::{run_fresh_cases, with_game};
+        if run_fresh_cases(
+            "game::natural_spawning::tests::entity_parts_answer_the_spawn_cluster_size",
+            "HORIZON_SPAWN_CLUSTER_CHILD",
+            &["valid"],
+        ) {
+            return;
+        }
+        let entries = vec![mod_api::ModEntry::new("clusters", Box::new(ClusterMod))];
+        mod_api::__private::install(entries.into());
+        crate::game::api_values::install_parts(&[mod_api::ModEntry::new(
+            "clusters",
+            Box::new(ClusterMod),
+        )])
+        .unwrap();
         with_game(|game| {
-            let entries = vec![mod_api::ModEntry::new("clusters", Box::new(ClusterMod))];
-            mod_api::__private::install(entries.into());
-            crate::game::api_values::install_parts(&[mod_api::ModEntry::new(
-                "clusters",
-                Box::new(ClusterMod),
-            )])
-            .unwrap();
             game.resolve_parts().unwrap();
             let mob = |id: &str| {
                 let kind = game.res.mob_types().get(id).unwrap().clone();
