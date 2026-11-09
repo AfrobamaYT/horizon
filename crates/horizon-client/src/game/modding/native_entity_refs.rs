@@ -907,12 +907,24 @@ pub(super) mod tests {
         }
         let _mods = mod_api::__private::part_tests::game_thread();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        Some(
-            super::super::mods::content_root(&base, &Default::default())
-                .unwrap()
-                .prepared()
-                .to_path_buf(),
-        )
+        let root = super::super::mods::content_root(&base, &Default::default())
+            .unwrap()
+            .prepared()
+            .to_path_buf();
+        // game_thread installs a small synthetic key table for API-only tests.
+        // This fixture loads a real resource graph: resolve its complete keys first.
+        let (registry, _) = horizon_world::level::data::load_registry_with_flags(&root).unwrap();
+        let ids: std::collections::HashSet<_> = (0..registry.len())
+            .map(|i| {
+                registry
+                    .state(horizon_world::registry::BlockStateId(i as u32))
+                    .unwrap()
+                    .name
+                    .clone()
+            })
+            .collect();
+        crate::game::api_values::register_game_keys(ids);
+        Some(root)
     }
 
     pub(in crate::game) fn with_game(test: impl FnOnce(&mut super::Game<'_>)) {
