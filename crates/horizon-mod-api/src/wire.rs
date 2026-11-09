@@ -380,7 +380,7 @@ impl Put for str {
 }
 
 impl Wire for &str {
-    const LAYOUT: u64 = layout_name("str");
+    const LAYOUT_SEED: u64 = layout_name("str");
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
         out.put_str(self);
@@ -537,12 +537,13 @@ pub const fn layout_mix(mut hash: u64, child: u64) -> u64 {
     label = "add #[derive(mod_api::Wire)] to it"
 )]
 pub trait Wire: Sized {
-    /// Identity of this encoding, including the layouts of its fields.
-    const LAYOUT: u64;
+    /// Leaf seed only; composed encoding identity comes from `layout`.
+    #[doc(hidden)]
+    const LAYOUT_SEED: u64;
     /// Compose this encoding with its children, marking recursive visits.
     #[doc(hidden)]
     fn layout(_visiting: &mut Vec<&'static str>) -> u64 {
-        Self::LAYOUT
+        Self::LAYOUT_SEED
     }
     /// The fewest bytes a value takes, so a length can be checked before anything is allocated.
     const MIN: usize;
@@ -579,7 +580,7 @@ pub trait Wire: Sized {
 macro_rules! numbers {
     ($($ty:ty),*) => {$(
         impl Wire for $ty {
-            const LAYOUT: u64 = crate::wire::layout_name(stringify!($ty));
+            const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!($ty));
     const MIN: usize = std::mem::size_of::<$ty>();
             fn put(&self, out: &mut Writer) {
                 out.put_bytes(&self.to_le_bytes());
@@ -618,7 +619,7 @@ numbers!(u8, i8, u16, i16, u32, i32, u64, i64, u128, i128, f32, f64);
 
 /// A `usize` crosses as 64 bits: a guest's is 32.
 impl Wire for usize {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(usize));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(usize));
     const MIN: usize = 8;
     fn put(&self, out: &mut Writer) {
         out.put(&(*self as u64));
@@ -629,7 +630,7 @@ impl Wire for usize {
 }
 
 impl Wire for bool {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(bool));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(bool));
     const MIN: usize = 1;
     fn put(&self, out: &mut Writer) {
         out.put(&u8::from(*self));
@@ -644,7 +645,7 @@ impl Wire for bool {
 }
 
 impl Wire for char {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(char));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(char));
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
         out.put(&u32::from(*self));
@@ -655,7 +656,7 @@ impl Wire for char {
 }
 
 impl Wire for () {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(()));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(()));
     const MIN: usize = 0;
     fn put(&self, _: &mut Writer) {}
     fn take(_: &mut Reader<'_>) -> Result<Self, WireError> {
@@ -664,7 +665,7 @@ impl Wire for () {
 }
 
 impl Wire for String {
-    const LAYOUT: u64 = layout_name("str");
+    const LAYOUT_SEED: u64 = layout_name("str");
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
         out.put_str(self);
@@ -680,7 +681,7 @@ impl Wire for String {
 
 /// A mod's own text, owned once read: a `Cow<'static, str>` field is how the API takes either.
 impl Wire for std::borrow::Cow<'_, str> {
-    const LAYOUT: u64 = layout_name("str");
+    const LAYOUT_SEED: u64 = layout_name("str");
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
         out.put_str(self);
@@ -691,7 +692,7 @@ impl Wire for std::borrow::Cow<'_, str> {
 }
 
 impl Wire for Box<str> {
-    const LAYOUT: u64 = layout_name("str");
+    const LAYOUT_SEED: u64 = layout_name("str");
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
         out.put_str(self);
@@ -702,7 +703,7 @@ impl Wire for Box<str> {
 }
 
 impl Wire for Arc<str> {
-    const LAYOUT: u64 = layout_name("str");
+    const LAYOUT_SEED: u64 = layout_name("str");
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
         out.put_str(self);
@@ -713,9 +714,9 @@ impl Wire for Arc<str> {
 }
 
 impl<T: Wire> Wire for Option<T> {
-    const LAYOUT: u64 = layout_name("option");
+    const LAYOUT_SEED: u64 = layout_name("option");
     fn layout(visiting: &mut Vec<&'static str>) -> u64 {
-        layout_mix(Self::LAYOUT, T::layout(visiting))
+        layout_mix(Self::LAYOUT_SEED, T::layout(visiting))
     }
     const MIN: usize = 1;
     fn put(&self, out: &mut Writer) {
@@ -746,10 +747,10 @@ impl<T: Wire> Wire for Option<T> {
 }
 
 impl<T: Wire, E: Wire> Wire for Result<T, E> {
-    const LAYOUT: u64 = layout_name("result");
+    const LAYOUT_SEED: u64 = layout_name("result");
     fn layout(visiting: &mut Vec<&'static str>) -> u64 {
         layout_mix(
-            layout_mix(Self::LAYOUT, T::layout(visiting)),
+            layout_mix(Self::LAYOUT_SEED, T::layout(visiting)),
             E::layout(visiting),
         )
     }
@@ -788,9 +789,9 @@ impl<T: Wire, E: Wire> Wire for Result<T, E> {
 }
 
 impl<T: Wire> Wire for Arc<[T]> {
-    const LAYOUT: u64 = layout_name("list");
+    const LAYOUT_SEED: u64 = layout_name("list");
     fn layout(visiting: &mut Vec<&'static str>) -> u64 {
-        layout_mix(Self::LAYOUT, T::layout(visiting))
+        layout_mix(Self::LAYOUT_SEED, T::layout(visiting))
     }
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
@@ -805,9 +806,9 @@ impl<T: Wire> Wire for Arc<[T]> {
 }
 
 impl<T: Wire> Wire for Box<[T]> {
-    const LAYOUT: u64 = layout_name("list");
+    const LAYOUT_SEED: u64 = layout_name("list");
     fn layout(visiting: &mut Vec<&'static str>) -> u64 {
-        layout_mix(Self::LAYOUT, T::layout(visiting))
+        layout_mix(Self::LAYOUT_SEED, T::layout(visiting))
     }
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
@@ -822,7 +823,7 @@ impl<T: Wire> Wire for Box<[T]> {
 }
 
 impl<T: Wire> Wire for Box<T> {
-    const LAYOUT: u64 = layout_name("transparent");
+    const LAYOUT_SEED: u64 = layout_name("transparent");
     fn layout(visiting: &mut Vec<&'static str>) -> u64 {
         T::layout(visiting)
     }
@@ -839,7 +840,7 @@ impl<T: Wire> Wire for Box<T> {
 }
 
 impl<T: Wire> Wire for Arc<T> {
-    const LAYOUT: u64 = layout_name("transparent");
+    const LAYOUT_SEED: u64 = layout_name("transparent");
     fn layout(visiting: &mut Vec<&'static str>) -> u64 {
         T::layout(visiting)
     }
@@ -853,9 +854,9 @@ impl<T: Wire> Wire for Arc<T> {
 }
 
 impl<T: Wire> Wire for Vec<T> {
-    const LAYOUT: u64 = layout_name("list");
+    const LAYOUT_SEED: u64 = layout_name("list");
     fn layout(visiting: &mut Vec<&'static str>) -> u64 {
-        layout_mix(Self::LAYOUT, T::layout(visiting))
+        layout_mix(Self::LAYOUT_SEED, T::layout(visiting))
     }
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
@@ -870,9 +871,9 @@ impl<T: Wire> Wire for Vec<T> {
 }
 
 impl<T: Wire> Wire for VecDeque<T> {
-    const LAYOUT: u64 = layout_name("list");
+    const LAYOUT_SEED: u64 = layout_name("list");
     fn layout(visiting: &mut Vec<&'static str>) -> u64 {
-        layout_mix(Self::LAYOUT, T::layout(visiting))
+        layout_mix(Self::LAYOUT_SEED, T::layout(visiting))
     }
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
@@ -893,9 +894,9 @@ impl<T: Wire> Wire for VecDeque<T> {
 }
 
 impl<T: Wire, const N: usize> Wire for [T; N] {
-    const LAYOUT: u64 = layout_name("array");
+    const LAYOUT_SEED: u64 = layout_name("array");
     fn layout(visiting: &mut Vec<&'static str>) -> u64 {
-        layout_mix(layout_mix(Self::LAYOUT, T::layout(visiting)), N as u64)
+        layout_mix(layout_mix(Self::LAYOUT_SEED, T::layout(visiting)), N as u64)
     }
     const MIN: usize = T::MIN * N;
     fn put(&self, out: &mut Writer) {
@@ -923,8 +924,8 @@ impl<T: Wire, const N: usize> Wire for [T; N] {
 macro_rules! sets {
     ($($ty:ident [$($bound:tt)+]),*) => {$(
         impl<T: Wire + $($bound)+> Wire for $ty<T> {
-            const LAYOUT: u64 = layout_name("set");
-    fn layout(visiting: &mut Vec<&'static str>) -> u64 { layout_mix(Self::LAYOUT, T::layout(visiting)) }
+            const LAYOUT_SEED: u64 = layout_name("set");
+    fn layout(visiting: &mut Vec<&'static str>) -> u64 { layout_mix(Self::LAYOUT_SEED, T::layout(visiting)) }
     const MIN: usize = 4;
             fn put(&self, out: &mut Writer) {
                 out.put_len(self.len());
@@ -949,8 +950,8 @@ sets!(BTreeSet[Ord], HashSet[Eq + Hash]);
 macro_rules! maps {
     ($($ty:ident [$($bound:tt)+]),*) => {$(
         impl<K: Wire + $($bound)+, V: Wire> Wire for $ty<K, V> {
-            const LAYOUT: u64 = layout_name("map");
-    fn layout(visiting: &mut Vec<&'static str>) -> u64 { layout_mix(layout_mix(Self::LAYOUT, K::layout(visiting)), V::layout(visiting)) }
+            const LAYOUT_SEED: u64 = layout_name("map");
+    fn layout(visiting: &mut Vec<&'static str>) -> u64 { layout_mix(layout_mix(Self::LAYOUT_SEED, K::layout(visiting)), V::layout(visiting)) }
     const MIN: usize = 4;
             fn put(&self, out: &mut Writer) {
                 out.put_len(self.len());
@@ -978,8 +979,8 @@ macro_rules! tuples {
     ($(($($name:ident),+)),*) => {$(
         #[allow(non_snake_case)]
         impl<$($name: Wire),+> Wire for ($($name,)+) {
-            const LAYOUT: u64 = layout_name("tuple");
-    fn layout(visiting: &mut Vec<&'static str>) -> u64 { { let h = Self::LAYOUT; $(let h = layout_mix(h, $name::layout(visiting));)+ h } }
+            const LAYOUT_SEED: u64 = layout_name("tuple");
+    fn layout(visiting: &mut Vec<&'static str>) -> u64 { { let h = Self::LAYOUT_SEED; $(let h = layout_mix(h, $name::layout(visiting));)+ h } }
     const MIN: usize = 0 $(+ $name::MIN)+;
             fn put(&self, out: &mut Writer) {
                 let ($($name,)+) = self;
@@ -1003,7 +1004,7 @@ tuples!(
 
 /// A duration as seconds and nanoseconds.
 impl Wire for std::time::Duration {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(std::time::Duration));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(std::time::Duration));
     const MIN: usize = 12;
     fn put(&self, out: &mut Writer) {
         out.put(&self.as_secs());
@@ -1074,7 +1075,7 @@ mod tests {
         check(Payload::Named { value: 7 }, &[2, 0, 0, 0, 7, 0, 0, 0]);
         check(Generic { value: 5u8 }, &[5]);
         check(Recursive { children: vec![] }, &[0, 0, 0, 0]);
-        assert_ne!(Recursive::LAYOUT, 0);
+        assert_ne!(Recursive::LAYOUT_SEED, 0);
         assert_ne!(
             Generic::<u8>::layout(&mut vec![]),
             Generic::<u32>::layout(&mut vec![])
@@ -1141,6 +1142,51 @@ mod tests {
             BTreeMap::<u8, u32>::layout(&mut visiting),
             HashMap::<u8, u32>::layout(&mut visiting)
         );
+    }
+
+    #[test]
+    fn recursive_layout_tracks_deep_changes_and_field_order() {
+        macro_rules! pair {
+            ($module:ident, $value:ty) => {
+                mod $module {
+                    use super::super::Wire;
+                    #[derive(mod_api::Wire)]
+                    struct Text {
+                        content: Content,
+                    }
+                    #[derive(mod_api::Wire)]
+                    enum Content {
+                        Child(Vec<Text>),
+                        Value($value),
+                    }
+                    pub fn hash() -> u64 {
+                        Text::layout(&mut vec![])
+                    }
+                }
+            };
+        }
+        pair!(byte, u8);
+        pair!(word, u32);
+        assert_ne!(byte::hash(), word::hash());
+        assert_eq!(byte::hash(), byte::hash());
+        macro_rules! shape {
+            ($module:ident, $($field:ident: $ty:ty),*) => {
+                mod $module {
+                    use super::super::Wire;
+                    #[derive(mod_api::Wire)]
+                    struct Node { $($field: $ty),* }
+                    pub fn hash() -> u64 { Node::layout(&mut vec![]) }
+                }
+            };
+        }
+        shape!(list, children: Vec<Node>);
+        shape!(optional, children: Option<Box<Node>>);
+        shape!(renamed, descendants: Vec<Node>);
+        shape!(forward, first: u8, last: u32);
+        shape!(reversed, last: u32, first: u8);
+        assert_ne!(list::hash(), optional::hash());
+        assert_ne!(list::hash(), renamed::hash());
+        assert_ne!(forward::hash(), reversed::hash());
     }
 
     #[test]
@@ -1212,7 +1258,7 @@ mod tests {
         struct Resource;
         impl Wire for Resource {
             const MIN: usize = 1;
-            const LAYOUT: u64 = layout_name("test resource");
+            const LAYOUT_SEED: u64 = layout_name("test resource");
             fn put(&self, out: &mut Writer) {
                 out.put(&1u8);
             }

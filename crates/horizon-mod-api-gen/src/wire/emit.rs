@@ -106,7 +106,7 @@ pub(super) fn types(types: &Types<'_>) -> String {
             } else {
                 String::new()
             };
-            writeln!(out,"impl crate::wire::Wire for {container}<dyn {path}> {{ const LAYOUT:u64=crate::wire::layout_name(stringify!({container}<dyn {path}>)); const MIN:usize=8; fn put(&self,out:&mut crate::wire::Writer) {{ {put} }} {transfer} fn take(input:&mut crate::wire::Reader<'_>)->Result<Self,crate::wire::WireError> {{ input.take_resource() }} }}").unwrap();
+            writeln!(out,"impl crate::wire::Wire for {container}<dyn {path}> {{ const LAYOUT_SEED:u64=crate::wire::layout_name(stringify!({container}<dyn {path}>)); const MIN:usize=8; fn put(&self,out:&mut crate::wire::Writer) {{ {put} }} {transfer} fn take(input:&mut crate::wire::Reader<'_>)->Result<Self,crate::wire::WireError> {{ input.take_resource() }} }}").unwrap();
         }
     }
     for (def_id, def) in types.defs.iter().enumerate() {
@@ -211,7 +211,7 @@ pub(super) fn types(types: &Types<'_>) -> String {
 
 fn imp(rust: &str, min: &str, put: &str, take: &str) -> String {
     format!(
-        "#[allow(unreachable_patterns, unused_variables)]\nimpl crate::wire::Wire for {rust} {{\nconst LAYOUT: u64 = crate::wire::layout_name(stringify!({rust}));\nconst MIN: usize = {min};\nfn put(&self, out: &mut crate::wire::Writer) {{ {put} }}\nfn take(input: &mut crate::wire::Reader<'_>) -> ::std::result::Result<Self, crate::wire::WireError> {{ {take} }}\n}}\n"
+        "#[allow(unreachable_patterns, unused_variables)]\nimpl crate::wire::Wire for {rust} {{\nconst LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!({rust}));\nconst MIN: usize = {min};\nfn put(&self, out: &mut crate::wire::Writer) {{ {put} }}\nfn take(input: &mut crate::wire::Reader<'_>) -> ::std::result::Result<Self, crate::wire::WireError> {{ {take} }}\n}}\n"
     )
 }
 

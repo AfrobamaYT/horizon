@@ -6,7 +6,7 @@ use crate::{
 };
 
 impl Wire for crate::OwnProvider {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::OwnProvider));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::OwnProvider));
     const MIN: usize = 12;
     fn put(&self, out: &mut Writer) {
         out.put(&self.handler);
@@ -26,7 +26,7 @@ impl Wire for crate::OwnProvider {
 }
 
 impl Wire for crate::Transaction {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::Transaction));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::Transaction));
     const MIN: usize = 0;
     fn put(&self, _: &mut Writer) {}
     fn take(_: &mut Reader<'_>) -> Result<Self, WireError> {
@@ -34,7 +34,7 @@ impl Wire for crate::Transaction {
     }
 }
 impl Wire for crate::TransactionSeal {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::TransactionSeal));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::TransactionSeal));
     const MIN: usize = 0;
     fn put(&self, _: &mut Writer) {}
     fn take(_: &mut Reader<'_>) -> Result<Self, WireError> {
@@ -42,7 +42,7 @@ impl Wire for crate::TransactionSeal {
     }
 }
 impl Wire for crate::LoadedMods {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::LoadedMods));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::LoadedMods));
     const MIN: usize = 0;
     fn put(&self, _: &mut Writer) {}
     fn take(_: &mut Reader<'_>) -> Result<Self, WireError> {
@@ -50,7 +50,7 @@ impl Wire for crate::LoadedMods {
     }
 }
 impl Wire for crate::RegistrationContext {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::RegistrationContext));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::RegistrationContext));
     const MIN: usize = 0;
     fn put(&self, _: &mut Writer) {}
     fn take(_: &mut Reader<'_>) -> Result<Self, WireError> {
@@ -58,7 +58,7 @@ impl Wire for crate::RegistrationContext {
     }
 }
 impl Wire for crate::PackageKind {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::PackageKind));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::PackageKind));
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
         out.put(
@@ -77,7 +77,7 @@ impl Wire for crate::PackageKind {
     }
 }
 impl Wire for crate::Side {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::Side));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::Side));
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
         out.put(
@@ -96,7 +96,7 @@ impl Wire for crate::Side {
     }
 }
 impl Wire for crate::PackageInfo {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::PackageInfo));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::PackageInfo));
     const MIN: usize = 24;
     fn put(&self, out: &mut Writer) {
         out.put(&self.id);
@@ -171,7 +171,7 @@ mod resource_wire_tests {
 macro_rules! slot_keys {
     ($width:ty; $($key:ty),+ $(,)?) => {$ (
         impl Wire for $key {
-            const LAYOUT: u64 = crate::wire::layout_name(stringify!($key));
+            const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!($key));
     const MIN: usize = <$width as Wire>::MIN;
             fn put(&self, out: &mut Writer) { out.put(&self.0); }
             fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
@@ -191,7 +191,7 @@ slot_keys!(u32; BlockEntityTypeKey, BlockKey, BoolGameRuleKey, DimensionKey, Eff
 slot_keys!(u64; UnresolvedFluid);
 
 impl Wire for crate::NativeWorldEpoch {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::NativeWorldEpoch));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::NativeWorldEpoch));
     const MIN: usize = 8;
     fn put(&self, out: &mut Writer) {
         out.put(&self.get());
@@ -201,7 +201,7 @@ impl Wire for crate::NativeWorldEpoch {
     }
 }
 impl Wire for crate::NativeTickId {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::NativeTickId));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::NativeTickId));
     const MIN: usize = 8;
     fn put(&self, out: &mut Writer) {
         out.put(&self.get());
@@ -211,7 +211,7 @@ impl Wire for crate::NativeTickId {
     }
 }
 impl Wire for crate::EntityRef {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::EntityRef));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::EntityRef));
     const MIN: usize = 12;
     fn put(&self, out: &mut Writer) {
         out.put(&self.epoch());
@@ -224,7 +224,7 @@ impl Wire for crate::EntityRef {
 macro_rules! entity_handles {
     ($($ty:ty),+ $(,)?) => { $(
         impl Wire for $ty {
-            const LAYOUT: u64 = crate::wire::layout_name(stringify!($ty));
+            const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!($ty));
     const MIN: usize = crate::EntityRef::MIN;
             fn put(&self, out: &mut Writer) { out.put(&self.entity()); }
             fn take(input: &mut Reader<'_>) -> Result<Self, WireError> { Ok(Self::new(input.take()?)) }
@@ -244,7 +244,7 @@ entity_handles!(
 );
 
 impl Wire for crate::Identifier {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::Identifier));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::Identifier));
     const MIN: usize = 8;
     fn put(&self, out: &mut Writer) {
         out.put_str(self.namespace());
@@ -256,7 +256,7 @@ impl Wire for crate::Identifier {
     }
 }
 impl Wire for crate::LevelKey {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::LevelKey));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::LevelKey));
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
         out.put_str(&String::from(self));
@@ -266,7 +266,7 @@ impl Wire for crate::LevelKey {
     }
 }
 impl Wire for crate::ConfigPath {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::ConfigPath));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::ConfigPath));
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
         out.put_str(self.as_str());
@@ -276,7 +276,7 @@ impl Wire for crate::ConfigPath {
     }
 }
 impl Wire for crate::SpawnerKey {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::SpawnerKey));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::SpawnerKey));
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
         out.put_str(self.as_str());
@@ -286,7 +286,7 @@ impl Wire for crate::SpawnerKey {
     }
 }
 impl Wire for crate::CustomSpawners {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::CustomSpawners));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::CustomSpawners));
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
         out.put(&Vec::from(self));
@@ -297,7 +297,7 @@ impl Wire for crate::CustomSpawners {
     }
 }
 impl Wire for crate::FileToIdConverter {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::FileToIdConverter));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::FileToIdConverter));
     const MIN: usize = 8;
     fn put(&self, out: &mut Writer) {
         out.put(&<(String, String)>::from(self));
@@ -308,7 +308,7 @@ impl Wire for crate::FileToIdConverter {
     }
 }
 impl Wire for crate::ReloadResourceError {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::ReloadResourceError));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::ReloadResourceError));
     const MIN: usize = 12;
     fn put(&self, out: &mut Writer) {
         out.put(&<(crate::Identifier, String)>::from(self));
@@ -318,7 +318,7 @@ impl Wire for crate::ReloadResourceError {
     }
 }
 impl Wire for crate::BlockState {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::BlockState));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::BlockState));
     const MIN: usize = 6;
     fn put(&self, out: &mut Writer) {
         out.put(&self.block());
@@ -329,7 +329,7 @@ impl Wire for crate::BlockState {
     }
 }
 impl Wire for crate::BlockStateRange {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::BlockStateRange));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::BlockStateRange));
     const MIN: usize = 10;
     fn put(&self, out: &mut Writer) {
         out.put(&self.first());
@@ -343,7 +343,7 @@ impl Wire for crate::BlockStateRange {
 
 /// An NBT key: UTF-16 units, in the bytes of a `Vec<u16>` but written and read in one pass.
 impl Wire for horizon_core::nbt::JavaString {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(horizon_core::nbt::JavaString));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(horizon_core::nbt::JavaString));
     const MIN: usize = <Vec<u16> as Wire>::MIN;
     fn put(&self, out: &mut Writer) {
         out.put_u16s(&self.0);
@@ -354,7 +354,7 @@ impl Wire for horizon_core::nbt::JavaString {
 }
 
 impl Wire for crate::Components {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::Components));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::Components));
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
         out.put(self.as_nbt());
@@ -364,7 +364,7 @@ impl Wire for crate::Components {
     }
 }
 impl Wire for crate::ItemStack {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::ItemStack));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::ItemStack));
     const MIN: usize = 10;
     fn put(&self, out: &mut Writer) {
         out.put(&self.item());
@@ -388,7 +388,7 @@ impl Wire for crate::ItemStack {
 }
 
 impl Wire for crate::SpawnerEntry {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::SpawnerEntry));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::SpawnerEntry));
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
         match self {
@@ -411,7 +411,7 @@ impl Wire for crate::SpawnerEntry {
     }
 }
 impl Wire for crate::LevelRef {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::LevelRef));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::LevelRef));
     const MIN: usize = 12;
     fn put(&self, out: &mut Writer) {
         out.put(&self.epoch());
@@ -422,7 +422,7 @@ impl Wire for crate::LevelRef {
     }
 }
 impl Wire for crate::ChunkRef {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::ChunkRef));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::ChunkRef));
     const MIN: usize = 20;
     fn put(&self, out: &mut Writer) {
         out.put(&self.level());
@@ -433,7 +433,7 @@ impl Wire for crate::ChunkRef {
     }
 }
 impl Wire for crate::RaidRef {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::RaidRef));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::RaidRef));
     const MIN: usize = 16;
     fn put(&self, out: &mut Writer) {
         out.put(&self.level());
@@ -444,7 +444,7 @@ impl Wire for crate::RaidRef {
     }
 }
 impl Wire for crate::PlayerRef {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::PlayerRef));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::PlayerRef));
     const MIN: usize = 28;
     fn put(&self, out: &mut Writer) {
         out.put(&self.entity());
@@ -458,7 +458,7 @@ impl Wire for crate::PlayerRef {
     }
 }
 impl Wire for crate::GlobalPos {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::GlobalPos));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::GlobalPos));
     const MIN: usize = 20;
     fn put(&self, out: &mut Writer) {
         out.put(self.dimension());
@@ -469,7 +469,7 @@ impl Wire for crate::GlobalPos {
     }
 }
 impl Wire for crate::SoundRef {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::SoundRef));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::SoundRef));
     const MIN: usize = 8;
     fn put(&self, out: &mut Writer) {
         out.put(&self.id);
@@ -479,7 +479,7 @@ impl Wire for crate::SoundRef {
     }
 }
 impl Wire for crate::BossBarRef {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::BossBarRef));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::BossBarRef));
     const MIN: usize = 24;
     fn put(&self, out: &mut Writer) {
         out.put(&self.epoch);
@@ -493,7 +493,7 @@ impl Wire for crate::BossBarRef {
     }
 }
 impl Wire for crate::MenuRef {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::MenuRef));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::MenuRef));
     const MIN: usize = 40;
     fn put(&self, out: &mut Writer) {
         out.put(&self.player);
@@ -509,7 +509,7 @@ impl Wire for crate::MenuRef {
     }
 }
 impl Wire for crate::BlockEntityRef {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::BlockEntityRef));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::BlockEntityRef));
     const MIN: usize = 32;
     fn put(&self, out: &mut Writer) {
         out.put(&self.level);
@@ -525,7 +525,7 @@ impl Wire for crate::BlockEntityRef {
     }
 }
 impl Wire for crate::UnspawnedMobRef {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::UnspawnedMobRef));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::UnspawnedMobRef));
     const MIN: usize = 16;
     fn put(&self, out: &mut Writer) {
         out.put(&self.epoch());
@@ -536,7 +536,7 @@ impl Wire for crate::UnspawnedMobRef {
     }
 }
 impl Wire for crate::ModelRef {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::ModelRef));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::ModelRef));
     const MIN: usize = 12;
     fn put(&self, out: &mut Writer) {
         out.put(&self.0);
@@ -547,7 +547,7 @@ impl Wire for crate::ModelRef {
     }
 }
 impl Wire for crate::InstanceGroupRef {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::InstanceGroupRef));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::InstanceGroupRef));
     const MIN: usize = 12;
     fn put(&self, out: &mut Writer) {
         out.put(&self.0);
@@ -558,7 +558,7 @@ impl Wire for crate::InstanceGroupRef {
     }
 }
 impl Wire for crate::TicketController {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::TicketController));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::TicketController));
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
         out.put(&self.slot());
@@ -569,7 +569,7 @@ impl Wire for crate::TicketController {
 }
 
 impl Wire for crate::SpawnerKind {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::SpawnerKind));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::SpawnerKind));
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
         out.put(&(*self as u32));
@@ -586,7 +586,7 @@ impl Wire for crate::SpawnerKind {
     }
 }
 impl Wire for crate::NativeBlockUpdateFlags {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::NativeBlockUpdateFlags));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::NativeBlockUpdateFlags));
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
         out.put(&self.bits());
@@ -596,7 +596,7 @@ impl Wire for crate::NativeBlockUpdateFlags {
     }
 }
 impl Wire for crate::FeatureFlags {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::FeatureFlags));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::FeatureFlags));
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
         out.put(&self.iter().map(str::to_owned).collect::<Vec<_>>());
@@ -606,7 +606,7 @@ impl Wire for crate::FeatureFlags {
     }
 }
 impl Wire for crate::NativeMobGoalEntry {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::NativeMobGoalEntry));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::NativeMobGoalEntry));
     const MIN: usize = 9;
     fn put(&self, out: &mut Writer) {
         out.put(&self.priority);
@@ -622,7 +622,7 @@ impl Wire for crate::NativeMobGoalEntry {
     }
 }
 impl Wire for crate::BlockEntityPartError {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::BlockEntityPartError));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::BlockEntityPartError));
     const MIN: usize = 8;
     fn put(&self, out: &mut Writer) {
         match self {
@@ -651,7 +651,7 @@ impl Wire for crate::BlockEntityPartError {
     }
 }
 impl Wire for crate::ItemResource {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::ItemResource));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::ItemResource));
     const MIN: usize = crate::ItemStack::MIN;
     fn put(&self, out: &mut Writer) {
         out.put(&self.0);
@@ -661,7 +661,7 @@ impl Wire for crate::ItemResource {
     }
 }
 impl Wire for crate::FluidResource {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::FluidResource));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::FluidResource));
     const MIN: usize = crate::FluidStack::MIN;
     fn put(&self, out: &mut Writer) {
         out.put(&self.0);
@@ -671,7 +671,7 @@ impl Wire for crate::FluidResource {
     }
 }
 impl Wire for crate::Corners {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::Corners));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::Corners));
     const MIN: usize = 24;
     fn put(&self, out: &mut Writer) {
         out.put(&self.width);
@@ -687,7 +687,7 @@ impl Wire for crate::Corners {
     }
 }
 impl Wire for crate::ParticleOptions {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::ParticleOptions));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::ParticleOptions));
     const MIN: usize = 45;
     fn put(&self, out: &mut Writer) {
         out.put(&self.ty);
@@ -719,7 +719,7 @@ impl Wire for crate::ParticleOptions {
     }
 }
 impl Wire for crate::Reduction {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::Reduction));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::Reduction));
     const MIN: usize = 1;
     fn put(&self, out: &mut Writer) {
         out.put(
@@ -746,7 +746,7 @@ impl Wire for crate::Reduction {
     }
 }
 impl Wire for crate::ReductionChange {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::ReductionChange));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::ReductionChange));
     const MIN: usize = 5;
     fn put(&self, out: &mut Writer) {
         let (kind, value) = match *self {
@@ -771,7 +771,7 @@ impl Wire for crate::ReductionChange {
     }
 }
 impl Wire for crate::DamageContainer {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::DamageContainer));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::DamageContainer));
     const MIN: usize = 53;
     fn put(&self, out: &mut Writer) {
         let v = crate::DamageValues::from(self);
@@ -806,7 +806,7 @@ impl Wire for crate::DamageContainer {
 }
 
 impl Wire for crate::BiomeId {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::BiomeId));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::BiomeId));
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
         out.put(&self.0);
@@ -825,7 +825,7 @@ impl Wire for crate::ModColorResolver {
     }
 }
 impl Wire for crate::StatePredicate {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::StatePredicate));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::StatePredicate));
     const MIN: usize = 12;
     fn put(&self, out: &mut Writer) {
         let record = crate::StatePredicateRecord::from(self);
@@ -852,7 +852,7 @@ impl Wire for crate::StatePredicate {
     }
 }
 impl Wire for crate::particles::PositionSource {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::particles::PositionSource));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::particles::PositionSource));
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
         match self {
@@ -879,7 +879,7 @@ impl Wire for crate::particles::PositionSource {
     }
 }
 impl Wire for crate::EquipmentSlotGroup {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::EquipmentSlotGroup));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::EquipmentSlotGroup));
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
         out.put(&(*self as u32));
@@ -902,7 +902,7 @@ impl Wire for crate::EquipmentSlotGroup {
     }
 }
 impl Wire for crate::ItemAttributeModifier {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::ItemAttributeModifier));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::ItemAttributeModifier));
     const MIN: usize = 0;
     fn put(&self, out: &mut Writer) {
         out.put(&self.attribute);
@@ -914,7 +914,7 @@ impl Wire for crate::ItemAttributeModifier {
     }
 }
 impl Wire for crate::ItemAttributeModifiers {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::ItemAttributeModifiers));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::ItemAttributeModifiers));
     const MIN: usize = 5;
     fn put(&self, out: &mut Writer) {
         out.put(&self.entries);
@@ -928,7 +928,7 @@ impl Wire for crate::ItemAttributeModifiers {
     }
 }
 impl Wire for crate::ItemEnchantments {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::ItemEnchantments));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::ItemEnchantments));
     const MIN: usize = 5;
     fn put(&self, out: &mut Writer) {
         out.put(&self.entries);
@@ -942,7 +942,7 @@ impl Wire for crate::ItemEnchantments {
     }
 }
 impl Wire for crate::containers::ModRevision {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::containers::ModRevision));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::containers::ModRevision));
     const MIN: usize = 16;
     fn put(&self, out: &mut Writer) {
         out.put(&self.identity());
@@ -953,7 +953,7 @@ impl Wire for crate::containers::ModRevision {
     }
 }
 impl Wire for crate::ModBlockEntity {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::ModBlockEntity));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::ModBlockEntity));
     const MIN: usize = 32;
     fn put(&self, out: &mut Writer) {
         out.put(&self.id);
@@ -979,7 +979,7 @@ impl Wire for crate::ModBlockEntity {
 }
 
 impl Wire for crate::ItemPlace {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::ItemPlace));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::ItemPlace));
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
         use crate::ItemPlace::*;
@@ -1149,7 +1149,7 @@ mod tests {
 
 /// The whole generator, through its own constructor, which masks the state to 48 bits.
 impl Wire for crate::LegacyRandom {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::LegacyRandom));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::LegacyRandom));
     const MIN: usize = 9;
     fn put(&self, out: &mut Writer) {
         out.put(&<(u64, Option<f64>)>::from(self));
@@ -1161,7 +1161,7 @@ impl Wire for crate::LegacyRandom {
 
 /// The converted files of a reload, as the game hands them over: ids that parsed, with their bytes.
 impl Wire for crate::reload::ReloadFiles {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::reload::ReloadFiles));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::reload::ReloadFiles));
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
         out.put(&self.0);
@@ -1171,7 +1171,7 @@ impl Wire for crate::reload::ReloadFiles {
     }
 }
 impl Wire for crate::ServerReloadContext {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::ServerReloadContext));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::ServerReloadContext));
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
         out.put(&self.files);
@@ -1181,7 +1181,7 @@ impl Wire for crate::ServerReloadContext {
     }
 }
 impl Wire for crate::ClientReloadContext {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(crate::ClientReloadContext));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::ClientReloadContext));
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
         out.put(&self.files);

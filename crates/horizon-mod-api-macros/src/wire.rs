@@ -41,7 +41,7 @@ pub(crate) fn expand(mut input: DeriveInput) -> syn::Result<TokenStream> {
             #[automatically_derived]
             impl #imp #w::Wire for #name #ty #clause {
                 const MIN: usize = <#via as #w::Wire>::MIN;
-                const LAYOUT: u64 = <#via as #w::Wire>::LAYOUT;
+                const LAYOUT_SEED: u64 = #w::layout_name("via");
                 fn layout(visiting: &mut Vec<&'static str>) -> u64 {
                     <#via as #w::Wire>::layout(visiting)
                 }
@@ -130,7 +130,7 @@ pub(crate) fn expand(mut input: DeriveInput) -> syn::Result<TokenStream> {
         #[automatically_derived]
             impl #imp #w::Wire for #name #ty #clause {
             const MIN: usize = #min;
-            const LAYOUT: u64 = #w::layout_name(stringify!(#name));
+            const LAYOUT_SEED: u64 = #w::layout_name(stringify!(#name));
             fn layout(visiting: &mut Vec<&'static str>) -> u64 {
                 let identity = ::core::any::type_name::<Self>();
                 if visiting.contains(&identity) { return #w::layout_name("recursive"); }

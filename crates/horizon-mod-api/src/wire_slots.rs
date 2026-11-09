@@ -126,7 +126,7 @@ impl<T> Slots<T> {
 }
 
 impl crate::wire::Wire for Id {
-    const LAYOUT: u64 = crate::wire::layout_name(stringify!(Id));
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(Id));
     const MIN: usize = 8;
     fn put(&self, out: &mut crate::wire::Writer) {
         out.put(&self.0);
