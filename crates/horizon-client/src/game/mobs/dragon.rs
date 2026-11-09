@@ -6,6 +6,8 @@
 //! the spikes, its parts (head and neck take full damage, the rest a quarter
 //! plus one), wing knockback, block breaking, the death flight and rays, the
 //! exit portal, the egg and the next gateway; and its rendering and boss bar.
+#[path = "dragon/rays.rs"]
+mod rays;
 #[path = "dragon/save_lending.rs"]
 mod save_lending;
 use super::api_values::TryIntoApi;
