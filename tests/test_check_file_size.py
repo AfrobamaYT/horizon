@@ -234,6 +234,14 @@ class SyncProvenanceTests(unittest.TestCase):
             with self.subTest(marker=marker):
                 self.assertTrue(check_file_size.sync_provenance(marker, self.base))
 
+    def test_an_upstream_base_ancestor_that_is_a_merge_parent_is_rejected(self):
+        # A forced merge makes the old base an exact merge parent, and it is
+        # also in upstream main. Only the outside-base rule rejects this SHA.
+        self.run_git("checkout", "-q", "-b", "already-based", self.base)
+        self.run_git("merge", "-q", "--no-ff", "--no-edit", "upstream")
+        result = check_file_size.sync_provenance(self.base, self.base)
+        self.assertIn("already an ancestor of the base", result[0])
+
     def test_ancestor_without_merge_parent_is_not_a_sync(self):
         self.run_git("checkout", "-q", "upstream")
         self.commit("child")

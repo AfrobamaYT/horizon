@@ -190,10 +190,6 @@ def sync_provenance(marker, base, head="HEAD"):
         return ["sync baseline provenance needs full history; fetch --unshallow before checking"]
     if marker is None:
         return ["sync baseline provenance needs a sync-baseline header"]
-    commit = subprocess.run(["git", "cat-file", "-t", marker], cwd=ROOT,
-                            capture_output=True, text=True)
-    if commit.returncode != 0 or commit.stdout.strip() != "commit":
-        return [f"sync baseline SHA {marker} is not an available commit"]
     ancestor = subprocess.run(["git", "merge-base", "--is-ancestor", marker, base], cwd=ROOT,
                               capture_output=True)
     if ancestor.returncode == 0:
