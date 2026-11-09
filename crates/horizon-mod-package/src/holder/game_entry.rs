@@ -15,6 +15,18 @@ pub fn acquire_entry(context: &ModSelectionContext) -> io::Result<Option<Acquire
     }
     reference.acquire(context).map(Some)
 }
+// Selection syntax belongs to the command-line boundary, not to lease acquisition.
+// Refused syntax must retain the game's usage status and never create crash reports.
+fn launch_arguments(command: &Command) -> io::Result<LaunchArguments> {
+    match LaunchArguments::for_command(command) {
+        Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+            eprintln!("Horizon: {error}");
+            std::process::exit(2);
+        }
+        result => result,
+    }
+}
+
 /// First operation in ordinary and generated main. Private holder mode never returns.
 pub fn bootstrap() -> (Option<Capture>, Option<LaunchArguments>) {
     enter();
@@ -23,7 +35,7 @@ pub fn bootstrap() -> (Option<Capture>, Option<LaunchArguments>) {
             let executable = std::env::current_exe()?;
             let mut command = Command::new(&executable);
             command.args(std::env::args_os().skip(1));
-            let selection = LaunchArguments::for_command(&command)?;
+            let selection = launch_arguments(&command)?;
             // Help and capability replies never open game caches or load mods.
             if selection.is_information_request() {
                 return Ok(());
@@ -42,7 +54,7 @@ pub fn bootstrap() -> (Option<Capture>, Option<LaunchArguments>) {
     let result = (|| -> io::Result<(Capture, LaunchArguments)> {
         let mut command = Command::new(std::env::current_exe()?);
         command.args(std::env::args_os().skip(1));
-        let selection = LaunchArguments::for_command(&command)?;
+        let selection = launch_arguments(&command)?;
         let ownership = acquire_entry(&selection.context)?.ok_or(io::ErrorKind::InvalidData)?;
         // Native exit callbacks run after main's locals drop; only kernel exit may release claims.
         let ownership = Box::leak(Box::new(ownership));
@@ -101,7 +113,7 @@ fn acquire_standalone(
     let Some((data, registry)) = found else {
         return Ok(None);
     };
-    let paths = lease_paths(executable, selection, data)?;
+    let paths = lease_paths(executable, selection, data, &std::env::current_dir()?)?;
     let snapshots = paths
         .iter()
         .map(|(path, complete)| Snapshot::capture(path, *complete))
@@ -121,6 +133,7 @@ pub fn lease_paths(
     executable: &Path,
     selection: &LaunchArguments,
     data: &Path,
+    directory: &Path,
 ) -> io::Result<Vec<(PathBuf, bool)>> {
     // Normalize both sides, including Windows' extended-path prefix and macOS /tmp aliases.
     let data = data.canonicalize()?;
@@ -151,7 +164,7 @@ pub fn lease_paths(
         if let crate::selection::Argument::Value(name, value) = argument
             && name == "--resources"
         {
-            candidates.push(std::path::absolute(value)?);
+            candidates.push(directory.join(value));
         }
     }
     for path in candidates {
@@ -327,6 +340,26 @@ mod tests {
             std::fs::write(install.join(".installed"), b"").unwrap();
             assert!(acquire_snapshots(&registry, &[snapshot]).is_err());
         }
+    }
+
+    #[test]
+    fn resources_resolve_against_the_game_command_directory_not_the_launcher() {
+        let root = tempfile::tempdir().unwrap();
+        let data = root.path().canonicalize().unwrap();
+        let install = data.join("install");
+        let game = data.join("instances/player");
+        let resources = data.join("resources");
+        for path in [&install, &game, &resources] {
+            std::fs::create_dir_all(path).unwrap();
+        }
+        let executable = install.join("game");
+        let mut command = Command::new(&executable);
+        command
+            .current_dir(&game)
+            .args(["--resources", "../../resources"]);
+        let selection = LaunchArguments::for_command(&command).unwrap();
+        let paths = lease_paths(&executable, &selection, &data, &game).unwrap();
+        assert!(paths.iter().any(|(path, _)| *path == resources));
     }
 
     #[test]

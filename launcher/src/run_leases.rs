@@ -186,7 +186,7 @@ pub(crate) fn spawn(command: &mut Command, piped: bool) -> std::io::Result<std::
                 environment.remove(std::ffi::OsStr::new(GAME));
                 let selection = LaunchArguments::for_command(&game)?;
                 let data = crate::backend::data_dir().canonicalize()?;
-                let trees = holder::lease_paths(&executable, &selection, &data)?;
+                let trees = holder::lease_paths(&executable, &selection, &data, &cwd)?;
                 let program = holder::Program {
                     executable: command.get_program().to_owned(),
                     arguments: command.get_args().map(std::ffi::OsStr::to_owned).collect(),
@@ -207,7 +207,9 @@ pub(crate) fn spawn(command: &mut Command, piped: bool) -> std::io::Result<std::
                     )),
                 )?;
                 let mut holder_command = Command::new(executable);
-                holder_command.args(&words[1..]);
+                // Private bootstrap ignores arguments; retaining the final command's arguments
+                // also permits receiver harnesses whose process entry parses test filters first.
+                holder_command.args(command.get_args());
                 // Spawn inherits the caller's chosen pipe/terminal configuration.
                 // Transfer stdio through the original Command is not possible; callers set
                 // the same policy on the holder via the explicit mode below.

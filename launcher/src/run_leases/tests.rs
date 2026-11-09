@@ -106,7 +106,9 @@ fn routed_game_keeps_its_lease_after_launcher_sigkill() {
     let root = tempfile::tempdir().unwrap();
     let data = root.path().canonicalize().unwrap();
     let install = data.join("install");
-    let home = data.join("home");
+    let home = data.join("instances/player");
+    let resources = data.join("resources");
+    fs::create_dir_all(&resources).unwrap();
     fs::create_dir_all(&install).unwrap();
     fs::create_dir_all(&home).unwrap();
     fs::write(install.join(".installed"), b"").unwrap();
@@ -151,7 +153,29 @@ fn routed_game_keeps_its_lease_after_launcher_sigkill() {
         registry.lock(&directory(&install), LockMode::Exclusive),
         Err(Error::Busy)
     ));
+    assert!(
+        matches!(
+            registry.lock(&directory(&resources), LockMode::Exclusive),
+            Err(Error::Busy)
+        ),
+        "relative resources lost their lease after launcher death"
+    );
     fs::write(data.join("routed-stop"), b"").unwrap();
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match registry.lock(&directory(&resources), LockMode::Exclusive) {
+            Ok(claim) => {
+                drop(claim);
+                break;
+            }
+            Err(Error::Busy) => assert!(
+                std::time::Instant::now() < end,
+                "game did not release resources after exit"
+            ),
+            Err(error) => panic!("unexpected cleanup error: {error:?}"),
+        }
+        std::thread::yield_now();
+    }
 }
 
 #[cfg(unix)]
@@ -166,8 +190,19 @@ fn routing_actor() {
         let mut game = Command::new(root.join("install/actor"));
         game.args(["--exact", "run_leases::tests::routing_actor"])
             .env("ROUTING_MODE", "game")
-            .current_dir(root.join("home"));
-        let game = crate::launch::wrap(game, &crate::launch::Launch::default());
+            .current_dir(root.join("instances/player"));
+        let mut game = crate::launch::wrap(game, &crate::launch::Launch::default());
+        // A wrapper may consume engine arguments before starting libtest's receiver.
+        // Preserve the declared engine command, whose cwd differs from this launcher.
+        let words: Vec<std::ffi::OsString> = [
+            root.join("install/actor").into_os_string(),
+            "--exact".into(),
+            "run_leases::tests::routing_actor".into(),
+            "--resources".into(),
+            "../../resources".into(),
+        ]
+        .into();
+        game.env(super::GAME, serde_json::to_string(&words).unwrap());
         let (mut game, _runtime) = crate::backend::prepare_command(game).unwrap();
         let mut child = super::spawn(&mut game, false).unwrap();
         let _ = child.wait();
