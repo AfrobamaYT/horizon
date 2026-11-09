@@ -214,6 +214,12 @@ impl Game<'_> {
                         .filter(|r| r.extra.mount == Some(v))
                         .count();
                     attach = riders::happy_ghast_attachment(seat);
+                } else if vehicle.kind.passenger_attachments.len() > 1 {
+                    let seat = self.mobs[..i]
+                        .iter()
+                        .filter(|r| r.extra.mount == Some(v))
+                        .count();
+                    attach = riders::passenger_attachment_at(vehicle, seat);
                 }
                 let (pos, prev) = (vehicle.position, vehicle.previous);
                 let (yaw, prev_yaw) = (vehicle.yaw, vehicle.previous_yaw);
