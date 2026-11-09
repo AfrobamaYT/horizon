@@ -237,6 +237,14 @@ pub(super) struct GuestSwap {
 }
 
 impl GuestPlay {
+    /// The guest's `Player.attackStrengthTicker` outside its turn.
+    pub(in crate::game) fn attack_ticks(&self) -> u32 {
+        self.attack_ticks
+    }
+    /// The main-hand item of the guest's last tick (`Game.attack_item`).
+    pub(in crate::game) fn attack_item(&self) -> Option<&str> {
+        self.attack_item.as_deref()
+    }
     /// The item in use: its slot and for how many ticks.
     pub(super) fn using(&self) -> Option<(usize, u32)> {
         self.using

@@ -483,10 +483,19 @@ fn result_error(output: &syn::ReturnType) -> Option<&Type> {
     Some(error)
 }
 
+/// A borrowed `&ItemStack`: outside a checked write, the method only reads it.
+fn read_only_stack(ty: &Type) -> bool {
+    matches!(ty, Type::Reference(reference) if outer_type(&reference.elem, "ItemStack"))
+}
+
 fn outer_type(ty: &Type, expected: &str) -> bool {
     matches!(ty, Type::Path(path) if path.path.segments.last().is_some_and(|segment| segment.ident == expected))
 }
 
+/// The conversion code for a host method's boundary arguments, the arguments to pass on, and
+/// whether it is a checked write (`&mut self`, a `Result`, a converted value). A checked write
+/// refuses an invalid value with its error; a read converts a borrowed stack without the write
+/// limits, and any other refused value makes the method return its default.
 fn boundary_arguments(
     sig: &syn::Signature,
     method: &str,
@@ -521,6 +530,10 @@ fn boundary_arguments(
         }
         let conversion = if text {
             format!("{name}.try_into_engine(&())")
+        } else if !checked_write && read_only_stack(&arg.ty) {
+            // Only a write imposes resident maxima: a stack vanilla stores (damage above its
+            // maximum, say) still answers a read.
+            format!("crate::game::api_values::stack_value({name})")
         } else {
             format!("{name}.try_into_engine(self.items())")
         };
@@ -528,9 +541,7 @@ fn boundary_arguments(
             format!(
                 "match {name}.try_into_engine(&()) {{ Ok(value) => value, Err(_) => return Default::default() }}"
             )
-        } else if text {
-            format!("{conversion}?")
-        } else if checked_write {
+        } else if text || checked_write {
             format!("{conversion}?")
         } else if result_error(&sig.output).is_some() {
             format!(
@@ -958,6 +969,25 @@ mod tests {
         assert!(!checked_write);
         assert!(setup.contains("return Err(mod_api::NoBackend::no_backend())"));
         assert!(!setup.contains("Default::default()"));
+    }
+
+    #[test]
+    fn borrowed_stacks_are_read_without_write_validation_outside_checked_writes() {
+        let read = entry("fn item_resource_damageable(&self, stack: &ItemStack) -> bool;");
+        let (setup, args, checked_write) = boundary_arguments(&read.sig, "read").unwrap();
+        assert!(!checked_write);
+        assert!(setup.contains("crate::game::api_values::stack_value(stack)"));
+        assert!(!setup.contains("try_into_engine"));
+        assert_eq!(args, "&stack");
+        let write = entry(
+            "fn living_apply_consume_effect(&mut self, stack: &ItemStack) -> Result<bool, StackWriteError>;",
+        );
+        let (setup, _, checked_write) = boundary_arguments(&write.sig, "write").unwrap();
+        assert!(checked_write);
+        assert!(setup.contains("stack.try_into_engine(self.items())?"));
+        let owned = entry("fn drop_at(&mut self, stack: ItemStack) -> bool;");
+        let (setup, _, _) = boundary_arguments(&owned.sig, "owned").unwrap();
+        assert!(setup.contains("stack.try_into_engine(self.items())"));
     }
 
     #[test]

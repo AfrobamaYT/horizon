@@ -1380,6 +1380,11 @@ mod tests {
             game.options.dedicated = None;
             game.player = Some(PlayerMotion::new(game.motion, Vec3::new(4.5, 202.0, 4.5)).unwrap());
             game.creative = true;
+            // Supply the synthetic chunk before forceload's synchronous load barrier.
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
             game.world_root = std::env::current_dir().unwrap().join("h155-causal-world");
             let pack = game.world_root.join("datapacks/h155_causal");
             let dir = pack.join("data/h155c/function");
@@ -1679,6 +1684,11 @@ mod tests {
             game.options.dedicated = None;
             game.player = Some(PlayerMotion::new(game.motion, Vec3::new(4.5, 202.0, 4.5)).unwrap());
             game.creative = true;
+            // Supply the synthetic chunk before forceload's synchronous load barrier.
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
             game.world_root = std::env::current_dir().unwrap().join("h155-world");
             let pack = game.world_root.join("datapacks/h155_unit");
             let dir = pack.join("data/h155/function");
@@ -1900,14 +1910,29 @@ mod tests {
             .unwrap();
             game.world_root = root.clone();
             game.set_allow_commands(true);
+            // Establish the live pack generation before injecting a refused candidate.
+            // Mod declarations are load-bound; replacing them cannot be used to test
+            // a subsequent successful reload of the same live worker registry.
+            game.reload_datapacks(true, &[]).unwrap();
+            assert!(game.items().block_tags["reload_test:candidate"].contains("minecraft:stone"));
+            assert!(game.run_command("datapack disable \"file/candidate\""));
+            assert!(game.run_command("datapack enable \"file/candidate\""));
+            let live_stone = mod_api::__private::part_tests::block_key("minecraft:stone");
+            assert_eq!(
+                super::super::native_world_read::block_in_tag(live_stone, "reload_test:candidate"),
+                Some(true)
+            );
             crate::game::api_values::install_parts(&[ModEntry::new(
                 "reload_test",
                 Box::new(MissingItem),
             )])
             .unwrap();
+            // Resolve candidate metadata without rebinding the live worker registry.
+            let (registry, _) =
+                horizon_world::level::data::load_registry_with_flags(&game.options.resources)
+                    .unwrap();
+            crate::game::api_values::resolve_block_definitions(&registry).unwrap();
             let stone = mod_api::__private::part_tests::block_key("minecraft:stone");
-            let registry = game.pack.assets.registry;
-            crate::game::api_values::resolve_block_definitions(registry).unwrap();
             let old_tag =
                 super::super::native_world_read::block_in_tag(stone, "reload_test:candidate");
             let old_context = game.loop_context.clone();
@@ -1931,38 +1956,11 @@ mod tests {
                 super::super::native_world_read::block_in_tag(stone, "reload_test:candidate"),
                 old_tag
             );
-            struct Valid;
-            #[mod_api::__subscriptions]
-            impl Hooks for Valid {
-                fn register(&self, registrar: &mut dyn Registrar, _: &RegistrationContext) {
-                    registrar.block_key("minecraft:stone");
-                }
-            }
-            crate::game::api_values::install_parts(&[ModEntry::new(
-                "reload_test",
-                Box::new(Valid),
-            )])
-            .unwrap();
-            game.reload_datapacks(true, &[]).unwrap();
-            assert!(game.items().block_tags["reload_test:candidate"].contains("minecraft:stone"));
-            assert_eq!(
-                super::super::native_world_read::block_in_tag(stone, "reload_test:candidate"),
-                Some(true)
-            );
-            // The command path also prepares the replacement before publishing
-            // its canonical selection or persisting the player's pack settings.
-            assert!(game.run_command("datapack disable \"file/candidate\""));
-            assert!(game.run_command("datapack enable \"file/candidate\""));
             game.save_datapack_settings();
             let settings = std::fs::read(root.join("datapacks.json")).unwrap();
             let enabled = game.fns.enabled.clone();
             let context = game.loop_context.clone();
             let generation = game.damage_tag_generation;
-            crate::game::api_values::install_parts(&[ModEntry::new(
-                "reload_test",
-                Box::new(MissingItem),
-            )])
-            .unwrap();
             assert!(!game.run_command("datapack disable \"file/candidate\""));
             assert_eq!(game.fns.enabled, enabled);
             assert_eq!(
@@ -2070,7 +2068,11 @@ mod tests {
         ] {
             std::fs::create_dir_all(pack.join(path)).unwrap();
         }
-        std::fs::write(pack.join("pack.mcmeta"), "{}").unwrap();
+        std::fs::write(
+            pack.join("pack.mcmeta"),
+            r#"{"pack":{"description":"Function fixture"}}"#,
+        )
+        .unwrap();
         let function = pack.join("data/test/function/start.mcfunction");
         std::fs::write(
             &function,
@@ -2152,7 +2154,7 @@ mod tests {
             game.level.enabled_features = Default::default();
             std::fs::write(
                 pack.join("pack.mcmeta"),
-                r#"{"features":{"enabled":["test:feature"]}}"#,
+                r#"{"pack":{"description":"Feature fixture"},"features":{"enabled":["test:feature"]}}"#,
             )
             .unwrap();
             let stack = game

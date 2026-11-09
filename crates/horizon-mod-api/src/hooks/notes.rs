@@ -110,8 +110,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   the level `dimension`, before it moves (NeoForge's `EntityTravelToDimensionEvent`); `cause` is `nether_portal`,
   `end_portal`, `end_gateway` or `teleport` (a `/tp` or spectator teleport into another level). Set `cancel` to
   keep it where it is. Players and every other entity that crosses a portal or a command's teleport are asked;
-  a ridden vehicle and its server players are asked together and one cancel keeps them all. The player's state
-  is not swapped in.
+  passengers are asked recursively, and a refused passenger stays behind, dismounted, with its own subtree.
+  Discarding an entity in the callback prevents its travel. The player's state is not swapped in.
 - **`native_block_damage_abort(player, name, pos)`**: a server player stopped digging `pos` before it broke. It is
   heard after the server clears the dig and sends the block state back to the client. The player's state is not
   swapped in.
@@ -760,13 +760,23 @@ handle, an entity the client doesn't track and a level it doesn't show:
   players work; armor stands and the dragon return false, and so does a player other than the acting one while another
   player acts.
 - `living.arrow_count(host)` / `set_arrow_count` and `stinger_count` / `set_stinger_count` (`DATA_ARROW_COUNT_ID`,
-  `DATA_STINGER_COUNT_ID`) read and set what is stuck in a player; the player and those around see it. Horizon keeps no
-  such count for mobs (None, false). `set_arrow_removal_ticks` and `set_stinger_removal_ticks` set the ticks until the
-  next one falls out (`removeArrowTime`, `removeStingerTime`; at 0 or less the timer restarts at `20 * (30 - count)`).
+  `DATA_STINGER_COUNT_ID`) read and set what is stuck in a player or a mob; the entity data carries it to the players
+  around, so they see it. Armor stands and the dragon keep no such count (None, false). `set_arrow_removal_ticks` and
+  `set_stinger_removal_ticks` set the ticks until the next one falls out (`removeArrowTime`, `removeStingerTime`; at 0 or
+  less the timer restarts at `20 * (30 - count)`); a mob's timers run in its tick as a player's do.
 - `living.item_use_remaining(host)` / `set_item_use_remaining(host, ticks)` (`useItemRemaining`) read and move the end of
   the item a player uses: at 1 the use completes on the next tick, at 0 or less it lasts until the player lets go, as in
   vanilla. It moves the deadline the use-item Tick hook moves, so shield, bow, trident, spear, instrument and bundle uses,
-  which don't count it, ignore it, and a call inside that Tick hook is overwritten by the hook's result. Nothing in use reads 0 and refuses a write. A mob's item use is a counter of its goal, so mobs read None.
+  which don't count it, ignore it, and a call inside that Tick hook is overwritten by the hook's result. Nothing in use reads 0 and refuses a write. A mob's use never runs out: its read is the item's use duration less the ticks its use counter has run, and a write moves that counter to where `ticks` are left, which the stabs of a spear and the draw of a bow follow. A piglin admiring gold and a drinking witch use no item, so they read 0 and refuse a write.
+- `living.set_riptiding(host, ticks, damage)` (`startAutoSpinAttack`) starts a player's Riptide spin: for `ticks` ticks
+  the player turns, the first mob its box touches takes `damage` and ends the spin, and the players around see it
+  (living flag 4). It adds no velocity (a Riptide launch does that itself), and a `ticks` of 0 or less ends the spin.
+  Mobs, armor stands and the dragon return false: Horizon runs no spin for them.
+- `living.set_waypoint_style(host, &style)` and `set_waypoint_color(host, rgb)` (`Waypoint.Icon.style`, `.color`) change
+  the locator bar icon of a living entity as `/waypoint modify` does, untracking and tracking its waypoint again, so the
+  players it transmits to get the new icon. A colour of `None` shows a player in their team's colour. Only a player's
+  waypoint reaches other players (`waypoint_transmit_range` is 0 for every other entity); a mob's or an armor stand's
+  icon is kept for its waypoint and `/waypoint list`. The dragon returns false.
 - `living.used_item_hand(host)` (`getUsedItemHand` while `isUsingItem`) reads the hand of the item a player or a mob uses,
   None when it uses none; on a client only the local player answers. `living.start_using_item(host, hand)` is
   `LivingEntity.startUsingItem`: the item's use timer and the use-item Start hook, not the item's own `use` (no ammo check,
@@ -1734,6 +1744,8 @@ still go on each event or registrar.
 
 - `Hooks::render_tooltip_pre` (NeoForge's `RenderTooltipEvent.Pre`) is asked for each tooltip about to be placed and drawn, after `render_tooltip_gather_components`: item tooltips and text tooltips (a button's, a book's, the creative tab names), not the selected-item name a bundle draws beside its grid. `place` is the point the tooltip hangs from (the cursor, or the point its screen gives), before the positioner adds its offset and keeps the box on screen; set its `x` and `y` to move it. `screen_width` and `screen_height` are the screen's size. `elements` are the tooltip's lines then its images, read-only (change them in `render_tooltip_gather_components`), and `stack` is the item it describes, `None` for a text tooltip. Set `cancel` and nothing is drawn and no `render_tooltip_texture` is asked. It runs each frame a tooltip shows, only while a mod listens. Diverges from upstream: new hook.
 
+- `Hooks::component_hover` (vanilla's `GuiGraphicsExtractor.componentHoverEffect`; NeoForge has no event for it) is asked for the hover of the text component under the cursor in the chat, a book or a dialog, before the game draws it. `hover` is the typed hover action (`TextHover`: its text, an item or an entity), `x` and `y` the cursor. Set `cancel` and the game draws nothing for it, and a mod can draw its own with `draw`. Left alone, a text hover is split at half the screen's width (at least 200), an item hover draws its stack's tooltip, which asks `item_tooltip` and the `render_tooltip_*` hooks as any item tooltip does, and an entity hover shows its name, type and UUID while advanced tooltips are on. It runs each frame a hovered component shows, only while a mod listens. Diverges from upstream: new hook.
+
 - [advancement triggers](#advancement-triggers) of a mod's own: `player.trigger_criterion(host, trigger, test)` fires a trigger
   an advancement of a content mod or a data pack names (`mymod:pipe_connected`) for one player, as a NeoForge mod's
   `SimpleCriterionTrigger.trigger`.
@@ -1954,8 +1966,9 @@ whole behaviour object with a log warning, falling back to the existing particle
 the sprite set still loads. Vanilla particle JSONs are unaffected. Resource reloads apply new
 declarations to newly spawned particles; live particles keep their spawn-time values.
 The engine copies fixed-size numeric data at spawn and performs no new allocations per particle
-tick. This first slice supports only linear size/opacity curves and constant gravity/friction;
-there is no per-particle code hook.
+tick. Declarations support linear size/opacity curves and constant gravity/friction; for per-particle
+code, register a provider with `register_particle_providers` ("Particle providers"). A provider replaces the
+declared motion (its tick moves the particle) but the declared spawn values still seed it.
 
 
 - the open screen hears of a key press (`native_screen_key_pressed_pre`) and of each character it types (`native_screen_char_typed_pre`), as vanilla's `ScreenEvent.KeyPressed.Pre` and `.CharacterTyped.Pre`: the screen, vanilla's key name (`key.keyboard.e`; a key with no name fires nothing), whether the press is an auto-repeat, the character, GLFW's modifier bits (shift 1, control 2, alt 4, super 8), and `screen.mouse` for the pointer. A cancelled press goes no further — no focus move, no Escape-close, no inventory or hotbar key, no typing by the key itself — while its release still arrives and the characters no mod cancelled still reach the text box, as vanilla's separate `charTyped` comes for a cancelled `keyPressed` too. A cancelled character drops only that character and never reaches a text box, and the character hook's `field` is a copy of the focused box whose edits the box takes through its own filter, length limit and responders; control characters (Enter, Backspace, Tab, Delete, Escape, a Control letter) are keys and fire nothing. A key's characters fire after the key has acted, as GLFW's char callback comes after its key callback, so a key that closes the screen (the inventory key) reports no character (the closed screen hears none) and one that moves the focus types into the box it moved to. The input method's committed text fires the character hook too. They fire for the window and the control socket's `key` and `type` (not its `\b` backspace), after the fullscreen, screenshot, debug and narrator keys, never on the connect and loading screens, the prompts, books and sign editors drawn over gameplay, or while a world loads or saves.

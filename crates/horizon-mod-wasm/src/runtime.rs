@@ -113,8 +113,6 @@ struct Running {
     group: Mutex<Group<State>>,
     poisoned: AtomicBool,
     lending: Arc<AtomicUsize>,
-    /// Exposure plans for this module's raw listeners; freed with the module.
-    policy: std::sync::OnceLock<mod_points::endpoint_policy::EndpointPolicy>,
 }
 struct PoisonOnPanic<'a>(&'a AtomicBool);
 impl Drop for PoisonOnPanic<'_> {
@@ -153,6 +151,7 @@ pub struct WasmMod {
     input: TypedFunc<u32, u32>,
     hook: TypedFunc<u32, u64>,
     pub subscribed: &'static [Option<HookId>],
+    pub(crate) listeners: &'static [mod_api::Listener],
     released: Arc<Releases>,
     subscriptions: Arc<Mutex<std::collections::HashMap<(Id, u32), &'static [Option<HookId>]>>>,
 }
@@ -164,14 +163,12 @@ pub(crate) struct WeakWasmMod {
     input: TypedFunc<u32, u32>,
     hook: TypedFunc<u32, u64>,
     subscribed: &'static [Option<HookId>],
+    pub(crate) listeners: &'static [mod_api::Listener],
     released: Arc<Releases>,
     subscriptions: Arc<Mutex<std::collections::HashMap<(Id, u32), &'static [Option<HookId>]>>>,
 }
 impl WeakWasmMod {
     /// The module-owned plan for a raw point's head call, until the module is dropped.
-    pub(crate) fn plan(&self, head_call: usize) -> Option<Arc<mod_points::exposure::Plan>> {
-        self.running.upgrade()?.policy.get()?.plan(head_call)
-    }
     pub(crate) fn is_stopped(&self) -> bool {
         self.running
             .upgrade()
@@ -192,6 +189,7 @@ impl WeakWasmMod {
             input: self.input.clone(),
             hook: self.hook.clone(),
             subscribed: self.subscribed,
+            listeners: self.listeners,
             released: self.released.clone(),
             subscriptions: self.subscriptions.clone(),
         };
@@ -414,16 +412,13 @@ impl WasmMod {
             input: self.input.clone(),
             hook: self.hook.clone(),
             subscribed: self.subscribed,
+            listeners: self.listeners,
             released: self.released.clone(),
             subscriptions: self.subscriptions.clone(),
         }
     }
     pub(crate) fn mod_id(&self) -> &str {
         &self.id
-    }
-    /// Stores the module's endpoint policy; it lives exactly as long as the module.
-    pub(crate) fn set_policy(&self, policy: mod_points::endpoint_policy::EndpointPolicy) {
-        let _ = self.running.policy.set(policy);
     }
     pub(crate) fn is_stopped(&self) -> bool {
         self.running.poisoned.load(Ordering::Relaxed)
@@ -516,7 +511,6 @@ impl WasmMod {
             lending,
             group: Mutex::new(group),
             poisoned: AtomicBool::new(false),
-            policy: std::sync::OnceLock::new(),
         });
         running
             .group
@@ -533,6 +527,7 @@ impl WasmMod {
                 input,
                 hook,
                 subscribed: &[],
+                listeners: &[],
                 released: Arc::default(),
                 subscriptions: Arc::default(),
             })

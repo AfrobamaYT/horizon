@@ -47,6 +47,13 @@ pub trait BlockStatesHost {
     /// no item; None if either resolved identity is unavailable.
     #[access(Metadata)]
     fn block_item(&self, block: BlockKey) -> Option<ItemKey>;
+    /// Side: both.
+    /// The block `item` places (`BlockItem.getBlock`, as `Block.byItem` reads
+    /// it): `minecraft:wheat_seeds` places `minecraft:wheat`, and a
+    /// standing/wall item places its standing block, not the wall variant.
+    /// None for an item that places no block, and for an unknown item.
+    #[access(Metadata)]
+    fn item_block(&self, item: ItemKey) -> Option<BlockKey>;
 }
 /// The server host's methods of the `block_states` area, implemented by the game and reached through [`ServerHost`].
 #[horizon_mod_api_macros::host_area]
@@ -168,7 +175,6 @@ pub trait BlockStatesBackend {
     /// block, or air for the empty fluid. None for a state no fluid can be in (a tank-only
     /// fluid, an amount above 8, a zero amount for anything but the empty fluid, or a source
     /// that isn't full) and without a resolved registry.
-    /// Not on wasm: the block state id has no wire layout yet.
     #[access(Metadata)]
     fn fluid_legacy_block(&self, state: FluidState) -> Option<BlockStateId>;
     /// Side: both.

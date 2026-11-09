@@ -251,6 +251,7 @@
   "E_INTERNAL_GATED: {mod} uses {path}, which exists only under a cfg; target-specific internals aren't supported.": "E_INTERNAL_GATED: {mod} uses {path}, which exists only under a cfg; target-specific internals aren't supported.",
   "E_INTERNAL_MISSING: {mod} uses {path}, which this game doesn't have; run cargo horizon-mod internals sync to discover this pin's used internals.": "E_INTERNAL_MISSING: {mod} uses {path}, which this game doesn't have; run cargo horizon-mod internals sync to discover this pin's used internals.",
   "E_INTERNAL_SOURCE_UNAVAILABLE: internals sync needs the source for {revision}. It is not cached and could not be downloaded: {error}": "E_INTERNAL_SOURCE_UNAVAILABLE: internals sync needs the source for {revision}. It is not cached and could not be downloaded: {error}",
+  "Registry native binary for {mod}: {url}": "Fișier binar nativ din registru pentru {mod}: {url}",
   "{path} is not a native mod project.": "{path} is not a native mod project.",
   "Internals discovery failed; the manifest was not changed. {error}": "Internals discovery failed; the manifest was not changed. {error}",
   "Game internals must be declared: run cargo horizon-mod internals sync in the mod's folder, then build again.": "Game internals must be declared: run cargo horizon-mod internals sync in the mod's folder, then build again.",
@@ -1209,5 +1210,7 @@
   "Your system keyring didn't answer within {seconds} seconds. Make sure it is running and unlocked, then restart the launcher.": "Inelul de chei al sistemului nu a răspuns în {seconds} secunde. Asigură-te că rulează și este deblocat, apoi repornește launcherul.",
   "Can't read {name}'s sign-in: {why}": "Nu se poate citi conectarea lui {name}: {why}",
   "Horizon runs a data pack's functions, function tags, predicates, item modifiers, recipes, loot tables, advancements, villager trades, damage types, most tags and most worldgen (biomes, features, structures, dimensions). Other files, such as world presets, are not read yet.": "Horizon runs a data pack's functions, function tags, predicates, item modifiers, recipes, loot tables, advancements, villager trades, damage types, most tags and most worldgen (biomes, features, structures, dimensions). Other files, such as world presets, are not read yet.",
-  "{title} would change nothing in Horizon yet: Horizon doesn't read its {files}.": "{title} would change nothing in Horizon yet: Horizon doesn't read its {files}."
+  "{title} would change nothing in Horizon yet: Horizon doesn't read its {files}.": "{title} would change nothing in Horizon yet: Horizon doesn't read its {files}.",
+  "Game cache leases require a supported local filesystem.": "Game cache leases require a supported local filesystem.",
+  "Game cache cleanup is unavailable because running games cannot be reliably excluded.": "Game cache cleanup is unavailable because running games cannot be reliably excluded."
 }

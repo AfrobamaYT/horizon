@@ -74,7 +74,7 @@ impl Game<'_> {
     /// `FluidState.createLegacyBlock` for `state`, through the one table the engine converts
     /// fluid states with. None for a state no fluid can be in: no world form, an amount above
     /// 8, a zero amount for anything but the empty fluid, or a source that isn't full.
-    pub(super) fn fluid_legacy_block(&self, state: FluidState) -> Option<BlockStateId> {
+    pub(super) fn fluid_legacy_block(&self, state: FluidState) -> Option<mod_api::BlockStateId> {
         let kind = super::native_world_read::engine_fluid_kind(state.fluid)?;
         let engine = EngineFluidState::new(kind, state.amount, state.falling);
         let consistent = match kind {
@@ -82,7 +82,7 @@ impl Game<'_> {
             _ if engine.is_source() => state.amount == 8,
             _ => (1..=8).contains(&state.amount),
         };
-        consistent.then(|| self.res.behaviours().legacy_block(engine))
+        consistent.then(|| mod_api::BlockStateId(self.res.behaviours().legacy_block(engine).0))
     }
 
     /// Validate fluid constraints against the exported property definition.
@@ -281,6 +281,16 @@ impl Game<'_> {
         let id = super::api_values::behavior_block(block, behaviours)?;
         mod_api::__private::item_key(&behaviours.block_data(id).item)
     }
+
+    /// `BlockItem.getBlock`: the block `item` places. The behaviour table
+    /// keeps one binding per item that places a block (`wheat_seeds` to
+    /// `wheat`), and the state table names it.
+    pub(super) fn item_block(&self, item: ItemKey) -> Option<BlockKey> {
+        let behaviours = self.res.behaviours();
+        let id = mod_api::__private::item_key_id(item)?;
+        let block = behaviours.item_binding(id)?.block;
+        mod_api::__private::block_key(&behaviours.table.info(block).name)
+    }
 }
 
 pub(super) fn match_state_properties(
@@ -415,6 +425,76 @@ mod tests {
                     .and_then(mod_api::__private::item_key_id),
                 Some("minecraft:air")
             );
+            let item = |id| mod_api::__private::item_key(id).unwrap();
+            let block = mod_api::__private::part_tests::block_key;
+            assert_eq!(
+                host.item_block(item("minecraft:oak_planks")),
+                Some(block("minecraft:oak_planks"))
+            );
+            // `Block.byItem(WHEAT_SEEDS)` is `Blocks.WHEAT`, whose item id is
+            // the seeds' even though the names differ.
+            assert_eq!(
+                host.item_block(item("minecraft:wheat_seeds")),
+                Some(block("minecraft:wheat"))
+            );
+            // A standing/wall item places its standing block; the wall variant
+            // is the placement's, not the item's (`Block.byItem(TORCH)`).
+            assert_eq!(
+                host.item_block(item("minecraft:torch")),
+                Some(block("minecraft:torch"))
+            );
+            assert_eq!(host.item_block(item("minecraft:stick")), None);
+        });
+    }
+
+    /// A mod item maps back to the content block it places: the item's
+    /// binding is the block the content root registered for it.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn item_block_maps_a_mod_items_back_to_its_block() {
+        use super::super::native_entity_refs::tests::{run_fresh_cases, with_game_at};
+        use mod_api::{self, Hooks, Host};
+        use std::sync::Arc;
+
+        const CHILD: &str = "HORIZON_ITEM_BLOCK_MOD_CHILD";
+        if run_fresh_cases(
+            "game::native_block_states::tests::item_block_maps_a_mod_items_back_to_its_block",
+            CHILD,
+            &["game"],
+        ) {
+            return;
+        }
+        const CRATE: &str = "item_test:crate";
+        struct TestMod;
+        #[mod_api::__subscriptions]
+        impl Hooks for TestMod {
+            fn blocks(
+                &self,
+                _context: &mod_api::RegistrationContext,
+                event: &mut mod_api::BlocksEvent<'_>,
+            ) {
+                event.blocks.push({
+                    let mut draft = mod_api::Block::new(CRATE, "minecraft:stone");
+                    draft.item = true;
+                    draft
+                });
+            }
+        }
+        let mods: mod_api::Mods =
+            Arc::from([mod_api::ModEntry::new("item_test", Box::new(TestMod))]);
+        mod_api::__private::install(mods.clone());
+        crate::game::api_values::install_parts(&mods).unwrap();
+        let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let root = super::super::mods::content_root(&base, &Default::default())
+            .unwrap()
+            .prepared()
+            .to_path_buf();
+        with_game_at(root, |game| {
+            let host: &dyn Host = game;
+            assert_eq!(
+                host.item_block(mod_api::__private::item_key(CRATE).unwrap()),
+                mod_api::__private::block_key(CRATE)
+            );
         });
     }
 
@@ -511,7 +591,7 @@ mod tests {
             };
             let block = |state: FluidState| {
                 let id = service.legacy_block(state)?;
-                game.pack.assets.registry.state(id).cloned()
+                game.pack.assets.registry.state(BlockStateId(id.0)).cloned()
             };
             let liquid = |name: &str, level: &str| {
                 Some(BlockState {

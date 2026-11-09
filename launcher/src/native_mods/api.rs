@@ -67,6 +67,7 @@ pub(super) fn main_rs(
                         target: point.target.clone(),
                         private: point.private,
                         at_return: point.at_return,
+                        api_refusal: point.api_refusal.clone(),
                     })
                     .collect::<Vec<_>>();
                 horizon_mod_point_emit::api(manifest, &api_points, &format!("mod_{i}::"))
@@ -106,7 +107,7 @@ pub(super) fn main_rs(
                 .find_map(|(marker, value)| {
                     chunk
                         .strip_suffix(*marker)
-                        .map(|prefix| prefix.to_owned() + value)
+                        .map(|prefix| prefix.trim_end_matches([' ', '\t']).to_owned() + value)
                 })
                 .unwrap_or_else(|| chunk.to_owned())
         })
@@ -589,6 +590,12 @@ mod tests {
         let mods = [&base, &extra];
         for count in 0..=2 {
             let text = main_rs(template, &mods[..count], &[], &[]);
+            let padded = ["/* MOD_ENTRIES */", "/* MOD_SLOTS */", "/* BUILT_MODS */"]
+                .into_iter()
+                .fold(template.to_owned(), |text, marker| {
+                    text.replace(marker, &format!("    {marker}"))
+                });
+            assert_eq!(main_rs(&padded, &mods[..count], &[], &[]), text);
             let facts: Vec<_> = text
                 .lines()
                 .filter(|line| line.contains(" => mod_"))
@@ -644,6 +651,7 @@ mod tests {
             target: "game::Game::tick".into(),
             raw: true,
             at_return: true,
+            api_refusal: None,
             listener: None,
             return_listener: None,
         }];

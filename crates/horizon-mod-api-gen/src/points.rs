@@ -18,8 +18,9 @@ pub mod source;
 /// One point, as `points.json` lists it.
 #[derive(Debug, serde::Serialize)]
 pub struct GamePoint {
-    /// Why the registration-policy reader cannot be generated, absent when it can.
-    pub runtime_refusal: Option<String>,
+    /// Why its API listeners are refused at registration, native and wasm alike: the first
+    /// parameter with no API type, naming it. Absent when the point has an API record.
+    pub api_refusal: Option<String>,
     pub name: String,
     /// The function, as an injection's `target` names it.
     pub target: String,
@@ -36,10 +37,9 @@ pub struct GamePoint {
     pub returns: &'static str,
     /// Whether its API listeners run at the return: not when the value returned borrows.
     pub at_return: bool,
-    /// Whether it has a raw form: listeners with the receiver and every parameter by its own type.
+    /// Whether it has a raw form: native listeners with the receiver and every parameter by its
+    /// own type (`access = "internals"`).
     pub raw: bool,
-    #[serde(skip)]
-    snapshot: bool,
     /// Full raw listener contract, including engine-typed parameters.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_shape: Option<point_shape::RawShape>,
@@ -102,6 +102,11 @@ pub(crate) fn module_files(
     let mut files = Vec::new();
     let mut pending = vec![(module, path, dir, Vec::new())];
     while let Some((module, path, dir, cfg)) = pending.pop() {
+        // A declared module with no file is one another target builds (its file named by a
+        // `cfg_attr` path this walk already followed): nothing here compiles from it.
+        if !path.is_file() {
+            continue;
+        }
         let source = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         let file = crate::game_modules::parse(&path, &source)?;
         if test_only(&file.attrs) || (every_build && gated(&file.attrs)) {
@@ -176,6 +181,46 @@ fn children(
             },
             _ => None,
         });
+        // `#[cfg_attr(unix, path = "a/unix.rs")]`: each target's file, under its condition.
+        let per_target: Vec<(String, String)> = declared
+            .attrs
+            .iter()
+            .filter(|attr| attr.path().is_ident("cfg_attr"))
+            .filter_map(|attr| {
+                let args = attr
+                    .parse_args_with(
+                        syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
+                    )
+                    .ok()?;
+                let mut args = args.into_iter();
+                let condition = args.next()?;
+                let path = args.find_map(|meta| match meta {
+                    syn::Meta::NameValue(value) if value.path.is_ident("path") => {
+                        match value.value {
+                            syn::Expr::Lit(syn::ExprLit {
+                                lit: syn::Lit::Str(path),
+                                ..
+                            }) => Some(path.value()),
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                })?;
+                Some((condition.to_token_stream().to_string(), path))
+            })
+            .collect();
+        if declared.content.is_none() && explicit.is_none() && !per_target.is_empty() {
+            for (condition, relative) in per_target {
+                let file = here.join(relative);
+                let dir = file
+                    .parent()
+                    .expect("a module file has a folder")
+                    .to_owned();
+                let cfg = cfg.iter().cloned().chain([condition]).collect();
+                pending.push((child.clone(), file, dir, cfg));
+            }
+            continue;
+        }
         if let Some((_, inner)) = &declared.content {
             // An inline module's children live in its folder, named by its own `#[path]` if any.
             let inner_dir = dir.join(explicit.as_deref().unwrap_or(&name));
@@ -340,6 +385,9 @@ pub(crate) struct Found<'a> {
     owner: Option<(&'a Type, &'a syn::Generics)>,
     /// Where the item that holds it ends: the `impl` block, or the function. Its raw types go there.
     pub(crate) end: proc_macro2::LineColumn,
+    /// The types its signature names that cross as `mod_api` types, as written, with the API
+    /// type's path and whether it converts (an engine type's [`MIRRORS`] entry).
+    mirrors: Vec<(String, String, bool)>,
 }
 
 impl Found<'_> {
@@ -400,6 +448,17 @@ impl Found<'_> {
         }
         if self.owner.is_none() {
             parts.push("free".into());
+        }
+        for (word, convert) in [("api", false), ("mirror", true)] {
+            let named: Vec<_> = self
+                .mirrors
+                .iter()
+                .filter(|(_, _, converts)| *converts == convert)
+                .map(|(written, api, _)| format!("{written} = {api:?}"))
+                .collect();
+            if !named.is_empty() {
+                parts.push(format!("{word}({})", named.join(", ")));
+            }
         }
         parts.join(", ")
     }
@@ -492,6 +551,7 @@ pub(crate) fn file_functions<'a>(
                     body: &function.block,
                     owner: None,
                     end: function.block.brace_token.span.close().end(),
+                    mirrors: Vec::new(),
                 };
                 if keep(&found) {
                     out.push(found);
@@ -516,6 +576,7 @@ pub(crate) fn file_functions<'a>(
                             body: &method.block,
                             owner: Some((&block.self_ty, &block.generics)),
                             end: block.brace_token.span.close().end(),
+                            mirrors: Vec::new(),
                         };
                         if keep(&found) {
                             out.push(found);
@@ -537,6 +598,9 @@ struct Scanned {
     /// The crate's package, when it is a lower crate: the pass gives it the points' dependencies.
     package: Option<PathBuf>,
 }
+
+/// The `mod_api` types a record may hold ([`crate::build::wire_types`]), by path.
+type WireTypes = std::collections::BTreeSet<String>;
 
 /// Every file with points: the game module's, then each listed lower crate's. Fails on a listed
 /// path that names no point function, or a crate the points' own crate is built on.
@@ -581,7 +645,12 @@ fn scan(root: &Path) -> Result<(Vec<Scanned>, Vec<(String, String)>), String> {
 
 impl Scanned {
     /// This file's points: all of a game-module file's, or the listed ones of a lower crate's.
-    fn points<'a>(&'a self, list: &[(String, String)], used: &mut Vec<bool>) -> Vec<Found<'a>> {
+    fn points<'a>(
+        &'a self,
+        list: &[(String, String)],
+        wire: &WireTypes,
+        used: &mut Vec<bool>,
+    ) -> Vec<Found<'a>> {
         let mut out = Vec::new();
         let used = std::cell::RefCell::new(used);
         let keep = |found: &Found<'_>| {
@@ -598,7 +667,117 @@ impl Scanned {
             }
         };
         file_points(&self.module, &self.parsed.items, &keep, &mut out);
+        let uses = imports(&self.parsed.items);
+        for found in &mut out {
+            // Only the game's own crate has the conversions a mirror goes through.
+            found.mirrors = mirrors(found.sig, &uses, wire, self.package.is_none());
+        }
         out
+    }
+}
+
+/// The engine types a point carries as their `mod_api` mirrors, by full path, and the mirror. The
+/// game converts each through its `TryIntoApi` and `TryIntoEngine` (`game::points`).
+pub const MIRRORS: &[(&str, &str)] = &[
+    ("horizon_client::text::Text", "::mod_api::Text"),
+    ("horizon_client_core::text::Text", "::mod_api::Text"),
+    (
+        "horizon_world::registry::BlockStateId",
+        "::mod_api::BlockState",
+    ),
+];
+
+/// A file's top-level `use`s: each name it brings in, with the path it names (`crate::` as the
+/// game's crate). Globs and `self`/`super` paths are left out: a type they name has no mirror.
+fn imports(items: &[Item]) -> Vec<(String, String)> {
+    fn walk(prefix: &str, tree: &syn::UseTree, out: &mut Vec<(String, String)>) {
+        let join = |name: &str| {
+            if prefix.is_empty() {
+                name.to_owned()
+            } else {
+                format!("{prefix}::{name}")
+            }
+        };
+        match tree {
+            syn::UseTree::Path(path) => walk(&join(&path.ident.to_string()), &path.tree, out),
+            syn::UseTree::Name(name) => {
+                out.push((name.ident.to_string(), join(&name.ident.to_string())))
+            }
+            syn::UseTree::Rename(rename) => {
+                out.push((rename.rename.to_string(), join(&rename.ident.to_string())))
+            }
+            syn::UseTree::Group(group) => {
+                for tree in &group.items {
+                    walk(prefix, tree, out);
+                }
+            }
+            syn::UseTree::Glob(_) => {}
+        }
+    }
+    let mut out = Vec::new();
+    for item in items {
+        if let Item::Use(item) = item {
+            walk("", &item.tree, &mut out);
+        }
+    }
+    for (_, path) in &mut out {
+        if let Some(rest) = path.strip_prefix("crate::") {
+            *path = format!("horizon_client::{rest}");
+        }
+    }
+    out
+}
+
+/// The leaves of `sig` that name a `mod_api` type in `wire`, or (with `convert`) a [`MIRRORS`]
+/// type, through the file's `imports` or in full.
+fn mirrors(
+    sig: &syn::Signature,
+    imports: &[(String, String)],
+    wire: &WireTypes,
+    convert: bool,
+) -> Vec<(String, String, bool)> {
+    let mut found: Vec<(String, String, bool)> = Vec::new();
+    for leaf in point_shape::leaves(sig) {
+        let written = point_shape::spelling(&leaf);
+        let full = match leaf.get_ident() {
+            Some(ident) => match imports.iter().find(|(name, _)| ident == name) {
+                Some((_, path)) => path.clone(),
+                None => continue,
+            },
+            None => written
+                .trim_start_matches("::")
+                .replace("crate::", "horizon_client::"),
+        };
+        if found.iter().any(|(seen, _, _)| *seen == written) {
+            continue;
+        }
+        if let Some(api) = wire_type(wire, &full) {
+            found.push((written, format!("::{api}"), false));
+        } else if let Some((_, api)) = MIRRORS.iter().find(|(path, _)| *path == full)
+            && convert
+        {
+            found.push((written, (*api).to_owned(), true));
+        }
+    }
+    found
+}
+
+/// The path `wire` lays out the `mod_api` type at `full` under: the same path, or the one type of
+/// that name re-exported elsewhere in `mod_api`.
+fn wire_type<'w>(wire: &'w WireTypes, full: &str) -> Option<&'w str> {
+    if !full.starts_with("mod_api::") {
+        return None;
+    }
+    if let Some(found) = wire.get(full) {
+        return Some(found);
+    }
+    let name = full.rsplit("::").next()?;
+    let mut named = wire
+        .iter()
+        .filter(|path| path.rsplit("::").next() == Some(name));
+    match (named.next(), named.next()) {
+        (Some(only), None) => Some(only),
+        _ => None,
     }
 }
 
@@ -606,12 +785,13 @@ impl Scanned {
 fn all_points<'a>(
     scanned: &'a [Scanned],
     list: &[(String, String)],
+    wire: &WireTypes,
 ) -> Result<Vec<(usize, Found<'a>)>, String> {
     let mut used = vec![false; list.len()];
     let mut points = Vec::new();
     for (index, file) in scanned.iter().enumerate() {
         points.extend(
-            file.points(list, &mut used)
+            file.points(list, wire, &mut used)
                 .into_iter()
                 .map(|found| (index, found)),
         );
@@ -637,109 +817,41 @@ fn all_points<'a>(
     Ok(points)
 }
 
-type Calls = std::collections::BTreeMap<String, Result<crate::native_raw::Call, String>>;
-
-/// What each crate owning points cannot name in the graph, by layout (see `native_crate`).
-type Blocked = std::collections::BTreeMap<String, Vec<Option<usize>>>;
-
-/// One ordered graph over the whole catalog, before any name selection, and each raw point's
-/// virtual call layouts in it. Guest and native generators share these descriptor IDs. A point
-/// reaching a layout its own crate cannot name is refused.
-fn catalog_graph(
-    root: &Path,
-    rule: &crate::crossing::Rule,
-    ordered: &[(usize, Found<'_>)],
-) -> Result<(crate::native_policy::Graph, Calls, Blocked), String> {
-    let mut graph = crate::native_policy::Graph::default();
-    let mut calls = Calls::new();
-    for (_, found) in ordered {
-        let shape = found.shape()?;
-        if shape.raw {
-            calls.insert(
-                found.target(),
-                crate::native_raw::register(
-                    rule,
-                    &found.module,
-                    found.owner.map(|(ty, _)| ty),
-                    found.sig,
-                    &shape,
-                    &mut graph,
-                ),
-            );
-        }
-    }
-    let crates: std::collections::BTreeSet<String> = ordered
-        .iter()
-        .map(|(_, found)| crate::native_crate::owner(&found.module).to_owned())
-        .chain(["horizon_client".to_owned()])
-        .collect();
-    let blocked: Blocked = crate::native_crate::read(root, &crates)?
-        .into_iter()
-        .map(|(krate, names)| (krate, names.blocked(rule, &graph)))
-        .collect();
-    for (_, found) in ordered {
-        let krate = crate::native_crate::owner(&found.module);
-        if let Some(Ok(call)) = calls.get(&found.target()) {
-            let layouts: Vec<usize> = std::iter::once(call.head).chain(call.tail).collect();
-            if let Some(reason) =
-                crate::native_crate::refusal(&graph, &blocked[krate], krate, &layouts)
-            {
-                calls.insert(found.target(), Err(reason));
-            }
-        }
-    }
-    Ok((graph, calls, blocked))
-}
-
 /// The game's points, by name: every point function of the game module, and the listed ones of
 /// the crates below it. Staged private source targets are never part of this public list.
 pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
+    points_with(root, &crate::build::wire_types(root)?)
+}
+
+/// [`game_points`] with the `mod_api` types a record may hold.
+fn points_with(root: &Path, wire: &WireTypes) -> Result<Vec<GamePoint>, String> {
     let private = source::read(root)?
         .into_iter()
         .map(|point| plain_path(&point.target))
         .collect::<std::collections::BTreeSet<_>>();
     let (scanned, list) = scan(root)?;
-    let rule = crate::crossing::Rule::new(&crate::internals::rule_catalog(root)?);
     let mut points = Vec::new();
-    let ordered = all_points(&scanned, &list)?;
-    let (graph, calls, _) = catalog_graph(root, &rule, &ordered)?;
-    for (_, found) in ordered {
+    for (_, found) in all_points(&scanned, &list, wire)? {
         let target = found.target();
         if private.contains(&plain_path(&target)) {
             continue;
         }
         let shape = found.shape()?;
-        let runtime = calls.get(&target).map(|call| {
-            call.clone().and_then(|call| {
-                crate::native_raw::generate_runtime(
-                    &rule,
-                    &found.module,
-                    found.owner.map(|(ty, _)| ty),
-                    found.sig,
-                    &shape,
-                    &graph,
-                    call,
-                )
-                .map(|_| ())
-            })
-        });
-        let admitted = matches!(runtime, Some(Ok(())));
         let api = shape.api_items(&target);
         points.push(GamePoint {
-            record_item: shape.record_item(&target).to_string(),
+            record_item: if shape.api() {
+                shape.record_item(&target).to_string()
+            } else {
+                String::new()
+            },
             api: [
                 api.listeners.to_string(),
                 api.variants.to_string(),
                 api.dispatch.to_string(),
             ],
-            at_return: shape.has_return(),
+            at_return: shape.api() && shape.has_return(),
             raw: shape.raw,
-            snapshot: shape.snapshot_able(found.sig)
-                || admitted
-                || (shape.raw
-                    && crate::native_raw::generate(&rule, &found.module, found.sig, &shape)
-                        .is_ok()),
-            runtime_refusal: runtime.and_then(Result::err),
+            api_refusal: shape.api_refusal.clone(),
             raw_shape: shape
                 .raw
                 .then(|| point_shape::raw_shape(&shape, found.sig, found.owner.map(|(ty, _)| ty))),
@@ -767,10 +879,11 @@ pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
                 })
                 .collect(),
             record: shape.record().to_string(),
-            returns: match shape.returns {
-                point_shape::Returns::Unit | point_shape::Returns::UnitResult => "cancel",
-                point_shape::Returns::Value(_) => "result",
-                point_shape::Returns::Opaque => "none",
+            returns: match (&shape.returns, shape.api()) {
+                (_, false) => "none",
+                (point_shape::Returns::Unit | point_shape::Returns::UnitResult, true) => "cancel",
+                (point_shape::Returns::Value(_), true) => "result",
+                (point_shape::Returns::Opaque, true) => "none",
             },
             name: shape.name,
         });
@@ -801,158 +914,18 @@ pub(crate) fn offset(source: &str, lines: &[usize], at: proc_macro2::LineColumn)
         .map_or(source.len(), |(i, _)| line + i)
 }
 
-/// The game crate root's no-op the source tree carries; staging gives it the catalog install.
-const INSTALL_STUB: &str = "pub fn install_points_catalog() {}";
-
-/// The head call layout of every raw point's head and return places, in `PointId` terms, and the
-/// installer the staged game runs before the wasm host initializes. Both phases of a point share
-/// the plan its head call names.
-fn install_items(points: &[(usize, Found<'_>)], calls: &Calls) -> proc_macro2::TokenStream {
-    let mut pairs = Vec::new();
-    for (_, found) in points {
-        let Some(Ok(call)) = calls.get(&found.target()) else {
-            continue;
-        };
-        let head = call.head;
-        let name = found.name();
-        for place in [name.clone(), format!("{name}_return")] {
-            let variant = quote::format_ident!("{}", point_shape::camel(&place));
-            pairs.push(quote::quote!((mod_points::PointId::#variant, #head)));
-        }
-    }
-    quote::quote! {
-        /// Each raw place and the head call layout its staged plan is keyed by.
-        pub fn head_calls() -> Vec<(mod_points::PointId, usize)> {
-            vec![#(#pairs),*]
-        }
-        /// Gives the wasm host this catalog, to resolve manifest internals against.
-        pub fn install() {
-            horizon_mod_wasm::install_catalog(horizon_mod_wasm::InternalsCatalog {
-                schema: catalog(),
-                head_calls: head_calls(),
-            });
-        }
-    }
-}
-
-/// The once-per-source readers, planners and decoders, and the pure schema catalog the loader
-/// resolves manifest declarations against, appended to the game crate's root.
-fn emit_runtime_module(
-    root: &Path,
-    rule: &crate::crossing::Rule,
-    entries: &[crate::internals::Internal],
-    graph: &crate::native_policy::Graph,
-    points: &[(usize, Found<'_>)],
-    calls: &Calls,
-    blocked: &Blocked,
-) -> Result<(), String> {
-    let layouts = graph.tokens();
-    let mut specs = Vec::new();
-    for (_, found) in points {
-        let Some(Ok(call)) = calls.get(&found.target()) else {
-            continue;
-        };
-        let head = call.head;
-        let tail = match call.tail {
-            Some(tail) => quote::quote!(Some(#tail)),
-            None => quote::quote!(None),
-        };
-        let receiver = match found.owner {
-            Some((ty, _)) => graph
-                .id(&rule.shape(&found.module, None, ty))
-                .map_or(quote::quote!(None), |id| quote::quote!(Some(#id))),
-            None => quote::quote!(None),
-        };
-        specs.push(quote::quote!(mod_points::endpoint_policy::PointSpec { head_call: #head, tail_call: #tail, receiver: #receiver }));
-    }
-    let mut fields = Vec::new();
-    for entry in entries.iter().filter(|entry| entry.kind == "field") {
-        let Some((owner, field)) = entry.path.rsplit_once("::") else {
-            continue;
-        };
-        let Some(receiver) = graph.layouts.iter().position(|layout| layout.name == owner) else {
-            continue;
-        };
-        let (path, hash) = (&entry.path, &entry.hash);
-        fields.push(quote::quote!(mod_points::endpoint_policy::InternalField { path: String::from(#path), kind: String::from("field"), hash: String::from(#hash), receiver: #receiver, field: String::from(#field) }));
-    }
-    let install = install_items(points, calls);
-    let catalog = quote::quote! {
-        #install
-        /// The exact catalog the generated readers were emitted from.
-        pub fn catalog() -> mod_points::endpoint_policy::SchemaCatalog {
-            mod_points::endpoint_policy::SchemaCatalog {
-                layouts: #layouts,
-                points: vec![#(#specs),*],
-                fields: vec![#(#fields),*],
-            }
-        }
-    };
-    // One helper module per crate that owns admitted points, and the game's, which also holds the
-    // catalog. Each emits the layouts its own points reach, spelled from its own crate.
-    let mut crates = std::collections::BTreeMap::<&str, Vec<usize>>::new();
-    crates.entry("horizon_client").or_default();
-    for (_, found) in points {
-        if let Some(Ok(call)) = calls.get(&found.target()) {
-            crates
-                .entry(crate::native_crate::owner(&found.module))
-                .or_default()
-                .extend(std::iter::once(call.head).chain(call.tail));
-        }
-    }
-    for (krate, calls) in crates {
-        let emit = crate::native_crate::emitted(rule, graph, &blocked[krate], &calls);
-        let windows = crate::native_window::helpers(rule, graph, &emit)?;
-        let patches = crate::native_patch::helpers(rule, graph, &emit)?;
-        let (catalog, alias) = if krate == "horizon_client" {
-            (catalog.clone(), quote::quote!())
-        } else {
-            // A lower crate names its own layouts by the catalog's paths, as its dependents do.
-            let name = quote::format_ident!("{krate}");
-            (
-                quote::quote!(),
-                quote::quote!(#[allow(unused_extern_crates)] extern crate self as #name;),
-            )
-        };
-        let module = quote::quote! {
-            #alias
-            #[doc(hidden)]
-            #[allow(dead_code, clippy::all)]
-            pub mod __horizon_points {
-                #windows
-                #patches
-                #catalog
-            }
-        };
-        let (_, lib) = crate_root(root, krate)?;
-        let mut source = fs::read_to_string(&lib).map_err(|e| format!("{}: {e}", lib.display()))?;
-        if krate == "horizon_client" {
-            if !source.contains(INSTALL_STUB) {
-                return Err(format!("{}: no `{INSTALL_STUB}` to stage", lib.display()));
-            }
-            source = source.replacen(
-                INSTALL_STUB,
-                "pub fn install_points_catalog() { __horizon_points::install() }",
-                1,
-            );
-        }
-        source.push('\n');
-        source.push_str(&module.to_string());
-        fs::write(&lib, source).map_err(|e| format!("{}: {e}", lib.display()))?;
-    }
-    Ok(())
-}
-
 /// The staging pass: puts `#[point]` on every point function of the staged copy at `root`, in
 /// place, declares each raw form's record and listener types after the item that holds the
 /// function, and gives each lower crate with points the points' dependencies. Run on a copy, never
 /// on a working tree: the source tree carries no `#[point]`.
 pub fn stage(root: &Path) -> Result<Staged, String> {
+    stage_with(root, &crate::build::wire_types(root)?)
+}
+
+/// [`stage`] with the `mod_api` types a record may hold.
+fn stage_with(root: &Path, wire: &WireTypes) -> Result<Staged, String> {
     let (scanned, list) = scan(root)?;
-    let entries = crate::internals::rule_catalog(root)?;
-    let rule = crate::crossing::Rule::new(&entries);
-    let points = all_points(&scanned, &list)?;
-    let (graph, calls, blocked) = catalog_graph(root, &rule, &points)?;
+    let points = all_points(&scanned, &list, wire)?;
     let mut staged = Staged::default();
     let mut packages = std::collections::BTreeSet::new();
     for (index, file) in scanned.iter().enumerate() {
@@ -995,32 +968,7 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
             };
             edits.push((
                 offset(source, &lines, start),
-                format!(
-                    "#[horizon_mod_api_macros::point({})]{} ",
-                    found.attribute(),
-                    if found.shape()?.raw && !found.shape()?.snapshot_able(found.sig) {
-                        calls
-                            .get(&found.target())
-                            .cloned()
-                            .and_then(Result::ok)
-                            .and_then(|call| {
-                                crate::native_raw::generate_runtime(
-                                    &rule,
-                                    &found.module,
-                                    found.owner.map(|(ty, _)| ty),
-                                    found.sig,
-                                    &found.shape().ok()?,
-                                    &graph,
-                                    call,
-                                )
-                                .ok()
-                            })
-                            .map(|plan| format!(" {}", plan.attribute()))
-                            .unwrap_or_default()
-                    } else {
-                        String::new()
-                    },
-                ),
+                format!("#[horizon_mod_api_macros::point({})] ", found.attribute()),
             ));
             let shape = found.shape()?;
             staged.points += 1;
@@ -1052,7 +1000,6 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
             packages.insert(package.clone());
         }
     }
-    emit_runtime_module(root, &rule, &entries, &graph, &points, &calls, &blocked)?;
     dependencies(root, packages)?;
     Ok(staged)
 }
@@ -1190,54 +1137,19 @@ pub(crate) fn records_selected(
     let dispatch = points.iter().map(|point| parse(&point.api[2]));
     let mut guest_functions = proc_macro2::TokenStream::new();
     let mut guest_entries = proc_macro2::TokenStream::new();
-    let mut raw_entries = proc_macro2::TokenStream::new();
-    let mut raw_places = proc_macro2::TokenStream::new();
-    let mut raw_listeners = proc_macro2::TokenStream::new();
     let mut api_places = proc_macro2::TokenStream::new();
     let mut layout = 0xcbf29ce484222325u64;
-    let snapshot = syn::parse_file(include_str!("../../horizon-mod-points/src/snapshot.rs"))
-        .expect("snapshot key schema");
-    let rows = syn::parse_file(include_str!("../../horizon-mod-api/src/row_pages.rs"))
-        .expect("snapshot row schema");
-    let patch = syn::parse_file(include_str!("../../horizon-mod-api/src/wire_patch.rs"))
-        .expect("snapshot patch schema");
-    for item in snapshot
-        .items
-        .into_iter()
-        .chain(rows.items)
-        .chain(patch.items)
-    {
-        let schema = match item {
-            syn::Item::Type(alias)
-                if matches!(
-                    alias.ident.to_string().as_str(),
-                    "Row" | "Payload" | "CellBytes"
-                ) =>
-            {
-                alias.ty.to_token_stream().to_string()
-            }
-            syn::Item::Fn(function) if function.sig.ident == "key" => {
-                function.block.to_token_stream().to_string()
-            }
-            _ => continue,
-        };
-        for byte in schema.bytes() {
-            layout = (layout ^ u64::from(byte)).wrapping_mul(0x100000001b3);
-        }
-    }
     for point in points {
         for byte in format!(
-            "{}:{}:{}:{}:{}:{:?}",
-            point.name,
-            point.host,
-            point.record_item,
-            point.at_return,
-            point.snapshot,
-            point.raw_shape
+            "{}:{}:{}:{}:{:?}",
+            point.name, point.host, point.record_item, point.at_return, point.api_refusal
         )
         .bytes()
         {
             layout = (layout ^ u64::from(byte)).wrapping_mul(0x100000001b3);
+        }
+        if point.api_refusal.is_some() {
+            continue;
         }
         let record = quote::format_ident!("{}", point.record);
         let passed = match point.host {
@@ -1260,7 +1172,7 @@ pub(crate) fn records_selected(
                 #side
                 let mut args: #record = input.take()?;
                 let mut host = ::mod_api::wire::guest::Guest;
-                crate::guest::fire(place, listener, false, |function| {
+                crate::guest::fire(place, listener, |function| {
                     // SAFETY: head and return have the same checked host and record type.
                     let function = unsafe { ::std::mem::transmute::<*const (), listeners::#listener>(function) };
                     function(#passed &mut args);
@@ -1272,39 +1184,18 @@ pub(crate) fn records_selected(
         });
         }
         for name in std::iter::once(point.name.clone())
-            .chain((point.at_return || point.snapshot).then(|| format!("{}_return", point.name)))
+            .chain(point.at_return.then(|| format!("{}_return", point.name)))
         {
             let variant = quote::format_ident!("{}", point_shape::camel(&name));
             let target = &point.target;
-            let at_return = name.ends_with("_return") && name != point.name;
-            // A borrowed return has a raw return place only: the API has no such listener.
-            let raw_only = at_return && !point.at_return;
-            if !raw_only {
-                api_places.extend(quote! { (PointId::#variant, #target, #at_return), });
-            }
-            if point.snapshot {
-                raw_places.extend(quote! { (PointId::#variant, #target, #at_return), });
-                if enabled(point) {
-                    let constructor = quote::format_ident!("{name}");
-                    raw_listeners.extend(quote! {
-                        pub const fn #constructor(injection: &'static str, function: Listener) -> crate::guest::RawListener {
-                            // SAFETY: Listener checks the common owned-view and sparse-edit signature.
-                            unsafe { crate::guest::RawListener::new(PointId::#variant, injection, function as *const ()) }
-                        }
-                    });
-                }
-            }
+            let at_return = name != point.name;
+            api_places.extend(quote! { (PointId::#variant, #target, #at_return), });
             if selected.is_some_and(|names| !names.contains(&name)) {
                 continue;
             }
-            if point.snapshot {
-                raw_entries.extend(quote! { table[PointId::#variant as usize] = Some((PointId::#variant, raw_dispatch as Dispatch)); });
-            }
-            if !raw_only {
-                guest_entries.extend(quote! {
-                    table[PointId::#variant as usize] = Some((PointId::#variant, #function as Dispatch));
-                });
-            }
+            guest_entries.extend(quote! {
+                table[PointId::#variant as usize] = Some((PointId::#variant, #function as Dispatch));
+            });
         }
     }
     let private_variants = sources.iter().map(|point| {
@@ -1320,24 +1211,12 @@ pub(crate) fn records_selected(
         /// API places as (place, target function, return phase), for manifest validation.
         #[doc(hidden)]
         pub const API_PLACES: &[(PointId, &str, bool)] = &[#api_places];
-        /// Raw places whose staged slots have snapshot readers.
-        #[doc(hidden)]
-        pub const RAW_PLACES: &[(PointId, &str, bool)] = &[#raw_places];
-        #[cfg(any(target_arch = "wasm32", feature = "wasm-guest"))]
-        #[allow(missing_docs)]
-        pub mod raw_listeners {
-            use super::*;
-            pub type Listener = fn(crate::snapshot::Snapshot<'_>, &mut ::mod_api::wire::RecordPatch);
-            #raw_listeners
-        }
         #[cfg(any(target_arch = "wasm32", feature = "wasm-guest"))]
         #[doc(hidden)]
         pub fn guest_dispatch(id: u32, input: &mut ::mod_api::wire::Reader<'_>, out: &mut ::mod_api::wire::Writer) -> Result<(), ::mod_api::wire::WireError> {
             if id == 0xBFFF_FFFF { out.put(&crate::guest::subscriptions()); return Ok(()); }
-            let raw = id & 0xC000_0000 == 0xC000_0000;
             let index = (id & 0x3FFF_FFFF) as usize;
-            let table = if raw { &guest_exports::RAW_TABLE } else { &guest_exports::TABLE };
-            let (place, function) = table.get(index).copied().flatten().ok_or(::mod_api::wire::WireError::Tag(id))?;
+            let (place, function) = guest_exports::TABLE.get(index).copied().flatten().ok_or(::mod_api::wire::WireError::Tag(id))?;
             function(place, input, out)
         }
         #[cfg(any(target_arch = "wasm32", feature = "wasm-guest"))]
@@ -1350,19 +1229,6 @@ pub(crate) fn records_selected(
                 #guest_entries
                 table
             };
-            pub(super) const RAW_TABLE: [Option<(PointId, Dispatch)>; POINT_COUNT] = {
-                let mut table = [None; POINT_COUNT]; #raw_entries table
-            };
-            fn raw_dispatch(place: PointId, input: &mut ::mod_api::wire::Reader<'_>, out: &mut ::mod_api::wire::Writer) -> Result<(), ::mod_api::wire::WireError> {
-                let listener: u32 = input.take()?;
-                let (rows, pages, mut patch): crate::snapshot::Payload = input.take()?;
-                crate::guest::fire(place, listener, true, |function| {
-                    // SAFETY: every raw constructor checks this one shared signature.
-                    let function = unsafe { ::std::mem::transmute::<*const (), raw_listeners::Listener>(function) };
-                    function(crate::snapshot::Snapshot::with_pages(&rows, pages.as_ref()), &mut patch);
-                })?;
-                out.put(&()); out.put(&patch); Ok(())
-            }
             #guest_functions
         }
         /// A point's place: its head and return in catalog order.
@@ -1394,7 +1260,7 @@ mod tests {
             let shape = point_shape::shape(quote!(), &sig).unwrap();
             let api = shape.api_items(name);
             GamePoint {
-                runtime_refusal: None,
+                api_refusal: None,
                 name: name.into(),
                 target: name.into(),
                 side: "none",
@@ -1404,7 +1270,6 @@ mod tests {
                 returns: "cancel",
                 at_return: true,
                 raw: false,
-                snapshot: false,
                 raw_shape: None,
                 listener: None,
                 return_listener: None,
@@ -1443,310 +1308,43 @@ mod tests {
         assert!(!selected.contains("table [PointId :: First as usize]"));
     }
 
+    /// The census: how many points have an API record, and why the others refuse.
+    /// `POINT_INVENTORY=path` writes every point's name, target and refusal.
     #[test]
-    fn raw_point_inventory() {
+    fn point_inventory() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let points = game_points(&root).unwrap();
-        let mut inventory = Vec::new();
-        for point in &points {
-            assert_eq!(point.raw_shape.is_some(), point.raw, "{}", point.target);
-            for at_return in [false, true] {
-                if at_return && !point.at_return && !point.raw {
-                    continue;
-                }
-                inventory.push(serde_json::json!({
-                    "name": if at_return { format!("{}_return", point.name) } else { point.name.clone() },
-                    "target": point.target,
-                    "api": !at_return || point.at_return,
-                    "raw_shape": point.raw_shape,
-                    "raw_status": if point.snapshot { "generated primitive rows" } else if point.raw { "staged nominal reader needed" } else { "no raw place" },
-                    "raw_snapshot": point.snapshot,
-                    "runtime_refusal": point.runtime_refusal,
-                }));
-            }
-        }
         if let Ok(path) = std::env::var("POINT_INVENTORY") {
+            let inventory: Vec<_> = points
+                .iter()
+                .map(|point| {
+                    serde_json::json!({
+                        "name": point.name,
+                        "target": point.target,
+                        "api_refusal": point.api_refusal,
+                        "raw": point.raw,
+                    })
+                })
+                .collect();
             fs::write(path, serde_json::to_vec_pretty(&inventory).unwrap()).unwrap();
         }
-        println!(
-            "{} functions; {} places; {} raw functions; {} generated raw snapshot functions",
-            points.len(),
-            inventory.len(),
-            points.iter().filter(|point| point.raw).count(),
-            points.iter().filter(|point| point.snapshot).count()
-        );
-        let mut refusals = std::collections::BTreeMap::<String, usize>::new();
-        for point in points.iter().filter(|point| point.raw) {
-            let reason = point
-                .runtime_refusal
-                .as_deref()
-                .map_or("admitted", |reason| &reason[..reason.len().min(110)]);
-            *refusals.entry(reason.to_owned()).or_default() += 1;
+        let api = points.iter().filter(|p| p.api_refusal.is_none()).count();
+        println!("{} points; {api} with an API record", points.len());
+        let mut refused = std::collections::BTreeMap::<String, usize>::new();
+        for reason in points.iter().filter_map(|p| p.api_refusal.as_deref()) {
+            // `argument 2 `x` (`T`) has no API type yet`: count by type.
+            let key = reason
+                .split_once("(`")
+                .and_then(|(_, rest)| rest.split_once("`)"))
+                .map_or(reason, |(ty, _)| ty);
+            *refused.entry(key.to_owned()).or_default() += 1;
         }
-        let mut lower = std::collections::BTreeMap::<(&str, &str), usize>::new();
-        for point in points
-            .iter()
-            .filter(|point| point.raw && !point.target.starts_with("horizon_client::"))
-        {
-            let krate = crate::native_crate::owner(&point.target);
-            let reason = point.runtime_refusal.as_deref().unwrap_or("admitted");
-            *lower.entry((krate, reason)).or_default() += 1;
+        let mut refused: Vec<_> = refused.into_iter().collect();
+        refused.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
+        for (reason, count) in refused.iter().take(60) {
+            println!("refused {count}: {reason}");
         }
-        for ((krate, reason), count) in lower {
-            println!("lower crate {krate}: {count} {reason}");
-        }
-        let mut refusals: Vec<_> = refusals.into_iter().collect();
-        refusals.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
-        for (reason, count) in refusals.iter().take(40) {
-            println!("runtime admission {count}: {reason}");
-        }
-        {
-            // Trait-object arguments that cross as method tables, by trait, with how many of
-            // the trait's methods cross; the rest stay opaque leaves.
-            let rule = crate::crossing::Rule::new(&crate::internals::rule_catalog(&root).unwrap());
-            let mut tables = std::collections::BTreeMap::<String, usize>::new();
-            let mut leaves = std::collections::BTreeMap::<String, usize>::new();
-            for point in &points {
-                // `module::Owner<..>::method` or `module::function`.
-                let segments: Vec<_> = point.target.split("::").collect();
-                let owned = segments
-                    .iter()
-                    .position(|s| s.contains('<') || s.starts_with(char::is_uppercase));
-                let module = segments[..owned.unwrap_or(segments.len() - 1)].join("::");
-                for arg in point.raw_shape.iter().flat_map(|shape| &shape.args) {
-                    if arg.class != "unclassified" {
-                        continue;
-                    }
-                    let ty: syn::Type = syn::parse_str(&arg.ty).unwrap();
-                    match rule.trait_object(&module, &ty) {
-                        Some(path) => *tables.entry(path).or_default() += 1,
-                        None => *leaves.entry(arg.ty.clone()).or_default() += 1,
-                    }
-                }
-            }
-            for (path, count) in &tables {
-                let methods = crate::native_callable::methods(&rule, path);
-                let crossing = methods
-                    .iter()
-                    .filter(|m| {
-                        crate::native_callable::method_gap(&rule, path, &m.name.to_string())
-                            .is_none()
-                    })
-                    .count();
-                println!(
-                    "trait table {count} args: {path} ({crossing}/{} methods cross)",
-                    methods.len()
-                );
-            }
-            for (ty, count) in &leaves {
-                println!("trait object leaf {count} args: {ty}");
-            }
-        }
-        for class in ["plain", "callback", "unclassified"] {
-            let functions = points
-                .iter()
-                .filter_map(|p| p.raw_shape.as_ref())
-                .filter(|shape| shape.args.iter().any(|arg| arg.class == class))
-                .count();
-            let arguments = points
-                .iter()
-                .filter_map(|p| p.raw_shape.as_ref())
-                .flat_map(|shape| &shape.args)
-                .filter(|arg| arg.class == class)
-                .count();
-            println!("argument class {class}: {functions} functions; {arguments} arguments");
-            if class != "plain" {
-                let mut admitted = 0;
-                let mut refused = std::collections::BTreeMap::<&str, usize>::new();
-                for point in points.iter().filter(|point| {
-                    point
-                        .raw_shape
-                        .as_ref()
-                        .is_some_and(|shape| shape.args.iter().any(|arg| arg.class == class))
-                }) {
-                    match point.runtime_refusal.as_deref() {
-                        None => admitted += 1,
-                        Some(reason) => *refused.entry(reason).or_default() += 1,
-                    }
-                }
-                println!("argument class {class} as opaque leaf: {admitted} admitted functions");
-                for (reason, count) in refused {
-                    println!("argument class {class} refused {count}: {reason}");
-                }
-            }
-        }
-        for class in ["plain", "borrowed_return", "callback", "unclassified"] {
-            let functions = points
-                .iter()
-                .filter_map(|p| p.raw_shape.as_ref())
-                .filter(|shape| shape.return_class == class)
-                .count();
-            println!("return class {class}: {functions} functions");
-        }
-    }
-
-    #[test]
-    fn record_mutability_catalog_proof() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let points = game_points(&root).unwrap();
-        let sources = source::read(&root).unwrap();
-        let full = serde_json::to_vec_pretty(&points).unwrap();
-        if let Ok(path) = std::env::var("RETURN_MUTABILITY_FULL") {
-            fs::write(path, &full).unwrap();
-        }
-        let serialized: serde_json::Value = serde_json::from_slice(&full).unwrap();
-        assert_eq!(serialized, serde_json::to_value(&points).unwrap());
-        for point in serialized.as_array().unwrap() {
-            if let Some(raw) = point.get("raw_shape") {
-                assert!(raw["return_record_mutable"].is_boolean());
-                if raw["return_ty"] != "()" {
-                    assert_eq!(raw["return_record_mutable"], true);
-                }
-            }
-        }
-        let text = std::str::from_utf8(&full).unwrap();
-        for raw in text.split("\"raw_shape\":").skip(1) {
-            assert!(
-                raw.find("\"return_record_mutable\"").unwrap() < raw.find("\"return_ty\"").unwrap()
-            );
-            assert!(raw.find("\"return_ty\"").unwrap() < raw.find("\"return_class\"").unwrap());
-        }
-        let mut existing = serde_json::to_value(&points).unwrap();
-        let mut added = 0;
-        for point in existing.as_array_mut().unwrap() {
-            if let Some(raw) = point.get_mut("raw_shape") {
-                assert!(raw.get("return_record_mutable").is_some());
-                raw.as_object_mut().unwrap().remove("return_record_mutable");
-                for arg in raw["args"].as_array_mut().unwrap() {
-                    assert_eq!(arg["record_mutable"].as_bool(), Some(true));
-                    added += usize::from(
-                        arg.as_object_mut()
-                            .unwrap()
-                            .remove("record_mutable")
-                            .is_some(),
-                    );
-                }
-                assert_eq!(
-                    raw.get("outcome_record_mutable"),
-                    (raw["outcome"] != "none").then_some(&serde_json::Value::Bool(true)),
-                );
-                added += usize::from(
-                    raw.as_object_mut()
-                        .unwrap()
-                        .remove("outcome_record_mutable")
-                        .is_some(),
-                );
-            }
-        }
-        let existing = serde_json::to_vec_pretty(&existing).unwrap();
-        let proof = serde_json::to_vec_pretty(&serde_json::json!({
-            "existing_fields": String::from_utf8(existing.clone()).unwrap(),
-            "records_and_shapes": records(&points, &sources),
-        }))
-        .unwrap();
-        if let Ok(path) = std::env::var("RECORD_MUTABILITY_BASELINE") {
-            assert_eq!(
-                proof,
-                fs::read(path).unwrap(),
-                "existing points fields or records/SHAPES changed"
-            );
-        }
-        if let Ok(path) = std::env::var("RECORD_MUTABILITY_PROOF") {
-            fs::write(path, proof).unwrap();
-        }
-        println!(
-            "points={} raw={} added_flags={added} bytes={} existing_bytes={} growth={}",
-            points.len(),
-            points.iter().filter(|p| p.raw).count(),
-            full.len(),
-            existing.len(),
-            full.len() - existing.len()
-        );
-    }
-
-    #[test]
-    fn raw_shape_catalog_proof() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let mut points = game_points(&root).unwrap();
-        let mut existing = serde_json::to_value(&points).unwrap();
-        let mut counts = std::collections::BTreeMap::<String, usize>::new();
-        for (point, json) in points.iter().zip(existing.as_array_mut().unwrap()) {
-            if point.raw {
-                assert!(json.get("raw_shape").is_some(), "{}", point.target);
-                if let Some(raw) = json.get("raw_shape") {
-                    assert!(raw["args"].is_array());
-                    for class in ["plain", "callback", "unclassified"] {
-                        if raw["args"]
-                            .as_array()
-                            .unwrap()
-                            .iter()
-                            .any(|arg| arg["class"] == class)
-                        {
-                            *counts.entry(class.into()).or_default() += 1;
-                            if class == "callback" {
-                                println!("callback {}: {}", point.target, raw["args"]);
-                            }
-                        }
-                    }
-                    if raw["return_class"] == "borrowed_return" {
-                        *counts.entry("borrowed_return".into()).or_default() += 1;
-                    }
-                }
-            } else {
-                assert!(json.get("raw_shape").is_none());
-            }
-            json.as_object_mut().unwrap().remove("raw_shape");
-        }
-        let sources = source::read(&root).unwrap();
-        let proof = serde_json::json!({
-            "existing_fields": existing,
-            "records": records(&points, &sources),
-        });
-        let before_records = records(&points, &sources);
-        let before_json = serde_json::to_vec(&existing).unwrap();
-        for point in &mut points {
-            point.raw_shape = None;
-        }
-        let mut after = serde_json::to_value(&points).unwrap();
-        for json in after.as_array_mut().unwrap() {
-            json.as_object_mut().unwrap().remove("raw_shape");
-        }
-        assert_eq!(serde_json::to_vec(&after).unwrap(), before_json);
-        // Raw shape metadata participates in the layout fingerprint, but does not change
-        // the records or dispatch code emitted for these same points.
-        let split_layout = |code: &str| {
-            let mut file = syn::parse_file(code).unwrap();
-            let index = file
-                .items
-                .iter()
-                .position(|item| {
-                    matches!(item,
-                        syn::Item::Const(item) if item.ident == "POINT_LAYOUT"
-                    )
-                })
-                .unwrap();
-            let layout = file.items.remove(index).to_token_stream().to_string();
-            (layout, file.to_token_stream().to_string())
-        };
-        let (before_layout, before_code) = split_layout(&before_records);
-        let (after_layout, after_code) = split_layout(&records(&points, &sources));
-        assert_ne!(before_layout, after_layout);
-        assert_eq!(before_code, after_code);
-        if let Ok(path) = std::env::var("RAW_SHAPE_BASELINE") {
-            let baseline = fs::read(path).unwrap();
-            assert!(
-                serde_json::to_vec_pretty(&proof).unwrap() == baseline,
-                "existing fields or generated records/SHAPES changed"
-            );
-        }
-        if let Ok(path) = std::env::var("RAW_SHAPE_PROOF") {
-            fs::write(path, serde_json::to_vec_pretty(&proof).unwrap()).unwrap();
-        }
-        println!(
-            "points={} raw={} classes={counts:?}",
-            points.len(),
-            points.iter().filter(|p| p.raw).count()
-        );
+        assert!(api > 0);
     }
 
     fn point(attribute: &str, method: &str) -> Result<point_shape::Shape, String> {
@@ -1760,21 +1358,78 @@ mod tests {
     }
 
     #[test]
-    fn a_point_passes_only_api_typed_parameters() {
+    fn a_point_passes_every_parameter_or_refuses_naming_it() {
         let shape = point(
             r#"side = "client""#,
-            "fn turn(&mut self, mut yaw: f64, button: MouseButton, text: &str, event: &'static str, batch: &mut HudBatch) {}",
+            "fn turn(&mut self, mut yaw: f64, text: &str, slots: &[u32], count: &mut usize, names: Vec<String>) {}",
         )
         .unwrap();
-        let args: Vec<_> = shape.args.iter().map(|arg| arg.name.to_string()).collect();
-        assert_eq!(args, ["yaw", "text"]);
+        let args: Vec<_> = shape
+            .args
+            .iter()
+            .map(|arg| (arg.name.to_string(), arg.pass))
+            .collect();
+        use point_shape::Pass;
+        assert_eq!(
+            args,
+            [
+                ("yaw".into(), Pass::Value),
+                ("text".into(), Pass::Shared),
+                ("slots".into(), Pass::Shared),
+                ("count".into(), Pass::Mut),
+                ("names".into(), Pass::Value)
+            ]
+        );
         assert!(matches!(shape.returns, point_shape::Returns::Unit));
         let item = shape.record_item("t").to_string();
         assert!(
             item.contains("pub yaw : f64")
                 && item.contains("pub text : :: std :: borrow :: Cow < 'a , str >")
+                && item.contains("pub slots : :: std :: vec :: Vec < u32 >")
+                && item.contains("pub count : u64")
+                && item.contains("pub names : :: std :: vec :: Vec < :: std :: string :: String >")
                 && item.contains("pub cancel : bool"),
             "{item}"
+        );
+        for (signature, reason) in [
+            (
+                "fn turn(&mut self, yaw: f64, batch: &mut HudBatch) {}",
+                "argument 2 `batch` (`&mutHudBatch`) has no API type yet",
+            ),
+            (
+                "fn turn(&mut self, event: &'static str) {}",
+                "argument 1 `event` (`&'staticstr`) has no API type yet",
+            ),
+            (
+                "fn turn(&mut self, (a, b): (u8, u8)) {}",
+                "argument 1 is a pattern, not a name",
+            ),
+        ] {
+            let shape = point(r#"side = "client""#, signature).unwrap();
+            assert_eq!(shape.api_refusal.as_deref(), Some(reason), "{signature}");
+            assert!(shape.api_items("t").listeners.is_empty());
+        }
+        let mirrored = point(
+            r#"side = "both", mirror(Text = "::mod_api::Text")"#,
+            "fn say(&mut self, line: &Text, lines: Option<Vec<Text>>) -> Text {}",
+        )
+        .unwrap();
+        assert!(mirrored.api_refusal.is_none());
+        assert!(mirrored.args.iter().all(|arg| arg.mirror));
+        let item = mirrored.record_item("t").to_string();
+        assert!(
+            item.contains("pub line : :: mod_api :: Text")
+                && item.contains(
+                    "pub lines : :: std :: option :: Option < :: std :: vec :: Vec < :: mod_api :: Text > >"
+                )
+                && item.contains("pub result : Option < :: mod_api :: Text >"),
+            "{item}"
+        );
+        // A receiver other than `Game` has no API handle yet.
+        let other = point(r#"name = "boat_paddle""#, "fn paddle(&mut self) {}").unwrap();
+        assert_eq!(
+            other.api_refusal.as_deref(),
+            Some("its `self` has no API handle yet")
         );
         let read = point(
             r#"side = "server", name = "reach_of""#,
@@ -1805,6 +1460,10 @@ mod tests {
         ));
         assert!(matches!(
             returns("fn hit(&self) -> Option<(usize, f64)> {}"),
+            Ok(point_shape::Returns::Value(_))
+        ));
+        assert!(matches!(
+            returns("fn hit(&self) -> Option<HitResult> {}"),
             Ok(point_shape::Returns::Opaque)
         ));
         let at_return = |sig: &str| point(r#"side = "both""#, sig).unwrap().has_return();
@@ -1853,10 +1512,7 @@ mod tests {
             "crates/horizon-client/Cargo.toml",
             "[package]\nname = 'horizon-client'\n",
         );
-        put(
-            "crates/horizon-client/src/lib.rs",
-            "mod game; mod entry;\npub fn install_points_catalog() {}\n",
-        );
+        put("crates/horizon-client/src/lib.rs", "mod game; mod entry;\n");
         put("crates/horizon-client/src/entry.rs", "");
         put(
             "crates/horizon-client/src/game.rs",
@@ -1916,7 +1572,7 @@ mod tests {
             "crates/horizon-mod-api-gen/slots/horizon.txt",
             "# lower points\nhorizon_client_render::mesher::Mesher<'_>::mesh\n",
         );
-        let points = game_points(&root).unwrap();
+        let points = points_with(&root, &WireTypes::new()).unwrap();
         let named: Vec<_> = points
             .iter()
             .map(|p| (p.name.as_str(), p.target.as_str(), p.side, p.raw))
@@ -1979,13 +1635,16 @@ mod tests {
         let api = records(&points, &[]);
         assert!(
             api.contains("fn tick_return")
-                && api.contains("fn slot_return")
+                // A borrowed return has a raw return place only.
+                && !api.contains("fn slot_return")
                 && api.contains("SlotReturn")
-                && api.contains("fn game_remote_other_send (args"),
+                // `Other` has no API handle: its point keeps only its raw places.
+                && !api.contains("fn game_remote_other_send (")
+                && api.contains("GameRemoteOtherSendReturn"),
             "{api}"
         );
         assert_eq!(
-            stage(&root).unwrap(),
+            stage_with(&root, &WireTypes::new()).unwrap(),
             Staged {
                 points: 10,
                 head_only: 1,
@@ -2015,12 +1674,6 @@ mod tests {
                     .iter()
                     .any(|attr| attr.to_token_stream().to_string()
                         == "# [horizon_mod_api_macros :: point (side = \"both\" , raw)]")
-            );
-            assert!(
-                method
-                    .attrs
-                    .iter()
-                    .any(|attr| attr.path().is_ident("horizon_raw_plan"))
             );
         }
         assert!(
@@ -2060,37 +1713,22 @@ mod tests {
             lock.contains("name = \"horizon-client-render\"\nversion = \"0.1.0\"\ndependencies = [\n \"horizon-mod-api\",\n \"horizon-mod-api-macros\",\n \"horizon-mod-points\",\n \"log\",\n]\n\n[[package]]\nname = \"log\""),
             "{lock}"
         );
-        // One helper module per crate that owns points: the game's holds the catalog, a lower
-        // crate's names its own layouts by the catalog's paths and has none.
-        let lib =
-            |krate: &str| std::fs::read_to_string(root.join(krate).join("src/lib.rs")).unwrap();
-        let (client, lower) = (
-            lib("crates/horizon-client"),
-            lib("crates/horizon-client-render"),
-        );
-        assert_eq!(
-            client.matches("pub mod __horizon_points").count(),
-            1,
-            "{client}"
-        );
-        assert_eq!(
-            lower.matches("pub mod __horizon_points").count(),
-            1,
-            "{lower}"
-        );
-        assert!(client.contains("fn catalog") && !lower.contains("fn catalog"));
-        assert!(
-            lower.contains("extern crate self as horizon_client_render")
-                && !client.contains("extern crate self")
-        );
         // A second pass finds the attribute and refuses: the source tree never carries one.
-        assert!(stage(&root).unwrap_err().contains("already has"));
+        assert!(
+            stage_with(&root, &WireTypes::new())
+                .unwrap_err()
+                .contains("already has")
+        );
         // A crate the points' own crate is built on can't be listed.
         put(
             "crates/horizon-mod-api-gen/slots/horizon.txt",
             "horizon_world::level::tick\n",
         );
-        assert!(game_points(&root).unwrap_err().contains("built under"));
+        assert!(
+            points_with(&root, &WireTypes::new())
+                .unwrap_err()
+                .contains("built under")
+        );
         // Nor one it builds with (the generator), nor the points' own crate.
         for listed in [
             "horizon_mod_api_gen::points::stage\n",
@@ -2098,10 +1736,60 @@ mod tests {
         ] {
             put("crates/horizon-mod-api-gen/slots/horizon.txt", listed);
             assert!(
-                game_points(&root).unwrap_err().contains("built under"),
+                points_with(&root, &WireTypes::new())
+                    .unwrap_err()
+                    .contains("built under"),
                 "{listed}"
             );
         }
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A module whose file each target names with `cfg_attr(…, path = …)` is read from each
+    /// target's file under its condition; it has no default file, and none is needed.
+    #[test]
+    fn per_target_module_paths_are_followed_and_need_no_default_file() {
+        let dir = std::env::temp_dir().join(format!("points-cfg-attr-{}", std::process::id()));
+        let src = dir.join("src");
+        std::fs::create_dir_all(src.join("control")).unwrap();
+        std::fs::write(
+            src.join("lib.rs"),
+            "#[cfg_attr(unix, path = \"control/unix.rs\")]\n#[cfg_attr(windows, path = \"control/windows.rs\")]\nmod platform;\n",
+        )
+        .unwrap();
+        std::fs::write(src.join("control/unix.rs"), "pub fn a() {}").unwrap();
+        std::fs::write(src.join("control/windows.rs"), "pub fn b() {}").unwrap();
+        let files = module_files("k".into(), src.join("lib.rs"), src.clone(), false).unwrap();
+        let mut found: Vec<_> = files
+            .iter()
+            .map(|f| {
+                (
+                    f.module.as_str(),
+                    f.path.strip_prefix(&src).unwrap().to_owned(),
+                    f.cfg.clone(),
+                )
+            })
+            .collect();
+        found.sort();
+        assert_eq!(
+            found,
+            [
+                ("k", "lib.rs".into(), vec![]),
+                (
+                    "k::platform",
+                    "control/unix.rs".into(),
+                    vec!["unix".to_owned()]
+                ),
+                (
+                    "k::platform",
+                    "control/windows.rs".into(),
+                    vec!["windows".to_owned()]
+                ),
+            ]
+        );
+        // Every build compiles neither, so the point walk leaves the module out.
+        let every = module_files("k".into(), src.join("lib.rs"), src, true).unwrap();
+        assert_eq!(every.len(), 1);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -14,7 +14,16 @@ const USAGE: &str = "usage: cargo horizon-mod inject add <at> --kind <kind> [--c
 
 #[derive(serde::Deserialize)]
 struct Catalog {
+    #[serde(default)]
+    points: Vec<Point>,
     sites: Vec<Call>,
+}
+/// A function's point, as `points.json` lists it: whether its API listeners have a record.
+#[derive(serde::Deserialize)]
+struct Point {
+    target: String,
+    #[serde(default)]
+    api_refusal: Option<String>,
 }
 #[derive(serde::Deserialize)]
 struct Call {
@@ -85,7 +94,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
 fn add(dir: &Path, args: &[String]) -> Result<(), String> {
     let request = request(args)?;
     let path = dir.join(MANIFEST);
-    let original = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let original = crate::bounded::read(&path, crate::bounded::MAX_MANIFEST)?;
     // Manifest::parse owns mod id, native pin and existing declaration validation.
     let manifest = Manifest::parse(&original)?;
     let native = manifest
@@ -97,12 +106,42 @@ fn add(dir: &Path, args: &[String]) -> Result<(), String> {
         .join("target/horizon-mod/prebuilt")
         .join(&native.horizon)
         .join("points.json");
-    let catalog: Catalog = serde_json::from_str(
-        &fs::read_to_string(&points).map_err(|e| format!("{}: {e}", points.display()))?,
-    )
-    .map_err(|e| format!("{}: {e}", points.display()))?;
+    let catalog: Catalog =
+        serde_json::from_str(&crate::bounded::read(&points, crate::bounded::MAX_CATALOG)?)
+            .map_err(|e| format!("{}: {e}", points.display()))?;
     let candidate = append(&original, &manifest, &request, &internals, &catalog)?;
-    crate::internals::atomic_write_manifest(&path, candidate)
+    crate::internals::atomic_write_manifest(&path, candidate)?;
+    println!("{}", availability(&catalog, &request));
+    Ok(())
+}
+
+/// Which access tiers can listen at the request's place: `access = "api"` (native and wasm) at a
+/// point whose every parameter has an API type, at its head or return; `access = "internals"`
+/// on native mods only.
+fn availability(catalog: &Catalog, request: &Request<'_>) -> String {
+    use horizon_mod_point_emit::plain_path;
+    let api = if !matches!(
+        request.kind,
+        Kind::Head | Kind::Return | Kind::ModifyArg | Kind::Replace
+    ) {
+        format!("refused, {} is internals only", request.kind_name)
+    } else {
+        match catalog
+            .points
+            .iter()
+            .find(|point| plain_path(&point.target) == plain_path(request.at))
+        {
+            Some(Point {
+                api_refusal: None, ..
+            }) => "available (native and wasm)".to_owned(),
+            Some(Point {
+                api_refusal: Some(why),
+                ..
+            }) => format!("refused, {why}"),
+            None => format!("refused, {} is not a point", request.at),
+        }
+    };
+    format!("api: {api}\ninternals: native only")
 }
 
 fn append(
@@ -239,7 +278,7 @@ mod tests {
         add(dir, &args(command))
     }
     pub(super) fn fixture() -> (Vec<ListedInternal>, Catalog) {
-        (serde_json::from_str(r#"[{"path":"game::tick","kind":"method","signature":"fn tick(&mut self)","hash":"signature-fixture"}]"#).unwrap(), serde_json::from_str(r#"{"sites":[{"target":"game::tick","call":"game::first","ordinal":0,"ctx":"context-zero"},{"target":"game::tick","call":"game::first","ordinal":2,"ctx":"context-two"},{"target":"game::tick","call":"game::other","ordinal":0,"ctx":"other-context"}]}"#).unwrap())
+        (serde_json::from_str(r#"[{"path":"game::tick","kind":"method","signature":"fn tick(&mut self)","hash":"signature-fixture"}]"#).unwrap(), serde_json::from_str(r#"{"points":[{"target":"game::tick"},{"target":"game::turn","api_refusal":"argument 1 `batch` (`&mutHudBatch`) has no API type yet"}],"sites":[{"target":"game::tick","call":"game::first","ordinal":0,"ctx":"context-zero"},{"target":"game::tick","call":"game::first","ordinal":2,"ctx":"context-two"},{"target":"game::tick","call":"game::other","ordinal":0,"ctx":"other-context"}]}"#).unwrap())
     }
     pub(super) fn edit(text: &str, args: &str) -> Result<String, String> {
         let args = self::args(args);
@@ -247,6 +286,31 @@ mod tests {
         let (internals, catalog) = fixture();
         append(text, &manifest, &request(&args)?, &internals, &catalog)
     }
+    #[test]
+    fn inject_add_prints_each_access_tier() {
+        let (_, catalog) = fixture();
+        let says = |line: &str| {
+            let args = self::args(line);
+            availability(&catalog, &request(&args).unwrap())
+        };
+        assert_eq!(
+            says("add game::tick --kind head"),
+            "api: available (native and wasm)\ninternals: native only"
+        );
+        assert_eq!(
+            says("add game::turn --kind return"),
+            "api: refused, argument 1 `batch` (`&mutHudBatch`) has no API type yet\ninternals: native only"
+        );
+        assert_eq!(
+            says("add game::gone --kind head"),
+            "api: refused, game::gone is not a point\ninternals: native only"
+        );
+        assert_eq!(
+            says("add game::tick --kind wrap_call"),
+            "api: refused, wrap_call is internals only\ninternals: native only"
+        );
+    }
+
     #[test]
     fn inject_add_writes_only_validated_manifests() {
         let dir = reviewer_directory("validation");
