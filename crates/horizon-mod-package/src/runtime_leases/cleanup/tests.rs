@@ -47,16 +47,10 @@ fn boundaries_and_permanent_gate() {
             assert!(cleanup.directory.as_raw_fd() > 2);
             assert!(cleanup._gate.file().as_raw_fd() > 2);
         }
-        assert_eq!(
-            cleanup.collect().unwrap(),
-            if count < 4096 { 0 } else { count }
-        );
+        assert_eq!(cleanup.collect().unwrap(), 0);
         let after = cleanup.directory.metadata("gate").unwrap();
         assert_eq!((before.dev(), before.ino()), (after.dev(), after.ino()));
-        assert_eq!(
-            cleanup.directory.entries().unwrap().count(),
-            if count < 4096 { count + 1 } else { 1 }
-        );
+        assert_eq!(cleanup.directory.entries().unwrap().count(), count + 1);
         assert!(matches!(Registry::existing(root.path()), Err(Error::Busy)));
         drop(cleanup);
         assert!(Registry::existing(root.path()).is_ok());
@@ -111,7 +105,7 @@ fn unknown_entries_never_count_or_disappear() {
     let cleanup = Cleanup::existing(root.path()).unwrap();
     assert_eq!(cleanup.collect().unwrap(), 0);
     drop(initialize_lock(&cleanup.directory, &format!("{:064x}", 4095)).unwrap());
-    assert_eq!(cleanup.collect().unwrap(), 4096);
+    assert_eq!(cleanup.collect().unwrap(), 0);
     for name in odd {
         assert_eq!(cleanup.directory.read(name).unwrap(), b"retained");
     }
@@ -154,7 +148,7 @@ fn redirects_and_hardlinks_are_retained() {
     fs::hard_link(&outside, &hard).unwrap();
     drop(registry);
     let cleanup = Cleanup::existing(root.path()).unwrap();
-    assert_eq!(cleanup.collect().unwrap(), 4096);
+    assert_eq!(cleanup.collect().unwrap(), 0);
     assert!(fs::symlink_metadata(link).unwrap().file_type().is_symlink());
     assert_eq!(fs::read(hard).unwrap(), b"untouched");
     drop(cleanup);
@@ -184,4 +178,21 @@ fn windows_open_reader_blocks_exclusive_gate_and_collection_shares_no_gate() {
     drop(reader);
     let cleanup = Cleanup::existing(root.path()).unwrap();
     assert!(cleanup.directory.open("gate").is_err());
+}
+
+#[test]
+fn published_live_unit_key_survives_collection_at_the_threshold() {
+    if isolated() {
+        return;
+    }
+    let (root, registry) = setup();
+    populate(&registry, 4096);
+    let tree = open_directory(root.path()).unwrap();
+    drop(registry.lock(&tree, LockMode::Shared).unwrap());
+    drop(registry);
+    let cleanup = Cleanup::existing(root.path()).unwrap();
+    assert_eq!(cleanup.collect().unwrap(), 0);
+    drop(cleanup);
+    let registry = Registry::existing(root.path()).unwrap();
+    drop(registry.lock(&tree, LockMode::Shared).unwrap());
 }
