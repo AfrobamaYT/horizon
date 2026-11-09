@@ -1,6 +1,8 @@
 //! The build-tool fixture is a real shared module, not a component.
 // Generated fixtures exercise every shape; TODO(#2273): make the generator emit clippy-clean code.
 #![allow(clippy::all, unused_comparisons, unreachable_patterns, dead_code)]
+#[path = "support/no_hooks.rs"]
+mod no_hooks;
 #[path = "fixture/src/replace.rs"]
 mod replace;
 #[path = "fixture/src/shutdown.rs"]
