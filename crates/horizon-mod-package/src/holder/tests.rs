@@ -55,7 +55,17 @@ impl Scene {
             })
             .collect();
         let image = path.join("image").join(actor().file_name().unwrap());
-        fs::copy(actor(), &image).unwrap();
+        // A concurrent fork can retain fs::copy's writable destination descriptor until
+        // exec, making our immediate exec fail with ETXTBSY even after copy returns.
+        // Keep that descriptor in a single-threaded actor, never in the libtest process.
+        assert!(
+            Command::new(actor())
+                .env("HOLDER_TEST_MODE", "copy-image")
+                .env("HOLDER_TEST_IMAGE", &image)
+                .status()
+                .unwrap()
+                .success()
+        );
         let claims = snapshots
             .iter()
             .map(|snapshot| registry.lock(&snapshot.directory, LockMode::Shared))
