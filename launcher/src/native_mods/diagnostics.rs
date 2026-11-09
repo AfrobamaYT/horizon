@@ -499,7 +499,7 @@ mod tests {
 
     /// A trait mod pinned to a fork's commit (its `[api]` package uses hooks the base Nightly
     /// lacks): the error is in the mod's own package, so the mod is named and left out, and the
-    /// build can move to the commit it pins. Horizon's own crates name no one.
+    /// build retries without that mod. Horizon's own crates name no one.
     #[test]
     fn an_error_in_a_mods_own_package_names_the_mod() {
         let dir = super::super::tests::dir("compiler-package-owner");

@@ -2296,7 +2296,7 @@ const COMPILE_RETRIES: usize = 3;
 
 /// Runs `pipeline` until it builds, each time without the mods that stopped it before (they
 /// are said with `progress` as they are left out, and those needing them once it built). The
-/// error, when it can't, starts with the mods already left out; they come with it.
+/// error, when it can't, starts with the mods already left out.
 fn isolated(
     mut pipeline: impl FnMut(&[LeftOut]) -> Result<Built, Failed>,
     progress: &impl Fn(Step),

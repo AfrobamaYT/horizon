@@ -61,7 +61,7 @@ fn game() -> Game<'static> {
 
 fn id(game: &Game<'_>, n: usize) -> u32 {
     match game.target_with_uuid([24732, 0, 0, n as i32]) {
-        Some(super::commands::Target::Mob(id)) => id,
+        Some(crate::game::commands::Target::Mob(id)) => id,
         other => panic!("{other:?}"),
     }
 }

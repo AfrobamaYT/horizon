@@ -7520,6 +7520,8 @@ mod hurt_cooldown_incoming_tests {
         let mut test_level = crate::health::TestLevel::new(0);
         let level = &mut test_level.level();
         let mut m = mob(Species::Pig);
+        // Absorption I gives max_absorption 4, so the 1.5 remainder is valid.
+        m.add_effect("absorption", 600, 0);
         m.absorption = 1.5;
         assert!(m.damage(level, 1.0, Damage::of(DamageKind::Generic)));
         assert_eq!((m.health, m.absorption), (40.0, 0.5));

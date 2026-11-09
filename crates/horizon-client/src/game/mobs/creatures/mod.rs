@@ -13567,9 +13567,13 @@ mod h169_glide_travel_tests {
 }
 
 #[cfg(test)]
-#[path = "../../entities/leash_without_item_criterion_tests.rs"]
+#[path = "../../entities/tests/leash_without_item_criterion_tests.rs"]
 mod leash_without_item_criterion_tests;
 
 #[cfg(test)]
 #[path = "../../entities/tests/leash_without_item_postbaseline_controls.rs"]
 mod leash_without_item_postbaseline_controls;
+
+#[cfg(test)]
+#[path = "../tests/revenge_home_tests.rs"]
+mod revenge_home_tests;
