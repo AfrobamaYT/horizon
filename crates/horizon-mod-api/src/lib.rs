@@ -3010,8 +3010,7 @@ pub enum LightLayer {
 /// as its id (`minecraft:vanilla`, `minecraft:redstone_experiments`), shared with the world.
 /// A world that names none enables `minecraft:vanilla` alone, as vanilla's default does.
 /// Getting and reading it allocates nothing.
-#[derive(horizon_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
+// no wire: encodes the effective iter() list, which synthesizes minecraft:vanilla for empty backing storage; a structural derive would encode zero flags.
 #[derive(Clone, Debug, PartialEq, Eq)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct FeatureFlags(Arc<[String]>);

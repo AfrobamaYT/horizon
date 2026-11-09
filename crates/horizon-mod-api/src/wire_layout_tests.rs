@@ -112,6 +112,43 @@ fn checked_records_have_declared_field_bytes() {
 }
 
 #[test]
+fn resource_decoders_normalize_non_unit_wire_quantities() {
+    let _keys = Keys::new();
+    // Item key slot 0, count 7, no damage or component patch.
+    let item: ItemResource = Reader::decode(&[0, 0, 0, 0, 7, 0, 0, 0, 0, 0]).unwrap();
+    assert_eq!(item.as_stack().count(), 1);
+    let mut out = Writer::new();
+    out.put(&item);
+    assert_eq!(out.bytes(), &[0, 0, 0, 0, 1, 0, 0, 0, 0, 0]);
+    // Resolved-fluid tag 0, fluid slot 0, amount 7, no components.
+    let fluid: FluidResource = Reader::decode(&[0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0]).unwrap();
+    out.clear();
+    out.put(&fluid);
+    assert_eq!(out.bytes(), &[0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0]);
+}
+
+#[test]
+fn empty_feature_flag_storage_encodes_the_effective_vanilla_default() {
+    let flags = FeatureFlags::new(std::sync::Arc::from([]));
+    assert!(flags.contains("minecraft:vanilla"));
+    assert!(flags.contains("vanilla"));
+    assert_eq!(flags.iter().collect::<Vec<_>>(), ["minecraft:vanilla"]);
+    // Independent bytes: one flag, then the 17-byte UTF-8 resource id.
+    let expected = b"\x01\0\0\0\x11\0\0\0minecraft:vanilla";
+    let mut out = Writer::new();
+    out.put(&flags);
+    assert_eq!(out.bytes(), expected);
+    let decoded: FeatureFlags = Reader::decode(expected).unwrap();
+    assert_eq!(decoded.iter().collect::<Vec<_>>(), ["minecraft:vanilla"]);
+    // A zero-entry input still takes the constructor's empty-default path,
+    // and re-encoding it emits the same effective list as before the migration.
+    let empty: FeatureFlags = Reader::decode(&[0, 0, 0, 0]).unwrap();
+    out.clear();
+    out.put(&empty);
+    assert_eq!(out.bytes(), expected);
+}
+
+#[test]
 fn handle_records_have_declared_field_bytes() {
     let epoch = NativeWorldEpoch::new(47);
     let level = LevelRef::new(epoch, DimensionKey::OVERWORLD);

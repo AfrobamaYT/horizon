@@ -138,8 +138,7 @@ pub struct ItemDamageSource {
 
 /// An item and its components, without a count, as NeoForge's `ItemResource`: what a slot holds.
 /// An empty slot holds none.
-#[derive(horizon_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
+// no wire: decoding calls ItemResource::of to normalize the incoming stack count to one; a structural derive would preserve a non-unit wire count.
 #[derive(Clone)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ItemResource(pub(crate) ItemStack);

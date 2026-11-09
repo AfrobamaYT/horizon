@@ -26,6 +26,41 @@ impl Wire for crate::OwnProvider {
     }
 }
 
+impl Wire for crate::ItemResource {
+    layout_fields!("stack" => crate::ItemStack);
+    const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(crate::ItemResource));
+    const MIN: usize = crate::ItemStack::MIN;
+    fn put(&self, out: &mut Writer) {
+        out.put(&self.0);
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        Ok(Self::of(&input.take()?))
+    }
+}
+impl Wire for crate::FluidResource {
+    layout_fields!("stack" => crate::FluidStack);
+    const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(crate::FluidResource));
+    const MIN: usize = crate::FluidStack::MIN;
+    fn put(&self, out: &mut Writer) {
+        out.put(&self.0);
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        Ok(Self::of(&input.take()?))
+    }
+}
+
+impl Wire for crate::FeatureFlags {
+    layout_fields!("flags" => Vec<String>);
+    const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(crate::FeatureFlags));
+    const MIN: usize = 4;
+    fn put(&self, out: &mut Writer) {
+        out.put(&self.iter().map(str::to_owned).collect::<Vec<_>>());
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        Ok(Self::new(input.take::<Vec<String>>()?.into()))
+    }
+}
+
 impl Wire for crate::LoadedMods {
     const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(crate::LoadedMods));
     const MIN: usize = 0;

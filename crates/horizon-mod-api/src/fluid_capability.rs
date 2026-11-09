@@ -62,8 +62,7 @@ impl FluidStack {
 
 /// A fluid and its components, without an amount, as NeoForge's `FluidResource`: what a tank
 /// holds. An empty tank holds none.
-#[derive(horizon_mod_api_macros::Wire)]
-#[wire(internal_field_layouts)]
+// no wire: decoding calls FluidResource::of to normalize the incoming fluid amount to one; a structural derive would preserve a non-unit wire amount.
 #[derive(Clone)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct FluidResource(pub(crate) FluidStack);
