@@ -6258,7 +6258,8 @@ mod connected_statistics_save_tests {
     fn connected_stats_save_control(stale: bool) {
         use super::super::{execution_role::ExecutionRole, stats};
         use std::sync::{Arc, Mutex};
-        let mut game = crate::game::game_tests::tests::server_game();
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
         game.options.execution_role = ExecutionRole::DedicatedServer;
         let dir = std::env::current_dir().unwrap().join(if stale {
             "stats-stale"
@@ -6364,7 +6365,8 @@ mod connected_statistics_save_exclusion_tests {
     #[test]
     #[ignore = "needs prepared resources and scratch homes/cwd"]
     fn excluded_guest_records_are_not_invented_or_written() {
-        let mut game = crate::game::game_tests::tests::server_game();
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
         let _rx = super::world_spawn_sync_tests::host_for(&mut game);
         game.world_root = std::env::current_dir().unwrap().join("stats-excluded");
         std::fs::create_dir_all(&game.world_root).unwrap();
