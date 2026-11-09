@@ -527,6 +527,30 @@ pub const fn layout_name(name: &str) -> u64 {
     hash
 }
 
+/// Hash a handwritten leaf type's unqualified name.
+// hidden: normalizes macro type arguments without tying encodings to source paths.
+#[doc(hidden)]
+pub const fn layout_seed(name: &str) -> u64 {
+    let bytes = name.as_bytes();
+    let mut start = 0;
+    let mut i = 1;
+    while i < bytes.len() {
+        if bytes[i - 1] == b':' && bytes[i] == b':' {
+            start = i + 1;
+        }
+        i += 1;
+    }
+    let mut hash = 0xcbf29ce484222325u64;
+    i = start;
+    while i < bytes.len() {
+        if bytes[i] != b' ' {
+            hash = (hash ^ bytes[i] as u64).wrapping_mul(0x100000001b3);
+        }
+        i += 1;
+    }
+    hash
+}
+
 /// Compose a layout hash with a child encoding.
 // hidden: shared stable encoding hash composition used by Wire derives.
 #[doc(hidden)]
@@ -591,7 +615,7 @@ pub trait Wire: Sized {
 macro_rules! numbers {
     ($($ty:ty),*) => {$(
         impl Wire for $ty {
-            const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!($ty));
+            const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!($ty));
     const MIN: usize = std::mem::size_of::<$ty>();
             fn put(&self, out: &mut Writer) {
                 out.put_bytes(&self.to_le_bytes());
@@ -630,7 +654,7 @@ numbers!(u8, i8, u16, i16, u32, i32, u64, i64, u128, i128, f32, f64);
 
 /// A `usize` crosses as 64 bits: a guest's is 32.
 impl Wire for usize {
-    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(usize));
+    const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(usize));
     const MIN: usize = 8;
     fn put(&self, out: &mut Writer) {
         out.put(&(*self as u64));
@@ -641,7 +665,7 @@ impl Wire for usize {
 }
 
 impl Wire for bool {
-    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(bool));
+    const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(bool));
     const MIN: usize = 1;
     fn put(&self, out: &mut Writer) {
         out.put(&u8::from(*self));
@@ -656,7 +680,7 @@ impl Wire for bool {
 }
 
 impl Wire for char {
-    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(char));
+    const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(char));
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
         out.put(&u32::from(*self));
@@ -667,7 +691,7 @@ impl Wire for char {
 }
 
 impl Wire for () {
-    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(()));
+    const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(()));
     const MIN: usize = 0;
     fn put(&self, _: &mut Writer) {}
     fn take(_: &mut Reader<'_>) -> Result<Self, WireError> {
@@ -1016,7 +1040,7 @@ tuples!(
 /// A duration as seconds and nanoseconds.
 impl Wire for std::time::Duration {
     crate::wire::layout_fields!("secs" => u64, "nanos" => u32);
-    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(std::time::Duration));
+    const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(std::time::Duration));
     const MIN: usize = 12;
     fn put(&self, out: &mut Writer) {
         out.put(&self.as_secs());

@@ -627,7 +627,12 @@ pub use staged::{MODS_STAGE, staged_mods};
 pub fn generate_test_hooks(root: &Path, out_dir: &Path) -> Result<(), String> {
     build::track(root)?;
     dispatch_fixtures::generate(root, out_dir)?;
-    let code = sources(root, FillMode::Ignore)?.hooks;
+    // These fixtures deliberately substitute dispatch-only stub values for API
+    // types. Encoding is exercised by the real mod_api's Wire tests, not stubs.
+    let code = sources(root, FillMode::Ignore)?
+        .hooks
+        .replace(", horizon_mod_api_macros::Wire", "")
+        .replace("#[derive(horizon_mod_api_macros::Wire)]\n", "");
     fs::write(out_dir.join("mod_api_generated.rs"), code).map_err(|e| e.to_string())
 }
 

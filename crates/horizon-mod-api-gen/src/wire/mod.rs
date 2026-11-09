@@ -751,6 +751,23 @@ mod tests {
             assert!(matches!(projection.kind, super::ty::Kind::Opaque));
             projection.projection.as_mut().unwrap()[0].ty = super::ty::Ty::Unit;
             assert_ne!(baseline, super::layout(&surface));
+            let before_borrowed = super::layout(&surface);
+            let borrowed = surface
+                .types
+                .defs
+                .iter_mut()
+                .find_map(|def| {
+                    if def.lifetimes == 0 {
+                        return None;
+                    }
+                    match &mut def.kind {
+                        super::ty::Kind::Record(fields) => fields.first_mut(),
+                        _ => None,
+                    }
+                })
+                .expect("a borrowed call record");
+            borrowed.ty = super::ty::Ty::Unit;
+            assert_ne!(before_borrowed, super::layout(&surface));
         };
         std::thread::Builder::new()
             .stack_size(64 << 20)
