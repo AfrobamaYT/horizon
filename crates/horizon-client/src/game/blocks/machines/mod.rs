@@ -1996,38 +1996,6 @@ mod item_column_tests {
         })
     }
 
-    /// One tick of empty hoppers looking for items: each scans every item
-    /// (before) or asks the columns first (after, build included).
-    #[test]
-    #[ignore]
-    fn hopper_suck_cost() {
-        for (hoppers, count) in [(500i32, 200u32), (2000, 500), (2000, 2000)] {
-            let mut seed = 99u64;
-            let mut next = |range: f64| {
-                seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
-                (seed >> 11) as f64 / (1u64 << 53) as f64 * range
-            };
-            let items: Vec<ItemEntity> = (0..count)
-                .map(|id| item(id, next(160.0), 64.0, next(160.0)))
-                .collect();
-            let at: Vec<(i32, i32, i32)> = (0..hoppers)
-                .map(|_| (next(160.0) as i32, 63, next(160.0) as i32))
-                .collect();
-            let t = std::time::Instant::now();
-            let a: Vec<bool> = at.iter().map(|&h| scan(&items, h)).collect();
-            let before = t.elapsed().as_secs_f64() * 1e3;
-            let t = std::time::Instant::now();
-            let mut columns = ItemColumns::default();
-            let b: Vec<bool> = at
-                .iter()
-                .map(|&h| columns.may_reach(&items, h.0, h.2) && scan(&items, h))
-                .collect();
-            let after = t.elapsed().as_secs_f64() * 1e3;
-            assert_eq!(a, b);
-            println!("{hoppers} hoppers, {count} items: {before:.3} ms -> {after:.3} ms");
-        }
-    }
-
     #[test]
     fn no_hopper_with_an_item_over_it_is_skipped() {
         let mut seed = 0x1234_5678_9abc_def1u64;
