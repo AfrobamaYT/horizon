@@ -125,6 +125,10 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `ClientHost::set_camera_entity` | crosses | Wire call |
 | `ClientHost::crosshair_target` | crosses | Wire call |
 | `ClientHost::translate` | crosses | Wire call |
+| `ClientHost::setting_bool` | crosses | Wire call |
+| `ClientHost::setting_choice` | crosses | Wire call |
+| `ClientHost::setting_f64` | crosses | Wire call |
+| `ClientHost::setting_color` | crosses | Wire call |
 | `ClientHost::fluid_name` | crosses | Wire call |
 | `ClientHost::bake_layer` | crosses | Wire call |
 | `ClientHost::muffle_sounds` | crosses | Wire call |
@@ -951,6 +955,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Registrar::register_key_mapping` | crosses | Wire call |
 | `Registrar::attach_menu_part` | crosses | Wire call |
 | `Registrar::particle_key` | crosses | Wire call |
+| `Registrar::register_setting` | crosses | Wire call |
 | `Registrar::declare_spawn_placement` | crosses | Wire call |
 | `Registrar::add_structure_type` | crosses | Wire call |
 | `Registrar::register_ticket_controller` | crosses | Wire call |
