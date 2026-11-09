@@ -163,7 +163,6 @@ impl dyn Registrar + '_ {
 /// Fixtures that tests of other crates use to install Parts.
 #[cfg(any(test, feature = "testing"))]
 pub mod tests {
-    use super::*;
     use crate::parts::tests::*;
     use crate::*;
 
