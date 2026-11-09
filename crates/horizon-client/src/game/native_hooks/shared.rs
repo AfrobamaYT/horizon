@@ -104,7 +104,7 @@ impl Game<'_> {
     /// the one place the game's screen changes. A different screen runs
     /// `screen_opening` first (`ScreenEvent.Opening`: a mod may keep the
     /// current screen or open its own), then `screen_closing` for the screen
-    /// it replaces, as NeoForge's `Minecraft.setScreen` does. The same screen
+    /// it replaces. The same screen
     /// again, a game with no mod listening to either, and a server's or a guest's `Game`
     /// are a plain assignment.
     pub(super) fn set_screen(&mut self, screen: Screen) {
@@ -180,7 +180,7 @@ impl Game<'_> {
             self.capture(false);
         }
     }
-    /// The events of one change of screen, in NeoForge's order, for
+    /// The events of one change of screen, in order, for
     /// `set_screen` and for the overlays `observe_screen` announces: `opens`
     /// fires `screen_opening` (`ScreenEvent.Opening`) from `current` to `new`
     /// (a screen of `playing` is vanilla's null) and returns a mod's answer;

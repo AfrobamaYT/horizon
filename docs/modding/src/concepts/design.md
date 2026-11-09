@@ -147,8 +147,8 @@ them; the design is this:
 
 - **One trait per scope.** `BlockPart`, `BlockEntityPart`, `ItemPart` and `MenuPart` are generated from the
   catalog entries whose `scope` names them, so a part on a plain block has no tick method to write.
-- **A global hook only where NeoForge has a bus event.** Where NeoForge fires an event at the same moment as
-  the override, that event is a hook on `Hooks`, asked first for everything, and its cancel skips the parts.
+- **A global hook only where NeoForge has a bus event.** Where a NeoForge event is the counterpart for
+  the override moment, that event is a hook on `Hooks`, asked first for everything, and its cancel skips the parts.
   Where it has none, the moment is a part method alone and has no global form. A mod reacting to its own blocks
   uses a part; one reacting to every block uses the event.
 - **A part is configuration.** It takes `&self` and is `Send + Sync`, like a vanilla `Block`'s properties. State

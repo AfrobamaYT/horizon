@@ -48,7 +48,7 @@ Native mods are native code with the player's rights, not sandboxed. The first i
 and every build waits behind a red warning; the registry lists one only after a review (its later releases are
 checked by machine). They play in a game of their own, built for the instance they are installed in.
 
-The game's Mods screen only lists code mods (it has no switch, as NeoForge's has none). A code mod's settings page,
+The game's Mods screen only lists code mods (it has no switch). A code mod's settings page,
 when it has one, opens from the Config button. The launcher decides which mods are on. A browser install that
 finishes after a world opens waits until the world closes before activating its content.
 

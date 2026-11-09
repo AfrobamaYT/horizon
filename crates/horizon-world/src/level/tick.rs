@@ -314,8 +314,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 }
                 Class::BambooStalk => {
                     if b.table.int(state, p.stage) == 0 {
-                        // Vanilla's roll comes first; NeoForge asks the crop
-                        // hook only after the other checks.
+                        // Vanilla's roll comes first, in vanilla's order, before
+                        // the crop hook is asked.
                         let roll = self.rand_int(3) == 0;
                         if self.is_empty_block(above(pos))
                             && self.raw_brightness(above(pos), 0) >= 9
@@ -373,7 +373,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                         {
                             let next = self.growing_plant_grow_into_state(state);
                             self.set_block_and_update(growth, next);
-                            // NeoForge passes the new head as the original state.
+                            // The hook gets the new head as the original state.
                             let grown = self.state(growth);
                             self.level.crop_grow_post(growth, grown);
                         }
@@ -476,7 +476,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 Class::SweetBerryBush => {
                     let age = b.table.int(state, p.age);
                     if age < 3 {
-                        // Vanilla rolls before the light check; NeoForge after.
+                        // Vanilla rolls before the light check.
                         let roll = self.rand_int(5) == 0;
                         if self.raw_brightness(above(pos), 0) >= 9
                             && self.level.crop_grow_pre(pos, state, roll)

@@ -2568,7 +2568,7 @@ registration path.
 
 - An item cooldown about to start for a server player: `native_player_item_cooldown(player, name, item, ticks, cancel)` is called for use cooldowns and for a shield disabled by a hit. `item` is the item id and `ticks` its duration. Set `cancel` to skip the cooldown; shield disable still stops the use and plays its configured sound. The player's state is not swapped in.
 
-- A server player switches hotbar slot (`PlayerSwitchHotbarSlotEvent`), only when the slot differs: `native_player_switch_hotbar_slot_pre(player, player_entity_id, old_slot, new_slot, cancel)` is called after the slot range check and before the selected slot changes. Set `cancel` to keep the old slot; the client is sent that slot again (NeoForge leaves the client on the new one). Otherwise `native_player_switch_hotbar_slot_post(player, player_entity_id, old_slot, new_slot)` follows once the slot changed and a main-hand item use stopped. The player's state is not swapped in.
+- A server player switches hotbar slot (`PlayerSwitchHotbarSlotEvent`), only when the slot differs: `native_player_switch_hotbar_slot_pre(player, player_entity_id, old_slot, new_slot, cancel)` is called after the slot range check and before the selected slot changes. Set `cancel` to keep the old slot; the client is sent that slot again. Otherwise `native_player_switch_hotbar_slot_post(player, player_entity_id, old_slot, new_slot)` follows once the slot changed and a main-hand item use stopped. The player's state is not swapped in.
 
 
 - A server player selected loom pattern button `pattern`, after the menu accepted it: `native_player_loom_pattern_select(player, name, pattern)`.

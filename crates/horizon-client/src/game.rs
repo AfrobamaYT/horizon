@@ -7156,7 +7156,7 @@ impl Game<'_> {
             .get("minecraft:breaks_decorated_pots")
             .is_some_and(|t| t.contains(&*held.item));
         let enchantments = &self.stations().enchantments;
-        // `EnchantmentHelper.hasTag`, which NeoForge asks through the mods.
+        // `EnchantmentHelper.hasTag`.
         let kept = held
             .all_enchantments()
             .iter()
@@ -12015,8 +12015,8 @@ impl Game<'_> {
     /// ServerExplosion: rays from a 16^3 grid lose (resistance + 0.3) * 0.3 per step.
     /// A mob explosion (`ServerLevel.explode` with `ExplosionInteraction.MOB`:
     /// blocks are kept without mobGriefing, else the mob_explosion_drop_decay
-    /// rule picks decay). NeoForge asks `canEntityGrief` for `source`, the
-    /// exploding entity (the rule alone without one).
+    /// rule picks decay). Mods are asked through `can_entity_grief` for
+    /// `source`, the exploding entity (the rule alone without one).
     fn explode(
         &mut self,
         source: Option<u32>,

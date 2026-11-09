@@ -2913,8 +2913,7 @@ impl SaveDir {
     /// types through a registry. Each is saved under its controller's id;
     /// `slot_of` gives the slot of an id a loaded mod registered. A ticket of
     /// any other id (a mod that is gone, or a file from before controllers) is
-    /// dropped with a warning, as NeoForge drops a controller nobody registers,
-    /// and one that doesn't read is skipped.
+    /// dropped with a warning, and one that doesn't read is skipped.
     pub fn load_mod_tickets(&self, slot_of: impl Fn(&str) -> Option<u32>) -> Vec<ModTicket> {
         let Some(root) = read_dat(&self.mod_tickets_path()) else {
             return Vec::new();

@@ -2568,7 +2568,7 @@ impl Game<'_> {
                             );
                         }
                     }
-                    // Canceled, NeoForge returns before `detectRateSpam`.
+                    // Canceled: stop before `detectRateSpam`.
                     if cancel {
                         continue;
                     }

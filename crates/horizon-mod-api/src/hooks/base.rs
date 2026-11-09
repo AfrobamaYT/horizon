@@ -3629,7 +3629,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "cancel",
         out = "cancel",
-        neoforge = "none (NeoForge's PlayerContainerEvent.Open fires after the menu is open and is not cancellable)",
+        neoforge = "none (not NeoForge's PlayerContainerEvent.Open: this hook can cancel the opening)",
         cancellable = true
     )]
     fn container_opened();
