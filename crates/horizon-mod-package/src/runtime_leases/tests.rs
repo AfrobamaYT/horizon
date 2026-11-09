@@ -90,12 +90,13 @@ fn a_lock_file_cannot_redirect_access_outside_the_registry() {
     let registry = Registry::with_release(&data, Release::Unlock).unwrap();
     let tree = directory(&root.path().join("tree"));
     drop(registry.lock(&tree, LockMode::Shared).unwrap());
-    let file = fs::read_dir(data.join("run-leases"))
+    // The registry also holds its gate; directory order is the filesystem's, so pick the tree's file by name.
+    let files: Vec<_> = fs::read_dir(data.join("run-leases"))
         .unwrap()
-        .next()
-        .unwrap()
-        .unwrap()
-        .path();
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.file_name().unwrap() != "gate")
+        .collect();
+    let [file] = <[_; 1]>::try_from(files).unwrap();
     fs::remove_file(&file).unwrap();
     let precious = root.path().join("precious");
     fs::write(&precious, b"keep").unwrap();

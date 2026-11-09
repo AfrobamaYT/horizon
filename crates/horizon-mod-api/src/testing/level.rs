@@ -1,8 +1,9 @@
 //! The level fake: blocks, block entities with the game's storages, and entities.
 use super::FAKE_EPOCH;
-use crate::{BlockEntityTypeKey, FluidStack, ItemStack, LevelRef, NativeWorldEpoch};
+use crate::{BlockEntityTypeKey, FluidStack, ItemStack, LevelRef, WorldEpoch};
 use std::collections::{BTreeMap, HashMap};
 
+// no wire: in-process testing harness state, not a mod boundary payload.
 /// One level of a test world: the blocks a test names, the block entities standing in it with
 /// the storages the game answers for them, and its entities. Positions nothing was put at read
 /// as empty, as unloaded blocks do.
@@ -27,8 +28,8 @@ impl FakeLevel {
     pub fn new(dimension: &'static str) -> Self {
         Self {
             level: LevelRef::new(
-                NativeWorldEpoch::new(FAKE_EPOCH),
-                crate::registry_keys::dimension_key(dimension),
+                WorldEpoch::new(FAKE_EPOCH),
+                crate::content::registry_keys::dimension_key(dimension),
             ),
             blocks: HashMap::new(),
             block_entities: BTreeMap::new(),
@@ -88,6 +89,7 @@ impl FakeLevel {
     }
 }
 
+// no wire: in-process testing harness state, not a mod boundary payload.
 /// A block entity of a test level: its type, vanilla when unset, and the storages the game
 /// answers for it from every side.
 #[derive(Clone, Debug, Default)]
@@ -124,6 +126,7 @@ impl FakeBlockEntity {
     }
 }
 
+// no wire: in-process testing harness state, not a mod boundary payload.
 /// A block entity's item slots, as the game's `Container` handler answers: a slot takes the
 /// item it holds, or any when empty, up to `limit` and the item's stack size.
 #[derive(Clone, Debug)]
@@ -148,7 +151,7 @@ impl FakeContainer {
         self.slots
             .iter()
             .flatten()
-            .filter(|held| crate::registry_keys::item_id(held.item()) == Some(item))
+            .filter(|held| crate::content::registry_keys::item_id(held.item()) == Some(item))
             .map(ItemStack::count)
             .sum()
     }
@@ -194,6 +197,7 @@ impl FakeContainer {
     }
 }
 
+// no wire: in-process testing harness state, not a mod boundary payload.
 /// A fluid tank, as the game's tanks answer: it fills with the fluid it holds, or any when
 /// empty, up to `capacity` millibuckets.
 #[derive(Clone, Debug)]
@@ -246,6 +250,7 @@ impl FakeTank {
     }
 }
 
+// no wire: in-process testing harness state, not a mod boundary payload.
 /// An energy storage, as NeoForge's `EnergyStorage`: what it holds of its capacity, and the
 /// most one insert or one extract moves.
 #[derive(Clone, Debug)]
@@ -288,6 +293,7 @@ impl FakeBattery {
     }
 }
 
+// no wire: in-process testing harness state, not a mod boundary payload.
 /// An entity of a test world: its type, the level it is in and its UUID.
 #[derive(Clone, Debug)]
 #[non_exhaustive]

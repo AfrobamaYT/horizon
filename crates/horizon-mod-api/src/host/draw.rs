@@ -61,6 +61,8 @@ pub trait DrawContext {
     fn text(&mut self, text: &str, at: [f32; 2], argb: u32, shadow: bool) {
         unimplemented!("DrawContext::text")
     }
+    /// Stack drawing does not enforce resident count or damage maxima. Unknown
+    /// item identities or unrepresentable component payloads still refuse drawing.
     /// Draw a stack and its slot decorations, except the count, at `at`,
     /// `size` GUI pixels square. False when nothing was drawn: an unknown item
     /// or an empty stack (air, or a count of 0, as `ItemStack.isEmpty`).
@@ -104,7 +106,7 @@ pub trait DrawContext {
     /// the order drawn. Draw it from a screen's drawing hook
     /// (`native_screen_draw`). A client's call; nothing is drawn on a server.
     /// API @API:scenes_in_screens@.
-    fn draw_scene(&mut self, rect: [f32; 4], blocks: &[NativeSceneBlock], view: NativeSceneView) {
+    fn draw_scene(&mut self, rect: [f32; 4], blocks: &[SceneBlock], view: SceneView) {
         unimplemented!("DrawContext::draw_scene")
     }
     /// `Screen.renderMenuBackground`: draws the tiled menu background (32x32) across `rect`
@@ -121,6 +123,7 @@ pub trait DrawContext {
         unimplemented!("DrawContext::tiled_sprite")
     }
     /// Draw an item stack with custom count/decoration text (or None) at `at` in GUI units.
+    /// Uses the same nonresident stack encoding as `item_stack`, not write validation.
     fn gui_draw_item_with(&mut self, stack: &ItemStack, at: [f32; 2], text: Option<&str>) {
         unimplemented!("DrawContext::gui_draw_item_with")
     }
@@ -128,7 +131,7 @@ pub trait DrawContext {
     /// `widget/button` sprite (`button_highlighted` when `highlighted`, `button_disabled` and
     /// grey when not `active`), scrolling when it doesn't fit, and recorded for the narrator and
     /// a controller's focus. `rect` is `[x, y, w, h]` in GUI pixels. What
-    /// [`crate::widgets::Widgets`] draws its buttons with.
+    /// [`crate::client::widgets::Widgets`] draws its buttons with.
     /// Refuses text deeper than 512 component nodes before applying any changes.
     fn widget_button(
         &mut self,
@@ -144,7 +147,7 @@ pub trait DrawContext {
     /// highlighted, the caret, the suggestion, the `widget/text_field` sprite when bordered, and
     /// a record for the narrator and a controller's focus. Answers the scroll it drew with and
     /// the x of each shown character boundary, for the next press. What
-    /// [`crate::widgets::Widgets`] draws its fields with.
+    /// [`crate::client::widgets::Widgets`] draws its fields with.
     fn widget_text_field(&mut self, field: &TextFieldView) -> TextFieldLayout {
         unimplemented!("DrawContext::widget_text_field")
     }
@@ -249,7 +252,7 @@ pub trait BlockEntityDrawContext {
     fn item(
         &mut self,
         stack: &ItemStack,
-        display: NativeItemDisplayContext,
+        display: ItemDisplayContext,
         owner_yaw: Option<f32>,
         seed: i32,
     ) -> bool {

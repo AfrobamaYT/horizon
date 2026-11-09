@@ -565,8 +565,10 @@ fn replaced_tree_completion_or_unreserved_image_never_starts_game() {
             );
         }
         if change == 1 {
+            // Keep the old marker alive beside its replacement: a deleted inode may be reused at once
+            // (ext4), and these cleared snapshots no longer hold it as the GUI's retained ones do.
             let complete = scene.request.entry.trees[0].path.join(".installed");
-            fs::remove_file(&complete).unwrap();
+            fs::rename(&complete, complete.with_extension("old")).unwrap();
             fs::write(complete, b"").unwrap();
         }
         let (_endpoint, mut child, result) = scene.begin(change == 2, false);

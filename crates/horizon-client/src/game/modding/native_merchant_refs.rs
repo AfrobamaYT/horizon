@@ -57,7 +57,15 @@ impl Game<'_> {
         index: usize,
         read: impl FnOnce(&[MerchantOffer], i32, i32) -> T,
     ) -> T {
-        let mob = &self.mobs[index];
+        self.merchant_read_lent(&self.mobs[index], read)
+    }
+
+    /// The same read while an AI tick lends this mob out of `self.mobs`.
+    pub(super) fn merchant_read_lent<T>(
+        &self,
+        mob: &horizon_client::mobs::Mob,
+        read: impl FnOnce(&[MerchantOffer], i32, i32) -> T,
+    ) -> T {
         if mob.species() == Species::Villager && mob.extra.profession.index().is_none() {
             return read(
                 &[],
@@ -317,7 +325,7 @@ pub(super) mod tests {
     use super::*;
     use horizon_client::{items::ItemStack, merchant::ItemCost, mobs::Mob};
     use horizon_core::geometry::Vec3;
-    use mod_api::NativeWorldEpoch;
+    use mod_api::WorldEpoch;
 
     pub(in crate::game) fn offer(cost: &str, result: &str) -> MerchantOffer {
         MerchantOffer {
@@ -528,7 +536,7 @@ pub(super) mod tests {
             assert_eq!(horizon_client::entity_nbt::offers_from_nbt(&tag), saved);
 
             let stale = MerchantRef::new(EntityRef::new(
-                NativeWorldEpoch::new(villager.entity().epoch().get() + 1),
+                WorldEpoch::new(villager.entity().epoch().get() + 1),
                 villager.entity().id(),
             ));
             assert_eq!(stale.offers(game), None);

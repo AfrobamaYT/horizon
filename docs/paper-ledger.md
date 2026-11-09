@@ -1,5 +1,7 @@
 # Paper and Bukkit porting ledger
 
+For executable event comparisons, see [Paper event parity](paper-parity.md).
+
 This is a map for porting plugin logic to Horizon native mods, **not** a Bukkit or
 Paper compatibility layer. Java plugins do not run through these APIs. Event-by-event
 mappings belong in the native hook catalog; this page covers other plugin services.
@@ -7,11 +9,11 @@ The Paper/Bukkit references below are public Javadoc, not implementation sources
 
 | Plugin API | Horizon native-mod route and limits |
 | --- | --- |
-| [Permissions](https://hub.spigotmc.org/javadocs/bukkit/org/bukkit/permissions/Permissible.html) | **Partial:** `NativeCommand::op` uses vanilla operator levels 0–4, not named permission nodes or Bukkit attachments. `native_player_command` can reject a player command; implement any finer policy in the mod. The command tree and dispatch are in `crates/horizon-client/src/game/modding/native_server.rs`. |
+| [Permissions](https://hub.spigotmc.org/javadocs/bukkit/org/bukkit/permissions/Permissible.html) | **Partial:** `Command::op` uses vanilla operator levels 0–4, not named permission nodes or Bukkit attachments. `native_player_command` can reject a player command; implement any finer policy in the mod. The command tree and dispatch are in `crates/horizon-client/src/game/modding/native_server.rs`. |
 | [Scheduler](https://hub.spigotmc.org/javadocs/bukkit/org/bukkit/scheduler/BukkitScheduler.html) | **Gap:** no general delayed, repeating or asynchronous plugin task service. `native_server_tick` provides start and end callbacks for non-paused server ticks: a mod can manage its own tick deadlines there, rather than assume Bukkit task ownership or cancellation. Block/fluid tick scheduling in `crates/horizon-world/src/level/` is for world ticks, not arbitrary tasks. |
 | [PersistentDataContainer](https://hub.spigotmc.org/javadocs/bukkit/org/bukkit/persistence/PersistentDataContainer.html) | **Partial:** typed `AttachmentType<T>` with a codec persists mod-namespaced values on `Holder::Player` and `Holder::Entity`, among other holders. It is not a Bukkit data container or wire format; holders must be present, and player death copying is opt-in. See `crates/horizon-mod-runtime/src/attachments.rs` and [server attachments](modding/src/concepts/trait-mods.md#server-attachments). |
 | [ServicesManager](https://hub.spigotmc.org/javadocs/bukkit/org/bukkit/plugin/ServicesManager.html) | **Gap:** no equivalent provider registry, priority selection or economy service contract. Native mods must arrange their own integration; the host and attachment APIs are not a service registry. |
-| [CommandExecutor](https://hub.spigotmc.org/javadocs/bukkit/org/bukkit/command/CommandExecutor.html) and Brigadier | **Partial:** register `NativeCommand` usages through `native_register_commands`, then execute commands from any source in `native_run_mod_command` with typed source identity and arguments. Horizon builds a command tree from its supported usage syntax; this is not a general Bukkit executor or arbitrary Brigadier registration. See `crates/horizon-client/src/game/modding/native_server.rs` and [server commands](https://arismoko.github.io/horizon/reference/hook-notes.html#server-commands-and-players). |
+| [CommandExecutor](https://hub.spigotmc.org/javadocs/bukkit/org/bukkit/command/CommandExecutor.html) and Brigadier | **Partial:** register `Command` usages through `native_register_commands`, then execute commands from any source in `native_run_mod_command` with typed source identity and arguments. Horizon builds a command tree from its supported usage syntax; this is not a general Bukkit executor or arbitrary Brigadier registration. See `crates/horizon-client/src/game/modding/native_server.rs` and [server commands](https://arismoko.github.io/horizon/reference/hook-notes.html#server-commands-and-players). |
 
 For callback signatures, side and current limitations, use [native mods](modding/src/how-to/native-mods.md)
 and the hook declarations under `crates/horizon-mod-api/src/hooks/` at the fork revision being targeted.
@@ -996,7 +998,7 @@ one of these moments has to move that logic into a client native mod.
 |---|---|
 | `add_attribute_tooltips.rs` | `add_attribute_tooltips` |
 | `add_client_reload_listeners.rs` | `add_client_reload_listeners` |
-| `base.rs` | `biome_colors`, `block_entity_render_bounding_box`, `block_entity_submit`, `block_highlight`, `camera_distance`, `camera_shake`, `client_level_load`, `client_level_unload`, `client_resources_reloaded`, `command`, `compute_fog_color`, `compute_fov`, `emissive`, `framerate_limit`, `gui_layer_post`, `gui_layer_pre`, `health_hud`, `input_key`, `interaction_key_mapping_triggered`, `item_bar`, `item_decorations`, `map_decorations`, `minimap`, `mob_layer`, `mob_submit`, `mouse_button_post`, `mouse_button_pre`, `mouse_scrolling`, `music`, `music_layers`, `net_from_server`, `panel_event`, `player_render_listened`, `player_submit`, `recipes_received`, `register_client_commands`, `render_fog`, `render_hand`, `render_needs`, `screen_char_typed_pre`, `screen_click`, `screen_draw`, `screen_key_pressed_pre`, `screen_key_released_pre`, `screen_mouse_button_pressed_pre`, `screen_mouse_button_released_pre`, `screen_mouse_dragged_pre`, `screen_mouse_scrolled_pre`, `screen_render_post`, `screen_tooltip`, `settings_click`, `shader_params`, `standalone_models`, `tooltip`, `tooltip_component`, `tooltip_component_draw`, `use_animation`, `visuals`, `world_drawn`, `zoom` |
+| `base.rs` | `biome_colors`, `block_entity_render_bounding_box`, `block_entity_submit`, `block_highlight`, `camera_distance`, `camera_shake`, `client_level_load`, `client_level_unload`, `client_resources_reloaded`, `command`, `compute_fog_color`, `compute_fov`, `emissive`, `framerate_limit`, `gui_layer_post`, `gui_layer_pre`, `health_hud`, `input_key`, `interaction_key_mapping_triggered`, `item_bar`, `item_decorations`, `map_decorations`, `minimap`, `mob_layer`, `mob_submit`, `mouse_button_post`, `mouse_button_pre`, `mouse_scrolling`, `music`, `music_layers`, `net_from_server`, `panel_event`, `player_render_listened`, `player_submit`, `recipes_received`, `register_client_commands`, `render_fog`, `render_hand`, `render_needs`, `screen_char_typed_pre`, `screen_click`, `screen_draw`, `screen_key_pressed_pre`, `screen_key_released_pre`, `screen_mouse_button_pressed_pre`, `screen_mouse_button_released_pre`, `screen_mouse_dragged_pre`, `screen_mouse_scrolled_pre`, `screen_render_post`, `screen_tooltip`, `setting_changed`, `shader_params`, `standalone_models`, `tooltip`, `tooltip_component`, `tooltip_component_draw`, `use_animation`, `visuals`, `world_drawn`, `zoom` |
 | `block_entity_view_distance.rs` | `block_entity_view_distance` |
 | `block_render_visibility.rs` | `block_render_visibility` |
 | `block_screen_effect_draw.rs` | `block_screen_effect_draw` |
@@ -1051,6 +1053,7 @@ one of these moments has to move that logic into a client native mod.
 | `register_item_tint_sources.rs` | `register_item_tint_sources` |
 | `register_range_select_item_model_property.rs` | `register_range_select_item_model_property` |
 | `register_runtime_sprites.rs` | `register_runtime_sprites` |
+| `register_texture_atlases.rs` | `register_texture_atlases` |
 | `render_arm.rs` | `render_arm` |
 | `render_frame_post.rs` | `render_frame_post` |
 | `render_frame_pre.rs` | `render_frame_pre` |

@@ -667,10 +667,14 @@ impl Hub {
             if in_menu && items.is_none() {
                 return None;
             }
+            let container_limits = source
+                .map(|source| source.stack_limits(world, items.as_ref().map_or(0, Vec::len)))
+                .unwrap_or_default();
             let mut view = View {
                 guest,
                 container: items.as_deref_mut(),
                 shulker,
+                container_limits,
                 hidden: &hidden,
                 loop_context,
             };

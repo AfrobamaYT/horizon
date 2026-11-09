@@ -671,8 +671,7 @@ fn visible_contains(m: &mut Mob, w: &MobWorld, who: Who) -> bool {
 fn sense_players(m: &mut Mob, w: &MobWorld) {
     let range = m.attrs.follow_range;
     let near = w
-        .player
-        .as_ref()
+        .selected_player()
         .is_some_and(|p| !p.spectator && m.distance_sqr(p.position) < range * range);
     let players: Vec<Who> = if near { vec![Who::Player] } else { vec![] };
     let visible: Vec<Who> = players
@@ -887,7 +886,9 @@ fn state_poi(w: &MobWorld, state: horizon_world::registry::BlockStateId) -> Opti
         .filter(|p| p.is_job())
 }
 fn runtime_bed_poi(name: &str, part: Option<&str>) -> Option<Poi> {
-    (name.ends_with("_bed") && part == Some("head")).then_some(Poi::Home)
+    // PoiTypes.BEDS contains the colored Blocks.BED collection, not STRAW_BED.
+    (name.ends_with("_bed") && name != "minecraft:straw_bed" && part == Some("head"))
+        .then_some(Poi::Home)
 }
 
 /// Which POI types a predicate accepts.
@@ -3039,7 +3040,9 @@ impl B {
                     self.do_stop(m, cx);
                     return;
                 }
-                let Some(p) = cx.w.player.clone() else { return };
+                let Some(p) = cx.w.selected_player().cloned() else {
+                    return;
+                };
                 mem(m).look_target.set(Tracker::Entity(Who::Player, true));
                 let close = {
                     let a = block_of(p.position);
@@ -3085,7 +3088,7 @@ impl B {
                     mem(m).look_target.set(Tracker::Entity(target, true));
                 }
                 // findItemsToDisplay: the trades the player's item pays for.
-                let current = cx.w.player.as_ref().and_then(|p| p.main_hand.clone());
+                let current = cx.w.selected_player().and_then(|p| p.main_hand.clone());
                 // getOffers makes the trades on first use: the level rolls
                 // them, and the cost is compared from the next tick on.
                 let unset = m.extra.trade.as_ref().is_none_or(|t| t.unset);
@@ -3521,8 +3524,7 @@ fn follow_trading_condition(m: &Mob, w: &MobWorld) -> bool {
         && m.alive()
         && !m.fluids.in_water
         && m.hurt_time <= 0
-        && w.player
-            .as_ref()
+        && w.selected_player()
             .is_some_and(|p| m.distance_sqr(p.position) <= 16.0)
 }
 fn follow_trading_player(m: &mut Mob) {
@@ -3537,7 +3539,7 @@ fn follow_trading_player(m: &mut Mob) {
 /// `GiveGiftToHero.isHeroVisible`.
 fn hero_visible(m: &Mob, w: &MobWorld) -> bool {
     mem_ref(m).is_some_and(|mm| mm.nearest_visible_player.get() == Some(&Who::Player))
-        && w.player.as_ref().is_some_and(|p| p.hero)
+        && w.selected_player().is_some_and(|p| p.hero)
 }
 /// `ShowTradesToPlayer.checkExtraStartConditions`.
 fn show_trades_condition(m: &Mob, w: &MobWorld) -> bool {
@@ -4783,9 +4785,38 @@ mod poi_classification_tests {
     }
 
     #[test]
-    fn straw_bed_head_differs_between_runtime_and_saved_pois() {
+    #[ignore = "requires the vanilla bed POI oracle output"]
+    fn vanilla_bed_poi_states() {
+        let path = std::env::var("HORIZON_BED_POI_ORACLE").expect("oracle output path");
+        let rows = std::fs::read_to_string(path).unwrap();
+        assert_eq!(rows.lines().count(), 272);
+        for row in rows.lines() {
+            let fields: Vec<_> = row.split_whitespace().collect();
+            let [name, part, expected] = fields[..] else {
+                panic!("invalid oracle row")
+            };
+            let expected = expected == "true";
+            let state = BlockState {
+                name: name.into(),
+                properties: [("part".into(), part.into())].into_iter().collect(),
+            };
+            assert_eq!(
+                runtime_bed_poi(name, Some(part)).is_some(),
+                expected,
+                "{row}"
+            );
+            assert_eq!(
+                horizon_world::poi::saved_poi(&state) == Some(Poi::Home),
+                expected,
+                "{row}"
+            );
+        }
+    }
+
+    #[test]
+    fn bed_heads_agree_between_runtime_and_saved_pois() {
         for (name, part, runtime, saved) in [
-            ("minecraft:straw_bed", "head", true, false),
+            ("minecraft:straw_bed", "head", false, false),
             ("minecraft:straw_bed", "foot", false, false),
             ("minecraft:red_bed", "head", true, true),
             ("minecraft:red_bed", "foot", false, false),

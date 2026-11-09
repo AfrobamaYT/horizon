@@ -162,8 +162,7 @@ pub fn steer(m: &mut Mob) {
 fn target_pos(w: &MobWorld, id: i32) -> Option<([f64; 3], f64, bool)> {
     match id {
         -1 => w
-            .player
-            .as_ref()
+            .selected_player()
             .filter(|p| p.alive && !p.creative && !p.spectator)
             .map(|p| ([p.position.x, p.position.y, p.position.z], p.eye[1], true)),
         0 => None,
@@ -416,7 +415,7 @@ pub fn custom_server_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEven
                 .filter(|s| s.alive && s.id != m.id && !undead(s.species) && near(s.position))
                 .map(|s| s.id as i32)
                 .collect();
-            if let Some(pl) = &w.player
+            if let Some(pl) = w.selected_player()
                 && pl.alive
                 && !pl.creative
                 && !pl.spectator

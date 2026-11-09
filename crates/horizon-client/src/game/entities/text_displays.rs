@@ -577,6 +577,7 @@ mod tests {
         with_game(|game| {
             game.others.push(OtherEntity {
                 knot_check: None,
+                eye: None,
                 join: Default::default(),
                 item_transformation: None,
                 interaction: None,

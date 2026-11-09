@@ -2,8 +2,8 @@
 //! the backends, the drawing contexts) and every method it implements (`Hooks`, the parts, the
 //! capability handlers), through one shared-memory boundary and the glue on both sides of it.
 mod append;
+mod borrowed;
 mod calls;
-mod emit;
 mod host;
 pub use host::generate_host;
 mod ty;
@@ -40,7 +40,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "RenderAssets",
     "InstanceGroups",
     "Tags",
-    "menu::SlotView",
+    "item::menu::SlotView",
     "Registrar",
     "CapabilityProviders",
     "TicketValidation",
@@ -134,6 +134,7 @@ const EXPORTS: &[&str] = &[
     "BlockTintSource",
     "ParticleProvider",
     "EnchantmentDamageEffect",
+    "CommandArgumentType",
     "GroundStateProvider",
     "PlaceProvider",
     "TooltipAppender",
@@ -403,9 +404,11 @@ pub(super) fn surface<'a>(
     let target = root.join("target");
     std::fs::create_dir_all(&target).map_err(|e| format!("creating wire report directory: {e}"))?;
     let dropped = excused_methods;
-    // The type emitter respects checked, hand-written Wire impls even when a shape
-    // becomes derivable after a new generic borrowing/resource rule is added.
-    types.index.module("mod_api", &["wire_types".into()])?;
+    // Track the source of checked codecs as a build-script dependency. Module
+    // lookup loads it into Index even though call generation never parses its fields.
+    types
+        .index
+        .module("mod_api", &["wire".into(), "wire_types".into()])?;
     for owner in exports() {
         let (path, _) = owner_parts(owner)?;
         let Found::Item(id) = types.index.resolve_path(api, &path)? else {
@@ -566,7 +569,7 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Generated, Str
     with_providers.push(("capability_providers_generated.rs", providers.as_str()));
     let surface = surface(root, &with_providers)?;
     coverage(&surface)?;
-    let mut wire = emit::types(&surface.types);
+    let mut wire = borrowed::calls(&surface.types);
     let mut guest = calls::guest(
         &surface.types,
         &surface.methods,
@@ -578,8 +581,9 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Generated, Str
     guest.push_str(&calls::dispatch(&surface.types, &surface.methods).0);
     let _ = writeln!(
         wire,
-        "#[doc(hidden)]\npub const WIRE_LAYOUT: u64 = {:#x};",
-        layout(&surface)
+        "#[doc(hidden)]\npub static WIRE_LAYOUT: ::std::sync::LazyLock<u64> = ::std::sync::LazyLock::new(|| {{ let mut hash = {:#x}; {layouts} hash }});",
+        layout(&surface),
+        layouts = surface.types.defs.iter().filter(|def| def.lifetimes == 0).map(|def| format!("hash = crate::wire::layout_mix(hash, <{} as crate::wire::Wire>::layout(&mut vec![]));", def.rust.replace("mod_api::", "crate::"))).collect::<String>()
     );
     let sources = surface.types.index.read.take();
     Ok(Generated {
@@ -589,10 +593,9 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Generated, Str
     })
 }
 
-/// Every `mod_api` type the boundary lays out, by the path the generated impls name it with
-/// (`mod_api::EntityRef`): each has a `Wire` impl, generated or checked beside it. A point record
-/// may hold exactly these and the std types, when they are `Clone`: the record holds a copy, and a
-/// capability the game only lends (`Transaction`) is never copied.
+/// Public owned API values available to point records, without inspecting their fields.
+/// The generated record's Wire bounds check its members; Clone permits copying a borrowed
+/// argument, while a live capability such as Transaction remains non-copyable.
 pub(crate) fn owned_types(
     root: &Path,
     included: &[(&str, &str)],
@@ -600,14 +603,159 @@ pub(crate) fn owned_types(
     let providers = crate::capability_providers::generate(root, included)?.0;
     let mut with_providers = included.to_vec();
     with_providers.push(("capability_providers_generated.rs", providers.as_str()));
-    let surface = surface(root, &with_providers)?;
-    Ok(surface
+    let mut surface = surface(root, &with_providers)?;
+    // Every owned signature def appears in generated WIRE_LAYOUT with a Wire bound.
+    // That compile-time guarantee covers macro-generated slot keys/handle codecs too;
+    // no owned field traversal or second Wire-implementation discovery is needed.
+    let mut clones = std::collections::HashSet::new();
+    let implementations = surface
+        .types
+        .index
+        .modules
+        .iter()
+        .enumerate()
+        .flat_map(|(module, source)| {
+            source.items.iter().filter_map(move |item| match item {
+                Item::Impl(item)
+                    if item.trait_.as_ref().is_some_and(|(_, path, _)| {
+                        path.segments.last().is_some_and(|s| s.ident == "Clone")
+                    }) =>
+                {
+                    Some((module, item.self_ty.clone()))
+                }
+                _ => None,
+            })
+        })
+        .collect::<Vec<_>>();
+    for (module, ty) in implementations {
+        let syn::Type::Path(path) = *ty else {
+            continue;
+        };
+        let path = path
+            .path
+            .segments
+            .iter()
+            .map(|s| s.ident.to_string())
+            .collect::<Vec<_>>();
+        if let Ok(Found::Item(id)) = surface.types.index.resolve_path(module, &path) {
+            clones.insert(id);
+        }
+    }
+    let cloned =
+        |index: &Index<'_>, id| ty::derives(index.item(id), "Clone") || clones.contains(&id);
+    let mut allowed = std::collections::BTreeSet::new();
+    for (def, value) in surface
         .types
         .defs
         .iter()
-        .filter(|def| def.lifetimes == 0 && def.clone)
-        .map(|def| def.rust.replace(' ', ""))
-        .collect())
+        .enumerate()
+        .filter(|(_, value)| value.lifetimes == 0)
+    {
+        let item = surface
+            .types
+            .by_item
+            .iter()
+            .find_map(|(item, d)| (*d == def).then_some(*item));
+        if item.map_or(value.rust.starts_with("serde_json::"), |id| {
+            cloned(&surface.types.index, id)
+        }) {
+            allowed.insert(value.rust.replace(' ', ""));
+        }
+    }
+    // Index both the public boundary reexports and checked codec declarations.
+    // These lookups load source files; they do not classify any owned fields.
+    surface.types.index.module("mod_api", &["wire".into()])?;
+    let codec = surface
+        .types
+        .index
+        .module("mod_api", &["wire".into(), "wire_types".into()])?;
+    let mut codecs = std::collections::HashSet::new();
+    for item in surface.types.index.modules[codec].items.clone() {
+        let Item::Impl(item) = item else {
+            continue;
+        };
+        // wire_types imports precisely crate::wire::Wire. Its direct impl targets
+        // include foreign reexports such as ConnectionKind, which cannot derive here.
+        if !item
+            .trait_
+            .as_ref()
+            .is_some_and(|(_, p, _)| p.segments.last().is_some_and(|s| s.ident == "Wire"))
+        {
+            continue;
+        }
+        let syn::Type::Path(path) = &*item.self_ty else {
+            continue;
+        };
+        let path = path
+            .path
+            .segments
+            .iter()
+            .map(|s| s.ident.to_string())
+            .collect::<Vec<_>>();
+        if let Ok(Found::Item(id)) = surface.types.index.resolve_path(codec, &path) {
+            codecs.insert(id);
+        }
+    }
+    // Reuse the parsed module inventory. Extra declarations need an explicit
+    // derive or checked codec; Clone alone (or a no-Wire reason) is never proof.
+    let modules = surface
+        .types
+        .index
+        .modules
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| m.krate == "mod_api")
+        .map(|(module, m)| (module, m.path.clone(), m.items.clone()))
+        .collect::<Vec<_>>();
+    for (module, prefix, items) in modules {
+        for item in items {
+            let names = match item {
+                Item::Use(item) if matches!(item.vis, syn::Visibility::Public(_)) => {
+                    crate::capability_providers::use_names(&item.tree)
+                }
+                Item::Struct(item) if matches!(item.vis, syn::Visibility::Public(_)) => {
+                    vec![item.ident.to_string()]
+                }
+                Item::Enum(item) if matches!(item.vis, syn::Visibility::Public(_)) => {
+                    vec![item.ident.to_string()]
+                }
+                _ => continue,
+            };
+            for name in names {
+                let Ok(Found::Item(id)) = surface.types.index.resolve(module, &name) else {
+                    continue;
+                };
+                let declaration = surface.types.index.item(id);
+                let generics = match declaration {
+                    Item::Struct(item) => &item.generics,
+                    Item::Enum(item) => &item.generics,
+                    _ => continue,
+                };
+                if generics.params.is_empty()
+                    && (ty::derives(declaration, "Wire") || codecs.contains(&id))
+                    && cloned(&surface.types.index, id)
+                {
+                    let path = std::iter::once("mod_api")
+                        .chain(prefix.iter().map(String::as_str))
+                        .chain(std::iter::once(name.as_str()))
+                        .collect::<Vec<_>>()
+                        .join("::");
+                    if public_path(&surface.types.index, &path) {
+                        allowed.insert(path);
+                    }
+                }
+            }
+        }
+    }
+    Ok(allowed)
+}
+
+/// A defining path is usable by generated records only through public modules.
+fn public_path(index: &Index<'_>, path: &str) -> bool {
+    let segments = path.split("::").skip(1).collect::<Vec<_>>();
+    (0..segments.len().saturating_sub(1)).all(|depth| {
+        index.modules.iter().find(|m| m.krate == "mod_api" && m.path.iter().map(String::as_str).eq(segments[..depth].iter().copied())).is_some_and(|m| m.items.iter().any(|item| matches!(item, Item::Mod(child) if child.ident == segments[depth] && matches!(child.vis, syn::Visibility::Public(_)))))
+    })
 }
 
 /// A hash of everything the two sides must agree on: every method's id and signature, and
@@ -635,7 +783,7 @@ fn layout(surface: &Surface<'_>) -> u64 {
     }
     for def in &surface.types.defs {
         // Private borrowed descriptors also define bytes and checked writeback policy.
-        // Hash the complete definition so a new transport shape cannot hide behind Opaque.
+        // Hash the complete definition so private writeback contracts affect compatibility.
         feed(&format!("{def:?}"));
     }
     feed(&format!("{:?}", surface.hooks));
@@ -699,7 +847,7 @@ mod tests {
                 assert!(
                     sources
                         .iter()
-                        .any(|p| p.ends_with("crates/horizon-mod-api/src/wire_types.rs"))
+                        .any(|p| p.ends_with("crates/horizon-mod-api/src/wire/wire_types.rs"))
                 );
             })
             .unwrap()
@@ -720,6 +868,15 @@ mod tests {
             ];
             let mut surface = super::surface(&root, &included).unwrap();
             let baseline = super::layout(&surface);
+            assert!(
+                surface
+                    .types
+                    .defs
+                    .iter()
+                    .filter(|def| def.lifetimes == 0)
+                    .all(|def| matches!(def.borrowed, super::ty::BorrowedShape::None)),
+                "owned fields must not be classified by the call generator"
+            );
             let append = surface
                 .types
                 .defs
@@ -727,8 +884,8 @@ mod tests {
                 .position(|d| d.append.is_some())
                 .unwrap();
             assert!(matches!(
-                surface.types.defs[append].kind,
-                super::ty::Kind::Opaque
+                surface.types.defs[append].borrowed,
+                super::ty::BorrowedShape::None
             ));
             surface.types.defs[append].append.as_mut().unwrap().field += 1;
             assert_ne!(baseline, super::layout(&surface));
@@ -739,9 +896,29 @@ mod tests {
                 .iter_mut()
                 .find(|d| d.projection.is_some())
                 .unwrap();
-            assert!(matches!(projection.kind, super::ty::Kind::Opaque));
+            assert!(matches!(
+                projection.borrowed,
+                super::ty::BorrowedShape::None
+            ));
             projection.projection.as_mut().unwrap()[0].ty = super::ty::Ty::Unit;
             assert_ne!(baseline, super::layout(&surface));
+            let before_borrowed = super::layout(&surface);
+            let borrowed = surface
+                .types
+                .defs
+                .iter_mut()
+                .find_map(|def| {
+                    if def.lifetimes == 0 {
+                        return None;
+                    }
+                    match &mut def.borrowed {
+                        super::ty::BorrowedShape::Record(fields) => fields.first_mut(),
+                        _ => None,
+                    }
+                })
+                .expect("a borrowed call record");
+            borrowed.ty = super::ty::Ty::Unit;
+            assert_ne!(before_borrowed, super::layout(&surface));
         };
         std::thread::Builder::new()
             .stack_size(64 << 20)

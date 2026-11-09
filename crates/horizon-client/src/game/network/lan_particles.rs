@@ -18,7 +18,7 @@ use horizon_protocol::{
     packets::play::{self, Clientbound as C},
 };
 use horizon_world::registry::BlockStateId;
-use mod_api::{SoundSource, particles::PositionSource};
+use mod_api::{SoundSource, client::particles::PositionSource};
 
 /// A particle request awaiting delivery to players in its level.
 pub(super) struct QueuedParticle {
@@ -287,7 +287,8 @@ impl Game<'_> {
             ];
             if let Some((sprite, tint)) = self.particle_sprite(state, block) {
                 self.particles.send_particles(
-                    &ParticleOptions::block(ParticleType::Block, sprite, tint),
+                    &ParticleOptions::block(ParticleType::Block, sprite, tint)
+                        .with_source(&self.res.facts().get(state).name),
                     at,
                     [0.0; 3],
                     speed,
@@ -428,10 +429,12 @@ impl Game<'_> {
             None => ParticleOptions::simple(ty),
             Some(ParticleData::State(s)) => {
                 let pos = at.map(|v| v.floor() as i32);
+                let state = BlockStateId(*s as u32);
                 let (sprite, tint) = self
-                    .particle_sprite(BlockStateId(*s as u32), pos)
+                    .particle_sprite(state, pos)
                     .unwrap_or_else(|| ("block/stone".into(), 0xFFFFFF));
                 ParticleOptions::block(ty, sprite, tint)
+                    .with_source(&self.res.facts().get(state).name)
             }
             Some(ParticleData::ColorScale(c, scale)) => {
                 ParticleOptions::dust(rgb(rgba(*c)), *scale)

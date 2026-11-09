@@ -44,10 +44,12 @@ pub fn register(m: &mut Mob) {
     m.set_malus(super::path::PathType::Water, -1.0);
 }
 /// Enderman.isBeingStaredBy: the player's look within a cone of 0.025 / distance
-/// of the eyes, with line of sight, and no carved pumpkin. Last, as in NeoForge,
+/// of the eyes, with line of sight, and no carved pumpkin. Last,
 /// a mod may keep the enderman calm (`EnderManAngerEvent`).
 pub fn stared_at(m: &Mob, w: &MobWorld) -> bool {
-    let Some(p) = &w.player else { return false };
+    let Some(p) = w.selected_player() else {
+        return false;
+    };
     if !p.alive || p.head.as_deref() == Some("minecraft:carved_pumpkin") {
         return false;
     }
@@ -213,7 +215,7 @@ pub fn custom_server_ai_step(m: &mut Mob, cx: &mut Cx) {
         );
         if br > 0.5 && cx.w.can_see_sky(x, y, z) && m.random.next_float() * 30.0 < (br - 0.4) * 2.0
         {
-            m.ai.target = None;
+            m.set_ai_target(cx.w, None);
             teleport_random(m, cx.w, cx.events);
         }
     }
@@ -306,14 +308,16 @@ impl Goal for FreezeWhenLookedAt {
         if m.ai.target != Some(Who::Player) {
             return false;
         }
-        let Some(p) = &cx.w.player else { return false };
+        let Some(p) = cx.w.selected_player() else {
+            return false;
+        };
         m.distance_sqr(p.position) <= 256.0 && stared_at(m, cx.w)
     }
     fn start(&mut self, m: &mut Mob, _: &mut Cx) {
         m.nav_stop();
     }
     fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
-        if let Some(p) = &cx.w.player {
+        if let Some(p) = cx.w.selected_player() {
             let at = [p.position.x, p.eye[1], p.position.z];
             m.look_at(at);
         }
@@ -333,7 +337,9 @@ impl Goal for LookForPlayer {
         TARGET
     }
     fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        let Some(p) = &cx.w.player else { return false };
+        let Some(p) = cx.w.selected_player() else {
+            return false;
+        };
         self.pending = p.alive
             && !p.creative
             && m.distance_sqr(p.position) <= m.attrs.follow_range.powi(2)
@@ -346,12 +352,12 @@ impl Goal for LookForPlayer {
         // setBeingStaredAt: play the stare sound.
         m.extra.counter = m.age as i32;
     }
-    fn stop(&mut self, m: &mut Mob, _: &mut Cx) {
+    fn stop(&mut self, m: &mut Mob, cx: &mut Cx) {
         self.pending = false;
-        m.ai.target = None;
+        m.set_ai_target(cx.w, None);
     }
     fn can_continue(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        let Some(p) = cx.w.player.clone() else {
+        let Some(p) = cx.w.selected_player().cloned() else {
             return false;
         };
         if self.pending {
@@ -367,12 +373,14 @@ impl Goal for LookForPlayer {
             && m.distance_sqr(p.position) <= m.attrs.follow_range.powi(2)
     }
     fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
-        let Some(p) = cx.w.player.clone() else { return };
+        let Some(p) = cx.w.selected_player().cloned() else {
+            return;
+        };
         if self.pending {
             self.aggro -= 1;
             if self.aggro <= 0 {
                 self.pending = false;
-                m.ai.target = Some(Who::Player);
+                m.set_ai_target(cx.w, Some(Who::Player));
                 cx.events.push(MobEvent::Sound(
                     "entity.enderman.stare",
                     m.center(),

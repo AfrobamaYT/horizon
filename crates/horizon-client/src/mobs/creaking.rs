@@ -298,7 +298,9 @@ fn deactivate(m: &mut Mob, events: &mut Vec<MobEvent>) {
 /// (eyeY + y) / 2)`: within the player's view cone and seen through
 /// transparent blocks.
 fn looked_at_by(m: &Mob, w: &MobWorld) -> bool {
-    let Some(p) = &w.player else { return false };
+    let Some(p) = w.selected_player() else {
+        return false;
+    };
     let look = normalize(p.look);
     let eye = m.eye_y();
     [eye, m.position.y + 0.5, (eye + m.position.y) / 2.0]
@@ -339,7 +341,10 @@ fn check_can_move(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) -> bool
         return true;
     }
     let mut potential = false;
-    if let Some(p) = w.player.as_ref().filter(|_| players.contains(&Who::Player)) {
+    if let Some(p) = w
+        .selected_player()
+        .filter(|_| players.contains(&Who::Player))
+    {
         // canAttack (not creative, spectator or dead) and not allied.
         if p.alive && !p.creative && !p.spectator {
             potential = true;

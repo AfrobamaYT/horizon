@@ -289,10 +289,12 @@ pub(super) fn emit<'a>(
                 let lookup = match key_type.as_str() {
                     "BlockState" if table == "block" => format!("block_value({key})"),
                     "BlockState" => {
-                        format!("{table}(|| super::registry_keys::block_id({key}.block()))")
+                        format!(
+                            "{table}(|| super::content::registry_keys::block_id({key}.block()))"
+                        )
                     }
                     "& ItemStack" => {
-                        format!("{table}(|| super::registry_keys::item_id({key}.item()))")
+                        format!("{table}(|| super::content::registry_keys::item_id({key}.item()))")
                     }
                     "& str" => format!("{table}(|| Some({key}))"),
                     // An entity's type id need not be its block's: its own table.
@@ -373,8 +375,7 @@ pub(super) fn emit<'a>(
             struct OwnedLootContext;
             impl syn::visit_mut::VisitMut for OwnedLootContext {
                 fn visit_type_path_mut(&mut self, path: &mut syn::TypePath) {
-                    if path.path.segments.len() == 1
-                        && path.path.segments[0].ident == "NativeLootContext"
+                    if path.path.segments.len() == 1 && path.path.segments[0].ident == "LootContext"
                     {
                         path.path.segments[0].arguments = syn::PathArguments::None;
                     } else {
@@ -430,7 +431,7 @@ pub(super) fn emit<'a>(
                 if generics.is_empty() { "" } else { "<'_>" }
             ));
             calls.push_str(&format!(
-                "/// What the game passes `dispatch_{name}`: the hook's declared parameters.\n#[doc(hidden)]\n#[allow(missing_docs)]\npub struct {carrier}{generics} {{\n{fields}}}\n"
+                "/// What the game passes `dispatch_{name}`: the hook's declared parameters.\n#[doc(hidden)]\n#[allow(missing_docs)]\n// no wire: internal call carrier, not an owned boundary value.\npub struct {carrier}{generics} {{\n{fields}}}\n"
             ));
         }
         let (generics, elided) = match (lifetimes.a, lifetimes.b) {
@@ -438,9 +439,14 @@ pub(super) fn emit<'a>(
             (true, false) => ("<'a>", "<'_>"),
             (false, false) => ("", ""),
         };
+        let wire_form = if generics.is_empty() {
+            "#[derive(horizon_mod_api_macros::Wire)]"
+        } else {
+            "// no wire: borrowed event crosses as call arguments."
+        };
         if is_render {
             render_dispatch.push_str(&format!(
-                "#[allow(missing_docs)]\npub struct {event_type}{generics} {{\n{fields}}}\n"
+                "#[allow(missing_docs)]\n{wire_form}\npub struct {event_type}{generics} {{\n{fields}}}\n"
             ));
             continue;
         }
@@ -457,10 +463,22 @@ pub(super) fn emit<'a>(
         };
         // Reuse the exact host and drawing conversions for generated game-side calls.
         if in_game {
+            // A scoped read hook can run against either the game or a borrowed
+            // tick view. Its native receiver carries the selected host.
+            let scoped_read_host = target.contains("::NativeHookHost<");
+            if scoped_read_host
+                && (hook.host != Some(HostAccess::Read) || receiver_mut != Some(false))
+            {
+                return Err(format!(
+                    "{name}: NativeHookHost requires a read-only host and receiver"
+                ));
+            }
             let passed = host
                 .as_ref()
                 .map(|(_, param)| {
-                    if param.call == "&*self" && receiver_mut == Some(false) {
+                    if scoped_read_host {
+                        "self.host".to_owned()
+                    } else if param.call == "&*self" && receiver_mut == Some(false) {
                         "self".to_owned()
                     } else {
                         param.call.to_owned()
@@ -554,7 +572,9 @@ pub(super) fn emit<'a>(
                 let passed = host
                     .as_ref()
                     .map(|(_, param)| {
-                        if param.call == "&*self" && receiver_mut == Some(false) {
+                        if scoped_read_host {
+                            "self.host".to_owned()
+                        } else if param.call == "&*self" && receiver_mut == Some(false) {
                             "self".to_owned()
                         } else {
                             param.call.to_owned()
@@ -667,14 +687,16 @@ pub(super) fn emit<'a>(
             .as_ref()
             .map_or(trait_name, |(part_trait, _)| part_trait);
         dispatch.push_str(&format!(
-            "/// What [`{trait_name}::{name}`] is told. Each field is that hook's argument of the same name, described in the hook's doc.\n#[allow(missing_docs)]\npub struct {event_type}{generics} {{\n{fields}}}\n"
+            "/// What [`{trait_name}::{name}`] is told. Each field is that hook's argument of the same name, described in the hook's doc.\n#[allow(missing_docs)]\n{wire_form}\npub struct {event_type}{generics} {{\n{fields}}}\n"
         ));
         let build = format!("let mut {event} = {event_type} {{ {} }};", inits.join(", "));
         // A trait mod's call is marked with the mod for a panic to name.
-        let each = if answered {
-            format!("super::entered_with_id(HookId::{hook_id}, \"{name}\")")
-        } else {
-            format!("super::entered(HookId::{hook_id}, \"{name}\")")
+        let each = match &hook.owner {
+            Some(owner) => format!("super::entered_owned(HookId::{hook_id}, \"{name}\", {owner})"),
+            None if answered => {
+                format!("super::entered_with_id(HookId::{hook_id}, \"{name}\")")
+            }
+            None => format!("super::entered(HookId::{hook_id}, \"{name}\")"),
         };
         // One callee's call: a mod's, or a scoped hook's part's.
         let call = |callee: &str, exit: &str| match contract {
@@ -698,6 +720,13 @@ pub(super) fn emit<'a>(
             mod_item.clone()
         };
         let (lookup, calls) = match &scoped {
+            None if name == "setting_changed" => (
+                String::new(),
+                format!(
+                    "for (_, owner) in super::listening(HookId::{hook_id}) {{ if owner.id != {event}.mod_id {{ continue; }} let (_entered, {mod_item}) = super::enter_listener(owner, \"{name}\"); {} }}",
+                    call(&mod_item, "break"),
+                ),
+            ),
             None if mod_cancel => (
                 String::new(),
                 format!(
@@ -805,7 +834,7 @@ fn stack_crossing_routed(
         "GameRuleValue",
         "PlacementContext",
         "LootStack",
-        "NativeLootContext",
+        "LootContext",
         "ParticleOptions",
     ];
     const BLOCK_VALUES: &[&str] = &["BlockState", "LandingWrite"];
@@ -1721,9 +1750,245 @@ mod tests {
     use super::*;
 
     #[test]
+    fn setting_changes_notify_only_the_owner() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let sources = super::super::sources(&root, super::super::FillMode::Require).unwrap();
+        let file = syn::parse_file(&sources.hooks).unwrap();
+        let function = file
+            .items
+            .into_iter()
+            .find_map(|item| match item {
+                syn::Item::Fn(f) if f.sig.ident == "dispatch_setting_changed" => Some(f),
+                _ => None,
+            })
+            .unwrap();
+        let function = function.to_token_stream().to_string();
+        let dir = root.join("target/setting-owner-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, function, succeeds) in [
+            ("owner", function.clone(), true),
+            (
+                "broadcast",
+                function.replace("if owner . id != event . mod_id { continue ; }", ""),
+                false,
+            ),
+        ] {
+            let program = format!(
+                r#"
+#![allow(dead_code, unused_variables)]
+use std::sync::atomic::{{AtomicUsize, Ordering}};
+static A: AtomicUsize = AtomicUsize::new(0);
+static B: AtomicUsize = AtomicUsize::new(0);
+struct Owner {{ id: &'static str }}
+static OWNERS: [Owner; 2] = [Owner {{ id: "a" }}, Owner {{ id: "b" }}];
+fn listened(_: generated::HookId) -> bool {{ true }}
+fn listening(_: generated::HookId) -> impl Iterator<Item=(bool, &'static Owner)> {{ OWNERS.iter().map(|m| (false, m)) }}
+fn enter_listener<'a>(owner: &'a Owner, _: &str) -> ((), &'a Owner) {{ ((), owner) }}
+impl Owner {{ fn setting_changed(&self, _: &mut dyn generated::ClientHost, _: &mut generated::SettingChangedEvent<'_>) {{ if self.id == "a" {{ A.fetch_add(1, Ordering::Relaxed); }} else {{ B.fetch_add(1, Ordering::Relaxed); }} }} }}
+mod generated {{
+pub trait ClientHost {{}}
+impl ClientHost for () {{}}
+pub enum HookId {{ SettingChanged }}
+pub struct SettingChangedEvent<'a> {{ pub mod_id: &'a str, pub key: &'a str }}
+{function}
+}}
+fn main() {{ generated::dispatch_setting_changed(&mut (), "a", "toggle"); assert_eq!(A.load(Ordering::Relaxed), 1); assert_eq!(B.load(Ordering::Relaxed), 0); }}
+"#
+            );
+            let source = dir.join(format!("{name}.rs"));
+            let binary = dir.join(name);
+            std::fs::write(&source, program).unwrap();
+            let output = std::process::Command::new("rustc")
+                .arg("--edition=2024")
+                .arg(&source)
+                .arg("-o")
+                .arg(&binary)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(
+                std::process::Command::new(binary)
+                    .status()
+                    .unwrap()
+                    .success(),
+                succeeds,
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn settings_boundary_owns_and_caches_values() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let source = std::fs::read_to_string(
+            root.join("crates/horizon-client/src/game/native_hooks/base.rs"),
+        )
+        .unwrap();
+        let source = source
+            + &std::fs::read_to_string(
+                root.join("crates/horizon-client/src/game/native_hooks/shared.rs"),
+            )
+            .unwrap();
+        let file = syn::parse_file(&source).unwrap();
+        let methods: String = file
+            .items
+            .into_iter()
+            .filter_map(|item| match item {
+                syn::Item::Impl(i) => Some(
+                    i.items
+                        .into_iter()
+                        .filter_map(|item| match item {
+                            syn::ImplItem::Fn(f)
+                                if [
+                                    "setting",
+                                    "stored_setting",
+                                    "set_setting",
+                                    "store_setting",
+                                    "another_mods",
+                                    "native_setting_event",
+                                ]
+                                .contains(&f.sig.ident.to_string().as_str()) =>
+                            {
+                                Some(f.to_token_stream().to_string())
+                            }
+                            _ => None,
+                        })
+                        .collect::<String>(),
+                ),
+                _ => None,
+            })
+            .collect();
+        let settings_source = std::fs::read_to_string(
+            root.join("crates/horizon-client/src/game/native_hooks/mod_settings.rs"),
+        )
+        .unwrap();
+        let settings_file = syn::parse_file(&settings_source).unwrap();
+        let settings: String = settings_file
+            .items
+            .into_iter()
+            .filter_map(|item| match item {
+                syn::Item::Fn(f) => Some(f.to_token_stream().to_string()),
+                syn::Item::Static(s) => Some(s.to_token_stream().to_string()),
+                _ => None,
+            })
+            .collect();
+        let dir = root.join("target/settings-boundary-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let program = format!(
+            r#"
+#![allow(dead_code)]
+mod mod_api {{
+    #[derive(Clone, Copy, Debug, PartialEq)] pub enum SettingValue {{ Toggle(bool), Choice(usize), Range(f64), Color(u32) }}
+    pub struct Spec;
+    impl Spec {{ pub fn store(&self, value: SettingValue) -> Option<String> {{ match value {{ SettingValue::Toggle(v) => Some(v.to_string()), _ => None }} }} pub fn read(&self, raw: Option<&str>) -> SettingValue {{ SettingValue::Toggle(raw == Some("true")) }} }}
+    pub mod content {{ pub mod crash {{ pub fn current_native_mod() -> Option<&'static str> {{ Some("a") }} }} }}
+    pub mod __private {{ pub fn setting(owner: &str, key: &str) -> Option<super::Spec> {{ (owner == "a" && key == "toggle").then_some(super::Spec) }} }}
+}}
+mod horizon_world {{ pub mod native_load_context {{ pub fn read_setting(dir: &std::path::Path, key: &str) -> Option<String> {{ std::fs::read_to_string(dir.join(key)).ok() }} }} }}
+mod game {{
+use crate::mod_api;
+mod mod_settings {{
+use crate::{{mod_api, horizon_world}};
+use std::{{fs, path::{{Path, PathBuf}}, collections::HashMap, sync::{{LazyLock, Mutex}}}};
+{settings}
+pub(super) fn typed(dir: &Path, key: &str) -> Option<mod_api::SettingValue> {{ read_typed(dir, "a", key) }}
+}}
+use std::{{fs, path::PathBuf, cell::RefCell, collections::BTreeMap}};
+struct Context;
+impl Context {{ fn setting(&self, _: &str, _: &str) -> Option<String> {{ Some("loaded".into()) }} }}
+enum NativeSettingValue {{ Toggle(bool), Choice {{ index: usize }}, Range {{ value: f64 }}, Color(u32) }}
+struct Setting {{ key: String, value: NativeSettingValue }}
+struct Page {{ settings: Vec<Setting> }}
+struct Row {{ id: String, native: Option<Page> }}
+struct Mods {{ installed: Vec<Row> }}
+struct Settings {{ mods: Mods }}
+struct Game {{ settings: Settings, notifications: usize, loop_context: Context, setting_overrides: RefCell<BTreeMap<(String, String), String>>, root: PathBuf }}
+impl Game {{
+    fn native_setting_changed(&mut self, _: &str, _: &str) {{ self.notifications += 1; }}
+    fn native_data_dir(&self, id: &str) -> PathBuf {{ self.root.join(id) }}
+    {methods}
+}}
+pub fn run(root: PathBuf) {{
+    let mut game = Game {{ settings: Settings {{ mods: Mods {{ installed: vec![Row {{ id: "a".into(), native: Some(Page {{ settings: vec![Setting {{ key: "toggle".into(), value: NativeSettingValue::Toggle(true) }}] }}) }}] }} }}, notifications: 0, loop_context: Context, setting_overrides: RefCell::new(BTreeMap::new()), root }};
+    assert_eq!(game.setting("a", "toggle"), None);
+    assert_eq!(game.setting("b", "toggle"), None);
+    game.set_setting("b", "toggle", "stolen");
+    assert!(!game.native_data_dir("b").exists());
+    game.set_setting("a", "toggle", "edited");
+    assert_eq!(game.setting("a", "toggle").as_deref(), Some("edited"));
+    game.native_setting_event(0, 0);
+    assert_eq!(game.notifications, 1);
+    game.set_setting("a", "toggle", "true");
+    assert_eq!(mod_settings::typed(&game.native_data_dir("a"), "toggle"), Some(mod_api::SettingValue::Toggle(true)));
+    fs::write(game.native_data_dir("a").join("toggle"), "false").unwrap();
+    assert_eq!(mod_settings::typed(&game.native_data_dir("a"), "toggle"), Some(mod_api::SettingValue::Toggle(true)));
+    assert_eq!(mod_settings::typed(&game.root.join("other"), "toggle"), Some(mod_api::SettingValue::Toggle(false)));
+    game.set_setting("a", "toggle", "false");
+    assert_eq!(mod_settings::typed(&game.native_data_dir("a"), "toggle"), Some(mod_api::SettingValue::Toggle(false)));
+    fs::remove_file(game.native_data_dir("a").join("toggle")).unwrap();
+    fs::create_dir(game.native_data_dir("a").join("toggle")).unwrap();
+    assert!(!game.store_setting("a", "toggle", "true"));
+    game.native_setting_event(0, 0);
+    assert_eq!(game.notifications, 1, "failed persistence must not notify");
+    fs::create_dir_all(game.root.join("b")).unwrap();
+    fs::write(game.root.join("b/secret"), "secret").unwrap();
+    game.set_setting("a", "../b/secret", "bad");
+    assert_eq!(fs::read_to_string(game.root.join("b/secret")).unwrap(), "secret");
+    assert_eq!(game.setting("a", "../b/secret"), None);
+}}
+}}
+fn main() {{ game::run(std::env::args_os().nth(1).unwrap().into()); }}
+"#
+        );
+        let source = dir.join("boundary.rs");
+        let binary = dir.join("boundary");
+        std::fs::write(&source, program).unwrap();
+        let output = std::process::Command::new("rustc")
+            .arg("--edition=2024")
+            .arg(&source)
+            .arg("-o")
+            .arg(&binary)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let data = dir.join("data");
+        if data.exists() {
+            std::fs::remove_dir_all(&data).unwrap();
+        }
+        assert!(
+            std::process::Command::new(binary)
+                .arg(data)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+
+    #[test]
     fn a_new_hook_over_the_limit_needs_the_carrier() {
         assert!(target_parameters("new_hook", "native_new_hook", 7, "NewHookCall").is_ok());
         let refused = target_parameters("new_hook", "native_new_hook", 8, "NewHookCall");
         assert!(refused.unwrap_err().contains("one NewHookCall"));
+    }
+
+    #[test]
+    fn scoped_native_hook_uses_selected_host_and_game_hooks_keep_their_receiver() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let fire = super::super::sources(&root, super::super::FillMode::Require)
+            .unwrap()
+            .fire;
+        let compact: String = fire.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(compact.contains("mod_api::dispatch_living_change_target(self.host,call)"));
+        assert!(
+            compact.contains("mod_api::dispatch_living_visibility(self,entity,looking,visibility)")
+        );
     }
 }

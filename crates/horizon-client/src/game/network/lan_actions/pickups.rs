@@ -20,6 +20,23 @@ impl Game<'_> {
         if mode == SPECTATOR || self.dropped.is_empty() {
             return;
         }
+        // The test below takes items whose position is less than 1.5 from
+        // the player's on x and z: their boxes reach these columns.
+        if let Some(columns) = self.pickup_columns.as_mut()
+            && !columns.may_reach_area(
+                &self.dropped,
+                (
+                    (position[0] - 1.5).floor() as i32,
+                    (position[0] + 1.5).floor() as i32,
+                ),
+                (
+                    (position[2] - 1.5).floor() as i32,
+                    (position[2] + 1.5).floor() as i32,
+                ),
+            )
+        {
+            return;
+        }
         let near: Vec<_> = self
             .dropped
             .iter()
@@ -253,7 +270,7 @@ impl Game<'_> {
             if called.is_none() || canceled {
                 return;
             }
-            orb.value = orb.value.clamp(1, i32::MAX as u32);
+
             orb.count = orb.count.max(1);
             self.orbs[index].value = orb.value;
             self.orbs[index].count = orb.count;
@@ -279,7 +296,7 @@ impl Game<'_> {
             0.1,
             pitch,
         );
-        let value = orb.value;
+        let value = orb.value.max(0) as u32;
         self.as_guest(conn, |game| {
             let rest = game.mending(value);
             if rest > 0 {

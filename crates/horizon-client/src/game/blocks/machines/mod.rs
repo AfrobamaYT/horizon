@@ -11,6 +11,8 @@ mod crafter;
 pub(in crate::game) mod native_energy;
 pub(in crate::game) mod native_fluids;
 pub(in crate::game) mod native_items;
+#[cfg(test)]
+mod tank_reopen_tests;
 use horizon_client::{
     Result,
     containers::{BlockEntity, HOPPER_SLOTS, ModContainer},
@@ -252,7 +254,10 @@ impl Containers<'_> {
         // them and a hopper leaves them alone.
         if matches!(
             entity,
-            BlockEntity::Beehive(_) | BlockEntity::Campfire(_) | BlockEntity::Brushable(_)
+            BlockEntity::Beehive(_)
+                | BlockEntity::Campfire(_)
+                | BlockEntity::Brushable(_)
+                | BlockEntity::EndPortal
         ) {
             return None;
         }
@@ -434,7 +439,10 @@ impl Containers<'_> {
         if !self.accepts(view, slot, stack) {
             return 0;
         }
-        view.slot_limit().min(self.max_stack(stack))
+        let capacity = view.slot_limit().min(self.max_stack(stack));
+        view.locate(slot)
+            .and_then(|(pos, _)| self.world.container_stack_limit(pos))
+            .map_or(capacity, |limit| capacity.min(limit))
     }
     /// How many of `stack` slot `slot` takes now: none where `can_place` refuses it, else
     /// `capacity` less what it holds.
@@ -543,6 +551,43 @@ impl ItemColumns {
             }
         }
         self.cells.contains(&(x, z))
+    }
+    /// Whether an item's box may reach into any column of x0..=x1, z0..=z1.
+    pub(super) fn may_reach_area(
+        &mut self,
+        items: &[horizon_client::entities::ItemEntity],
+        (x0, x1): (i32, i32),
+        (z0, z1): (i32, i32),
+    ) -> bool {
+        (x0..=x1).any(|x| (z0..=z1).any(|z| self.may_reach(items, x, z)))
+    }
+}
+
+/// [`ItemColumns`] for a pass in which items can move (a command, an
+/// explosion's push), kept with the item list's
+/// [`ListStamp`](horizon_client::join_seq::ListStamp): after any write the
+/// first question scans as before (`true`), and the second with nothing
+/// written in between builds the columns. A pass that writes the items
+/// between questions costs no more than the scans did.
+#[derive(Default)]
+pub(super) struct StampedItemColumns {
+    stamp: Option<horizon_client::join_seq::ListStamp>,
+    columns: ItemColumns,
+}
+impl StampedItemColumns {
+    /// [`ItemColumns::may_reach_area`] for the items as they are now.
+    pub(super) fn may_reach_area(
+        &mut self,
+        items: &horizon_client::join_seq::JoinList<horizon_client::entities::ItemEntity>,
+        xs: (i32, i32),
+        zs: (i32, i32),
+    ) -> bool {
+        if self.stamp != Some(items.stamp()) {
+            self.stamp = Some(items.stamp());
+            self.columns = ItemColumns::default();
+            return true;
+        }
+        self.columns.may_reach_area(items, xs, zs)
     }
 }
 
@@ -719,7 +764,15 @@ impl Game<'_> {
             return (Some(stack), false);
         }
         let was_empty = c.is_empty(view);
-        let max = c.max_stack(&stack);
+        let vanilla_max = c.max_stack(&stack);
+        let override_limit = view
+            .locate(slot)
+            .and_then(|(pos, _)| c.world.container_stack_limit(pos));
+        let restricted = override_limit.is_some_and(|limit| limit < vanilla_max);
+        let max = override_limit.map_or(vanilla_max, |limit| vanilla_max.min(limit));
+        if restricted && max == 0 {
+            return (Some(stack), false);
+        }
         let mut success = false;
         let mut filled_empty = false;
         let Some(target) = self.slot_mut_at(view, slot) else {
@@ -737,7 +790,7 @@ impl Game<'_> {
                     count: stack.count.min(max),
                     ..stack.clone()
                 });
-                stack.count = 0;
+                stack.count = if restricted { stack.count.saturating_sub(max) } else { 0 };
                 success = true;
                 filled_empty = true;
             }
@@ -1581,6 +1634,25 @@ impl Game<'_> {
         }
         false
     }
+    /// `suck_item_entities` for a hopper minecart, which first asks the item
+    /// columns whether any item's box reaches the columns of the box: an item
+    /// that meets it reaches one of them. The columns follow the item list's
+    /// stamp, so any write since they were built (an item's move, an
+    /// explosion's push, a command, a pickup) makes them scan, then rebuild.
+    fn cart_suck_items(&mut self, hopper: &View, min: [f64; 3], max: [f64; 3]) -> bool {
+        if !self
+            .pickup_columns
+            .get_or_insert_with(Default::default)
+            .may_reach_area(
+                &self.dropped,
+                (min[0].floor() as i32, max[0].floor() as i32),
+                (min[2].floor() as i32, max[2].floor() as i32),
+            )
+        {
+            return false;
+        }
+        self.suck_item_entities(None, hopper, min, max)
+    }
     /// `MinecartHopper.tick`'s `tryConsumeItems` (`suckInItems`) for an enabled
     /// hopper minecart: one item from the container above, else the item
     /// entities over it or touching it, each tick without a cooldown.
@@ -1603,8 +1675,7 @@ impl Game<'_> {
         let at = [p.x, p.y + 1.5, p.z];
         let took = match self.suck_from_container(above, at, &view) {
             Some(took) => took,
-            None => self.suck_item_entities(
-                None,
+            None => self.cart_suck_items(
                 &view,
                 [p.x - 0.5, p.y + 11.0 / 16.0, p.z - 0.5],
                 [p.x + 0.5, p.y + 2.0, p.z + 0.5],
@@ -1614,8 +1685,7 @@ impl Game<'_> {
             // The cart's own box, inflated by 0.25 sideways.
             let b = cart.bounds();
             let (lo, hi) = (b.min_position(), b.max_position());
-            self.suck_item_entities(
-                None,
+            self.cart_suck_items(
                 &view,
                 [lo.x - 0.25, lo.y, lo.z - 0.25],
                 [hi.x + 0.25, hi.y, hi.z + 0.25],
@@ -1954,6 +2024,7 @@ mod item_column_tests {
         ItemEntity {
             attachment_lifetime: Default::default(),
             fall_distance: 0.0,
+            random: horizon_core::random::LegacyRandom::new(0),
             rotation: [0.0, 0.0],
             join: Default::default(),
             no_gravity: false,
@@ -1996,36 +2067,72 @@ mod item_column_tests {
         })
     }
 
-    /// One tick of empty hoppers looking for items: each scans every item
-    /// (before) or asks the columns first (after, build included).
+    /// An item moved in place (a `/tp`, an explosion's push) keeps the list's
+    /// length and last id; the stamped columns still see where it went.
     #[test]
-    #[ignore]
-    fn hopper_suck_cost() {
-        for (hoppers, count) in [(500i32, 200u32), (2000, 500), (2000, 2000)] {
-            let mut seed = 99u64;
-            let mut next = |range: f64| {
-                seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
-                (seed >> 11) as f64 / (1u64 << 53) as f64 * range
-            };
-            let items: Vec<ItemEntity> = (0..count)
-                .map(|id| item(id, next(160.0), 64.0, next(160.0)))
-                .collect();
-            let at: Vec<(i32, i32, i32)> = (0..hoppers)
-                .map(|_| (next(160.0) as i32, 63, next(160.0) as i32))
-                .collect();
-            let t = std::time::Instant::now();
-            let a: Vec<bool> = at.iter().map(|&h| scan(&items, h)).collect();
-            let before = t.elapsed().as_secs_f64() * 1e3;
-            let t = std::time::Instant::now();
-            let mut columns = ItemColumns::default();
-            let b: Vec<bool> = at
+    fn a_moved_item_is_seen_where_it_went() {
+        let mut items = horizon_client::join_seq::JoinList::<_, true>::from_iter([
+            item(1, 0.5, 64.0, 0.5),
+            item(2, 40.5, 64.0, 40.5),
+        ]);
+        let mut columns = super::StampedItemColumns::default();
+        let far = ((100, 100), (100, 100));
+        // The first question for a list scans; the second builds the columns.
+        assert!(columns.may_reach_area(&items, far.0, far.1));
+        assert!(!columns.may_reach_area(&items, far.0, far.1));
+        items.update(0, |item| {
+            item.position = horizon_core::geometry::Vec3::new(100.5, 64.0, 100.5)
+        });
+        assert!(columns.may_reach_area(&items, far.0, far.1));
+        assert!(columns.may_reach_area(&items, far.0, far.1));
+        assert!(!columns.may_reach_area(&items, (0, 0), (0, 0)));
+    }
+
+    #[test]
+    fn no_player_with_an_item_in_reach_is_skipped() {
+        // guest_pickups' horizontal test, on every item.
+        let touches = |items: &[ItemEntity], p: [f64; 3]| {
+            items
                 .iter()
-                .map(|&h| columns.may_reach(&items, h.0, h.2) && scan(&items, h))
-                .collect();
-            let after = t.elapsed().as_secs_f64() * 1e3;
-            assert_eq!(a, b);
-            println!("{hoppers} hoppers, {count} items: {before:.3} ms -> {after:.3} ms");
+                .any(|d| (d.position.x - p[0]).abs() < 1.5 && (d.position.z - p[2]).abs() < 1.5)
+        };
+        let mut seed = 0x0bad_5eed_u64;
+        let mut next = |range: f64| {
+            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            (seed >> 11) as f64 / (1u64 << 53) as f64 * range
+        };
+        let mut items: Vec<ItemEntity> = Vec::new();
+        let mut columns = ItemColumns::default();
+        let (mut skipped, mut found) = (0, 0);
+        for round in 0..4000u32 {
+            if round % 25 == 0 {
+                // On column edges as often as not.
+                let mut at = || {
+                    let v = next(40.0) - 20.0;
+                    if next(1.0) < 0.5 { v.round() } else { v }
+                };
+                items.push(item(round, at(), 64.0, at()));
+            } else if round % 101 == 0 && !items.is_empty() {
+                items.remove(next(items.len() as f64) as usize);
+            }
+            let p = [next(44.0) - 22.0, 64.0, next(44.0) - 22.0];
+            let reach = columns.may_reach_area(
+                &items,
+                ((p[0] - 1.5).floor() as i32, (p[0] + 1.5).floor() as i32),
+                ((p[2] - 1.5).floor() as i32, (p[2] + 1.5).floor() as i32),
+            );
+            let touching = touches(&items, p);
+            assert!(
+                reach || !touching,
+                "round {round}: skipped a player touching an item"
+            );
+            skipped += usize::from(!reach);
+            found += usize::from(touching);
         }
+        assert!(
+            skipped > 1000 && found > 100,
+            "skipped {skipped}, found {found}"
+        );
     }
 
     #[test]
@@ -2224,7 +2331,7 @@ mod part_front_tests {
     use horizon_client::containers::BlockEntity;
     use horizon_client::items::ItemStack;
     use horizon_core::position::BlockPos;
-    use mod_api::NativeBlockUpdateFlags;
+    use mod_api::BlockUpdateFlags;
     use std::sync::Arc;
 
     fn stack(item: &str, count: u32) -> ItemStack {
@@ -2260,12 +2367,7 @@ mod part_front_tests {
             };
             let crafter = game.pack.assets.registry.resolve(&state).unwrap();
             assert_eq!(
-                game.level_set_block(
-                    level,
-                    [2, 64, 8],
-                    crafter,
-                    NativeBlockUpdateFlags::NEIGHBORS
-                ),
+                game.level_set_block(level, [2, 64, 8], crafter, BlockUpdateFlags::NEIGHBORS),
                 Ok(true)
             );
             let pipe = game
@@ -2275,7 +2377,7 @@ mod part_front_tests {
                 .default_state("test:pipe")
                 .unwrap();
             assert_eq!(
-                game.level_set_block(level, [1, 64, 8], pipe, NativeBlockUpdateFlags::NONE),
+                game.level_set_block(level, [1, 64, 8], pipe, BlockUpdateFlags::NONE),
                 Ok(true)
             );
             if let Some(BlockEntity::Crafter(c)) = game.world.block_entities.get_mut(&(2, 64, 8)) {
@@ -2324,12 +2426,7 @@ mod part_front_tests {
             };
             let dropper = game.pack.assets.registry.resolve(&state).unwrap();
             assert_eq!(
-                game.level_set_block(
-                    level,
-                    [2, 64, 8],
-                    dropper,
-                    NativeBlockUpdateFlags::NEIGHBORS
-                ),
+                game.level_set_block(level, [2, 64, 8], dropper, BlockUpdateFlags::NEIGHBORS),
                 Ok(true)
             );
             let pipe = game
@@ -2339,7 +2436,7 @@ mod part_front_tests {
                 .default_state("test:pipe")
                 .unwrap();
             assert_eq!(
-                game.level_set_block(level, [1, 64, 8], pipe, NativeBlockUpdateFlags::NONE),
+                game.level_set_block(level, [1, 64, 8], pipe, BlockUpdateFlags::NONE),
                 Ok(true)
             );
             if let Some(BlockEntity::Chest(items)) = game.world.block_entities.get_mut(&(2, 64, 8))
@@ -2398,7 +2495,7 @@ mod part_front_tests {
                 .registry
                 .default_state("minecraft:chest")
                 .unwrap();
-            let flags = NativeBlockUpdateFlags::NEIGHBORS;
+            let flags = BlockUpdateFlags::NEIGHBORS;
             let chest_items =
                 |game: &super::Game<'_>, z| match game.world.block_entities.get(&(2, 64, z)) {
                     Some(BlockEntity::Chest(items)) => {
@@ -2415,7 +2512,7 @@ mod part_front_tests {
                 }
                 let state = game.pack.assets.registry.default_state(part).unwrap();
                 assert_eq!(
-                    game.level_set_block(level, [1, 64, z], state, NativeBlockUpdateFlags::NONE),
+                    game.level_set_block(level, [1, 64, z], state, BlockUpdateFlags::NONE),
                     Ok(true)
                 );
                 if let Some(BlockEntity::Chest(items)) =
@@ -2445,7 +2542,7 @@ mod part_front_tests {
                 }
                 let state = game.pack.assets.registry.default_state(part).unwrap();
                 assert_eq!(
-                    game.level_set_block(level, [1, 64, z], state, NativeBlockUpdateFlags::NONE),
+                    game.level_set_block(level, [1, 64, z], state, BlockUpdateFlags::NONE),
                     Ok(true)
                 );
                 if let Some(BlockEntity::Crafter(c)) =

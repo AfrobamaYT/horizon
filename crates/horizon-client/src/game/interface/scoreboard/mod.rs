@@ -232,8 +232,11 @@ impl Game<'_> {
                 .iter()
                 .find(|s| s.id == id)
                 .map(|s| uuid_text(s.uuid)),
-            // Orbs, projectiles and dragon parts have no UUID here.
-            Target::Orb(_) | Target::Projectile(_) | Target::DragonPart(_) => None,
+            // An orb's registered identity, as its saved UUID reads.
+            Target::Orb(id) => Some(uuid_text(self.uuid_for(id))),
+            // Projectiles have no UUID here.
+            Target::Projectile(_) | Target::DragonPart(_) => None,
+            Target::Knot(id) => self.persist.uuids.get(&id).map(|&u| uuid_text(u)),
         }
     }
     fn holder_for(&mut self, t: Target) -> Option<Holder> {
@@ -289,6 +292,8 @@ impl Game<'_> {
                 .iter()
                 .find(|f| f.id == id)
                 .and_then(|f| f.saved.as_ref().map(|s| &s.1)),
+            // A natural knot keeps no saved compound: it has no tags.
+            Target::Knot(_) => None,
         };
         match raw.and_then(|r| r.get("Tags")) {
             Some(Tag::List(l)) => l
@@ -574,6 +579,64 @@ impl Game<'_> {
             return None;
         }
         self.team_with_owner(m.id, || tame_owner(m))
+    }
+    /// `mob_team_of` while the mob tick has lent its mobs out of `Game`.
+    /// The active mob and the disjoint live loan replace `self.mobs` for
+    /// resolving a tame owner's UUID; other live entities still use Game.
+    pub(super) fn mob_team_scoped(
+        &self,
+        m: &horizon_client::mobs::Mob,
+        actor: &horizon_client::mobs::Mob,
+        world: &horizon_client::mobs::MobWorld<'_>,
+    ) -> Option<&sb::Team> {
+        if self.score.board.teams.is_empty() {
+            return None;
+        }
+        let own_uuid = *self.persist.uuids.get(&m.id)?;
+        let own = self.scoreboard_name(m.id, own_uuid);
+        if let Some(team) = self.score.board.players_team(&own) {
+            return Some(team);
+        }
+        let owner = tame_owner(m)?;
+        let loaned = |uuid: [i32; 4]| {
+            self.persist
+                .uuids
+                .iter()
+                .filter(|(_, found)| **found == uuid)
+                .find_map(|(&id, _)| {
+                    if id == actor.id {
+                        (!actor.removed).then_some(actor)
+                    } else {
+                        world
+                            .live_mobs
+                            .and_then(|mobs| mobs.find(id))
+                            .filter(|mob| !mob.removed)
+                    }
+                })
+        };
+        let root = root_owner(owner, |uuid| {
+            if let Some(mob) = loaned(uuid) {
+                return tame_owner(mob);
+            }
+            let Target::Mob(id) = self.target_by_uuid(ints_uuid(uuid))? else {
+                return None;
+            };
+            self.mobs
+                .iter()
+                .find(|mob| mob.id == id)
+                .and_then(tame_owner)
+        });
+        let owner_name = if let Some(mob) = loaned(root) {
+            self.scoreboard_name(mob.id, root)
+        } else {
+            match self.target_by_uuid(ints_uuid(root))? {
+                Target::Player => self.acting_player_name().to_owned(),
+                Target::Guest(conn) => self.command_guest(conn)?.name.clone(),
+                Target::Mob(id) => self.scoreboard_name(id, root),
+                _ => uuid_text(root),
+            }
+        };
+        pet_team(&self.score.board, &own, Some(&owner_name))
     }
     /// A mob's own team, else its tamed owner's (`owner` is asked only then).
     fn team_with_owner(

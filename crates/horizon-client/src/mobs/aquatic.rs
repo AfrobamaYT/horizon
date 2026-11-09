@@ -174,7 +174,7 @@ pub fn register(m: &mut Mob) {
             g.add(4, RandomLookAround::default());
             g.add(5, LookAtPlayer::new(6.0));
             g.add(5, super::dolphin::Jump::new(10));
-            g.add(6, MeleeAttack::new(1.2, true));
+            g.add(6, MeleeAttack::new(f64::from(1.2_f32), true));
             g.add(7, super::dolphin::MoveToItem::default());
             g.add(8, super::dolphin::PlayWithItems);
             g.add(8, super::dolphin::FollowPlayerRidden::new(false));
@@ -326,7 +326,7 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, events: &
             if m.species() == S::Pufferfish && m.alive() && m.extra.size > 0 {
                 // Preserve the existing AI-side audio path. Player damage
                 // and poison are dispatched by the player tick, not fish AI.
-                if let Some(p) = &w.player
+                if let Some(p) = w.selected_player()
                     && p.alive
                     && !p.creative
                     && m.bounds()
@@ -952,8 +952,7 @@ impl Goal for PufferfishPuff {
     fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
         let area = m.bounds().inflate(Vec3::new(2.0, 2.0, 2.0));
         let player =
-            cx.w.player
-                .as_ref()
+            cx.w.selected_player()
                 .is_some_and(|p| p.alive && !p.creative && area.intersects(p.bounds));
         // TARGETING_CONDITIONS: not #not_scary_for_pufferfish, and alive.
         let mob = cx.w.others_near(area).any(|s| {

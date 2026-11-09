@@ -76,8 +76,13 @@ impl Game<'_> {
         ) else {
             return;
         };
+        let player = self
+            .lan
+            .as_ref()
+            .and_then(|host| host.mob_players.get(&caller).copied())
+            .or(self.lan_acting);
+        self.set_event_ai_target(id, Some(target), player);
         if let Some(reinforcement) = self.mobs.iter_mut().find(|m| m.id == id) {
-            reinforcement.ai.target = Some(target);
             // ZOMBIE_REINFORCEMENT_CALLEE_CHARGE.
             finalize::add_modifier(
                 reinforcement,

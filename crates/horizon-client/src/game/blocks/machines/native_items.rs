@@ -58,6 +58,28 @@ impl Game<'_> {
             .view((at.pos[0], at.pos[1], at.pos[2]), false)?;
         takes_from(&view).then_some(view)
     }
+    pub(in crate::game) fn container_set_stack_limit(
+        &mut self,
+        at: BlockSide,
+        limit: u32,
+        tx: &Transaction,
+    ) -> bool {
+        if !self.transaction_holds(tx) {
+            return false;
+        }
+        if !(1..=99).contains(&limit) {
+            return false;
+        }
+        let Some(view) = self.capability_view(at) else {
+            return false;
+        };
+        for &(pos, _) in &view.parts {
+            self.journal_block_entity(pos);
+            self.world.set_container_stack_limit(pos, limit);
+        }
+        self.view_told(&view);
+        true
+    }
     /// How many slots of the block entity at `at` its side reaches (none: every slot), by its
     /// `WorldlyContainer` rules: a furnace's top reaches its input only. None where no block
     /// entity has slots, in a level not in place, and on a client's copy of the world.
@@ -94,7 +116,9 @@ impl Game<'_> {
             count: amount,
             ..resource.clone()
         };
-        let _ = tx;
+        if !self.transaction_holds(tx) {
+            return Some(stack);
+        }
         let Some(view) = self.capability_view(at) else {
             return Some(stack);
         };
@@ -145,7 +169,9 @@ impl Game<'_> {
         max: u32,
         tx: &Transaction,
     ) -> Option<ItemStack> {
-        let _ = tx;
+        if !self.transaction_holds(tx) {
+            return None;
+        }
         let view = self.capability_view(at)?;
         let slot = *view.slots_for_face(at.side).get(slot)?;
         let c = self.containers();

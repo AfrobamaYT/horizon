@@ -1,6 +1,7 @@
 """Ignored-test CI must distinguish completed targets from child fixture output."""
 import contextlib
 import io
+import os
 import subprocess
 import unittest
 from unittest.mock import patch
@@ -43,6 +44,29 @@ class IgnoredTests(unittest.TestCase):
         with patch.object(ignored_tests, "known_failures", return_value={("example", "repaired"): None}), patch.object(ignored_tests, "run", return_value=result), contextlib.redirect_stdout(io.StringIO()) as log:
             self.assertEqual(ignored_tests.main(["example"]), 1)
         self.assertIn("repaired: passes now; take it off", log.getvalue())
+
+    def test_client_lib_halves_run_serially_and_preserve_failure_policy(self):
+        package = "horizon-client-lib"
+        names = [f"suite::case_{n}" for n in range(20)]
+        seen = []
+
+        def run(package_arg, skip, number=None, count=None):
+            self.assertEqual(package_arg, package)
+            self.assertEqual(count, 2)
+            selected = [name for name in names if ignored_tests.in_leg(name, number, count)]
+            seen.extend(selected)
+            return {name: name != names[0] for name in selected}
+
+        with patch.object(ignored_tests, "known_failures", return_value={}), patch.object(ignored_tests, "run", side_effect=run) as execute, contextlib.redirect_stdout(io.StringIO()) as log:
+            self.assertEqual(ignored_tests.main([package]), 1)
+        self.assertEqual([call.args[2:] for call in execute.call_args_list], [(1, 2), (2, 2)])
+        self.assertCountEqual(seen, names)
+        self.assertIn(f"{names[0]}: failed, and isn't a known failure", log.getvalue())
+
+    def test_explicit_client_lib_selection_is_not_split_again(self):
+        with patch.object(ignored_tests, "known_failures", return_value={}), patch.object(ignored_tests, "run", return_value={}) as execute:
+            self.assertEqual(ignored_tests.main(["horizon-client-lib#2of3"]), 0)
+        self.assertEqual(execute.call_args.args, ("horizon-client-lib", [], 2, 3))
 
     def test_unexplained_nonzero_status(self):
         result, _ = self.run_output(target(1, "test good ... ok\n", summary(passed=1)), 101)
@@ -98,6 +122,24 @@ def leg_names(count=2):
 
 
 class Legs(unittest.TestCase):
+    def test_worldgen_shard_optimizes_listing_and_execution_without_changing_parent(self):
+        output = target(1, "test suite::a ... ok\n", summary(passed=1))
+        for package, optimization in [("horizon-client-lib", "3"), ("example", "0")]:
+            with self.subTest(package=package), patch.dict(os.environ, CARGO_PROFILE_TEST_OPT_LEVEL="0"):
+                calls = []
+
+                def execute(command, **kwargs):
+                    calls.append((command, kwargs["env"]["CARGO_PROFILE_TEST_OPT_LEVEL"]))
+                    return subprocess.CompletedProcess(command, 0, "suite::a: test\n" if "--list" in command else output)
+
+                with patch.object(ignored_tests.subprocess, "run", side_effect=execute), contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(ignored_tests.run(package, [], 1, 1), {"suite::a": True})
+                self.assertEqual(len(calls), 2)
+                self.assertIn("--list", calls[0][0])
+                self.assertNotIn("--list", calls[1][0])
+                self.assertEqual([level for _, level in calls], [optimization, optimization])
+                self.assertEqual(os.environ["CARGO_PROFILE_TEST_OPT_LEVEL"], "0")
+
     def test_shard_names(self):
         self.assertEqual(ignored_tests.parse_shard("horizon-client#2of3"), ("horizon-client", 2, 3))
         self.assertEqual(ignored_tests.parse_shard("horizon-client-lib"), ("horizon-client-lib", None, None))

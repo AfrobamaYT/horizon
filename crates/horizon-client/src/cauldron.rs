@@ -44,6 +44,10 @@ pub struct Interaction {
     pub stat: Option<&'static str>,
     /// `lowerFillLevel` posts BLOCK_CHANGE with the new state.
     pub lower_fill_level: bool,
+    /// The `Level.gameEvent` the interaction ends with, after its sound:
+    /// `FLUID_PICKUP` from `fillBucket` and the glass bottle, `FLUID_PLACE`
+    /// from `emptyBucket` and a water potion. Washing posts none.
+    pub fluid_event: Option<&'static str>,
 }
 
 fn state(name: &str, level: Option<u8>) -> BlockState {
@@ -63,6 +67,15 @@ fn pass() -> Interaction {
         sound: None,
         stat: None,
         lower_fill_level: false,
+        fluid_event: None,
+    }
+}
+
+/// `InteractionResult.CONSUME`: a lava or powder snow bucket under water.
+fn consume() -> Interaction {
+    Interaction {
+        outcome: Outcome::Consume,
+        ..pass()
     }
 }
 
@@ -133,6 +146,7 @@ fn changed(block: BlockState, sound: Option<&'static str>, stat: &'static str) -
         sound,
         stat: Some(stat),
         lower_fill_level: false,
+        fluid_event: None,
     }
 }
 
@@ -144,6 +158,14 @@ fn changed_lowered(
     let mut result = changed(lowered(cauldron), sound, stat);
     result.lower_fill_level = true;
     result
+}
+
+impl Interaction {
+    /// The same answer, ending with the interaction's `Level.gameEvent`.
+    fn with_event(mut self, event: &'static str) -> Self {
+        self.fluid_event = Some(event);
+        self
+    }
 }
 
 const COLORS: [&str; 16] = [
@@ -261,10 +283,11 @@ pub fn interact(
             Some(sound),
             "use_cauldron",
         )
+        .with_event("minecraft:fluid_pickup")
     };
     let empty_bucket = |player: &mut dyn Player, block: BlockState, sound| {
         create_filled_result(player, ItemStack::new("minecraft:bucket", 1), true);
-        changed(block, Some(sound), "fill_cauldron")
+        changed(block, Some(sound), "fill_cauldron").with_event("minecraft:fluid_place")
     };
     let Some(action) = interactions()[kind].get(item) else {
         return pass();
@@ -272,13 +295,7 @@ pub fn interact(
     match action {
         Action::EmptyLava => {
             if under_water {
-                Interaction {
-                    outcome: Outcome::Consume,
-                    block: None,
-                    sound: None,
-                    stat: None,
-                    lower_fill_level: false,
-                }
+                consume()
             } else {
                 empty_bucket(
                     player,
@@ -294,13 +311,7 @@ pub fn interact(
         ),
         Action::EmptySnow => {
             if under_water {
-                Interaction {
-                    outcome: Outcome::Consume,
-                    block: None,
-                    sound: None,
-                    stat: None,
-                    lower_fill_level: false,
-                }
+                consume()
             } else {
                 empty_bucket(
                     player,
@@ -319,6 +330,7 @@ pub fn interact(
                 Some("minecraft:item.bottle.empty"),
                 "use_cauldron",
             )
+            .with_event("minecraft:fluid_place")
         }
         Action::FillWater => fill_bucket(
             player,
@@ -333,6 +345,7 @@ pub fn interact(
                 true,
             );
             changed_lowered(cauldron, Some("minecraft:item.bottle.fill"), "use_cauldron")
+                .with_event("minecraft:fluid_pickup")
         }
         Action::TopUpPotion => {
             if level == 3 || !water_potion {
@@ -344,6 +357,7 @@ pub fn interact(
             next.properties
                 .insert("level".into(), (level % 3 + 1).to_string());
             changed(next, Some("minecraft:item.bottle.empty"), "use_cauldron")
+                .with_event("minecraft:fluid_place")
         }
         Action::CleanBanner => {
             let layers = held.data().map_or(0, |d| d.banner_patterns.len());

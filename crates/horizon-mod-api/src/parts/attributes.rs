@@ -5,6 +5,7 @@ use crate::Sentiment;
 /// attribute catalog (`Catalog::with_attributes`, #812).
 #[derive(Clone, Debug)]
 // exhaustive: only registration builds it; the game reads it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct AttributeDeclaration {
     /// The declaring mod's id: the first key of the catalog's sort order.
     pub mod_id: String,
@@ -74,7 +75,7 @@ impl AttributesRegistrar for PartRegistrar {
         sentiment: Sentiment,
     ) -> Result<(), crate::AttributeRegistrationError> {
         let result = (|| {
-            if crate::phase::LoadedMods::new()
+            if crate::world::phase::LoadedMods::new()
                 .get(self.mod_id)
                 .is_some_and(|package| package.side() != crate::Side::Both)
             {

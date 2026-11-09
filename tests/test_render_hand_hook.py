@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class RenderHandHookTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("rustc"), "requires Rust")
     def test_each_hand_can_be_cancelled_or_posed(self):
-        source = (ROOT / "crates/horizon-client/src/game.rs").read_text()
+        source = next(p.read_text() for p in [ROOT / "crates/horizon-client/src/game.rs", *sorted((ROOT / "crates/horizon-client/src/game").rglob("*.rs"))] if "fn hand_geometry(" in p.read_text())
         start = source.index("            let snapshot =", source.index("fn hand_geometry("))
         end = source.index("            // No mod moved the hand", start)
         dispatch = source[start:end]
@@ -29,7 +29,7 @@ mod mod_api {
         pub fn listened(_: super::HookId) -> bool { LISTENED.get() }
     }
     pub struct ItemStack { pub value: i32 }
-    pub struct NativeHandRender<'a> {
+    pub struct HandRender<'a> {
         pub player: u128, pub player_entity_id: i32, pub hand: usize,
         pub stack: Option<&'a ItemStack>, pub partial: f32, pub interpolated_pitch: f32,
         pub swing: f32, pub equip: f32, pub packed_light: u32,
@@ -49,7 +49,7 @@ struct Game { cancel: Option<usize>, calls: Vec<(usize, Option<i32>, f32, f32, f
 impl Game {
     fn own_uuid(&self) -> u128 { 7 }
     fn own_entity_id(&self) -> i32 { 9 }
-    fn native_render_hand(&mut self, render: &mut mod_api::NativeHandRender<'_>, canceled: &mut bool) {
+    fn native_render_hand(&mut self, render: &mut mod_api::HandRender<'_>, canceled: &mut bool) {
         assert_eq!((render.player, render.player_entity_id, render.interpolated_pitch, render.packed_light), (7, 9, 2.0, 3 << 4 | 10 << 20));
         self.calls.push((render.hand, render.stack.map(|stack| stack.value), render.partial, render.swing, render.equip));
         render.translation[0] += 2.0;

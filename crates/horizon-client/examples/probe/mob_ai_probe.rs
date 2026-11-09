@@ -207,6 +207,7 @@ fn goal_name(m: &Mob, name: &str) -> String {
         "GhastLook" => "GhastLookGoal",
         "Peek" => "ShulkerPeekGoal",
         "GhastShoot" => "GhastShootFireballGoal",
+        "BlazeAttack" => "BlazeAttackGoal",
         "Stroll" => "WaterAvoidingRandomStrollGoal",
         "ParrotWander" => "ParrotWanderGoal",
         "RandomStroll" => "RandomStrollGoal",
@@ -549,6 +550,7 @@ impl HiveHost for ProbeHive<'_, '_> {
     fn sound(&mut self, name: &'static str, at: [f64; 3]) {
         self.events.push(MobEvent::Sound(name, at, 1.0, 1.0));
     }
+    fn set_changed(&mut self, _at: [i32; 3]) {}
 }
 /// The hive's honey level and front from its block state.
 fn hive_state(registry: &BlockRegistry, world: &World, at: [i32; 3]) -> (Option<i32>, [i32; 2]) {
@@ -1211,9 +1213,11 @@ pub fn main() -> horizon_client::Result<()> {
                     player: player.clone(),
                     // The probe lends no goal view: no identity to capture.
                     player_identity: None,
+                    player_selection: None,
                     controlling_player_movement: None,
                     nearest_player: player.as_ref().filter(|p| !p.spectator).map(|p| p.position),
                     others: $snapshot,
+                    live_mobs: None,
                     dragon: None,
                     leash_boats: &[],
                     who_lookup: None,

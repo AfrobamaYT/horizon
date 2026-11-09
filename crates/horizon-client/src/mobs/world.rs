@@ -386,7 +386,7 @@ impl MobWorld<'_> {
             return Some(target);
         }
         match who {
-            Who::Player => self.player.as_ref().map(|p| TargetInfo {
+            Who::Player => self.selected_player().map(|p| TargetInfo {
                 position: p.position,
                 eye_y: p.eye[1],
                 bounds: p.bounds,
@@ -605,9 +605,11 @@ pub(crate) fn with_resource_test_world(
         data: &data,
         player: None,
         player_identity: None,
+        player_selection: None,
         controlling_player_movement: None,
         nearest_player: None,
         others,
+        live_mobs: None,
         dragon: None,
         leash_boats: &[],
         who_lookup: None,

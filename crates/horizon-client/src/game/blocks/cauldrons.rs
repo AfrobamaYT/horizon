@@ -71,6 +71,9 @@ impl Game<'_> {
                     pitch: 1.0,
                 });
             }
+            if let Some(event) = result.fluid_event {
+                self.post_block_game_event(event, pos, None, None);
+            }
             return Ok(true);
         }
         let outcome = mod_api::run_transaction(self, |game, _| {
@@ -108,6 +111,9 @@ impl Game<'_> {
                     volume: 1.0,
                     pitch: 1.0,
                 });
+            }
+            if let Some(event) = result.fluid_event {
+                game.post_block_game_event(event, pos, None, None);
             }
             Ok(())
         });

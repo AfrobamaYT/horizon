@@ -13,16 +13,19 @@ fn tooltip_position(
     (width, height): (f32, f32),
     (w, h): (f32, f32),
 ) -> (f32, f32) {
-    let mut x = x + 12.0;
-    let mut y = y - 12.0;
+    let mut x = (x + 12.0).round();
+    let mut y = (y - 12.0).round();
     if x + w > width - 4.0 {
         x = (x - 28.0 - w).max(4.0);
+    }
+    if x + w > width - 4.0 {
+        x = (width - w - 4.0).max(4.0);
     }
     if y + h + 3.0 > height {
         y = height - h - 3.0;
     }
     y = y.max(4.0);
-    (x, y)
+    (x.round(), y.round())
 }
 
 use super::api_values::{TryIntoApi, TryIntoEngine};
@@ -746,9 +749,9 @@ impl Game<'_> {
             // A server's table: its data slots carry the offers, and its
             // client menu only clears them without an enchantable item.
             Kind::Enchanting if self.remote.is_some() => {
-                let enchantable = s.inputs[0].as_ref().is_some_and(|i| {
-                    data.enchantments.enchantable(&i.item) > 0 && i.enchantments().is_empty()
-                });
+                let enchantable = s.inputs[0]
+                    .as_ref()
+                    .is_some_and(|i| stations::is_enchantable(&data.enchantments, i));
                 if !enchantable {
                     s.offers = Default::default();
                 }
@@ -2815,7 +2818,7 @@ impl Game<'_> {
             && mod_api::__private::listened(mod_api::HookId::ItemTooltip)
             && let Ok(stack) = stack.try_into_api()
         {
-            let display = mod_api::item_tooltip::TooltipDisplay::for_stack(&stack);
+            let display = mod_api::item::item_tooltip::TooltipDisplay::for_stack(&stack);
             let Ok(mut api_lines) = lines.try_into_api() else {
                 return lines;
             };
@@ -2964,6 +2967,7 @@ impl Game<'_> {
             n => 8.0 + 2.0 + (n - 1) as f32 * 10.0,
         };
         let h = text_h + extra[1];
+        let (w, h) = (w.ceil(), h.ceil());
         let (x, y) = tooltip_position((x, y), (width, height), (w, h));
         (x, y, w, h)
     }
@@ -3119,7 +3123,7 @@ impl Game<'_> {
         }
         let mut at = y + text_h + bundle_extra + 2.0;
         for image in &images {
-            if let Ok(stack) = image.stack.try_into_engine(self.items()) {
+            if let Ok(stack) = crate::game::api_values::stack_value(&image.stack) {
                 self.native_tooltip_component_draw(&stack, batch, [x, at], image.size);
             }
             at += image.size[1] + 2.0;
@@ -3410,6 +3414,9 @@ impl Game<'_> {
         }
         if let Some(ingredient) = ingredient {
             self.native_brewing_start(at, &ingredient);
+        }
+        if !was_idle || consumed_fuel || started || out != brewing::BrewTick::default() {
+            self.container_changed(pos);
         }
         let (x, y, z) = pos;
         if out.brewed {
@@ -4027,4 +4034,27 @@ mod cycling_tests {
             });
         });
     }
+
+    #[test]
+    fn tooltip_position_rounds_and_stays_within_bounds() {
+        let (x, y) = tooltip_position((10.3, 20.7), (640.0, 360.0), (100.0, 20.0));
+        assert_eq!((x, y), (22.0, 9.0));
+
+        // When overflowing right boundary, flips to left
+        let (x, _y) = tooltip_position((600.0, 50.0), (640.0, 360.0), (100.0, 20.0));
+        assert_eq!(x, 484.0);
+
+        // Clamps to min 4.0 margin
+        let (x, y) = tooltip_position((50.0, 50.0), (100.0, 100.0), (120.0, 20.0));
+        assert_eq!(x, 4.0);
+        assert_eq!(y, 38.0);
+
+        // Near top screen edge
+        let (_x, y) = tooltip_position((50.0, 5.0), (640.0, 360.0), (100.0, 20.0));
+        assert_eq!(y, 4.0);
+    }
 }
+
+#[cfg(test)]
+#[path = "tests/brewing_changed_tests.rs"]
+mod brewing_changed_tests;

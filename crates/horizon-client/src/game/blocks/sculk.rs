@@ -21,7 +21,7 @@ use horizon_core::{
     random::RandomSource,
 };
 use horizon_world::registry::BlockStateId;
-use mod_api::particles::PositionSource;
+use mod_api::client::particles::PositionSource;
 use std::collections::HashSet;
 
 pub const HELP: &[&str] = &[
@@ -479,6 +479,21 @@ impl Game<'_> {
             }
             self.sculk.known = loaded;
         }
+        self.sculk_sync_writes();
+    }
+
+    /// `LevelChunk.setBlockState`: finish sculk placement before a command
+    /// or `BlockItem.updateCustomBlockEntityTag` loads saved entity fields.
+    pub(super) fn sculk_place_entity(&mut self, state: BlockStateId) -> bool {
+        self.sculk_prepare();
+        if self.kind_of_state(state.0) == 0 {
+            return false;
+        }
+        self.sculk_sync_writes();
+        true
+    }
+
+    fn sculk_sync_writes(&mut self) {
         let writes = std::mem::take(&mut self.world.watched_writes);
         for (key, old, new) in writes {
             let (old_kind, new_kind) = (self.kind_of_state(old), self.kind_of_state(new));
@@ -1438,7 +1453,7 @@ impl Game<'_> {
                 f64::from(at.1),
                 f64::from(at.2) + 0.5,
             ];
-            let yaw = mod_api::camera::wrap_degrees(self.world.random.next_float() * 360.0);
+            let yaw = mod_api::client::camera::wrap_degrees(self.world.random.next_float() * 360.0);
             self.next_entity += 1;
             let mut mob = Mob::new(
                 self.next_entity,
@@ -1549,7 +1564,7 @@ impl Game<'_> {
     /// `LightmapRenderStateExtractor`: the night vision effect's intensity
     /// (`GameRenderer.nightVisionScale`), or conduit power's water vision.
     pub(super) fn night_vision_intensity(&self, partial: f32) -> f32 {
-        use mod_api::fog::FogType;
+        use mod_api::client::fog::FogType;
         if let Some(e) = self.potions.effects.get("night_vision") {
             // MobEffectInstance.endsWithin(200); -1 is infinite.
             return if e.duration < 0 || e.duration > 200 {
@@ -2101,8 +2116,8 @@ impl Game<'_> {
         &mut self,
         pos: [i32; 3],
         held: Option<&horizon_client::items::ItemStack>,
-    ) -> Result<Option<mod_api::NativeInteractionResult>> {
-        use mod_api::NativeInteractionResult as Answer;
+    ) -> Result<Option<mod_api::InteractionResult>> {
+        use mod_api::InteractionResult as Answer;
         if !matches!(
             &*self.block_name(pos),
             "minecraft:redstone_ore" | "minecraft:deepslate_redstone_ore"
@@ -2461,12 +2476,53 @@ impl Game<'_> {
     /// `ArmorStand.kill`, `VehicleEntity.destroy`): removed, then
     /// `gameEvent(ENTITY_DIE, attributedTo != null ? attributedTo : this)` at
     /// the entity's position. `by_player`: the player's hit killed it, so the
-    /// player is the source. Otherwise the source is the entity itself (or a
-    /// bolt), which no listener tells apart from none: it is not living,
-    /// sneaking, a spectator or a warden.
+    /// player is the source. Nonliving self sources have no Who handle;
+    /// their listener facts are represented by the default context.
     pub(super) fn entity_killed_event(&mut self, at: [f64; 3], by_player: bool) {
-        let ctx = self.who_context(by_player.then_some(Who::Player), None);
-        self.post_game_event("minecraft:entity_die", at, ctx);
+        self.entity_killed_event_by(at, by_player.then_some(super::commands::Target::Player));
+    }
+    /// `BlockAttachedEntity.kill` / `ArmorStand.kill` with DamageSource.getEntity.
+    pub(super) fn entity_killed_event_by(
+        &mut self,
+        at: [f64; 3],
+        source: Option<super::commands::Target>,
+    ) {
+        self.entity_event_by("minecraft:entity_die", at, source);
+    }
+    /// `Entity.gameEvent(event, attributedTo)` at `at`, attributed to `source`
+    /// (a LAN guest posts as that player), else to the entity itself.
+    pub(super) fn entity_event_by(
+        &mut self,
+        event: &'static str,
+        at: [f64; 3],
+        source: Option<super::commands::Target>,
+    ) {
+        use super::commands::Target;
+        if let Some(Target::Guest(conn)) = source {
+            if self.lan_acting == Some(conn) {
+                let ctx = self.player_context(None);
+                self.post_game_event(event, at, ctx);
+                return;
+            }
+            let posted = self
+                .as_guest(conn, |g| {
+                    let ctx = g.player_context(None);
+                    g.post_game_event(event, at, ctx);
+                })
+                .is_some();
+            if posted {
+                return;
+            }
+        }
+        let who = match source {
+            Some(Target::Player) => Some(Who::Player),
+            Some(Target::Mob(id)) => Some(Who::Mob(id)),
+            _ => None,
+        };
+        let mut ctx = self.who_context(who, None);
+        // A stand is living, but Warden.canTargetEntity explicitly excludes it.
+        ctx.living |= matches!(source, Some(Target::Stand(_)));
+        self.post_game_event(event, at, ctx);
     }
 }
 

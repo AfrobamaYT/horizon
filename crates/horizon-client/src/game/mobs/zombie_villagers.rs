@@ -259,6 +259,7 @@ fn carry_over(from: &Mob, to: &mut Mob) {
     to.extra.left_handed = from.extra.left_handed;
     to.no_ai = from.no_ai;
     to.invulnerable_flag = from.invulnerable_flag;
+    to.invulnerable_time = from.invulnerable_time;
     to.no_gravity = from.no_gravity;
     to.silent = from.silent;
     for slot in horizon_items::equipment::MAINHAND..=horizon_items::equipment::BODY {
@@ -268,8 +269,7 @@ fn carry_over(from: &Mob, to: &mut Mob) {
     to.extra.gear = from.extra.gear.clone();
     to.retain_effects(|_| false);
     for effect in &from.extra.effects {
-        let (effect, ticks, amplifier) = (effect.id, effect.duration, effect.amplifier);
-        to.load_effect(effect, ticks, amplifier);
+        to.load_effect(*effect);
     }
 
     // VillagerData and the trades, experience and gossip.

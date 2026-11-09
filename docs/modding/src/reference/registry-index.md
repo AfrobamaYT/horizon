@@ -65,8 +65,9 @@ fields; the signature is required. Records live only in the registry, never in
 `horizon-mod.toml`. Duplicate build/target pairs are rejected. Lookup returns a
 typed absence when the exact pair is unavailable, so source preparation can
 handle it without selecting another build or architecture. These signatures are
-registry-produced metadata; binary trust acceptance belongs to the verifier
-([#804](https://github.com/arismoko/horizon/issues/804)), independently of project package keys.
+registry-produced metadata, independent of project package keys. The launcher
+builds native mods locally with its pinned Rust toolchain against the prebuilt
+game; registry-built native binaries are not used.
 
 ## Before a file is installed
 

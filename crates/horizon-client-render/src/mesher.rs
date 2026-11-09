@@ -3,7 +3,7 @@
 //! `ModelBlockRenderer`/`BlockModelLighter` (smooth light, ambient occlusion,
 //! cardinal shading, tint sources, block offsets; see `lighting`). Fluids
 //! follow `FluidRenderer` (see `fluid`).
-pub use mod_api::mesher::TintSource;
+pub use mod_api::client::mesher::TintSource;
 pub use mod_render::render::Vertex;
 mod fluid;
 mod leaf_culling;
@@ -11,6 +11,9 @@ mod lighting;
 mod mod_tint;
 pub mod packed;
 mod sides;
+#[cfg(test)]
+#[path = "mesher/source_tests.rs"]
+mod source_tests;
 use crate::connected::{Pick, TileLayer};
 use crate::{
     assets::{Assets, RenderAssets},
@@ -330,13 +333,41 @@ mod section_mesh_tests {
         );
     }
 }
+/// A shader terrain quad's unmodified source state and owning section cell. Two words
+/// per quad, kept beside (not in) the native 24-byte vertex format. Word 1 has cell XYZ
+/// in three nibbles, a fluid flag, a valid flag, then the emitted light (0..15).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct TerrainSource {
+    state: u32,
+    cell: u32,
+}
+impl TerrainSource {
+    pub(crate) fn new(state: u32, pos: [i32; 3], emission: u8, fluid: bool) -> Self {
+        debug_assert!(pos.iter().all(|&v| (0..16).contains(&v)));
+        Self {
+            state,
+            cell: pos[0] as u32
+                | (pos[1] as u32) << 4
+                | (pos[2] as u32) << 8
+                | u32::from(fluid) << 12
+                | 1 << 13
+                | u32::from(emission.min(15)) << 14,
+        }
+    }
+}
+
 pub struct SectionMesh {
     pub solid: Vec<TerrainVertex>,
+    /// One source per quad when a shader pack meshes terrain; independent of its sprite
+    /// and geometry. Empty on native/default meshes and on distant terrain.
+    pub solid_sources: Vec<TerrainSource>,
     /// The buckets `solid` is sorted in by the side its quads face: empty
     /// until `sort_solid`, which the meshing workers call; `solid` is in
     /// model order before.
     pub sides: Sides,
     pub translucent: Vec<TerrainVertex>,
+    pub translucent_sources: Vec<TerrainSource>,
     /// Whether `packed` holds far tile records (`lod::packed`) rather than
     /// section records (`mesher::packed`): the two are read apart, by the base
     /// vertex their draws use.
@@ -370,8 +401,10 @@ impl Default for SectionMesh {
     fn default() -> Self {
         Self {
             solid: Vec::new(),
+            solid_sources: Vec::new(),
             sides: Sides::default(),
             translucent: Vec::new(),
+            translucent_sources: Vec::new(),
             packed: Vec::new(),
             packed_far: false,
             solid_tints: Vec::new(),
@@ -406,7 +439,9 @@ impl SectionMesh {
     /// Retain geometry capacity after an upload, but none of its old contents.
     pub fn clear(&mut self) {
         self.solid.clear();
+        self.solid_sources.clear();
         self.translucent.clear();
+        self.translucent_sources.clear();
         self.packed.clear();
         self.packed_far = false;
         self.solid_tints.clear();
@@ -421,6 +456,8 @@ impl SectionMesh {
     pub(crate) fn capacity_bytes(&self) -> usize {
         self.solid.capacity() * std::mem::size_of::<TerrainVertex>()
             + self.translucent.capacity() * std::mem::size_of::<TerrainVertex>()
+            + (self.solid_sources.capacity() + self.translucent_sources.capacity())
+                * std::mem::size_of::<TerrainSource>()
             + self.packed.capacity() * std::mem::size_of::<[u32; 6]>()
             + self.solid_tints.capacity() * std::mem::size_of::<u32>()
             + self.block_entities.capacity() * std::mem::size_of::<([i32; 3], u32)>()
@@ -435,14 +472,32 @@ impl SectionMesh {
         if !self.solid_tints.is_empty() {
             self.solid_tints.resize(quads, packed::UNKNOWN_TINT);
         }
-        self.sides = sides::sort_tinted(&mut self.solid, &mut self.solid_tints);
+        self.sides = sides::sort_sourced(
+            &mut self.solid,
+            &mut self.solid_tints,
+            &mut self.solid_sources,
+        );
         self.bounds = self.compute_bounds();
         self.packed.clear();
         self.packed_far = false;
         if packed::packing() && quads > 0 && self.solid_tints.len() == quads {
-            self.packed = packed::layout(&self.solid, &self.solid_tints);
+            packed::layout_into(&self.solid, &self.solid_tints, &mut self.packed);
         }
         self.solid_tints.clear();
+    }
+
+    /// Every face emitted since `start` belongs to this block, including multipart,
+    /// connected-texture pieces, overlays and duplicated/back-facing fluid faces.
+    fn record_source(&mut self, start: [usize; 2], source: TerrainSource) {
+        for (vertices, sources, start) in [
+            (&self.solid, &mut self.solid_sources, start[0]),
+            (&self.translucent, &mut self.translucent_sources, start[1]),
+        ] {
+            if vertices.len() > start {
+                sources.resize(start / 4, TerrainSource::default());
+                sources.resize(vertices.len() / 4, source);
+            }
+        }
     }
 
     /// Computes the tight axis-aligned bounding box [min, max] of actual terrain geometry vertices.
@@ -628,6 +683,8 @@ struct Info {
     block_entity: bool,
     tints: [Tint; 2],
     tint_count: u8,
+    /// A resource pack's Polytone colormap over its tints (an index in `MeshTables::colormaps`).
+    colormap: Option<u16>,
     /// `OffsetType` as (max horizontal, max vertical): vertical 0 for XZ.
     offset: Option<(f32, f32)>,
     /// `isSolid()` (legacy), for fluid corner heights.
@@ -688,6 +745,9 @@ pub struct MeshTables {
     animated_layers: Vec<bool>,
     /// The layers of the states mods colour (`register_block_tint_sources`).
     mod_tints: mod_tint::ModTints,
+    /// Resource packs' Polytone block and fluid colormaps (#11486), and the water's.
+    colormaps: Vec<Arc<crate::environment::Colormap>>,
+    water_colormap: Option<u16>,
 }
 /// What a mod's fluid draws with ([`crate::fluid_models`]).
 #[derive(Clone, Copy)]
@@ -699,7 +759,10 @@ struct ModFluidLayers {
     tint: Option<u32>,
 }
 fn redstone_color(power: u8) -> u32 {
-    // RedstoneWireBlock.COLORS
+    // RedstoneWireBlock.COLORS, or a pack's.
+    if let Some(color) = crate::pack_palette::redstone(power) {
+        return color;
+    }
     let f = f32::from(power) / 15.0;
     let r = f * 0.6 + if f > 0.0 { 0.4 } else { 0.3 };
     let g = (f * f * 0.7 - 0.5).clamp(0.0, 1.0);
@@ -749,7 +812,7 @@ fn world_tint(tint: Tint, tints: &mut Tints, [x, y, z]: [i32; 3]) -> Option<u32>
         Tint::TallGrassUpper => tints.get(Resolver::Grass, x, y, z),
         Tint::Foliage => tints.get(Resolver::Foliage, x, y, z),
         Tint::DryFoliage => tints.get(Resolver::Dry, x, y, z),
-        Tint::Water => tints.get(Resolver::Water, x, y, z),
+        Tint::Water => tints.water(x, y, z),
         Tint::Constant(c) => c,
         Tint::LilyPad => 0x20_8030,
         Tint::Redstone(p) => redstone_color(p),
@@ -902,6 +965,7 @@ impl MeshTables {
                 block_entity: s.block_entity,
                 tints,
                 tint_count,
+                colormap: None,
                 offset,
                 legacy_solid: s.legacy_solid,
                 overlay: s.has_class("HalfTransparentBlock") || s.has_class("LeavesBlock"),
@@ -936,12 +1000,56 @@ impl MeshTables {
             lava_flow: layer("minecraft:block/lava_flow")?,
             mod_fluids,
             animated_layers,
+            colormaps: Vec::new(),
+            water_colormap: None,
             mod_tints: mod_tint::ModTints::default(),
         };
         if let Some(registered) = mod_tint::registered() {
             tables.apply_tint_layers(assets.registry, registered, mod_tint_values)?;
         }
         Ok(tables)
+    }
+    /// These tables with the colormaps of the Polytone block and fluid modifiers of the packs
+    /// merged at `pack_root` (wiki "Colormaps"): a tinted block they target takes its colour
+    /// from the colormap, and its own tint where the colormap's pixel is transparent.
+    #[must_use]
+    pub fn with_polytone_colormaps(
+        mut self,
+        pack_root: &horizon_assets::resource_source::ResourceSource,
+        registry: &horizon_world::registry::BlockRegistry,
+    ) -> Self {
+        let modifiers = crate::environment::polytone_colormap_modifiers(pack_root);
+        if modifiers.is_empty() {
+            return self;
+        }
+        let mut loaded: std::collections::HashMap<String, Option<u16>> = Default::default();
+        let mut index = |id: &str, colormaps: &mut Vec<Arc<crate::environment::Colormap>>| {
+            *loaded.entry(id.to_owned()).or_insert_with(|| {
+                let colormap = crate::environment::Colormap::load(pack_root, id)?;
+                colormaps.push(Arc::new(colormap));
+                Some((colormaps.len() - 1) as u16)
+            })
+        };
+        for (fluid, targets, id) in &modifiers {
+            if *fluid {
+                if targets.matches("minecraft:water", |_| false) {
+                    self.water_colormap = index(id, &mut self.colormaps);
+                }
+                continue;
+            }
+            let Some(i) = index(id, &mut self.colormaps) else {
+                continue;
+            };
+            for (state, info) in self.info.iter_mut().enumerate() {
+                let Some(block) = registry.state(BlockStateId(state as u32)) else {
+                    continue;
+                };
+                if info.tint_count > 0 && targets.matches(&block.name, |_| false) {
+                    info.colormap = Some(i);
+                }
+            }
+        }
+        self
     }
     /// Whether a terrain sprite layer has an animated clip.
     pub fn is_animated(&self, layer: u16) -> bool {
@@ -1043,7 +1151,7 @@ impl MeshTables {
         let info = self.info.get(state.0 as usize)?;
         let [x, y, z] = pos;
         let origin = [x >> 4, z >> 4, y & !15];
-        let mut tints = Tints::new(region, biomes, zoom, blend_radius, origin);
+        let mut tints = Tints::new(region, biomes, zoom, blend_radius, origin).with_colormaps(self);
         let local = [x & 15, y & 15, z & 15];
         let tinted = (state.0, info);
         self.tint_at(tinted, 0, &mut tints, local, nether_shading, true)
@@ -1069,7 +1177,8 @@ impl MeshTables {
                 .map_or_else(Vec::new, |info| {
                     let [x, y, z] = pos;
                     let origin = [x >> 4, z >> 4, y & !15];
-                    let mut tints = Tints::new(region, biomes, zoom, blend_radius, origin);
+                    let mut tints =
+                        Tints::new(region, biomes, zoom, blend_radius, origin).with_colormaps(self);
                     let local = [x & 15, y & 15, z & 15];
                     (0..i32::from(info.tint_count))
                         .map(|i| {
@@ -1104,6 +1213,11 @@ impl MeshTables {
     ) -> Option<u32> {
         if index < 0 || index >= i32::from(info.tint_count) {
             return None;
+        }
+        if let Some(colormap) = info.colormap
+            && let Some(colour) = tints.colormap(colormap, x, y, z)
+        {
+            return Some(colour);
         }
         let Tint::Mod(slot) = info.tints[0] else {
             let tint = info.tints[(index as usize).min(1)];
@@ -1557,6 +1671,13 @@ struct Tints<'a> {
     /// (`ModelBlockRenderer.computeTintColor`).
     asked: Option<([i32; 3], u32)>,
     asked_colors: Vec<(i32, u32)>,
+    /// The packs' colormaps (`MeshTables::colormaps`), the water's, and their colours so far
+    /// by colormap and section-local block.
+    colormaps: &'a [Arc<crate::environment::Colormap>],
+    water_colormap: Option<u16>,
+    sampled: std::collections::HashMap<(u16, [i32; 3]), Option<u32>>,
+    /// Each colormap's own colour by block, before the blend averages them.
+    cells: std::collections::HashMap<(u16, [i32; 3]), Option<u32>>,
 }
 impl<'a> Tints<'a> {
     fn new(
@@ -1577,7 +1698,79 @@ impl<'a> Tints<'a> {
             uniform: None,
             asked: None,
             asked_colors: Vec::new(),
+            colormaps: &[],
+            water_colormap: None,
+            sampled: std::collections::HashMap::new(),
+            cells: std::collections::HashMap::new(),
         }
+    }
+    /// With the packs' colormaps of `tables`.
+    fn with_colormaps(mut self, tables: &'a MeshTables) -> Self {
+        self.colormaps = &tables.colormaps;
+        self.water_colormap = tables.water_colormap;
+        self
+    }
+    /// Colormap `index`'s colour at block `(x, y, z)` (section-local), `None` where its pixel
+    /// is transparent.
+    fn colormap(&mut self, index: u16, x: i32, y: i32, z: i32) -> Option<u32> {
+        if let Some(&known) = self.sampled.get(&(index, [x, y, z])) {
+            return known;
+        }
+        let colormap = self.colormaps.get(usize::from(index))?.clone();
+        // ClientLevel.calculateBlockTint: the mean of the (2r+1)^2 colours around the block, each
+        // channel summed and divided. A transparent pixel in the square leaves the block's own.
+        let r = if colormap.biome_blend { self.radius } else { 0 };
+        let mut sum = [0u32; 3];
+        let mut blended = true;
+        'square: for dz in -r..=r {
+            for dx in -r..=r {
+                let Some(c) = self.colormap_cell(&colormap, index, [x + dx, y, z + dz]) else {
+                    blended = false;
+                    break 'square;
+                };
+                sum = [
+                    sum[0] + (c >> 16 & 255),
+                    sum[1] + (c >> 8 & 255),
+                    sum[2] + (c & 255),
+                ];
+            }
+        }
+        let colour = if blended {
+            let n = ((2 * r + 1) * (2 * r + 1)) as u32;
+            Some((sum[0] / n) << 16 | (sum[1] / n) << 8 | (sum[2] / n))
+        } else {
+            self.colormap_cell(&colormap, index, [x, y, z])
+        };
+        self.sampled.insert((index, [x, y, z]), colour);
+        colour
+    }
+    /// Colormap `index`'s own colour at block `at` (section-local, x and z may reach into the
+    /// neighbours), before any blend.
+    fn colormap_cell(
+        &mut self,
+        colormap: &crate::environment::Colormap,
+        index: u16,
+        at: [i32; 3],
+    ) -> Option<u32> {
+        if let Some(&known) = self.cells.get(&(index, at)) {
+            return known;
+        }
+        let id = Self::biome_id(&self.zoom, self.region, self.plains, self.origin, at);
+        let [cx, cz, base_y] = self.origin;
+        let block = [cx * 16 + at[0], base_y + at[1], cz * 16 + at[2]];
+        let mut host = crate::environment::BlockHost::new(block, self.biomes.get(id));
+        let colour = colormap.sample(&mut host).map(|c| c & 0xFF_FFFF);
+        self.cells.insert((index, at), colour);
+        colour
+    }
+    /// The water's tint at block `(x, y, z)`: the packs' water colormap, else the biome's.
+    fn water(&mut self, x: i32, y: i32, z: i32) -> u32 {
+        if let Some(index) = self.water_colormap
+            && let Some(colour) = self.colormap(index, x, y, z)
+        {
+            return colour;
+        }
+        self.get(Resolver::Water, x, y, z)
     }
     /// The biome of block `(x, y, z)` (section-local x/z, y in 0..16), as `BiomeManager.getBiome`
     /// picks it.
@@ -1851,7 +2044,8 @@ impl Mesher<'_> {
             self.zoom,
             self.blend_radius,
             [center.x, center.z, base_y],
-        );
+        )
+        .with_colormaps(self.tables);
         let info = &self.tables.info;
         let full_faces = &self.tables.full_faces;
         let catalog = &self.render.model_catalog;
@@ -1880,7 +2074,8 @@ impl Mesher<'_> {
                         continue;
                     }
                     if state.fluid.kind() != FluidKind::Empty {
-                        let water = tints.get(Resolver::Water, x, y, z);
+                        let start = [out.solid.len(), out.translucent.len()];
+                        let water = tints.water(x, y, z);
                         let shade = (
                             self.nether_shading,
                             self.shader_pack_lighting,
@@ -1888,6 +2083,12 @@ impl Mesher<'_> {
                             self.shader_pack,
                         );
                         fluid::tesselate(self.tables, shade, pad, water, &mut out, [x, y, z]);
+                        if self.shader_pack {
+                            out.record_source(
+                                start,
+                                TerrainSource::new(id, [x, y, z], state.emission, true),
+                            );
+                        }
                     }
                     if !state.model {
                         continue;
@@ -1960,6 +2161,7 @@ impl Mesher<'_> {
                                 .unwrap_or(true);
                     }
                     let connected = &self.render.connected;
+                    let start = [out.solid.len(), out.translucent.len()];
                     for model in &models {
                         for face in &model.faces {
                             if face.quad.cull.is_some_and(|d| !visible[d as usize]) {
@@ -2002,6 +2204,12 @@ impl Mesher<'_> {
                                 interior_leaf,
                             );
                         }
+                    }
+                    if self.shader_pack {
+                        out.record_source(
+                            start,
+                            TerrainSource::new(id, [x, y, z], state.emission, false),
+                        );
                     }
                 }
             }

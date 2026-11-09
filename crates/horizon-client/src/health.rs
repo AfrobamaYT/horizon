@@ -21,7 +21,7 @@ use horizon_world::{
     server_player_damage::ServerDamageEnvironment,
     synced_floats::{FloatValue, Observer, SyncedFloats},
 };
-pub use mod_api::health::{HurtSource, ShieldBlock, Victim};
+pub use mod_api::entity::health::{HurtSource, ShieldBlock, Victim};
 use std::{fs, io, path::Path};
 pub(crate) type Attributes = LiveAttributes<Box<dyn horizon_world::attributes::live::Identities>>;
 pub(crate) type State = HurtState<DamageTypeId>;
@@ -39,12 +39,16 @@ pub enum Hurting<'a> {
     Dragon(i32, HurtSource<'a>),
     /// An armor stand, by its entity id, for sweep knockback.
     ArmorStand(i32, HurtSource<'a>),
+    /// A non-living entity, by its entity id and registry type.
+    Entity(i32, &'a str, HurtSource<'a>),
 }
 pub use horizon_world::living_damage::{DamageContainer, Reduction};
 /// The native hooks a hit runs, owned by the game and lent to the level the hit lands in
 /// ([`DamageLevel`]), so no hook is a global. A table with no entry (`NONE`) runs none.
 #[derive(Clone, Copy)]
 pub struct DamageHooks {
+    /// Override vanilla's per-source entity immunity decision.
+    pub invulnerable: Option<fn(DamageLevel<'_>, Hurting<'_>, bool) -> bool>,
     /// `native_living_incoming_damage`: `LivingEntity.hurtServer` once its guards passed. It
     /// may change the container's new damage and post-attack invulnerability ticks; true
     /// cancels the hit.
@@ -72,6 +76,7 @@ pub struct DamageHooks {
 impl DamageHooks {
     /// No hooks: what tests of the vanilla behaviour hit through.
     pub const NONE: Self = Self {
+        invulnerable: None,
         incoming: None,
         pre: None,
         post: None,
@@ -227,6 +232,13 @@ impl<'a> DamageLevel<'a> {
         }
         self.attachment_syncs.insert(holder);
         Ok(self.attachments)
+    }
+    /// Return the server hook's immunity decision, or vanilla's without a listener.
+    pub fn invulnerability_check(&mut self, hurting: Hurting<'_>, vanilla: bool) -> bool {
+        match self.hooks.and_then(|hooks| hooks.invulnerable) {
+            Some(hook) => hook(self.reborrow(), hurting, vanilla),
+            None => vanilla,
+        }
     }
     /// Whether `LivingIncomingDamageEvent` canceled the hit on `hurting`, standing as
     /// `victim` says ([`DamageHooks::incoming`]; never without it).
@@ -1478,6 +1490,20 @@ impl ImmunityWorld for Environment<'_> {
     fn client_loaded(&mut self) -> io::Result<bool> {
         Ok(self.client_loaded)
     }
+    fn invulnerability_check(&mut self, vanilla: bool) -> io::Result<bool> {
+        let source = HurtSource {
+            damage_type: &self.source.definition().name,
+            causing: self.causing,
+            direct: self
+                .level
+                .attack()
+                .projectile_direct(&self.source.definition().name),
+            position: None,
+        };
+        Ok(self
+            .level
+            .invulnerability_check(Hurting::Player(self.entity, source), vanilla))
+    }
 }
 impl HurtWorld for Environment<'_> {
     type Error = io::Error;
@@ -1751,6 +1777,33 @@ mod datapack_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_hook_can_refuse_one_damage_type_and_allow_another() {
+        use crate::mobs::{Damage, DamageKind, Mob};
+        fn immune_to_generic(_: DamageLevel<'_>, hurting: Hurting<'_>, vanilla: bool) -> bool {
+            match hurting {
+                Hurting::Mob(_, hit) if matches!(hit.kind, DamageKind::Generic) => true,
+                _ => vanilla,
+            }
+        }
+        let hooks = DamageHooks {
+            invulnerable: Some(immune_to_generic),
+            ..DamageHooks::NONE
+        };
+        let mut test_level = TestLevel::with_hooks(0, hooks);
+        let level = &mut test_level.level();
+        let mut mob = Mob::new(
+            9201,
+            crate::mobs::sensor_scan_tests::kind(),
+            Default::default(),
+            0.0,
+        );
+        assert!(!mob.damage(level, 2.0, Damage::of(DamageKind::Generic)));
+        assert_eq!(mob.health, 10.0);
+        assert!(mob.damage(level, 2.0, Damage::of(DamageKind::Fall)));
+        assert_eq!(mob.health, 8.0);
+    }
+
     #[test]
     fn the_weapon_is_the_attackers_main_hand_only_for_its_own_hit() {
         let sword = crate::items::ItemStack::new("minecraft:iron_sword", 1);
@@ -2065,9 +2118,10 @@ mod tests {
             container: &mut DamageContainer,
         ) -> bool {
             let (entity, seen) = match hurting {
-                Hurting::Player(e, s) | Hurting::Dragon(e, s) | Hurting::ArmorStand(e, s) => {
-                    (e, format!("{} {}", s.damage_type, s.causing))
-                }
+                Hurting::Player(e, s)
+                | Hurting::Dragon(e, s)
+                | Hurting::ArmorStand(e, s)
+                | Hurting::Entity(e, _, s) => (e, format!("{} {}", s.damage_type, s.causing)),
                 Hurting::Mob(mob, source) => (mob.id as i32, format!("{:?}", source.kind)),
             };
             if !matches!(entity, 9001..=9005 | 9011..=9013) {
@@ -2142,11 +2196,13 @@ mod tests {
         // goes on. The hearts would take their 1.5; half of it is 0.75, so 5.25 reaches the
         // health (10 - 5.25) and 0.75 hearts are left.
         let mut modified = mob(9005);
+        modified.add_effect("absorption", 600, 0);
         modified.absorption = 1.5;
         assert!(modified.damage(level, 8.0, hit));
         assert_eq!((modified.health, modified.absorption), (4.75, 0.75));
         // The same hit with no modifier: 8 less the 1.5 hearts.
         let mut plain = mob(9006);
+        plain.add_effect("absorption", 600, 0);
         plain.absorption = 1.5;
         assert!(plain.damage(level, 8.0, hit));
         assert_eq!((plain.health, plain.absorption), (3.5, 0.0));

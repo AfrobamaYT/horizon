@@ -797,6 +797,7 @@ fn refused_client_context_keeps_pack_and_listeners() {
             &game.mods,
             game.register_client_reload_listeners(),
             &[],
+            &[],
             &game.pack.assets,
             &game.res,
             &game.pack.context,
@@ -903,8 +904,7 @@ fn client_startup_finishes_configs_before_the_first_runtime_callback() {
             use mod_api::__private::{ModPhase, PhaseOwner};
             use mod_api::{
                 ClientHost, ClientSetupEvent, ClientTickPreEvent, ConfigLoadingEvent, Hooks,
-                HostSide, ModEntry, NativeConfig, NativeConfigKind, RegisterConfigsEvent,
-                ScreenOpening, ScreenOpeningEvent,
+                HostSide, ModEntry, RegisterConfigsEvent, ScreenOpening, ScreenOpeningEvent,
             };
             use std::{sync::Mutex, time::Instant};
 
@@ -912,14 +912,14 @@ fn client_startup_finishes_configs_before_the_first_runtime_callback() {
             #[mod_api::__subscriptions]
             impl Hooks for Probe {
                 fn register_configs(&self, _: HostSide<'_>, event: &mut RegisterConfigsEvent<'_>) {
-                    event.configs.push(NativeConfig::new(
+                    event.configs.push(mod_api::Config::new(
                         "startup_phase",
-                        NativeConfigKind::Client,
+                        mod_api::ConfigKind::Client,
                         "enabled = true\n",
                     ));
-                    event.configs.push(NativeConfig::new(
+                    event.configs.push(mod_api::Config::new(
                         "startup_phase",
-                        NativeConfigKind::Common,
+                        mod_api::ConfigKind::Common,
                         "enabled = true\n",
                     ));
                 }

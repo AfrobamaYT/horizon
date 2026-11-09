@@ -56,7 +56,7 @@ impl ItemPart for Probe {
         let answer = self.answer.load(Ordering::Relaxed);
         if answer != 0 && self.discard.load(Ordering::Relaxed) {
             let entity = host.entity(event.entity as u32).unwrap();
-            assert!(entity.remove(host, mod_api::NativeRemovalReason::Discarded));
+            assert!(entity.remove(host, mod_api::RemovalReason::Discarded));
         }
         match answer {
             0 => None,
@@ -94,6 +94,13 @@ fn target(id: i32) -> Option<InteractTarget> {
 #[test]
 #[ignore = "private prepared resources; process-wide mods, run this test alone"]
 fn actual_item_interact_mob_fallback_priority_and_filters() {
+    crate::game::in_own_process(
+        "game::item_interact_mob_tests::actual_item_interact_mob_fallback_priority_and_filters",
+        actual_item_interact_mob_fallback_priority_and_filters_isolated,
+    );
+}
+
+fn actual_item_interact_mob_fallback_priority_and_filters_isolated() {
     let root = PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
     let probe = Probe::default();
     let mods: mod_api::Mods = vec![mod_api::ModEntry::new("item", Box::new(probe.clone()))].into();
@@ -130,7 +137,7 @@ fn actual_item_interact_mob_fallback_priority_and_filters() {
         )
         .unwrap();
         game.native_lifecycle
-            .begin_open(mod_api::NativeAuthority::IntegratedServer);
+            .begin_open(mod_api::Authority::IntegratedServer);
         crate::game::native_entity_refs::tests::resolve_parts(&game).unwrap();
         game.world = World::new(game.res.facts().air, 1);
         game.world

@@ -105,7 +105,7 @@ struct Candidate {
 /// on or the rider it carries.
 fn candidates(m: &Mob, w: &MobWorld) -> Vec<Candidate> {
     let mut out = Vec::new();
-    if let Some(p) = w.player.as_ref().filter(|p| p.alive && !p.spectator) {
+    if let Some(p) = w.selected_player().filter(|p| p.alive && !p.spectator) {
         out.push(Candidate {
             who: Who::Player,
             bounds: p.bounds,
@@ -273,11 +273,11 @@ fn stab_attack(
     let mut affected = deals_knockback;
     if deals_damage {
         match target {
-            Who::Player => events.push(MobEvent::DamagePlayer {
+            Who::Player => events.push(w.route_player_event(MobEvent::DamagePlayer {
                 amount: damage,
                 from,
                 kind: "minecraft:spear",
-            }),
+            })),
             Who::Mob(id) => events.push(MobEvent::AttackMob {
                 target: id,
                 amount: damage,
@@ -288,21 +288,21 @@ fn stab_attack(
         // `EnchantmentHelper.doPostAttackEffects`: Fire Aspect.
         let burn = gear::fire_aspect(m);
         if burn > 0 {
-            events.push(MobEvent::Ignite {
+            events.push(w.route_player_event(MobEvent::Ignite {
                 target,
                 seconds: burn,
-            });
+            }));
         }
     }
     if deals_knockback {
-        cause_extra_knockback(m, target, 0.4_f32, source, events);
+        cause_extra_knockback(m, target, 0.4_f32, source, w, events);
         // `LivingEntity.getKnockback`: the Knockback enchantment, halved.
         let power = gear::knockback(m) as f32 / 2.0;
-        cause_extra_knockback(m, target, power, source, events);
+        cause_extra_knockback(m, target, power, source, w, events);
     }
     if dismounts && w.target_info(target).is_some_and(|t| t.passenger) {
         affected = true;
-        events.push(MobEvent::StabDismount { target });
+        events.push(w.route_player_event(MobEvent::StabDismount { target }));
     }
     affected
 }
@@ -314,19 +314,20 @@ fn cause_extra_knockback(
     target: Who,
     power: f32,
     source: Damage,
+    w: &MobWorld,
     events: &mut Vec<MobEvent>,
 ) {
     if power <= 0.0 {
         return;
     }
     let to_rad = std::f32::consts::PI / 180.0;
-    events.push(MobEvent::Knockback {
+    events.push(w.route_player_event(MobEvent::Knockback {
         target,
         power: f64::from(power),
         x: f64::from((m.yaw * to_rad).msin()),
         z: f64::from(-(m.yaw * to_rad).mcos()),
         source,
-    });
+    }));
     m.velocity = Vec3::new(m.velocity.x * 0.6, m.velocity.y, m.velocity.z * 0.6);
 }
 

@@ -530,9 +530,9 @@ impl Goal for CrossbowAttack {
                 .is_some_and(|t| t.alive && !(t.is_player && t.creative));
         valid && holding_crossbow(m)
     }
-    fn stop(&mut self, m: &mut Mob, _: &mut Cx) {
+    fn stop(&mut self, m: &mut Mob, cx: &mut Cx) {
         m.ai.aggressive = false;
-        m.ai.target = None;
+        m.set_ai_target(cx.w, None);
         self.see_time = 0;
         m.extra.flag = false;
         m.extra.using_item = 0;

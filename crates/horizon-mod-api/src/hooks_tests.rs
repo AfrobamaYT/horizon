@@ -106,7 +106,7 @@ fn eager_subscribers_are_shared_across_dispatch_threads() {
         [1]
     );
     let barrier = Barrier::new(2);
-    let load = crate::phase::TestReader::default();
+    let load = crate::world::phase::TestReader::default();
     let context = crate::OwningLoad::new(crate::DataLoadOrigin::ServerDataLoad, &load);
     let context = &context;
     std::thread::scope(|scope| {
@@ -579,7 +579,7 @@ fn sea_level_takes_a_host(host: &dyn Host, level: LevelRef) -> Option<i32> {
 /// Compile-only: a client mod reads column heights of the world its window shows.
 #[allow(dead_code)]
 fn client_heights_take_a_client_host(host: &dyn ClientHost) -> Result<Vec<Option<i32>>, String> {
-    host.client_surface_heights(&[(0, 0), (16, -16)], NativeHeightmap::MotionBlocking)
+    host.client_surface_heights(&[(0, 0), (16, -16)], Heightmap::MotionBlocking)
 }
 
 /// Compile-only: a client mod moves the view onto an entity and back through the `&mut dyn ClientHost`
@@ -657,7 +657,7 @@ fn level_queries_take_their_hosts(
 fn entity_queries_take_a_shared_host(read: &dyn Host, entity: EntityRef) {
     let _: Option<[f64; 3]> = entity.up_vector(read);
     let _: Option<[i32; 3]> = entity.on_block(read);
-    let _: Option<NativeClipHit> = entity.pick(read, 4.5);
+    let _: Option<ClipHit> = entity.pick(read, 4.5);
     let _: Option<bool> = entity.is_multipart(read);
     let _: Option<Vec<EntityRef>> = entity.parts(read);
 }
@@ -700,7 +700,7 @@ fn player_rules_take_their_hosts(
     stack: &ItemStack,
     config: PlayerRespawnConfig,
 ) {
-    let _: Option<bool> = player.may_use_item_at(read, [0, 64, 0], NativeBlockFace::Up, stack);
+    let _: Option<bool> = player.may_use_item_at(read, [0, 64, 0], BlockFace::Up, stack);
     let _: Option<bool> = player.can_harm(read, other);
     let _: Option<Option<PlayerRespawnConfig>> = player.respawn_config(read);
     let _: Option<bool> = player.text_filtering(read);
@@ -709,6 +709,27 @@ fn player_rules_take_their_hosts(
     let _: Option<u32> = player.sleep_timer(read);
     let _: bool = player.set_respawn_config(server, Some(config));
     let _: bool = player.set_sleep_timer(server, 0);
+}
+
+#[test]
+fn the_special_multiplier_rises_between_effective_two_and_four() {
+    let at = |effective| Difficulty::new(3, effective).special_multiplier();
+    assert_eq!(at(1.5), 0.0);
+    assert_eq!(at(3.0), 0.5);
+    assert_eq!(at(4.5), 1.0);
+}
+
+/// Compile-only: the border, weather and difficulty calls take their hosts.
+#[allow(dead_code)]
+fn level_world_controls_take_a_server_host(server: &mut dyn ServerHost, level: LevelRef) {
+    let _ = level.local_difficulty(server, [0, 64, 0]);
+    let _ = level.set_world_border_center(server, [0.0, 0.0]);
+    let _ = level.set_world_border_size(server, 100.0, 20);
+    let _ = level.set_world_border_damage(server, 0.2, 5.0);
+    let _ = level.set_world_border_warning(server, 5, 300);
+    let _ = level.set_weather(server, 0, 6000, true, false);
+    let _ = level.set_weather_levels(server, 1.0, 0.0);
+    let _ = server.set_tick_rate(40.0);
 }
 
 /// Compile-only: mob spawning and the spawn policy as a mod calls them, the reads on any host
@@ -728,6 +749,6 @@ fn spawn_policy_writes_take_a_server_host(
         server,
         "minecraft:zombie",
         [0.5, 64.0, 0.5],
-        NativeSpawnReason::Command,
+        SpawnReason::Command,
     );
 }

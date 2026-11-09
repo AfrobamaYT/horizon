@@ -55,7 +55,7 @@ horizon-bots: load-test bots for a Minecraft Java Edition 26.3 server (offline m
 
   --server HOST:PORT     default 127.0.0.1:25565
   --bots N               default 10
-  --behaviour B          idle, walk, explore, fight or mixed (60 % walk, 20 % explore, 20 % idle); default mixed.
+  --behaviour B          idle, hotbar, walk, explore, fight or mixed (60 % walk, 20 % explore, 20 % idle); default mixed.
                          fight needs gamemode=survival, force-gamemode=true and allow-flight=true.
                          stand: stays on the ground where the server puts it (/tp), for a survival test.
                          One abusive client, to test a server's limits (run it beside a normal crowd):
@@ -115,6 +115,7 @@ horizon-bots: load-test bots for a Minecraft Java Edition 26.3 server (offline m
 enum Behaviour {
     Idle,
     Stand,
+    Hotbar,
     Walk,
     Explore,
     Fight,
@@ -135,6 +136,7 @@ impl Behaviour {
         match self {
             Self::Idle => "idle",
             Self::Stand => "stand",
+            Self::Hotbar => "hotbar",
             Self::Walk => "walk",
             Self::Explore => "explore",
             Self::Fight => "fight",
@@ -340,13 +342,14 @@ fn options() -> Result<Options, String> {
             _ => return Err(format!("unknown option {arg}; --help lists them")),
         }
     }
-    const BEHAVIOURS: [&str; 16] = [
+    const BEHAVIOURS: [&str; 17] = [
         "idle",
         "walk",
         "explore",
         "fight",
         "mixed",
         "stand",
+        "hotbar",
         "flood-move",
         "flood-acks",
         "flood-packets",
@@ -371,6 +374,7 @@ fn options() -> Result<Options, String> {
 #[derive(Default)]
 struct Bot {
     explore_complete: AtomicBool,
+    server_time: Mutex<Option<i64>>,
     online: AtomicBool,
     chunks: AtomicU64,
     /// Chunks received while the bot already held them (no ForgetLevelChunk in between).
@@ -989,6 +993,10 @@ fn read(
         }
         let mut r = Reader::new(&body);
         let sent = match id {
+            cb::SET_TIME => {
+                *lock(&bot.server_time) = r.i64().ok();
+                Ok(())
+            }
             cb::KEEP_ALIVE => match r.i64() {
                 Ok(v) => send(raw(sb::KEEP_ALIVE, |w| w.i64(v))),
                 Err(_) => Ok(()),
@@ -1216,6 +1224,7 @@ fn run_bot(
     let heading = random.unit() * std::f64::consts::TAU;
     let mut explored = 0.0_f64;
     let mut target = pos;
+    let (mut hotbar_deadline, mut hotbar_step) = (None, 0usize);
     let mut next = Instant::now();
     let (joined, mut tick) = (Instant::now(), 0u64);
     loop {
@@ -1228,7 +1237,22 @@ fn run_bot(
         }
         let here = ((pos[0].floor() as i32) >> 4, (pos[2].floor() as i32) >> 4);
         // The abusive client doesn't wait for its chunk, as a real client must.
-        if behaviour == Behaviour::Stand {
+        if behaviour == Behaviour::Hotbar {
+            // Server time packets pace requests even during slow startup ticks.
+            if let Some(time) = *lock(&bot.server_time) {
+                let deadline = hotbar_deadline.get_or_insert(time + 40);
+                if time >= *deadline {
+                    *deadline = time + 20;
+                    if hotbar_step == 3 {
+                        bot.explore_complete.store(true, Ordering::Relaxed);
+                        break;
+                    }
+                    let slot = [3, 7, 3][hotbar_step];
+                    send(play::Serverbound::SetCarriedItem(play::SetCarriedItem { slot }).encode());
+                    hotbar_step += 1;
+                }
+            }
+        } else if behaviour == Behaviour::Stand {
             // Where the server put it, on the ground.
         } else if behaviour == Behaviour::FloodMove {
             // The last of these moves goes out below, with the tick's end.
@@ -1266,7 +1290,7 @@ fn run_bot(
             pos[1] = (pos[1] + 0.5).min(cruise);
         } else {
             match behaviour {
-                Behaviour::Idle | Behaviour::Stand => {}
+                Behaviour::Idle | Behaviour::Stand | Behaviour::Hotbar => {}
                 Behaviour::Walk => walk_step(&mut pos, &mut target, spawn, cruise, &mut random),
                 Behaviour::Fight => {
                     let near = lock(&bot.entities).nearest(pos, o.pvp, &bots);
@@ -1427,6 +1451,7 @@ fn behaviour_of(mode: &str, index: usize) -> Behaviour {
     match mode {
         "idle" => Behaviour::Idle,
         "stand" => Behaviour::Stand,
+        "hotbar" => Behaviour::Hotbar,
         "walk" => Behaviour::Walk,
         "explore" => Behaviour::Explore,
         "fight" => Behaviour::Fight,

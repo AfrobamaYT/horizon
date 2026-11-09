@@ -24,7 +24,7 @@ use horizon_core::{
     random::{LegacyRandom, RandomSource, WorldgenRandom, XoroshiroRandom},
 };
 use horizon_world::dimension_type::DimensionFacts;
-use mod_api::{NativeSpawnCheck, SpawnFlags, SpawnLimits};
+use mod_api::{SpawnCheck, SpawnFlags, SpawnLimits};
 use std::collections::HashMap;
 use {
     horizon_core::nbt::{Compound, Tag},
@@ -619,7 +619,7 @@ impl SpawnLevel for GameLevel<'_, '_> {
         if !mod_api::__private::listened(mod_api::HookId::MobSpawnPlacementCheck) {
             return vanilla;
         }
-        let mut result = NativeSpawnCheck::Default;
+        let mut result = SpawnCheck::Default;
         self.game.native_mob_spawn_placement_check(
             mod_api::__private::MobSpawnPlacementCheckCall {
                 dimension: self.game.dim.id(),
@@ -633,8 +633,8 @@ impl SpawnLevel for GameLevel<'_, '_> {
             },
         );
         match result {
-            NativeSpawnCheck::Succeed => true,
-            NativeSpawnCheck::Fail => false,
+            SpawnCheck::Succeed => true,
+            SpawnCheck::Fail => false,
             _ => vanilla,
         }
     }
@@ -716,8 +716,8 @@ impl NaturalLevel for GameLevel<'_, '_> {
         reason: Reason,
         at: [f64; 3],
         pending: spawn_selection::Pending,
-    ) -> NativeSpawnCheck {
-        let mut result = NativeSpawnCheck::Default;
+    ) -> SpawnCheck {
+        let mut result = SpawnCheck::Default;
         if !mod_api::__private::listened(mod_api::HookId::MobSpawnPositionCheck) {
             return result;
         }
@@ -1065,24 +1065,27 @@ impl<'a> Game<'a> {
         self.level_players_iter().collect()
     }
     /// `level_players` one at a time, without collecting them.
-    fn level_players_iter(&self) -> impl Iterator<Item = LevelPlayer> + '_ {
-        let local = self.player_view().map(|p| LevelPlayer {
+    pub(super) fn level_players_iter(&self) -> impl Iterator<Item = LevelPlayer> + '_ {
+        self.local_level_player()
+            .into_iter()
+            .chain(self.level_guests().map(|g| LevelPlayer {
+                uuid: g.uuid,
+                position: Vec3::new(g.position[0], g.position[1], g.position[2]),
+                bounds: super::lan_mobs::guest_bounds(g),
+                alive: !g.dead,
+                creative: g.creative(),
+                spectator: g.spectator(),
+            }))
+    }
+    fn local_level_player(&self) -> Option<LevelPlayer> {
+        self.player_view().map(|p| LevelPlayer {
             uuid: horizon_client::lan::playerdata::ints_uuid(p.uuid),
             position: p.position,
             bounds: p.bounds,
             alive: p.alive,
             creative: p.creative,
             spectator: p.spectator,
-        });
-        let guests = self.level_guests().map(|g| LevelPlayer {
-            uuid: g.uuid,
-            position: Vec3::new(g.position[0], g.position[1], g.position[2]),
-            bounds: super::lan_mobs::guest_bounds(g),
-            alive: !g.dead,
-            creative: g.creative(),
-            spectator: g.spectator(),
-        });
-        local.into_iter().chain(guests)
+        })
     }
     /// The UUIDs of the players in level `dimension`, for a query that only
     /// names them: no `PlayerView`, so nothing is allocated per player. For the
@@ -1120,8 +1123,19 @@ impl<'a> Game<'a> {
     /// `Level.hasNearbyAlivePlayer` before a level is built for the spawn
     /// code: what a spawner asks first, every tick.
     pub(super) fn alive_player_near(&self, x: f64, y: f64, z: f64, range: f64) -> bool {
-        self.level_players_iter()
-            .any(|p| p.alive_near(x, y, z, range))
+        if self
+            .local_level_player()
+            .is_some_and(|p| p.alive_near(x, y, z, range))
+        {
+            return true;
+        }
+        self.level_guests().any(|g| {
+            let [px, py, pz] = g.position;
+            !g.dead
+                && !g.spectator()
+                && (range < 0.0
+                    || (px - x).powi(2) + (py - y).powi(2) + (pz - z).powi(2) < range * range)
+        })
     }
     /// `ChunkMap.collectSpawningChunks`: the natural spawn chunk tracker's
     /// chunks (within 8 chunks of a player, `getSpawnCandidateChunks`) that
@@ -1181,7 +1195,20 @@ impl<'a> Game<'a> {
             return;
         }
         let mut laps = horizon_client::spans::laps();
-        let players = self.level_players();
+        let mut players = self.level_players();
+        // Fake players (mods' bots) do not anchor natural spawning.
+        if let Some(h) = self.lan.as_ref() {
+            let fake: Vec<u128> = h
+                .hub
+                .guests
+                .iter()
+                .filter(|g| g.is_fake())
+                .map(|g| g.uuid)
+                .collect();
+            if !fake.is_empty() {
+                players.retain(|p| !fake.contains(&p.uuid));
+            }
+        }
         if players.is_empty() {
             return;
         }
@@ -1354,6 +1381,98 @@ impl<'a> Game<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `Level.hasNearbyAlivePlayer` as spawners ask it, against the same
+    /// test on every player's full record (`level_players`).
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn alive_player_near_tests_guests_where_they_stand() {
+        use horizon_client::lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig};
+        use horizon_protocol::packets::configuration::ClientInformation;
+        use std::sync::{Arc, atomic::AtomicI32, mpsc};
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
+        let net = NetConfig {
+            announce: false,
+            ..NetConfig::lan(0, "spawner-players-test".into(), 8)
+        };
+        game.lan_host(
+            super::super::lan::LanSettings {
+                port: 0,
+                guest_commands: true,
+                force_game_mode: false,
+            },
+            net,
+            HubConfig {
+                default_game_mode: 0,
+                guest_commands: true,
+                force_game_mode: false,
+                hardcore: false,
+                view_distance: 2,
+                simulation_distance: 2,
+                dimension: Dim::Overworld.id().into(),
+                allow_flight: false,
+                seed: 0,
+                max_players: 8,
+                integrated: false,
+                levels: Default::default(),
+            },
+        )
+        .unwrap();
+        // (x, dead, spectator): alive at 20, dead at 5, a spectator at 2.
+        for (conn, (x, dead, spectator)) in
+            [(20.5, false, false), (5.5, true, false), (2.5, false, true)]
+                .into_iter()
+                .enumerate()
+        {
+            let conn = conn as u32 + 2;
+            let (tx, _rx) = mpsc::channel();
+            let mut guest = Guest::new(
+                Joined {
+                    conn,
+                    uuid: u128::from(conn),
+                    name: format!("Near{conn}"),
+                    properties: Vec::new(),
+                    info: ClientInformation::new(2),
+                    brand: "test".into(),
+                    sender: PlayerSender::new(tx, Arc::default()),
+                    latency: Arc::new(AtomicI32::new(0)),
+                    address: "127.0.0.1:25565".parse().unwrap(),
+                    expected: false,
+                },
+                conn as i32,
+                [x, 64.0, 0.5],
+                1,
+            );
+            guest.placed = true;
+            guest.loaded = true;
+            guest.dead = dead;
+            if spectator {
+                guest.game_mode = 3;
+            }
+            game.lan.as_mut().unwrap().hub.guests.push(guest);
+        }
+        let full = |game: &Game, x: f64, range: f64| {
+            game.level_players()
+                .iter()
+                .any(|p| p.alive_near(x, 64.0, 0.5, range))
+        };
+        for (x, range, near) in [
+            (0.5, 16.0, false),   // only the dead and the spectator in range
+            (5.5, 16.0, true),    // the live one 15 away
+            (4.4, 16.0, false),   // 16.1 away
+            (4.5, 16.0, false),   // 16 away: not below the range
+            (-500.0, -1.0, true), // any distance
+            (36.4, 16.0, true),
+        ] {
+            assert_eq!(
+                game.alive_player_near(x, 64.0, 0.5, range),
+                near,
+                "{x} {range}"
+            );
+            assert_eq!(full(&game, x, range), near, "{x} {range}");
+        }
+    }
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
@@ -1648,7 +1767,7 @@ mod tests {
     }
 
     /// Answers both spawn checks with one fixed result.
-    struct ChecksMod(NativeSpawnCheck);
+    struct ChecksMod(SpawnCheck);
     #[mod_api::__subscriptions]
     impl mod_api::Hooks for ChecksMod {
         fn mob_spawn_placement_check(
@@ -1704,7 +1823,7 @@ mod tests {
                 );
                 (ok, random.next_int())
             };
-            let run = |answer: Option<NativeSpawnCheck>| {
+            let run = |answer: Option<SpawnCheck>| {
                 let go = || {
                     (
                         placement(&mut LegacyRandom::new(11)),
@@ -1729,8 +1848,8 @@ mod tests {
             let none = run(None);
             assert!(none.0.0, "the sulfur cube's predicate has no conditions");
             assert_eq!(none.1, (false, second), "vanilla's closure drew once");
-            assert_eq!(run(Some(NativeSpawnCheck::Default)), none);
-            let succeed = run(Some(NativeSpawnCheck::Succeed));
+            assert_eq!(run(Some(SpawnCheck::Default)), none);
+            let succeed = run(Some(SpawnCheck::Succeed));
             assert_eq!(
                 succeed.0,
                 (true, none.0.1),
@@ -1741,7 +1860,7 @@ mod tests {
                 (true, first),
                 "Succeed skips the checks and their draws"
             );
-            let fail = run(Some(NativeSpawnCheck::Fail));
+            let fail = run(Some(SpawnCheck::Fail));
             assert_eq!(fail.0, (false, none.0.1));
             assert_eq!(fail.1, (false, first));
         });
@@ -1767,7 +1886,7 @@ mod tests {
     /// Records both spawn checks and answers the position check with `answer`, reading the lent
     /// mob and changing nothing else.
     struct ContextMod {
-        answer: NativeSpawnCheck,
+        answer: SpawnCheck,
         log: Log,
     }
     #[mod_api::__subscriptions]
@@ -1846,7 +1965,7 @@ mod tests {
     /// Runs `go` with no mod (`None`), or with a position-check listener answering `answer`
     /// beside `extra` mods, and what that listener heard.
     fn with_checks<R>(
-        answer: Option<NativeSpawnCheck>,
+        answer: Option<SpawnCheck>,
         extra: impl Fn() -> Vec<mod_api::ModEntry>,
         go: impl FnOnce() -> R,
     ) -> (R, Vec<Heard>) {
@@ -1958,7 +2077,7 @@ mod tests {
                 "one provisional id per spawned mob"
             );
             let (listened, heard) =
-                with_checks(Some(NativeSpawnCheck::Default), spawns, || attempt(game));
+                with_checks(Some(SpawnCheck::Default), spawns, || attempt(game));
             assert_eq!(listened, unlistened, "same draws, ids and mobs");
             let positions: Vec<_> = heard.iter().filter(|h| h.hook == "position").collect();
             assert!(positions.len() >= unlistened.0.len());
@@ -1978,8 +2097,7 @@ mod tests {
                 );
                 assert!(positions.iter().any(|h| h.mob.as_ref() == Some(&reads)));
             }
-            let (refused, heard) =
-                with_checks(Some(NativeSpawnCheck::Fail), spawns, || attempt(game));
+            let (refused, heard) = with_checks(Some(SpawnCheck::Fail), spawns, || attempt(game));
             assert!(refused.0.is_empty(), "a failed check adds nothing");
             assert_eq!(refused.1, 0, "and gives each provisional id back");
             assert!(heard.iter().any(|h| h.hook == "position"));
@@ -2035,9 +2153,8 @@ mod tests {
             };
             let (unlistened, _) = with_checks(None, Vec::new, || tick(game, None));
             assert!(!unlistened.0.is_empty(), "the spawner spawns");
-            let (listened, heard) = with_checks(Some(NativeSpawnCheck::Default), Vec::new, || {
-                tick(game, None)
-            });
+            let (listened, heard) =
+                with_checks(Some(SpawnCheck::Default), Vec::new, || tick(game, None));
             assert_eq!(listened, unlistened, "same draws, ids and mobs");
             assert!(heard.iter().any(|h| h.hook == "placement"));
             for h in &heard {
@@ -2057,7 +2174,7 @@ mod tests {
                 );
             }
             let (refused, heard) =
-                with_checks(Some(NativeSpawnCheck::Fail), Vec::new, || tick(game, None));
+                with_checks(Some(SpawnCheck::Fail), Vec::new, || tick(game, None));
             assert!(heard.iter().any(|h| h.hook == "position"));
             assert_eq!(
                 (refused.0.len(), refused.1, refused.2),
@@ -2066,9 +2183,8 @@ mod tests {
             );
             // Entity data: the mob is loaded after the tick, so the lend is its kind and position.
             let health = || Some(("Health", Tag::Float(5.0f32.to_bits())));
-            let (_, heard) = with_checks(Some(NativeSpawnCheck::Default), Vec::new, || {
-                tick(game, health())
-            });
+            let (_, heard) =
+                with_checks(Some(SpawnCheck::Default), Vec::new, || tick(game, health()));
             let lent: Vec<_> = heard.iter().filter_map(|h| h.mob.clone()).collect();
             assert!(!lent.is_empty());
             for (kind, position, head) in lent {
@@ -2124,8 +2240,7 @@ mod tests {
             let (unlistened, _) = with_checks(None, Vec::new, || tick(game));
             assert_eq!(unlistened.0.len(), 1, "the trial spawner spawns one mob");
             assert!(unlistened.0[0].4, "a trial spawner's mob is persistent");
-            let (listened, heard) =
-                with_checks(Some(NativeSpawnCheck::Default), Vec::new, || tick(game));
+            let (listened, heard) = with_checks(Some(SpawnCheck::Default), Vec::new, || tick(game));
             assert_eq!(listened, unlistened, "same draws, ids and mob");
             let lent = (
                 Ok(mod_api::Identifier::parse(SULFUR_CUBE).unwrap()),
@@ -2140,8 +2255,7 @@ mod tests {
                     (SULFUR_CUBE, level, Some(trial))
                 );
             }
-            let (refused, heard) =
-                with_checks(Some(NativeSpawnCheck::Fail), Vec::new, || tick(game));
+            let (refused, heard) = with_checks(Some(SpawnCheck::Fail), Vec::new, || tick(game));
             assert!(heard.iter().any(|h| h.hook == "position"));
             assert_eq!(
                 (refused.0.len(), refused.1, refused.2),
@@ -2275,9 +2389,7 @@ mod tests {
     }
 
     /// Records the kind and reason of every `finalize_spawn` event.
-    struct RecordFinalize(
-        std::sync::Arc<std::sync::Mutex<Vec<(String, mod_api::NativeSpawnReason)>>>,
-    );
+    struct RecordFinalize(std::sync::Arc<std::sync::Mutex<Vec<(String, mod_api::SpawnReason)>>>);
     #[mod_api::__subscriptions]
     impl mod_api::Hooks for RecordFinalize {
         fn finalize_spawn(
@@ -2331,7 +2443,7 @@ mod tests {
 
     /// Answers every `mob_despawn` event with the value in its cell and counts them.
     struct Despawns(
-        std::sync::Arc<std::sync::Mutex<mod_api::NativeDespawn>>,
+        std::sync::Arc<std::sync::Mutex<mod_api::Despawn>>,
         std::sync::Arc<std::sync::atomic::AtomicUsize>,
     );
     #[mod_api::__subscriptions]
@@ -2352,7 +2464,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated process for native mods"]
     fn mob_despawn_answers_override_vanilla_and_default_passes_through() {
         use super::super::native_entity_refs::tests::with_game;
-        use mod_api::NativeDespawn::{Allow, Default as Vanilla, Deny};
+        use mod_api::Despawn::{Allow, Default as Vanilla, Deny};
         use std::sync::atomic::Ordering::Relaxed;
         let answer = std::sync::Arc::new(std::sync::Mutex::new(Vanilla));
         let asked = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -2449,7 +2561,7 @@ mod tests {
             player.x += 40.0;
             world.nearest_player = Some(player);
             horizon_client::mobs::ai::despawn_check(&mut mob, &world);
-            assert_eq!(mob.despawn, mod_api::NativeDespawn::Default);
+            assert_eq!(mob.despawn, mod_api::Despawn::Default);
             assert_ne!(
                 mob.random.next_int_bound(1 << 30),
                 untouched.next_int_bound(1 << 30),
@@ -2457,8 +2569,6 @@ mod tests {
             );
         });
     }
-
-    use mod_api::NativeSpawnReason;
 
     /// Answers the group size limit of a type, reading the mob it is lent.
     struct ZombieClusters;
@@ -2468,12 +2578,12 @@ mod tests {
             &self,
             host: &dyn mod_api::Host,
             mob: mod_api::UnspawnedMobRef,
-            reason: NativeSpawnReason,
-            _: Option<mod_api::NativeSpawner>,
+            reason: mod_api::SpawnReason,
+            _: Option<mod_api::SpawnSource>,
             vanilla: u32,
         ) -> Option<u32> {
             assert_eq!(mob.kind(host).unwrap().to_string(), "minecraft:zombie");
-            Some(if reason == NativeSpawnReason::Natural {
+            Some(if reason == mod_api::SpawnReason::Natural {
                 vanilla * 2
             } else {
                 1
@@ -2488,8 +2598,8 @@ mod tests {
             &self,
             _: &dyn mod_api::Host,
             _: mod_api::UnspawnedMobRef,
-            _: NativeSpawnReason,
-            _: Option<mod_api::NativeSpawner>,
+            _: mod_api::SpawnReason,
+            _: Option<mod_api::SpawnSource>,
             _: u32,
         ) -> Option<u32> {
             Some(9)
@@ -2537,10 +2647,19 @@ mod tests {
                 Mob::new(1, kind, Vec3::ZERO, 0.0)
             };
             let ask = |id: &str, reason| game.spawn_cluster_size(&mut mob(id), reason, None, 4);
-            assert_eq!(ask("minecraft:zombie", NativeSpawnReason::Natural), Some(8));
-            assert_eq!(ask("minecraft:zombie", NativeSpawnReason::Spawner), Some(1));
-            assert_eq!(ask("minecraft:skeleton", NativeSpawnReason::Natural), None);
-            assert_eq!(ask("minecraft:cow", NativeSpawnReason::Natural), None);
+            assert_eq!(
+                ask("minecraft:zombie", mod_api::SpawnReason::Natural),
+                Some(8)
+            );
+            assert_eq!(
+                ask("minecraft:zombie", mod_api::SpawnReason::Spawner),
+                Some(1)
+            );
+            assert_eq!(
+                ask("minecraft:skeleton", mod_api::SpawnReason::Natural),
+                None
+            );
+            assert_eq!(ask("minecraft:cow", mod_api::SpawnReason::Natural), None);
         });
     }
 }

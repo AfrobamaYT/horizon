@@ -254,6 +254,10 @@ pub trait ItemsBackend {
 #[doc(hidden)]
 #[horizon_mod_api_macros::host_area]
 pub trait ItemsBackendMut {
+    /// Side: server. Set a persisted container limit in 1..=99 under the transaction.
+    #[access(WorldOnly)]
+    fn container_set_stack_limit(&mut self, at: BlockSide, limit: u32, tx: &Transaction) -> bool;
+
     /// Side: server. Roll an enchantment result with the named level's random source.
     #[access(WorldOnly)]
     fn item_resource_enchant_randomly(

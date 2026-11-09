@@ -1,13 +1,14 @@
 //! The players fake: who is online, their inventories, and what the game told them.
 use super::FAKE_EPOCH;
 use crate::{
-    EntityRef, Hand, ItemPlace, ItemStack, LevelRef, NativeWorldEpoch, PlayerRef, Players, Text,
+    EntityRef, Hand, ItemPlace, ItemStack, LevelRef, PlayerRef, Players, Text, WorldEpoch,
 };
 use std::collections::BTreeMap;
 
 /// The off hand's inventory slot (`ItemPlace::PlayerSlot`).
 const OFF_HAND: i32 = -106;
 
+// no wire: in-process testing harness state, not a mod boundary payload.
 /// The players online in a test world, by UUID, and the one whose action is running.
 #[derive(Clone, Debug, Default)]
 #[non_exhaustive]
@@ -42,7 +43,7 @@ impl FakePlayers {
     pub(super) fn handle(&self, uuid: u128) -> Option<PlayerRef> {
         let player = self.players.get(&uuid)?;
         Some(PlayerRef {
-            entity: EntityRef::new(NativeWorldEpoch::new(FAKE_EPOCH), player.entity),
+            entity: EntityRef::new(WorldEpoch::new(FAKE_EPOCH), player.entity),
             uuid,
         })
     }
@@ -76,6 +77,7 @@ impl FakePlayers {
     }
 }
 
+// no wire: in-process testing harness state, not a mod boundary payload.
 /// An online player: their entity and level, their name, their inventory by
 /// `ItemPlace::PlayerSlot` number, and what the game handed or showed them.
 #[derive(Clone, Debug)]

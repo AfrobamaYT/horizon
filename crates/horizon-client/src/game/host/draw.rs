@@ -39,7 +39,7 @@ impl DrawContext for GameDrawContext<'_, '_> {
             .native_text(&mut *self.surface, text, at, argb, shadow)
     }
     fn item_stack(&mut self, stack: &ItemStack, at: [f32; 2], size: f32) -> bool {
-        let Ok(stack) = stack.try_into_engine(self.game.items()) else {
+        let Ok(stack) = crate::game::api_values::stack_value(stack) else {
             return false;
         };
         self.game
@@ -69,7 +69,7 @@ impl DrawContext for GameDrawContext<'_, '_> {
     fn fluid(&mut self, fluid: &str, at: [f32; 2], size: f32) {
         self.game.native_fluid(&mut *self.surface, fluid, at, size)
     }
-    fn draw_scene(&mut self, rect: [f32; 4], blocks: &[NativeSceneBlock], view: NativeSceneView) {
+    fn draw_scene(&mut self, rect: [f32; 4], blocks: &[mod_api::SceneBlock], view: SceneView) {
         let Ok(blocks) =
             crate::game::api_values::aggregates::SourceScene(blocks).try_into_engine(&())
         else {
@@ -87,7 +87,7 @@ impl DrawContext for GameDrawContext<'_, '_> {
             .native_tiled_sprite(&mut *self.surface, sprite, rect, size, argb)
     }
     fn gui_draw_item_with(&mut self, stack: &ItemStack, at: [f32; 2], text: Option<&str>) {
-        let Ok(stack) = stack.try_into_engine(self.game.items()) else {
+        let Ok(stack) = crate::game::api_values::stack_value(stack) else {
             return;
         };
         self.game
@@ -171,11 +171,11 @@ impl BlockEntityDrawContext for GameBlockEntityDrawContext<'_, '_> {
     fn item(
         &mut self,
         stack: &ItemStack,
-        display: NativeItemDisplayContext,
+        display: ItemDisplayContext,
         owner_yaw: Option<f32>,
         seed: i32,
     ) -> bool {
-        let Ok(stack) = stack.try_into_engine(self.game.items()) else {
+        let Ok(stack) = crate::game::api_values::stack_value(stack) else {
             return false;
         };
         let Ok(display) = display.try_into_engine(self.game.items()) else {

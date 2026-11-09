@@ -338,9 +338,9 @@ impl Game<'_> {
                     self.command_damage_mob(id, amount, damage)
                 }
             }
-            Target::Item(id) => self.command_damage_item(id, amount, ty, cause.or(by)),
+            Target::Item(id) => self.command_damage_item(id, amount, ty, by, cause.or(by), from),
             Target::Boat(_) | Target::Cart(_) => {
-                self.command_damage_vehicle(target, amount, ty, cause.or(by))
+                self.command_damage_vehicle(target, amount, ty, by, cause.or(by), from)
             }
             Target::Dragon(id) => self.command_damage_dragon(
                 id,
@@ -357,7 +357,9 @@ impl Game<'_> {
                 id,
                 ty,
                 Self::damage_kind(&self.motion.health.damage, ty),
+                by,
                 cause.or(by),
+                from,
             ),
             Target::Stand(id) => self.command_damage_stand(id, ty, cause.or(by)),
             _ => false,
@@ -370,7 +372,9 @@ impl Game<'_> {
         target: Target,
         amount: f32,
         damage_type: &str,
+        direct: Option<Target>,
         causing: Option<Target>,
+        position: Option<[f64; 3]>,
     ) -> bool {
         let registry = &self.motion.health.damage;
         let Some(kind) = registry.id(damage_type) else {
@@ -381,17 +385,45 @@ impl Game<'_> {
             Target::Boat(id) | Target::Cart(id) => id,
             _ => return false,
         };
-        let invulnerable = self
-            .persist
-            .raw
-            .get(&id)
-            .is_some_and(|tag| horizon_client::entity_nbt::flag(tag, "Invulnerable"));
-        if invulnerable && !creative && !registry.in_tag(kind, "minecraft:bypasses_invulnerability")
-        {
-            return false;
-        }
+        let vanilla = self.saved_refuses_damage(id, damage_type, creative);
         let ignites = registry.in_tag(kind, "minecraft:is_fire")
             || registry.in_tag(kind, "minecraft:is_explosion");
+        let entity_kind = match target {
+            Target::Boat(_) => self
+                .boats
+                .iter()
+                .find(|b| b.id == id)
+                .map(|b| b.entity_type()),
+            Target::Cart(_) => self
+                .carts
+                .iter()
+                .find(|c| c.id == id)
+                .map(|c| c.kind.id().to_owned()),
+            _ => None,
+        };
+        let Some(entity_kind) = entity_kind else {
+            return false;
+        };
+        let entity_id = |target| match target {
+            Some(Target::Player) => self.own_entity_id(),
+            Some(Target::Guest(conn)) => self.command_guest(conn).map_or(0, |g| g.entity_id),
+            Some(target) => {
+                crate::game::native_entities::target_id(target).map_or(0, |id| id as i32)
+            }
+            None => 0,
+        };
+        let source = horizon_client::health::HurtSource {
+            damage_type,
+            causing: entity_id(causing),
+            direct: entity_id(direct),
+            position,
+        };
+        if crate::game::entity::damage_level_of!(self, scoped).invulnerability_check(
+            horizon_client::health::Hurting::Entity(id as i32, &entity_kind, source),
+            vanilla,
+        ) {
+            return false;
+        }
         match target {
             Target::Boat(_) => self
                 .boats
@@ -413,22 +445,45 @@ impl Game<'_> {
         id: u32,
         amount: f32,
         damage_type: &str,
+        direct: Option<Target>,
         causing: Option<Target>,
+        position: Option<[f64; 3]>,
     ) -> bool {
         let Some(index) = self.dropped.iter().position(|item| item.id == id) else {
             return false;
         };
-        let registry = &self.motion.health.damage;
-        let Some(kind) = registry.id(damage_type) else {
+        let Some(kind) = self.motion.health.damage.id(damage_type) else {
             return false;
         };
         let creative = self.creative_source_of(causing);
-        if self.saved_refuses_damage(id, damage_type, creative)
-            || !self
-                .ui
-                .rules
-                .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING)
-                && matches!(causing, Some(Target::Mob(_)))
+        let vanilla = self.saved_refuses_damage(id, damage_type, creative);
+        let entity_id = |target| match target {
+            Some(Target::Player) => self.own_entity_id(),
+            Some(Target::Guest(conn)) => self.command_guest(conn).map_or(0, |g| g.entity_id),
+            Some(target) => {
+                crate::game::native_entities::target_id(target).map_or(0, |id| id as i32)
+            }
+            None => 0,
+        };
+        let causing_id = entity_id(causing);
+        let source = horizon_client::health::HurtSource {
+            damage_type,
+            causing: causing_id,
+            direct: entity_id(direct),
+            position,
+        };
+        if crate::game::entity::damage_level_of!(self, scoped).invulnerability_check(
+            horizon_client::health::Hurting::Entity(id as i32, "minecraft:item", source),
+            vanilla,
+        ) {
+            return false;
+        }
+        let registry = &self.motion.health.damage;
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING)
+            && matches!(causing, Some(Target::Mob(_)))
             || registry.in_tag(kind, "minecraft:is_fall")
                 && self.entity_tag_matches("minecraft:fall_damage_immune", "minecraft:item")
         {
@@ -553,7 +608,7 @@ impl Game<'_> {
     // ---- /rotate and /swing -----------------------------------------------------------
 
     pub(super) fn cmd_rotate(&mut self, ctx: &Context) -> R<i32> {
-        let targets = self.entities(ctx, "target", false)?;
+        let targets = super::without_knots(self.entities(ctx, "target", false)?)?;
         let Some(t) = targets.first().copied() else {
             return Ok(0);
         };
@@ -1829,7 +1884,7 @@ impl Game<'_> {
                 &[&max_y, &self.world.bottom_y()],
             ));
         }
-        let targets = self.entities(ctx, "targets", false)?;
+        let targets = super::without_knots(self.entities(ctx, "targets", false)?)?;
         if targets.is_empty() {
             return Err(err("argument.entity.notfound.entity", &[]));
         }
@@ -2005,6 +2060,7 @@ impl Game<'_> {
             }
             if !skip {
                 self.teleport_to(t, to, None, false);
+                self.teleport_stops(t);
             }
             let closest = points
                 .iter()

@@ -341,6 +341,17 @@ impl Game<'_> {
         };
         Some(climbing::on_climbable(&mut world, &self.motion.climbing).unwrap_or(false))
     }
+    /// The climbing decision for a mob currently lent out of the game's list.
+    pub(super) fn native_mob_is_climbing(&self, mob: &horizon_client::mobs::Mob) -> bool {
+        let mut world = FlagClimbing {
+            world: &self.world,
+            position: BlockPos::containing(mob.position),
+            spectator: false,
+            gliding: mob.extra.fall_flying,
+        };
+        climbing::on_climbable(&mut world, &self.motion.climbing).unwrap_or(false)
+    }
+
     /// Whether the entity is a baby (`LivingEntity.isBaby`): a mob answers
     /// from its age, negative until it grows up. A player, an armor stand
     /// and the dragon are never babies.
@@ -395,7 +406,7 @@ pub(in crate::game) mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use horizon_client::mobs::{Mob, villager};
     use horizon_core::geometry::Vec3;
-    use mod_api::{EntityRef, LivingRef, NativeWorldEpoch};
+    use mod_api::{EntityRef, LivingRef, WorldEpoch};
 
     /// A live cow `id` at `(5.5, 64, 5.5)`, with its handle.
     fn cow(game: &mut Game<'_>, id: u32) -> LivingRef {
@@ -493,7 +504,7 @@ pub(in crate::game) mod tests {
             assert_eq!(game.living_baby(mob), Some(false));
             // A stale handle reads None and writes false.
             let stale = LivingRef::new(EntityRef::new(
-                NativeWorldEpoch::new(mob.entity().epoch().get() + 1),
+                WorldEpoch::new(mob.entity().epoch().get() + 1),
                 12,
             ));
             assert!(game.mob(stale.entity()).is_none());

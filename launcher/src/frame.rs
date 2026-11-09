@@ -390,7 +390,13 @@ impl Launcher {
                         .flex()
                         .items_baseline()
                         .justify_between()
-                        .child(ui::text(14., FontWeight::SEMIBOLD, ink::FULL).child(title))
+                        // The title wraps within the card: a long translation takes a second line.
+                        .child(
+                            ui::text(14., FontWeight::SEMIBOLD, ink::FULL)
+                                .flex_1()
+                                .min_w_0()
+                                .child(title),
+                        )
                         .children(
                             right.map(|r| ui::text(13., FontWeight::NORMAL, ink::NOTE).child(r)),
                         ),
