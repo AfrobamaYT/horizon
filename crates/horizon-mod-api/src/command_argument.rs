@@ -113,5 +113,11 @@ pub trait CommandArgumentType: Send + Sync + 'static {
     ///
     /// Return the values that match, in the order the chat should show them; the game keeps each
     /// suggestion's replacement range and tooltip. An empty list leaves the input as typed.
+    ///
+    /// Native and wasm results share the vanilla packet limits: completion text may contain
+    /// at most 32767 UTF-16 code units; a literal tooltip may occupy at most 65535 bytes in
+    /// Java modified UTF-8 (the NBT string limit). If any result exceeds either limit, the
+    /// engine reports the refusal and discards the callback's results, rather than truncating
+    /// player-visible text. A panicking native callback is also refused.
     fn suggest(&self, prefix: &str) -> Vec<CommandSuggestion>;
 }

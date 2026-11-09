@@ -49,9 +49,9 @@ impl CommandArgumentType for Machine {
     fn parse(&self, input: &str) -> Result<String, CommandArgumentError> {
         match input {
             "press" | "furnace" => Ok(input.to_owned()),
-            _ => Err(CommandArgumentError::new(Text::literal(format!(
-                "unknown machine `{input}`"
-            )))),
+            _ => Err(CommandArgumentError::new(Text::translate(
+                "example.commands.machine.unknown", vec![Text::literal(input)]
+            ))),
         }
     }
 

@@ -12,9 +12,7 @@ pub(crate) struct CommandArgumentInfo {
 
 /// The command argument types every installed mod registered, in registration order.
 pub(crate) fn installed_command_arguments() -> &'static [CommandArgumentInfo] {
-    installed().map_or(&[], |installed| {
-        installed.keys.command_arguments.as_slice()
-    })
+    installed().map_or(&[], |installed| installed.keys.command_arguments.as_slice())
 }
 
 impl dyn Registrar + '_ {
@@ -69,12 +67,10 @@ impl CommandArgumentsRegistrar for PartRegistrar {
             self.refused.push(refusal);
             return;
         }
-        self.parts
-            .command_arguments
-            .push(CommandArgumentInfo {
-                id: id.into(),
-                argument,
-            });
+        self.parts.command_arguments.push(CommandArgumentInfo {
+            id: id.into(),
+            argument,
+        });
     }
 }
 
@@ -95,8 +91,9 @@ pub mod tests {
             fn parse(&self, input: &str) -> Result<String, crate::CommandArgumentError> {
                 match input {
                     "fast" | "slow" => Ok(input.to_owned()),
-                    _ => Err(crate::CommandArgumentError::new(crate::Text::literal(
-                        format!("unknown mode `{input}`"),
+                    _ => Err(crate::CommandArgumentError::new(crate::Text::translate(
+                        "test.commands.mode.unknown",
+                        vec![crate::Text::literal(input)],
                     ))),
                 }
             }
@@ -137,10 +134,7 @@ pub mod tests {
         let installed = super::installed_command_arguments();
         assert_eq!(installed.len(), 1);
         assert_eq!(&*installed[0].id, "test:mode");
-        assert_eq!(
-            installed[0].argument.parse("fast"),
-            Ok("fast".to_owned())
-        );
+        assert_eq!(installed[0].argument.parse("fast"), Ok("fast".to_owned()));
         assert_eq!(
             installed[0].argument.suggest("s"),
             [crate::CommandSuggestion::new("slow")]

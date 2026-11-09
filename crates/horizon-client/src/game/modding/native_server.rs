@@ -119,7 +119,10 @@ const LEVELS: [&str; 5] = ["", "moderators", "gamemasters", "admins", "owners"];
 
 /// One parsed word of a usage: its key in the tree and its node, without
 /// children.
-fn usage_nodes(usage: &str, custom: &CommandArguments) -> Result<Vec<(String, Value, bool)>, String> {
+fn usage_nodes(
+    usage: &str,
+    custom: &CommandArguments,
+) -> Result<Vec<(String, Value, bool)>, String> {
     let mut out = Vec::new();
     let mut optional_seen = false;
     let mut greedy_seen = false;
@@ -157,7 +160,11 @@ fn usage_nodes(usage: &str, custom: &CommandArguments) -> Result<Vec<(String, Va
                 let Some(argument) = custom.get(kind) else {
                     return Err(format!("`{usage}`: unknown kind `{kind}`"));
                 };
-                let (properties, greedy) = match argument.kind() {
+                let (properties, greedy) = match std::panic::catch_unwind(
+                    std::panic::AssertUnwindSafe(|| argument.kind()),
+                )
+                .map_err(|_| format!("`{usage}`: argument type `{kind}` panicked"))?
+                {
                     mod_api::CommandArgumentKind::Word => (json!({"type": "word"}), false),
                     mod_api::CommandArgumentKind::Greedy => (json!({"type": "greedy"}), true),
                     _ => {
@@ -376,22 +383,46 @@ fn argument_type(node: &Value, arguments: &CommandArguments) -> ArgType {
             .unwrap_or_else(|| panic!("native command tree names unregistered argument type {id}"));
         let parse = argument.clone();
         let suggest = argument.clone();
-        let kind = match argument.kind() {
-            mod_api::CommandArgumentKind::Word => horizon_client::command::CustomArgumentKind::Word,
-            mod_api::CommandArgumentKind::Greedy => {
-                horizon_client::command::CustomArgumentKind::Greedy
-            }
-            // A kind this build does not know: the tree builder refused it, so a tree that
-            // reached here has only the two above.
-            _ => horizon_client::command::CustomArgumentKind::Word,
+        // Use the validated tree property rather than calling mod code again.
+        let kind = if node["properties"]["type"] == "greedy" {
+            horizon_client::command::CustomArgumentKind::Greedy
+        } else {
+            horizon_client::command::CustomArgumentKind::Word
         };
         return ArgType::Custom(horizon_client::command::CustomArgument::new(
             id,
             kind,
-            move |input| parse.parse(input).map_err(refused_argument_text),
+            move |input| {
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| parse.parse(input)))
+                    .map_err(|_| Text::tr("commands.generic.failed", &[]))?
+                    .map_err(refused_argument_text)
+            },
             move |prefix| {
-                suggest
-                    .suggest(prefix)
+                let Ok(results) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    suggest.suggest(prefix)
+                })) else {
+                    eprintln!("mod command argument completer panicked");
+                    return Vec::new();
+                };
+                // Suggestions use STRING_UTF8 (Java UTF-16 length). Tooltips are
+                // literal NBT strings, whose modified UTF-8 byte length is unsigned u16.
+                if results.iter().any(|s| {
+                    s.text.encode_utf16().count() > 32767
+                        || s.tooltip.as_ref().is_some_and(|tip| {
+                            tip.encode_utf16()
+                                .map(|unit| match unit {
+                                    1..=0x7f => 1,
+                                    0..=0x7ff => 2,
+                                    _ => 3,
+                                })
+                                .sum::<usize>()
+                                > 65535
+                        })
+                }) {
+                    eprintln!("mod command argument completion exceeds the protocol string limit");
+                    return Vec::new();
+                }
+                results
                     .into_iter()
                     .map(|suggestion| horizon_client::command::CustomSuggestion {
                         text: suggestion.text,
@@ -1863,9 +1894,11 @@ impl Game<'_> {
         );
         commands.extend(extras.iter().cloned());
         let arguments = command_arguments();
-        let (tree, mut levels, problems) = command_tree(&commands, |name| {
-            host.hub.vanilla_command(name) || vanilla.find(name).is_some()
-        }, &arguments);
+        let (tree, mut levels, problems) = command_tree(
+            &commands,
+            |name| host.hub.vanilla_command(name) || vanilla.find(name).is_some(),
+            &arguments,
+        );
         for p in problems {
             log::warn!("Horizon: a native mod's command was left out: {p}");
         }
@@ -2658,7 +2691,12 @@ mod tests {
             assert_eq!(problems.len(), 1, "{first} then {second}: {problems:?}");
             assert!(problems[0].starts_with(&format!("`{second}`")));
             let mut dispatcher = Dispatcher::new();
-            register_dispatcher(&mut dispatcher, &tree, "native_mod_command", &HashMap::new());
+            register_dispatcher(
+                &mut dispatcher,
+                &tree,
+                "native_mod_command",
+                &HashMap::new(),
+            );
             let registries = horizon_client::command::Registries::default();
             assert!(dispatcher.parse(line, &registries).executable().is_ok());
             // The kept kind decides: `word` stops at the space, `text` takes it all.
@@ -2687,9 +2725,12 @@ mod tests {
         fn parse(&self, input: &str) -> Result<String, mod_api::CommandArgumentError> {
             match input {
                 "press" | "furnace" => Ok(input.to_owned()),
-                _ => Err(mod_api::CommandArgumentError::new(mod_api::Text::literal(
-                    format!("unknown machine `{input}`"),
-                ))),
+                _ => Err(mod_api::CommandArgumentError::new(
+                    mod_api::Text::translate(
+                        "test.commands.machine.unknown",
+                        vec![mod_api::Text::literal(input)],
+                    ),
+                )),
             }
         }
 
@@ -2700,6 +2741,94 @@ mod tests {
                 .map(mod_api::CommandSuggestion::new)
                 .collect()
         }
+    }
+
+    struct HostileArgument;
+
+    impl mod_api::CommandArgumentType for HostileArgument {
+        fn kind(&self) -> mod_api::CommandArgumentKind {
+            mod_api::CommandArgumentKind::Word
+        }
+        fn parse(&self, input: &str) -> Result<String, mod_api::CommandArgumentError> {
+            if input == "panic" {
+                panic!("parser")
+            }
+            Ok(input.into())
+        }
+        fn suggest(&self, prefix: &str) -> Vec<mod_api::CommandSuggestion> {
+            match prefix {
+                "panic" => panic!("completer"),
+                "text" => vec![mod_api::CommandSuggestion::new("a".repeat(32768))],
+                "tip" => vec![mod_api::CommandSuggestion::with_tooltip(
+                    "ok",
+                    "a".repeat(65536),
+                )],
+                "unicode" => vec![mod_api::CommandSuggestion::with_tooltip(
+                    "ok",
+                    "\0".repeat(32768),
+                )],
+                _ => vec![mod_api::CommandSuggestion::with_tooltip(
+                    "a".repeat(32767),
+                    "a".repeat(65535),
+                )],
+            }
+        }
+    }
+
+    #[test]
+    fn hostile_argument_callbacks_are_refused_without_losing_the_dispatcher() {
+        let arguments: CommandArguments = HashMap::from([(
+            "test:hostile".into(),
+            Arc::new(HostileArgument) as Arc<dyn mod_api::CommandArgumentType>,
+        )]);
+        let (tree, _, problems) = super::command_tree(
+            &[NativeCommand::new("probe <value:test:hostile>")],
+            |_| false,
+            &arguments,
+        );
+        assert!(problems.is_empty());
+        let mut dispatcher = Dispatcher::new();
+        register_dispatcher(&mut dispatcher, &tree, "native_mod_command", &arguments);
+        let registries = horizon_client::command::Registries::default();
+        for prefix in ["panic", "text", "tip", "unicode"] {
+            let input = format!("probe {prefix}");
+            let parsed = dispatcher.parse(&input, &registries);
+            assert_eq!(parsed.executable().is_err(), prefix == "panic");
+            let (_, suggestions) = dispatcher.suggestions(&parsed, input.len(), &registries);
+            assert!(suggestions.is_empty(), "{prefix}");
+        }
+        let input = "probe valid";
+        let parsed = dispatcher.parse(input, &registries);
+        let (_, suggestions) = dispatcher.suggestions(&parsed, input.len(), &registries);
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].text.len(), 32767);
+    }
+
+    #[test]
+    fn panicking_argument_kind_is_left_out_of_the_tree() {
+        struct PanicKind;
+        impl mod_api::CommandArgumentType for PanicKind {
+            fn kind(&self) -> mod_api::CommandArgumentKind {
+                panic!("kind")
+            }
+            fn parse(&self, _: &str) -> Result<String, mod_api::CommandArgumentError> {
+                unreachable!()
+            }
+            fn suggest(&self, _: &str) -> Vec<mod_api::CommandSuggestion> {
+                unreachable!()
+            }
+        }
+        let arguments: CommandArguments = HashMap::from([(
+            "test:panic".into(),
+            Arc::new(PanicKind) as Arc<dyn mod_api::CommandArgumentType>,
+        )]);
+        let (_, _, problems) = super::command_tree(
+            &[NativeCommand::new("probe <value:test:panic>")],
+            |_| false,
+            &arguments,
+        );
+        assert_eq!(problems.len(), 1);
+        assert!(problems[0].contains("panicked"));
     }
 
     struct Machines;
@@ -2733,12 +2862,7 @@ mod tests {
         assert_eq!(machine["properties"], json!({"type": "word"}));
 
         let mut dispatcher = Dispatcher::new();
-        register_dispatcher(
-            &mut dispatcher,
-            &tree,
-            "native_mod_command",
-            &arguments,
-        );
+        register_dispatcher(&mut dispatcher, &tree, "native_mod_command", &arguments);
         let registries = horizon_client::command::Registries::default();
         let parsed = dispatcher.parse("machine use press", &registries);
         let (context, _) = parsed.executable().unwrap();
@@ -2761,7 +2885,10 @@ mod tests {
         let parse = dispatcher.parse(typed, &registries);
         let (_, suggestions) = dispatcher.suggestions(&parse, typed.len(), &registries);
         assert_eq!(
-            suggestions.iter().map(|s| s.text.as_str()).collect::<Vec<_>>(),
+            suggestions
+                .iter()
+                .map(|s| s.text.as_str())
+                .collect::<Vec<_>>(),
             ["press"]
         );
     }
@@ -2775,7 +2902,12 @@ mod tests {
         ]);
         assert!(problems.is_empty(), "{problems:?}");
         let mut dispatcher = Dispatcher::new();
-        register_dispatcher(&mut dispatcher, &tree, "native_mod_command", &HashMap::new());
+        register_dispatcher(
+            &mut dispatcher,
+            &tree,
+            "native_mod_command",
+            &HashMap::new(),
+        );
         let mut registries = horizon_client::command::Registries::default();
         assert!(dispatcher.parse("warp", &registries).executable().is_ok());
         assert!(
@@ -3308,7 +3440,12 @@ mod tests {
                 let (tree, _, problems) = tree(&commands);
                 assert!(problems.is_empty(), "{problems:?}");
                 let mut dispatcher = Dispatcher::new();
-                register_dispatcher(&mut dispatcher, &tree, "native_mod_command", &HashMap::new());
+                register_dispatcher(
+                    &mut dispatcher,
+                    &tree,
+                    "native_mod_command",
+                    &HashMap::new(),
+                );
                 for permission in 0..=4 {
                     let registries = horizon_client::command::Registries {
                         permission,
@@ -3338,7 +3475,12 @@ mod tests {
             let (tree, _, problems) = tree(&commands);
             assert!(problems.is_empty(), "{problems:?}");
             let mut dispatcher = Dispatcher::new();
-            register_dispatcher(&mut dispatcher, &tree, "native_mod_command", &HashMap::new());
+            register_dispatcher(
+                &mut dispatcher,
+                &tree,
+                "native_mod_command",
+                &HashMap::new(),
+            );
             for permission in 0..=4 {
                 let registries = horizon_client::command::Registries {
                     permission,
@@ -3369,7 +3511,12 @@ mod tests {
             let (tree, _, problems) = tree(&commands);
             assert!(problems.is_empty(), "{problems:?}");
             let mut dispatcher = Dispatcher::new();
-            register_dispatcher(&mut dispatcher, &tree, "native_mod_command", &HashMap::new());
+            register_dispatcher(
+                &mut dispatcher,
+                &tree,
+                "native_mod_command",
+                &HashMap::new(),
+            );
             for permission in 0..=4 {
                 let registries = horizon_client::command::Registries {
                     permission,
@@ -3395,7 +3542,12 @@ mod tests {
         ]);
         assert_eq!(problems.len(), 1);
         let mut dispatcher = Dispatcher::new();
-        register_dispatcher(&mut dispatcher, &tree, "native_mod_command", &HashMap::new());
+        register_dispatcher(
+            &mut dispatcher,
+            &tree,
+            "native_mod_command",
+            &HashMap::new(),
+        );
         for permission in 0..=4 {
             let registries = horizon_client::command::Registries {
                 permission,
