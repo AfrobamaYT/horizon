@@ -3,9 +3,11 @@
 //! death are expressions, and emitters that spawn particles from blocks and from particles. Each
 //! custom particle is an ordinary engine particle (sprite set, interpolation, rendering, the
 //! total limit) with a controller that runs the type's ticker.
+#[cfg(test)]
+use super::ModSet;
 use super::{
-    Behaviour, Fluid, ModSet, Particle, ParticleEngine, ParticleLevel, ParticleOptions,
-    ParticleType, ParticleUpdate, PendingParticle, Sprite,
+    Behaviour, Fluid, Particle, ParticleEngine, ParticleLevel, ParticleOptions, ParticleType,
+    ParticleUpdate, PendingParticle, Sprite,
 };
 use crate::environment::Frame;
 use horizon_core::random::{LegacyRandom, RandomSource};
@@ -1209,9 +1211,17 @@ pub(super) fn make(
     let hidden = def.render_type == RenderType::Invisible
         || (def.render.contains_key("model") && model.is_none())
         || def.gpu.is_some();
-    match engine.mod_sets.get(name) {
-        Some(ModSet { set, .. }) => {
-            let set = *set;
+    // A custom sprite set, or the vanilla set when replacing a vanilla type.
+    let set = engine
+        .mod_sets
+        .get(name)
+        .map(|entry| entry.set)
+        .or_else(|| {
+            let vanilla = name.strip_prefix("minecraft:")?;
+            engine.sets.get(&ParticleType::from_name(vanilla)?).copied()
+        });
+    match set {
+        Some(set) => {
             let sprites = engine.set_sprites.get(set as usize)?;
             frames = sprites.len();
             particle.set = Some(set);

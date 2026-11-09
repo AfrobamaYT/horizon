@@ -395,7 +395,7 @@ impl Game<'_> {
             .and_then(|host| host.hub.guest(conn))
             .and_then(|g| g.vehicle)
             .is_none_or(|v| self.guest_controls_vehicle(conn, v));
-        let Some(host) = self.lan.as_mut() else {
+        let Some(host) = self.lan.as_ref() else {
             return;
         };
         let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) else {
@@ -408,7 +408,7 @@ impl Game<'_> {
             || !p.yaw.is_finite()
             || !p.pitch.is_finite()
         {
-            host.hub.kick(
+            self.lan.as_mut().unwrap().hub.kick(
                 conn,
                 translatable("multiplayer.disconnect.invalid_vehicle_movement", &[]),
             );
@@ -424,6 +424,7 @@ impl Game<'_> {
             return;
         }
         let owner = host.hub.singleplayer_owner == Some(g.uuid);
+        let allow_flight = host.hub.config.allow_flight;
         let (vehicle, good) = (g.vehicle, g.vehicle_good);
         let back = |host: &mut LanHost, position: Vec3, yaw: f32| {
             let packet = play::MoveVehicle {
@@ -471,7 +472,7 @@ impl Game<'_> {
             if let Some(c) = vehicle.and_then(|v| self.carts.iter().find(|c| c.id == v))
                 && c.position.distance_squared(Vec3::new(x, y, z)) > 1.0
             {
-                back(host, c.position, c.yaw);
+                back(self.lan.as_mut().unwrap(), c.position, c.yaw);
             }
             return;
         };
@@ -485,7 +486,7 @@ impl Game<'_> {
         let moved = target.distance_squared(old) - velocity.length_squared();
         if moved > 100.0 && !owner {
             log::warn!("vehicle {id} moved too quickly! {moved}");
-            back(host, old, yaw);
+            back(self.lan.as_mut().unwrap(), old, yaw);
             return;
         }
         // A living mount on a climbable has no fall, before its move: a move
@@ -517,7 +518,7 @@ impl Game<'_> {
             .unwrap_or(true);
         if free_before && (wrongly || !free_after) {
             log::warn!("vehicle {id} moved wrongly");
-            back(host, old, yaw);
+            back(self.lan.as_mut().unwrap(), old, yaw);
             return;
         }
         // clientVehicleIsFloating: the move didn't go down a step, the vehicle hadn't come down onto
@@ -535,8 +536,7 @@ impl Game<'_> {
             [Axis::X, Axis::Y, Axis::Z].map(|a| if max { around.max(a) } else { around.min(a) })
         };
         let no_blocks = no_blocks_in(&self.world, corner(false), corner(true));
-        let allow_flight = host.hub.config.allow_flight;
-        host.hub.guests.update(gi, |g| {
+        self.lan.as_mut().unwrap().hub.guests.update(gi, |g| {
             g.vehicle_good = Some([target.x, target.y, target.z]);
             let rested = std::mem::replace(
                 &mut g.vehicle_rests,
@@ -549,7 +549,8 @@ impl Game<'_> {
         if let Some(i) = mount {
             let mut m = self.mobs[i].clone();
             let mut events = Vec::new();
-            {
+            let mut lent = horizon_client::health::LentLevel::take(&mut self.world);
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let w = self.mob_world_base(&[]);
                 // absSnapTo: where and how its rider's client turned it; the
                 // rider sits on it from its own ride tick.
@@ -559,8 +560,19 @@ impl Game<'_> {
                 m.head_pitch = p.pitch;
                 // setOnGroundWithMovement and doCheckFallDamage with the client's
                 // ground and move: a landing hurts the horse and its riders.
-                let mut level = crate::game::entity::damage_level_of!(self);
+                let mut level = horizon_client::health::DamageLevel::lent(
+                    &self.world,
+                    self.pack.assets.registry,
+                    &mut lent,
+                    Some(self.items()),
+                    Some(&self.pack.block_registries),
+                    &self.damage_hooks,
+                );
                 m.client_moved_fall(&w, &mut level, delta, p.on_ground, &mut events);
+            }));
+            lent.give_back(&mut self.world);
+            if let Err(panic) = outcome {
+                std::panic::resume_unwind(panic);
             }
             self.mobs[i] = m;
             // propagateFallToPassengers reaches the guests through `host`: it is out
@@ -594,7 +606,10 @@ impl Game<'_> {
             }
             let _ = self.handle_mob_events(events);
             for (mob, distance, modifier) in falls {
-                let riders: Vec<u32> = host
+                let riders: Vec<u32> = self
+                    .lan
+                    .as_ref()
+                    .unwrap()
                     .hub
                     .guests
                     .iter()
@@ -629,8 +644,8 @@ impl Game<'_> {
             .0
             > 0.0;
         // Entity.move: a long move through water or a reset block resets it first.
-        self.boats[i].fall_distance =
-            self.vehicle_fall_reset(self.boats[i].fall_distance, old, resolved);
+        let reset_fall = self.vehicle_fall_reset(self.boats[i].fall_distance, old, resolved);
+        self.boats.update(i, |boat| boat.fall_distance = reset_fall);
         let fall = if in_water {
             0.0
         } else {
