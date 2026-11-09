@@ -3067,7 +3067,7 @@ struct Game<'a> {
     /// The horse inventory (game/interface/mount_menu.rs).
     mount_menu: mount_menu::MountMenu,
     /// The player's fishing hook.
-    hook: Option<fishing::Hook>,
+    hook: horizon_client::join_seq::ResidentSlot<fishing::Hook>,
     /// The other players' hooks a server tracks to this client.
     remote_hooks: Vec<fishing::RemoteHook>,
     tridents: horizon_client::join_seq::JoinList<trident::ThrownTrident>,
@@ -3141,6 +3141,7 @@ struct Game<'a> {
     native_input: native_claimed_items::ModInput,
     /// The native lifecycle bookkeeping.
     native_lifecycle: native_lifecycle::NativeLifecycle,
+    resident_entities: resident_state::ResidentEntities,
     /// The mobs lent to the hook calls running now, before they join a level
     /// (game/modding/native_unspawned_mob.rs).
     lent_mobs: RefCell<native_unspawned_mob::LentMobs>,
@@ -5117,11 +5118,6 @@ impl Game<'_> {
         self.award_stat("dropped", &item, count);
         self.award_custom_stat("drop", 1);
         Some(dropped)
-    }
-    /// `Player.drop(stack, false)`, as `ItemUtils.createFilledResult` drops what no longer fits
-    /// in the inventory: thrown from the eyes, with no thrower, statistic or drop hook.
-    pub(super) fn drop_plain(&mut self, stack: ItemStack) -> Option<u32> {
-        self.drop_stack_from_eyes(stack, false)
     }
     /// `Player.drop(stack, false, thrown_from_hand)`: the stack thrown from the eyes along the
     /// view, the main hand swinging for every drop (`LivingEntity.drop`; `PREDICTED` only keeps
@@ -8581,7 +8577,7 @@ impl Game<'_> {
             }
         }
         if self.remote.is_some() {
-            return self.tick_remote();
+            return self.with_residency_tick(Self::tick_remote);
         }
         // Only a server ticks its own world from here: its players are guests, swapped in for
         // their turns (`as_guest`), and the window's player is a client of it.
@@ -16721,7 +16717,7 @@ impl<'a> Game<'a> {
             &gui.atlas.translucent,
         );
         let resource_source = pack.source.clone();
-        let game = Game {
+        let mut game = Game {
             structure_spawns: horizon_client::mobs::spawn_selection::StructureSpawns::load(
                 &options.resources,
             ),
@@ -17102,7 +17098,7 @@ impl<'a> Game<'a> {
             spill: Default::default(),
             recipe_ui: Default::default(),
             mount_menu: Default::default(),
-            hook: None,
+            hook: Default::default(),
             remote_hooks: Vec::new(),
             tridents: Default::default(),
             rockets: Default::default(),
@@ -17160,6 +17156,7 @@ impl<'a> Game<'a> {
             native_shaders: Default::default(),
             native_input: Default::default(),
             native_lifecycle: Default::default(),
+            resident_entities: Default::default(),
             lent_mobs: Default::default(),
             held_out: Vec::with_capacity(4),
             native_configs: Default::default(),
@@ -17316,6 +17313,7 @@ impl<'a> Game<'a> {
             fangs: Default::default(),
             player_model: None,
         };
+        game.reset_entity_residency();
         Ok(game)
     }
 }
@@ -18111,9 +18109,9 @@ pub(crate) fn run_with(
     mods::register_map_decoration_types();
     mods::register_range_select_item_model_properties(options.execution_role);
     mods::register_select_item_model_properties(options.execution_role);
-    mods::register_item_tint_sources(options.execution_role);
+    mods::register_resource_sources(options.execution_role);
     mods::register_enchantment_damage_effects();
-    mods::register_dimension_transition_screens(options.execution_role);
+    mods::register_client_presentations(options.execution_role);
     mods::register_color_resolvers(options.execution_role);
     mods::register_block_tint_sources(options.execution_role);
     mods::register_particle_providers(options.execution_role);
@@ -18478,9 +18476,8 @@ mod escape_tests {
     use horizon_core::random::RandomSource;
     use std::sync::Arc;
 
-    /// `Entity.moveTowardsClosestSpace` takes an item's escape speed from the
-    /// item's own random, the one its constructor drew from, and leaves the
-    /// level's random as it was (#13043).
+    /// `Entity.moveTowardsClosestSpace` uses the item's own random, never the
+    /// level's random. Seeded Java values pin vanilla's float arithmetic (#13043).
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn an_item_escapes_a_block_at_its_own_randoms_speed() {
@@ -18502,15 +18499,16 @@ mod escape_tests {
         game.world.set(8, 64, 8, stone).unwrap();
         let stack = ItemStack::new("minecraft:stone", 2);
         game.spawn_item(stack, [8.5, 64.4, 8.5], [0.0, 0.0, 0.0], 10);
-        let item = game.dropped.last().unwrap();
-        let expected = f64::from(item.random.clone().next_float() * 0.2 + 0.1);
+        let item = game.dropped.last_mut().unwrap();
+        item.random = horizon_core::random::LegacyRandom::new(12345);
         let mut level = game.world.random.clone();
         game.ticked_entities_through = u32::MAX;
         game.tick_items();
         let item = game.dropped.last().unwrap();
-        // Up is the nearest open side from the middle of the block.
-        // The push replaces the fall's velocity; then the 0.98 drag.
-        assert_eq!(item.velocity.y, expected * 0.98);
+        // Up is the nearest open side. Independent Java Random(12345):
+        // nextFloat()*0.2F+0.1F, widened before multiplying by widened 0.98F.
+        assert_eq!(item.velocity.y, f64::from_bits(0x3fc5_9ef4_570f_5500));
+        assert_eq!(item.random.clone().next_float().to_bits(), 0x3f03_61b3);
         assert_eq!(game.world.random.next_float(), level.next_float());
     }
 }
