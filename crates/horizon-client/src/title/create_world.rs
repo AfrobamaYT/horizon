@@ -604,8 +604,8 @@ pub(super) fn button_narration(
         ))),
         24 => cycle(on_off(!o.commands(creative))).hint(tr("selectWorld.allowCommands.info")),
         25 => {
-            let n = cycle(tr(o.world_type.next().label()));
-            if o.world_type == crate::save::WorldPreset::Amplified {
+            let n = cycle(super::preset_editors::preset_label(o.cycled_preset(1)));
+            if o.custom_preset.is_none() && o.world_type == crate::save::WorldPreset::Amplified {
                 n.hint(tr("generator.minecraft.amplified.info"))
             } else {
                 n

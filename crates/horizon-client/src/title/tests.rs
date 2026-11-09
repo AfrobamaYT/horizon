@@ -130,6 +130,72 @@ fn bundled_mod_world_presets_do_not_require_a_repository_pack_selection() {
 }
 
 #[test]
+fn an_empty_normal_world_preset_tag_falls_back_to_all_registry_presets() {
+    let mut f = Fixture::new();
+    let data = f.root.join("mod-data/data/example/worldgen/world_preset");
+    fs::create_dir_all(&data).unwrap();
+    fs::write(data.join("islands.json"), r#"{"dimensions":{"minecraft:overworld":{"type":"minecraft:overworld","generator":{"type":"minecraft:debug"}}}}"#).unwrap();
+    let tags = f
+        .root
+        .join("mod-data/data/minecraft/tags/worldgen/world_preset");
+    fs::create_dir_all(&tags).unwrap();
+    fs::write(tags.join("normal.json"), r#"{"replace":true,"values":[]}"#).unwrap();
+    f.title
+        .set_preset_data_source(crate::resource_source::ResourceSource::directory(
+            f.root.join("mod-data"),
+        ));
+    f.title.enter_singleplayer();
+    let Mode::Create { options, .. } = &mut f.title.mode else {
+        panic!("create")
+    };
+    assert_eq!(
+        options.preset_order.len(),
+        crate::save::WorldPreset::ALL.len() + 1
+    );
+    for preset in crate::save::WorldPreset::ALL {
+        assert!(options.preset_order.iter().any(|id| id == preset.id()));
+    }
+    options.cycle_preset(-1);
+    assert_eq!(options.preset_id(), "example:islands");
+    options.cycle_preset(1);
+    assert_eq!(options.preset_id(), "minecraft:normal");
+}
+
+#[test]
+fn world_preset_narration_matches_the_cycle_and_only_hints_actual_amplified() {
+    let mut options = WorldOptions {
+        custom_preset: Some("example:islands".into()),
+        world_type: crate::save::WorldPreset::Amplified,
+        preset_order: vec![
+            "minecraft:normal".into(),
+            "example:islands".into(),
+            "minecraft:flat".into(),
+        ],
+        tab: 1,
+        ..Default::default()
+    };
+    let button = create_world::buttons(480.0, 262.0, false, &options, true)
+        .into_iter()
+        .find(|b| b.id == 25)
+        .unwrap();
+    let narration = create_world::button_narration(&button, false, &options);
+    assert!(narration.hint.is_none());
+    let crate::widgets::What::Cycle { next, .. } = narration.what else {
+        panic!("cycle")
+    };
+    assert_eq!(next, lang::get("generator.minecraft.flat"));
+    options.cycle_preset(1);
+    assert_eq!(options.preset_id(), "minecraft:flat");
+    options.custom_preset = None;
+    options.world_type = crate::save::WorldPreset::Amplified;
+    assert!(
+        create_world::button_narration(&button, false, &options)
+            .hint
+            .is_some()
+    );
+}
+
+#[test]
 fn registered_world_preset_editor_commits_only_on_done_and_saves_its_dimensions() {
     use mod_api::PresetEditor;
     let mut f = Fixture::new();

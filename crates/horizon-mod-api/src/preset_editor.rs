@@ -1,7 +1,7 @@
 //! World-preset editor registration.
 
 /// A client screen used to customize a data-pack world preset.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(horizon_mod_api_macros::Wire, Clone, Debug, PartialEq, Eq)]
 // exhaustive: registration is plain data shared by native and wasm mods
 pub struct PresetEditor {
     /// World-preset registry id, such as `example:islands`.

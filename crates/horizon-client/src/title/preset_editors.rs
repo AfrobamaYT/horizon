@@ -30,6 +30,10 @@ pub(super) fn editor(preset: &str) -> Option<mod_api::PresetEditor> {
     EDITORS.read().unwrap().get(preset).cloned()
 }
 
+pub(super) fn preset_label(id: &str) -> String {
+    lang::get(&format!("generator.{}", id.replace([':', '/'], ".")))
+}
+
 impl Title {
     /// The already-enabled mod data layer, below the world's selectable packs.
     pub fn set_preset_data_source(&mut self, source: crate::resource_source::ResourceSource) {
@@ -89,8 +93,7 @@ impl WorldOptions {
             .unwrap_or(self.world_type.id())
     }
     pub(super) fn preset_label(&self) -> String {
-        let key = format!("generator.{}", self.preset_id().replace([':', '/'], "."));
-        lang::get(&key)
+        preset_label(self.preset_id())
     }
     /// Reload Create World's selected pack resources, retaining a still-available choice.
     pub(super) fn refresh_presets(
@@ -170,21 +173,30 @@ impl WorldOptions {
                 }
             }
         }
-        match tags.build(|id, _| {
+        let all_presets = defaults
+            .iter()
+            .map(|id| (*id).to_owned())
+            .chain(
+                self.presets
+                    .keys()
+                    .filter(|id| crate::save::WorldPreset::of_id(id).is_none())
+                    .cloned(),
+            )
+            .collect();
+        self.preset_order = match tags.build(|id, _| {
             (crate::save::WorldPreset::of_id(id).is_some() || self.presets.contains_key(id))
                 .then(|| id.to_owned())
         }) {
-            Ok(mut built) => {
-                self.preset_order = built
-                    .tags
-                    .remove("minecraft:normal")
-                    .unwrap_or_else(|| defaults.into_iter().map(str::to_owned).collect())
-            }
+            Ok(mut built) => built
+                .tags
+                .remove("minecraft:normal")
+                .filter(|ids| !ids.is_empty())
+                .unwrap_or(all_presets),
             Err(error) => {
                 log::warn!("Invalid world preset tags: {error}");
-                self.preset_order = defaults.into_iter().map(str::to_owned).collect();
+                all_presets
             }
-        }
+        };
         if !self.preset_order.iter().any(|id| id == self.preset_id()) {
             self.custom_preset = self.preset_order.first().cloned();
             if let Some(preset) = self
@@ -202,14 +214,7 @@ impl WorldOptions {
         if self.preset_order.is_empty() {
             return;
         }
-        let current = self
-            .preset_order
-            .iter()
-            .position(|id| *id == self.preset_id())
-            .unwrap_or(0);
-        let next =
-            ((current as i32 + step.signum()).rem_euclid(self.preset_order.len() as i32)) as usize;
-        let id = self.preset_order[next].clone();
+        let id = self.cycled_preset(step).to_owned();
         self.custom_preset = if let Some(preset) = crate::save::WorldPreset::of_id(&id) {
             self.world_type = preset;
             None
@@ -217,6 +222,19 @@ impl WorldOptions {
             Some(id)
         };
         self.preset_dimensions = None;
+    }
+    pub(super) fn cycled_preset(&self, step: i32) -> &str {
+        if self.preset_order.is_empty() {
+            return self.preset_id();
+        }
+        let current = self
+            .preset_order
+            .iter()
+            .position(|id| *id == self.preset_id())
+            .unwrap_or(0);
+        let next =
+            ((current as i32 + step.signum()).rem_euclid(self.preset_order.len() as i32)) as usize;
+        &self.preset_order[next]
     }
     /// Dimensions chosen by a data-pack preset or committed by its editor.
     pub fn dimensions(&self) -> Option<Tag> {

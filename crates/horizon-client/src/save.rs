@@ -3715,6 +3715,30 @@ pub fn world_gen_settings(world: &Path) -> Option<Tag> {
             .cloned()
     })
 }
+/// Saved preset/editor stems fill only levels that mods and enabled packs did not define.
+pub fn merge_saved_world_gen_dimensions(
+    world: &Path,
+    overrides: &mut horizon_world::worldgen::overrides::WorldgenOverrides,
+) {
+    use horizon_world::worldgen::overrides::DIMENSIONS;
+    let Some(Tag::Compound(dimensions)) =
+        world_gen_settings(world).and_then(|settings| settings.get("dimensions").cloned())
+    else {
+        return;
+    };
+    for (id, stem) in dimensions {
+        let id = id.to_string_lossy();
+        if horizon_core::level_id::valid_level_id(&id)
+            && !overrides.entries(DIMENSIONS).any(|(level, _)| level == id)
+        {
+            overrides.set(
+                DIMENSIONS,
+                &id,
+                crate::scoreboard::tag_to_json(&stem).to_string(),
+            );
+        }
+    }
+}
 fn write_saved_data(world: &Path, name: &str, data: Tag) -> Result<()> {
     write_dat(
         &saved_data_path(world, name),
@@ -5884,6 +5908,63 @@ fn effect_details(e: &crate::effects::SavedEffect) -> Vec<(&'static str, Tag)> {
 #[cfg(test)]
 mod tests {
     use crate::mobs::spawner::SpawnDataExt;
+
+    #[test]
+    fn saved_preset_editor_stems_supply_shapes_and_facts_below_pack_stems() {
+        use super::*;
+        use horizon_world::worldgen::overrides::{DIMENSIONS, WorldgenOverrides};
+        let dir = std::env::temp_dir().join(format!(
+            "horizon-preset-shapes-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let dimensions = json_tag(&serde_json::json!({
+            "minecraft:overworld": {"type":"minecraft:the_nether","generator":{"type":"minecraft:debug"}},
+            "example:pocket": {
+                "type":{"min_y":-128,"height":448,"logical_height":320,"has_skylight":false,"has_ceiling":true},
+                "generator":{"type":"minecraft:debug"}
+            }
+        }));
+        write_world_gen_settings_with(&dir, 1, WorldGen::default(), None, None, Some(dimensions))
+            .unwrap();
+        let mut overrides = WorldgenOverrides::default();
+        merge_saved_world_gen_dimensions(&dir, &mut overrides);
+        let overworld = overrides.level_height("minecraft:overworld").unwrap();
+        assert_eq!((overworld.min_y, overworld.height), (0, 256));
+        assert!(overworld.has_ceiling && !overworld.has_skylight);
+        let pocket = overrides.level_height("example:pocket").unwrap();
+        assert_eq!(
+            (pocket.min_y, pocket.height, pocket.logical_height),
+            (-128, 448, 320)
+        );
+        assert!(pocket.has_ceiling && !pocket.has_skylight);
+        assert!(
+            overrides
+                .level_facts("minecraft:overworld")
+                .unwrap()
+                .unwrap()
+                .fast_lava
+        );
+        let pack_stem = r#"{"type":"minecraft:overworld","generator":{"type":"minecraft:debug"}}"#;
+        overrides.set(DIMENSIONS, "minecraft:overworld", pack_stem.into());
+        merge_saved_world_gen_dimensions(&dir, &mut overrides);
+        assert_eq!(
+            overrides
+                .entries(DIMENSIONS)
+                .find(|(id, _)| *id == "minecraft:overworld")
+                .unwrap()
+                .1,
+            pack_stem
+        );
+        assert_eq!(
+            overrides.level_height("minecraft:overworld").unwrap().min_y,
+            -64
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn an_ender_chest_saves_none_of_the_players_items() {
