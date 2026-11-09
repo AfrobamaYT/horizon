@@ -612,7 +612,6 @@
   "horizon.mods.browse.update": "Aggiorna",
   "horizon.mods.browse.installed": "Installato",
   "horizon.mods.browse.open_page": "Apri pagina",
-  "horizon.mods.browse.enabled": "Mod",
   "horizon.mods.browse.changelog": "Registro modifiche",
   "horizon.mods.browse.done": "%s %s è installato e attivo.",
   "horizon.mods.browse.install_failed": "Impossibile installarlo: %s",
