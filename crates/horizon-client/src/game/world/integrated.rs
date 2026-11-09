@@ -43,6 +43,11 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 pub(super) const NO_ANSWER: &str =
     "the integrated server stopped or did not answer within 10 s (the game log says which)";
 
+/// The server thread's stack: the 8 MB the main thread has (`build.rs`), not a spawned thread's
+/// 2 MB default. It holds the server's `Game` by value (~67 KB, `serve`) and runs every tick on it,
+/// as deep as the main thread's game goes (#2430).
+const SERVER_THREAD_STACK: usize = 8 * 1024 * 1024;
+
 /// `LevelLoadProgressTracker.EXPECTED_PLAYER_CHUNKS`: the 7x7 chunks around the spawn.
 const PLAYER_CHUNKS: usize = 49;
 
@@ -495,6 +500,7 @@ impl Game<'_> {
         let server_flags = flags.clone();
         let thread = std::thread::Builder::new()
             .name("Server thread".into())
+            .stack_size(SERVER_THREAD_STACK)
             .spawn(move || {
                 // MinecraftServer.spin's Thread.setPriority(8).
                 horizon_threads::favour_current();
@@ -1292,6 +1298,7 @@ impl Game<'_> {
         options.dedicated = Some(Vec::new());
         let result = std::thread::Builder::new()
             .name("Server thread".into())
+            .stack_size(SERVER_THREAD_STACK)
             .spawn(move || {
                 let run = || -> Result<()> {
                     let mut server = server_game(&res, pack, options, settings)?;
