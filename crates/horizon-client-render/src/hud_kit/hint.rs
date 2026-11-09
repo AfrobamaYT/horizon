@@ -12,8 +12,8 @@
 //! use horizon_client_render::hud_kit::hint::{self, HintRow};
 //! use horizon_client_render::pad_glyph::{Glyph, Glyphs};
 //!
-//! let resources = horizon_client_render::resource_source::ResourceSource::directory("/nonexistent".into());
-//! let atlas = HudAtlas::build(&resources).unwrap();
+//! let source = horizon_client_render::resource_source::ResourceSource::directory("/nonexistent".into());
+//! let atlas = HudAtlas::build(&source).unwrap();
 //! let back = Glyph::menu(MenuJob::Back, Glyphs::default());
 //! let row = HintRow::new([back], "Leave");
 //! // Its glyph, the gap, then the caption.
