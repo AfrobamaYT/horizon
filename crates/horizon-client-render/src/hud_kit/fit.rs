@@ -6,7 +6,8 @@
 //! use horizon_client_render::hud::HudAtlas;
 //! use horizon_client_render::hud_kit::fit;
 //!
-//! let atlas = HudAtlas::build(std::path::Path::new("/nonexistent")).unwrap();
+//! let source = horizon_client_render::resource_source::ResourceSource::directory("/nonexistent".into());
+//! let atlas = HudAtlas::build(&source).unwrap();
 //! // Room enough: the same text, not a copy.
 //! assert_eq!(fit::ellipsize(&atlas, "Jump", 100.0), "Jump");
 //! // Too long: cut, with an ellipsis, inside the width.
