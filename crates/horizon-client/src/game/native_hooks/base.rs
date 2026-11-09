@@ -5058,16 +5058,20 @@ impl Game<'_> {
         if Self::another_mods(mod_id) {
             return None;
         }
-        horizon_world::native_load_context::read_setting(&self.native_data_dir(mod_id), key)
+        self.stored_setting(mod_id, key)
+    }
+    pub(super) fn stored_setting(&self, mod_id: &str, key: &str) -> Option<String> {
+        mod_settings::read_raw(&self.native_data_dir(mod_id), mod_id, key)
     }
     /// Keeps a mod's setting `key`. A mod's hook or part keeps only its own mod's.
     pub(in crate::game) fn set_setting(&self, mod_id: &str, key: &str, value: &str) {
         if Self::another_mods(mod_id) {
             return;
         }
-        let dir = self.native_data_dir(mod_id);
-        self.forget_setting(&dir, key);
-        let _ = fs::create_dir_all(&dir).and_then(|()| fs::write(dir.join(key), value));
+        self.store_setting(mod_id, key, value);
+    }
+    pub(super) fn store_setting(&self, mod_id: &str, key: &str, value: &str) -> bool {
+        mod_settings::store(&self.native_data_dir(mod_id), mod_id, key, value)
     }
     /// A mod's hook or part is running, and `mod_id` is another mod's.
     fn another_mods(mod_id: &str) -> bool {

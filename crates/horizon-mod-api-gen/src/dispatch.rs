@@ -1842,6 +1842,7 @@ fn main() {{ generated::dispatch_setting_changed(&mut (), "a", "toggle"); assert
                                     "stored_setting",
                                     "set_setting",
                                     "store_setting",
+                                    "another_mods",
                                 ]
                                 .contains(&f.sig.ident.to_string().as_str()) =>
                             {
@@ -1854,17 +1855,41 @@ fn main() {{ generated::dispatch_setting_changed(&mut (), "a", "toggle"); assert
                 _ => None,
             })
             .collect();
+        let settings_source = std::fs::read_to_string(
+            root.join("crates/horizon-client/src/game/native_hooks/mod_settings.rs"),
+        )
+        .unwrap();
+        let settings_file = syn::parse_file(&settings_source).unwrap();
+        let settings: String = settings_file
+            .items
+            .into_iter()
+            .filter_map(|item| match item {
+                syn::Item::Fn(f) => Some(f.to_token_stream().to_string()),
+                syn::Item::Static(s) => Some(s.to_token_stream().to_string()),
+                _ => None,
+            })
+            .collect();
         let dir = root.join("target/settings-boundary-test");
         std::fs::create_dir_all(&dir).unwrap();
         let program = format!(
             r#"
 #![allow(dead_code)]
 mod mod_api {{
+    #[derive(Clone, Debug, PartialEq)] pub enum SettingValue {{ Toggle(bool) }}
+    pub struct Spec;
+    impl Spec {{ pub fn read(&self, raw: Option<&str>) -> SettingValue {{ SettingValue::Toggle(raw == Some("true")) }} }}
     pub mod crash {{ pub fn current_native_mod() -> Option<&'static str> {{ Some("a") }} }}
-    pub mod __private {{ pub fn setting(_: &str, key: &str) -> Option<()> {{ (key == "toggle").then_some(()) }} }}
+    pub mod __private {{ pub fn setting(owner: &str, key: &str) -> Option<super::Spec> {{ (owner == "a" && key == "toggle").then_some(super::Spec) }} }}
 }}
+mod horizon_world {{ pub mod native_load_context {{ pub fn read_setting(dir: &std::path::Path, key: &str) -> Option<String> {{ std::fs::read_to_string(dir.join(key)).ok() }} }} }}
 mod game {{
 use crate::mod_api;
+mod mod_settings {{
+use crate::{{mod_api, horizon_world}};
+use std::{{fs, path::{{Path, PathBuf}}, collections::HashMap, sync::{{LazyLock, Mutex}}}};
+{settings}
+pub(super) fn typed(dir: &Path, key: &str) -> Option<mod_api::SettingValue> {{ read_typed(dir, "a", key) }}
+}}
 use std::{{fs, path::PathBuf, cell::RefCell, collections::BTreeMap}};
 struct Context;
 impl Context {{ fn setting(&self, _: &str, _: &str) -> Option<String> {{ Some("loaded".into()) }} }}
@@ -1875,16 +1900,25 @@ impl Game {{
 }}
 pub fn run(root: PathBuf) {{
     let game = Game {{ loop_context: Context, setting_overrides: RefCell::new(BTreeMap::new()), root }};
-    assert_eq!(game.setting("a", "toggle").as_deref(), Some("loaded"));
+    assert_eq!(game.setting("a", "toggle"), None);
     assert_eq!(game.setting("b", "toggle"), None);
     game.set_setting("b", "toggle", "stolen");
     assert!(!game.native_data_dir("b").exists());
     game.set_setting("a", "toggle", "edited");
     assert_eq!(game.setting("a", "toggle").as_deref(), Some("edited"));
-    fs::write(game.native_data_dir("a").join("toggle"), "external").unwrap();
-    assert_eq!(game.setting("a", "toggle").as_deref(), Some("edited"));
+    game.set_setting("a", "toggle", "true");
+    assert_eq!(mod_settings::typed(&game.native_data_dir("a"), "toggle"), Some(mod_api::SettingValue::Toggle(true)));
+    fs::write(game.native_data_dir("a").join("toggle"), "false").unwrap();
+    assert_eq!(mod_settings::typed(&game.native_data_dir("a"), "toggle"), Some(mod_api::SettingValue::Toggle(true)));
+    assert_eq!(mod_settings::typed(&game.root.join("other"), "toggle"), Some(mod_api::SettingValue::Toggle(false)));
+    game.set_setting("a", "toggle", "false");
+    assert_eq!(mod_settings::typed(&game.native_data_dir("a"), "toggle"), Some(mod_api::SettingValue::Toggle(false)));
+    fs::remove_file(game.native_data_dir("a").join("toggle")).unwrap();
+    fs::create_dir(game.native_data_dir("a").join("toggle")).unwrap();
+    assert!(!game.store_setting("a", "toggle", "true"));
     game.set_setting("a", "../escape", "bad");
     assert!(!game.root.join("escape").exists());
+    assert_eq!(game.setting("a", "../escape"), None);
 }}
 }}
 fn main() {{ game::run(std::env::args_os().nth(1).unwrap().into()); }}
