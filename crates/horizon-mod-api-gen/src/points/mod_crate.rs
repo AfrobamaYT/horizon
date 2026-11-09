@@ -164,7 +164,7 @@ fn listed<'a>(files: &'a [File], krate: &str, wire: &WireTypes) -> Result<Vec<Li
         files
             .iter()
             .map(|file| (file.module.as_str(), file.parsed.items.as_slice())),
-    )
+    )?
     .into_values()
     .collect();
     let mut out = Vec::new();

@@ -97,6 +97,10 @@ fn copy_files(to: &Path, files: impl IntoIterator<Item = (String, Vec<u8>)>) -> 
 }
 
 /// Check target-crossing edges before the native-only dependency resolver.
+///
+/// A package that can't be read stops the scan, naming the mod: every enabled native mod compiles
+/// into one game binary, and every other native refusal stops that build the same way. Leaving
+/// one mod out would quietly build a different set than the player enabled.
 pub(super) fn checked_bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
     let paths = horizon_mod_package::find(folder)
         .into_iter()
