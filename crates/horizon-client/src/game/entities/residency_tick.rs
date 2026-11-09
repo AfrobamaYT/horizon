@@ -30,7 +30,6 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::game::native_entity_refs::tests::with_client_game;
     use horizon_client::mobs::Mob;
     use horizon_core::geometry::Vec3;
