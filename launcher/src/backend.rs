@@ -1357,13 +1357,6 @@ pub fn resources(tag: &str) -> PathBuf {
     resources_at(&version_dir(base.as_deref().unwrap_or(tag)))
 }
 
-/// Installed native clients retain their base's prepared data even when not selected.
-pub(crate) fn resource_dependents(tag: &str) -> bool {
-    installed()
-        .iter()
-        .any(|version| crate::native_mods::about(version).is_some_and(|about| about.base == tag))
-}
-
 fn resources_at(dir: &Path) -> PathBuf {
     dir.join(".local/horizon-client").join(game_version_at(dir))
 }
@@ -3104,7 +3097,7 @@ pub fn prune_old_versions() -> Vec<String> {
         &protected,
         auto_installed,
     ) {
-        if resource_dependents(&tag) {
+        if crate::native_mods::resource_dependents(&tag) {
             eprintln!("Keeping old version {tag}: a native build uses its resources.");
             continue;
         }
@@ -4529,12 +4522,6 @@ impl Settings {
         self.save()
     }
 
-    /// Revoke consent before attempting to disable installed native packages.
-    pub fn revoke_native_mods(&mut self) -> Result<(), String> {
-        self.native_mods_allowed_at = None;
-        self.save()
-    }
-
     pub fn load() -> Self {
         Self::parse(&fs::read_to_string(data_dir().join("settings.json")).unwrap_or_default())
     }
@@ -4993,14 +4980,14 @@ pub fn {f}("
             "base": base, "horizon": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "target": "client"
         }).to_string()).unwrap();
         assert_eq!(resources(&native), resources(&base));
-        assert!(resource_dependents(&base));
+        assert!(crate::native_mods::resource_dependents(&base));
         assert!(remove_version(&base).is_err());
         assert!(base_dir.join(COMPLETE).exists());
         fs::remove_dir_all(&base_dir).unwrap();
         let error = need_prepared(&native).unwrap_err();
         assert!(error.contains(&base), "{error}");
         fs::remove_dir_all(&native_dir).unwrap();
-        assert!(!resource_dependents(&base));
+        assert!(!crate::native_mods::resource_dependents(&base));
     }
 
     #[test]

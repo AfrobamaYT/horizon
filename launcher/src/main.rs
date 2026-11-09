@@ -1298,16 +1298,7 @@ impl Launcher {
                     }
                 }
                 Msg::DiskUse(disk) => self.disk = disk,
-                Msg::Storage(result) => {
-                    self.storage_pending = false;
-                    match result {
-                        Ok(report) => {
-                            self.storage_report = Some(*report);
-                            self.storage_error = None;
-                        }
-                        Err(error) => self.storage_error = Some(error),
-                    }
-                }
+                Msg::Storage(result) => self.storage_arrived(result),
                 Msg::Imported(result) => {
                     self.importing_build = false;
                     self.installed = backend::installed();

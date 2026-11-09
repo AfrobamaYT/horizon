@@ -27,6 +27,18 @@ impl Launcher {
         });
     }
 
+    /// A finished measurement or Clear from the worker.
+    pub(super) fn storage_arrived(&mut self, result: Result<Box<storage::Report>, String>) {
+        self.storage_pending = false;
+        match result {
+            Ok(report) => {
+                self.storage_report = Some(*report);
+                self.storage_error = None;
+            }
+            Err(error) => self.storage_error = Some(error),
+        }
+    }
+
     pub(super) fn glass_storage(&mut self, cx: &mut Context<Self>) -> Div {
         let t = self.theme;
         let blocked = self.storage_pending
