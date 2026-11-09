@@ -99,7 +99,7 @@ LivingEntity.wouldNotSuffocateAtTargetPose	port	crates/horizon-client/src/pose.r
 LivingEntity.canUsePortal	port	crates/horizon-client/src/game/blocks/nether_portal.rs::Game::mob_can_use_portal	gap: minor: a sleeping mob is not excluded
 LivingEntity.setPosToBed	port	crates/horizon-client/src/mobs/villager.rs::start_sleeping	x and z at the bed's centre, y 0.6875 above its base (sleep height plus 0.125)
 LivingEntity.entityEventForEquipmentBreak	inline	crates/horizon-client/src/mobs/item_break.rs::equipment_break_event	the slot-to-event table itself; a mob's worn armour that breaks broadcasts 49 to 52 and 65 (Game::hurt_mob_armor, #5317) and a player's hands, armour and shield reach every client through onEquippedItemBroken (#5392)
-LivingEntity.onEquippedItemBroken	inline	crates/horizon-client/src/game.rs::Game::damage_held	gap: minor: the stack is cleared and modifiers rebuilt, but no break event is broadcast
+LivingEntity.onEquippedItemBroken	inline	crates/horizon-client/src/game/item_durability.rs::Game::damage_held	gap: minor: the stack is cleared and modifiers rebuilt, but no break event is broadcast
 LivingEntity.stopLocationBasedEffects	inline	crates/horizon-client/src/game.rs::Game::apply_equipment	all applied modifiers are dropped and re-added from what is worn
 LivingEntity.getEquipmentSlotForItem	inline	crates/horizon-client/src/game/mobs/mob_gear.rs::Game::equip_from_table	resolveSlot: the item's equip_slot, else the main hand
 LivingEntity.createEquipmentSlotAccess	inline	crates/horizon-client/src/game/administration/commands/items.rs::Game::slots_named	/item slot names such as armor.head and weapon.mainhand

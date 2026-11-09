@@ -3202,13 +3202,7 @@ impl Game<'_> {
                 MobEvent::EnterHive { mob, hive } => self.bee_enter_hive(mob, hive),
                 MobEvent::ParrotToShoulder { mob } => self.parrot_to_shoulder(mob),
                 MobEvent::Infested { at, velocities } => self.spawn_infested(at, velocities),
-                MobEvent::Gift { target, item } => {
-                    if let Some(m) = self.mobs.iter_mut().find(|m| m.id == target)
-                        && m.saddle_item().is_none()
-                    {
-                        m.set_saddle(Some(ItemStack::new(item, 1)));
-                    }
-                }
+                MobEvent::Gift { target, item } => self.receive_gift(target, item),
                 MobEvent::HurtSelf { mob, kind, amount } => {
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
                         m.damage(
@@ -5602,7 +5596,12 @@ impl Game<'_> {
         }
     }
     /// Dispatch with the projectile's actual owner context, including a guest shooter.
-    fn projectile_shoot_event(&mut self, owner: Option<Who>, guest: Option<u32>, at: [f64; 3]) {
+    pub(super) fn projectile_shoot_event(
+        &mut self,
+        owner: Option<Who>,
+        guest: Option<u32>,
+        at: [f64; 3],
+    ) {
         if let Some(conn) = guest.filter(|conn| self.lan_acting != Some(*conn)) {
             let dispatched = self
                 .as_guest(conn, |g| {
@@ -6792,7 +6791,13 @@ impl Game<'_> {
         {
             let item = self.held().map(|h| h.item.to_string()).unwrap_or_default();
             let used = self.held().cloned();
-            if self.interact_leash(index, &item) {
+            if let Some(context) = self.interact_leash_with_item_context(index, &item) {
+                let used = match context {
+                    super::leads::LeashInteraction::WithItem => used,
+                    super::leads::LeashInteraction::WithoutItem => {
+                        Some(ItemStack::new("minecraft:air", 0))
+                    }
+                };
                 if let Some(stack) = &used {
                     let target = self.mob_entity(&self.mobs[index]);
                     self.trigger_item_entity(
@@ -13560,3 +13565,11 @@ mod h169_glide_travel_tests {
         });
     }
 }
+
+#[cfg(test)]
+#[path = "../../entities/leash_without_item_criterion_tests.rs"]
+mod leash_without_item_criterion_tests;
+
+#[cfg(test)]
+#[path = "../../entities/tests/leash_without_item_postbaseline_controls.rs"]
+mod leash_without_item_postbaseline_controls;

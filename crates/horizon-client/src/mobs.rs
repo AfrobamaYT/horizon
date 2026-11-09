@@ -4950,7 +4950,13 @@ impl Mob {
         ) {
             through = damage - taken;
         }
-        self.absorption = (self.absorption - (damage - through)).max(0.0);
+        let left = self.absorption - (damage - through);
+        // LivingEntity.setAbsorptionAmount clamps the remainder to the attribute maximum.
+        self.absorption = if left < 0.0 {
+            0.0
+        } else {
+            left.min(armor::max_absorption(self))
+        };
         through
     }
     /// `LivingEntity.checkTotemDeathProtection`: the first hand with a

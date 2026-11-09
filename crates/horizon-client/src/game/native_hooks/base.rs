@@ -5171,7 +5171,7 @@ impl Game<'_> {
     }
     /// Transfer a viewer recipe without learning it.
     pub(in crate::game) fn transfer_recipe(&mut self, book_id: i32) {
-        self.transfer_viewer_recipe(book_id);
+        self.transfer_viewer_recipe(book_id, false);
     }
     /// Creative mode only: gives the player `count` of `item`
     /// (`minecraft:diamond`) as taking it from the creative inventory does

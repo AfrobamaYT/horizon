@@ -1141,7 +1141,7 @@
   "{count} servers in {name}": "Серверов в {name}: {count}",
   "{count} worlds to pick from": "{count} миров на выбор",
   "{days} days ago": "{days} дн. назад",
-  "{day}, {time} UTC": "{day}, {time} UTC",
+  "{day}, {time} UTC": "{day}, {time} по UTC",
   "{error} Run `cargo horizon-mod update --horizon {commit}` in each mod's folder to pin it to this game, then build again.": "{error} Run `cargo horizon-mod update --horizon {commit}` in each mod's folder to pin it to this game, then build again.",
   "{file} holds no {program}.": "В {file} нет {program}.",
   "{file} is not a Horizon game for this computer.": "{file} — не игра Horizon для этого компьютера.",
