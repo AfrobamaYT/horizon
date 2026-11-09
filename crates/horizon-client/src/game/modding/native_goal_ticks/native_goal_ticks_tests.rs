@@ -1,6 +1,8 @@
 //! Tests for `native_goal_ticks` (arismoko/horizon#1077): registration order,
 //! priorities and interruption, per-mob state and random streams, the read
 //! view, `set_target`, and the no-mod-goals fast path.
+//!
+//! The `zombie` fixture is shared with the behavior tests (#824).
 use super::super::creatures;
 use super::super::native_entity_refs::tests::with_game;
 use horizon_client::mobs::{self, Mob, goals::Cx};
@@ -112,7 +114,7 @@ impl mobs::goals::Goal for Vanilla {
 }
 
 /// A zombie in the game's list, as `Mob::new` builds it.
-fn zombie(game: &mut super::super::Game<'_>, id: u32, at: [f64; 3]) {
+pub(in crate::game) fn zombie(game: &mut super::super::Game<'_>, id: u32, at: [f64; 3]) {
     let kind = game
         .res
         .mob_types()
@@ -1012,14 +1014,17 @@ impl Hooks for GoalsAndFinalize {
 #[test]
 #[ignore = "needs prepared resources"]
 fn a_finalize_spawn_listener_keeps_the_mod_goals() {
+    // The mods install before the game opens: a game that opens resolves
+    // the parts of whatever is installed, and the worker block metadata
+    // with them (installing inside the game leaves it unpublished).
+    let entries = vec![ModEntry::new("finalize-goals", Box::new(GoalsAndFinalize))];
+    mod_api::__private::install(entries.into());
+    crate::game::api_values::install_parts(&[ModEntry::new(
+        "finalize-goals",
+        Box::new(GoalsAndFinalize),
+    )])
+    .unwrap();
     with_game(|game| {
-        let entries = vec![ModEntry::new("finalize-goals", Box::new(GoalsAndFinalize))];
-        mod_api::__private::install(entries.into());
-        crate::game::api_values::install_parts(&[ModEntry::new(
-            "finalize-goals",
-            Box::new(GoalsAndFinalize),
-        )])
-        .unwrap();
         game.resolve_parts().unwrap();
         let kind = game
             .res
