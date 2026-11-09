@@ -1231,5 +1231,7 @@
   "Unavailable on this platform": "Unavailable on this platform",
   "Horizon will download the Rust compiler ({size}) to build them. You can turn this off in Settings, Storage.": "Horizon will download the Rust compiler ({size}) to build them. You can turn this off in Settings, Storage.",
   "NATIVE": "NATIVE",
-  "{mod} is a native mod. Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.": "{mod} is a native mod. Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors."
+  "{mod} is a native mod. Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.": "{mod} is a native mod. Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.",
+  "Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.": "Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.",
+  "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here."
 }
