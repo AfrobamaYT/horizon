@@ -1053,6 +1053,7 @@ one of these moments has to move that logic into a client native mod.
 | `register_item_tint_sources.rs` | `register_item_tint_sources` |
 | `register_range_select_item_model_property.rs` | `register_range_select_item_model_property` |
 | `register_runtime_sprites.rs` | `register_runtime_sprites` |
+| `register_texture_atlases.rs` | `register_texture_atlases` |
 | `render_arm.rs` | `render_arm` |
 | `render_frame_post.rs` | `render_frame_post` |
 | `render_frame_pre.rs` | `render_frame_pre` |
