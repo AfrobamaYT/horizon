@@ -3743,7 +3743,7 @@ pub fn item_frame_to_nbt(f: &ItemFrame, uuid: [i32; 4], raw: Option<&Tag>) -> Ta
 }
 /// `ItemFrame.readAdditionalSaveData`: an absent Facing defaults to Direction.DOWN.
 pub fn item_frame_from_nbt(tag: &Tag, id: u32) -> Option<ItemFrame> {
-    let pos = attached_block_pos(tag)?;
+    let pos = hanging::attached_block_pos(tag)?;
     Some(ItemFrame {
         attachment_lifetime: Default::default(),
         join: Default::default(),

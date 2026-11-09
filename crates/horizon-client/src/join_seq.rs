@@ -929,22 +929,7 @@ impl<T: Joined, const DIRECT: bool> JoinList<T, DIRECT> {
             self.push(entity);
         }
     }
-    /// An entity that never left its level keeps its place in
-    /// `EntityTickList`: one a pass took out and puts back (an arrow bouncing
-    /// off) goes back before the first entity that joined after it. One that
-    /// has not joined yet is appended and numbered, as by `push`.
-    pub fn put_back(&mut self, entity: T) {
-        let seq = entity.join_seq();
-        let at = if seq.is_joined() {
-            self.list
-                .iter()
-                .position(|q| q.join_seq() > seq)
-                .unwrap_or(self.list.len())
-        } else {
-            self.list.len()
-        };
-        self.insert(at, entity);
-    }
+
 }
 
 impl<T: Joined, const DIRECT: bool> FromIterator<T> for JoinList<T, DIRECT> {
@@ -1064,9 +1049,9 @@ mod tests {
         }
         let first = list.remove(0);
         let first_seq = first.join;
-        list.put_back(first);
+        list.put_back(0, first);
         assert_eq!(list[0].join, first_seq, "back before the later joins");
-        list.put_back(E {
+        list.push(E {
             join: JoinSeq::UNJOINED,
         });
         let seqs: Vec<_> = list.iter().map(|e| e.join).collect();

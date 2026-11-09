@@ -1,3 +1,4 @@
+// game-module-visibility: pub(crate)
 //! Where the game hands the player models to crates above the engine (`horizon_hooks::Hooks`'s
 //! `frame`, `tick`, `name_decoration`, `player_mark`, `camera`; spec #14091): only a window's
 //! game calls them, never the integrated server's thread or a dedicated server. With no hook

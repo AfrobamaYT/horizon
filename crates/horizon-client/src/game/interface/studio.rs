@@ -589,7 +589,10 @@ impl Game<'_> {
             && button == winit::event::MouseButton::Right
         {
             if let Some(renderer) = &self.renderer {
-                let batch = super::HudBatch::new([renderer.config.width, renderer.config.height]);
+                let batch = super::HudBatch::new(
+                    [renderer.config.width, renderer.config.height],
+                    self.settings.gui_scale_inputs(),
+                );
                 if self.studio.timeline.visible
                     && self.cursor.1 >= batch.height - self.studio.timeline.height()
                 {
@@ -631,7 +634,7 @@ impl Game<'_> {
                 .as_ref()
                 .map(|renderer| [renderer.config.width, renderer.config.height])
                 .unwrap_or([1, 1]);
-            let batch = super::HudBatch::new(size);
+            let batch = super::HudBatch::new(size, self.settings.gui_scale_inputs());
             let had_open_menu = self.studio.topbar.open_menu.is_some();
             let topbar_action =
                 self.studio

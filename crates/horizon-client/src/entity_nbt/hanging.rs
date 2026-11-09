@@ -26,7 +26,7 @@ pub fn painting_to_nbt(p: &Painting, uuid: [i32; 4], raw: Option<&Tag>) -> Tag {
 /// `BlockAttachedEntity.readAdditionalSaveData`: `block_pos` when saved; a
 /// summoned one has none, and `setPos` puts its block at the block holding
 /// the summon position.
-fn attached_block_pos(tag: &Tag) -> Option<[i32; 3]> {
+pub(super) fn attached_block_pos(tag: &Tag) -> Option<[i32; 3]> {
     match tag.get("block_pos") {
         Some(Tag::IntArray(v)) if v.len() == 3 => Some([v[0], v[1], v[2]]),
         _ => {
@@ -79,7 +79,7 @@ pub fn item_frame_to_nbt(f: &ItemFrame, uuid: [i32; 4], raw: Option<&Tag>) -> Ta
     put(&mut tag, "Invisible", Tag::Byte(i8::from(f.invisible)));
     put(&mut tag, "Fixed", Tag::Byte(i8::from(f.fixed)));
     if let Tag::Compound(map) = &mut tag {
-        map.remove(&horizon_world::nbt::JavaString::from("Item"));
+        map.remove(&horizon_core::nbt::JavaString::from("Item"));
     }
     if let Some(item) = &f.item {
         put(&mut tag, "Item", item_to_nbt(item));
@@ -90,6 +90,8 @@ pub fn item_frame_to_nbt(f: &ItemFrame, uuid: [i32; 4], raw: Option<&Tag>) -> Ta
 pub fn item_frame_from_nbt(tag: &Tag, id: u32) -> Option<ItemFrame> {
     let pos = attached_block_pos(tag)?;
     Some(ItemFrame {
+        attachment_lifetime: Default::default(),
+        join: Default::default(),
         id,
         pos,
         facing: number(tag.get("Facing")).unwrap_or(0).clamp(0, 5) as u8,

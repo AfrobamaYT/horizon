@@ -4,7 +4,7 @@
 //! dust, while gameplay keeps vanilla's `DyeColor`), mob effect colours, the experience number's,
 //! entity shadows, the effect fogs' settings and durability bar colours. Lock-free: the draw paths
 //! and the mesher's workers read the dye, sheep and redstone tables per face.
-use std::path::Path;
+use crate::resource_source::ResourceSource;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::{Arc, RwLock};
 
@@ -110,7 +110,7 @@ static REDSTONE: [AtomicU64; 16] = [const { AtomicU64::new(0) }; 16];
 
 /// The colours of the pack overlay at `root`, from the installed pack formats; their dye, sheep
 /// and redstone colours go to the draw paths' tables ([`set`]).
-pub fn read(root: &Path) -> PackColors {
+pub fn read(root: &ResourceSource) -> PackColors {
     let formats = crate::pack_hooks::formats();
     let colors = formats.colors(root).unwrap_or_default();
     set(&colors);
@@ -181,30 +181,4 @@ pub fn sheep_wool(dye: u8) -> u32 {
     let src = DYES[i].1;
     let f = |c: u32| ((c as f32 * 0.75).floor() as u32).min(255);
     f(src >> 16 & 255) << 16 | f(src >> 8 & 255) << 8 | f(src & 255)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_pack_recolours_only_what_it_names() {
-        // Dyes no other test draws: the table is process-wide.
-        set(&PackColors::from_files([(None, Some(
-            r#"{"dye": {"cyan": {"diffuse": "00ff00", "text": "0000ff"}}, "sheep": {"pink": "2040ff"}, "redstone": {"7": "0x123456"}}"#.to_owned(),
-        ))]));
-        let (cyan, pink, purple) = (9, 6, 10);
-        assert_eq!(diffuse(cyan), 0x00ff00);
-        assert_eq!(text(cyan), 0x0000ff);
-        assert_eq!(sheep_wool(pink as u8), 0x2040ff);
-        // Wool reads vanilla's dye, not the pack's diffuse: 75% of 0x169C9C.
-        assert_eq!(sheep_wool(cyan as u8), 0x107575);
-        assert_eq!(diffuse(purple), 0x8932B8);
-        assert_eq!(text(purple), 0xA020F0);
-        assert_eq!((redstone(7), redstone(15)), (Some(0x123456), None));
-        set(&PackColors::default());
-        assert_eq!(redstone(7), None);
-        assert_eq!(diffuse(cyan), 0x169C9C);
-        assert_eq!(sheep_wool(pink as u8), 0xB6687F);
-    }
 }

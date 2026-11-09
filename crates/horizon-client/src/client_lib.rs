@@ -23,7 +23,7 @@ pub use horizon_client_render::{
     menu_style, mesher, minimap, mipmap, mod_browser, mod_chunk_tickets, mod_list, model_library,
     models, mods_screen, monitor, multiline_edit, native_emissive, options_file, options_fixes,
     options_ui, overlay, pack_browser, pack_formats, pack_hooks, pack_palette, pack_screen, packs,
-    pad_cursor, pad_glyph, par, particles, poi_sections, polytone_colors, polytone_creative_tabs,
+    pad_cursor, pad_glyph, par, particles, poi_sections, polytone_creative_tabs,
     polytone_post, post_chain, potent_sulfur, preedit, providers, pvp, pvp_hud, random_source,
     resource_source, screen_draw, screen_effects, sculk, section_mask, server_terrain, settings,
     shader_options, shader_pack_list, signs, skins, social, sound_engine, sound_events,
@@ -61,8 +61,6 @@ pub mod debug_overlay;
 pub mod debugworld;
 pub mod dialog;
 pub mod dialog_screen;
-#[cfg(feature = "discord")]
-pub mod discord_presence;
 pub mod enchantment_levels;
 pub mod end_crystal;
 pub mod end_gateway;
@@ -75,7 +73,6 @@ pub mod fire_render;
 pub mod first_person;
 pub mod flatgen;
 pub mod fluid_tooltip;
-pub mod friends_screen;
 pub mod furnace;
 pub mod game_mode_switcher;
 pub mod game_rules_screen;

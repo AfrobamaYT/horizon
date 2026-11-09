@@ -1,4 +1,6 @@
 //! Startup shared by the gameplay library and its executable.
+#[path = "horizon_look.rs"]
+mod horizon_look;
 use crate::{crash, game, logging};
 use horizon_mod_package::selection::{Argument, LaunchArguments};
 use mod_api::__private::game::*;
@@ -76,7 +78,7 @@ pub fn main_with(
         }
     };
     horizon_threads::configure_allocator();
-    crate::horizon_look::give();
+    horizon_look::give();
     // OptiFine's and Polytone's pack formats (platform, docs/layers.md), before any pack loads.
     horizon_client::pack_formats::install();
     // horizon-extras (docs/forking.md): without the feature, no Horizon Settings or Mods page.

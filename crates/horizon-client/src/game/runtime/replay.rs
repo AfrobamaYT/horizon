@@ -20,7 +20,7 @@ pub(super) struct Replay {
     /// The packet replay playing, if any.
     pub(super) driver: Option<ReplayDriver>,
     /// Camera perspective to restore after leaving replay playback.
-    pub(super) previous_camera_type: Option<super::perspective::CameraType>,
+    pub(super) previous_camera_type: Option<horizon_client::camera::CameraType>,
     /// Replay opened from the title screen owns the synthetic remote session.
     pub(super) standalone: bool,
     pub(super) last_tick: Option<std::time::Instant>,
@@ -670,7 +670,7 @@ impl Game<'_> {
             self.replay.standalone = standalone;
         }
         self.replay.driver = Some(driver);
-        self.camera_type = super::perspective::CameraType::FirstPerson;
+        self.camera_type = horizon_client::camera::CameraType::FirstPerson;
         self.title = None;
         self.screen = Screen::Playing;
         self.capture(false);
@@ -721,7 +721,7 @@ impl Game<'_> {
             self.reset_studio_hand_state();
             // A title-screen replay has no previous world perspective to
             // restore. Start the next world in first person with visible hands.
-            self.camera_type = super::perspective::CameraType::FirstPerson;
+            self.camera_type = horizon_client::camera::CameraType::FirstPerson;
             if let Some(title) = self.title.as_mut() {
                 title.mode = horizon_client::title::Mode::Main;
             }

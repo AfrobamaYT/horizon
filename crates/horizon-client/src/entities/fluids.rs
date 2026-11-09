@@ -35,6 +35,7 @@ struct EntityFluidWorld<'a> {
 /// block, the water's first (its first query fixes the shared cached shape);
 /// either one hitting ends the ray.
 pub fn fall_reset_hit(
+    context: &LoopContext,
     world: &World,
     fluids: &FluidResources,
     tagged: impl Fn(BlockPos) -> bool,
@@ -43,7 +44,7 @@ pub fn fall_reset_hit(
 ) -> bool {
     let to = from.add_vector(moved.normalize().scale(moved.length().min(8.0)));
     let hit = horizon_core::geometry::traverse_blocks(from, to, 1_000_000, |p| {
-        let water = water_clip(world, fluids, from, to, p);
+        let water = water_clip(context, world, fluids, from, to, p);
         let reset = tagged(p)
             && horizon_core::geometry::VoxelShape::block()
                 .clip(from, to, p)
