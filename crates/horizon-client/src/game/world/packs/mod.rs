@@ -596,8 +596,8 @@ impl Game<'_> {
             &mut self.native_shaders.picked,
         ));
         self.ui.chat.rescale(&self.gui.atlas);
-        // The creative screen survives the reload; item names may not.
-        self.creative_screen.forget_items();
+        // The screen survives reload, but names and mod-collected contents may change.
+        self.creative_screen.invalidate_build();
         super::client_reload::apply_client_reload(&self.mod_phase, client_applies);
         self.install_loop_context(loop_context);
         self.texture_atlases_stitched();
