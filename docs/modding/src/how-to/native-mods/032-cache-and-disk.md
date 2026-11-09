@@ -23,6 +23,12 @@ or displays a build duration. `native/build.log` retains Cargo's diagnostic outp
 Disk use varies with the platform, profile and set of mods. Run `horizon-launcher storage` to inspect the actual
 cache rather than estimating its size from another computer's build.
 
-The native builds an instance plays are kept, and the three newest no instance plays (`native_mods::prune`, by when
-each was built or last used): switching a mod off and on again plays the kept build again without compiling.
-`native/target/` stays for the next one.
+Instance references and newest-build retention still select which builds could be disposable, but do not prove
+that no game can start using them. While launch routes remain uninstrumented, manual game-cache cleanup,
+installed-version removal and automatic runtime eviction retain those files, even after a process scan reports no
+game. Rust/Cargo/temp build-tool caches remain clearable with their existing Cargo locks. `native/target/` stays
+for the next build rather than being evicted without exclusion.
+
+Private launch records and raw stdout/stderr capture files are collected as one group only after every protocol
+owner exits, under an exclusive namespace gate. Malformed records and unknown files remain untouched. The
+permanent gate is never deleted; recognized empty registry lock files are collected at the 4,096-entry threshold.
