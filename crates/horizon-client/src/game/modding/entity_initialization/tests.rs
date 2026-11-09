@@ -379,3 +379,39 @@ fn a_loaded_entity_reads_its_saved_attachments_over_the_listeners_and_is_named_b
         })
     });
 }
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn mob_constructor_first_store_binds_only_the_resident_lifetime() {
+    use mod_api::AttachmentQueries;
+    observe(|_| {
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.native_level_opened(Dim::Overworld);
+            let id = game
+                .spawn_mob_spawned(
+                    "cow",
+                    [1.0, 70.0, 3.0],
+                    crate::game::creatures::SpawnSite::Plain,
+                )
+                .unwrap();
+            assert!(
+                game.mobs
+                    .iter()
+                    .find(|mob| mob.id == id)
+                    .unwrap()
+                    .attachment_lifetime
+                    .is_bound()
+            );
+            let batch = game.query(&VALUE).unwrap();
+            let rows: Vec<_> = batch.iter().collect();
+            assert_eq!(rows.len(), 1);
+            let row = rows[0].as_ref().unwrap();
+            assert_eq!(row.value, &41);
+            assert_eq!(
+                row.holder,
+                mod_api::AttachmentHolder::Entity(game.entity(id).unwrap())
+            );
+        });
+    });
+}
