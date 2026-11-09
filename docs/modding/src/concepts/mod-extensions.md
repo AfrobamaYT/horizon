@@ -361,12 +361,17 @@ Native and wasm mods can't call each other's functions: they live in different a
   - `#[inline(always)]`;
   - parameters named `cancel` or `result`.
 
-  As with the engine's game module, the whole crate is covered, not an opt-in list.
+  As with the engine's game module, the whole crate is covered, not an opt-in list. "Function" means what the engine's staging walk means (`file_functions` in `horizon-mod-api-gen/src/points.rs`):
+  - free functions;
+  - methods of inherent `impl` blocks on a plain path type;
+  - functions in inline modules.
+
+  **Trait impl methods are not eligible**, nor are impls on a qualified type (`<T as Trait>::Assoc`), or modules and impls under `cfg`. A trait method's behaviour is reached through the library's own call sites, which are points, and through the trait itself, which is the library's extension point. This matches the engine, so the pass and the catalog keep one rule.
 - **Opting out.** `#[mod_api::no_point]` on a function keeps the build tool from giving it a point. An addon that declares a listener there is refused at load: "chemlib::fill_tank has no point (opted out)". `eligible` treats the attribute as one more exclusion, so the pass and the generator still agree.
 - **Declaration.** The same declarations as engine points: `[[inject]]`, or code registration, naming the function's path within its crate (`chemlib::tanks::fill_tank`). There is the same `kind` (head, return), the same `priority`, and the same order: priority descending, then dependency order, then inject id.
 - **Levels.**
   - **`access = "api"`.** The listener gets the side's host and a record holding a copy of every parameter. `&mut` parameters are copied in and out. The record has `cancel` and `result` where the contract has them. Every parameter type needs `#[derive(Wire)]`, which a mod's own types now have through section 0. A parameter without it refuses `api` listeners at registration, naming the parameter and type, exactly as #2242 does for engine types. With the derive, `api` listeners work across native and wasm, through the game.
-  - **`access = "internals"`.** The listener gets the receiver and every parameter by reference, in its own type. This works only within one target: the same binary on native, the same dependency group on wasm, where the library's types are ordinary Rust. It is refused at load when the listener's mod is on the other target, with "internals access to chemlib needs the same target". On engine points `internals` is native-only, because wasm can't reach the game's address space. A wasm addon of a wasm library *can* reach the library's, since they share one group. Owner's comment on #2339.
+  - **`access = "internals"`.** The listener gets the receiver and every parameter by reference, in its own type. This works only within one target: the same binary on native, the same dependency group on wasm, where the library's types are ordinary Rust. It is refused at load when the listener's mod is on the other target, with "internals access to chemlib needs the same target". Engine `internals` is native-only because a wasm mod can't reach the game's memory; a wasm library and its wasm addons in one dependency group share memory and no engine type crosses, so the same principle allows `internals` there and refuses it across targets (owner, on #2339).
 - **Generics.** A generic function gets the `api` level only, with no raw form, as on the engine. The record is per point, not per instantiation. A parameter whose type is a type parameter needs `T: Wire` at that instantiation, or the listener is refused.
 - **Signature check.** Each mod point carries a hash, recorded in the library's per-mod `points.json` inside its `.hmod`. Listeners pin it in their `[[inject]] hash`, written by `cargo horizon-mod inject add`. The hash is what engine internals use (`internals::signature_hash` in `horizon-mod-api-gen`: the first 8 bytes of SHA-256, as hex) over:
   1. the canonical path;
