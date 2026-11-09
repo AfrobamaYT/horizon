@@ -827,7 +827,7 @@ mod tests {
             }
             // Capacity counts real player bodies, not an unbound `riding` pointer.
             let player = super::super::native_player_death::tests::add_guest(game);
-            let player_id = player.entity().id();
+            let player_id = player.entity().id() as i32;
             game.lan
                 .as_mut()
                 .unwrap()
