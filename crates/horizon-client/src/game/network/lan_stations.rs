@@ -23,7 +23,7 @@ pub(super) struct GuestStation {
     state: i32,
     pub(super) kind: StationKind,
     pub(super) pos: [i32; 3],
-    menu: Box<Menu>,
+    pub(super) menu: Box<Menu>,
     /// The data slots the client was last sent. `None` is not sent yet,
     /// which is not a cost: an anvil's signed cost may be `i32::MIN`.
     sent_data: Vec<Option<i32>>,
@@ -529,7 +529,7 @@ impl Game<'_> {
             {
                 for (row, original) in drawn.iter().enumerate() {
                     if let Some(original_level) = *original {
-                        let offer = mod_api::stations::EnchantmentRow {
+                        let offer = mod_api::item::stations::EnchantmentRow {
                             player: guest_uuid,
                             player_entity_id: guest_entity_id,
                             row: row as i32,
@@ -623,7 +623,7 @@ impl Game<'_> {
                 seed,
                 button,
                 gs.menu.data[button],
-                &item.item,
+                &item,
             )
         });
         // Player.onEnchantmentPerformed, and EnchantmentMenu's awardStat(ENCHANT_ITEM).
@@ -734,7 +734,7 @@ impl Game<'_> {
                 // other half). Single player's own player is a guest of
                 // its own host too (`lan.rs:165`), so this one path covers
                 // both single player and a LAN guest.
-                let context = mod_api::menu::MenuButtonContext {
+                let context = mod_api::item::menu::MenuButtonContext {
                     player: uuid,
                     player_entity_id: entity_id,
                     pos: [pos.0, pos.1, pos.2],

@@ -76,6 +76,13 @@ impl Game<'_> {
                 .then(|| (self.mobs.len(), BoxReach::of(&self.mobs))),
         );
     }
+    /// A vehicle picked a mob up: a shulker turns its lid up (`Shulker.startRiding`), which
+    /// changes its box, so the next query works the [`BoxReach`] out again.
+    pub(super) fn vehicle_picked_up(&self) {
+        if let Some((_, reach)) = self.vehicle_mob_reach.get() {
+            self.vehicle_mob_reach.set(Some((usize::MAX, reach)));
+        }
+    }
     /// The mobs' [`BoxReach`] while vehicles tick, none otherwise.
     pub(super) fn vehicle_mob_reach(&self) -> Option<BoxReach> {
         let (count, reach) = self.vehicle_mob_reach.get()?;
@@ -136,7 +143,7 @@ impl Game<'_> {
     }
     /// `getRootVehicle` of mob `j`: the mob or boat at the bottom of what it
     /// rides, None when it rides nothing.
-    fn mob_root_vehicle(&self, mut j: usize) -> Option<u32> {
+    pub(super) fn mob_root_vehicle(&self, mut j: usize) -> Option<u32> {
         let mut root = None;
         for _ in 0..8 {
             let Some(v) = self.mobs[j].extra.mount else {
@@ -317,6 +324,7 @@ impl Game<'_> {
                         && self.native_mob_may_ride(mob, id, true)
                         && let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob)
                     {
+                        horizon_client::mobs::shulker::on_start_riding(m);
                         m.extra.mount = Some(id);
                         m.extra.passenger = true;
                         m.ai.nav.stop();
@@ -325,6 +333,7 @@ impl Game<'_> {
                         // Mob.startRiding drops its lead.
                         self.break_leash(mob, true, false);
                         self.note_started_riding(id);
+                        self.vehicle_picked_up();
                     }
                     continue;
                 }

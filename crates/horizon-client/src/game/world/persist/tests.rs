@@ -3,6 +3,151 @@ use super::*;
 
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn neutral_mob_load_notifies_target_even_without_saved_anger() {
+    use std::sync::{Arc, Mutex};
+
+    struct Observe(Arc<Mutex<Vec<(u32, bool)>>>);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Observe {
+        fn living_change_target(
+            &self,
+            host: &dyn mod_api::Host,
+            event: &mut mod_api::LivingChangeTargetEvent<'_>,
+        ) -> mod_api::Flow {
+            assert!(event.mob.living().health(host).is_some());
+            self.0
+                .lock()
+                .unwrap()
+                .push((event.mob.entity().id(), event.original_target.is_none()));
+            mod_api::Flow::Continue
+        }
+    }
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let mods = vec![mod_api::ModEntry::new(
+        "observe",
+        Box::new(Observe(observed.clone())),
+    )]
+    .into();
+    mod_api::testing::with_mods(mods, || {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let wolf = game.load_mob(entity("minecraft:wolf"), None).unwrap();
+            let golem = game.load_mob(entity("minecraft:iron_golem"), None).unwrap();
+            game.load_mob(entity("minecraft:pig"), None).unwrap();
+            assert_eq!(*observed.lock().unwrap(), [(wolf, true), (golem, true)]);
+        });
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn neutral_load_restores_only_the_saved_live_target_with_or_without_listeners() {
+    use std::sync::{Arc, Mutex};
+
+    struct Observe(Arc<Mutex<Vec<(u32, Option<u32>)>>>);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Observe {
+        fn living_change_target(
+            &self,
+            _host: &dyn mod_api::Host,
+            event: &mut mod_api::LivingChangeTargetEvent<'_>,
+        ) -> mod_api::Flow {
+            self.0.lock().unwrap().push((
+                event.mob.entity().id(),
+                event.original_target.map(|target| target.entity().id()),
+            ));
+            mod_api::Flow::Continue
+        }
+    }
+
+    fn check(game: &mut Game<'_>, observed: Option<&Mutex<Vec<(u32, Option<u32>)>>>) {
+        let uuid = [274, 0, 0, 1];
+        let entity_at_origin = |kind: &str| {
+            let mut mob = entity(kind);
+            if let Tag::Compound(ref mut tag) = mob {
+                tag.insert(
+                    "Pos".into(),
+                    Tag::List(vec![Tag::Double(0), Tag::Double(0), Tag::Double(0)]),
+                );
+            }
+            mob
+        };
+        let mut zombie = entity_at_origin("minecraft:zombie");
+        if let Tag::Compound(ref mut tag) = zombie {
+            tag.insert("UUID".into(), Tag::IntArray(uuid.to_vec()));
+        }
+        let zombie = game.load_mob(zombie, None).unwrap();
+        let saved_neutral = |kind: &str, target: [i32; 4]| {
+            let mut mob = entity_at_origin(kind);
+            if let Tag::Compound(ref mut tag) = mob {
+                // Vanilla reads the target even when the anger timer expired.
+                tag.insert("angry_at".into(), Tag::IntArray(target.to_vec()));
+                tag.insert("anger_end_time".into(), Tag::Long(-1));
+            }
+            mob
+        };
+        let live = game
+            .load_mob(saved_neutral("minecraft:iron_golem", uuid), None)
+            .unwrap();
+        let absent = game
+            .load_mob(saved_neutral("minecraft:iron_golem", [274, 0, 0, 2]), None)
+            .unwrap();
+        let enderman = game
+            .load_mob(saved_neutral("minecraft:enderman", uuid), None)
+            .unwrap();
+        assert_eq!(
+            game.mobs
+                .iter()
+                .find(|mob| mob.id == live)
+                .unwrap()
+                .ai
+                .target,
+            Some(horizon_client::mobs::Who::Mob(zombie))
+        );
+        assert_eq!(
+            game.mobs
+                .iter()
+                .find(|mob| mob.id == absent)
+                .unwrap()
+                .ai
+                .target,
+            None,
+            "an offline UUID must never become a different player"
+        );
+        let enderman_state = game.mobs.iter().find(|mob| mob.id == enderman).unwrap();
+        assert_eq!(
+            enderman_state.ai.target,
+            Some(horizon_client::mobs::Who::Mob(zombie))
+        );
+        assert!(
+            enderman_state.extra.flag,
+            "Enderman.setTarget must open its mouth"
+        );
+        if let Some(observed) = observed {
+            assert_eq!(
+                *observed.lock().unwrap(),
+                [
+                    (live, Some(zombie)),
+                    (absent, None),
+                    (enderman, Some(zombie))
+                ]
+            );
+        }
+    }
+
+    super::super::native_entity_refs::tests::with_game(|game| check(game, None));
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let mods = vec![mod_api::ModEntry::new(
+        "observe",
+        Box::new(Observe(observed.clone())),
+    )]
+    .into();
+    mod_api::testing::with_mods(mods, || {
+        super::super::native_entity_refs::tests::with_game(|game| check(game, Some(&observed)));
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn resident_other_and_fangs_load_tick_and_reset() {
     super::super::native_entity_refs::tests::with_game(|game| {
         game.others.clear();

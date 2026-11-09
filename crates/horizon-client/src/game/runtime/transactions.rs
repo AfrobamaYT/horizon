@@ -627,8 +627,8 @@ mod tests {
     use mod_api::HostTransaction;
     use mod_api::ServerHost;
     use mod_api::{
-        BlockSide, FLUIDS, FluidStack, ITEMS, ItemResource, NativeAuthority,
-        NativeBlockUpdateFlags, Transaction,
+        Authority, BlockSide, BlockUpdateFlags, FLUIDS, FluidStack, ITEMS, ItemResource,
+        Transaction,
     };
     use std::{sync::Arc, time::Instant};
 
@@ -665,7 +665,7 @@ mod tests {
                 let level = host.level("minecraft:overworld").unwrap();
                 let hand = mod_api::ItemPlace::PlayerHand {
                     player: event.player,
-                    hand: mod_api::first_person::Hand::Main,
+                    hand: mod_api::client::first_person::Hand::Main,
                 };
                 self.seen.lock().unwrap().push((
                     level.block_state(host, [2, 64, 2]),
@@ -1008,6 +1008,190 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn container_limits_preserve_capacity_and_transaction_rollback() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.level("minecraft:overworld").unwrap();
+            for (pos, id) in [
+                ([0, 64, 0], "minecraft:chest"),
+                ([4, 64, 0], "minecraft:jukebox"),
+            ] {
+                let state = game.pack.assets.registry.default_state(id).unwrap();
+                game.level_set_block(level, pos, state, BlockUpdateFlags::NEIGHBORS)
+                    .unwrap();
+            }
+            let mut large = ItemStack::new("minecraft:stick", 1);
+            large.data_mut().set_other(
+                "minecraft:max_stack_size",
+                Some(horizon_core::nbt::Tag::Int(99)),
+            );
+            let large = ItemResource::of(&large.try_into_api().unwrap());
+            let handler = level.capability(game, &ITEMS, [0, 64, 0], None).unwrap();
+            assert_eq!(handler.capacity(game, 0, &large), 99);
+            assert_eq!(game.world.container_stack_limit((0, 64, 0)), None);
+            let stick =
+                ItemResource::of(&ItemStack::new("minecraft:stick", 1).try_into_api().unwrap());
+            let host: &mut dyn ServerHost = game;
+            let handler = level
+                .capability(host, &mod_api::ITEMS, [0, 64, 0], None)
+                .unwrap();
+            let aborted = host.transaction(|host, tx| {
+                assert!(handler.set_max_stack_size(host, tx, 10));
+                assert_eq!(handler.insert(host, tx, 0, &stick, 64), 10);
+                host.transaction(|host, tx| {
+                    assert!(handler.set_max_stack_size(host, tx, 4));
+                    Ok::<_, ()>(())
+                })?;
+                assert_eq!(handler.capacity(host, 0, &stick), 4);
+                Err::<(), ()>(())
+            });
+            assert_eq!(aborted, Err(()));
+            assert_eq!(handler.capacity(host, 0, &stick), 64);
+            assert_eq!(handler.capacity(host, 0, &large), 99);
+            assert_eq!(handler.amount(host, 0), 0);
+            host.transaction(|host, tx| {
+                assert!(handler.set_max_stack_size(host, tx, 10));
+                let _ = host.transaction(|host, tx| {
+                    assert!(handler.set_max_stack_size(host, tx, 4));
+                    Err::<(), ()>(())
+                });
+                assert_eq!(handler.capacity(host, 0, &stick), 10);
+                for invalid in [0, 100, u32::MAX] {
+                    assert!(!handler.set_max_stack_size(host, tx, invalid));
+                    assert_eq!(handler.capacity(host, 0, &stick), 10);
+                }
+                assert!(handler.set_max_stack_size(host, tx, 64));
+                assert_eq!(handler.insert(host, tx, 0, &stick, 20), 20);
+                assert!(handler.set_max_stack_size(host, tx, 10));
+                assert_eq!(handler.amount(host, 0), 20);
+                assert_eq!(handler.insert(host, tx, 0, &stick, 1), 0);
+                assert_eq!(handler.extract(host, tx, 0, &stick, 15), 15);
+                assert_eq!(handler.amount(host, 0), 5);
+                assert_eq!(handler.insert(host, tx, 0, &stick, 64), 5);
+                Err::<(), ()>(())
+            })
+            .unwrap_err();
+
+            let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _: Result<(), ()> = host.transaction(|host, tx| {
+                    assert!(handler.set_max_stack_size(host, tx, 10));
+                    assert_eq!(handler.insert(host, tx, 0, &stick, 64), 10);
+                    panic!("abort container writes");
+                });
+            }));
+            assert!(panic.is_err());
+            assert_eq!(handler.capacity(host, 0, &stick), 64);
+            assert_eq!(handler.capacity(host, 0, &large), 99);
+            assert_eq!(handler.amount(host, 0), 0);
+            host.transaction(|host, tx| {
+                let pearl = ItemResource::of(
+                    &ItemStack::new("minecraft:ender_pearl", 1)
+                        .try_into_api()
+                        .unwrap(),
+                );
+                assert!(handler.set_max_stack_size(host, tx, 32));
+                assert_eq!(handler.insert(host, tx, 0, &pearl, 64), 16);
+                let disc = level.capability(host, &ITEMS, [4, 64, 0], None).unwrap();
+                assert!(disc.set_max_stack_size(host, tx, 10));
+                let record = ItemResource::of(
+                    &ItemStack::new("minecraft:music_disc_13", 1)
+                        .try_into_api()
+                        .unwrap(),
+                );
+                assert_eq!(disc.insert(host, tx, 0, &record, 64), 1);
+                Err::<(), ()>(())
+            })
+            .unwrap_err();
+            // Player clicks and shift-clicks use the menu's separate slot rules.
+            let env = game.menu_env();
+            let mut menu = horizon_client::menu::Menu::new(horizon_client::menu::Kind::Chest(1));
+            menu.set_container_limits(vec![Some(10); 9]);
+            menu.carried = Some(ItemStack::new("minecraft:stick", 20));
+            menu.click(&env, 0, 0, horizon_client::menu::Input::Pickup)
+                .unwrap();
+            assert_eq!(menu.slot(0).unwrap().count, 10);
+            assert_eq!(menu.carried.as_ref().unwrap().count, 10);
+            menu.carried = None;
+            menu.set_slot(&env, 9, Some(ItemStack::new("minecraft:stick", 20)));
+            menu.click(&env, 9, 0, horizon_client::menu::Input::QuickMove)
+                .unwrap();
+            assert_eq!(menu.slot(1).unwrap().count, 10);
+            assert_eq!(menu.slot(2).unwrap().count, 10);
+            let hopper = horizon_world::chunk::BlockState {
+                name: "minecraft:hopper".into(),
+                properties: [("facing".into(), "east".into())].into_iter().collect(),
+            };
+            let hopper = game.pack.assets.registry.resolve(&hopper).unwrap();
+            let chest = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:chest")
+                .unwrap();
+            let flags = BlockUpdateFlags::NEIGHBORS;
+            game.level_set_block(level, [0, 64, 4], hopper, flags)
+                .unwrap();
+            if let Some(BlockEntity::Chest(items)) = game.world.block_entities.get_mut(&(0, 64, 4))
+            {
+                items[0] = Some(ItemStack::new("minecraft:stick", 2));
+            }
+            let sticks = |count| ItemStack::new("minecraft:stick", count);
+            let slots = |game: &Game<'_>, pos| match game.world.block_entities.get(&pos) {
+                Some(BlockEntity::Chest(items)) => {
+                    items.iter().flatten().map(|s| s.count).sum::<u32>()
+                }
+                _ => panic!("missing chest"),
+            };
+            assert_eq!(
+                game.level_set_block(level, [1, 64, 4], chest, flags),
+                Ok(true)
+            );
+            if let Some(BlockEntity::Chest(items)) = game.world.block_entities.get_mut(&(1, 64, 4))
+            {
+                items.fill(Some(sticks(10)));
+                items[0] = Some(sticks(9));
+            }
+            let target = level.capability(game, &ITEMS, [1, 64, 4], None).unwrap();
+            game.transaction(|host, tx| {
+                assert!(target.set_max_stack_size(host, tx, 10));
+                Ok::<_, ()>(())
+            })
+            .unwrap();
+            game.hoppers.remove(&(0, 64, 4));
+            game.hopper_try_move_items((0, 64, 4));
+            assert_eq!(slots(game, (1, 64, 4)), 270);
+            let _ = game.transaction(|host, tx| {
+                assert!(target.set_max_stack_size(host, tx, 64));
+                Err::<(), ()>(())
+            });
+            game.hoppers.remove(&(0, 64, 4));
+            game.hopper_try_move_items((0, 64, 4));
+            assert_eq!(slots(game, (1, 64, 4)), 270);
+            assert_eq!(slots(game, (0, 64, 4)), 1);
+            // Dropper uses add_item, dispenser ejects into the world instead.
+            let dropper = horizon_world::chunk::BlockState {
+                name: "minecraft:dropper".into(),
+                properties: [("facing".into(), "east".into())].into_iter().collect(),
+            };
+            let dropper = game.pack.assets.registry.resolve(&dropper).unwrap();
+            game.level_set_block(level, [0, 64, 4], dropper, flags)
+                .unwrap();
+            if let Some(BlockEntity::Chest(items)) = game.world.block_entities.get_mut(&(0, 64, 4))
+            {
+                items[0] = Some(sticks(2));
+            }
+            game.dispense_from(horizon_core::position::BlockPos::new(0, 64, 4), dropper)
+                .unwrap();
+            assert_eq!(slots(game, (1, 64, 4)), 270);
+            assert_eq!(slots(game, (0, 64, 4)), 2);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn an_aborted_transaction_puts_back_what_it_and_its_committed_children_changed() {
         let Some(root) = super::super::native_entity_refs::tests::declared_part_root(
             "game::transactions::tests::an_aborted_transaction_puts_back_what_it_and_its_committed_children_changed",
@@ -1048,7 +1232,7 @@ mod tests {
             .chunks
             .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
         game.native_lifecycle
-            .begin_open(NativeAuthority::IntegratedServer);
+            .begin_open(Authority::IntegratedServer);
         super::super::native_entity_refs::tests::resolve_parts(&game).unwrap();
         // Pins the opaque backend: a real game always hands one out, so a None
         // from Host::backend is a bug, never a fallback.
@@ -1064,7 +1248,7 @@ mod tests {
         let full = registry.resolve(&full).unwrap();
         let empty = registry.default_state("minecraft:cauldron").unwrap();
         let jukebox = registry.default_state("minecraft:jukebox").unwrap();
-        let flags = NativeBlockUpdateFlags::NEIGHBORS;
+        let flags = BlockUpdateFlags::NEIGHBORS;
         assert_eq!(
             game.level_set_block(level, [0, 64, 0], chest, flags),
             Ok(true)
@@ -1248,7 +1432,7 @@ mod tests {
         let me = game.native_acting_id();
         let hand = mod_api::ItemPlace::PlayerHand {
             player: me,
-            hand: mod_api::first_person::Hand::Main,
+            hand: mod_api::client::first_person::Hand::Main,
         };
         let water = ItemResource::of(&bucket("minecraft:water_bucket", 1).try_into_api().unwrap());
         let host: &mut dyn ServerHost = &mut game;
@@ -1442,12 +1626,7 @@ mod tests {
         for (id, moved) in [("test:pipe", 1), ("test:greedy", 0)] {
             let state = game.pack.assets.registry.default_state(id).unwrap();
             assert_eq!(
-                game.level_set_block(
-                    level,
-                    [1, 64, 4],
-                    state,
-                    mod_api::NativeBlockUpdateFlags::NONE
-                ),
+                game.level_set_block(level, [1, 64, 4], state, mod_api::BlockUpdateFlags::NONE),
                 Ok(true)
             );
             if let Some(BlockEntity::Chest(items)) = game.world.block_entities.get_mut(&(0, 64, 4))

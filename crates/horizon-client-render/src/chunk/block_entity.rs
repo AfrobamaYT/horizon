@@ -8,7 +8,7 @@ use horizon_client_core::{
 };
 use horizon_items::{banner_layer::BannerLayer, items::ItemStack};
 mod mod_models;
-pub use mod_api::containers::{ModContainer, ModEnergyBuffer, ModFluidTanks};
+pub use mod_api::item::containers::{ModContainer, ModEnergyBuffer, ModFluidTanks};
 pub use mod_models::{ModBlockEntity, ModBlockEntityFields, ModRevision};
 use std::{collections::HashMap, sync::Arc};
 use {
@@ -80,11 +80,18 @@ pub enum BlockEntity {
     Skull(Skull),
     /// `TheEndGatewayBlockEntity`: its age and configured destination.
     EndGateway(EndGateway),
+    /// `TheEndPortalBlockEntity`: no data, only identity.
+    EndPortal,
     /// `DaylightDetectorBlockEntity`: no data, only the ticker
     /// (`DaylightDetectorBlock.tickEntity`).
     DaylightDetector,
     /// `BellBlockEntity`: saved identity only; ringing state is kept separately.
     Bell,
+    /// `ConduitBlockEntity`: the UUID of its `destroyTarget` (`Target`). Its
+    /// shape and animation are kept separately (`block_entity_anim`).
+    Conduit(Option<[i32; 4]>),
+    /// `EnchantingTableBlockEntity`: its custom name is the world's block name.
+    EnchantingTable,
     /// Suspicious sand and gravel: saved loot and the transient brushed face.
     Brushable(Box<Brushable>),
     /// A shelf holds three displayed item stacks.

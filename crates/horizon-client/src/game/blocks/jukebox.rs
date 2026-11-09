@@ -149,8 +149,8 @@ impl Game<'_> {
         state: horizon_world::registry::BlockStateId,
         held: Option<&ItemStack>,
         branch: horizon_world::level::UseBranch,
-    ) -> Option<mod_api::NativeInteractionResult> {
-        use mod_api::NativeInteractionResult as Answer;
+    ) -> Option<mod_api::InteractionResult> {
+        use mod_api::InteractionResult as Answer;
         if &*self.res.facts().get(state).name != "minecraft:jukebox" {
             return None;
         }
@@ -381,7 +381,7 @@ impl Game<'_> {
             let color = f64::from(self.world.random.next_int_bound(4).unwrap_or(0)) / 24.0;
             let at = [
                 f64::from(pos[0]) + 0.5,
-                f64::from(pos[1]) + 1.2,
+                f64::from(pos[1]) + f64::from(1.2_f32), // add(0.0, 1.2F, 0.0)
                 f64::from(pos[2]) + 0.5,
             ];
             self.particles.add(
@@ -545,7 +545,7 @@ mod jukebox_play_tests {
                 Some(&disc),
                 horizon_world::level::UseBranch::ItemOn,
             ),
-            Some(mod_api::NativeInteractionResult::Success),
+            Some(mod_api::InteractionResult::Success),
             "the disc goes in"
         );
         for _ in 0..ticks {

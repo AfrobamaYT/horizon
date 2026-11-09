@@ -2026,13 +2026,13 @@ impl<R: RandomSource> LootContext<'_, R> {
     /// the tool it has, and a seed from the roll's random. The entity, the
     /// damage, the player and the biome belong to the main loot engine's
     /// rolls; they are None here (docs/modding/src/how-to/native-mods.md).
-    fn native_loot_context(&self, random: &mut R) -> horizon_world::loot::NativeLootContext<'_> {
-        horizon_world::loot::NativeLootContext {
+    fn native_loot_context(&self, random: &mut R) -> horizon_world::loot::LootContext<'_> {
+        horizon_world::loot::LootContext {
             entity: None,
             damage: None,
             player: None,
             block: (!self.block.is_empty()).then_some(self.block),
-            tool: self.held.map(|h| horizon_world::loot::NativeLootTool {
+            tool: self.held.map(|h| horizon_world::loot::LootTool {
                 item: h.item.to_string(),
                 enchantments: h
                     .enchantments()
@@ -2775,12 +2775,12 @@ fn apply_loot(
 fn mod_function(
     kind: &str,
     data: &Value,
-    ctx: &horizon_world::loot::NativeLootContext<'_>,
+    ctx: &horizon_world::loot::LootContext<'_>,
     stack: &mut ItemStack,
     hook: impl FnOnce(
         &str,
         &Value,
-        &horizon_world::loot::NativeLootContext<'_>,
+        &horizon_world::loot::LootContext<'_>,
         &mut horizon_world::loot::LootStack,
     ),
 ) {
@@ -3066,6 +3066,38 @@ mod tests {
         let mut ids: Vec<&str> = items.loot_table_ids().collect();
         ids.sort();
         assert_eq!(ids, ["mymod:rooms/a", "mypack:b"]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Songs load under their own namespace beside vanilla's through the resource overlay.
+    #[test]
+    fn content_mod_songs_load_under_their_namespace() {
+        let root = std::env::temp_dir().join(format!("horizon-songs-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        for ns in ["minecraft", "mymod"] {
+            fs::create_dir_all(root.join(format!("data/{ns}/jukebox_song"))).unwrap();
+        }
+        fs::write(root.join("items.json"), "{}").unwrap();
+        let song = json!({"sound_event": "mymod:music_disc.tune", "length_in_seconds": 5.0, "comparator_output": 3, "description": "tune"});
+        fs::write(
+            root.join("data/mymod/jukebox_song/tune.json"),
+            song.to_string(),
+        )
+        .unwrap();
+        fs::write(
+            root.join("data/minecraft/jukebox_song/cat.json"),
+            json!({"sound_event": "minecraft:music_disc.cat", "length_in_seconds": 185.0, "comparator_output": 2, "description": "cat"}).to_string(),
+        )
+        .unwrap();
+
+        let songs = load_songs(&root, &PackOverlay::NONE);
+        assert!(songs.contains_key("minecraft:cat"));
+        assert!(songs.contains_key("mymod:tune"));
+        let tune = &songs["mymod:tune"];
+        assert_eq!(tune.sound, "mymod:music_disc.tune");
+        assert_eq!((tune.length_ticks, tune.comparator), (100, 3));
+        assert!(songs.contains_key("minecraft:cat"));
+        assert!(!songs.contains_key("minecraft:tune"));
         fs::remove_dir_all(root).unwrap();
     }
 

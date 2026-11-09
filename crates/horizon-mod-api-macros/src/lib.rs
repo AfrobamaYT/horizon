@@ -1,5 +1,15 @@
 //! Derive hook subscriptions from a trait implementation.
 mod point;
+mod wire;
+
+/// Derive the shared native/wasm owned-value encoding.
+#[proc_macro_derive(Wire, attributes(wire))]
+pub fn derive_wire(input: TokenStream) -> TokenStream {
+    wire::expand(syn::parse_macro_input!(input as syn::DeriveInput))
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{
@@ -308,7 +318,7 @@ pub fn host_area(_attribute: TokenStream, input: TokenStream) -> TokenStream {
         let operation = method.sig.ident.to_string();
         let label = format!("{union}::{operation}");
         method.default = Some(syn::parse_quote!({
-            crate::phase::unprovided(#label, #operation, crate::phase::LoadAccess::#level)
+            crate::world::phase::unprovided(#label, #operation, crate::world::phase::LoadAccess::#level)
         }));
         method.semi_token = None;
     }
@@ -354,7 +364,10 @@ pub fn horizon_part(_attribute: TokenStream, input: TokenStream) -> TokenStream 
 /// record's by-value and `&T` values, and a `&mut T` parameter's place gets the record's value back.
 /// A raw listener (`raw`, native only) gets the receiver and a `&mut` to every parameter itself. Its
 /// return does the same with the value returned; a value that borrows reaches only raw listeners,
-/// as itself. `free` marks a free function, whose body moves to a sibling function.
+/// as itself. `free` marks a free function, whose body moves to a sibling function. A `replace`
+/// listener (`mod_points::replace!`) owns the head's outcome: it runs after the other API
+/// listeners, and on a point with both forms the head keeps its value and cancel through the raw
+/// listeners after it.
 #[proc_macro_attribute]
 pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
     point::expand(attribute.into(), parse_macro_input!(input as ImplItemFn)).into()

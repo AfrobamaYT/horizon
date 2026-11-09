@@ -101,8 +101,8 @@ dunce = "1.0.5"
 # Use the registered URI handler without routing links through Explorer/cmd.
 open = { version = "5.4.5", features = ["shellexecute-on-windows"] }
 # DirectX 12, where Vulkan has no adapter or device, or by choice (`graphicsApi`, graphics.rs).
-# Shaders compile with FXC (d3dcompiler_47.dll, part of Windows), or DXC when dxcompiler.dll is
-# on the PATH.
+# Shaders compile with FXC (d3dcompiler_47.dll, part of Windows), or on integrated GPUs with DXC
+# (dxcompiler.dll beside the game, gfx/dx12_compiler.rs).
 wgpu = { version = "30.0.1", default-features = false, features = ["dx12"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -131,7 +131,8 @@ friends = ["horizon-client-lib/friends", "dep:horizon-friends"]
 # Records the call sites of mob random draws (`mob_ai_probe` traces).
 rng-trace = ["horizon-core/rng-trace", "horizon-client-lib/rng-trace"]
 # Rust's allocations go to the system heap instead of mimalloc, where heap profilers that replace
-# malloc (heaptrack, valgrind's massif) see them. For profiling only: mimalloc is faster.
+# malloc (heaptrack, valgrind's massif) see them. Also the Windows prebuilt archive's allocator
+# (tools/prebuilt_game.py, #2394): there std's DLL keeps its own allocator. Otherwise mimalloc is faster.
 system-allocator = []
 # mimalloc with a tag on each block: `horizon-ctl memory` lists the live heap by startup step and
 # thread (`heap_by_tag_mb`). For measuring only: each block costs 16 bytes more.

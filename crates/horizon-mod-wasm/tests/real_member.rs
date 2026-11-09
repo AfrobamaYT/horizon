@@ -1,6 +1,8 @@
 //! The build-tool fixture is a real shared module, not a component.
 // Generated fixtures exercise every shape; TODO(#2273): make the generator emit clippy-clean code.
 #![allow(clippy::all, unused_comparisons, unreachable_patterns, dead_code)]
+#[path = "fixture/src/replace.rs"]
+mod replace;
 #[path = "fixture/src/shutdown.rs"]
 mod shutdown;
 use horizon_mod_package::manifest::Package;
@@ -13,13 +15,15 @@ impl mod_api::ServerHost for Quiet {}
 mod_api::impl_server_host_areas!(Quiet);
 
 #[test]
+#[ignore = "needs HORIZON_WASM_STD or HORIZON_WASM_FIXTURE_RAW; prints a member's sections"]
 fn dump_members() {
     for (name, path) in [
         ("std", "HORIZON_WASM_STD"),
         ("fixture", "HORIZON_WASM_FIXTURE_RAW"),
     ] {
         let Ok(path) = std::env::var(path) else {
-            return;
+            println!("=== {name} === skipped: {path} is not set");
+            continue;
         };
         let bytes = std::fs::read(path).unwrap();
         println!("=== {name} ===");
@@ -45,13 +49,15 @@ fn dump_members() {
 }
 
 #[test]
+#[ignore = "needs HORIZON_WASM_FIXTURE and HORIZON_WASM_STD, which the wasm-mods workflow builds"]
 fn real_member() {
     let (Ok(fixture), Ok(std)) = (
         std::env::var("HORIZON_WASM_FIXTURE"),
         std::env::var("HORIZON_WASM_STD"),
     ) else {
-        eprintln!("skipping: HORIZON_WASM_FIXTURE and HORIZON_WASM_STD are not set");
-        return;
+        panic!(
+            "HORIZON_WASM_FIXTURE and HORIZON_WASM_STD must be set: run with the wasm-mods workflow's environment"
+        );
     };
     let path = std::path::Path::new(&fixture);
     let manifest = Package::read(path).unwrap().manifest;
@@ -113,6 +119,18 @@ fn real_member() {
         remember_shutdown(&mut failure, message.into());
         assert_eq!(failure.as_deref(), after, "{message}");
     }
+    // The guest's `replace` (`replace::own_average`, emitted through `mod_points::replace!`):
+    // its value reaches the caller across the boundary, and the body never runs.
+    let _: fn(&mut mod_points::GameBeaconAverageArgs) -> u32 = replace::own_average;
+    for (a, b, value) in replace::CASES {
+        assert_eq!(average(a, b), value, "{a} {b}");
+    }
+}
+
+/// `horizon_client::game::beacon::average`, as the staging pass marks it.
+#[horizon_mod_api_macros::point(name = "game_beacon_average", free)]
+fn average(a: u32, b: u32) -> u32 {
+    panic!("a replaced body ran: {a} {b}")
 }
 
 /// `horizon_client::game::server_lifecycle::remember_shutdown`, as the staging pass marks it.

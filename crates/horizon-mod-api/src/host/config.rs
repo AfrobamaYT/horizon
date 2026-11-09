@@ -12,11 +12,14 @@ pub trait ConfigHost {
     #[access(Metadata)]
     fn on(&self, mod_id: &str) -> bool;
     /// Side: both.
-    /// A mod's setting `key` (one file per key in `native_data_dir`).
+    /// A mod's setting `key` (one file per key in `native_data_dir`). A mod reads only its own:
+    /// another mod's id or a key not registered by that owner gives None.
     #[access(WorldOnly)]
     fn setting(&self, mod_id: &str, key: &str) -> Option<String>;
     /// Side: both.
-    /// Keeps a mod's setting `key`.
+    /// Keeps a mod's registered setting `key`. Another mod's id or an unregistered key keeps
+    /// nothing. A successful write invalidates the typed read cache for this data folder and key;
+    /// a failed write leaves it unchanged. This raw write does not fire `setting_changed`.
     #[access(WorldOnly)]
     fn set_setting(&self, mod_id: &str, key: &str, value: &str);
     /// Side: both.
@@ -60,6 +63,16 @@ pub trait ConfigServerHost {
     #[access(WorldOnly)]
     fn tick_stats(&self) -> (f32, f64);
     /// Side: server.
+    /// Sets the server's tick rate, as `/tick rate` does (`ServerTickRateManager.setTickRate`):
+    /// the game ticks `rate` times a second from the next tick on, an autosave wait already
+    /// running is shortened when the new rate asks for less, and `server_tick_rate_changed`
+    /// fires. The players' clients follow on the next sync. False, with nothing changed, for a
+    /// rate outside 1 to 10000 (the command's range), one that isn't finite, a call from
+    /// inside `server_tick_rate_changed` (which would hear itself again without end), or on a
+    /// client.
+    #[access(WorldOnly)]
+    fn set_tick_rate(&mut self, rate: f32) -> bool;
+    /// Side: server.
     /// The open world's folder (`world/`, beside its `level.dat`): a server
     /// mod keeps its data in a folder of its own there, so the world's
     /// backups carry it. None when no world is open.
@@ -81,4 +94,24 @@ pub trait ConfigClientHost {
     /// when no language layer defines it.
     #[access(ClientSetup)]
     fn translate(&self, key: &str) -> Option<String>;
+    /// Side: client.
+    /// The calling mod's toggle `key` (`Registrar::register_setting`): the player's choice, else
+    /// its default. None when the mod registered no toggle by that key.
+    #[access(WorldOnly)]
+    fn setting_bool(&self, key: &str) -> Option<bool>;
+    /// Side: client.
+    /// The index of the option the player picked for the calling mod's choice `key`, else its
+    /// default. None when the mod registered no choice by that key.
+    #[access(WorldOnly)]
+    fn setting_choice(&self, key: &str) -> Option<u32>;
+    /// Side: client.
+    /// The calling mod's range `key`: the player's value, else its default; a kept value outside
+    /// the range reads as the default. None when the mod registered no range by that key.
+    #[access(WorldOnly)]
+    fn setting_f64(&self, key: &str) -> Option<f64>;
+    /// Side: client.
+    /// The calling mod's colour `key`, `0xRRGGBB`: the player's choice, else its default. None
+    /// when the mod registered no colour by that key.
+    #[access(WorldOnly)]
+    fn setting_color(&self, key: &str) -> Option<u32>;
 }

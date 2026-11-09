@@ -11,6 +11,30 @@ use horizon_client::mobs::Damage;
 use mod_api::EntityRef;
 
 impl Game<'_> {
+    /// Whether a named causing entity is a creative player.
+    pub(in crate::game) fn creative_damage_source_id(&self, id: i32) -> bool {
+        id != 0
+            && ((id == self.own_entity_id() && self.creative)
+                || self.lan.as_ref().is_some_and(|host| {
+                    host.hub
+                        .guests
+                        .iter()
+                        .any(|g| g.entity_id == id && g.creative())
+                }))
+    }
+    /// Ask listeners about a nonliving entity damage source.
+    pub(in crate::game) fn native_nonliving_invulnerable(
+        &mut self,
+        id: u32,
+        kind: &str,
+        source: horizon_client::health::HurtSource<'_>,
+        vanilla: bool,
+    ) -> bool {
+        crate::game::entity::damage_level_of!(self, scoped).invulnerability_check(
+            horizon_client::health::Hurting::Entity(id as i32, kind, source),
+            vanilla,
+        )
+    }
     /// A player's body, where it is kept now.
     pub(super) fn native_player_body(
         &self,
@@ -376,7 +400,7 @@ mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use horizon_client::mobs::Mob;
     use horizon_core::geometry::Vec3;
-    use mod_api::{EntityRef, NativeWorldEpoch};
+    use mod_api::{EntityRef, WorldEpoch};
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
@@ -539,7 +563,7 @@ mod tests {
                 // The piercing query follows the flag.
                 assert_eq!(victim.invulnerable_to_piercing_weapon(game), Some(true));
                 // A stale handle reads None and hurts nothing.
-                let stale = EntityRef::new(NativeWorldEpoch::new(victim.epoch().get() + 1), 300001);
+                let stale = EntityRef::new(WorldEpoch::new(victim.epoch().get() + 1), 300001);
                 assert_eq!(stale.hurt(game, "minecraft:generic", 5.0, None, None), None);
                 assert_eq!(
                     stale.invulnerable_to_damage(game, "minecraft:generic"),
@@ -574,7 +598,7 @@ mod tests {
             // the flag answers the piercing query false.
             assert_eq!(a.entities_team_damage_allowed(game, b), Some(true));
             assert_eq!(a.invulnerable_to_piercing_weapon(game), Some(false));
-            let stale = EntityRef::new(NativeWorldEpoch::new(a.epoch().get() + 1), 300001);
+            let stale = EntityRef::new(WorldEpoch::new(a.epoch().get() + 1), 300001);
             assert_eq!(stale.entities_team_damage_allowed(game, b), None);
         });
     }
@@ -599,7 +623,7 @@ mod tests {
             assert!(game.entity_set_damage_cooldown_time(mob, 20));
             assert_eq!(game.mobs[0].invulnerable, 20);
             assert_eq!(game.entity_damage_cooldown_time(mob), Some(20));
-            let stale = EntityRef::new(NativeWorldEpoch::new(mob.epoch().get() + 1), 12);
+            let stale = EntityRef::new(WorldEpoch::new(mob.epoch().get() + 1), 12);
             assert_eq!(game.entity_permanently_invulnerable(stale), None);
             assert!(!game.entity_set_invulnerable(stale, false));
             assert_eq!(game.entity_damage_cooldown_time(stale), None);

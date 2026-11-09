@@ -29,7 +29,7 @@ use horizon_core::{
     geometry::{Aabb, Axis, Direction, Vec3},
     random::{LegacyRandom, RandomSource},
 };
-use mod_api::{EffectApplicable, EffectTickChange, EntityRef, LivingRef, NativePlayerFood};
+use mod_api::{EffectApplicable, EffectTickChange, EntityRef, LivingRef, PlayerFood};
 
 /// Per-cloud settings; natural lingering clouds keep their creation defaults.
 pub(super) struct CloudSettings {
@@ -256,7 +256,13 @@ pub(super) fn potion_cloud_to_nbt(c: &Breath, uuid: [i32; 4], raw: Option<&Tag>)
         "potion_duration_scale".into(),
         Tag::Float(potion.settings.duration_scale.to_bits()),
     );
-    map.insert("potion_contents".into(), Tag::Compound(contents));
+    // Vanilla writes the key only while the contents differ from
+    // PotionContents.EMPTY: no effects and the default water colour.
+    if !(potion.effects.is_empty()
+        && potion.color == horizon_client_core::potions::BASE_POTION_COLOR)
+    {
+        map.insert("potion_contents".into(), Tag::Compound(contents));
+    }
     tag
 }
 
@@ -1283,13 +1289,11 @@ impl Game<'_> {
                     let max_health =
                         player.attribute("minecraft:max_health").unwrap_or(20.0) as f32;
                     let food = &player.health.food;
-                    let food = Some(NativePlayerFood::from(
-                        mod_api::__private::built::NativePlayerFood {
-                            level: food.food,
-                            saturation: food.saturation,
-                            exhaustion: food.exhaustion,
-                        },
-                    ));
+                    let food = Some(PlayerFood::from(mod_api::__private::built::PlayerFood {
+                        level: food.food,
+                        saturation: food.saturation,
+                        exhaustion: food.exhaustion,
+                    }));
                     let (keep, changes) = self.mod_effect_tick(
                         mod_api::__private::effect_key_by_index(
                             e.registry_index.expect("active effect registry index"),
@@ -1530,7 +1534,7 @@ impl Game<'_> {
         holder: LivingRef,
         health: f32,
         max_health: f32,
-        food: Option<NativePlayerFood>,
+        food: Option<PlayerFood>,
     ) -> (bool, Vec<EffectTickChange>) {
         let mut apply = false;
         self.native_should_apply_effect_tick_this_tick(effect, tick_count, amplifier, &mut apply);
@@ -1658,7 +1662,7 @@ impl Game<'_> {
     /// the boxes of all of them. Until the potion has left it, none can be hit
     /// (`canHitEntity`: `isPassengerOfSameVehicle`) and any one near keeps it
     /// from leaving (`isOutsideOwnerCollisionRange`).
-    fn thrown_ridden(
+    pub(super) fn thrown_ridden(
         &self,
         owner: Option<Who>,
         players: &[(Who, Aabb)],
@@ -1710,7 +1714,13 @@ impl Game<'_> {
         };
         let mut landed = Vec::new();
         let mut deflected: Vec<u32> = Vec::new();
+        // ServerLevel.tick: only entities in entity-ticking chunks tick.
+        let ticking = self.entity_ticking_area();
         thrown.retain_mut(|t| {
+            if !ticking(t.position.x.floor() as i32, t.position.z.floor() as i32) {
+                t.previous = t.position;
+                return true;
+            }
             t.age += 1;
             // Projectile.tick: whether it has left its thrower's vehicle tree,
             // before it moves.
@@ -1880,7 +1890,12 @@ impl Game<'_> {
         let mut clouds = self.breath_clouds.lift();
         #[cfg(test)]
         super::entity::taken_pass_tests::after_take(self);
-        clouds.retain_mut(|c| c.potion.is_none() || self.tick_potion_cloud(c, &players));
+        let ticking = self.entity_ticking_area();
+        clouds.retain_mut(|c| {
+            c.potion.is_none()
+                || !ticking(c.at[0].floor() as i32, c.at[2].floor() as i32)
+                || self.tick_potion_cloud(c, &players)
+        });
         self.breath_clouds
             .restore(clouds, horizon_client::join_seq::RestoreOrder::SpawnsFirst);
     }
@@ -2226,8 +2241,17 @@ impl Game<'_> {
                 (p.y + 0.2125).floor() as i32,
                 p.z.floor() as i32,
             );
+            // Frame generation and temporal upscaling follow its own flight; one not yet
+            // given an id (0) can't be told apart from another, so it keeps the camera's.
+            let motion = if t.id == 0 {
+                0
+            } else {
+                Self::MOTION_OBJECT | u64::from(t.id)
+            };
+            self.mark_motion(out.len(), motion);
             self.submit_item_world(&state, pose, vertex_light(light), out);
         }
+        self.mark_motion(out.len(), 0);
     }
     /// `HealOrHarmMobEffect.applyInstantaneousEffect` with a source (a
     /// potion or a cloud): indirectMagic, not plain magic, credited to the

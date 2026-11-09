@@ -17,7 +17,7 @@
 //!   other side. Down over a result slot takes one craft or the whole furnace
 //!   output to the inventory; nothing ever goes into a result slot.
 //!
-//! Sorting draws a small button by the container's title and one by the
+//! Sorting draws a small button by a menu's storage slots and one by the
 //! inventory's (an optional key sorts the part under the cursor); the
 //! clicks come from `inv_sort::plan`.
 use super::{Creative, Game, Screen};
@@ -464,7 +464,10 @@ impl Game<'_> {
         if self.screen != Screen::Playing
             || self.title.is_some()
             || self.settings.horizon.hdr_key != name
-            || !horizon_client::graphics::hdr_offered()
+            || !self
+                .renderer
+                .as_ref()
+                .is_some_and(|r| r.output().hdr_offered())
         {
             return false;
         }

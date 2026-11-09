@@ -604,13 +604,11 @@ fn dimension_travel_admits_the_duplicate_child_before_the_copied_root() {
     });
 }
 
-/// Known unfixed (#11807 is a partial repair): vanilla adds a tree's
-/// members in order and skips one whose UUID an earlier member took; that
-/// one still rides its vehicle and saves under its Passengers. Horizon has
-/// no passenger outside the level, and admits each duplicate. Expected to
-/// fail until that exists; run explicitly, never counted as a pass.
+/// `ServerLevel.tryAddFreshEntityWithPassengers` / `PersistentEntitySectionManager.addEntity`:
+/// vanilla adds a tree's members in order and skips one whose UUID an earlier member took;
+/// that one still rides its vehicle and saves under its Passengers (#11807).
 #[test]
-#[ignore = "known unfixed: duplicate UUIDs inside a summoned tree still join (#11807); expected to fail"]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
 fn summon_skips_a_uuid_taken_earlier_in_the_same_tree() {
     with_game(|game, _| {
         let mut failures = Vec::new();

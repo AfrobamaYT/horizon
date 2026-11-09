@@ -641,17 +641,17 @@ impl Game<'_> {
                 let Some(i) = self.armor_stands.iter().position(|s| s.id == id) else {
                     continue;
                 };
-                // knockback(0.4, ..) follows a hurtServer that landed, on a
+                // knockback(0.4F, ..) follows a hurtServer that landed, on a
                 // stand that is still there (LivingEntity.knockback).
                 if !self.punch_armor_stand(i) {
                     continue;
                 }
                 let mut knock = horizon_client::health::Knock {
-                    strength: 0.4,
+                    strength: f64::from(0.4_f32),
                     x: xd,
                     z: zd,
                 };
-                let source = mod_api::health::HurtSource {
+                let source = mod_api::entity::health::HurtSource {
                     damage_type: "minecraft:player_attack",
                     causing: attack.attacker,
                     direct: attack.attacker,

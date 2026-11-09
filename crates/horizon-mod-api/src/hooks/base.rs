@@ -224,7 +224,7 @@ pub trait Hooks {
     )]
     fn command();
     /// The client's own commands (NeoForge's `RegisterClientCommandsEvent`), which
-    /// `command` runs: push a `NativeCommand` per usage (`x <mode:word>`).
+    /// `command` runs: push a `Command` per usage (`x <mode:word>`).
     /// Asked when a connection starts and again when the server sends its
     /// own tree, so the chat box colours, completes and lists them as the
     /// game's own; a name the game already has keeps that command's
@@ -254,23 +254,17 @@ pub trait Hooks {
         neoforge = "none (Horizon-only; NeoForge has no counterpart)"
     )]
     fn minimap();
-    /// The buttons of mod `mod_id`'s settings page: push
-    /// their labels when it is yours. Asked again each time the page opens
-    /// and after each click.
-    #[hook(
-        side = "both",
-        contract = "collect",
-        out = "buttons",
-        neoforge = "none (Horizon's own settings page; NeoForge's per-mod screen is IConfigScreenFactory, not an event)"
-    )]
-    fn settings();
-    /// Button `button` of mod `mod_id`'s settings page was clicked.
+    /// The player changed setting `key` of mod `mod_id` on its page in Options > Mods
+    /// (`Registrar::register_setting`); the new value is kept already, so read it with
+    /// `setting_bool` and its siblings. Only mod `mod_id` hears it: a mod is told of its own
+    /// settings, never another's.
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "none (Horizon's own settings page; NeoForge's per-mod screen is IConfigScreenFactory, not an event)"
+        owner = "mod_id",
+        neoforge = "ModConfigEvent.Reloading (a ModConfigSpec value set on the config screen)"
     )]
-    fn settings_click();
+    fn setting_changed();
     /// The player did `event` on mod `mod_id`'s panel (`native_panel_items`):
     /// act on it when it is yours.
     #[hook(
@@ -436,7 +430,10 @@ pub trait Hooks {
     /// name vanilla has is left out. Asked again after a mod calls
     /// `host.commands().refresh_commands()`. Each executable usage keeps its own
     /// permission level; a lower-level child only opens traversal through a
-    /// shared prefix, not execution of that prefix.
+    /// shared prefix, not execution of that prefix. An argument's kind is one
+    /// of `word`, `text`, `integer`, `number`, `boolean`, `player`, `item` and
+    /// `block_pos`, or a command argument type a mod registered
+    /// (`Registrar::register_command_argument`), named by its namespaced id.
     #[hook(
         side = "server",
         contract = "collect",
@@ -981,7 +978,7 @@ pub trait Hooks {
         holder: LivingRef,
         health: f32,
         max_health: f32,
-        food: Option<NativePlayerFood>,
+        food: Option<PlayerFood>,
         changes: &mut Vec<EffectTickChange>,
         keep: &mut bool,
     );
@@ -1133,7 +1130,9 @@ pub trait Hooks {
     fn component_types();
     /// `DispenserBlock.getDispenseMethod`: choose a behaviour for any item,
     /// including vanilla items, on the authoritative server (not droppers).
-    /// Leave answer None for vanilla. Otherwise answer `(remainder, event)`:
+    /// The block the dispenser faces is asked first (`dispense_method`), and
+    /// its answer keeps this part from being asked. Leave answer None for
+    /// vanilla. Otherwise answer `(remainder, event)`:
     /// a remainder of None empties the slot, `Some(stack)` replaces it (the hook
     /// owns consumption: no extra item is removed afterwards). `event` is the
     /// level event the dispenser plays with its smoke: 1000 the click, 1001 the
@@ -1350,7 +1349,7 @@ pub trait Hooks {
     /// stacks; empty ones don't drop (NeoForge's global loot modifiers, Fabric's
     /// `LootTableEvents.MODIFY_DROPS`); `context` says what dropped them and
     /// how, and it is called even when `drops` is empty. A player's use drops
-    /// through it too (`NativeLootDrops::used`: shears, a brush, an item
+    /// through it too (`LootDrops::used`: shears, a brush, an item
     /// frame), with that player named. Lead drops from untying or cutting a
     /// leash, and from a mob a player killed while leashed, pass through here
     /// too, with that player named. It hears blocks that a
@@ -2412,13 +2411,13 @@ pub trait Hooks {
     fn gui_layer_post();
     /// Icons a mod puts on map `map` each time it is drawn: held, in an
     /// item frame or on the cartography table's screen (a map's pixels are
-    /// its own; nothing is saved in the map). Push `NativeMapDecoration`s
+    /// its own; nothing is saved in the map). Push `MapDecoration`s
     /// (an atlas sprite, a position in half map pixels, a rotation, and
     /// whether it shows in a frame and on the screen like vanilla's markers
     /// do); they are drawn after the vanilla ones with the same pose, and a
     /// sprite the atlas lacks is left out. `map.center`, `map.scale` and
     /// `map.dimension` say which blocks the map shows, and
-    /// `NativeMapDecoration::x` has the formula. Vanilla's decorations are
+    /// `MapDecoration::x` has the formula. Vanilla's decorations are
     /// not passed in. Asked every frame a map is drawn, so keep it cheap.
     /// The client half of `MapDecorationType` and `addDecoration`: a type
     /// registered on the server and saved in the map's data is not here.
@@ -2646,7 +2645,12 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// window's player is drawn only in third person (and F5 front view); an
     /// invisible player is not asked. `draw` is the frame of `native_mob_submit`:
     /// at the player's feet, turned with the body. The name tag, shadow,
-    /// flames and glowing outline draw as before.
+    /// flames and glowing outline draw as before. `hidden.hide(part)` leaves
+    /// only that part out of the vanilla model this frame (after Skin
+    /// Customization), as a mod drawing its own outer skin layer does: a
+    /// hidden part takes its children with it (the hat goes with the head),
+    /// while its armour, held items and other layers, the cape among them,
+    /// keep every part.
     #[hook(
         side = "client",
         contract = "cancel",
@@ -2661,7 +2665,10 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// in the entity's frame, which starts at its feet turned with the body
     /// (`mob.head_yaw`, `mob.pitch` and the walk cycle place a part, the eyes
     /// being at the entity type's eye height). `who` is set for a player.
-    /// Not asked for what a mod drew itself (`native_mob_submit`,
+    /// `parts` is a humanoid model's parts as vanilla posed them this frame
+    /// (`HumanoidModel.setupAnim`), read-only: attach geometry to an arm or
+    /// the head without animating it again; None for a model that isn't
+    /// humanoid. Not asked for what a mod drew itself (`native_mob_submit`,
     /// `native_player_submit`) nor for a mob that isn't drawn at all.
     #[hook(
         side = "client",
@@ -3003,7 +3010,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         reason: &str,
         cancel: &mut bool,
     );
-    /// A server player who ate chorus fruit (or another item with the
+    /// A server player or fox that ate chorus fruit (or another item with the
     /// `teleport_randomly` consume effect) is about to try a random spot
     /// (NeoForge's `EntityTeleportEvent.ItemConsumption`, vanilla's
     /// `TeleportRandomlyConsumeEffect.apply`): once per attempt (up to 16),
@@ -3011,12 +3018,20 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// drawn; a mod may move it (its y kept inside the level's height, a
     /// value that is not a number ignored), and the game still looks down
     /// from it for ground it may land on. Canceling ends the effect: no teleport and no
-    /// more attempts. The player's state is swapped in
-    /// (`host.players().acting_player()`). Foxes are not heard. Diverges from upstream: renamed from
+    /// more attempts. `consumer` names the living actor through its handle.
+    /// `consumed` is the stack captured before consumption, including
+    /// its count and components; it is not reread from the hand after listener writes.
+    /// A player's state is swapped in (`host.players().acting_player()`). A fox's
+    /// callback has the full server host before its living AI/movement step and
+    /// before the next mob ticks. Listener writes survive; changing the consumer's
+    /// item, position or eligibility refuses the captured effect instead of
+    /// overwriting that write. Cancellation still finishes consumption.
+    /// Diverges from upstream: renamed from
     /// `chorus_fruit_teleport`.
     #[hook(
         side = "server",
         contract = "cancel",
+        version = 2,
         out = "cancel",
         neoforge = "EntityTeleportEvent.ItemConsumption",
         cancellable = true
@@ -3098,27 +3113,27 @@ requires a farmer at work and `mob_griefing` enabled."#]
         neoforge = "none (NeoForge has no such event)"
     )]
     fn enchant_item();
-    /// A server player's ender pearl landed and is about to teleport them
-    /// (NeoForge's `EntityTeleportEvent.EnderPearl`, vanilla's
-    /// `ThrownEnderpearl.onHit` for a player owner): `pearl` is the pearl's
-    /// entity id, `from` their feet now, `target` where the pearl started
-    /// its last tick and `damage` the fall damage they then take (5). A mod
-    /// may move `target` (a value that is not a number is ignored) or change
-    /// `damage` (0 or less: none). Canceling
-    /// keeps the player where they are: no endermite roll, no teleport, no
-    /// damage and no sound; the pearl is used up either way. The player's
-    /// state is swapped in (`host.players().acting_player()`). The hit itself is
-    /// heard by `native_projectile_impact`.
+    /// A server player's or mob's ender pearl is about to teleport its `owner`
+    /// (`EntityTeleportEvent.EnderPearl`, `ThrownEnderpearl.onHit`). `owner` is
+    /// the live entity handle, `pearl` its projectile id, `from` the owner's feet
+    /// and `target` the pearl's previous position. A mod may move the target;
+    /// non-finite changes keep the original spot. Canceling leaves the owner
+    /// in place with no teleport sound, damage or endermite roll; the pearl is
+    /// used up. Player owners keep their acting-player context and mutable fall
+    /// `damage` (5; nonpositive is none). Mob owners take no fall damage and
+    /// make no endermite draw; their `damage` starts at zero and is player-only.
+    /// An owner moved, removed, killed or put to sleep by a listener is not moved
+    /// again using the old decision. The impact hook still hears the hit.
     #[hook(
         side = "server",
         contract = "cancel",
+        version = 2,
         out = "cancel",
         neoforge = "EntityTeleportEvent.EnderPearl",
         cancellable = true
     )]
     fn ender_pearl_teleport(
-        player: u128,
-        name: &str,
+        owner: EntityRef,
         pearl: u32,
         from: [f64; 3],
         target: &mut [f64; 3],
@@ -3629,7 +3644,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "cancel",
         out = "cancel",
-        neoforge = "none (NeoForge's PlayerContainerEvent.Open fires after the menu is open and is not cancellable)",
+        neoforge = "none (not NeoForge's PlayerContainerEvent.Open: this hook can cancel the opening)",
         cancellable = true
     )]
     fn container_opened();
@@ -4136,7 +4151,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         name: &str,
         advancement: &str,
         criterion: &str,
-        progress_type: NativeProgressType,
+        progress_type: ProgressType,
         progress: &AdvancementProgress,
     );
     /// A guest's arm swing was handled by the server. `hand` is `mainhand`. Server-side.

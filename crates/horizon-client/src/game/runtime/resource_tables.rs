@@ -146,13 +146,16 @@ impl PackResources {
     ) -> Result<Self> {
         let visibility = models::load_visibility(root.prepared(), assets.registry)?;
         api_values::resolve_block_definitions(assets.registry)?;
-        let tables = Arc::new(MeshTables::new(
-            &assets,
-            &render,
-            facts,
-            visibility,
-            api_values::mod_tint_values(assets.registry)?,
-        )?);
+        let tables = Arc::new(
+            MeshTables::new(
+                &assets,
+                &render,
+                facts,
+                visibility,
+                api_values::mod_tint_values(assets.registry)?,
+            )?
+            .with_polytone_colormaps(root.source(), assets.registry),
+        );
         let item_renderer = horizon_client::item_render::ItemRenderer::load_with_library(
             root,
             render.model_library.clone(),
@@ -198,29 +201,36 @@ impl PackResources {
         // These pack-local resources do not depend on one another. Decode the
         // images and language map together so a custom-sky pack cannot put all
         // of the pack assembly on the critical path behind its own files.
-        let (names, clouds, forcefield, custom_sky) = std::thread::scope(|scope| {
-            let names = named_scope(scope, "pack.names", || Names::load(root.source()));
-            let clouds = named_scope(scope, "pack.clouds", || load_clouds(root.source()));
-            let forcefield =
-                named_scope(scope, "pack.forcefield", || load_forcefield(root.source()));
-            let custom_sky = named_scope(scope, "pack.custom_sky", || {
-                horizon_client::custom_sky::CustomSky::load(root.source())
+        let (names, clouds, forcefield, custom_sky, environments, polytone_particles) =
+            std::thread::scope(|scope| {
+                let names = named_scope(scope, "pack.names", || Names::load(root.source()));
+                let clouds = named_scope(scope, "pack.clouds", || load_clouds(root.source()));
+                let forcefield =
+                    named_scope(scope, "pack.forcefield", || load_forcefield(root.source()));
+                let custom_sky = named_scope(scope, "pack.custom_sky", || {
+                    horizon_client::custom_sky::CustomSky::load(root.source())
+                });
+                let environments =
+                    named_scope(scope, "pack.environments", || pack_environments(root));
+                let particles = named_scope(scope, "pack.particles", || {
+                    pack_particles(root, assets.registry)
+                });
+                (
+                    names.join().unwrap(),
+                    clouds.join().unwrap(),
+                    forcefield.join().unwrap(),
+                    custom_sky.join().unwrap(),
+                    environments.join().unwrap(),
+                    particles.join().unwrap(),
+                )
             });
-            (
-                names
-                    .join()
-                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
-                clouds
-                    .join()
-                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
-                forcefield
-                    .join()
-                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
-                custom_sky
-                    .join()
-                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
-            )
-        });
+        let polytone_post = horizon_client::polytone_post::PolytonePost::read(
+            root.source(),
+            horizon_client::packs::polytone_configs(&horizon_client::packs::Source::Opened(
+                root.source().clone(),
+            )),
+        )
+        .map(Arc::new);
         Self {
             layer_names: Arc::new(
                 render
@@ -249,7 +259,10 @@ impl PackResources {
             clouds: Arc::new(clouds),
             forcefield: Arc::new(forcefield),
             custom_sky: Arc::new(custom_sky),
-            environments: pack_environments(root),
+            environments,
+            polytone_particles,
+            polytone_post,
+            polytone_colors: Arc::new(read_colors(root)),
         }
     }
 }
@@ -277,4 +290,43 @@ fn pack_environments(
             None
         }
     }
+}
+
+/// The custom particles and block emitters of the packs merged at `root` (#11486); `None` when
+/// no pack has any.
+fn pack_particles(
+    root: &horizon_assets::resource_source::ResourceRoot,
+    blocks: &'static horizon_world::registry::BlockRegistry,
+) -> Option<Arc<horizon_client::particles::polytone::Registry>> {
+    let configs = horizon_client::packs::polytone_configs(&horizon_client::packs::Source::Opened(
+        root.source().clone(),
+    ));
+    let registry =
+        horizon_client::particles::polytone::Registry::read(root.source(), configs, blocks);
+    (!registry.is_empty()).then(|| Arc::new(registry))
+}
+
+/// The packs' custom colours; their dye and sheep colours go to the draw paths' table.
+fn read_colors(
+    root: &horizon_assets::resource_source::ResourceRoot,
+) -> horizon_client::polytone_colors::PackColors {
+    let colors = horizon_client::polytone_colors::PackColors::from_files(
+        root.source()
+            .namespaces("assets")
+            .into_iter()
+            .map(|namespace| {
+                let base = format!("assets/{namespace}/polytone");
+                (
+                    root.source()
+                        .read_to_string(&format!("{base}/color.properties"))
+                        .ok(),
+                    root.source()
+                        .read_to_string(&format!("{base}/colors.json"))
+                        .ok(),
+                )
+            }),
+    );
+    horizon_client::pack_palette::set(&colors);
+    horizon_client::brewing::set_pack_colors(colors.effects());
+    colors
 }

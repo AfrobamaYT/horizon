@@ -2276,7 +2276,7 @@ impl Hub {
                     } else {
                         play::ClockState {
                             clock: id,
-                            total_ticks: world.game_time,
+                            total_ticks: world.end_clock,
                             partial_tick: 0.0,
                             rate: if rate > 0.0 { 1.0 } else { 0.0 },
                         }
@@ -3333,8 +3333,9 @@ impl Hub {
                     continue;
                 }
                 // A decorated pot is no block entity: its tag is the chunk's saved one.
+                let state = world.block(x, y, z).0;
                 let tag = match world.block_entities.get(&(x, y, z)) {
-                    Some(entity) => self.encoder.change_tag((x, y, z), entity),
+                    Some(entity) => self.encoder.change_tag((x, y, z), state, entity),
                     None => world
                         .chunks
                         .get(&(x >> 4, z >> 4))
@@ -3409,7 +3410,7 @@ impl Hub {
             }
             T::Vibration => {
                 use horizon_protocol::entity_data::PositionSource as NetworkPositionSource;
-                use mod_api::particles::PositionSource;
+                use mod_api::client::particles::PositionSource;
                 let (source, _, ticks) = options.vibration.as_ref()?;
                 let source = match source {
                     PositionSource::Block(pos) => NetworkPositionSource::Block(*pos),
@@ -3780,6 +3781,7 @@ impl Hub {
             g.sleeping = false;
             g.sleep_timer = 100;
             if g.sent_bed.take().is_some() {
+                g.sent_pose = crate::pose::Pose::Standing;
                 g.send(&C::SetEntityData(play::SetEntityData {
                     id: g.entity_id,
                     values: vec![
@@ -3811,6 +3813,11 @@ impl Hub {
             if g.bed != g.sent_bed {
                 g.sent_bed = g.bed;
                 let pose = if g.bed.is_some() { 2 } else { 0 };
+                g.sent_pose = if g.bed.is_some() {
+                    crate::pose::Pose::Sleeping
+                } else {
+                    crate::pose::Pose::Standing
+                };
                 g.send(&C::SetEntityData(play::SetEntityData {
                     id: g.entity_id,
                     values: vec![
@@ -3924,6 +3931,18 @@ impl Hub {
                 g.send(&C::SetEntityData(play::SetEntityData {
                     id: g.entity_id,
                     values: vec![(0, serializer::BYTE, Value::Byte(shared))],
+                }));
+            }
+            let pose = g.pose();
+            if matches!(
+                pose,
+                crate::pose::Pose::Standing | crate::pose::Pose::Crouching
+            ) && pose != g.sent_pose
+            {
+                g.sent_pose = pose;
+                g.send(&C::SetEntityData(play::SetEntityData {
+                    id: g.entity_id,
+                    values: vec![(6, serializer::POSE, Value::Id(pose.id()))],
                 }));
             }
             // ServerEntity.sendDirtyEntityData: the parrots on the player's
@@ -4916,8 +4935,8 @@ impl Hub {
                 positions.push(pos);
             }
         }
-        for pos in positions {
-            let state = ctx.world.block(pos[0], pos[1], pos[2]);
+        for pos @ [x, y, z] in positions {
+            let state = ctx.world.block(x, y, z);
             self.send_to(
                 conn,
                 &C::BlockUpdate(play::BlockUpdate {
@@ -4925,10 +4944,10 @@ impl Hub {
                     state: state.0 as i32,
                 }),
             );
-            let Some(entity) = ctx.world.block_entities.get(&(pos[0], pos[1], pos[2])) else {
+            let Some(entity) = ctx.world.block_entities.get(&(x, y, z)) else {
                 continue;
             };
-            let Some(tag) = self.encoder.update_tag((pos[0], pos[1], pos[2]), entity) else {
+            let Some(tag) = self.encoder.update_tag((x, y, z), state.0, entity) else {
                 continue;
             };
             let Some(kind) = self.encoder.entity_type(state.0) else {
@@ -5246,6 +5265,7 @@ impl Hub {
         });
         self.respawned(id);
         self.guests.update(i, |g| {
+            g.sent_pose = crate::pose::Pose::Standing;
             // ServerPlayer.restoreFrom: the game mode again (onUpdateAbilities).
             g.send(&g.abilities_packet());
             // The new player faces the level's respawn direction (snapTo), or
@@ -5429,7 +5449,9 @@ impl Hub {
             g.sent_xp = None;
             g.sent_air = (300, 0.0);
             g.sent_frozen = 0;
-            g.sent_shared = 0;
+            // Respawn KEEP_ALL_DATA copies the old player's tracked values,
+            // including shared flags. Preserve the publication baseline so a
+            // flag cleared after the level change is still sent to that client.
             g.sent_shoulders = [None; 2];
             g.sent_stuck = (0, 0);
             let (cx, cz) = g.chunk();
@@ -6275,6 +6297,60 @@ mod tests {
                 flags,
             }),
         );
+    }
+
+    /// `ClientboundRespawnPacket.KEEP_ALL_DATA`: a level change keeps the client's copy of the
+    /// player's shared flags, so one that clears afterwards still reaches it. (A creative player
+    /// who leaves lava through a dimension change kept the fire on its screen.)
+    #[test]
+    fn a_shared_flag_cleared_after_a_level_change_reaches_the_player() {
+        let (mut hub, rx) = hub_with_a_guest();
+        let shared_flags_sent = |rx: &std::sync::mpsc::Receiver<crate::lan::Out>| {
+            let mut sent = Vec::new();
+            while let Ok(out) = rx.try_recv() {
+                let crate::lan::Out::Packet(body) = out else {
+                    continue;
+                };
+                let mut r = horizon_protocol::buf::Reader::new(&body);
+                let id = r.varint().unwrap();
+                if let Ok(C::SetEntityData(packet)) = C::decode(id, r.rest()) {
+                    sent.extend(packet.values.iter().filter_map(|(index, _, value)| {
+                        match (index, value) {
+                            (0, Value::Byte(flags)) => Some(*flags),
+                            _ => None,
+                        }
+                    }));
+                }
+            }
+            sent
+        };
+        hub.guests.update(0, |g| g.sneaking = true);
+        hub.sync_player_state(0);
+        assert_eq!(shared_flags_sent(&rx), [0x02]);
+        let mut world = World::new(horizon_world::registry::BlockStateId(0), 0);
+        let mut next_entity = 2;
+        let border = crate::worldborder::WorldBorder::default();
+        let ctx = TickCtx {
+            world: &mut world,
+            entities: &[],
+            next_entity: &mut next_entity,
+            spawn: [0.5, 64.0, 0.5],
+            spawn_angle: [0.0; 2],
+            difficulty: 2,
+            difficulty_locked: false,
+            clock_rate: 1.0,
+            tick_rate: 20.0,
+            tick_frozen: false,
+            tick_steps: Default::default(),
+            collision: None,
+            border: &border,
+            streaming: None,
+        };
+        hub.change_level(0, [100.5, 49.0, 0.5], 0.0, None, false, 0, &ctx);
+        let _ = shared_flags_sent(&rx);
+        hub.guests.update(0, |g| g.sneaking = false);
+        hub.sync_player_state(0);
+        assert_eq!(shared_flags_sent(&rx), [0]);
     }
 
     /// `ServerGamePacketListenerImpl.forceSendPlayerSupportBlocks`: a client that says it stands

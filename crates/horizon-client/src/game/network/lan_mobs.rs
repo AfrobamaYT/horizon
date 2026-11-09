@@ -169,7 +169,7 @@ impl Game<'_> {
             .hub
             .guests
             .iter()
-            .filter(|g| host.hub.here(g) && g.loaded && !g.dead)
+            .filter(|g| host.hub.here(g) && g.loaded && !g.dead && !g.is_fake())
             .map(|g| {
                 let moved = [0, 1, 2].map(|k| g.position[k] - g.previous_position[k]);
                 (g.conn, g.uuid, moved)
@@ -232,11 +232,11 @@ impl Game<'_> {
     }
 
     /// Mob events aimed at a guest, run as that guest (`guest_hit_by`).
-    pub(super) fn lan_guest_mob_events(&mut self, events: Vec<(u32, u32, MobEvent)>) {
+    pub(super) fn lan_guest_mob_events(&mut self, events: &mut Vec<(u32, u32, MobEvent)>) {
         if events.is_empty() {
             return;
         }
-        for (conn, mob, e) in events {
+        for (conn, mob, e) in super::creatures::RemainingActions::new(events) {
             self.guest_hit_by(conn, |g| g.guest_mob_event(mob, e));
         }
     }

@@ -123,6 +123,8 @@ impl<'scope, T: Send + 'scope> Step<'scope, T> {
 /// `load_resources` binds them into the pack tables and `WorldCore`.
 pub(super) struct CoreTables {
     pub(super) item_data: Arc<horizon_world::item_defaults::ItemData>,
+    pub(super) entity_models: Option<Arc<horizon_client::mobs::EntityModelDocument>>,
+    pub(super) item_defaults: Arc<horizon_world::item_defaults::ItemDefaults>,
     pub(super) assets: Assets,
     pub(super) render: RenderAssets,
     pub(super) item_renderer: horizon_client::item_render::ItemRenderer,
@@ -163,16 +165,24 @@ pub(super) fn load_core(
     // read and the block facts; on a cold cache that read was most of a
     // second on the critical path, and warm it is still ~30 ms.
     // A server draws nothing and parses no models, so it skips this.
-    let (assets, parsed_models) = std::thread::scope(|scope| {
+    let (assets, parsed_models, entity_models) = std::thread::scope(|scope| {
         let models = (parallel && !headless).then(|| {
             scope.spawn(|| {
                 let _step = startup::step("core.models_parse");
                 horizon_client::model_library::ParsedModels::load(resources.source())
             })
         });
+        let entity_models = (!headless).then(|| {
+            Step::spawn(scope, parallel, "entity_models", || {
+                startup::time("core.entity_models", || {
+                    horizon_client::mobs::EntityModelDocument::load(root).ok()
+                })
+            })
+        });
         let assets = startup::time("core.assets", || Assets::load(root));
         let models = models.map(|m| m.join().unwrap_or_else(|e| std::panic::resume_unwind(e)));
-        (assets, models)
+        let entity_models = entity_models.and_then(|step| step.join()).map(Arc::new);
+        (assets, models, entity_models)
     });
     let assets = match assets {
         Ok(assets) => assets,
@@ -181,8 +191,9 @@ pub(super) fn load_core(
     progress.set(1);
     let item_data = Arc::new(mods::load_item_data(root, role).map_err(|e| e.to_string())?);
     let registry = assets.registry;
-    let (render, gameplay, visibility, biomes, environment, collision) =
-        std::thread::scope(|scope| {
+    let entity_models_for_render = entity_models.clone();
+    let (render, gameplay, visibility, biomes, environment, collision) = std::thread::scope(
+        |scope| {
             let assets = &assets;
             let item_data = &item_data;
             let render = Step::spawn(scope, parallel, "render", move || {
@@ -208,6 +219,10 @@ pub(super) fn load_core(
                     if headless {
                         horizon_client::item_render::ItemRenderer::load_for_server(
                             resources, library, item_data,
+                        )
+                    } else if let Some(document) = entity_models_for_render.as_deref() {
+                        horizon_client::item_render::ItemRenderer::load_with_library_and_entity_models(
+                            resources, library, document, item_data,
                         )
                     } else {
                         horizon_client::item_render::ItemRenderer::load_with_library(
@@ -267,9 +282,10 @@ pub(super) fn load_core(
                 environment.join(),
                 collision.join(),
             )
-        });
+        },
+    );
     // The packs' failure first: it rolls back whatever else failed.
-    let (render, item_renderer, _) = match render {
+    let (render, item_renderer, item_defaults) = match render {
         Ok(render) => render,
         Err(e) => return Ok(Err(e)),
     };
@@ -277,6 +293,8 @@ pub(super) fn load_core(
     progress.set(3);
     Ok(Ok(CoreTables {
         item_data,
+        item_defaults,
+        entity_models,
         gameplay,
         biomes: biomes?,
         environment: environment?,
@@ -467,12 +485,16 @@ pub(super) fn load_resources(
 ) -> Result<Loaded> {
     let mut root = resolved.prepared().to_path_buf();
     let headless = !role.is_client();
-    let runtime_sprites = if headless {
-        Vec::new()
+    let (runtime_sprites, texture_atlases) = if headless {
+        (Vec::new(), Vec::new())
     } else {
-        client_reload::collect_runtime_sprites()
+        (
+            client_reload::collect_runtime_sprites(),
+            client_reload::collect_texture_atlases(),
+        )
     };
     resolved = client_reload::stage_runtime_sprites(resolved, &runtime_sprites);
+    resolved = client_reload::stage_texture_atlases(resolved, &texture_atlases);
     let threads = settings.horizon.worker_threads();
     // One pool of workers for every level's streaming, the client's and the
     // server thread's (horizon_threads::jobs), sized before any world opens.
@@ -511,8 +533,8 @@ pub(super) fn load_resources(
         }
     };
     let mut can_rollback = true;
-    let (core, loaded_gui, resolved, entity_models) = loop {
-        let (ui, core, entity_models) = std::thread::scope(|scope| {
+    let (core, loaded_gui, resolved) = loop {
+        let (ui, core) = std::thread::scope(|scope| {
             let core = Step::spawn(scope, parallel, "core", || {
                 // A failed pack starts core again from the game's own
                 // resources, which the world's preload must read: with packs
@@ -522,21 +544,11 @@ pub(super) fn load_resources(
                     load_core(&resolved, &additional_data, role, parallel, progress, early)
                 })
             });
-            // The handoff's entity models, the rest worker's mob models and
-            // its transformers all read this one document. A server draws
-            // none of them.
-            let entity_models = (!headless).then(|| {
-                Step::spawn(scope, parallel, "entity_models", || {
-                    startup::time("core.entity_models", || {
-                        horizon_client::mobs::EntityModelDocument::load(&root).ok()
-                    })
-                })
-            });
             let ui = load_ui(resolved.source()).map(|ui| offer(ui, &root));
-            (ui, core.join(), entity_models.and_then(|step| step.join()))
+            (ui, core.join())
         });
         let failure = match (ui, core) {
-            (Ok(gui), Ok(Ok(core))) => break (core, gui, resolved, entity_models),
+            (Ok(gui), Ok(Ok(core))) => break (core, gui, resolved),
             (Err(e), _) if can_rollback => e.to_string(),
             (_, Ok(Err(e))) if can_rollback => e,
             (_, Ok(Err(e))) => {
@@ -558,11 +570,13 @@ pub(super) fn load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             &runtime_sprites,
         );
+        resolved = client_reload::stage_texture_atlases(resolved, &texture_atlases);
     };
     log::info!("load core tables: {:.2}s", started.elapsed().as_secs_f32());
-    let entity_models = entity_models.map(Arc::new);
     let CoreTables {
         item_data,
+        item_defaults,
+        entity_models,
         assets,
         render,
         item_renderer,
@@ -601,6 +615,7 @@ pub(super) fn load_resources(
             visibility,
             api_values::mod_tint_values(assets.registry)?,
         )
+        .map(|tables| tables.with_polytone_colormaps(resolved.source(), assets.registry))
     })?);
     let pack_step = startup::step("pack.assemble");
     let mut pack = PackResources::assemble(
@@ -668,6 +683,7 @@ pub(super) fn load_resources(
                     &behaviour_json,
                     &gameplay_projection,
                     entity_models.as_deref(),
+                    item_defaults.as_ref(),
                     visibility,
                     &progress,
                     started,
@@ -698,6 +714,7 @@ pub(super) fn load_resources(
             &behaviour_json,
             &gameplay_projection,
             entity_models.as_deref(),
+            item_defaults.as_ref(),
             visibility,
             progress,
             started,
@@ -743,8 +760,7 @@ pub(super) fn load_resources(
         (None, None)
     };
     // The client reload listeners register once before any prepare runs (no
-    // game exists yet, as NeoForge's construction-time event fires before
-    // resources load) and prepare here beside the rest of the load, against
+    // game exists yet) and prepare here beside the rest of the load, against
     // the same merged root; the game applies them at handoff. A dedicated
     // server never fires the client event. A failed prepare keeps the game
     // running without mod reload listeners, like the reload path's rollback.

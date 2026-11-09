@@ -3,6 +3,8 @@ use crate::{BlockKey, BlockMetadata, BlockState, BlockStateError, StateConstrain
 
 /// A block or tag filter, with unspecified properties left as wildcards.
 /// An unknown or missing property on a tag member never matches.
+#[derive(horizon_mod_api_macros::Wire)]
+#[wire(internal_field_layouts)]
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct StatePredicate {
@@ -14,7 +16,7 @@ pub struct StatePredicate {
 // exhaustive: the closed serialized block/tag selector vocabulary is a link contract.
 // hidden: selector used by the derived predicate codec, not a second public constructor.
 #[doc(hidden)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
 pub enum StatePredicateTarget {
     Block(BlockKey),
     Tag(TagKey),
@@ -24,6 +26,7 @@ pub enum StatePredicateTarget {
 #[doc(hidden)]
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct StatePredicateRecord {
     pub target: StatePredicateTarget,
     pub constraints: Vec<StateConstraint>,

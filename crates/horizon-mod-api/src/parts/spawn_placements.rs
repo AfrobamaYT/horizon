@@ -4,6 +4,7 @@ use super::*;
 /// The game resolves it once, at load, into the tables its spawn checks read.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: only registration builds it; the game reads it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct SpawnPlacementDeclaration {
     /// The entity type the rule belongs to.
     pub id: String,
@@ -24,10 +25,10 @@ pub mod tests {
     #[cfg(test)]
     fn rule() -> SpawnPlacementRule {
         SpawnPlacementRule {
-            placement: NativeSpawnPlacementType::OnGround,
-            heightmap: NativeHeightmap::MotionBlockingNoLeaves,
+            placement: SpawnPlacementType::OnGround,
+            heightmap: Heightmap::MotionBlockingNoLeaves,
             spawnable_on: Some("minecraft:animals_spawnable_on".to_string()),
-            light: NativeSpawnLight::Bright,
+            light: SpawnLight::Bright,
             biome_tag: Some("minecraft:is_forest".to_string()),
         }
     }

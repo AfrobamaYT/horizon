@@ -589,6 +589,11 @@ impl Loading {
                     self.save_menu_settings();
                     self.menu.reload_packs = true;
                 }
+                Event::PackOptions { entries, chosen } => {
+                    packs::save_pack_options(&entries, chosen);
+                    self.menu.options.pack_configs = packs::pack_configs(&self.vanilla_root);
+                    self.menu.reload_packs = true;
+                }
                 Event::OpenPackFolder => {
                     let dir = packs::packs_dir();
                     let _ = std::fs::create_dir_all(&dir);
@@ -697,7 +702,7 @@ impl Loading {
                 }
                 // Mods' settings pages open only in a running game.
                 // The HUD editor needs a world: its button is inactive here.
-                Event::NativeSettings(_) | Event::NativeButton(..) | Event::HudEditor => {}
+                Event::NativeSettings(_) | Event::NativeSetting(..) | Event::HudEditor => {}
                 // The startup menu runs before the game opens a control socket,
                 // and before its sound engine (no clicks, no volume previews,
                 // and no music tracks to list or play).
@@ -1318,9 +1323,13 @@ impl Loading {
                 self.menu.win = None;
             }
         } else if self.menu.options_open {
+            let output = self
+                .renderer
+                .as_ref()
+                .map_or(Default::default(), |r| *r.output());
             self.menu
                 .options
-                .draw(&self.settings, batch, &gui.atlas, self.menu.cursor);
+                .draw(&self.settings, output, batch, &gui.atlas, self.menu.cursor);
         } else if let Some(title) = &mut self.menu.title {
             title.poll_backup();
             if std::mem::take(&mut title.onboarding_finished) {

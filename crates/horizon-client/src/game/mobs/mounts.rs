@@ -706,6 +706,20 @@ impl Game<'_> {
         };
         dismount_location(mount, &rider, &GameDismountWorld(self))
     }
+
+    /// The same player search when the mount is lent out during a mob tick.
+    pub(super) fn player_dismount_from_lent_mob(
+        &self,
+        mount: &Mob,
+        yaw: f32,
+        player: &PlayerMotion,
+    ) -> Vec3 {
+        if mount.species() == Species::HappyGhast {
+            on_top(mount)
+        } else {
+            self.mount_player_dismount(&Mount::of(mount), yaw, player).0
+        }
+    }
     /// Where `stop_riding` sets a player in `p` facing `yaw` down off `vehicle`: None when
     /// `vehicle` is no boat, cart or mob.
     pub(in crate::game) fn player_dismount_point(
@@ -898,7 +912,7 @@ impl Game<'_> {
     /// landing code's own fall damage for the player: creative flight is
     /// exempt, and the statistic, the sounds and the damage records wait in the
     /// player's events for its next tick, as a landing of its own leaves them.
-    fn rider_fall_damage(&mut self, distance: f64, modifier: f32) {
+    pub(super) fn rider_fall_damage(&mut self, distance: f64, modifier: f32) {
         let Some(player) = self.player.as_mut() else {
             return;
         };

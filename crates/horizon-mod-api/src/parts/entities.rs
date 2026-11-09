@@ -14,6 +14,7 @@ where
         self(host, entity, context)
     }
 }
+// no wire: trait-object alias inherits its provider trait policy; callbacks are not serialized.
 /// An entity capability provider, as the registrar keeps it.
 pub type EntityProvider<T, C = ()> = dyn EntityCapabilityProvider<T, C>;
 
@@ -88,6 +89,7 @@ pub fn entity_providers<T: ?Sized + 'static, C: Copy + 'static>(
     })
 }
 
+// no wire: provider lookup borrows static capability dispatch tables and process-local type identity.
 /// An entity's providers of one capability ([`entity_providers`]).
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct EntityProviders<T: ?Sized + 'static, C: 'static> {
@@ -161,7 +163,6 @@ impl dyn Registrar + '_ {
 /// Fixtures that tests of other crates use to install Parts.
 #[cfg(any(test, feature = "testing"))]
 pub mod tests {
-    use super::*;
     use crate::parts::tests::*;
     use crate::*;
 
@@ -244,7 +245,7 @@ pub mod tests {
         fn resource(&self, host: &mut dyn ServerHost, _: usize) -> Option<FluidResource> {
             (self.amount(host, 0) > 0).then(|| {
                 FluidResource::of(&FluidStack::new(
-                    crate::registry_keys::fluid_key("minecraft:water").unwrap(),
+                    crate::content::registry_keys::fluid_key("minecraft:water").unwrap(),
                     1,
                 ))
             })
@@ -259,7 +260,7 @@ pub mod tests {
             if index == 0
                 && resource
                     == &FluidResource::of(&FluidStack::new(
-                        crate::registry_keys::fluid_key("minecraft:water").unwrap(),
+                        crate::content::registry_keys::fluid_key("minecraft:water").unwrap(),
                         1,
                     ))
             {

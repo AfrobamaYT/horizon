@@ -34,6 +34,12 @@ The following documented `Game` helpers are not in the trait yet:
   `container_slots` uses gameplay-private types.
 - `with_mod_block_entity` is generic, so its signature cannot be called through `dyn Host`.
 
+Experience-orb values use vanilla's signed `i32` representation in
+`ExperienceOrb`, `ServerHost::set_experience_orb`, and the pickup and merge hooks.
+Reading or changing a value preserves zero and negative saved values rather than
+clamping them through an unsigned representation. A negative value does not grant
+positive experience when picked up.
+
 Advancement triggers instead live on `PlayerRef::trigger_criterion`, with a mod-owned
 `CriterionTest` and the game's scoped `CriterionContext` resource. The context keeps real
 world-aware item predicates; it is not a conditions-only snapshot. See

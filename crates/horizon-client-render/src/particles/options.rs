@@ -1,6 +1,6 @@
 //! Engine particle provider options, independent of API registry keys.
 use super::ParticleType;
-use mod_api::particles::PositionSource;
+use mod_api::client::particles::PositionSource;
 /// `ParticleOptions` with the parameters of the option classes used here.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods use the constructors
@@ -38,6 +38,8 @@ pub struct ParticleOptions {
     /// `nextInt(40) + 10` after constructing the particle. Set by the client for an older
     /// server only, never read from the wire.
     pub legacy_trail_lifetime: bool,
+    pub source: Option<std::sync::Arc<str>>,
+    pub polytone_seed: Option<std::sync::Arc<super::polytone::Seed>>,
 }
 impl ParticleOptions {
     pub fn simple(ty: ParticleType) -> Self {
@@ -54,6 +56,8 @@ impl ParticleOptions {
             mod_particle: None,
             legacy_entity_effect: None,
             legacy_trail_lifetime: false,
+            polytone_seed: None,
+            source: None,
         }
     }
     /// A native mod's `SimpleParticleType`: the sprite set of

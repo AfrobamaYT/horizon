@@ -1935,7 +1935,9 @@ impl Game<'_> {
     }
 
     fn pad_show_os_pointer(&mut self, show: bool) {
-        if self.pad.menu.os_hidden != show {
+        // While the game's grab is internal the system pointer stays as it is; the first poll
+        // after shows or hides it.
+        if self.pad.menu.os_hidden != show || self.internal_grab() {
             return;
         }
         self.pad.menu.os_hidden = !show;
@@ -2545,7 +2547,7 @@ impl Game<'_> {
                 || self.screen == Screen::Chat;
             let mut ui = horizon_client::ui_theme::Ui::new(&self.gui.atlas, batch, self.cursor);
             let options = &self.ui.options;
-            keyboard.draw(&mut ui, at_top, options.pad_style, options.pad_by_letter);
+            keyboard.draw(&mut ui, at_top, options.pad_glyphs);
             ui.finish();
             return;
         }

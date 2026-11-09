@@ -79,6 +79,17 @@ fn vehicle_id(t: Target) -> Option<u32> {
 impl Game<'_> {
     /// `AbstractMinecart.getDismountLocationForPassenger` for a standing mob.
     pub(super) fn cart_dismount_point(&self, vehicle: u32, rider: u32) -> Option<Vec3> {
+        self.cart_dismount_point_from(
+            self.carts.iter().find(|c| c.id == vehicle)?,
+            self.mob_object(rider)?,
+        )
+    }
+
+    pub(super) fn cart_dismount_mob(
+        &self,
+        vehicle: u32,
+        rider: &horizon_client::mobs::Mob,
+    ) -> Option<Vec3> {
         self.cart_dismount_point_from(self.carts.iter().find(|c| c.id == vehicle)?, rider)
     }
 
@@ -86,10 +97,9 @@ impl Game<'_> {
     pub(super) fn cart_dismount_point_from(
         &self,
         cart: &super::minecarts::Minecart,
-        rider: u32,
+        rider: &horizon_client::mobs::Mob,
     ) -> Option<Vec3> {
         use horizon_core::geometry::Aabb;
-        let rider = self.mob_object(rider)?;
         let direction =
             (f64::from(cart.yaw) / 90.0 + 0.5).floor() as i32 + if cart.flipped { 3 } else { 1 };
         let (fx, fz) = [(0, 1), (-1, 0), (0, -1), (1, 0)][(direction & 3) as usize];
@@ -139,9 +149,19 @@ impl Game<'_> {
     /// `AbstractHorse.getDismountLocationForPassenger`: try either side
     /// through the mount's height, then fall back to its feet.
     pub(super) fn horse_dismount_point(&self, vehicle: u32, rider: u32) -> Option<Vec3> {
+        self.horse_dismount_mobs(self.mob_object(vehicle)?, self.mob_object(rider)?)
+    }
+
+    /// The horse search for a mount and rider currently lent out of the mob list.
+    pub(super) fn horse_dismount_mobs(
+        &self,
+        mount: &horizon_client::mobs::Mob,
+        rider: &horizon_client::mobs::Mob,
+    ) -> Option<Vec3> {
         use horizon_core::geometry::{Aabb, trig};
-        let mount = self.mob_object(vehicle).filter(|m| is_horse(m.species()))?;
-        let rider = self.mob_object(rider)?;
+        if !is_horse(mount.species()) {
+            return None;
+        }
         let turn = if rider.main_arm_left() { -90.0 } else { 90.0 };
         let reach =
             (f64::from(mount.width()) + f64::from(rider.width()) + f64::from(1e-5_f32)) / 2.0;
@@ -272,6 +292,7 @@ impl Game<'_> {
             }
             game.prepare_vehicle_transition(root);
             game.teleport_to_in_level(target, at, rotation, [false; 3], turn_riders);
+            game.teleport_stops(target);
             let mounts: Vec<_> = game.mob_objects().map(|m| (m.id, m.extra.mount)).collect();
             let tree = super::persist::vehicle_tree(root, &mounts);
             let tag = game.vehicle_tree_nbt(root).ok_or("missing vehicle tree")?;

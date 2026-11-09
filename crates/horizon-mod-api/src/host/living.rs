@@ -27,14 +27,14 @@ pub trait LivingBackend {
     /// stand, the dragon or a stale handle; on a client, for any entity but the
     /// local player, whose copy of what the server sent it is read.
     #[access(WorldOnly)]
-    fn living_effect(&self, living: LivingRef, effect: EffectKey) -> Option<NativeActiveEffect>;
+    fn living_effect(&self, living: LivingRef, effect: EffectKey) -> Option<ActiveEffect>;
     /// Side: both.
     /// The entity's active effects (`LivingEntity.getActiveEffects`), in the
     /// order their store keeps them, in `Some` even when it has none. None
     /// for an armor stand, the dragon or a stale handle; on a client, for any
     /// entity but the local player (its copy of what the server sent it).
     #[access(WorldOnly)]
-    fn living_effects(&self, living: LivingRef) -> Option<Vec<NativeActiveEffect>>;
+    fn living_effects(&self, living: LivingRef) -> Option<Vec<ActiveEffect>>;
     /// Side: both.
     /// Whether the entity has `effect` (`LivingEntity.hasEffect`), using its resolved key.
     /// False before effect resolution, for an armor stand, the dragon or a stale handle;
@@ -215,6 +215,14 @@ pub trait LivingBackend {
     #[access(WorldOnly)]
     fn living_used_item_hand(&self, living: LivingRef) -> Option<Hand>;
     /// Side: both.
+    /// `LivingEntity.isBlocking`: whether a player or a mob holds up an item that blocks attacks
+    /// (a shield, or any item with `minecraft:blocks_attacks`): it is using that item, from either
+    /// hand, and has used it for the component's `block_delay_seconds` (5 ticks for a shield).
+    /// False while it uses nothing or another item. On a client, the local player's only. None
+    /// for armor stands and the dragon, and for a stale handle.
+    #[access(WorldOnly)]
+    fn living_is_blocking(&self, living: LivingRef) -> Option<bool>;
+    /// Side: both.
     /// `LivingEntity.getDimensions(Pose)`: the box the living entity has in
     /// `pose` — its width, height and eye height, `minecraft:scale`
     /// included, the fixed 0.2 box of a sleeping pose included. The species'
@@ -329,7 +337,7 @@ pub trait LivingBackendMut {
     /// stand, the dragon, a stale handle or a client, or when the active
     /// instance did not change, as in vanilla's `addEffect`.
     #[access(WorldOnly)]
-    fn living_add_effect(&mut self, living: LivingRef, effect: &NativeActiveEffect) -> bool;
+    fn living_add_effect(&mut self, living: LivingRef, effect: &ActiveEffect) -> bool;
     /// Side: server.
     /// `LivingEntity.removeEffect(effect)` the way its running out goes
     /// (`LivingEntity.tickEffects` drops it): what the effect gave the

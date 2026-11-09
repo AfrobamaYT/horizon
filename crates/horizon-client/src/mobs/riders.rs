@@ -505,6 +505,34 @@ impl Drop for NavigationLoan<'_> {
     }
 }
 
+/// Read-only view of entities disjoint from the mob currently ticking.
+struct LiveOthers<'a> {
+    before: &'a [Mob],
+    between: &'a [Mob],
+    after: &'a [Mob],
+    vehicle: Option<&'a Mob>,
+}
+
+impl super::LiveMobs for LiveOthers<'_> {
+    fn find(&self, id: u32) -> Option<&Mob> {
+        self.before
+            .iter()
+            .chain(self.between)
+            .chain(self.after)
+            .chain(self.vehicle)
+            .find(|mob| mob.id == id)
+    }
+
+    fn for_each(&self, visitor: &mut dyn FnMut(&Mob)) {
+        self.before
+            .iter()
+            .chain(self.between)
+            .chain(self.after)
+            .chain(self.vehicle)
+            .for_each(visitor);
+    }
+}
+
 /// Tick a passenger with Mob.getNavigation's recursive vehicle redirection.
 /// Navigation is lent, not copied: goal start/stop/path progress all address
 /// the same object the vehicle ticks. The pathfinder sees the vehicle body.
@@ -515,6 +543,42 @@ pub fn tick(
     level: &mut super::DamageLevel<'_>,
     events: &mut Vec<super::MobEvent>,
 ) -> bool {
+    tick_with(mobs, index, w, level, events, Mob::tick)
+}
+
+/// Return an inline consumption pause only after restoring a rider's navigation loan.
+pub fn tick_until_consumption(
+    mobs: &mut JoinList<Mob>,
+    index: usize,
+    w: &MobWorld,
+    level: &mut super::DamageLevel<'_>,
+    events: &mut Vec<super::MobEvent>,
+) -> super::ai::TickProgress {
+    tick_with(mobs, index, w, level, events, Mob::tick_until_consumption)
+}
+
+/// Resume the paused living AI step with the current vehicle/navigation owner.
+pub fn resume_after_consumption(
+    mobs: &mut JoinList<Mob>,
+    index: usize,
+    w: &MobWorld,
+    level: &mut super::DamageLevel<'_>,
+    was_on_fire: bool,
+    events: &mut Vec<super::MobEvent>,
+) -> bool {
+    tick_with(mobs, index, w, level, events, |m, w, level, events| {
+        super::ai::resume_after_consumption(m, w, level, was_on_fire, events)
+    })
+}
+
+fn tick_with<R>(
+    mobs: &mut JoinList<Mob>,
+    index: usize,
+    w: &MobWorld,
+    level: &mut super::DamageLevel<'_>,
+    events: &mut Vec<super::MobEvent>,
+    step: impl FnOnce(&mut Mob, &MobWorld, &mut super::DamageLevel<'_>, &mut Vec<super::MobEvent>) -> R,
+) -> R {
     let mut owner = index;
     if !mobs[index].no_ai {
         for _ in 0..mobs.len() {
@@ -533,13 +597,41 @@ pub fn tick(
             owner = vehicle;
         }
     }
-    if owner == index {
-        return mobs[index].tick(w, level, events);
+    if !mod_api::__private::listened(mod_api::HookId::LivingChangeTarget) {
+        if owner == index {
+            return step(&mut mobs[index], w, level, events);
+        }
+        let [rider, vehicle] = mobs.get_disjoint_mut([index, owner]).unwrap();
+        return step(NavigationLoan::new(rider, vehicle).rider, w, level, events);
     }
-    let [rider, vehicle] = mobs.get_disjoint_mut([index, owner]).unwrap();
-    NavigationLoan::new(rider, vehicle)
-        .rider
-        .tick(w, level, events)
+    if owner == index {
+        return mobs
+            .with_one_and_rest(index, |mob, before, after| {
+                let live = LiveOthers {
+                    before,
+                    between: &[],
+                    after,
+                    vehicle: None,
+                };
+                let mut scoped = w.clone();
+                scoped.live_mobs = Some(&live);
+                step(mob, &scoped, level, events)
+            })
+            .expect("tick index is present");
+    }
+    mobs.with_two_and_rest(index, owner, |rider, vehicle, before, between, after| {
+        let loan = NavigationLoan::new(rider, vehicle);
+        let live = LiveOthers {
+            before,
+            between,
+            after,
+            vehicle: Some(&*loan.vehicle),
+        };
+        let mut scoped = w.clone();
+        scoped.live_mobs = Some(&live);
+        step(loan.rider, &scoped, level, events)
+    })
+    .expect("rider and vehicle are distinct and present")
 }
 /// `Mob.requiresCustomPersistence`: a passenger never despawns.
 pub fn keeps_alive(m: &Mob) -> bool {

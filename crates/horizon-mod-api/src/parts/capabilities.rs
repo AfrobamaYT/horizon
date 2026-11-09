@@ -23,6 +23,7 @@ pub(crate) struct CapabilityPart<P> {
 /// publishes), erased: only mods linked with that crate know its handler type.
 // hidden: the registrar's erased provider, not part of the mod surface
 // exhaustive: its fields are private, so mods cannot build or destructure it
+// no wire: transfers the handler name and a retained provider resource id, reporting unsupported handlers rather than serializing the native Any object.
 #[doc(hidden)]
 #[derive(Clone)]
 pub struct OwnProvider {
@@ -232,6 +233,7 @@ pub mod tests {
     /// A chemical, as Mekanism's: the test mods' own resource, which the game knows nothing of.
     #[derive(Clone, Debug, PartialEq)]
     // exhaustive: the game builds it with a literal; mods only read it
+    // no wire: testing-feature fixture state, not a mod boundary value.
     pub struct Chemical(pub String);
 
     /// The test mods' own capability, as Mekanism's `Capabilities.CHEMICAL`: the game has no
@@ -242,6 +244,7 @@ pub mod tests {
     /// A mod block entity's one tank of 1000 of a chemical, kept in its saved data (`chemical`
     /// and `amount`), whose writes the game's journal keeps for a transaction.
     // exhaustive: the game builds it with a literal; mods only read it
+    // no wire: testing-feature fixture state, not a mod boundary value.
     pub struct ChemTank(pub BlockSide);
     impl ChemTank {
         fn entity(&self, host: &dyn Host) -> Option<BlockEntityRef> {
@@ -367,7 +370,7 @@ pub mod tests {
         let host: &mut dyn ServerHost = &mut world;
         // The pipe's type has a provider, which answers in the level in place; parked while
         // the server ticks another, the same block entity's level gives none.
-        let parked = LevelRef::new(NativeWorldEpoch::new(1), crate::DimensionKey::NETHER);
+        let parked = LevelRef::new(WorldEpoch::new(1), crate::DimensionKey::NETHER);
         assert!(here().capability(host, &ITEMS, PIPE, None).is_some());
         assert!(parked.capability(host, &ITEMS, PIPE, None).is_none());
     }
@@ -565,7 +568,7 @@ pub mod tests {
             side: None,
         };
         let direct_block = || block_entity_providers(&ITEMS, &ordered_world(), at).unwrap();
-        let robot = EntityRef::new(NativeWorldEpoch::new(1), 3);
+        let robot = EntityRef::new(WorldEpoch::new(1), 3);
         let mut player = player_world(None);
         let direct_entity =
             || entity_providers(&ENTITY_ITEMS, &player_world(None), robot, ()).unwrap();

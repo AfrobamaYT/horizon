@@ -120,7 +120,7 @@ pub trait LevelsBackend {
         &self,
         level: LevelRef,
         controller: TicketController,
-    ) -> Option<Vec<(NativeTicketOwner, [i32; 2], bool)>>;
+    ) -> Option<Vec<(TicketOwner, [i32; 2], bool)>>;
     /// Side: server.
     /// Whether this chunk is loaded; false on a client or for a stale handle.
     #[access(WorldOnly)]
@@ -288,7 +288,7 @@ pub trait LevelsBackend {
         &self,
         level: LevelRef,
         pos: [i32; 3],
-        kind: NativeBlockShapeKind,
+        kind: BlockShapeKind,
     ) -> Option<Vec<[f64; 6]>>;
     /// Side: server.
     /// Clip an empty-context ray against collider or outline shapes, without fluids.
@@ -299,9 +299,9 @@ pub trait LevelsBackend {
         level: LevelRef,
         from: [f64; 3],
         to: [f64; 3],
-        blocks: NativeClipBlock,
-        fluids: NativeClipFluid,
-    ) -> Option<NativeClipHit>;
+        blocks: ClipBlock,
+        fluids: ClipFluid,
+    ) -> Option<ClipHit>;
     /// Side: server.
     /// Gameplay's face support in the current or a parked server level, including
     /// live block entities for dynamic shapes. None for stale or closed levels,
@@ -311,8 +311,8 @@ pub trait LevelsBackend {
         &self,
         level: LevelRef,
         pos: [i32; 3],
-        face: NativeBlockFace,
-        support: NativeSupportType,
+        face: BlockFace,
+        support: SupportType,
     ) -> Option<bool>;
     /// Side: server.
     /// How strongly the block at `pos` powers the block on its `direction` side, power it
@@ -375,6 +375,14 @@ pub trait LevelsBackend {
     /// or `hard`, as `/difficulty` names it.
     #[access(WorldOnly)]
     fn level_difficulty(&self, level: LevelRef) -> Option<&'static str>;
+    /// Side: server.
+    /// The local difficulty at `pos` (`ServerLevel.getCurrentDifficultyAt`), as mobs spawned
+    /// there are finalized with: the world difficulty scaled by the level's age, the chunk's
+    /// inhabited time and the moon (both 0 for a chunk that isn't loaded). Its
+    /// `special_multiplier` is vanilla's `getSpecialMultiplier`. None for a stale handle, a level
+    /// the server has not opened, or a client.
+    #[access(WorldOnly)]
+    fn level_local_difficulty(&self, level: LevelRef, pos: [i32; 3]) -> Option<Difficulty>;
     /// Side: server.
     /// Read a registered boolean game rule.
     #[access(WorldOnly)]
@@ -611,7 +619,7 @@ pub trait LevelsBackendMut {
         level: LevelRef,
         kind: &str,
         pos: [f64; 3],
-        reason: NativeSpawnReason,
+        reason: SpawnReason,
     ) -> Option<EntityRef>;
     /// Side: server.
     /// Sets the level's natural spawning limits ([`SpawnLimits`]), from the next
@@ -664,7 +672,7 @@ pub trait LevelsBackendMut {
         &mut self,
         chunk: ChunkRef,
         controller: TicketController,
-        owner: NativeTicketOwner,
+        owner: TicketOwner,
         forced: bool,
         natural_spawning: bool,
     ) -> bool;
@@ -678,7 +686,7 @@ pub trait LevelsBackendMut {
         level: LevelRef,
         pos: [i32; 3],
         state: BlockState,
-        flags: NativeBlockUpdateFlags,
+        flags: BlockUpdateFlags,
     ) -> Result<bool, LevelWriteError>;
     /// Side: server.
     /// Remove a block in place (`Level.removeBlock`), preserving its fluid.
@@ -741,6 +749,74 @@ pub trait LevelsBackendMut {
     /// stale handle and on a client.
     #[access(WorldOnly)]
     fn level_request_save(&mut self, level: LevelRef) -> bool;
+    /// Side: server.
+    /// Moves the world border's centre (`WorldBorder.setCenter`), as `/worldborder center`
+    /// does. Horizon keeps one border for every level, so this moves it everywhere; the
+    /// players see it after the next sync. The centre it already has is true, with nothing
+    /// heard. False for a centre that isn't finite or lies past 2.9999984E7 on x or z, a call
+    /// from inside `world_border_center_changed`, a stale handle, a level the server has not
+    /// opened or a client.
+    #[access(WorldOnly)]
+    fn level_set_world_border_center(&mut self, level: LevelRef, center: [f64; 2]) -> bool;
+    /// Side: server.
+    /// Sets the world border's size, as `/worldborder set`: at once when `ticks` is 0
+    /// (`setSize`), otherwise growing or shrinking in a straight line over `ticks` game ticks
+    /// from its size now (`lerpSizeBetween`). The one border every level shares. A still
+    /// border set to the size it has at once is true, with nothing heard. False for a size
+    /// outside 1 to 5.9999968E7, a negative `ticks`, a call from inside
+    /// `world_border_bounds_changed`, a stale handle, a level the server has not opened or a
+    /// client.
+    #[access(WorldOnly)]
+    fn level_set_world_border_size(&mut self, level: LevelRef, size: f64, ticks: i64) -> bool;
+    /// Side: server.
+    /// The world border's damage (`setDamagePerBlock`, `setSafeZone`), as `/worldborder
+    /// damage amount` and `buffer`: a player outside the border and past `safe_zone` blocks
+    /// takes `per_block` damage for each block beyond it. False for a value that is
+    /// negative or not finite, a stale handle, a level the server has not opened or a client.
+    #[access(WorldOnly)]
+    fn level_set_world_border_damage(
+        &mut self,
+        level: LevelRef,
+        per_block: f64,
+        safe_zone: f64,
+    ) -> bool;
+    /// Side: server.
+    /// The world border's warning (`setWarningBlocks`, `setWarningTime`), as `/worldborder
+    /// warning distance` and `time`: a player's screen tints red within `distance` blocks of
+    /// the border, or when a shrinking border will reach them within `ticks` game ticks.
+    /// False for a negative value, a stale handle, a level the server has not opened or a
+    /// client.
+    #[access(WorldOnly)]
+    fn level_set_world_border_warning(
+        &mut self,
+        level: LevelRef,
+        distance: i32,
+        ticks: i32,
+    ) -> bool;
+    /// Side: server.
+    /// Sets the weather as `/weather` does (`ServerLevel.setWeatherParameters`): clear for
+    /// `clear_ticks`, or raining (and thundering) for `weather_ticks`, after which the
+    /// weather cycle goes on as usual. Rain and thunder then fade in or out as vanilla's do;
+    /// `set_weather_levels` sets their strength at once. The `weather_change` hook may cancel
+    /// all of it and `thunder_change` the thunder. The players see it after the next sync.
+    /// False for a negative time, a call from inside `weather_change` or `thunder_change`, a
+    /// parked level, a stale handle or a client.
+    #[access(WorldOnly)]
+    fn level_set_weather(
+        &mut self,
+        level: LevelRef,
+        clear_ticks: i32,
+        weather_ticks: i32,
+        raining: bool,
+        thundering: bool,
+    ) -> bool;
+    /// Side: server.
+    /// How strong the rain and thunder are now (`Level.setRainLevel`, `setThunderLevel`),
+    /// each clamped to 0 to 1 and set without fading. They still drift toward the weather
+    /// the level has (`set_weather`) by 0.01 a tick, as vanilla's do. False for a value that
+    /// isn't finite, a parked level, a stale handle or a client.
+    #[access(WorldOnly)]
+    fn level_set_weather_levels(&mut self, level: LevelRef, rain: f32, thunder: f32) -> bool;
     /// Side: server.
     /// Random-tick `pos` now, as `ServerLevel.tickChunk` does for a position it picked: the
     /// block's `randomTick` when it ticks randomly (its part first), then lava's fluid random
@@ -875,7 +951,7 @@ pub trait LevelsBackendMut {
         center: [f64; 3],
         radius: f32,
         fire: bool,
-        interaction: NativeExplosionInteraction,
+        interaction: ExplosionInteraction,
     ) -> bool;
     /// Side: server.
     /// Strikes lightning at `at`, as summoning a `minecraft:lightning_bolt`

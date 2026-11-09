@@ -165,8 +165,12 @@ impl Game<'_> {
             }
             keep
         });
-        let (tree, _, problems) =
-            super::native_server::command_tree(&commands, |name| base.find(name).is_some());
+        let arguments = super::native_server::command_arguments();
+        let (tree, _, problems) = super::native_server::command_tree(
+            &commands,
+            |name| base.find(name).is_some(),
+            &arguments,
+        );
         for problem in problems {
             log::warn!("Horizon: a client command was left out: {problem}");
         }
@@ -175,6 +179,7 @@ impl Game<'_> {
             &mut tree_with_mods,
             &tree,
             horizon_client::command::MOD_COMMAND,
+            &arguments,
         );
         with_studio_commands(&with_native_commands(&tree_with_mods, &["studio"]))
     }
@@ -1855,6 +1860,9 @@ impl Game<'_> {
             self.sync_hub_clocks();
             return;
         }
+        // The End's independent clock runs one tick per tick while advance_time
+        // is enabled, regardless of the Overworld clock's pause or rate.
+        self.world.end_clock += 1;
         let mut names: Vec<String> = self.ui.command_clocks.keys().cloned().collect();
         let active = self.active_clock().to_owned();
         for name in [OVERWORLD_CLOCK.to_owned(), active] {
@@ -2496,16 +2504,20 @@ mod tests {
     fn a_client_commands_usage_is_parsed_by_the_chat_tree() {
         let reg = Registries::default();
         let vanilla = horizon_client::command::vanilla::game_dispatcher();
-        let commands = [mod_api::NativeCommand::new("xmode <mode:word>")];
-        let (tree, _, problems) = super::super::native_server::command_tree(&commands, |name| {
-            vanilla.find(name).is_some()
-        });
+        let commands = [mod_api::Command::new("xmode <mode:word>")];
+        let arguments = super::super::native_server::command_arguments();
+        let (tree, _, problems) = super::super::native_server::command_tree(
+            &commands,
+            |name| vanilla.find(name).is_some(),
+            &arguments,
+        );
         assert!(problems.is_empty(), "{problems:?}");
         let mut chat = vanilla.clone();
         super::super::native_server::register_dispatcher(
             &mut chat,
             &tree,
             horizon_client::command::MOD_COMMAND,
+            &arguments,
         );
         let parse = chat.parse("xmode fast", &reg);
         assert_eq!(
@@ -2522,8 +2534,9 @@ mod tests {
         );
         // A name the game has is not taken over.
         let (_, _, problems) = super::super::native_server::command_tree(
-            &[mod_api::NativeCommand::new("help <x:word>")],
+            &[mod_api::Command::new("help <x:word>")],
             |name| vanilla.find(name).is_some(),
+            &arguments,
         );
         assert_eq!(problems.len(), 1);
     }
