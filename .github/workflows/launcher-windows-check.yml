@@ -40,5 +40,7 @@ jobs:
           shared-key: launcher-windows-check
           # One cache from main, read by every pull request: per-PR caches filled the 10 GB budget and evicted main's.
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: "cargo test --release --locked -p horizon-mod-package --features runtime-process --lib output::"
+        working-directory: .
       # Every test target (the library, the binary, tests/), as launcher.yml runs them.
       - run: cargo test --release --locked

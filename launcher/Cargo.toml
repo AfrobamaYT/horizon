@@ -54,7 +54,7 @@ horizon-bench = { path = "../crates/horizon-bench" }
 # Import modpack: the porting pipeline, run on the player's own files (docs/modpacks.md).
 horizon-port-pack = { path = "../crates/horizon-port-pack" }
 # Horizon's mod registry: its index and the checks a download passes before install.
-horizon-mod-package = { path = "../crates/horizon-mod-package", features = ["index", "prebuilt"] }
+horizon-mod-package = { path = "../crates/horizon-mod-package", features = ["index", "prebuilt", "runtime-process"] }
 # Use the game's manifest validation for native shader identities.
 horizon-shader-api = { path = "../crates/horizon-shader-api" }
 # Signed updates: archives are checked against the release's signed checksums (docs/security.md).
@@ -115,6 +115,7 @@ winreg = "0.56"
 winresource = "0.1"
 
 [dev-dependencies]
+libc = "0.2"
 tempfile = "3"
 # Tokenize source strings for the translation completeness test, including multiline calls.
 syn = "2"

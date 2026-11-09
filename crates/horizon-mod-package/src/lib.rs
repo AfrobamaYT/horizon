@@ -14,6 +14,8 @@ pub mod manifest;
 pub mod mod_list;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod modpack;
+#[cfg(feature = "runtime-process")]
+pub mod output;
 pub mod packages;
 pub mod runtime;
 pub mod selection;
