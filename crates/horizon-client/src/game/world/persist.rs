@@ -282,8 +282,8 @@ pub(super) struct ItemDisplayTransformation {
     right_rotation: [f32; 4],
 }
 
-impl From<mod_api::NativeTransformation> for ItemDisplayTransformation {
-    fn from(value: mod_api::NativeTransformation) -> Self {
+impl From<mod_api::Transformation> for ItemDisplayTransformation {
+    fn from(value: mod_api::Transformation) -> Self {
         Self {
             translation: value.translation,
             left_rotation: value.left_rotation,
@@ -645,6 +645,25 @@ impl Game<'_> {
                 self.native_joins_flush(false, 0);
                 let kind = entity_nbt::kind(&tag).unwrap_or_default();
                 let is_mob = self.res.mob_types().contains_key(kind.as_str());
+                if from_disk
+                    && is_mob
+                    && entity_nbt::position(&tag).is_none()
+                    && !self.world.chunks.contains_key(&(0, 0))
+                {
+                    // The decoder defaults Pos to zero, but that destination has
+                    // not been read. Keep the source record rather than admitting
+                    // an entity no resident chunk can save (or overwriting origin).
+                    // Admission is irreversible: a duplicate is rejected now,
+                    // not retried after its current owner has left the level.
+                    let duplicate = entity_nbt::uuid(&tag).is_some_and(|uuid| {
+                        self.restored_vehicle(uuid).is_some()
+                            || self.target_with_uuid(uuid).is_some()
+                    });
+                    if !duplicate {
+                        self.persist.unknown.entry(key).or_default().push(tag);
+                    }
+                    continue;
+                }
                 drop_unleashable_leash(&mut tag, &kind, is_mob);
                 let uuid = entity_nbt::uuid(&tag);
                 if uuid.is_some_and(|u| self.restored_vehicle(u).is_some()) {
@@ -750,13 +769,13 @@ impl Game<'_> {
     /// A saved dropped item.
     pub(super) fn load_item(&mut self, tag: Tag, uuid: Option<[i32; 4]>) {
         self.next_entity += 1;
-        // `ItemEntity(EntityType, Level)` before the load: the item's own random
-        // makes its UUID (kept unless the tag has one) and bobOffs, not the level's.
-        // Its yaw, the next draw, is always replaced by the saved rotation.
+        // `ItemEntity(EntityType, Level)` first: its own random draws UUID, bobOffs and yaw.
         let mut own = random_source::entity();
         let fresh = horizon_client::save::insecure_uuid(&mut own);
         let bob = own.next_float() * std::f32::consts::PI * 2.0;
+        own.next_float();
         if let Some(mut e) = entity_nbt::item_entity_from_nbt(&tag, self.next_entity, bob) {
+            e.random = own;
             self.remember(e.id, Some(uuid.unwrap_or(fresh)), tag);
             self.bind_saved_entity_attachments(e.id, &mut e.attachment_lifetime);
             self.dropped.push(e);
@@ -2687,42 +2706,7 @@ fn join_saved_team(board: &mut Scoreboard, name: &str, tag: &Tag) -> bool {
 mod tests {
     use super::*;
 
-    #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn neutral_mob_load_notifies_target_even_without_saved_anger() {
-        use std::sync::{Arc, Mutex};
-
-        struct Observe(Arc<Mutex<Vec<(u32, bool)>>>);
-        #[mod_api::__subscriptions]
-        impl mod_api::Hooks for Observe {
-            fn living_change_target(
-                &self,
-                host: &dyn mod_api::Host,
-                event: &mut mod_api::LivingChangeTargetEvent<'_>,
-            ) -> mod_api::Flow {
-                assert!(event.mob.living().health(host).is_some());
-                self.0
-                    .lock()
-                    .unwrap()
-                    .push((event.mob.entity().id(), event.original_target.is_none()));
-                mod_api::Flow::Continue
-            }
-        }
-        let observed = Arc::new(Mutex::new(Vec::new()));
-        let mods = vec![mod_api::ModEntry::new(
-            "observe",
-            Box::new(Observe(observed.clone())),
-        )]
-        .into();
-        mod_api::testing::with_mods(mods, || {
-            super::super::native_entity_refs::tests::with_game(|game| {
-                let wolf = game.load_mob(entity("minecraft:wolf"), None).unwrap();
-                let golem = game.load_mob(entity("minecraft:iron_golem"), None).unwrap();
-                game.load_mob(entity("minecraft:pig"), None).unwrap();
-                assert_eq!(*observed.lock().unwrap(), [(wolf, true), (golem, true)]);
-            });
-        });
-    }
+    include!("persist/position_load_tests.rs");
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
@@ -4174,7 +4158,7 @@ mod item_display_saved_transform_tests {
         )
         .unwrap();
         game.native_lifecycle
-            .begin_open(mod_api::NativeAuthority::IntegratedServer);
+            .begin_open(mod_api::Authority::IntegratedServer);
         game.build_registries();
         game.set_allow_commands(true);
 
@@ -4311,17 +4295,17 @@ mod item_display_saved_transform_tests {
     #[test]
     #[ignore = "prepared resources; actual native setter, stale raw and no-raw writer"]
     fn existing_native_item_display_setter_carries_only_transform_state() {
-        use mod_api::NativeTransformation;
+        use mod_api::Transformation;
         with_game(|game| {
             // Same actual server-context setup as existing native machine/contact fixtures.
             game.options.dedicated = Some(Vec::new());
             let id = summon(game, 4, None);
             let uuid = game.persist.uuid_of(id);
             let clock = game.world.game_time;
-            let update = NativeTransformation {
+            let update = Transformation {
                 translation: [9.0, 8.0, 7.0],
                 scale: [2.0; 3],
-                ..NativeTransformation::IDENTITY
+                ..Transformation::IDENTITY
             };
             let display = game.display(game.entity(id).unwrap()).unwrap();
             assert!(game.display_set_transformation(display, update));
@@ -4354,7 +4338,7 @@ mod item_display_saved_transform_tests {
             assert_eq!(fresh.get("teleport_duration"), Some(&Tag::Int(0)));
             assert!(fresh.get("start_interpolation").is_none());
             game.persist.raw.insert(id, raw);
-            let invalid = NativeTransformation {
+            let invalid = Transformation {
                 left_rotation: [0.0; 4],
                 ..update
             };

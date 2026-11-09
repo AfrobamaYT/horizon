@@ -12,7 +12,6 @@ use horizon_client::{
     mesher::Vertex,
 };
 use horizon_core::nbt::{JavaString, Tag};
-pub use mod_api::game::{NativeMapDecoration, NativeMapInfo};
 use std::collections::HashMap;
 
 /// `LodestoneTracker.tick`: existing native eligibility/loaded-block predicate.
@@ -1321,6 +1320,21 @@ impl Game<'_> {
                 );
             }
         }
+        // `LivingEntity.tick` ticks `EntityEquipment` (the armour slots) as
+        // well as the inventory, so a compass worn there loses its target too.
+        let gone = self.armor.each_ref().map(|stack| {
+            stack
+                .as_ref()
+                .is_some_and(|s| lodestone_target_gone(self, s, dim))
+        });
+        for (stack, gone) in self.armor.iter_mut().zip(gone) {
+            if gone && let Some(stack) = stack {
+                stack.data_mut().set_other(
+                    "minecraft:lodestone_tracker",
+                    Some(Tag::Compound(Default::default())),
+                );
+            }
+        }
     }
     fn give_or_drop_stack(&mut self, stack: ItemStack) {
         if let Some(rest) = self.add_stack_to_inventory(stack)
@@ -1866,11 +1880,11 @@ impl Game<'_> {
     /// The icons `native_map_decorations` adds to map `id`, as it is drawn
     /// (`frame`: in an item frame or on a screen, which show only what
     /// `shown_on_frame` allows).
-    pub(super) fn mod_map_decorations(&self, id: i32, frame: bool) -> Vec<NativeMapDecoration> {
+    pub(super) fn mod_map_decorations(&self, id: i32, frame: bool) -> Vec<mod_api::MapDecoration> {
         let Some(map) = self.maps.data.get(&id) else {
             return Vec::new();
         };
-        let info = NativeMapInfo {
+        let info = mod_api::MapInfo {
             id,
             center: map.center,
             scale: map.scale,
@@ -1883,7 +1897,7 @@ impl Game<'_> {
         decorations
             .into_iter()
             .filter(|d| !frame || d.shown_on_frame)
-            .map(|d| NativeMapDecoration {
+            .map(|d| mod_api::MapDecoration {
                 rot: d.rot & 15,
                 ..d
             })

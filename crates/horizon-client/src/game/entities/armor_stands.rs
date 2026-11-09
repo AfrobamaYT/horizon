@@ -2590,7 +2590,8 @@ mod stand_lodestone_inventory_tick_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
     fn actual_stand_equipment_compasses_tick_after_loaded_lodestone_removal() {
-        let mut game = crate::game::game_tests::tests::server_game();
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
         game.build_registries();
         game.set_allow_commands(true);
         game.level.health = 20.0;
@@ -2777,7 +2778,8 @@ mod postbaseline_lodestone_controls {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
     fn postbaseline_six_slots_noncompass_guard_and_dimension_preservation() {
-        let mut game = crate::game::game_tests::tests::server_game();
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
         game.build_registries();
         game.set_allow_commands(true);
         game.block_ticks

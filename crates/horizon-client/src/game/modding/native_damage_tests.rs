@@ -137,7 +137,7 @@ fn pre_sets_the_health_lost_and_the_last_hurt_the_cooldown_compares() {
         let mut pig = mob(game, 225003, "minecraft:pig");
         assert!(pig.damage(damage_level_of!(game), 6.0, Damage::of(DamageKind::Generic)));
         assert_eq!(pig.health, 8.0);
-        // NeoForge bubbles the inflicted damage up to `lastHurt`.
+        // The inflicted damage reaches `lastHurt`.
         assert_eq!(pig.last_hurt, 2.0);
     });
     assert_eq!(heard.pre, [(225003, 6.0, 2.0, 0.0)]);
@@ -270,7 +270,7 @@ fn arrow_hits_name_the_projectile_on_players_mobs_and_the_dragon() {
             game.mobs.push(mob(game, 43, "minecraft:pig"));
             let mut dragon = Dragon::new(Vec3::ZERO, 0.0, 0);
             // Hover is a sitting phase and correctly shrugs off arrows.
-            dragon.set_native_phase(mod_api::NativeDragonPhase::HoldingPattern);
+            dragon.set_native_phase(mod_api::DragonPhase::HoldingPattern);
             dragon.id = 44;
             game.dragon.replace(dragon);
             let mut arrow = Projectile::new(

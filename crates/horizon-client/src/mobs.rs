@@ -1362,7 +1362,7 @@ pub struct Extra {
     pub sitting: bool,
     /// `Parrot.partyParrot` and `jukebox`: the playing jukebox it dances to.
     pub party_jukebox: Option<[i32; 3]>,
-    /// The owner's UUID (tamed animals).
+    /// The owner's UUID: a tamed animal's, or the reference a vex was loaded with.
     pub owner: Option<[i32; 4]>,
     /// `Vindicator.isJohnny`: a custom name that was ever `Johnny`, which
     /// `setCustomName` latches and nothing clears.
@@ -1897,7 +1897,7 @@ pub struct Mob {
     /// Set by `remove`: the mob disappears without dying (conversion, despawn, pickup).
     pub removed: bool,
     /// What `mob_despawn` answered for this tick, read and reset by `check_despawn`.
-    pub despawn: mod_api::NativeDespawn,
+    pub despawn: mod_api::Despawn,
     /// Client-side animation clocks (attack swing, eating, shaking...).
     pub anim: anim::AnimState,
     /// Attribute values that differ per mob (slime size, babies, effects).
@@ -3582,7 +3582,7 @@ pub struct Vehicle {
     pub velocity: Vec3,
 }
 impl PlayerView {
-    /// `LivingEntity.getVisibilityPercent(level, looking)` before NeoForge's
+    /// `LivingEntity.getVisibilityPercent(level, looking)` before the visibility
     /// event and the clamp: sneaking, invisibility by armour cover, and the
     /// worn head's `mob_visibility` for the `looking` mob's type.
     pub fn visibility_percent(&self, looking: Species) -> f64 {
@@ -3884,7 +3884,7 @@ impl MobWorld<'_> {
         self.mob_griefing || self.mob_hooks.is_some_and(|hooks| hooks.grief_hooked())
     }
     /// `EventHooks.canEntityGrief(level, mob)`: the `mob_griefing` rule, or
-    /// what a mod answers for this mob. Asked where NeoForge asks it; the
+    /// what a mod answers for this mob (`native_entity_mob_griefing`); the
     /// places vanilla reads the rule with no entity still read `mob_griefing`.
     pub fn can_grief(&self, mob: u32) -> bool {
         match self.mob_hooks {
@@ -4083,7 +4083,7 @@ impl Mob {
             last_direct: None,
             combat: combat::Tracker::default(),
             removed: false,
-            despawn: mod_api::NativeDespawn::Default,
+            despawn: mod_api::Despawn::Default,
             custom_name: None,
             custom_name_text: None,
             name_visible: false,
@@ -4585,7 +4585,7 @@ impl Mob {
             container.record_reduction(Reduction::Absorption, dealt - through);
             self.health -= through;
         }
-        // NeoForge bubbles what Pre left up to `lastHurt`: vanilla's value plus what Pre
+        // `lastHurt` takes what Pre left: vanilla's value plus what Pre
         // added, so a hit no listener changes keeps vanilla's.
         self.last_hurt = incoming + container.pre_change();
         self.invulnerable = container.post_attack_invulnerability_ticks();
@@ -4869,8 +4869,7 @@ impl Mob {
         if creaking::is_creaking(self) && !creaking::can_move(self) {
             return;
         }
-        // The native hook runs first, on the raw strength (NeoForge's `LivingKnockBackEvent` fires
-        // at the start of `LivingEntity.knockback`), then the resistance scales what it left.
+        // The native hook runs first, on the raw strength, then the resistance scales what it left.
         let mut knock = crate::health::Knock {
             strength: power,
             x: xd,

@@ -166,18 +166,13 @@ use horizon_core::{
 };
 use horizon_core::{geometry::Vec3, random::RandomSource};
 use horizon_mod_package::selection::{Argument, LaunchArguments};
-pub use maps::{NativeMapDecoration, NativeMapInfo};
 pub use native_block_entity_draw::BlockEntityDraw;
-pub use native_claimed_items::{NativeHeldItem, NativeHit, NativeModEvent};
+pub use native_claimed_items::{HeldItemSlot, ModEvent};
 pub use native_components::NativeComponentError;
-pub use native_configs::{NativeConfig, NativeConfigFile, NativeConfigKind};
-pub use native_data_maps::NativeDataMapType;
-pub use native_falling::NativeFalling;
-pub use native_hooks::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
-pub use native_mob_draw::{NativeMobRender, NativePlayerRender};
-pub use native_server::NativeExperienceOrb;
-pub use native_world_columns::NativeColumnBlocks;
-pub use native_world_edit::{NativeBlockEdit, NativeBlockRun, NativeHeightmap};
+pub use native_configs::ConfigFile;
+pub use native_data_maps::DataMapType;
+pub use native_hooks::{PhantomSpawnResult, Shake, SleepProblem};
+pub use native_mob_draw::{MobRender, PlayerRender};
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
@@ -640,7 +635,7 @@ enum Screen {
     Studio,
 }
 impl Screen {
-    /// The id native mods see for this screen (`NativeScreenView.id`, the
+    /// The id native mods see for this screen (`ScreenView.id`, the
     /// `screen_render_post` hook): one per variant, and a hook's contract, so
     /// it stays the same from release to release. A new variant must add one.
     fn id(self) -> &'static str {
@@ -1214,7 +1209,7 @@ impl LevelAccess for GameLevel<'_> {
         {
             return vanilla;
         }
-        let mut result = mod_api::NativeTriState::Default;
+        let mut result = mod_api::TriState::Default;
         self.native_crop_grow_pre(self.dimension, pos, state, &mut result);
         result.or(vanilla)
     }
@@ -1274,10 +1269,10 @@ impl LevelAccess for GameLevel<'_> {
     ) -> Option<i32> {
         let mut cancel = false;
         if self.native_authoritative {
-            let context = mod_api::NativeNoteBlockChange {
+            let context = mod_api::NoteBlockChange {
                 dimension: self.dimension,
                 pos,
-                instrument: mod_api::NativeNoteInstrument::ALL[usize::from(instrument)],
+                instrument: mod_api::NoteInstrument::ALL[usize::from(instrument)],
                 old_note: old,
             };
             self.native_note_block_change(&context, &mut new, &mut cancel);
@@ -1291,13 +1286,13 @@ impl LevelAccess for GameLevel<'_> {
         instrument: &mut u8,
         note: &mut i32,
     ) -> bool {
-        use mod_api::NativeNoteInstrument;
+        use mod_api::NoteInstrument;
         if !self.native_authoritative
             || !mod_api::__private::listened(mod_api::HookId::NoteBlockPlay)
         {
             return true;
         }
-        let mut played_instrument = NativeNoteInstrument::ALL[usize::from(*instrument)];
+        let mut played_instrument = NoteInstrument::ALL[usize::from(*instrument)];
         let mut played = *note;
         let mut cancel = false;
         let (player, player_entity_id) = if by_player {
@@ -1330,13 +1325,12 @@ impl LevelAccess for GameLevel<'_> {
         let mut cancel = false;
         if self.native_authoritative && mod_api::__private::listened(mod_api::HookId::PortalSpawn) {
             let b = shape.bottom_left;
-            let shape =
-                mod_api::NativePortalShape::from(mod_api::__private::built::NativePortalShape {
-                    x_axis: shape.x_axis,
-                    bottom_left: [b.x, b.y, b.z],
-                    width: shape.width,
-                    height: shape.height,
-                });
+            let shape = mod_api::PortalShape::from(mod_api::__private::built::PortalShape {
+                x_axis: shape.x_axis,
+                bottom_left: [b.x, b.y, b.z],
+                width: shape.width,
+                height: shape.height,
+            });
             self.native_portal_spawn(self.dimension, pos, state, shape, &mut cancel);
         }
         !cancel
@@ -2242,10 +2236,10 @@ impl WorldTables {
 pub(super) fn durability_damage(damage: f32) -> f32 {
     (damage / 4.0).max(1.0)
 }
-/// The durability damage a mod left for `slot` (`NativeArmorHurt::new_damage`, cast to int
+/// The durability damage a mod left for `slot` (`mod_api::ArmorHurt::new_damage`, cast to int
 /// as vanilla casts it); an entry it removed keeps vanilla's `fallback`.
 pub(super) fn answered_wear(
-    entries: &[mod_api::NativeArmorHurt],
+    entries: &[mod_api::ArmorHurt],
     slot: horizon_core::equipment_slot::EquipmentSlot,
     fallback: u32,
 ) -> u32 {
@@ -3013,7 +3007,7 @@ struct Game<'a> {
     waypoints: horizon_client::locator_bar::ClientWaypoints,
     /// The camera the last frame drew from (position, yaw, pitch, fov), for the locator bar.
     locator_camera: Option<([f64; 3], f32, f32, f32)>,
-    native_camera_frame: Option<mod_api::NativeCamera>,
+    native_camera_frame: Option<mod_api::Camera>,
     /// The yaw and pitch a native mod's camera drew the last frame from (`native_camera_pose`),
     /// none when it drew from vanilla's.
     posed_rotation: Option<(f32, f32)>,
@@ -5013,27 +5007,15 @@ impl Game<'_> {
             attachment_lifetime: Default::default(),
             fall_distance: 0.0,
             rotation: [yaw, 0.0],
-            join: Default::default(),
-            no_gravity: false,
-            health: 5,
-            fire_ticks: 0,
-            thrower: None,
-            target: None,
-            id: self.next_entity,
-            stack,
-            position: p,
-            previous: p,
-            velocity: Vec3::new(velocity[0], velocity[1], velocity[2]),
-            on_ground: false,
-            vertical_collision: false,
-            horizontal_collision: false,
-            age: 0,
             pickup_delay: i64::from(pickup_delay),
-            bob_offset: bob,
-            ticks: 0,
-            needs_sync: false,
-            stuck: Vec3::ZERO,
-            was_touching_water: false,
+            random: random.own.into(),
+            ..ItemEntity::new(
+                self.next_entity,
+                stack,
+                p,
+                Vec3::new(velocity[0], velocity[1], velocity[2]),
+                bob,
+            )
         });
         // ServerLevel.addFreshEntity.
         if self.native_joins_flush(false, self.next_entity) {
@@ -5062,15 +5044,15 @@ impl Game<'_> {
         &self,
         origin: [f64; 3],
         block_entity: Option<horizon_core::nbt::Tag>,
-    ) -> horizon_world::loot::NativeLootPlace {
+    ) -> horizon_world::loot::LootPlace {
         let (rain, thunder) = self.world.weather.levels(1.0);
         // Level.canHaveWeather: sky light, no ceiling and not the End.
         let weather =
             self.world.shape.sky_light && !self.world.shape.has_ceiling && self.dim != Dim::End;
-        horizon_world::loot::NativeLootPlace {
+        horizon_world::loot::LootPlace {
             origin: Some(origin),
             block_entity,
-            level: Some(horizon_world::loot::NativeLootLevel {
+            level: Some(horizon_world::loot::LootLevel {
                 dimension: self.dim.id().to_owned(),
                 game_time: self.world.game_time,
                 day_time: self.world.day_time,
@@ -5370,7 +5352,7 @@ impl Game<'_> {
                     &nearby,
                     Some(self.border.geometry()),
                 );
-            let escape_speed = no_physics.then(|| self.world.random.next_float() * 0.2 + 0.1);
+            let escape_speed = no_physics.then(|| item.random.next_float() * 0.2 + 0.1);
             let mut entered = Vec::new();
             let (alive, discarded) = self.tick_item_with_block_contacts(
                 item,
@@ -7020,8 +7002,8 @@ impl Game<'_> {
         );
         let on_ground = wanted.y < 0.0 && movement.y != wanted.y;
         f.on_ground = on_ground;
-        if next.y < f.position.y {
-            f.fall_distance += f.position.y - next.y;
+        if movement.y < 0.0 {
+            f.fall_distance -= f64::from(movement.y as f32);
         }
         let from = f.position;
         f.position = next;
@@ -7156,7 +7138,7 @@ impl Game<'_> {
             .get("minecraft:breaks_decorated_pots")
             .is_some_and(|t| t.contains(&*held.item));
         let enchantments = &self.stations().enchantments;
-        // `EnchantmentHelper.hasTag`, which NeoForge asks through the mods.
+        // `EnchantmentHelper.hasTag`.
         let kept = held
             .all_enchantments()
             .iter()
@@ -7522,10 +7504,11 @@ impl Game<'_> {
         // its PASS goes on to Item.use, which a guest's UseItem asks for.
         // A slow tick's line names the phase of a use that took it (#8669): the
         // mods' hook, the block's own use, then the item's.
-        use mod_api::{NativeInteractionResult as Answer, NativeTriState};
+        use mod_api::InteractionResult as Answer;
+        use mod_api::TriState;
         let on_block = matches!(self.guest_use, Some(GuestUse::OnBlock(_)));
         let mut block_hit = block_hit;
-        let (mut use_block, mut use_item) = (NativeTriState::Default, NativeTriState::Default);
+        let (mut use_block, mut use_item) = (TriState::Default, TriState::Default);
         let block_phase = horizon_client::spans::guard("use_block");
         if let Some(hit) = block_hit {
             let held = self.held().cloned();
@@ -7547,7 +7530,7 @@ impl Game<'_> {
                     return Ok(true);
                 }
                 native_hooks::BlockClickAnswer::Canceled(_) => {
-                    (use_block, use_item) = (NativeTriState::False, NativeTriState::False);
+                    (use_block, use_item) = (TriState::False, TriState::False);
                 }
             }
         }
@@ -7845,7 +7828,7 @@ impl Game<'_> {
         // ServerPlayerGameMode.useItem and useItemOn: an item on cooldown is
         // not used (PASS, so the other hand may still act), unless
         // RightClickBlock's useItem TRUE forces a block click's useOn.
-        let forced = on_block && use_item == NativeTriState::True;
+        let forced = on_block && use_item == TriState::True;
         if !forced
             && self
                 .cooldowns
@@ -8244,7 +8227,7 @@ impl Game<'_> {
                         continue;
                     };
                     if let Some(living) = mob {
-                        let effect = mod_api::NativeActiveEffect::new(
+                        let effect = mod_api::ActiveEffect::new(
                             mod_api::__private::effect_key_by_index(def.index)
                                 .expect("effects resolved at load"),
                             eff.duration,
@@ -12015,8 +11998,8 @@ impl Game<'_> {
     /// ServerExplosion: rays from a 16^3 grid lose (resistance + 0.3) * 0.3 per step.
     /// A mob explosion (`ServerLevel.explode` with `ExplosionInteraction.MOB`:
     /// blocks are kept without mobGriefing, else the mob_explosion_drop_decay
-    /// rule picks decay). NeoForge asks `canEntityGrief` for `source`, the
-    /// exploding entity (the rule alone without one).
+    /// rule picks decay). Mods are asked through `can_entity_grief` for
+    /// `source`, the exploding entity (the rule alone without one).
     fn explode(
         &mut self,
         source: Option<u32>,
@@ -12700,11 +12683,11 @@ impl Game<'_> {
         if mod_api::__private::listened(mod_api::HookId::ArmorHurt)
             && let (Some(uuid), Some(player)) = (self.lan_acting_uuid, self.lan_acting_entity)
         {
-            let mut entries: Vec<mod_api::NativeArmorHurt> = eligible
+            let mut entries: Vec<mod_api::ArmorHurt> = eligible
                 .iter()
                 .enumerate()
                 .filter_map(|(i, e)| {
-                    Some(mod_api::NativeArmorHurt {
+                    Some(mod_api::ArmorHurt {
                         slot: armor_slot(i),
                         stack: e.as_ref()?.try_into_api().ok()?,
                         damage: durability_damage(damage),
@@ -14214,7 +14197,7 @@ impl Game<'_> {
             } else {
                 None
             };
-            let mut render = mod_api::NativeHandRender {
+            let mut render = mod_api::HandRender {
                 player: self.own_uuid(),
                 player_entity_id: self.own_entity_id(),
                 hand,
@@ -15785,7 +15768,7 @@ impl Game<'_> {
         self.screen_blur_requested.set(false);
         self.native_camera_frame = (mods_read_camera && !title).then(|| {
             let partial = camera_alpha as f32;
-            mod_api::NativeCamera {
+            mod_api::Camera {
                 position: camera.to_array(),
                 eye_height: self.view.eye_height_old
                     + (self.view.eye_height - self.view.eye_height_old) * partial,
@@ -18524,5 +18507,72 @@ mod nested_orb_spawn_tests {
                 expected
             );
         });
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn in_own_process(name: &str, body: impl FnOnce()) {
+    const OWN_PROCESS: &str = "HORIZON_TEST_OWN_PROCESS";
+    if std::env::var_os(OWN_PROCESS).is_some_and(|v| v == name) {
+        return body();
+    }
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([name, "--exact", "--include-ignored", "--test-threads=1"])
+        .env(OWN_PROCESS, name)
+        .output()
+        .unwrap();
+    let report = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        out.status.success() && report.contains("test result: ok. 1 passed;"),
+        "{name} failed in its own process:\n{report}"
+    );
+}
+
+#[cfg(test)]
+mod escape_tests {
+    use super::game_tests::tests::server_game;
+    use horizon_client::chunk::Chunk;
+    use horizon_client::items::ItemStack;
+    use horizon_core::random::RandomSource;
+    use std::sync::Arc;
+
+    /// `Entity.moveTowardsClosestSpace` takes an item's escape speed from the
+    /// item's own random, the one its constructor drew from, and leaves the
+    /// level's random as it was (#13043).
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn an_item_escapes_a_block_at_its_own_randoms_speed() {
+        let mut game_resources = None;
+        let mut game = server_game(&mut game_resources);
+        let feet = horizon_core::geometry::Vec3::new(8.5, 70.0, 8.5);
+        game.player = Some(horizon_client::motion::PlayerMotion::new(game.motion, feet).unwrap());
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        game.update_chunk_tickets();
+        assert!(game.entity_ticking_area()(8, 8));
+        let stone = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:stone")
+            .unwrap();
+        game.world.set(8, 64, 8, stone).unwrap();
+        let stack = ItemStack::new("minecraft:stone", 2);
+        game.spawn_item(stack, [8.5, 64.4, 8.5], [0.0, 0.0, 0.0], 10);
+        let item = game.dropped.last().unwrap();
+        let expected = f64::from(item.random.clone().next_float() * 0.2 + 0.1);
+        let mut level = game.world.random.clone();
+        game.ticked_entities_through = u32::MAX;
+        game.tick_items();
+        let item = game.dropped.last().unwrap();
+        // Up is the nearest open side from the middle of the block.
+        // The push replaces the fall's velocity; then the 0.98 drag.
+        assert_eq!(item.velocity.y, expected * 0.98);
+        assert_eq!(game.world.random.next_float(), level.next_float());
     }
 }

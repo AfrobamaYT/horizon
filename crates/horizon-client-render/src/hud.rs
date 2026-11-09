@@ -13,6 +13,7 @@ use std::{
 use wgpu::util::DeviceExt;
 
 pub mod cit_glint;
+mod menu_pictures;
 mod pack_text;
 pub mod pictures;
 pub(crate) mod sprite_modifiers;
@@ -1158,17 +1159,7 @@ impl HudAtlas {
                 }
             }
         }
-        files.retain(|p| {
-            let slot_picture = [
-                "textures/gui/title/background/panorama_0.png",
-                "textures/gui/title/background/panorama_2.png",
-                "textures/gui/title/background/panorama_3.png",
-                "textures/gui/presets/isles.png",
-            ]
-            .iter()
-            .any(|kept| p.ends_with(kept));
-            slot_picture || (!p.contains("title/background") && !p.contains("presets"))
-        });
+        files.retain(|p| !menu_pictures::menu_picture_only(p));
         // OptiFine random entity variants, under the names their scan gives them (those
         // outside `textures/` are `<ns>:optifine/random/...`).
         let random_textures = if folders.contains(&"entity") {

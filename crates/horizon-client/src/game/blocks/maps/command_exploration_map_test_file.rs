@@ -6,7 +6,8 @@ mod command_exploration_map_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn actual_item_modify_materializes_selected_exploration_map() {
-        let mut game = crate::game::game_tests::tests::server_game();
+        let mut game_resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut game_resources);
         game.player = Some(
             horizon_client::motion::PlayerMotion::new(
                 game.motion,
@@ -136,8 +137,11 @@ mod added_preservation_tests {
     use horizon_world::loot::{ExplorationMap, LootStack};
     use serde_json::json;
 
-    fn game(label: &str) -> crate::game::Game<'static> {
-        let mut game = crate::game::game_tests::tests::server_game();
+    fn game<'a>(
+        label: &str,
+        resources: &'a mut Option<std::sync::Arc<crate::game::Resources>>,
+    ) -> crate::game::Game<'a> {
+        let mut game = crate::game::game_tests::tests::server_game(resources);
         game.player = Some(
             horizon_client::motion::PlayerMotion::new(
                 game.motion,
@@ -184,7 +188,8 @@ mod added_preservation_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn nonempty_command_keeps_no_destination_but_pending_loot_filters_it() {
-        let mut game = game("map-command-no-destination");
+        let mut game_resources = None;
+        let mut game = game("map-command-no-destination", &mut game_resources);
         assert!(
             game.run_command(
                 "item replace entity @s hotbar.0 with map[custom_data={sentinel:5}] 3"
@@ -223,7 +228,8 @@ mod added_preservation_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn loaded_reference_list_sequence_filter_order_preserves_counts_and_empty() {
-        let mut game = game("map-command-reference-order");
+        let mut game_resources = None;
+        let mut game = game("map-command-reference-order", &mut game_resources);
         let path = game
             .world_root
             .join("datapacks/mapcmd/data/mapcmd/item_modifier");

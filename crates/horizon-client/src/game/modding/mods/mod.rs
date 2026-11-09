@@ -373,8 +373,8 @@ fn collect_standalone_models(role: ExecutionRole) -> Option<Vec<String>> {
 }
 pub(super) fn collect_key_mappings<'declared>(
     role: ExecutionRole,
-    declared: &'declared [(&'static str, mod_api::NativeKeyRegistration)],
-) -> &'declared [(&'static str, mod_api::NativeKeyRegistration)] {
+    declared: &'declared [(&'static str, mod_api::KeyRegistration)],
+) -> &'declared [(&'static str, mod_api::KeyRegistration)] {
     if role.is_client() { declared } else { &[] }
 }
 
@@ -1349,7 +1349,7 @@ impl Game<'_> {
         let built = self.mods.native.built();
         let built_mods = native_mods_detail(built);
         if let Some(list) = built_mods {
-            mod_api::crash::set_detail("Native Mods", list);
+            mod_api::content::crash::set_detail("Native Mods", list);
         }
 
         let native_dir = Self::game_dir().join(mod_list::NATIVE_DIR);
@@ -1563,10 +1563,16 @@ mod tests {
         assert_eq!(verdict(&ruby, &manifest, true), switches_on_restart);
         assert_eq!(verdict(&ruby, &manifest, false), Some(Ok(())));
         let later = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
-        std::fs::File::open(&ruby)
-            .unwrap()
-            .set_modified(later)
-            .unwrap();
+        let mut folder = std::fs::OpenOptions::new();
+        folder.read(true);
+        // Windows opens a folder only with FILE_FLAG_BACKUP_SEMANTICS, and sets its time only
+        // with write access.
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            folder.write(true).custom_flags(0x0200_0000);
+        }
+        folder.open(&ruby).unwrap().set_modified(later).unwrap();
         assert_eq!(verdict(&ruby, &manifest, false), switches_on_restart);
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -1578,7 +1584,7 @@ mod tests {
     fn only_clients_collect_registered_keys() {
         let declared = [(
             "sample",
-            mod_api::NativeKeyRegistration::new("zoom", "key.keyboard.z"),
+            mod_api::KeyRegistration::new("zoom", "key.keyboard.z"),
         )];
         assert_eq!(
             collect_key_mappings(ExecutionRole::Client, &declared).len(),

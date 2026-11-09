@@ -978,9 +978,9 @@ mod tests {
         let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
         options.resources = root.clone();
         options.execution_role = execution_role::ExecutionRole::IntegratedServer;
-        let res = Box::leak(Box::new(loaded.resources));
+        let res = loaded.resources;
         let mut game = Game::new(
-            res,
+            &res,
             loaded.pack,
             loaded.gui.unwrap(),
             options,

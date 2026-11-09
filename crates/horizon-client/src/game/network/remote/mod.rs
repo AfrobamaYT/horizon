@@ -1007,7 +1007,10 @@ impl Game<'_> {
             .settings
             .client_information(client_view_distance(self.settings.render_distance));
         if local.is_none() && !self.options.split_guest {
-            mod_api::crash::set_detail("Server", horizon_client::net::shown_address(address));
+            mod_api::content::crash::set_detail(
+                "Server",
+                horizon_client::net::shown_address(address),
+            );
         }
         // A signed-in account always plays under its own name; a splitscreen player signs in
         // with its own account when it picked one.
@@ -1615,7 +1618,7 @@ impl Game<'_> {
         };
         // A splitscreen player leaving says nothing of where P1 plays.
         if !self.options.split_guest {
-            mod_api::crash::clear_detail("Server");
+            mod_api::content::crash::clear_detail("Server");
         }
         self.clock = Default::default();
         self.adv = Default::default();
@@ -6490,34 +6493,11 @@ impl Game<'_> {
         };
         let at = Vec3::new(p[0], p[1], p[2]);
         // ItemEntity's constructor draws bobOffs from the item's own random.
-        let bob_offset = horizon_client::mobs::entity_random(id as u32, at).next_float()
-            * std::f32::consts::PI
-            * 2.0;
+        let mut random = horizon_client::mobs::entity_random(id as u32, at);
+        let bob_offset = random.next_float() * std::f32::consts::PI * 2.0;
         self.dropped.push(ItemEntity {
-            attachment_lifetime: Default::default(),
-            fall_distance: 0.0,
-            rotation: [0.0, 0.0],
-            join: Default::default(),
-            no_gravity: false,
-            health: 5,
-            fire_ticks: 0,
-            thrower: None,
-            target: None,
-            id: id as u32,
-            stack,
-            position: at,
-            previous: at,
-            velocity,
-            on_ground: false,
-            vertical_collision: false,
-            horizontal_collision: false,
-            age: 0,
-            pickup_delay: 0,
-            bob_offset,
-            ticks: 0,
-            needs_sync: false,
-            stuck: Vec3::ZERO,
-            was_touching_water: false,
+            random,
+            ..ItemEntity::new(id as u32, stack, at, velocity, bob_offset)
         });
     }
     /// `Entity.lerpMotion` (and `recreateFromPacket`'s motion) for the
@@ -8925,13 +8905,14 @@ impl Game<'_> {
             .as_ref()
             .is_some_and(|stack| &*stack.item == "minecraft:debug_stick");
         if let Some(hit) = self.pick() {
-            use mod_api::{NativeInteractionResult as Answer, NativeTriState};
+            use mod_api::InteractionResult as Answer;
+            use mod_api::TriState;
             let spectator = self.spectator();
             // RightClickBlock on this client, where performUseItemOn starts
             // (a spectator's use only opens menus on the server): it may force
             // the block's use or the item's useOn, or answer for both.
             let (mut canceled, mut use_block, mut use_item) =
-                (None, NativeTriState::Default, NativeTriState::Default);
+                (None, TriState::Default, TriState::Default);
             if !spectator {
                 match self.right_click_block(&hit, hand, held.as_ref()) {
                     super::native_hooks::BlockClickAnswer::Go {
@@ -8963,7 +8944,7 @@ impl Game<'_> {
             let sneaking = self.remote_shift_down();
             let hands_full = self.stack_in(self.selected).is_some() || self.offhand.is_some();
             let block_used = canceled.is_none() && use_block.or(!(sneaking && hands_full));
-            let cooldown_forced = use_item == NativeTriState::True;
+            let cooldown_forced = use_item == TriState::True;
             let item_used = canceled.is_none()
                 && use_item.or(true)
                 && held.as_ref().is_some_and(|stack| {
@@ -9746,7 +9727,7 @@ impl Game<'_> {
             return false;
         }
         if let Some(answer) = self.right_click_item(hand, &held, self.pick().is_some()) {
-            let success = answer == mod_api::NativeInteractionResult::Success;
+            let success = answer == mod_api::InteractionResult::Success;
             if success {
                 self.with_hand(hand, Game::swing_arm);
             }
@@ -12241,7 +12222,7 @@ fn keep_client_state(old: Option<&BlockEntity>, new: &mut BlockEntity) {
         (Some(BlockEntity::Beacon(old)), BlockEntity::Beacon(new)) => {
             new.sections.clone_from(&old.sections);
             new.checking.clone_from(&old.checking);
-            new.last_check_y = old.last_check_y;
+            (new.last_check_y, new.levels) = (old.last_check_y, old.levels);
         }
         _ => {}
     }
@@ -15130,7 +15111,7 @@ mod tests {
             connection::Pipe,
             packets::play::{Clientbound, Respawn, SpawnInfo},
         };
-        use mod_api::{EntityRef, NativeCrosshairTarget};
+        use mod_api::{CrosshairTarget, EntityRef};
 
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;
@@ -15193,7 +15174,7 @@ mod tests {
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
             game.yaw = 0.0;
             game.pitch = 0.0;
-            let Some(NativeCrosshairTarget::Entity { entity, .. }) = game.crosshair_target() else {
+            let Some(CrosshairTarget::Entity { entity, .. }) = game.crosshair_target() else {
                 panic!("the crosshair hits the pig in front of the player");
             };
             assert_eq!(entity, current);
@@ -16328,10 +16309,10 @@ mod tests {
         assert_eq!(b.sections, vec![(0xF9FFFE, 2)]);
         assert_eq!(b.checking, vec![(0xF9FFFE, 1)]);
         assert_eq!(b.last_check_y, 70);
-        // The powers and the levels are the tag's.
+        // The powers are the tag's; the levels stay the client's own (not read).
         assert_eq!(b.primary.as_deref(), Some("minecraft:haste"));
         assert_eq!(b.secondary.as_deref(), Some("minecraft:regeneration"));
-        assert_eq!(b.levels, 4);
+        assert_eq!(b.levels, 1);
     }
 
     #[test]

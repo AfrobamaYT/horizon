@@ -23,7 +23,8 @@ mod connected_advancement_save_tests {
     fn save_commands_write_the_connected_nonowners_current_advancements() {
         use super::super::{execution_role::ExecutionRole, stats};
         use std::sync::{Arc, Mutex};
-        let mut game = crate::game::game_tests::tests::server_game();
+        let mut game_resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut game_resources);
         game.options.execution_role = ExecutionRole::DedicatedServer;
         let dir = std::env::temp_dir().join(format!(
             "horizon-connected-advancement-save-{}",
@@ -187,7 +188,8 @@ mod connected_advancement_preservation_tests {
     fn empty_progress_missing_play_and_disconnect_wrapper_stay_distinct() {
         use super::super::{execution_role::ExecutionRole, stats};
         use std::sync::{Arc, Mutex};
-        let mut game = crate::game::game_tests::tests::server_game();
+        let mut game_resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut game_resources);
         game.options.execution_role = ExecutionRole::DedicatedServer;
         let dir = std::env::temp_dir().join(format!(
             "horizon-advancement-preservation-{}",
