@@ -20,7 +20,11 @@ impl Game<'_> {
     fn dedicated_lists(
         &self,
     ) -> R<std::sync::Arc<std::sync::Mutex<super::super::dedicated::Lists>>> {
-        match (&self.server_lists, self.options.dedicated.is_some()) {
+        match (
+            &self.server_lists,
+            self.options.execution_role
+                == super::super::execution_role::ExecutionRole::DedicatedServer,
+        ) {
             (Some(lists), true) => Ok(lists.clone()),
             _ => Err(err("command.unknown.command", &[])),
         }

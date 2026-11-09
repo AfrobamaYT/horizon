@@ -70,8 +70,7 @@ impl Game<'_> {
         // their own file (`PlayerDataStorage.save`); the owner is also in the
         // file level.dat names, which is the one it loads from
         // (`playerdata::load_owner`).
-        if self.options.dedicated.is_some()
-            && !self.options.execution_role.is_client()
+        if self.options.execution_role == execution_role::ExecutionRole::DedicatedServer
             && let Some(host) = self.lan.as_mut()
         {
             // The vehicle tree goes into a player's file when they leave
@@ -93,8 +92,7 @@ impl Game<'_> {
                 }
             });
         }
-        if self.options.dedicated.is_some()
-            && !self.options.execution_role.is_client()
+        if self.options.execution_role == execution_role::ExecutionRole::DedicatedServer
             && let Some(host) = self.lan.as_ref()
         {
             self.save_connected_guest_statistics(host);
