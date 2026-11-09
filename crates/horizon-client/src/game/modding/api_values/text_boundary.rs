@@ -866,10 +866,7 @@ pub(in crate::game) fn style_hover(style: &engine::Style) -> Option<TextHover> {
     if style.hover.is_none() && style.hover_item.is_none() && style.hover_entity.is_none() {
         return None;
     }
-    let span = engine::Span {
-        text: String::new(),
-        style: style.clone(),
-    };
+    let span = engine::Span::new(String::new(), style.clone());
     capture(Source::Span(&span)).ok()?.style.hover.take()
 }
 impl TryIntoApi for engine::Text {
@@ -1846,21 +1843,15 @@ mod iterative_tests {
             .spawn(|| {
                 use horizon_client_core::text::{Span, Style, Text as Engine};
                 for depth in [512, 513] {
-                    let mut text = Engine::empty();
-                    text.spans.push(Span {
-                        text: "leaf".into(),
-                        style: Style::default(),
-                    });
+                    let mut text = Engine::from_spans(vec![Span::new("leaf", Style::default())]);
                     for _ in 1..depth {
-                        let mut parent = Engine::empty();
-                        parent.spans.push(Span {
-                            text: "parent".into(),
-                            style: Style {
+                        text = Engine::from_spans(vec![Span::new(
+                            "parent",
+                            Style {
                                 hover: Some(std::sync::Arc::new(text)),
                                 ..Style::default()
                             },
-                        });
-                        text = parent;
+                        )]);
                     }
                     let api = text.try_into_api();
                     if depth == 513 {

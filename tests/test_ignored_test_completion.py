@@ -84,5 +84,124 @@ class IgnoredTests(unittest.TestCase):
         self.assertEqual(result, {"good": True})
 
 
+def leg_names(count=2):
+    """Test names that each leg of `count` owns, found by the same hash the runner uses."""
+    owned = {number: [] for number in range(1, count + 1)}
+    index = 0
+    while any(len(names) < 2 for names in owned.values()):
+        name = f"suite::test_{index}"
+        for number in owned:
+            if ignored_tests.in_leg(name, number, count):
+                owned[number].append(name)
+        index += 1
+    return owned
+
+
+class Legs(unittest.TestCase):
+    def test_shard_names(self):
+        self.assertEqual(ignored_tests.parse_shard("horizon-client#2of3"), ("horizon-client", 2, 3))
+        self.assertEqual(ignored_tests.parse_shard("horizon-client-lib"), ("horizon-client-lib", None, None))
+        with self.assertRaises(SystemExit):
+            ignored_tests.parse_shard("horizon-client#3of2")
+
+    def test_every_test_is_in_exactly_one_leg(self):
+        for index in range(500):
+            name = f"module::test_{index}"
+            self.assertEqual(sum(ignored_tests.in_leg(name, number, 3) for number in (1, 2, 3)), 1)
+        self.assertTrue(ignored_tests.in_leg("anything", None, None))
+
+    def test_a_leg_skips_every_test_another_leg_owns(self):
+        owned = leg_names()
+        listing = "".join(f"{name}: test\n" for names in owned.values() for name in names) + "a_bench: benchmark\n"
+        output = target(2, "".join(f"test {name} ... ok\n" for name in owned[1]), summary(passed=2))
+        calls = []
+
+        def fake(command, **_):
+            calls.append(command)
+            if "--list" in command:
+                return subprocess.CompletedProcess(command, 0, listing)
+            return subprocess.CompletedProcess(command, 0, output)
+
+        with patch.object(ignored_tests.subprocess, "run", side_effect=fake), contextlib.redirect_stdout(io.StringIO()):
+            result = ignored_tests.run("example", ["marked"], 1, 2)
+        self.assertEqual(set(result), set(owned[1]))
+        command = calls[1]
+        skipped = {command[i + 1] for i, arg in enumerate(command) if arg == "--skip"}
+        self.assertEqual(skipped, {"marked", *owned[2]})
+
+    def test_a_listed_test_that_never_reports_fails_the_leg(self):
+        owned = leg_names()[1][:2]
+        listing = "".join(f"{name}: test\n" for name in owned)
+        output = target(1, f"test {owned[0]} ... ok\n", summary(passed=1))
+
+        def fake(command, **_):
+            if "--list" in command:
+                return subprocess.CompletedProcess(command, 0, listing)
+            return subprocess.CompletedProcess(command, 0, output)
+
+        with patch.object(ignored_tests.subprocess, "run", side_effect=fake), contextlib.redirect_stdout(io.StringIO()) as log:
+            self.assertIsNone(ignored_tests.run("example", [], 1, 2))
+        self.assertIn(owned[1], log.getvalue())
+
+    def test_a_marked_test_is_not_expected_to_report(self):
+        owned = leg_names()[1][:2]
+        listing = "".join(f"{name}: test\n" for name in owned)
+        output = target(1, f"test {owned[0]} ... ok\n", summary(passed=1))
+
+        def fake(command, **_):
+            if "--list" in command:
+                return subprocess.CompletedProcess(command, 0, listing)
+            return subprocess.CompletedProcess(command, 0, output)
+
+        with patch.object(ignored_tests.subprocess, "run", side_effect=fake), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(ignored_tests.run("example", [owned[1]], 1, 2), {owned[0]: True})
+
+    def test_every_target_runs_despite_a_failing_one(self):
+        calls = []
+
+        def fake(command, **_):
+            calls.append(command)
+            return subprocess.CompletedProcess(command, 0, target(1, "test a ... ok\n", summary(passed=1)))
+
+        with patch.object(ignored_tests.subprocess, "run", side_effect=fake), contextlib.redirect_stdout(io.StringIO()):
+            ignored_tests.run("example", [])
+        self.assertIn("--no-fail-fast", calls[0])
+
+    def test_a_leg_that_cannot_list_its_tests_fails(self):
+        def fake(command, **_):
+            return subprocess.CompletedProcess(command, 101, "")
+
+        with patch.object(ignored_tests.subprocess, "run", side_effect=fake), contextlib.redirect_stdout(io.StringIO()):
+            self.assertIsNone(ignored_tests.run("example", [], 1, 2))
+
+    def judge(self, known, results, leg=1):
+        with patch.object(ignored_tests, "known_failures", return_value=known), patch.object(ignored_tests, "run", return_value=results), contextlib.redirect_stdout(io.StringIO()) as log:
+            code = ignored_tests.main([f"example#{leg}of2"])
+        return code, log.getvalue()
+
+    def test_an_entry_in_the_other_leg_is_not_judged_here(self):
+        mine, other = leg_names()[1][0], leg_names()[2][0]
+        code, log = self.judge({("example", other): None}, {mine: True})
+        self.assertEqual(code, 0, log)
+
+    def test_an_entry_in_this_leg_that_passes_or_vanished_still_fails(self):
+        mine = leg_names()[1]
+        code, log = self.judge({("example", mine[0]): None}, {mine[0]: True})
+        self.assertEqual(code, 1)
+        self.assertIn("passes now", log)
+        code, log = self.judge({("example", mine[1]): None}, {mine[0]: True})
+        self.assertEqual(code, 1)
+        self.assertIn("no longer runs", log)
+
+    def test_a_new_failure_and_an_incomplete_leg_fail(self):
+        mine = leg_names()[1][0]
+        code, log = self.judge({}, {mine: False})
+        self.assertEqual(code, 1)
+        self.assertIn("isn't a known failure", log)
+        code, log = self.judge({}, None)
+        self.assertEqual(code, 1)
+        self.assertIn("example#1of2: the test run did not complete", log)
+
+
 if __name__ == "__main__":
     unittest.main()

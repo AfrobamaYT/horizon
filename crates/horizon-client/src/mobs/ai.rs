@@ -1668,7 +1668,7 @@ fn ageable_step(
             // ageBoundaryReached runs (a goat's and a hoglin's attack damage, a
             // sulfur cube's size), which the age write used to skip.
             let next = m.extra.age + 1;
-            super::finalize::set_age(m, next);
+            super::finalize::set_age(m, next, Some(w));
             // setAge at the age boundary: refreshDimensions.
             if m.extra.age >= 0 {
                 m.fudge_position_after_size_change(w, bw, bh);
@@ -2294,7 +2294,7 @@ fn server_ai_step(
     m.ai.no_action_time = m.ai.no_action_time.wrapping_add(1);
     // A happy ghast set up for its age (ageBoundaryReached runs at once).
     if m.species() == Species::HappyGhast {
-        super::happy_ghast::ensure_setup(m);
+        super::happy_ghast::ensure_setup(m, Some(w));
     }
     // A saddled mount follows its rider instead of its goals.
     if super::equine::controlled(m) {
@@ -2612,21 +2612,10 @@ fn never_removed_when_far(s: Species) -> bool {
             | Species::Wither
     )
 }
-/// Movement speed bonus multiplier (baby zombies are 50% faster, etc.).
+/// Movement speed bonus from the modeled baby modifier, unless it was removed.
 pub fn speed_bonus(m: &Mob) -> f64 {
-    match m.species() {
-        Species::Zombie
-        | Species::Husk
-        | Species::Drowned
-        | Species::ZombieVillager
-        | Species::ZombifiedPiglin
-        | Species::Piglin
-            if m.is_baby() =>
-        {
-            1.5
-        }
-        _ => 1.0,
-    }
+    super::finalize::transient(m, super::finalize::Attr::MovementSpeed)
+        .map_or(1.0, |(amount, _)| 1.0 + amount)
 }
 /// The ambient, hurt and death sounds of species that pick them by state
 /// (`getHurtSound` / `getDeathSound` overrides); the type's otherwise.
@@ -2799,7 +2788,7 @@ pub fn can_use_golden_dandelion(
 pub fn set_age_locked_data(m: &mut Mob) {
     m.extra.age_locked = !m.extra.age_locked;
     let start = super::finalize::baby_start_age(m.species());
-    super::finalize::set_age(m, start);
+    super::finalize::set_age(m, start, None);
     m.extra.age_lock_particle_timer = 40;
 }
 /// `AgeableMob.makeAgeLockedParticle`: while the golden dandelion's timer
@@ -2840,7 +2829,7 @@ pub fn make_age_locked_particle(m: &mut Mob, events: &mut Vec<MobEvent>) {
 pub fn age_up(m: &mut Mob, seconds: i32, forced: bool) {
     let age = m.extra.age;
     let grown = (age + seconds * 20).min(0);
-    super::finalize::set_age(m, grown);
+    super::finalize::set_age(m, grown, None);
     if forced {
         m.extra.forced_age += grown - age;
         if m.extra.forced_age_timer == 0 {
@@ -2849,7 +2838,7 @@ pub fn age_up(m: &mut Mob, seconds: i32, forced: bool) {
     }
     if m.extra.age == 0 {
         let forced_age = m.extra.forced_age;
-        super::finalize::set_age(m, forced_age);
+        super::finalize::set_age(m, forced_age, None);
     }
 }
 /// `Animal.playEatingSound` (empty) and its overrides, as (sound, volume,
@@ -5443,7 +5432,7 @@ mod age_up_tests {
                             m.no_gravity = true;
                             m.persistent = true;
                             m.extra.age_locked = locked;
-                            super::super::finalize::set_age(&mut m, age);
+                            super::super::finalize::set_age(&mut m, age, None);
                             let (mut test_level, mut events) =
                                 (crate::health::TestLevel::new(0), Vec::new());
                             let level = &mut test_level.level();
@@ -5507,7 +5496,7 @@ mod age_up_tests {
         let mut m = Mob::new(1, kind, Vec3::ZERO, 0.0);
         // setAge(-24000) as finalizeSpawn does, whose own crossing is where
         // `Goat.ageBoundaryReached` gives the newborn its 1.0.
-        super::super::finalize::set_age(&mut m, age);
+        super::super::finalize::set_age(&mut m, age, None);
         m
     }
 
@@ -5542,7 +5531,7 @@ mod age_up_tests {
             let mut m = Mob::new(1, kind, Vec3::ZERO, 0.0);
             // As a natural spawn leaves it, then on its last baby tick.
             super::super::finalize::goat_spawn(&mut m);
-            super::super::finalize::set_age(&mut m, -1);
+            super::super::finalize::set_age(&mut m, -1, None);
             let (mut test_level, mut events) = (crate::health::TestLevel::new(0), Vec::new());
             let level = &mut test_level.level();
             tick(&mut m, w, level, &mut events);

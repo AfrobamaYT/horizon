@@ -1438,11 +1438,7 @@ impl Game<'_> {
         let mut guest_events = Vec::new();
         let mut player_credit = std::mem::take(&mut self.last_hurt_by_player);
         // The block writes since the last tick: mobs re-path around them.
-        let path_writes = self
-            .world
-            .path_writes
-            .get_or_insert_with(Vec::new)
-            .split_off(0);
+        let path_writes = std::mem::take(self.world.path_writes.get_or_insert_with(Vec::new));
         // The mobs whose bodies go this tick: (id, feet, width, height, split).
         // 🤖 Agent: the last field is the grown slime, magma cube or sulfur
         // cube the body leaves behind (`AbstractCubeMob.remove`), captured as
@@ -12326,6 +12322,8 @@ mod chorus_projectile_drop_tests {
             None,
         )
         .unwrap();
+        game.native_lifecycle
+            .begin_open(mod_api::NativeAuthority::IntegratedServer);
         game.build_registries();
         game.set_allow_commands(true);
 
@@ -13042,6 +13040,11 @@ mod loaded_mob_arrow_permission_tests {
             game.block_ticks
                 .add_empty_chunk(BlockPos::new(0, 0, 0).chunk())
                 .unwrap();
+            // Supply the synthetic chunk before forceload's synchronous load barrier.
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
             assert!(game.run_command("forceload add 0 0"));
             assert!(game.run_command("fill 0 199 0 15 199 15 stone"));
             assert!(game.world.loaded(3, 1));

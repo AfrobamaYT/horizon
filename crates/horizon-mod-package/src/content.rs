@@ -830,6 +830,22 @@ impl FileReader<'_> {
         }
         Ok(out)
     }
+    /// A content file's path on disk, checked as [`read`](Self::read) checks it (the name,
+    /// the size), for a caller that copies it without reading it; `None` in an archive.
+    pub fn path(&self, name: &str) -> Result<Option<std::path::PathBuf>, String> {
+        check_path(name)?;
+        let Self::Dir(root) = self else {
+            return Ok(None);
+        };
+        let path = root.join(name);
+        let len = std::fs::metadata(&path)
+            .map_err(|e| format!("{name}: {e}"))?
+            .len();
+        if len > MAX_FILE {
+            return Err(format!("{name} is over {} MiB", MAX_FILE >> 20));
+        }
+        Ok(Some(path))
+    }
 }
 
 /// Why two content mods cannot be on together: a namespace both own (one's
@@ -1751,6 +1767,24 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, u64)>) -> Result<(), Str
 mod tests {
     use super::*;
     use crate::manifest::Package;
+
+    #[test]
+    fn plain_content_files_over_the_size_limit_are_refused() {
+        let dir = scratch("plain-size-limit");
+        let name = "assets/ruby/textures/block/huge.png";
+        let path = dir.join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_len(MAX_FILE + 1)
+            .unwrap();
+        let mut reader = FileReader::Dir(&dir);
+        let error = reader.path(name).unwrap_err();
+        assert!(error.contains("is over"), "{error}");
+        let error = reader.read(name).unwrap_err();
+        assert!(error.contains("is over"), "{error}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     const MANIFEST_TEXT: &str = r#"
 id = "ruby"

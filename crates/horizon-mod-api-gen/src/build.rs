@@ -179,6 +179,29 @@ fn listed_render_slots_have_eligible_points() {
     super::points::game_points(&root).unwrap();
 }
 
+/// The `mod_api` types with a `Wire` layout ([`super::wire`]), for point records.
+/// A source tree without the mod API (a generator fixture's) has none.
+pub(crate) fn wire_types(root: &Path) -> Result<std::collections::BTreeSet<String>, String> {
+    if !root.join("crates/horizon-mod-api/src/hooks").is_dir() {
+        return Ok(Default::default());
+    }
+    let generated = sources(root, super::FillMode::Require)?;
+    let included = [
+        (host::AREAS_OUTPUT, generated.areas.as_str()),
+        ("mod_api_generated.rs", generated.hooks.as_str()),
+        ("mod_api_generated_host.rs", generated.host.as_str()),
+    ];
+    // The resolver recurses through the API's types: give it a deep stack.
+    std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn_scoped(scope, || super::wire::owned_types(root, &included))
+            .map_err(|e| e.to_string())?
+            .join()
+            .map_err(|_| "reading the wire types panicked".to_string())?
+    })
+}
+
 /// `horizon-mod-points`' generated file: each point's record, `PointId` and typed function constructors,
 /// from the game's source, tracking the game module's files.
 pub fn generate_points(root: &Path, out_dir: &Path) -> Result<(), String> {

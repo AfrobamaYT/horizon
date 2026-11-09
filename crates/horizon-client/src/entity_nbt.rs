@@ -2557,8 +2557,8 @@ pub fn mob_from_nbt(
     }
     // Zombie, Piglin and Zoglin.readAdditionalSaveData: IsBaby (the baby
     // zombies of trial spawners).
-    if !crate::mobs::finalize::ageable(m.species()) && flag(tag, "IsBaby") {
-        crate::mobs::finalize::set_baby(&mut m, true);
+    if !crate::mobs::finalize::ageable(m.species()) {
+        crate::mobs::finalize::set_baby(&mut m, flag(tag, "IsBaby"));
     }
     // Zombie.readAdditionalSaveData: setCanBreakDoors.
     if crate::mobs::doors::is_zombie(m.species()) {
@@ -3833,6 +3833,7 @@ pub fn item_frame_from_nbt(tag: &Tag, id: u32) -> Option<ItemFrame> {
         invisible: flag(tag, "Invisible"),
         check_interval: 0,
         custom_name: tag.get("CustomName").cloned(),
+        random: crate::random_source::entity(),
     })
 }
 /// ArmorStand.addAdditionalSaveData with LivingEntity's `equipment`.
