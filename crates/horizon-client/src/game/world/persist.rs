@@ -131,6 +131,25 @@ pub struct EntityMemory {
     pub(super) removals: Vec<super::commands::Target>,
 }
 
+impl EntityMemory {
+    /// Move object-owned save and dirty state, not either level's residency ledger.
+    /// The source still emits its leave and the destination its join.
+    pub(super) fn move_object_to(&mut self, id: u32, destination: &mut Self) {
+        if let Some(uuid) = self.uuids.remove(&id) {
+            destination.uuids.insert(id, uuid);
+        }
+        if let Some(raw) = self.raw.remove(&id) {
+            destination.raw.insert(id, raw);
+        }
+        if let Some(forced) = self.forced_meta.remove(&id) {
+            destination.forced_meta.insert(id, forced);
+        }
+        if self.score_destroyed.remove(&id) {
+            destination.score_destroyed.insert(id);
+        }
+    }
+}
+
 /// Runtime ownership paired with the serialized tree out of band. UUIDs are
 /// admission identities, not keys for matching these distinct object states.
 #[derive(Debug)]
@@ -1358,6 +1377,13 @@ impl Game<'_> {
             raw.insert("Tags".into(), Tag::List(tags));
         }
     }
+    pub(super) fn mob_uuid_admission_refused(&self, uuid: Option<[i32; 4]>) -> bool {
+        uuid.is_some_and(|uuid| {
+            self.target_with_uuid(uuid)
+                .is_some_and(|target| target != super::commands::Target::Player)
+        })
+    }
+
     /// A saved mob and, under `Passengers`, the mobs riding it.
     pub(super) fn load_mob(&mut self, tag: Tag, mount: Option<u32>) -> Option<u32> {
         self.load_mob_transferred(tag, mount, None)
@@ -1448,10 +1474,7 @@ impl Game<'_> {
         // PersistentEntitySectionManager.addEntityUuid refuses residency, not
         // the already-constructed object or its passenger links. Descendants
         // are still considered individually in preorder.
-        let refused = uuid.is_some_and(|uuid| {
-            self.target_with_uuid(uuid)
-                .is_some_and(|target| target != super::commands::Target::Player)
-        });
+        let refused = self.mob_uuid_admission_refused(uuid);
 
         if let Some(state) = transferred {
             self.adopt_transferred_entity_state(id, state);

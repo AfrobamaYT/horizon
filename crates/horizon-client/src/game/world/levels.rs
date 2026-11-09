@@ -592,20 +592,107 @@ impl Game<'_> {
         Ok(())
     }
 
-    /// The entity's memory (its UUID and the compound it was loaded with)
-    /// moves with it from the level not in place to the level in place, so
-    /// it is saved in the other level as it was.
-    pub(super) fn move_entity_memory(&mut self, from: Dim, id: u32) {
-        let Some(p) = self.levels.parked.get_mut(&from) else {
-            return;
-        };
-        let uuid = p.persist.uuids.remove(&id);
-        let raw = p.persist.raw.remove(&id);
-        if let Some(u) = uuid {
-            self.persist.uuids.insert(id, u);
+    /// Follow the direct mount of a travelling player through complete source objects.
+    /// A later player in the same travelling stack finds no source root: the first
+    /// arrival already moved it, keeping every id that the guests' mounts name.
+    pub(super) fn parked_vehicle_root(&self, from: Dim, mut id: u32) -> Option<u32> {
+        let p = self.levels.parked.get(&from)?;
+        for _ in 0..=p.mobs.len() + p.persist.off_level.len() + 1 {
+            let mob = p
+                .mobs
+                .iter()
+                .find(|m| m.id == id)
+                .or_else(|| {
+                    p.persist.off_level.get(&id).map(|object| match object {
+                        persist::OffLevel::Mob(mob) => mob,
+                    })
+                })
+                .filter(|m| !m.removed);
+            if let Some(parent) = mob.and_then(|m| m.extra.mount) {
+                id = parent;
+                continue;
+            }
+            let present = mob.is_some()
+                || p.boats.iter().any(|b| b.id == id)
+                || p.carts.iter().any(|c| c.id == id);
+            let removed = p.persist.removals.iter().any(|target| matches!(
+                target, commands::Target::Mob(n) | commands::Target::Boat(n) | commands::Target::Cart(n) if *n == id
+            ));
+            return (present && !removed).then_some(id);
         }
-        if let Some(r) = raw {
-            self.persist.raw.insert(id, r);
+        None
+    }
+
+    /// Move the source tree's object memory and take its Mob descendants in
+    /// canonical postorder. The caller owns the extracted root and admits it last.
+    /// Transfer removal preserves lifetimes; residency is decided in the destination.
+    pub(super) fn move_entity_memory(&mut self, from: Dim, root: u32) -> Vec<Mob> {
+        let Some(p) = self.levels.parked.get_mut(&from) else {
+            return Vec::new();
+        };
+        let mut edges: Vec<_> = p
+            .mobs
+            .iter()
+            .chain(p.persist.off_level.values().map(|object| match object {
+                persist::OffLevel::Mob(mob) => mob,
+            }))
+            .filter(|mob| !mob.removed)
+            .map(|mob| (mob.extra.mount, mob.extra.vehicle_order, mob.id))
+            .collect();
+        edges.sort_by_key(|&(_, order, id)| (order, id));
+        let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
+        for (parent, _, id) in edges {
+            if let Some(parent) = parent {
+                children.entry(parent).or_default().push(id);
+            }
+        }
+        let mut pending = vec![(root, false)];
+        let mut seen = std::collections::HashSet::new();
+        let mut ordered = Vec::new();
+        while let Some((id, done)) = pending.pop() {
+            if done {
+                ordered.push(id);
+            } else if seen.insert(id) {
+                pending.push((id, true));
+                if let Some(riders) = children.get(&id) {
+                    pending.extend(riders.iter().rev().map(|&rider| (rider, false)));
+                }
+            }
+        }
+        let mut moved = Vec::new();
+        for id in ordered {
+            p.persist.move_object_to(id, &mut self.persist);
+            if id == root {
+                continue;
+            }
+            if let Some(state) = p.portal_states.remove(&id) {
+                self.portals.entities.insert(id, state);
+            }
+            let mob = if let Some(index) = p.mobs.iter().position(|m| m.id == id) {
+                Some(p.mobs.remove_for_transfer(index))
+            } else {
+                p.persist.off_level.remove(&id).map(|object| match object {
+                    persist::OffLevel::Mob(mob) => mob,
+                })
+            };
+            if let Some(mut mob) = mob {
+                mob.join = horizon_client::join_seq::JoinSeq::UNJOINED;
+                moved.push(mob);
+            }
+        }
+        moved
+    }
+
+    /// An already-owned body changes level, never construction identity.
+    pub(super) fn admit_transferred_mob(&mut self, mut mob: Mob) {
+        let id = mob.id;
+        self.rebind_transferred_entity(id, &mut mob);
+        if self.mob_uuid_admission_refused(self.persist.uuids.get(&id).copied()) {
+            self.persist
+                .off_level
+                .insert(id, persist::OffLevel::Mob(mob));
+        } else {
+            self.mobs.push(mob);
         }
     }
 

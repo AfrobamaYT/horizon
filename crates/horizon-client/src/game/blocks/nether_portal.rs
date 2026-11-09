@@ -748,7 +748,13 @@ impl Game<'_> {
         for (id, entry) in leaving {
             // `Entity.teleportCrossDimension` carries the passengers: a
             // vehicle server players ride takes them along.
-            if self.guest_rides(id) {
+            if self.lan.as_ref().is_some_and(|host| {
+                host.hub.guests.iter().any(|guest| {
+                    guest
+                        .vehicle
+                        .is_some_and(|mount| self.vehicle_tree_contains_mount(id, mount))
+                })
+            }) {
                 let cooldown = self.portals.entities.get(&id).map_or(0, |s| s.cooldown);
                 self.portals.carried_cooldown.insert(id, cooldown);
                 if let Some(c) = self.carts.iter().find(|c| c.id == id) {

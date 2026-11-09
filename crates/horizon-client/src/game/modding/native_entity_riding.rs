@@ -95,7 +95,7 @@ impl Game<'_> {
     /// Follow full object links, returning no root for a cycle. Only mobs can
     /// be intermediate vehicles. Their object count plus the non-Mob endpoints
     /// bounds the walk without truncating valid trees or allocating a visited set.
-    fn native_root_vehicle_id(&self, id: u32, target: Target) -> Option<u32> {
+    pub(super) fn native_root_vehicle_id(&self, id: u32, target: Target) -> Option<u32> {
         let mut root = id;
         let mut next = self.native_vehicle_id(target);
         for _ in 0..=self.mobs.len() + self.persist.off_level.len() + 1 {
@@ -107,6 +107,14 @@ impl Game<'_> {
         }
         None
     }
+    /// A live portal root carries a direct or indirect mount through complete objects.
+    pub(super) fn vehicle_tree_contains_mount(&self, root: u32, mount: u32) -> bool {
+        self.entity(root).is_some()
+            && (self.mob_object(mount).is_some_and(|mob| !mob.removed)
+                || self.entity(mount).is_some())
+            && self.native_root_vehicle_id(mount, Target::Mob(mount)) == Some(root)
+    }
+
     /// The entities riding this one (`Entity.getPassengers`), in `addPassenger`'s order.
     pub(super) fn entity_passengers(&self, entity: EntityRef) -> Option<Vec<EntityRef>> {
         self.native_entity_target(entity)?;
