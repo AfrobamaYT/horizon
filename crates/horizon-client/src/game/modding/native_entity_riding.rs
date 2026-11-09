@@ -834,8 +834,8 @@ mod tests {
                 .hub
                 .guests
                 .update(0, |guest| guest.vehicle = Some(70));
-            assert!(game.start_riding_target(Target::Mob(73), Target::Mob(70), true));
-            assert!(game.start_riding_target(Target::Mob(74), Target::Mob(70), true));
+            assert!(game.start_riding_target(Target::Mob(73), Target::Mob(70), false));
+            assert!(game.start_riding_target(Target::Mob(74), Target::Mob(70), false));
             assert!(!game.start_riding_target(Target::Mob(75), Target::Mob(70), false));
             let mut riding = horizon_client::lan::entity::Riding::default();
             game.lan_riding(&[(70, 1)], &mut riding);
@@ -859,7 +859,7 @@ mod tests {
                     assert!(game.start_riding_target(
                         Target::Mob(rider),
                         Target::Mob(vehicle),
-                        true
+                        false
                     ));
                 }
                 if capacity == 3 {
