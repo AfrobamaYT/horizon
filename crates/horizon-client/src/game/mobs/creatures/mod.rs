@@ -2688,19 +2688,15 @@ impl Game<'_> {
     fn launch_mob_projectile(&mut self, mut p: Projectile) {
         self.next_entity += 1;
         p.id = self.next_entity;
-        let (owner, at) = (p.owner, [p.position.x, p.position.y, p.position.z]);
+        let at = [p.position.x, p.position.y, p.position.z];
         // LlamaSpit.recreateFromPacket: the spit's burst on the client.
         if p.kind == ProjectileKind::LlamaSpit {
             let v = p.velocity;
             self.particles.llama_spit_burst(at, [v.x, v.y, v.z]);
         }
-        // Ordinary arrows post from ArrowState's first tick, including loaded arrows.
-        // Keep the existing immediate post for the other arrow-state kind (tridents).
-        let immediate = p.arrow.is_some() && !p.is_arrow();
+        // Projectile.tick posts on the first tick, through the shared arrow-state
+        // continuation for ordinary arrows and tridents, including loaded ones.
         self.add_projectile(p);
-        if immediate {
-            self.projectile_event("minecraft:projectile_shoot", owner, at);
-        }
     }
     /// `LivingDestroyBlockEvent` for the mob `id` about to destroy the block at
     /// `pos`: false when a mod canceled. Nothing is built when no mod is loaded.
@@ -5231,11 +5227,9 @@ impl Game<'_> {
                         );
                     }
                     let events_from = arrow_events.len();
-                    let ordinary_arrow = p.is_arrow();
                     if let Some(a) = p.arrow.as_mut() {
                         arrow_events.extend(a.events.drain(..).map(|e| {
-                            if ordinary_arrow && e == horizon_client::arrows::ArrowEvent::ShootEvent
-                            {
+                            if e == horizon_client::arrows::ArrowEvent::ShootEvent {
                                 shoot_events.push((p.owner, p.guest, p.position.components()));
                             }
                             (p.position, e)
@@ -5262,9 +5256,7 @@ impl Game<'_> {
                             );
                             let a = p.arrow.as_mut().expect("an arrow");
                             arrow_events.extend(a.events.drain(..).map(|e| {
-                                if ordinary_arrow
-                                    && e == horizon_client::arrows::ArrowEvent::ShootEvent
-                                {
+                                if e == horizon_client::arrows::ArrowEvent::ShootEvent {
                                     shoot_events.push((p.owner, p.guest, p.position.components()));
                                 }
                                 (p.position, e)
@@ -5911,7 +5903,7 @@ impl Game<'_> {
         for event in events {
             if event == horizon_client::arrows::ArrowEvent::Drop {
                 self.spawn_at_location(arrow.position, f64::from(0.1f32), item.clone());
-            } else if arrow.is_arrow() && event == horizon_client::arrows::ArrowEvent::ShootEvent {
+            } else if event == horizon_client::arrows::ArrowEvent::ShootEvent {
                 self.projectile_shoot_event(arrow.owner, arrow.guest, arrow.position.components());
             } else {
                 self.arrow_event(arrow.position, event);
@@ -13666,30 +13658,60 @@ mod loaded_arrow_shot_tests {
         natural("mob")
     }
     #[test]
-    #[ignore = "prepared resources; non-arrow launch posts remain unchanged"]
-    fn non_arrow_rocket_and_mob_trident_keep_their_immediate_posts() {
+    #[ignore = "prepared resources; actual rocket and mob trident ticks"]
+    fn rocket_and_mob_trident_post_only_on_their_first_tick() {
         with_game(|game| {
             assert!(game.run_command("item replace entity @s weapon.mainhand with crossbow[charged_projectiles=[{id:\"minecraft:firework_rocket\",count:1}]]"));
             start_events();
             let bow = game.held().unwrap().clone();
             assert!(game.use_crossbow(&bow));
             assert_eq!(game.rockets.len(), 1);
-            assert_eq!(take_shots().len(), 1);
-            game.tick_projectiles().unwrap();
-            assert!(take_shots().is_empty());
+            assert!(take_shots().is_empty(), "no rocket shot before its tick");
+            game.tick_rockets();
+            assert_eq!(take_shots().len(), 1, "rocket first tick");
+            game.tick_rockets();
+            assert!(take_shots().is_empty(), "no repeated rocket shot");
             stop_events();
-            let mut p = Projectile::new(
-                ProjectileKind::Trident,
-                Vec3::new(6.5, 201.5, 6.5),
-                Some(Who::Mob(owner(game))),
-            );
-            p.velocity = Vec3::new(0.0, 0.0, 1.0);
-            start_events();
-            game.launch_mob_projectile(p);
-            assert_eq!(take_shots().len(), 1);
-            game.tick_projectiles().unwrap();
-            assert!(take_shots().is_empty());
-            stop_events();
+            for route in ["flight", "finish_hit", "breeze"] {
+                if route == "breeze" {
+                    assert!(game.run_command("summon breeze 6.5 201.5 7.5 {NoAI:1b,NoGravity:1b}"));
+                }
+                let mut p = Projectile::new(
+                    ProjectileKind::Trident,
+                    Vec3::new(6.5, 201.5, 6.5),
+                    Some(Who::Mob(owner(game))),
+                );
+                p.velocity = Vec3::new(0.0, 0.0, 1.0);
+                start_events();
+                game.launch_mob_projectile(p);
+                let id = game.creatures.projectiles.last().unwrap().id;
+                assert!(
+                    take_shots().is_empty(),
+                    "no trident shot before its tick: {route}"
+                );
+                if route == "finish_hit" {
+                    let p = game.creatures.projectiles.pop().unwrap();
+                    game.finish_arrow_hit(p, super::EntityHit::Deflected);
+                } else {
+                    game.tick_projectiles().unwrap();
+                }
+                assert_eq!(take_shots().len(), 1, "trident first tick: {route}");
+                if route == "breeze" {
+                    let p = game
+                        .creatures
+                        .projectiles
+                        .iter()
+                        .find(|p| p.id == id)
+                        .unwrap();
+                    assert!(
+                        p.velocity.z < 0.0,
+                        "the actual breeze deflected the trident"
+                    );
+                }
+                game.tick_projectiles().unwrap();
+                assert!(take_shots().is_empty(), "no repeated trident shot: {route}");
+                stop_events();
+            }
         });
     }
     #[test]
