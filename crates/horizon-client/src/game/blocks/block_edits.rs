@@ -511,7 +511,6 @@ mod tests {
             palette: vec![],
             filters: vec![],
             runs,
-            ..Default::default()
         }
     }
 
