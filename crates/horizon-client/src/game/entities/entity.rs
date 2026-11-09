@@ -1124,6 +1124,7 @@ impl Game<'_> {
             // Cast hooks live with their players, not in the saveable lists.
             // Keep both their identities and attachment holders until they leave.
             .chain(self.fishing_hooks_here().map(|(hook, _)| hook.id()))
+            .chain(self.natural_knot_id_iter())
     }
     /// The ids of every entity in the level that is not removed: one walk.
     pub(super) fn live_entity_ids(&self) -> HashSet<u32> {

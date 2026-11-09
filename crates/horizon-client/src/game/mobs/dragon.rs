@@ -35,6 +35,7 @@ use horizon_core::{
 };
 use horizon_protocol::entity_data::Value;
 use mod_api::DragonPhase;
+use rays::dragon_rays;
 
 /// `HealOrHarmMobEffect.applyInstantaneousEffect` at an `AreaEffectCloud`'s
 /// 0.5 scale: `(int) (scale * (6 << amplifier) + 0.5)`.
@@ -603,9 +604,9 @@ const ADJACENCY: [u32; 24] = [
     8257536,
 ];
 impl Dragon {
-    /// `Entity.teleportSetPosition` with a transition of no motion (`/tp`).
-    pub(super) fn stop(&mut self) {
-        self.velocity = Vec3::ZERO;
+    /// `Entity.teleportSetPosition` with the command's relative motion flags.
+    pub(super) fn teleport_motion(&mut self, relative: [bool; 3]) {
+        self.velocity = super::commands::teleport_velocity(self.velocity, relative, false);
     }
     /// `EnderDragon`'s constructor: full health, hovering (`EnderDragonPhase.HOVERING`). Only
     /// `EnderDragonFight.createNewDragon` sets the holding pattern; a dragon from `/summon`, a
@@ -3425,26 +3426,45 @@ impl Game<'_> {
         if hurts {
             self.note_dragon_attacker("minecraft:mob_attack");
         }
-        let (health, rules) = (&self.health_resources, self.world.health_rules);
-        let id = health.damage.id("minecraft:mob_attack");
-        let mut canceled = false;
-        if let Some(p) = self.player.as_mut() {
-            push_seen_with_hurt(p, push, |p| {
-                if let Some(id) = id.filter(|_| hurts)
-                    && let Ok(o) = p.hurt_blocking(
-                        crate::game::entity::damage_level_of!(self),
-                        health,
-                        rules,
-                        id,
-                        5.0,
-                        None,
-                    )
-                {
-                    canceled = o.canceled;
-                }
-            });
+        let before = self.player.as_mut().map(|p| {
+            let before = (p.velocity, std::mem::take(&mut p.health.sync_velocity));
+            p.velocity = p.velocity.add_vector(push);
+            before
+        });
+        if hurts {
+            let origin = self
+                .dragon
+                .as_ref()
+                .map(|d| [d.position.x, d.position.y, d.position.z]);
+            let blocking = self.player_blocking(origin, "minecraft:mob_attack", false);
+            let attack = self.current_attack();
+            let causing = self.dragon.as_ref().map_or(0, |d| d.id as i32);
+            if let Some(id) = self.health_resources.damage.id("minecraft:mob_attack")
+                && let Ok(outcome) =
+                    self.hurt_player_equipment(id, 5.0, blocking, false, causing, false, &attack)
+            {
+                self.combat.forget_noted(outcome.canceled);
+                self.after_block(
+                    outcome,
+                    (self.dragon.as_ref().map(|d| d.id), false),
+                    HurtSource {
+                        damage_type: "minecraft:mob_attack",
+                        causing,
+                        direct: causing,
+                        position: origin,
+                    },
+                    &attack,
+                );
+            }
         }
-        self.combat.forget_noted(canceled);
+        if let Some((velocity, marked)) = before
+            && let Some(p) = self.player.as_mut()
+        {
+            if !p.health.sync_velocity {
+                p.velocity = velocity;
+            }
+            p.health.sync_velocity |= marked;
+        }
         if !sitting
             && !hurt_lately
             && let Some(id) = self.dragon.as_ref().map(|d| d.id)
@@ -5219,78 +5239,6 @@ fn dissolve_mask(quads: &mut [Vertex], skin: [f32; 4], mask: [f32; 4]) {
         ];
     }
 }
-/// `submitRays`: the death rays from a fixed seed, fading in white to magenta.
-fn dragon_rays(base: glam::Mat4, t: f32, white: horizon_client::hud::Rect, out: &mut Vec<Vertex>) {
-    // Vanilla's dragonRays has no texture. Sample inside the white sprite:
-    // its border can round into transparent neighbours during interpolation.
-    let uv = [(white.u0 + white.u1) / 2.0, (white.v0 + white.v1) / 2.0];
-    let over = if t > 0.8 {
-        ((t - 0.8) / 0.2).min(1.0)
-    } else {
-        0.0
-    };
-    let inner = (((1.0 - over) * 255.0) as u32) << 24 | 0x00FF_FFFF;
-    let outer = 0x00FF_00FF;
-    let mut random = LegacyRandom::new(432);
-    let mut m = base;
-    let count = ((t + t * t) / 2.0 * 60.0).floor() as i32;
-    let half_sqrt3 = 3f32.sqrt() / 2.0;
-    let tau = std::f32::consts::TAU;
-    for _ in 0..count {
-        let mut f = || random.next_float() * tau;
-        let q1 = glam::Quat::from_rotation_x(f())
-            * glam::Quat::from_rotation_y(f())
-            * glam::Quat::from_rotation_z(f());
-        let (a, b, c) = (f(), f(), f());
-        let q2 = glam::Quat::from_rotation_x(a)
-            * glam::Quat::from_rotation_y(b)
-            * glam::Quat::from_rotation_z(c + t * std::f32::consts::FRAC_PI_2);
-        m *= glam::Mat4::from_quat(q1 * q2);
-        let length = random.next_float() * 20.0 + 5.0 + over * 10.0;
-        let width = random.next_float() * 2.0 + 1.0 + over * 2.0;
-        let o = glam::Vec3::ZERO;
-        let left = glam::Vec3::new(-half_sqrt3 * width, length, -0.5 * width);
-        let right = glam::Vec3::new(half_sqrt3 * width, length, -0.5 * width);
-        let bottom = glam::Vec3::new(0.0, length, width);
-        for (p1, p2) in [(left, right), (right, bottom), (bottom, left)] {
-            // A triangle as a quad with its last corner repeated.
-            for (p, c) in [(o, inner), (p1, outer), (p2, outer), (p2, outer)] {
-                out.push(Vertex {
-                    normal: [0; 4],
-                    pos: m.transform_point3(p).to_array(),
-                    uv,
-                    layer: horizon_client::gfx::DRAGON_RAYS_OVERLAY,
-                    color: c,
-                    light: 0,
-
-                    glint_uv: [0.0, 0.0],
-                });
-            }
-        }
-    }
-}
-
-/// `Entity.push` on the server's copy of a player, then `hurt`. A player's
-/// own client hears of its velocity only when a hurt marks it
-/// (`LivingEntity.hurtServer`'s `markHurt`, sent by
-/// `ServerEntity.sendChanges`); `push` alone only sets `needsSync`, which
-/// reaches the players tracking them, not them. So the push moves the player
-/// only together with a hurt that lands outside the hurt cooldown, and is
-/// dropped otherwise.
-fn push_seen_with_hurt(
-    p: &mut horizon_client::motion::PlayerMotion,
-    push: Vec3,
-    hurt: impl FnOnce(&mut horizon_client::motion::PlayerMotion),
-) {
-    let before = p.velocity;
-    let marked_before = std::mem::take(&mut p.health.sync_velocity);
-    p.velocity = before.add_vector(push);
-    hurt(p);
-    if !p.health.sync_velocity {
-        p.velocity = before;
-    }
-    p.health.sync_velocity |= marked_before;
-}
 
 #[cfg(test)]
 mod tests {
@@ -6492,57 +6440,6 @@ mod tests {
         assert_eq!(d.strafe_request, None);
     }
 
-    /// #2893: a player under a wing is pushed only when the wing's hurt
-    /// lands, not on every tick they stay there, and never under a perched
-    /// dragon's wing.
-    #[test]
-    fn a_wing_pushes_the_player_only_with_a_landed_hurt() {
-        let mut test_level = horizon_client::health::TestLevel::new(0);
-        let level = &mut test_level.level();
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../.local/horizon-client")
-            .join(horizon_core::VANILLA_VERSION);
-        if !root.join("movement-properties.nbt").exists() {
-            return;
-        }
-        let assets = horizon_client::assets::Assets::load(&root).unwrap();
-        let resources = horizon_client::motion::MotionResources::load(&root, &assets).unwrap();
-        let (health, rules) = (&resources.health, Default::default());
-        let id = health.damage.id("minecraft:mob_attack").unwrap();
-        let push = Vec3::new(0.5, f64::from(0.2_f32), -0.25);
-        let mut wing = |p: &mut horizon_client::motion::PlayerMotion, sitting: bool| {
-            push_seen_with_hurt(p, push, |p| {
-                if !sitting {
-                    let _ = p.hurt(level, health, rules, id, 5.0);
-                }
-            });
-        };
-        // In flight: the first tick's hurt lands and carries the push.
-        let mut p = horizon_client::motion::PlayerMotion::new(&resources, Vec3::ZERO).unwrap();
-        wing(&mut p, false);
-        assert_eq!(p.velocity, push);
-        assert_eq!(p.health.health(), 15.0);
-        // The next 9 ticks are inside the hurt cooldown: no hurt, no push.
-        for _ in 0..9 {
-            p.health.advance_clock();
-            wing(&mut p, false);
-        }
-        assert_eq!(p.velocity, push, "pushed again with no hurt");
-        assert_eq!(p.health.health(), 15.0);
-        // Ten ticks on, the next hurt lands and pushes again.
-        p.health.advance_clock();
-        wing(&mut p, false);
-        assert_eq!(p.velocity, push.add_vector(push));
-        assert_eq!(p.health.health(), 10.0);
-        // Under a perched dragon's wing nothing reaches the player.
-        let mut p = horizon_client::motion::PlayerMotion::new(&resources, Vec3::ZERO).unwrap();
-        for _ in 0..20 {
-            wing(&mut p, true);
-        }
-        assert_eq!(p.velocity, Vec3::ZERO, "pushed by a perched dragon");
-        assert!(!p.health.sync_velocity);
-    }
-
     #[test]
     fn the_dragon_targets_any_player_it_can_attack() {
         let at = Vec3::new(0.0, 64.0, 0.0);
@@ -6612,3 +6509,7 @@ mod thorns_tests;
 mod dragon_fireball_spawn_tests {
     include!("dragon/fireball_spawn_tests.rs");
 }
+
+#[cfg(test)]
+#[path = "dragon/wing_push_tests.rs"]
+mod wing_push_tests;
