@@ -45,9 +45,9 @@ impl Table {
             return false;
         };
         let slot = &sealed.slots[place];
-        slot.entries[..slot.api_end]
-            .last()
-            .is_some_and(|entry| entry.replace && sealed.listeners[entry.listener as usize].active())
+        slot.entries[..slot.api_end].last().is_some_and(|entry| {
+            entry.replace && sealed.listeners[entry.listener as usize].active()
+        })
     }
 
     /// Runs the API functions and forwarding endpoints at point `place`, each under its owner's
