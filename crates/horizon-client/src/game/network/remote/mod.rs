@@ -1859,7 +1859,7 @@ impl Game<'_> {
     /// A line in the connection's chat, with its styles, click and hover
     /// events (ChatComponent.addMessage). The lines the Chat option hides
     /// are dropped there (its `visibleMessageFilter`).
-    pub(super) fn chat_line(
+    pub(super) fn add_chat_line(
         &mut self,
         content: horizon_client::text::Text,
         source: horizon_client::chat::ChatSource,
@@ -5447,7 +5447,8 @@ impl Game<'_> {
                 if p.overlay {
                     self.say_system_queued(&text);
                     self.titles.set_overlay(text, false);
-                } else if self.chat_line(text.clone(), horizon_client::chat::ChatSource::Server) {
+                } else if self.add_chat_line(text.clone(), horizon_client::chat::ChatSource::Server)
+                {
                     // handleSystemMessage: said once the chat takes it.
                     self.say_system_chat_queued(&text);
                 }
@@ -5614,7 +5615,7 @@ impl Game<'_> {
                                         Signature::Unsigned
                                     };
                                     let textures =
-                                        skins::unpack(&t.value, signature, &skins::TEXTURE_URIS);
+                                        skins::unpack(&t.value, signature, skins::texture_uris());
                                     r.skin_textures.entry(e.uuid).or_insert(textures);
                                 }
                             }
@@ -6307,7 +6308,7 @@ impl Game<'_> {
                     horizon_client::skins::unpack(
                         &t.value,
                         signature,
-                        &horizon_client::skins::TEXTURE_URIS,
+                        horizon_client::skins::texture_uris(),
                     )
                 } else {
                     // `ResolvableProfile.resolveProfile`: no `textures` and
@@ -6325,7 +6326,7 @@ impl Game<'_> {
                                 horizon_client::skins::unpack(
                                     &value,
                                     signature,
-                                    &horizon_client::skins::TEXTURE_URIS,
+                                    horizon_client::skins::texture_uris(),
                                 )
                             })
                         }
@@ -9834,8 +9835,9 @@ impl Game<'_> {
         if gliding && &*held.item == "minecraft:firework_rocket" {
             self.with_hand(hand, Game::swing_arm);
         }
-        // A stack's own `blocks_attacks` raises it as a shield's does.
-        let blocks = self.blocks_attacks(&held).is_some();
+        // A stack's own `blocks_attacks` raises it as a shield's does; a
+        // use the server's patch gives it is CONSUME too (no swing).
+        let blocks = self.blocks_attacks(&held).is_some() || self.patched_held_use(&held);
         let ends = use_ends_click(&info, gliding) || blocks;
         // MultiPlayerGameMode.useItem: `ItemStack.use`'s SUCCESS swings
         // (SwingSource.CLIENT); CONSUME does not — a bow, crossbow, trident
@@ -9950,8 +9952,12 @@ impl Game<'_> {
             // Item.use: a kinetic weapon starts being used.
             id if horizon_client::spear::Kinetic::of(id).is_some() => true,
             // ShieldItem.use: anything that blocks attacks, off cooldown.
+            // Item.use: a consumable or `blocks_attacks` the server's patch
+            // adds starts the use (Consumable.startConsuming, startUsingItem).
             _ => {
-                self.raise_shield(self.held_slot());
+                if !self.raise_shield(self.held_slot()) && self.patched_held_use(held) {
+                    self.start_using_item();
+                }
                 return true;
             }
         };
@@ -9993,6 +9999,21 @@ impl Game<'_> {
                 | "minecraft:ender_eye"
         ) || horizon_client::spear::Kinetic::of(&stack.item).is_some()
             || self.blocks_attacks(stack).is_some()
+            || self.patched_held_use(stack)
+    }
+    /// Whether the server's patch gives `stack`, an item with no consumable
+    /// of its own, a `consumable` with a use time or `blocks_attacks` (a
+    /// sword made to block): `Item.use` starts a use of it
+    /// (`Consumable.startConsuming`, `startUsingItem`) that lasts until the
+    /// button lets go or the server stops it, as the client's
+    /// `LivingEntity.updateUsingItem` never completes one.
+    fn patched_held_use(&self, stack: &ItemStack) -> bool {
+        let (ticks, blocks) = horizon_client::item_sync::patched_use(stack);
+        ticks.map_or(blocks, |ticks| ticks > 0)
+            && self
+                .items()
+                .get(&stack.item)
+                .is_none_or(|i| i.consumable.is_none())
     }
 
     /// The rest of Minecraft.startUseItem once the main hand's target passed:
@@ -10453,7 +10474,7 @@ impl Game<'_> {
             self.own_attribute("minecraft:attack_damage")
                 .map_or(1.0, |v| v as f32)
         };
-        let magic = scale * (self.enchanted_damage(target, damage) - damage);
+        let magic = scale * (self.enchanted_damage(target, damage, None) - damage);
         if damage <= 0.0 && magic <= 0.0 {
             return;
         }
@@ -11300,7 +11321,7 @@ impl Game<'_> {
             _ => {
                 // Unsupported menu: tell the server we closed it.
                 self.remote_reject_container(p.container);
-                self.chat_line(
+                self.add_chat_line(
                     horizon_client::text::Text::literal(format!(
                         "(Horizon cannot show {menu} screens yet)"
                     )),
@@ -13318,6 +13339,47 @@ mod tests {
             assert!(mod_api::prelude::NetworkClientHost::send_chat(game, "/warp spawn").is_ok());
             game.settings.chat_visibility = 2;
             assert!(mod_api::prelude::NetworkClientHost::send_chat(game, "/warp spawn").is_err());
+        });
+    }
+
+    /// `ChatComponent.addClientSystemMessage`: the line joins this client's
+    /// chat history and no packet leaves for the server.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mod_chat_line_shows_locally_and_sends_nothing() {
+        use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
+        use horizon_protocol::connection::{Connection, Pipe};
+
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            let (client, server) = Pipe::pair();
+            game.connect_local(client, "ChatLineTest").unwrap();
+            // Whatever connecting wrote is not this line's; drain it until the
+            // client waits for the login answer, so the check below is about
+            // `chat_line` alone.
+            let (mut reader, _writer) = Connection::local(server).split();
+            reader
+                .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+                .unwrap();
+            while reader.recv().is_ok() {}
+            mod_api::prelude::NetworkClientHost::chat_line(
+                game,
+                mod_api::Text::literal("local only"),
+            )
+            .unwrap();
+            let history: Vec<_> = game
+                .remote
+                .as_ref()
+                .unwrap()
+                .chat
+                .iter()
+                .map(|(line, _)| line.clone())
+                .collect();
+            assert_eq!(history, ["local only"]);
+            assert!(
+                reader.recv().unwrap_err().is_timed_out(),
+                "a local chat line sends nothing to the server"
+            );
         });
     }
 

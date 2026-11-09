@@ -120,9 +120,12 @@ impl Game<'_> {
     }
     /// `ItemStack.getUseDuration`: a consumable's time, 72000 for what is
     /// held until let go, the fixed times of brushes, bundles, spyglasses and
-    /// goat horns, 0 for the rest, then a mod's answer.
+    /// goat horns, 0 for the rest, then a mod's answer. A `consumable` or
+    /// `blocks_attacks` the server's patch adds counts as the item's own
+    /// (`Item.getUseDuration` reads the stack's components).
     pub(super) fn use_duration(&self, stack: &ItemStack) -> i32 {
         let info = self.items().get(&stack.item);
+        let (patched_ticks, patched_blocks) = horizon_client::item_sync::patched_use(stack);
         let mut duration = match &*stack.item {
             "minecraft:bow" | "minecraft:crossbow" | "minecraft:trident" => 72_000,
             "minecraft:spyglass" => 1200,
@@ -131,9 +134,12 @@ impl Game<'_> {
             "minecraft:ender_eye" => 0,
             "minecraft:goat_horn" => self.native_item_instrument_duration(stack),
             _ => {
-                if let Some(consumable) = stack.consumable(info) {
+                if let Some(ticks) = patched_ticks {
+                    ticks
+                } else if let Some(consumable) = stack.consumable(info) {
                     consumable.ticks()
-                } else if stack.carries_component(info, "minecraft:blocks_attacks")
+                } else if patched_blocks
+                    || stack.carries_component(info, "minecraft:blocks_attacks")
                     || stack.carries_component(info, "minecraft:kinetic_weapon")
                 {
                     72_000

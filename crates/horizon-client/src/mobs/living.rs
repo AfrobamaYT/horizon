@@ -1385,7 +1385,7 @@ impl Mob {
                 speed
             }
         } else {
-            self.flying_speed(w)
+            self.flying_speed(w.loop_context)
         }
     }
     /// `LivingEntity.getSpeed`, through the `living_speed` hook.
@@ -1395,14 +1395,13 @@ impl Mob {
         speed
     }
     /// `LivingEntity.getFlyingSpeed`, through the `living_flying_speed` hook.
-    fn flying_speed(&self, w: &MobWorld) -> f32 {
-        let mut speed = 0.02;
-        crate::motion::native_living_flying_speed(
-            w.loop_context,
-            self.id,
-            &self.kind.id,
-            &mut speed,
-        );
+    fn flying_speed(&self, context: &horizon_world::native_load_context::LoopContext) -> f32 {
+        let mut speed = if super::equine::controlled(self) {
+            self.ai.speed * 0.1
+        } else {
+            0.02
+        };
+        crate::motion::native_living_flying_speed(context, self.id, &self.kind.id, &mut speed);
         speed
     }
     /// `LivingEntity.getEffectiveGravity`: the gravity, floored to 0.01 while a
@@ -3452,6 +3451,23 @@ mod tests {
             );
         });
         assert!(ran, "built test world ran");
+    }
+
+    /// `LivingEntity.getFlyingSpeed`: a horse its player steers (saddled, ridden) moves
+    /// through the air at a tenth of its speed; riderless or unsaddled at 0.02.
+    #[test]
+    fn a_steered_mount_moves_through_the_air_at_a_tenth_of_its_speed() {
+        let mut kind = crate::mobs::sensor_scan_tests::kind();
+        std::sync::Arc::make_mut(&mut kind).species = super::super::Species::Horse;
+        let mut m = Mob::new(1, kind, Vec3::ZERO, 0.0);
+        // Flying speed needs only the hook context, not prepared vanilla resources.
+        let context = crate::test_resources::server_loop_context();
+        m.ai.speed = 0.3;
+        assert_eq!(m.flying_speed(context), 0.02, "no rider");
+        m.rider = Some(super::super::equine::Rider::default());
+        assert_eq!(m.flying_speed(context), 0.02, "unsaddled");
+        m.extra.set_saddled(true);
+        assert_eq!(m.flying_speed(context), 0.3_f32 * 0.1);
     }
 }
 

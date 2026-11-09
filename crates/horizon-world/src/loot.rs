@@ -3326,10 +3326,12 @@ mod custom_data_predicate_tests {
                 )
             })
             .collect();
+        // One directory per call: tests run in parallel, and two payloads of the same length shared one.
+        static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let root = std::env::temp_dir().join(format!(
             "loot-custom-data-{}-{}",
             std::process::id(),
-            data.as_ref().map_or(0, |v| v.to_string().len())
+            CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         let _ = std::fs::remove_dir_all(&root);
         let dir = root.join("data/minecraft/loot_table");
