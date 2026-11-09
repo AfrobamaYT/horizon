@@ -171,10 +171,11 @@ pub struct JoinList<T, const DIRECT: bool = true>(
     Option<residency::Binding<T>>,
     ListStamp,
     Option<visibility::Binding>,
+    Option<visibility::PassLease>,
 );
 impl<T: Clone, const DIRECT: bool> Clone for JoinList<T, DIRECT> {
     fn clone(&self) -> Self {
-        Self(self.0.clone(), None, ListStamp::new(), None)
+        Self(self.0.clone(), None, ListStamp::new(), None, None)
     }
 }
 impl<T, const DIRECT: bool> Drop for JoinList<T, DIRECT> {
@@ -434,7 +435,7 @@ impl<'a, T> IntoIterator for &'a ResidentList<T> {
 
 impl<T, const DIRECT: bool> Default for JoinList<T, DIRECT> {
     fn default() -> Self {
-        Self(Vec::new(), None, ListStamp::new(), None)
+        Self(Vec::new(), None, ListStamp::new(), None, None)
     }
 }
 
@@ -495,6 +496,10 @@ impl<T, const DIRECT: bool> JoinList<T, DIRECT> {
     pub fn lift(&mut self) -> Self {
         self.written();
         let mut taken = std::mem::take(self);
+        assert!(taken.4.is_none(), "lifting an already owned pass");
+        if taken.3.is_none() {
+            taken.4 = Some(visibility::PassLease::enter());
+        }
         self.1 = taken.1.clone();
         self.3 = taken
             .3
@@ -521,6 +526,7 @@ impl<T, const DIRECT: bool> JoinList<T, DIRECT> {
     pub fn restore(&mut self, mut taken: Self, order: RestoreOrder) {
         self.written();
         let visibility_lease = taken.3.as_mut().and_then(|b| b.lease.take());
+        let pass_lease = taken.4.take();
         if let (Some(a), Some(b)) = (&self.3, &taken.3) {
             assert!(
                 a.sink.same(&b.sink),
@@ -558,9 +564,16 @@ impl<T, const DIRECT: bool> JoinList<T, DIRECT> {
             binding.marker(residency::Change::Restored);
         }
         drop(visibility_lease);
+        drop(pass_lease);
     }
     pub fn with_capacity(capacity: usize) -> Self {
-        Self(Vec::with_capacity(capacity), None, ListStamp::new(), None)
+        Self(
+            Vec::with_capacity(capacity),
+            None,
+            ListStamp::new(),
+            None,
+            None,
+        )
     }
     /// Move a batch back without changing its join numbers or order.
     pub fn append(&mut self, other: &mut Self) {
@@ -979,6 +992,7 @@ impl<T, const DIRECT: bool> IntoIterator for JoinList<T, DIRECT> {
         IntoIter {
             rows: std::mem::take(&mut self.0).into_iter(),
             _lease: self.3.as_mut().and_then(|b| b.lease.take()),
+            _pass: self.4.take(),
         }
     }
 }
@@ -988,6 +1002,7 @@ impl<T, const DIRECT: bool> IntoIterator for JoinList<T, DIRECT> {
 pub struct IntoIter<T> {
     rows: std::vec::IntoIter<T>,
     _lease: Option<visibility::Lease>,
+    _pass: Option<visibility::PassLease>,
 }
 impl<T> Iterator for IntoIter<T> {
     type Item = T;
