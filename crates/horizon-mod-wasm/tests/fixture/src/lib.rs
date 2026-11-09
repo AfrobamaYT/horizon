@@ -1,6 +1,8 @@
 use mod_api::Hooks;
 
+pub mod replace;
 pub mod shutdown;
+pub use replace::own_average;
 pub use shutdown::on_shutdown;
 
 #[derive(Default)]

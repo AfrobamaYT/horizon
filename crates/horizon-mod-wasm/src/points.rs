@@ -124,21 +124,33 @@ fn listen_checked(manifest: &Manifest, module: &WasmMod) -> Result<(), String> {
                 "{id}: listener does not match its declared API head/return target"
             ));
         }
-        slots.push((point, index as u32, inject.priority, id));
+        slots.push((
+            point,
+            index as u32,
+            inject.priority,
+            id,
+            inject.kind == Kind::Replace,
+        ));
     }
     if let Some(id) = declared.keys().next() {
         return Err(format!("unfilled point listener {id}"));
     }
     let owner = Box::leak(manifest.id.clone().into_boxed_str());
-    for (place, listener, priority, id) in slots {
+    for (place, listener, priority, id, replace) in slots {
         let endpoint = Box::leak(Box::new(Endpoint {
             owner,
             module: module.downgrade(),
             listener,
         }));
         let id = Box::leak(id.into_boxed_str());
-        let slot = SlotListener::forwarded(owner, place, endpoint, 0x8000_0000 + place as u32);
-        mod_points::register(&slot.ordered(priority, id)).map_err(|error| error.to_string())?;
+        let mut slot = SlotListener::forwarded(owner, place, endpoint, 0x8000_0000 + place as u32)
+            .ordered(priority, id);
+        // The guest's listener already owns the outcome (`mod_points::replace!`); the host's
+        // slot carries the mark, so a second replace at the place is refused for either target.
+        if replace {
+            slot = slot.replacing();
+        }
+        mod_points::register(&slot).map_err(|error| error.to_string())?;
     }
     Ok(())
 }
