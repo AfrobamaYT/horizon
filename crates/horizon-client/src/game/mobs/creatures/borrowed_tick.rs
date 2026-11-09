@@ -794,3 +794,20 @@ impl Game<'_> {
         (damage_type, attacker)
     }
 }
+
+impl Game<'_> {
+    pub(super) fn retained_passenger_snapshot(&self, uuid: u128) -> Vec<Seen> {
+        let passenger_objects: Vec<_> = if self.persist.off_level.is_empty() {
+            Vec::new()
+        } else {
+            self.persist
+                .off_level
+                .values()
+                .map(|object| match object {
+                    super::persist::OffLevel::Mob(m) => seen(m, uuid),
+                })
+                .collect()
+        };
+        passenger_objects
+    }
+}

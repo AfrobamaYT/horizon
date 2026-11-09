@@ -1565,17 +1565,7 @@ impl Game<'_> {
         snapshot.extend(self.mobs.iter().map(|m| seen(m, uuid)));
         let mut events = std::mem::take(&mut self.creatures.event_buf);
         events.clear();
-        let passenger_objects: Vec<_> = if self.persist.off_level.is_empty() {
-            Vec::new()
-        } else {
-            self.persist
-                .off_level
-                .values()
-                .map(|object| match object {
-                    super::persist::OffLevel::Mob(m) => seen(m, uuid),
-                })
-                .collect()
-        };
+        let passenger_objects = self.retained_passenger_snapshot(uuid);
         let mut pending = self.creatures.pending.remove(level_id).unwrap_or_default();
         let primable = self.sulfur_cubes_adopted_explosive();
         let mut mobs = self.mobs.lift();
