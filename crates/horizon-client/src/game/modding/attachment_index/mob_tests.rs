@@ -302,3 +302,45 @@ fn unsupported_physical_family_refuses_store_with_its_name() {
         );
     });
 }
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn mob_inner_first_binding_commit_outer_abort_invalidates_retained_row() {
+    use mod_api::{AttachmentError, HostTransaction};
+    with_game(|game| {
+        game.options.dedicated = Some(Vec::new());
+        game.native_level_opened(Dim::Overworld);
+        let uuid = [91, 92, 93, 94];
+        let Tag::Compound(mut tag) = mob(uuid) else {
+            unreachable!()
+        };
+        tag.remove(&horizon_mod_runtime::attachments::ATTACHMENTS_KEY.into());
+        let id = game.load_mob(Tag::Compound(tag), None).unwrap();
+        let holder = Holder::Entity(id);
+        let mut retained = None;
+        let result: Result<(), AttachmentError> = game.transaction(|host, _| {
+            let inner: Result<(), AttachmentError> = host.transaction(|host, _| {
+                VALUE.set(host, holder, 13)?;
+                retained = Some(host.query_mut(&VALUE).unwrap());
+                Ok(())
+            });
+            inner?;
+            Err(AttachmentError::MissingHolder)
+        });
+        assert!(result.is_err());
+        assert!(!game.mobs[0].attachment_lifetime.is_bound());
+        let batch = retained.unwrap();
+        let row = batch.iter().next().unwrap().unwrap();
+        assert_eq!(row.value(), &13);
+        assert_eq!(
+            row.set(game, 99),
+            Err(mod_api::AttachmentRowError::StaleHolder)
+        );
+        VALUE.set(game, holder, 17).unwrap();
+        assert_eq!(
+            row.set(game, 99),
+            Err(mod_api::AttachmentRowError::StaleHolder)
+        );
+        assert_eq!(VALUE.get_existing(game, holder), Ok(Some(17)));
+    });
+}

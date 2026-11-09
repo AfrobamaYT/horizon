@@ -175,7 +175,10 @@ impl Game<'_> {
                     .and_then(|tag| tag.get(ATTACHMENTS_KEY)),
             )?;
             if access == AttachmentAccess::Store
-                && self.persist.removals.contains(&super::commands::Target::Painting(id))
+                && self
+                    .persist
+                    .removals
+                    .contains(&super::commands::Target::Painting(id))
             {
                 return Err(AttachmentError::MissingHolder);
             }
