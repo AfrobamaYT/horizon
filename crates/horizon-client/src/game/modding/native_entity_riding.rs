@@ -537,9 +537,7 @@ impl Game<'_> {
         }
         match vehicle {
             Target::Boat(id) => {
-                let Some(index) = self.boats.iter().position(|b| b.id == id) else {
-                    return None;
-                };
+                let index = self.boats.iter().position(|b| b.id == id)?;
                 if self.boat_passengers(id) >= self.boats[index].max_passengers()
                     || (!force && !self.boat_has_room(index))
                 {
@@ -556,9 +554,7 @@ impl Game<'_> {
                 }
             }
             Target::Mob(id) => {
-                let Some(mob) = self.mobs.iter().find(|m| m.id == id && m.alive()) else {
-                    return None;
-                };
+                let mob = self.mobs.iter().find(|m| m.id == id && m.alive())?;
                 let seats = self.seated_passengers(id);
                 let players = seats
                     .iter()
