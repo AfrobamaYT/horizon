@@ -16,7 +16,8 @@
 //! use horizon_client_render::hud_kit::shapes::{self, Stop};
 //! use std::f32::consts::{FRAC_PI_8, TAU};
 //!
-//! let atlas = HudAtlas::build(std::path::Path::new("/nonexistent")).unwrap();
+//! let resources = horizon_client_render::resource_source::ResourceSource::directory("/nonexistent".into());
+//! let atlas = HudAtlas::build(&resources).unwrap();
 //! let mut batch = HudBatch::scratch([854, 480]);
 //! let centre = [213.0, 120.0];
 //! // A dark disc fading out, a faint ring, then the top 45 degree sector lit.
