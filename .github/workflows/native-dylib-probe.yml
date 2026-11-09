@@ -8,6 +8,7 @@ on:
     paths:
       - 'tools/native_dylib_probe.py'
       - 'tools/native_dylib_probe/**'
+      - 'tools/prebuilt_game.py'
       - '.github/workflows/native-dylib-probe.yml'
 
 permissions:
@@ -50,12 +51,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.rust.outputs.version }}-${{ matrix.target }}
+          components: clippy
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: '. -> target/prebuilt'
           shared-key: native-dylib-probe-${{ matrix.target }}
       - name: Linux SDK prerequisites
         if: runner.os == 'Linux'

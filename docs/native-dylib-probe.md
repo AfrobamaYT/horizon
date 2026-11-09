@@ -5,8 +5,8 @@ an SDK, change launcher routing, or claim a stable Rust ABI.
 
 ## Repeat
 
-Use pinned Rust 1.99.1 with Clippy and the platform's native inspection tools
-(`readelf` and `nm` on Linux, GNU `objdump` on Windows):
+Use the launcher's pinned Rust with Clippy; Linux also needs `readelf` (Windows images are read by the
+harness itself):
 
 ```sh
 CARGO_INCREMENTAL=0 python3 tools/prebuilt_game.py build target/probe-sdk
@@ -43,12 +43,18 @@ process exit. Assertions check:
   consumers; entered by each consumer and dropped by the executable; isolated
   from another thread while sharing the global points registry.
 - Heap vectors allocated and dropped across executable, dependency and consumer
-  boundaries. On Linux, dynamic symbols must identify the game as the sole
-  definition of the Rust allocation entry point across all SDK/probe images.
+  boundaries.
+- One allocator. The std runtime library carries its own default-allocator shim,
+  so the definitions present prove nothing. On Linux the dynamic linker's actual
+  bindings (`LD_DEBUG=bindings`) must send every allocator call, std's own
+  included, to the game. Windows binds each import to the DLL it names, with no
+  interposition: the game DLL must be the only image exporting the allocator
+  (std's DLL included), and every image calling it must import it from the game.
 
 `commands.log` records compiler commands, checks, Clippy, dynamic dependency
 inspection and runtime assertions. Other evidence includes full `rustc.txt`, the
-SDK identity, Linux allocator symbols and final probe artifact hashes. These
+SDK identity, allocator bindings (Linux) or PE allocator exports/imports
+(Windows) and final probe artifact hashes. These
 checks would fail if the tested registry, TLS or dependency state had duplicate
 copies. They do not instrument every static in every transitive crate: the
 remaining sharing evidence is the compiler's exact metadata dependency graph and
@@ -71,8 +77,9 @@ LLVM version: 23.1.1
 
 The unchanged SDK completed release/client compilation (18 existing staging
 visibility warnings). All four probe targets passed metadata checking and Clippy;
-runtime assertions passed and both Python refusal tests passed. The executable
-and shared dependency import the allocation entry point defined by the game.
+runtime assertions passed and both Python refusal tests passed. Every
+allocator binding in the process, from the executable, both consumers, the shared
+dependency, the wasm runtime library and std itself, resolves to the game.
 The consumer libraries also allocate vectors and return them for executable drop.
 
 An initial harness draft failed because it omitted the explicit game dependency
@@ -80,9 +87,7 @@ from the shared fixture: rustc correctly demanded unavailable rlibs. Adding the
 required game reference and SDK dylib extern fixed the harness; no SDK, profile,
 crate type or dependency architecture was changed.
 
-Windows GNU is **not checked** here. PE import/export inspection is logged by the
-portable harness, but its allocator symbol uniqueness is not automatically
-asserted as on ELF; Windows acceptance additionally needs that inspection and the
-SDK export-count check. No Windows CI was dispatched by this work. Gameplay,
+Windows GNU runs in `.github/workflows/native-dylib-probe.yml`; its result is
+recorded from that job's log, not here. Gameplay,
 launcher readiness, library descriptors, malicious/stale mod refusal before OS
 loading and performance acceptance are outside this probe's scope.

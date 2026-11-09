@@ -14,14 +14,83 @@ import sys
 import prebuilt_game as sdk_tools
 
 FIXTURES = Path(__file__).with_suffix("")
+PINNED = sdk_tools.ROOT / "launcher/src/rust_toolchain.rs"
+ALLOCATOR = "___rust_alloc"
+
+
+def pinned_release():
+    text = PINNED.read_text()
+    return text.split('pub const VERSION: &str = "', 1)[1].split('"', 1)[0]
+
+
+def pe_symbols(path):
+    """(exported names, {imported DLL: names}) from a PE image's export and import directories."""
+    data = path.read_bytes()
+    u16 = lambda at: int.from_bytes(data[at:at + 2], "little")
+    u32 = lambda at: int.from_bytes(data[at:at + 4], "little")
+    pe = u32(0x3C)
+    optional = pe + 24
+    wide = u16(optional) == 0x20B
+    directories = optional + (112 if wide else 96)
+    sections = optional + u16(pe + 20)
+    spans = [(u32(at + 12), max(u32(at + 8), u32(at + 16)), u32(at + 20))
+             for at in (sections + 40 * i for i in range(u16(pe + 6)))]
+
+    def offset(rva):
+        return next(raw + rva - address for address, size, raw in spans if address <= rva < address + size)
+
+    def string(rva):
+        start = offset(rva)
+        return data[start:data.index(b"\0", start)].decode()
+
+    exported = []
+    if export_rva := u32(directories):
+        directory = offset(export_rva)
+        names = offset(u32(directory + 32))
+        exported = [string(u32(names + 4 * i)) for i in range(u32(directory + 24))]
+    imported = {}
+    if import_rva := u32(directories + 8):
+        descriptor = offset(import_rva)
+        while u32(descriptor + 12):
+            thunk = offset(u32(descriptor) or u32(descriptor + 16))
+            width, ordinal = (8, 1 << 63) if wide else (4, 1 << 31)
+            names = []
+            while entry := int.from_bytes(data[thunk:thunk + width], "little"):
+                if not entry & ordinal:
+                    names.append(string((entry & 0x7FFFFFFF) + 2))
+                thunk += width
+            imported[string(u32(descriptor + 12))] = names
+            descriptor += 20
+    return exported, imported
+
+
+def windows_allocator(images, game, evidence):
+    """Windows binds each import to the named DLL (no ELF interposition): the game DLL must be the only image
+    exporting the Rust allocator, and every image calling it must import it from the game."""
+    rows = {}
+    for image in images:
+        exported, imported = pe_symbols(image)
+        rows[image.name] = {
+            "exports": [name for name in exported if ALLOCATOR in name],
+            "imports": {dll: [n for n in names if ALLOCATOR in n] for dll, names in imported.items()
+                        if any(ALLOCATOR in n for n in names)},
+        }
+    evidence.write_text(json.dumps(rows, indent=2))
+    definitions = [name for name, row in rows.items() if row["exports"]]
+    if definitions != [game.name]:
+        raise ValueError(f"expected game as sole allocator export: {definitions}")
+    foreign = {name: list(row["imports"]) for name, row in rows.items() if set(row["imports"]) - {game.name}}
+    if foreign:
+        raise ValueError(f"allocator imported from a DLL other than the game: {foreign}")
+    return rows
 
 
 def preflight(sdk, compiler):
     identity = json.loads((sdk / sdk_tools.IDENTITY).read_text())
     if compiler.strip() != identity["rustc"].strip():
         raise ValueError("full rustc -vV mismatch")
-    if "release: 1.99.1\n" not in compiler:
-        raise ValueError("probe requires pinned rustc 1.99.1")
+    if f"release: {pinned_release()}\n" not in compiler:
+        raise ValueError(f"probe requires the launcher's pinned rustc {pinned_release()}")
     for name, expected in identity["files"].items():
         path = sdk / name
         if not path.resolve().is_relative_to(sdk.resolve()):
@@ -75,6 +144,78 @@ def main():
                     subprocess.run(gate, check=True, stdout=log, stderr=subprocess.STDOUT)
             subprocess.run(command, check=True, stdout=log, stderr=subprocess.STDOUT, **kwargs)
 
+    sysroot = Path(subprocess.check_output(["rustc", "--print", "sysroot"], text=True).strip())
+    host = next(line.split(": ", 1)[1] for line in compiler.splitlines() if line.startswith("host: "))
+    runtime = sysroot / "lib/rustlib" / host / "lib"
+    std_runtime = sorted(runtime.glob(f"{prefix}std-*{extension}"))
+    game = sdk_tools.dylib(deps, "horizon_client")
+    failures = []
+
+    def runtime_env(*folders):
+        variable = "PATH" if windows else "LD_LIBRARY_PATH"
+        return {**os.environ, variable: os.pathsep.join(map(str, [*folders, deps, runtime])) + os.pathsep + os.environ.get(variable, "")}
+
+    # 1. Counting allocator across a dylib boundary, standalone: the same compiler and flags as the prebuilt route.
+    counting = output / "allocator"
+    counting.mkdir(exist_ok=True)
+    plain = ["rustc", "--edition=2024", "-C", "prefer-dynamic", "-C", "opt-level=3", "-L", f"dependency={counting}"]
+    for crate, source, extra in [("game", "game.rs", []), ("modx", "modx.rs", ["--extern", f"game={counting / (prefix + 'game' + extension)}"])]:
+        run([*plain, "--crate-type=dylib", "--crate-name", crate, *extra, str(FIXTURES / "allocator" / source),
+             "-o", str(counting / (prefix + crate + extension))])
+    counting_exe = counting / ("counting.exe" if windows else "counting")
+    run([*plain, "--crate-name=counting", "--extern", f"game={counting / (prefix + 'game' + extension)}",
+         "--extern", f"modx={counting / (prefix + 'modx' + extension)}", str(FIXTURES / "allocator/main.rs"), "-o", str(counting_exe)])
+    report = subprocess.run([str(counting_exe)], env=runtime_env(counting), capture_output=True, text=True)
+    (counting / "report.txt").write_text(report.stdout + report.stderr)
+    print(f"counting allocator (exit {report.returncode}):\n{report.stdout}{report.stderr}")
+    if report.returncode != 0 or "ONE ALLOCATOR" not in report.stdout:
+        failures.append("cross-image allocations do not all go through the game's counting allocator (allocator/report.txt)")
+
+    # 2. The shipped route: the starter mod and the generated executable, with the launcher's flags.
+    shipped = output / "shipped"
+    shipped.mkdir(exist_ok=True)
+    route = ["rustc", "--edition", "2024", "-C", "prefer-dynamic", "-C", "opt-level=3", "-L", f"dependency={deps}",
+             "-L", f"native={sdk / 'native'}", "-L", f"dependency={shipped}"]
+    starter = (sdk_tools.ROOT / "crates/cargo-horizon-mod/template/native/lib.rs").read_text()
+    (shipped / "mod_0.rs").write_text(starter.replace("{id}", "probe"))
+    subprocess.run([*route, "--crate-type", "rlib", "--crate-name", "mod_0", *extern("mod_api"),
+                    "--out-dir", str(shipped), str(shipped / "mod_0.rs")], check=True)
+    template = (sdk / sdk_tools.TEMPLATE).read_text()
+    (shipped / "main.rs").write_text(template.replace("/* MOD_ENTRIES */", '        "probe" => mod_0::hooks,\n').replace(
+        "/* BUILT_MODS */",
+        '    horizon_mod_package::runtime::BuiltMod { id: "probe", version: "0.1.0", side: horizon_mod_package::Side::Both },\n'))
+    shipped_exe = shipped / ("horizon-client.exe" if windows else "horizon-client")
+    subprocess.run([*route, "--crate-type", "bin", "--crate-name", "horizon_native_game",
+                    *(flag for arg in identity["link_args"] for flag in ("-C", f"link-arg={arg}")),
+                    "--extern", f"horizon_client={game}", *extern("mod_api"), *extern("mod_points"), *extern("horizon_mod_package"),
+                    "--extern", f"mod_0={shipped / 'libmod_0.rlib'}", "-o", str(shipped_exe), str(shipped / "main.rs")], check=True)
+    if windows:
+        exported, imported = pe_symbols(game)
+        names = {kind: next(n for n in exported if n.endswith(f"___rust_{kind}")) for kind in ("alloc", "dealloc")}
+        shipped_rows = {}
+        for image in [shipped_exe, game, *std_runtime]:
+            image_exports, image_imports = pe_symbols(image)
+            shipped_rows[image.name] = {
+                "exports": [n for n in image_exports if "___rust_" in n and ("alloc" in n or "___rdl_" in n)],
+                "imports": {dll: [n for n in found if "alloc" in n and ("___rust_" in n or "___rdl_" in n)]
+                            for dll, found in image_imports.items()},
+            }
+        (shipped / "allocator-imports.json").write_text(json.dumps(shipped_rows, indent=2))
+        print("shipped route allocator imports and exports:\n" + json.dumps(shipped_rows, indent=2))
+        foreign = {dll for dll, found in shipped_rows[shipped_exe.name]["imports"].items() if found and dll != game.name}
+        if foreign:
+            failures.append(f"the shipped executable imports the Rust allocator from {sorted(foreign)}, not the game")
+        # 3. At run time, which heap each allocator draws from (classified, never freed across).
+        heap_exe = shipped / "route_heap.exe"
+        run([*route, "--crate-name=route_heap", *extern("horizon_client"), *extern("mod_api"),
+             str(FIXTURES / "route_heap.rs"), "-o", str(heap_exe)])
+        heap = subprocess.run([str(heap_exe), game.name, std_runtime[0].name, names["alloc"], names["dealloc"]],
+                              env=runtime_env(shipped), capture_output=True, text=True)
+        (shipped / "route-heap.txt").write_text(heap.stdout + heap.stderr)
+        print(f"shipped route heaps (exit {heap.returncode}):\n{heap.stdout}{heap.stderr}")
+        if heap.returncode != 0 or "ONE ALLOCATOR" not in heap.stdout:
+            failures.append("the shipped executable and the game allocate from different heaps (shipped/route-heap.txt)")
+
     common = ["rustc", "--edition=2024", "-C", "prefer-dynamic", "-L", f"dependency={deps}",
               "-L", f"native={sdk / 'native'}", "-L", f"dependency={output}"]
     for crate, source in [("probe_shared", "shared.rs"), ("probe_a", "mod.rs"), ("probe_b", "mod.rs")]:
@@ -85,30 +226,41 @@ def main():
     run([*common, "--crate-name=probe", *extern("horizon_client"), *extern("mod_api"), *extern("mod_points"),
          *extern("libloading"), "--extern", f"probe_shared={output / (prefix + 'probe_shared' + extension)}",
          str(FIXTURES / "main.rs"), "-o", str(executable)])
-    sysroot = Path(subprocess.check_output(["rustc", "--print", "sysroot"], text=True).strip())
-    host = next(line.split(": ", 1)[1] for line in compiler.splitlines() if line.startswith("host: "))
-    runtime = sysroot / "lib/rustlib" / host / "lib"
-    env = dict(os.environ)
-    variable = "PATH" if windows else "LD_LIBRARY_PATH"
-    env[variable] = os.pathsep.join(map(str, [output, deps, runtime])) + os.pathsep + env.get(variable, "")
-    for artifact in [executable, *output.glob("*" + extension), *deps.glob("*" + extension)]:
-        inspector = ["objdump", "-p"] if windows else ["readelf", "-d"]
-        run([*inspector, str(artifact)])
-    if not windows:
-        # Inspect actual exported allocator definitions, not prefer-dynamic intent.
-        images = [executable, *output.glob("*.so"), *deps.glob("*.so")]
-        allocator_rows = {}
-        definitions = []
+    env = runtime_env(output)
+    # The std runtime library is part of the process too and carries its own default-allocator shim.
+    images = [executable, *output.glob("*" + extension), *deps.glob("*" + extension), *std_runtime]
+    probe_args = [str(executable), str(output / (prefix + "probe_a" + extension)), str(output / (prefix + "probe_b" + extension))]
+    if windows:
+        try:
+            windows_allocator(images, game, output / "allocator-symbols.json")
+        except ValueError as error:
+            failures.append(str(error))
+        print("probe allocator exports/imports:\n" + (output / "allocator-symbols.json").read_text())
+        # Run the state probe regardless, for its evidence; its cross-image frees are unsafe if allocators differ.
+        state = subprocess.run(probe_args, env=env, capture_output=True, text=True)
+        (output / "state-probe.txt").write_text(state.stdout + state.stderr)
+        print(f"state probe (exit {state.returncode}):\n{state.stdout}{state.stderr}")
+        if state.returncode != 0:
+            failures.append(f"state probe exited {state.returncode}")
+    else:
         for artifact in images:
-            symbols = subprocess.check_output(["nm", "-D", str(artifact)], text=True)
-            rows = [line for line in symbols.splitlines() if "___rust_alloc" in line or "___rust_dealloc" in line]
-            allocator_rows[str(artifact)] = rows
-            if any(" T " in row and "___rust_alloc" in row for row in rows):
-                definitions.append(artifact)
-        (output / "allocator-symbols.json").write_text(json.dumps(allocator_rows, indent=2))
-        if definitions != [sdk_tools.dylib(deps, "horizon_client")]:
-            raise ValueError(f"expected game as sole allocator definition: {definitions}")
-    run([str(executable), str(output / (prefix + "probe_a" + extension)), str(output / (prefix + "probe_b" + extension))], env=env)
+            run(["readelf", "-d", str(artifact)])
+        # ELF lets the first definition in load order interpose every allocator call, std's included:
+        # read the dynamic linker's actual bindings rather than the definitions present.
+        bindings = output / "ld-bindings"
+        run(probe_args, env={**env, "LD_DEBUG": "bindings", "LD_DEBUG_OUTPUT": str(bindings)})
+        bound = {}
+        for log in output.glob("ld-bindings.*"):
+            for line in log.read_text().splitlines():
+                if "normal symbol" in line and any(f"___rust_{kind}'" in line for kind in ("alloc", "dealloc", "realloc", "alloc_zeroed")):
+                    source, target = line.split("binding file ", 1)[1].split(": normal symbol")[0].split(" to ")
+                    bound.setdefault(Path(target.rsplit(" [", 1)[0]).name, set()).add(Path(source.rsplit(" [", 1)[0]).name)
+        (output / "allocator-bindings.json").write_text(json.dumps({k: sorted(v) for k, v in bound.items()}, indent=2))
+        if set(bound) != {game.name} or not {executable.name, *(p.name for p in std_runtime)} <= bound[game.name]:
+            failures.append(f"allocator calls must all bind to the game: {bound}")
+    if failures:
+        (output / "result.json").write_text(json.dumps({"result": "fail", "failures": failures}, indent=2))
+        sys.exit("FAIL:\n- " + "\n- ".join(failures))
     (output / "result.json").write_text(json.dumps({"result": "pass", "artifacts": {
         p.name: sdk_tools.sha256(p) for p in output.iterdir() if p.suffix in (extension, ".exe") or p == executable
     }}, indent=2))
