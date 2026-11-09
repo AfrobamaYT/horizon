@@ -1665,6 +1665,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `BlockPart::clone_item_stack` | crosses | Wire call |
 | `BlockPart::connects_to` | crosses | Wire call |
 | `BlockPart::contents_changed` | crosses | Wire call |
+| `BlockPart::dispense_method` | crosses | Wire call |
 | `BlockPart::entity_inside` | crosses | Wire call |
 | `BlockPart::is_pathfindable` | crosses | Wire call |
 | `BlockPart::item_after_vertical_collision` | crosses | Wire call |
