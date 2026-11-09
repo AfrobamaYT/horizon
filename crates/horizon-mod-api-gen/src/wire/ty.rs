@@ -680,3 +680,44 @@ pub(super) fn derives(item: &Item, name: &str) -> bool {
                 .any(|word| word == name)
     })
 }
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn staged_identifier_exposure_does_not_add_backing_storage_to_wire_layouts() {
+        std::thread::Builder::new().stack_size(64 << 20).spawn(|| {
+            let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+            let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
+            let included = [
+                ("mod_api_generated.rs", generated.hooks.as_str()),
+                ("mod_api_generated_host.rs", generated.host.as_str()),
+                ("mod_api_host_areas.rs", generated.areas.as_str()),
+            ];
+            let mut original_layout_metadata = None;
+            for exposed in [false, true] {
+                let mut types = super::Types::new(crate::index::Index::new(&root, &included)).unwrap();
+                let module = types.index.module("horizon_core", &["identifier".into()]).unwrap();
+                if exposed {
+                    // Native internals lowering exposes types and members for injected
+                    // source listeners. That changes access, not the API's wire contract.
+                    for item in &mut types.index.modules[module].items {
+                        if let syn::Item::Struct(record) = item {
+                            record.vis = syn::parse_quote!(pub);
+                            for field in &mut record.fields { field.vis = syn::parse_quote!(pub); }
+                        }
+                    }
+                }
+                types.ty(module, &syn::parse_quote!(Identifier), &[]).unwrap();
+                let layouts = types.defs.iter().filter(|def| def.lifetimes == 0).map(|def| def.rust.as_str()).collect::<Vec<_>>();
+                assert_eq!(layouts, ["mod_api::Identifier"], "staged exposure = {exposed}: backing storage must never acquire a global Wire layout bound");
+                // Global layout hashing includes the resolved definitions as well
+                // as their Wire bounds. Visibility promotion must change neither.
+                let metadata = format!("{:?}", types.defs);
+                if let Some(original) = &original_layout_metadata {
+                    assert_eq!(&metadata, original);
+                } else {
+                    original_layout_metadata = Some(metadata);
+                }
+            }
+        }).unwrap().join().unwrap();
+    }
+}
