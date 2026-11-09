@@ -2438,14 +2438,14 @@ fn axolotl_action(m: &mut Mob, cx: &mut Bx, action: AxolotlAction, until: &mut i
                         Who::Mob(id) => cx.w.seen(id).is_some_and(|s| !s.playing_dead),
                         Who::Player => true,
                     };
-            if tired || !valid {
-                if let super::TargetChange::Set(next) = cx.w.change_target(m, true, None) {
-                    if next != Some(target) {
-                        super::axolotl::on_stop_attacking(m, cx.w, target, cx.events);
-                    }
-                    mem(m).attack_target.set_opt(next);
-                    m.ai.target = next;
+            if (tired || !valid)
+                && let super::TargetChange::Set(next) = cx.w.change_target(m, true, None)
+            {
+                if next != Some(target) {
+                    super::axolotl::on_stop_attacking(m, cx.w, target, cx.events);
                 }
+                mem(m).attack_target.set_opt(next);
+                m.ai.target = next;
             }
             true
         }

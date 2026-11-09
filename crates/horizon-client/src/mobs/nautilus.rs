@@ -346,12 +346,13 @@ pub fn ai_step(
     if m.extra.anger > 0 {
         m.extra.anger -= 1;
     }
-    if m.ai.target.is_none() && m.alive() && !m.no_ai {
-        if let Some(target) = find_target(m, w, level_random)
-            && let super::TargetChange::Set(next) = w.change_target(m, true, Some(target))
-        {
-            m.ai.target = next;
-        }
+    if m.ai.target.is_none()
+        && m.alive()
+        && !m.no_ai
+        && let Some(target) = find_target(m, w, level_random)
+        && let super::TargetChange::Set(next) = w.change_target(m, true, Some(target))
+    {
+        m.ai.target = next;
     }
 }
 /// `MemorySlot.tick`: expire before decrementing a finite saved lifetime.

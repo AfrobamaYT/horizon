@@ -1800,10 +1800,9 @@ pub fn ai_step(
         if let Some(who @ Who::Mob(_)) = m.ai.target
             && w.target_info(who)
                 .is_none_or(|t| !t.alive || !t.can_be_seen_as_enemy)
+            && let super::TargetChange::Set(target) = w.change_target(m, true, None)
         {
-            if let super::TargetChange::Set(target) = w.change_target(m, true, None) {
-                m.ai.target = target;
-            }
+            m.ai.target = target;
         }
     }
     // `PiglinBrute.customServerAiStep`: `updateActivity`, then
@@ -1814,10 +1813,12 @@ pub fn ai_step(
     }
     if m.extra.anger > 0 {
         m.extra.anger -= 1;
-        if m.extra.anger == 0 && m.ai.target == Some(Who::Player) && !hostile_to_player(m, w) {
-            if let super::TargetChange::Set(target) = w.change_target(m, true, None) {
-                m.ai.target = target;
-            }
+        if m.extra.anger == 0
+            && m.ai.target == Some(Who::Player)
+            && !hostile_to_player(m, w)
+            && let super::TargetChange::Set(target) = w.change_target(m, true, None)
+        {
+            m.ai.target = target;
         }
     }
     // `Brain.forgetOutdatedMemories`: `ADMIRING_DISABLED`, `DISABLE_WALK_TO_ADMIRE_ITEM`

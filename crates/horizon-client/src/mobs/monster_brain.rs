@@ -684,10 +684,10 @@ impl B {
                             .is_some_and(|l| l.contains(&Who::Player));
                     !reachable
                 };
-                if !can_attack(m, cx.w, target) || tired || !alive || stop_when {
-                    if let super::TargetChange::Set(target) = cx.w.change_target(m, true, None) {
-                        set_attack_target(m, target);
-                    }
+                if (!can_attack(m, cx.w, target) || tired || !alive || stop_when)
+                    && let super::TargetChange::Set(target) = cx.w.change_target(m, true, None)
+                {
+                    set_attack_target(m, target);
                 }
                 *running = true;
                 true
