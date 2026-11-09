@@ -28,6 +28,8 @@ use std::{
 
 use horizon_core::nbt::{Compound, JavaString, Tag};
 
+// no wire: owned by the lower runtime crate, which cannot depend on mod_api's derive;
+// mod_api supplies the explicit tagged Wire implementation, including bounded static text.
 /// An attachment operation could not be completed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]

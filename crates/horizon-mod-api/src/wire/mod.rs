@@ -1471,7 +1471,12 @@ mod tests {
     #[test]
     fn attachment_refusals_use_bounded_interned_static_text() {
         round(crate::AttachmentError::HolderBusy);
-        round(crate::AttachmentError::UnsupportedHolder("dragon"));
+        round(crate::AttachmentError::UnsupportedHolder("dragonpart"));
+        round(crate::AttachmentRowError::HolderBusy);
+        round(crate::AttachmentRowError::UnsupportedHolder("dragonpart"));
+        let bound: &'static str = Box::leak("é".repeat(128).into_boxed_str());
+        round(crate::AttachmentError::UnsupportedHolder(bound));
+        round(crate::AttachmentRowError::UnsupportedHolder(bound));
         let mut out = super::Writer::new();
         out.put(&crate::AttachmentError::UnsupportedHolder("dragon"));
         let first = super::Reader::decode::<crate::AttachmentError>(out.bytes()).unwrap();
@@ -1491,6 +1496,13 @@ mod tests {
         out.put(&"x".repeat(257));
         assert_eq!(
             super::Reader::decode::<crate::AttachmentError>(out.bytes()),
+            Err(super::WireError::Invalid("static string too long"))
+        );
+        out.clear();
+        out.put(&3u32);
+        out.put(&"é".repeat(129));
+        assert_eq!(
+            super::Reader::decode::<crate::AttachmentRowError>(out.bytes()),
             Err(super::WireError::Invalid("static string too long"))
         );
     }
