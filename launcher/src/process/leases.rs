@@ -28,6 +28,29 @@ impl ChildLeases {
             data: data.canonicalize()?,
         })
     }
+    /// Create exactly one native child inside the isolated holder. Inherits that holder's cwd
+    /// and stdio; the supplied environment is complete, not an overlay. No launcher-global
+    /// handle is made inheritable. A refused breakaway is returned for the caller's job policy.
+    #[cfg(windows)]
+    pub fn spawn_windows(
+        self,
+        program: &Path,
+        args: &[std::ffi::OsString],
+        environment: &[(std::ffi::OsString, std::ffi::OsString)],
+        breakaway: bool,
+    ) -> io::Result<WindowsChild> {
+        let child = windows::spawn(
+            &self.files(),
+            &self.data,
+            program,
+            args,
+            environment,
+            breakaway,
+        );
+        drop(self);
+        child
+    }
+
     fn files(&self) -> Vec<&File> {
         self.claims.iter().flat_map(Claim::files).collect()
     }
@@ -95,6 +118,11 @@ impl ChildLeases {
         child
     }
 }
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+pub use windows::WindowsChild;
+
 #[cfg(test)]
 mod tests;
 
