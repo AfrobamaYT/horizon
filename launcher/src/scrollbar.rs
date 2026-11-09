@@ -1,8 +1,8 @@
 //! Pointer-operated scrollbars for the launcher's vertical scroll areas.
 use crate::theme::Theme;
 use gpui::{
-    Bounds, Div, HitboxBehavior, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ScrollEvent, ScrollHandle, Stateful, canvas, div, fill, point, prelude::*, px, size,
+    canvas, div, fill, point, prelude::*, px, size, Bounds, Div, HitboxBehavior, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ScrollEvent, ScrollHandle, Stateful,
 };
 use std::{cell::Cell, rc::Rc};
 
@@ -223,7 +223,7 @@ impl Scrollbar {
 
 #[cfg(test)]
 mod tests {
-    use super::{Geometry, list_moved};
+    use super::{list_moved, Geometry};
 
     #[test]
     fn a_step_that_moves_the_list_keeps_the_wheel() {

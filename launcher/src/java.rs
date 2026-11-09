@@ -187,7 +187,11 @@ fn homes_from_path(path: &OsStr) -> Vec<PathBuf> {
 
 /// The program name Java installers put in a home's `bin` on this OS.
 fn java_program() -> &'static str {
-    if cfg!(windows) { "java.exe" } else { "java" }
+    if cfg!(windows) {
+        "java.exe"
+    } else {
+        "java"
+    }
 }
 
 /// The folders Java installers put homes in, one home per child.
