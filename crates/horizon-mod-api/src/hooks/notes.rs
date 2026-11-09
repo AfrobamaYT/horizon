@@ -545,7 +545,7 @@ client they do nothing, and the readers give nothing). Each takes the `dimension
 `native_set_block` does, and is refused when another level is in place. The per-level tick hooks run with a defined level in
 place; `native_server_tick` does not define one, so name the dimension and expect a refusal there.
 
-- `native_spawn_mob(dimension, kind, pos, &NativeSpawn)` spawns a mob and returns its id. `NativeSpawn` holds an optional name and health, and the
+- `native_spawn_mob(dimension, kind, pos, &Spawn)` spawns a mob and returns its id. `Spawn` holds an optional name and health, and the
   `no_ai`, `invisible`, `silent`, `invulnerable` and `no_gravity` flags; its default is a plain mob. The mob is finalized as a natural spawn
   is, and kept when its chunk unloads. Nothing is spawned outside `/summon`'s bounds, in a chunk that isn't loaded, or a monster on peaceful.
 - `native_mob(dimension, id)` and `native_mobs(dimension)` read the living mobs: id, dimension, kind, position, yaw, health and maximum health.
@@ -1151,7 +1151,7 @@ level is in place.
 
 - `native_explode(dimension, center, radius, fire, blast)` sets off an explosion as `Level.explode` with no source entity
   does: blocks break (`native_explosion_detonate` sees them first and can spare some), entities are hurt and pushed, `fire`
-  lights a third of the air above solid blocks, and nearby players hear and see it. `blast` is `NativeBlast::Keep` (no
+  lights a third of the air above solid blocks, and nearby players hear and see it. `blast` is `Blast::Keep` (no
   block breaks), `Block` (drops by `block_explosion_drop_decay`) or `Tnt` (by `tnt_explosion_drop_decay`). It answers false,
   doing nothing, on a client, for another dimension, a chunk that isn't loaded, or a radius outside `0 < radius <= 32`
   (TNT is 4, vanilla's largest is 7).
@@ -1741,7 +1741,7 @@ still go on each event or registrar.
 - `native_component_types(context, types)` runs once before content loads. Append namespaced component IDs; duplicates, invalid IDs and the `minecraft` namespace stop startup. `native_component`, `native_set_component` and `native_remove_component` read, set and remove registered components, including item defaults. Values use NBT and must fit the network reader limits.
 
 - [explosions](#explosions) for server mods: `native_explode(dimension, center, radius, fire, blast)` sets one off as
-  `Level.explode` does, with `NativeBlast::Keep`, `Block` or `Tnt` for what it does to blocks.
+  `Level.explode` does, with `Blast::Keep`, `Block` or `Tnt` for what it does to blocks.
 
 - Dispenser behaviours are chosen at `DispenserBlock.getDispenseMethod`, before any vanilla behaviour, for mod or vanilla items, on the authoritative server only (droppers are unaffected). The block the dispenser faces is asked first: `native_dispense_method` gives its part the dimension, dispenser position, facing, the selected stack and `state`, the block at `pos` moved by `facing` (air included), and the part is asked only for that block. Then, unless that part answered, the item's own part is asked by `native_dispense_item` with the same dimension, position, facing and stack. Either answer is `Some((remainder, event))`: a `None` remainder empties the slot, `Some(stack)` writes that remainder without consuming again, and `event` is the level event played with the smoke (1000 click, 1001 fail, 0 nothing, as `NOOP`). The first answer wins: the other part is not asked and vanilla's behaviour doesn't run. `host.dispense_default(dimension, pos, facing, stack)` drops one item normally, including items with a special vanilla behaviour: answer its remainder with 1000. Leave the answer `None` to let vanilla decide, as before.
 
@@ -2768,7 +2768,7 @@ registration path.
 - The item panel beside container screens and its recipe pages (`native_panel_items`,
   `native_panel_recipes`, and the hook `native_panel_event` for the player's clicks, searches and keys over items), and
   the game's items and recipes (`native_recipes`, `native_known_recipes`, `native_place_recipe`, `native_give`): what a
-  recipe viewer needs. A recipe page (`NativeRecipeView`) also shows machine recipes: up to four `results`, each
+  recipe viewer needs. A recipe page (`RecipeView`) also shows machine recipes: up to four `results`, each
   cycling its stacks with an optional `chance` in percent written under it ("25%"); input slots past a 3 x 3 grid
   continuing in rows under it, 27 in all; and up to eight `fluid_inputs` and `fluid_outputs`, each a well under the
   slots with its amount in mB, drawn in the fluid's client look (`data/<mod>/horizon/fluid/`, [installing and using mods](../start/installing.md)).

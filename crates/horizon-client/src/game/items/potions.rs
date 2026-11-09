@@ -2911,15 +2911,24 @@ mod tests {
             "test-potions",
             Box::new(TestMod),
         )]));
-        static ONCE: std::sync::Once = std::sync::Once::new();
-        ONCE.call_once(|| {
-            brewing::register_mod_effects([("test:effect".into(), 0, brewing::Category::Neutral)]);
-        });
+        assert!(brewing::register_mod_effects([(
+            "test:effect".into(),
+            0,
+            brewing::Category::Neutral,
+        )]));
     }
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn mod_tick_heals_and_feeds_player() {
+        // Mod effects are frozen process-wide: another fixture may have registered first.
+        if super::super::native_entity_refs::tests::run_fresh_cases(
+            "game::potions::tests::mod_tick_heals_and_feeds_player",
+            "HORIZON_POTION_EFFECT_CHILD",
+            &["effect"],
+        ) {
+            return;
+        }
         effect_test_mod();
         super::super::native_entity_refs::tests::with_game(|game| {
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
@@ -2941,6 +2950,14 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn mod_tick_magic_respects_player_hit_frames() {
+        // Mod effects are frozen process-wide: another fixture may have registered first.
+        if super::super::native_entity_refs::tests::run_fresh_cases(
+            "game::potions::tests::mod_tick_magic_respects_player_hit_frames",
+            "HORIZON_POTION_EFFECT_CHILD",
+            &["effect"],
+        ) {
+            return;
+        }
         effect_test_mod();
         super::super::native_entity_refs::tests::with_game(|game| {
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
@@ -2956,6 +2973,14 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn mod_tick_kills_mob_through_death_and_drops() {
+        // Mod effects are frozen process-wide: another fixture may have registered first.
+        if super::super::native_entity_refs::tests::run_fresh_cases(
+            "game::potions::tests::mod_tick_kills_mob_through_death_and_drops",
+            "HORIZON_POTION_EFFECT_CHILD",
+            &["effect"],
+        ) {
+            return;
+        }
         effect_test_mod();
         super::super::native_entity_refs::tests::with_game(|game| {
             // Death drops read the server's loot, which a world open loads.
@@ -2994,6 +3019,14 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn mod_tick_sees_prior_regeneration() {
+        // Mod effects are frozen process-wide: another fixture may have registered first.
+        if super::super::native_entity_refs::tests::run_fresh_cases(
+            "game::potions::tests::mod_tick_sees_prior_regeneration",
+            "HORIZON_POTION_EFFECT_CHILD",
+            &["effect"],
+        ) {
+            return;
+        }
         effect_test_mod();
         super::super::native_entity_refs::tests::with_game(|game| {
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
