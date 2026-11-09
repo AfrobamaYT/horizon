@@ -1098,7 +1098,6 @@
   "optimization": "உகப்பாக்கம்",
   "played by {names}": "விளையாடியது {names}",
   "realistic": "யதார்த்தமான",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "runs {command} after": "{command} பிறகு ஓடுகிறது",
   "runs {command} first": "முதலில் {command} ஓடுகிறது",
   "simplistic": "எளிமையான",
@@ -1236,11 +1235,6 @@
   "{mod} is a native mod. Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.": "{mod} is a native mod. Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.",
   "Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.": "Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.",
   "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
-  "Mods: {mods}": "மோட்ஸ்: {mods}",
-  "Native builds may download Rust and other build tools. Source builds compile the game on this computer.": "Native builds may download Rust and other build tools. Source builds compile the game on this computer.",
-  "Native mods aren't sandboxed: they run with full access to your computer, like any program. Install only mods whose authors you trust. To play with one, build the game on the Mods page; a build may download Rust and other build tools.": "Native mods aren't sandboxed: they run with full access to your computer, like any program. Install only mods whose authors you trust. To play with one, build the game on the Mods page; a build may download Rust and other build tools.",
-  "These mods will run with full access to your computer": "இந்த மோட்கள் உங்கள் கணினிக்கான முழு அணுகலுடன் இயங்கும்",
-  "They can read, change or delete your files, and use your accounts and network, like any program you run. Build them only if you trust their authors: the Mods page names them.": "அவர்கள் உங்கள் கோப்புகளைப் படிக்கலாம், மாற்றலாம் அல்லது நீக்கலாம் மற்றும் நீங்கள் இயக்கும் எந்த நிரலைப் போலவே உங்கள் கணக்குகளையும் நெட்வொர்க்கையும் பயன்படுத்தலாம். அவற்றின் ஆசிரியர்களை நீங்கள் நம்பினால் மட்டுமே அவற்றை உருவாக்கவும்: மோட்ஸ் பக்கம் அவர்களுக்குப் பெயரிடுகிறது.",
   "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "replace needs a return the API carries": "replace needs a return the API carries"
 }

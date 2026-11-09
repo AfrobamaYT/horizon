@@ -1098,7 +1098,6 @@
   "optimization": "بهینه سازی",
   "played by {names}": "بازی توسط {names}",
   "realistic": "واقع بینانه",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "runs {command} after": "بعد از {command} اجرا می شود",
   "runs {command} first": "ابتدا {command} اجرا می شود",
   "simplistic": "ساده انگارانه",
@@ -1236,11 +1235,6 @@
   "{mod} is a native mod. Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.": "{mod} is a native mod. Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.",
   "Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.": "Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.",
   "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
-  "Mods: {mods}": "مدها: {mods}",
-  "Native builds may download Rust and other build tools. Source builds compile the game on this computer.": "Native builds may download Rust and other build tools. Source builds compile the game on this computer.",
-  "Native mods aren't sandboxed: they run with full access to your computer, like any program. Install only mods whose authors you trust. To play with one, build the game on the Mods page; a build may download Rust and other build tools.": "Native mods aren't sandboxed: they run with full access to your computer, like any program. Install only mods whose authors you trust. To play with one, build the game on the Mods page; a build may download Rust and other build tools.",
-  "These mods will run with full access to your computer": "این مودها با دسترسی کامل به کامپیوتر شما اجرا خواهند شد",
-  "They can read, change or delete your files, and use your accounts and network, like any program you run. Build them only if you trust their authors: the Mods page names them.": "آنها می توانند فایل های شما را بخوانند، تغییر دهند یا حذف کنند و از حساب ها و شبکه شما مانند هر برنامه ای که اجرا می کنید استفاده کنند. آنها را فقط در صورتی بسازید که به نویسندگان آنها اعتماد داشته باشید: صفحه Mods آنها را نامگذاری می کند.",
   "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "replace needs a return the API carries": "replace needs a return the API carries"
 }
