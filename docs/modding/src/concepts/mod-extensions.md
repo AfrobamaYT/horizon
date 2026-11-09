@@ -85,15 +85,23 @@ The kept constructors and `Put` impls are generated at the API root, so after th
 
 ### Layout hash and versioning
 
-- **A layout const on the trait.** `Wire` gains `const LAYOUT: u64`. The derive computes it as a `const fn` FNV-1a over:
+- **A layout method on the trait, computed at run time.** `Wire` gains a hidden method `fn layout(visiting: &mut Vec<&'static str>) -> u64`. It is not a const: mod_api has recursion through more than one type (`Text` holds `TextContent` and `Vec<Text>`, and `TextContent` holds `Vec<Text>` and `Option<Box<Text>>`), so a const layout would fail with rustc's const-evaluation cycle. The derived method is FNV-1a over:
   - the type's **unqualified** name (not `module_path!`, so the restructure's moves change nothing and only a rename changes it);
   - its shape (record, tuple, unit, enum);
   - its field and case names in order;
-  - each field's `<F as Wire>::LAYOUT`.
+  - each field's `F::layout(visiting)`.
 
-  The std impls compose their contents: a container's `LAYOUT` hashes a fixed tag for the container kind together with its elements' `LAYOUT` (key and value for maps, all fields for tuples, the element and the length `N` for `[T; N]`), so a change deep inside a `Vec<Option<T>>` still changes every hash above it. Only leaf types (numbers, `bool`, `char`, strings, `()`, `Duration`) have plain constants. A field whose type is the type itself, or a container of it, hashes a fixed marker in place of its own `LAYOUT`, which keeps `Tag` from forming a const cycle. Golden tests pin **bytes only**, never `LAYOUT` values: those are free to change when a type is renamed.
-- **`WIRE_LAYOUT`.** It becomes the hash of the call tables' signatures (as now) plus the `LAYOUT` of every type in them. This replaces hashing the generator's `Def` debug strings. Any field change in any crossing type still changes it, and a mod built against another layout is still refused with `Refusal::Layout`.
-- **A layout per mod.** `cargo horizon-mod build` folds the `LAYOUT` of each type the mod declares as crossing (its hook events and registry values) into one hash. It records that hash in the package's build metadata next to the existing build identity. A dependent on the other target that was built against another layout is refused at load, naming the mod and the first type whose `LAYOUT` differs.
+  On entry it checks whether `std::any::type_name::<Self>()` is already in `visiting`. If it is, it returns a fixed "recursive" marker. If not, it pushes the name, hashes, and pops. The type name serves only as identity within the walk and is never hashed, so module paths still don't matter.
+- **Layout follows the encoding, not the Rust spelling.** Types with the same bytes have the same layout:
+  - one list kind for `Vec<T>`, `VecDeque<T>`, `Box<[T]>` and `Arc<[T]>`, hashed with `T::layout`;
+  - one string kind for `String`, `Box<str>`, `Arc<str>`, `Cow<str>` and `&'static str`;
+  - one map kind for `BTreeMap` and `HashMap`, with key and value;
+  - one set kind;
+  - `Box<T>` and `Arc<T>` transparent, the same as `T`.
+
+  Every container hashes its kind, then its contents' `layout(visiting)`: element, key and value; all fields for tuples; element and `N` for `[T; N]`. That keeps the container's shape even when its element is recursive, so a change deep inside a `Vec<Option<T>>` still changes every hash above it. Leaf hand-written impls (numbers, `bool`, `char`, `()`, `Duration`, tokens) state a constant through a default method. Golden tests pin **bytes only**, never layout values, which are free to change when a type is renamed.
+- **`WIRE_LAYOUT`.** It becomes the hash of the call tables' signatures (as now) plus the `layout` of every type in them, computed once at first use (`LazyLock`) in place of today's generated const. This replaces hashing the generator's `Def` debug strings. Any field change in any crossing type still changes it, and a mod built against another layout is still refused with `Refusal::Layout`.
+- **A layout per mod.** `cargo horizon-mod build` folds the `layout` of each type the mod declares as crossing (its hook events and registry values) into one hash. It records that hash in the package's build metadata next to the existing build identity. A dependent on the other target that was built against another layout is refused at load, naming the mod and the first type whose layout differs.
 - **No versioning inside the encoding.** There are no optional fields, defaults or version tags. A change means a rebuild, and the hash refuses a stale build at load. This is the clean-break rule applied to bytes.
 
 ### Always written, never added by the build
@@ -123,13 +131,13 @@ It has to be. The derive expands in the mod's crate, so the impl lives there, an
 2. Everything the game decodes is a `mod_api` type, a std type or an engine mirror, decoded by `mod_api`'s own impls (derived or hand-written in `mod_api`, never by a mod). Orphan rules stop a mod from implementing `Wire` for a `mod_api` type or an engine type, so the host always decodes `mod_api` values with `mod_api`'s own impls.
 3. The game never decodes a mod's type. It forwards the bytes and compares the layout hash.
 
-A mod may still write an impl by hand, for a type with invariants. It must then state `LAYOUT` itself: the const has no default.
+A mod may still write an impl by hand, for a type with invariants. It must then implement `layout` itself: the method has no default for compound types, so the derive PR's switch provides every impl in one go.
 
 With this change, the parts of `mod_api::wire` a mod uses (`Wire`, `Reader`, `Writer`, `WireError`, the derive) become documented API. The transport (`INIT`, `RELEASE`, resources, `wire_guest`) stays hidden.
 
 ### One attribute: `#[wire(via = T)]`
 
-Many hand-written impls exist only because the type is built through a checked constructor from a simpler form. `#[wire(via = String)]` encodes `T::from(&self)` and decodes through `TryFrom<T>`, mapping a failure to `WireError::Invalid("<type>")`. Its bytes and `LAYOUT` are `T`'s. This is the same derive, not a second mechanism, and it keeps validation at the boundary that owns it (the owner's coding rules). A JSON form is not an attribute: the 4 JSON types keep hand-written impls (below), so no type changes its encoding.
+Many hand-written impls exist only because the type is built through a checked constructor from a simpler form. `#[wire(via = String)]` encodes `T::from(&self)` and decodes through `TryFrom<T>`, mapping a failure to `WireError::Invalid("<type>")`. Its bytes and layout are `T`'s. Only the conversion is bounded (`T: Wire`, `T: From<&Self>`, `Self: TryFrom<T>`), not the type's own parameters. A failed `TryFrom` inside a record stops the outer decode with `Invalid`. This is the same derive, not a second mechanism, and it keeps validation at the boundary that owns it (the owner's coding rules). A JSON form is not an attribute: the 4 JSON types keep hand-written impls (below), so no type changes its encoding.
 
 ### Migrating the existing impls
 
@@ -159,7 +167,7 @@ The first PR classifies every impl in a table in its description, with the golde
 
 | PR | What | Size (estimate) | Depends on |
 |---|---|---|---|
-| D1 | **One PR, in order:** (1) the golden byte test, passing against today's generated and hand-written impls; (2) the derive in `horizon-mod-api-macros` (shapes, `MIN`, `put_owned`, `non_exhaustive`, generic bounds, `via`, `LAYOUT`), `LAYOUT` on the trait with composed std layouts, `on_unimplemented`; (3) `mod_api` switched: `#[derive(Wire)]` on the 528 types, the hand-impl migration above, the generator stripped to call tables, `WIRE_LAYOUT` from `LAYOUT`, the golden test passing unchanged. `LAYOUT` has no default, so the derive can't land without every impl providing it: one PR, not two. Ordered before the restructure, as api-scaffold confirmed: the mover carries `#[derive(mod_api::Wire)]` with each item, and `::mod_api::wire::Wire` still resolves after `wire.rs` becomes `wire/mod.rs`. | ~2,200 changed, mostly one-line attributes; generator −1,000 | #2242 merged |
+| D1 | **One PR, in order:** (1) the golden byte test, passing against today's generated and hand-written impls; (2) the derive in `horizon-mod-api-macros` (shapes, `MIN`, `put_owned`, `non_exhaustive`, generic bounds, `via`, `layout`), the `layout` method on the trait with std layouts composed by encoding, `on_unimplemented`; (3) `mod_api` switched: `#[derive(Wire)]` on the 528 types, the hand-impl migration above, the generator stripped to call tables, `WIRE_LAYOUT` from `layout`, the golden test passing unchanged. `layout` has no default for compound types, so the derive can't land without every impl providing it: one PR, not two. Ordered before the restructure, as api-scaffold confirmed: the mover carries `#[derive(mod_api::Wire)]` with each item, and `::mod_api::wire::Wire` still resolves after `wire.rs` becomes `wire/mod.rs`. | ~2,200 changed, mostly one-line attributes; generator −1,000 | #2242 merged |
 | D2 | Mods: documented `wire` API, per-mod layout in `cargo horizon-mod build` metadata, load refusal naming the type, a book page. | ~400 | D1 |
 
 The restructure can be stacked on D1, or D1's attribute edits can be done inside the restructure's moves; api-scaffold and fork-lead decide which. Stages 2–6 of the plan below assume D1 has landed.
@@ -382,7 +390,7 @@ Native and wasm mods can't call each other's functions: they live in different a
 - **Signature check.** Each mod point carries a hash, recorded in the library's per-mod `points.json` inside its `.hmod`. Listeners pin it in their `[[inject]] hash`, written by `cargo horizon-mod inject add`. The hash is what engine internals use (`internals::signature_hash` in `horizon-mod-api-gen`: the first 8 bytes of SHA-256, as hex) over:
   1. the canonical path;
   2. the signature's token text: receiver, parameter names and types, return type;
-  3. for `api` declarations, the `LAYOUT` of every record field's type (section 0), so a changed field in a parameter type also refuses.
+  3. for `api` declarations, the `layout` of every record field's type (section 0), computed when the catalog is built, so a changed field in a parameter type also refuses.
 
   At load, a declaration whose hash differs from the installed library's is refused, naming the library, its version, the function, and both hashes and signatures. This is the `E_INJECT_CHANGED` path that `inject update` already reports. Engine points don't need this check at load, because a native mod is pinned to one game build.
 - **Cost when nothing listens.** The same single check as an engine point: one relaxed load of the point's `AtomicBool` slot and a branch, inside the body, so inlining keeps the check. **Unmeasured** on a real library. The first mod-point PR measures it on the chemicals sample's hottest function (a per-tick transfer), on native and wasm, and reports it in the PR.
