@@ -38,27 +38,27 @@ use std::{
 };
 
 /// The journal slot file names, in slot order.
-pub(crate) const SLOTS: [&str; 2] = ["horizon_carriers.journal.0", "horizon_carriers.journal.1"];
+pub const SLOTS: [&str; 2] = ["horizon_carriers.journal.0", "horizon_carriers.journal.1"];
 /// The `level.dat` key marking a world whose carriers exist.
-pub(crate) const IN_USE_FLAG: &str = "horizon:carriers_in_use";
+pub const IN_USE_FLAG: &str = "horizon:carriers_in_use";
 /// A whole slot file, header included, is at most this big.
-pub(crate) const MAX_SLOT_FILE: usize = 1024 * 1024;
+pub const MAX_SLOT_FILE: usize = 1024 * 1024;
 /// At most this many live carriers are indexed.
-pub(crate) const MAX_CARRIERS: usize = 4096;
+pub const MAX_CARRIERS: usize = 4096;
 /// At most this many tombstones are pending.
-pub(crate) const MAX_TOMBSTONES: usize = 4096;
+pub const MAX_TOMBSTONES: usize = 4096;
 /// An operation file is at most this big compressed, on disk.
-pub(crate) const MAX_OP_COMPRESSED: usize = 32 * 1024 * 1024;
+pub const MAX_OP_COMPRESSED: usize = 32 * 1024 * 1024;
 /// An operation file is at most this big decoded.
-pub(crate) const MAX_OP_DECODED: usize = 40 * 1024 * 1024;
+pub const MAX_OP_DECODED: usize = 40 * 1024 * 1024;
 /// An operation file's NBT nests at most this deep (vanilla's own bound).
-pub(crate) const MAX_OP_DEPTH: usize = 512;
+pub const MAX_OP_DEPTH: usize = 512;
 /// An operation touches at most this many cells (two images each).
-pub(crate) const MAX_OP_CELLS: usize = 4096;
+pub const MAX_OP_CELLS: usize = 4096;
 /// One cell's block-entity image is at most this big serialized.
-pub(crate) const MAX_CELL_ENTITY: usize = 64 * 1024;
+pub const MAX_CELL_ENTITY: usize = 64 * 1024;
 /// All block-entity images of one operation side total at most this much.
-pub(crate) const MAX_OP_ENTITIES: usize = 16 * 1024 * 1024;
+pub const MAX_OP_ENTITIES: usize = 16 * 1024 * 1024;
 /// The slot header: magic, version, record number, body length, CRC.
 const SLOT_HEADER: usize = 4 + 2 + 8 + 4 + 4;
 /// The slot magic.
@@ -74,7 +74,7 @@ const MAX_OP_NODES: usize = 10 * MAX_OP_CELLS;
 /// Why a world's carrier store refused to open. Every refusal names the
 /// store and never lets load continue on a guess.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Refusal {
+pub enum Refusal {
     /// The flag, or leftover carrier files, say the world has carriers,
     /// but no valid journal slot survives. The world must be restored
     /// from a coherent whole-world backup.
@@ -108,7 +108,7 @@ impl fmt::Display for Refusal {
 
 /// The transfer kind an operation file and journal record name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum OpKind {
+pub enum OpKind {
     /// World cells become carrier cells.
     Assemble,
     /// Carrier cells return to the world.
@@ -141,33 +141,33 @@ impl OpKind {
 
 /// The one operation a journal may hold in progress.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct InProgress {
+pub struct InProgress {
     /// The operation's id, from `next_op_id`.
-    pub(crate) op_id: u64,
+    pub op_id: u64,
     /// Whether it assembles or disassembles.
-    pub(crate) kind: OpKind,
+    pub kind: OpKind,
     /// The carrier it moves.
-    pub(crate) uuid: u128,
+    pub uuid: u128,
     /// The carrier's generation after this operation.
-    pub(crate) generation: u32,
+    pub generation: u32,
 }
 
 /// The journal body: what the newest valid slot holds.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct Journal {
+pub struct Journal {
     /// The next operation id to hand out; only grows.
-    pub(crate) next_op_id: u64,
+    pub next_op_id: u64,
     /// The one operation that may be in flight, if any.
-    pub(crate) in_progress: Option<InProgress>,
+    pub in_progress: Option<InProgress>,
     /// Carriers whose file must not come back to life after a deletion
     /// that may not be durable yet.
-    pub(crate) tombstones: Vec<(u128, u32)>,
+    pub tombstones: Vec<(u128, u32)>,
     /// The live carriers, `(uuid, generation)` per entry.
-    pub(crate) carriers: Vec<(u128, u32)>,
+    pub carriers: Vec<(u128, u32)>,
 }
 impl Journal {
     /// A fresh, empty journal handing out operation ids from one.
-    pub(crate) const fn empty() -> Self {
+    pub const fn empty() -> Self {
         Self {
             next_op_id: 1,
             in_progress: None,
@@ -176,11 +176,11 @@ impl Journal {
         }
     }
     /// Whether the index lists this carrier.
-    pub(crate) fn lists(&self, uuid: u128, generation: u32) -> bool {
+    pub fn lists(&self, uuid: u128, generation: u32) -> bool {
         self.carriers.contains(&(uuid, generation))
     }
     /// Whether this carrier is tombstoned.
-    pub(crate) fn tombstoned(&self, uuid: u128, generation: u32) -> bool {
+    pub fn tombstoned(&self, uuid: u128, generation: u32) -> bool {
         self.tombstones.contains(&(uuid, generation))
     }
 }
@@ -188,7 +188,7 @@ impl Journal {
 /// An opened store: `NeverUsed` when the world has no carriers, or the
 /// live journal.
 #[derive(Debug)]
-pub(crate) enum Opened {
+pub enum Opened {
     /// No slots, no flag, no files: the world never used carriers.
     NeverUsed,
     /// A valid journal rules the store.
@@ -198,7 +198,7 @@ pub(crate) enum Opened {
 /// The live store. Every mutation writes the next slot durably before it
 /// returns, so a crash always leaves the previous record intact.
 #[derive(Debug)]
-pub(crate) struct Store {
+pub struct Store {
     data: PathBuf,
     /// The newest valid record's number, and the slot it lives in.
     entry_no: u64,
@@ -216,7 +216,7 @@ impl Store {
     /// presence, the `level.dat` flag, leftover carrier files and slot
     /// validity decide between [`Opened::NeverUsed`], [`Opened::Live`]
     /// and a typed [`Refusal`]. Nothing is written or cleaned here.
-    pub(crate) fn open(world_root: &Path) -> Result<Opened, Refusal> {
+    pub fn open(world_root: &Path) -> Result<Opened, Refusal> {
         let data = world_root.join("data");
         let flag = in_use_flag(world_root);
         if read_slots(&data)?.is_none() {
@@ -271,10 +271,7 @@ impl Store {
     /// in its replacement gap leaves an untouched world that opens as
     /// never used — then slot 0 holds an empty initialized journal,
     /// published durably and read back before anything else may happen.
-    pub(crate) fn first_use(
-        world_root: &Path,
-        data_existed_at_open: bool,
-    ) -> Result<Self, FirstUseError> {
+    pub fn first_use(world_root: &Path, data_existed_at_open: bool) -> Result<Self, FirstUseError> {
         if !data_existed_at_open {
             return Err(FirstUseError::DataCreatedThisSession);
         }
@@ -302,20 +299,20 @@ impl Store {
     }
 
     /// The journal as the newest valid record holds it.
-    pub(crate) fn journal(&self) -> &Journal {
+    pub fn journal(&self) -> &Journal {
         &self.journal
     }
 
     /// Hands out the next operation id. Callers record it with
     /// [`Self::begin`] before writing any operation file.
-    pub(crate) fn next_op_id(&self) -> u64 {
+    pub fn next_op_id(&self) -> u64 {
         self.journal.next_op_id
     }
 
     /// Records the operation as in progress and publishes the next slot.
     /// Called after the operation file is durable, before the world
     /// changes.
-    pub(crate) fn begin(
+    pub fn begin(
         &mut self,
         kind: OpKind,
         uuid: u128,
@@ -337,7 +334,7 @@ impl Store {
     /// tombstones take the operation's effect, the in-progress record
     /// clears, the next slot publishes, and the operation file is durably
     /// deleted before the next transfer may start.
-    pub(crate) fn commit(&mut self) -> Result<(), StoreIoError> {
+    pub fn commit(&mut self) -> Result<(), StoreIoError> {
         let Some(op) = self.journal.in_progress else {
             return Err(StoreIoError("no operation in progress".into()));
         };
@@ -363,24 +360,24 @@ impl Store {
     }
 
     /// The operation file's path for `op_id`.
-    pub(crate) fn operation_path(&self, op_id: u64) -> PathBuf {
+    pub fn operation_path(&self, op_id: u64) -> PathBuf {
         self.data.join(format!("horizon_carrier_op_{op_id}.nbt"))
     }
 
     /// Publishes an encoded operation file durably.
-    pub(crate) fn write_operation(&self, op_id: u64, encoded: &[u8]) -> Result<(), StoreIoError> {
+    pub fn write_operation(&self, op_id: u64, encoded: &[u8]) -> Result<(), StoreIoError> {
         durable::write(&self.operation_path(op_id), encoded)
             .map_err(|e| StoreIoError(e.to_string()))
     }
 
     /// The carrier file's path.
-    pub(crate) fn carrier_path(&self, uuid: u128, generation: u32) -> PathBuf {
+    pub fn carrier_path(&self, uuid: u128, generation: u32) -> PathBuf {
         self.data
             .join(format!("horizon_carrier_{uuid:032x}-{generation}.nbt"))
     }
 
     /// Publishes a carrier file durably.
-    pub(crate) fn write_carrier(
+    pub fn write_carrier(
         &self,
         uuid: u128,
         generation: u32,
@@ -396,7 +393,7 @@ impl Store {
     /// deletion is durable, then clears with a new slot. Nothing is
     /// silently adopted: what the journal does not know is deleted or
     /// refused, never inferred into ownership.
-    pub(crate) fn cleanup(&mut self) -> Result<Cleanup, StoreIoError> {
+    pub fn cleanup(&mut self) -> Result<Cleanup, StoreIoError> {
         let mut report = Cleanup::default();
         let names = fs::read_dir(&self.data)
             .map_err(|e| StoreIoError(e.to_string()))?
@@ -455,18 +452,18 @@ impl Store {
 
 /// What one cleanup pass removed.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct Cleanup {
+pub struct Cleanup {
     /// Carrier files deleted that no index entry owned.
-    pub(crate) orphan_carriers: usize,
+    pub orphan_carriers: usize,
     /// Operation files deleted that were not in progress.
-    pub(crate) stale_operations: usize,
+    pub stale_operations: usize,
     /// Tombstones cleared after their carrier file's durable deletion.
-    pub(crate) resolved_tombstones: usize,
+    pub resolved_tombstones: usize,
 }
 
 /// Why a first use did not happen.
 #[derive(Debug)]
-pub(crate) enum FirstUseError {
+pub enum FirstUseError {
     /// `data/` was created during this session; its directory entry is
     /// not durable yet. Save and reopen the world first.
     DataCreatedThisSession,
@@ -504,12 +501,12 @@ impl fmt::Display for FirstUseError {
 /// when the block registry resolves it — the name exists and every
 /// property with this value is declared on that block. This is part B's
 /// replacement of part A's all-accepted seam.
-pub(crate) struct RegistryStates<'a> {
+pub struct RegistryStates<'a> {
     registry: &'a horizon_world::registry::BlockRegistry,
 }
 impl<'a> RegistryStates<'a> {
     /// Wraps the live block registry.
-    pub(crate) fn new(registry: &'a horizon_world::registry::BlockRegistry) -> Self {
+    pub fn new(registry: &'a horizon_world::registry::BlockRegistry) -> Self {
         Self { registry }
     }
 }
@@ -527,7 +524,7 @@ impl StateValidator for RegistryStates<'_> {
 /// operation file spells it (name plus every `key=value`). Computed once
 /// at load; a registry whose states cannot fit the operation envelope
 /// refuses preflight, never a half-stored transfer.
-pub(crate) fn longest_state_bytes(registry: &horizon_world::registry::BlockRegistry) -> usize {
+pub fn longest_state_bytes(registry: &horizon_world::registry::BlockRegistry) -> usize {
     let mut longest = 0_usize;
     for id in 0..registry.len() {
         let Some(state) = registry.state(horizon_world::registry::BlockStateId(id as u32)) else {
@@ -547,7 +544,7 @@ pub(crate) fn longest_state_bytes(registry: &horizon_world::registry::BlockRegis
 /// block-entity data, and framing. Refused at preflight, before any
 /// block is lifted, when the registry's own declarations outgrow the
 /// envelope.
-pub(crate) fn envelope_preflight(
+pub fn envelope_preflight(
     registry: &horizon_world::registry::BlockRegistry,
 ) -> Result<(), OpError> {
     let worst = 2 * 4096 * longest_state_bytes(registry) + MAX_OP_ENTITIES + 1024 * 1024;
@@ -565,7 +562,7 @@ pub(crate) fn envelope_preflight(
 /// anything else rather than silently rewriting facing properties: at
 /// most two components are nonzero, the angle cosine is 0 or ±√½ or ±1,
 /// and the sine rides exactly one axis.
-pub(crate) fn cube_symmetry_rotation(components: [f64; 4]) -> bool {
+pub fn cube_symmetry_rotation(components: [f64; 4]) -> bool {
     let [w, x, y, z] = components;
     if w == 0.0 && x == 0.0 && y == 0.0 && z == 0.0 {
         return false;
@@ -588,18 +585,18 @@ pub(crate) fn cube_symmetry_rotation(components: [f64; 4]) -> bool {
 
 /// What a recovery pass found and did.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct Recovered {
+pub struct Recovered {
     /// Chunks whose cells still held their before-images and were taken
     /// to the after-images.
-    pub(crate) applied: usize,
+    pub applied: usize,
     /// Chunks that already held their after-images untouched.
-    pub(crate) verified: usize,
+    pub verified: usize,
 }
 
 /// Why a recovery refused. Every variant but `NothingToDo` stops the
 /// world's load: recovery never guesses, and never generates content.
 #[derive(Debug)]
-pub(crate) enum RecoveryRefused {
+pub enum RecoveryRefused {
     /// The store itself refused to open.
     Store(Refusal),
     /// An in-progress operation's file is gone. By the approved contract
@@ -664,7 +661,7 @@ impl fmt::Display for RecoveryRefused {
 /// after-image (leave it), and only when every write-back is synced does
 /// the journal record `committed` and drop the operation file.
 /// Roll-forward only — nothing is ever written back into a cell.
-pub(crate) fn recover(
+pub fn recover(
     store: &mut Store,
     region_dir: &Path,
     states: &dyn StateValidator,
@@ -875,7 +872,7 @@ fn write_chunk_back(
 }
 /// A store-level I/O failure, with the operation's text.
 #[derive(Debug)]
-pub(crate) struct StoreIoError(pub(crate) String);
+pub struct StoreIoError(pub String);
 impl fmt::Display for StoreIoError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "carrier store: {}", self.0)
@@ -883,7 +880,7 @@ impl fmt::Display for StoreIoError {
 }
 
 /// Whether the `level.dat` flag is set.
-pub(crate) fn in_use_flag(world_root: &Path) -> bool {
+pub fn in_use_flag(world_root: &Path) -> bool {
     read_dat(&world_root.join("level.dat"))
         .as_ref()
         .and_then(|root| root.get("Data"))
@@ -893,7 +890,7 @@ pub(crate) fn in_use_flag(world_root: &Path) -> bool {
 /// Writes the flag into `level.dat` through the ordinary dat replacement
 /// (temporary, rename, `.dat_old`): a crash in the replacement gap rolls
 /// back to the flagless file, so no store state may exist yet.
-pub(crate) fn set_in_use_flag(level_dat: &Path) -> Result<(), String> {
+pub fn set_in_use_flag(level_dat: &Path) -> Result<(), String> {
     let mut root = read_dat(level_dat).ok_or("level.dat does not read")?;
     let Tag::Compound(map) = &mut root else {
         return Err("level.dat root is not a compound".into());
@@ -1222,27 +1219,27 @@ fn parse_carrier_name(name: &str) -> Option<(u128, u32)> {
 /// One side of a cell's image: the block state as the registry names it,
 /// plus the cell's full block-entity NBT when it has one.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct CellImage {
+pub struct CellImage {
     /// The state's namespaced block name.
-    pub(crate) name: String,
+    pub name: String,
     /// The state's properties, any order; part B validates them against
     /// the live registry through [`StateValidator`].
-    pub(crate) properties: Vec<(String, String)>,
+    pub properties: Vec<(String, String)>,
     /// The block entity's full NBT, if the cell owns one.
-    pub(crate) entity: Option<Tag>,
+    pub entity: Option<Tag>,
 }
 
 /// Decides whether a state image is a state the live registry declares.
 /// Part A ships the shape only; part B supplies the registry-backed one,
 /// so a state can never be silently accepted or rewritten.
-pub(crate) trait StateValidator {
+pub trait StateValidator {
     /// Whether the registry declares this name with these properties.
     fn known(&self, name: &str, properties: &[(String, String)]) -> bool;
 }
 
 /// Every state is known: part A's stand-in while the registry wiring is
 /// part B's.
-pub(crate) struct AllStatesKnown;
+pub struct AllStatesKnown;
 impl StateValidator for AllStatesKnown {
     fn known(&self, _name: &str, _properties: &[(String, String)]) -> bool {
         true
@@ -1252,36 +1249,36 @@ impl StateValidator for AllStatesKnown {
 /// One cell of an operation: its world and local positions, and its
 /// before and after images.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct OperationCell {
+pub struct OperationCell {
     /// The world cell the transfer touches.
-    pub(crate) world: [i32; 3],
+    pub world: [i32; 3],
     /// The carrier-local cell it maps to.
-    pub(crate) local: [i8; 3],
+    pub local: [i8; 3],
     /// The cell before the transfer.
-    pub(crate) before: CellImage,
+    pub before: CellImage,
     /// The cell after the transfer.
-    pub(crate) after: CellImage,
+    pub after: CellImage,
 }
 
 /// One transfer's file: what assembly or disassembly does to every cell
 /// it touches, so replay can finish or strip exactly one side.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Operation {
+pub struct Operation {
     /// The operation's id, from the journal's `next_op_id`.
-    pub(crate) op_id: u64,
+    pub op_id: u64,
     /// Whether it assembles or disassembles.
-    pub(crate) kind: OpKind,
+    pub kind: OpKind,
     /// The carrier it moves.
-    pub(crate) uuid: u128,
+    pub uuid: u128,
     /// The carrier's generation after this operation.
-    pub(crate) generation: u32,
+    pub generation: u32,
     /// The touched cells, at most [`MAX_OP_CELLS`].
-    pub(crate) cells: Vec<OperationCell>,
+    pub cells: Vec<OperationCell>,
 }
 
 /// Why an operation file could not be encoded or decoded.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum OpError {
+pub enum OpError {
     /// The decoded NBT would pass [`MAX_OP_DECODED`].
     DecodedTooBig {
         /// The offending size.
@@ -1366,7 +1363,7 @@ fn op_limits() -> Limits {
 /// any block is lifted: the decoded NBT must fit [`MAX_OP_DECODED`] and
 /// the compressed file [`MAX_OP_COMPRESSED`], so a transfer that cannot
 /// be stored never starts.
-pub(crate) fn encode_operation(operation: &Operation) -> Result<Vec<u8>, OpError> {
+pub fn encode_operation(operation: &Operation) -> Result<Vec<u8>, OpError> {
     if operation.cells.len() > MAX_OP_CELLS {
         return Err(OpError::CellCount {
             count: operation.cells.len(),
@@ -1442,10 +1439,7 @@ pub(crate) fn encode_operation(operation: &Operation) -> Result<Vec<u8>, OpError
 /// Decodes an operation file: the compressed size is checked before
 /// decompression, every length against its budget before allocation, and
 /// state images go through the validator.
-pub(crate) fn decode_operation(
-    bytes: &[u8],
-    states: &dyn StateValidator,
-) -> Result<Operation, OpError> {
+pub fn decode_operation(bytes: &[u8], states: &dyn StateValidator) -> Result<Operation, OpError> {
     if bytes.len() > MAX_OP_COMPRESSED {
         return Err(OpError::CompressedTooBig { size: bytes.len() });
     }
