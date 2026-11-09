@@ -1685,10 +1685,14 @@ impl Behaviours {
 mod dimension_key_tests {
     use super::*;
 
+    // These two tests each replace the process-wide registry and then reset it.
+    static SEA_LEVEL_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// A registered level has its own sea level; any other has its built-in level's, and the
     /// table clears.
     #[test]
     fn a_registered_level_has_its_own_sea_level() {
+        let _guard = SEA_LEVEL_TEST_LOCK.lock().unwrap();
         let pocket = LevelKey::parse("test:sea_pocket").unwrap();
         assert_eq!(sea_level_of(pocket), 63);
         assert_eq!(registered_sea_level(pocket), None);
@@ -1702,6 +1706,7 @@ mod dimension_key_tests {
 
     #[test]
     fn a_built_in_level_keeps_the_sea_level_its_generator_registered() {
+        let _guard = SEA_LEVEL_TEST_LOCK.lock().unwrap();
         // A superflat Overworld builds with -63, not the Overworld's 63.
         register_sea_level(LevelKey::OVERWORLD, -63);
         assert_eq!(sea_level_of(LevelKey::OVERWORLD), -63);
