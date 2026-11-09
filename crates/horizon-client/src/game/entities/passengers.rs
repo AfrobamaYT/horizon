@@ -1088,6 +1088,7 @@ mod nested_vehicle_discard_tests {
                 std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap())
                     .join(format!("guard-{:?}", std::thread::current().id())),
             );
+            game.world_root = game.options.game_dir.as_ref().unwrap().join("world");
             let at = Vec3::new(10.0, 200.0, 20.0);
             if cart {
                 game.carts.push(super::super::minecarts::Minecart::new(
