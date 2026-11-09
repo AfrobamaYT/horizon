@@ -25,18 +25,15 @@ impl Aabb {
             && self.lo.z < o.hi.z && self.hi.z > o.lo.z
     }
 }
-struct ExperienceOrb { id: u32, join: u32, x: f64, value: u32, count: u32, age: u32, ticks: u32 }
-trait Locate { fn locate(&self, join: u32) -> Option<usize>; }
-impl Locate for Vec<ExperienceOrb> {
-    fn locate(&self, join: u32) -> Option<usize> { self.iter().position(|orb| orb.join == join) }
-}
+struct ExperienceOrb { id: u32, x: f64, value: i32, count: u32, age: u32, ticks: u32 }
 impl ExperienceOrb {
     fn bounds(&self) -> Aabb {
         Aabb::new(Vec3::new(self.x - 0.25, 0.0, -0.25), Vec3::new(self.x + 0.25, 0.5, 0.25))
     }
-    fn can_merge(&self, id: u32, value: u32) -> bool {
+    fn can_merge(&self, id: u32, value: i32) -> bool {
         self.value == value && (self.id as i32).wrapping_sub(id as i32) % 40 == 0
     }
+    fn points(&self) -> u32 { self.value.max(0) as u32 }
 }
 struct Dim;
 impl Dim { fn id(&self) -> &'static str { "minecraft:overworld" } }
@@ -59,8 +56,8 @@ impl Game {
     MERGE_NEW_ORB
     MERGE_ORB
 }
-fn orb(id: u32, x: f64, value: u32, ticks: u32) -> ExperienceOrb {
-    ExperienceOrb { id, join: id, x, value, count: 1, age: 10, ticks }
+fn orb(id: u32, x: f64, value: i32, ticks: u32) -> ExperienceOrb {
+    ExperienceOrb { id, x, value, count: 1, age: 10, ticks }
 }
 fn game(orbs: Vec<ExperienceOrb>, flip: bool, cancel: bool) -> Game {
     Game { orbs, remote: None, dim: Dim, added: vec![], flip, cancel, asked: vec![], merged: vec![] }

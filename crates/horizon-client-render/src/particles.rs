@@ -32,6 +32,8 @@ pub use horizon_client_core::particle_type::ParticleType;
 pub use horizon_items::firework::{DYE_FIREWORK_COLORS, FireworkExplosion, FireworkShape};
 mod native;
 pub use native::{ParticleController, ParticleUpdate, register_particle_providers};
+pub mod polytone;
+mod polytone_gpu;
 
 #[derive(Clone, Debug)]
 enum Sprite {
@@ -377,6 +379,12 @@ pub struct Particle {
     /// `Particle.random`: the particle's own generator (`RandomSource.create()`).
     random: LegacyRandom,
     controller: Option<Box<dyn native::Controller>>,
+    /// A resource pack's Polytone custom particle type, for its `limit`.
+    polytone_type: Option<std::sync::Arc<str>>,
+    /// How a Polytone custom particle's quad turns (`rotation_mode`).
+    orientation: polytone_gpu::Orientation,
+    /// Blended additively (a Polytone `additive_translucent` particle).
+    additive: bool,
 }
 fn aabb_at(p: [f64; 3], w: f32, h: f32) -> Aabb {
     let w = f64::from(w) / 2.0;
@@ -738,6 +746,9 @@ impl Particle {
             frame_ticks: 0,
             random: LegacyRandom::new(0),
             controller: None,
+            polytone_type: None,
+            orientation: polytone_gpu::Orientation::Camera,
+            additive: false,
         }
     }
     /// The normal age/removal test and previous pose, without vanilla motion.
@@ -1155,6 +1166,13 @@ pub struct ParticleEngine {
     /// this engine was built, applied to `mod_sets` at every load.
     providers: BTreeMap<String, Arc<dyn ParticleProvider>>,
     set_sprites: Vec<Vec<u32>>,
+    /// Resource packs' Polytone custom particle types (#11486).
+    polytone: Option<std::sync::Arc<polytone::Registry>>,
+    /// The packs' GPU particles' records, one store per type, and the ticks they count in.
+    polytone_gpu: Vec<polytone_gpu::Store>,
+    polytone_ticks: u64,
+    /// The last frame's additively blended quads (`take_additive`).
+    additive: std::sync::Mutex<Vec<Vertex>>,
     /// `TrackingEmitter`s: particle type, entity feet position, width, height, ticks left.
     emitters: Vec<(ParticleOptions, [f64; 3], f64, f64, u32)>,
     /// Camera position for the 32-block spawn limiter.
@@ -1356,6 +1374,10 @@ impl ParticleEngine {
             mod_sets: HashMap::new(),
             providers: native::registered().clone(),
             set_sprites: Vec::new(),
+            polytone: None,
+            polytone_gpu: Vec::new(),
+            polytone_ticks: 0,
+            additive: std::sync::Mutex::default(),
             emitters: Vec::new(),
             starters: Vec::new(),
             elder_guardians: Vec::new(),
@@ -1589,6 +1611,28 @@ impl ParticleEngine {
         particle.behaviour = Behaviour::Controlled { translucent };
         particle.controller = Some(Box::new(controller));
         Some(particle)
+    }
+    /// Sets (or clears) the resource packs' Polytone custom particle types.
+    pub fn set_polytone(&mut self, registry: Option<std::sync::Arc<polytone::Registry>>) {
+        let registry = registry.filter(|r| !r.is_empty());
+        let same = match (&self.polytone, &registry) {
+            (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
+            (None, None) => true,
+            _ => false,
+        };
+        if !same {
+            self.polytone_gpu.clear();
+        }
+        self.polytone = registry;
+    }
+    /// The quads the last render blends additively (`RenderPipelines` additive, src alpha and
+    /// one), for the frame's additive pass.
+    pub fn take_additive(&self) -> Vec<Vertex> {
+        std::mem::take(&mut *self.additive.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+    /// Live GPU particle records (spawns, before `area` spreads them), for tests and status.
+    pub fn polytone_gpu_records(&self) -> usize {
+        self.polytone_gpu.iter().map(polytone_gpu::Store::len).sum()
     }
     /// Choose a frame from this particle's declared sprite set.
     pub fn set_sprite_frame(&self, particle: &mut Particle, frame: usize) {
@@ -1993,6 +2037,27 @@ impl ParticleEngine {
         let ty = o.ty;
         // A native mod's SimpleParticleType: vanilla's TextureSheetParticle with
         // the sprite set its particles/<name>.json names, no tint, 20..40 ticks.
+        if let Some(name) = &o.mod_particle
+            && let Some(registry) = &self.polytone
+            && let Some(def) = registry.get(name)
+        {
+            let (registry, def) = (registry.clone(), def.clone());
+            let particle = polytone::make(self, &registry, name, &def, o, p, v, seed)?;
+            if def.gpu.is_some() {
+                // A GPU particle is only a record: it never becomes an engine particle.
+                let now = self.polytone_ticks;
+                let store = match self.polytone_gpu.iter().position(|s| s.is(&def)) {
+                    Some(i) => &mut self.polytone_gpu[i],
+                    None => {
+                        self.polytone_gpu.push(polytone_gpu::Store::new(&def)?);
+                        self.polytone_gpu.last_mut()?
+                    }
+                };
+                store.spawn(&particle, now, seed as u64);
+                return None;
+            }
+            return Some(particle);
+        }
         if let Some(name) = &o.mod_particle {
             let entry = self.mod_sets.get(name.as_ref())?;
             let (set, behaviour, provider) = (entry.set, entry.behaviour, entry.provider.clone());
@@ -3655,6 +3720,14 @@ impl ParticleEngine {
             *left -= 1;
             *left >= 0
         });
+        self.polytone_ticks += 1;
+        for store in &mut self.polytone_gpu {
+            store.expire(self.polytone_ticks);
+        }
+        // The sounds the packs' custom particles played last tick.
+        if let Some(registry) = &self.polytone {
+            self.sounds.extend(registry.take_sounds());
+        }
         self.tick_starters();
         self.tick_explosions(level);
         for (options, feet, width, height, life) in std::mem::take(&mut self.emitters) {
@@ -4662,6 +4735,8 @@ impl ParticleEngine {
         let base = Quat::from_rotation_y(std::f32::consts::PI - yaw.to_radians())
             * Quat::from_rotation_x(-pitch.to_radians());
         let mut light_cache = ParticleLightCache::default();
+        let mut additive = self.additive.lock().unwrap_or_else(|e| e.into_inner());
+        additive.clear();
         let mut section_cache =
             (CULL && frustum.is_some()).then(ParticleSectionFrustumCache::default);
         for p in &self.particles {
@@ -4733,7 +4808,15 @@ impl ParticleEngine {
                 ) - camera;
                 (pos.as_vec3(), p.quad_size(partial))
             });
-            let rotation = if p.roll != 0.0 {
+            let rotation = if p.orientation != polytone_gpu::Orientation::Camera {
+                let velocity = FVec3::new(
+                    p.velocity[0] as f32,
+                    p.velocity[1] as f32,
+                    p.velocity[2] as f32,
+                );
+                let roll = p.o_roll + (p.roll - p.o_roll) * partial;
+                polytone_gpu::orient(p.orientation, center, velocity, roll, base)
+            } else if p.roll != 0.0 {
                 base * Quat::from_rotation_z(p.o_roll + (p.roll - p.o_roll) * partial)
             } else {
                 base
@@ -4815,6 +4898,7 @@ impl ParticleEngine {
                 r.u0 + du * p.uv[2],
                 r.v0 + dv * p.uv[3],
             );
+            let target: &mut Vec<Vertex> = if p.additive { &mut additive } else { &mut *out };
             for rotation in rotations.into_iter().flatten() {
                 for (n, uv) in [
                     ((1.0, -1.0), [u1, v1]),
@@ -4823,7 +4907,7 @@ impl ParticleEngine {
                     ((-1.0, -1.0), [u0, v1]),
                 ] {
                     let v = center + rotation * FVec3::new(n.0, n.1, 0.0) * size;
-                    out.push(Vertex {
+                    target.push(Vertex {
                         normal: [0; 4],
                         pos: v.to_array(),
                         uv,
@@ -4839,6 +4923,19 @@ impl ParticleEngine {
                     });
                 }
             }
+        }
+        for store in &self.polytone_gpu {
+            store.render(
+                &self.atlas,
+                camera,
+                base,
+                self.polytone_ticks,
+                partial,
+                &mut light_cache,
+                light_at,
+                out,
+                &mut additive,
+            );
         }
     }
 }

@@ -4674,7 +4674,7 @@ impl Game<'_> {
                         && let Value::Int(v) = value
                         && let Some(o) = self.orbs.iter_mut().find(|o| o.id == p.id as u32)
                     {
-                        o.value = (*v).max(0) as u32;
+                        o.value = *v;
                     }
                 }
                 self.remote_object_data(p.id, &p.values);
@@ -4837,6 +4837,22 @@ impl Game<'_> {
                 let own = me == Some(p.id);
                 self.pvp_hurt(p.id, own, p.direct.map(|d| Some(d) == me));
                 if own {
+                    // For `events`: this client has no combat tracker of its own here.
+                    let cause = self.remote.as_ref().and_then(|r| {
+                        r.registries
+                            .name("minecraft:damage_type", p.source_type)
+                            .map(str::to_owned)
+                    });
+                    let by = p
+                        .cause
+                        .and_then(|id| u32::try_from(id).ok())
+                        .and_then(|id| {
+                            self.mob_index
+                                .get(&self.mobs, id)
+                                .map(|m| m.kind.id.to_string())
+                        });
+                    self.events
+                        .note_hit(cause.unwrap_or_else(|| "unknown".into()), by);
                     if let Some(pl) = self.player.as_mut() {
                         pl.health.animate_hurt();
                         let sound = self.remote_hurt_sound(p.source_type);

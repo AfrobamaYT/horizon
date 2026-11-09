@@ -34,7 +34,6 @@ use horizon_client::{
     },
     particles::{ParticleOptions, ParticleType},
     projectiles::{Hit, Projectile, ProjectileKind, ProjectileWorld, clip_including_border},
-    text::Text,
 };
 use horizon_core::{
     geometry::{Aabb, Direction, Vec3, traverse_blocks, trig::Mth},
@@ -1400,10 +1399,23 @@ impl Game<'_> {
         self.init_sulfur_attribute_maps();
         let uuid = self.level.player_uuid;
         let level_id = self.dim.id();
+        // LivingEntity.isPushable reads onClimbable live; a mob's cached one
+        // is only refreshed by its own push step, so one that has not ticked
+        // yet (the first tick after a load, a fresh spawn) or has moved since
+        // would be pushed out of a ladder or scaffolding. Refreshed here, from
+        // where each mob stands now, before the snapshot others push it by.
+        let climbing: Vec<bool> = {
+            let w = self.mob_world_base(&[]);
+            self.mobs.iter().map(|m| m.on_climbable(&w)).collect()
+        };
+        for (m, climbing) in self.mobs.iter_mut().zip(climbing) {
+            m.on_climbable = climbing;
+        }
         let mut snapshot = std::mem::take(&mut self.creatures.seen_buf);
         snapshot.extend(self.mobs.iter().map(|m| seen(m, uuid)));
         let mut events = std::mem::take(&mut self.creatures.event_buf);
         events.clear();
+        let primable = self.sulfur_cubes_adopted_explosive();
         let mut mobs = self.mobs.lift();
         #[cfg(test)]
         super::entity::taken_pass_tests::after_take(self);
@@ -1561,7 +1573,7 @@ impl Game<'_> {
         self.tick_sniffer_effects();
         self.piglin_pickups();
         self.sulfur_cube_pickups();
-        self.sulfur_cube_power_priming();
+        self.sulfur_cube_power_priming(&primable);
         laps.lap("creature_systems");
         // Hurt and death sounds of damage dealt outside the mob ticks.
         let mut queued = Vec::new();
@@ -2212,8 +2224,21 @@ impl Game<'_> {
             }
         }
     }
+    /// `Mob.doHurtTarget` and the other melee callers of post-attack effects.
+    fn mob_attacks_mob(&mut self, target: u32, amount: f32, source: Damage) -> bool {
+        let hurt = self.mob_hits_mob(target, amount, source);
+        if hurt {
+            self.mob_post_attack(
+                target,
+                source.attacker,
+                None,
+                Some(damage_type(source.kind, false)),
+            );
+        }
+        hurt
+    }
     /// Melee or ranged damage to another mob; whether the hit landed.
-    fn mob_hits_mob(&mut self, target: u32, amount: f32, mut source: Damage) -> bool {
+    pub(super) fn mob_hits_mob(&mut self, target: u32, amount: f32, mut source: Damage) -> bool {
         if source.attacker_species.is_none()
             && let Some(Who::Mob(id)) = source.attacker
         {
@@ -2403,7 +2428,7 @@ impl Game<'_> {
         } else {
             String::new()
         };
-        let (id, kind) = (p.id, p.kind.id());
+        let (id, kind) = (p.id, p.entity_type());
         if let Some(a) = p.arrow.as_mut()
             && !p.stuck
         {
@@ -2786,6 +2811,11 @@ impl Game<'_> {
                         }
                     }
                 }
+                MobEvent::LidPush {
+                    shulker,
+                    area,
+                    delta,
+                } => self.lid_pushes_armor_stands(shulker, area, delta),
                 MobEvent::Wololo { mob } => {
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
                         // DyeColor.RED.
@@ -2875,6 +2905,13 @@ impl Game<'_> {
                     amount,
                     source,
                 } => {
+                    self.mob_attacks_mob(target, amount, source);
+                }
+                MobEvent::DamageMob {
+                    target,
+                    amount,
+                    source,
+                } => {
                     self.mob_hits_mob(target, amount, source);
                 }
                 MobEvent::AttackMobWithEffect {
@@ -2888,7 +2925,7 @@ impl Game<'_> {
                     // CaveSpider, Husk and WitherSkeleton.doHurtTarget: the
                     // effect sits inside the branch where the hit landed, and
                     // `LivingEntity.addEffect` takes a mob as well as a player.
-                    if self.mob_hits_mob(target, amount, source)
+                    if self.mob_attacks_mob(target, amount, source)
                         && let Some(t) = self.mobs.iter_mut().find(|m| m.id == target)
                     {
                         t.add_effect(effect, ticks, amplifier);
@@ -2942,6 +2979,12 @@ impl Game<'_> {
                                 pitch,
                             )])?;
                         }
+                        self.mob_post_attack(
+                            target,
+                            source.attacker,
+                            None,
+                            Some(super::creatures::damage_type(source.kind, false)),
+                        );
                     }
                 }
                 MobEvent::SonicBoom {
@@ -3038,6 +3081,14 @@ impl Game<'_> {
                                     m.velocity.y += up;
                                 }
                             }
+                        }
+                        if let Who::Mob(id) = target {
+                            self.mob_post_attack(
+                                id,
+                                source.attacker,
+                                None,
+                                Some("minecraft:mob_attack"),
+                            );
                         }
                     }
                 }
@@ -4696,6 +4747,7 @@ impl Game<'_> {
             return self.flush_wind_bursts();
         }
         let mut projectiles = self.creatures.projectiles.lift();
+        let ticking = self.entity_ticking_area();
         let mut hits = Vec::new();
         // The breezes that deflected a projectile, and where.
         let mut deflections: Vec<(u32, [f64; 3])> = Vec::new();
@@ -4758,7 +4810,21 @@ impl Game<'_> {
                     .map(|g| g.conn)
                     .collect()
             });
+            // `EntityTickList.forEach`: a projectile that joined during this
+            // tick's entity pass (a mob's shot) first ticks on the next one; a
+            // player's or a dispenser's, which join before the pass, tick now.
+            let through = self.ticked_entities_through;
             for i in 0..projectiles.len() {
+                if projectiles[i].id > through {
+                    continue;
+                }
+                // ServerLevel.tick: losing an entity-ticking ticket must not
+                // advance projectile flags or motion while its chunk unloads.
+                let at = projectiles[i].position;
+                if !ticking(at.x.floor() as i32, at.z.floor() as i32) {
+                    projectiles.update(i, |p| p.previous = at);
+                    continue;
+                }
                 // A ghast's fireball or a wind charge is pickable, so a pearl, an
                 // arrow or a trident can strike it (`Projectile.isPickable`,
                 // `Projectile.onHit`).
@@ -5089,11 +5155,8 @@ impl Game<'_> {
         direct: &str,
         damage_type: &str,
     ) {
-        if p.owner == Some(Who::Player)
-            && let Who::Mob(id) = who
-            && let Some(index) = self.mobs.iter().position(|m| m.id == id)
-        {
-            self.victim_post_attack(index, direct, Some(damage_type));
+        if let Who::Mob(id) = who {
+            self.mob_post_attack(id, p.owner, Some(direct), Some(damage_type));
         }
     }
     /// What an arrow or a thrown trident hits an entity of type `victim`
@@ -5506,15 +5569,7 @@ impl Game<'_> {
             self.native_target_hit(self.dim.id(), pos, strength);
             if p.owner == Some(Who::Player) && (p.guest.is_none() || p.guest == self.lan_acting) {
                 self.award_custom_stat("target_hit", 1);
-                let kind = if p
-                    .arrow
-                    .as_ref()
-                    .is_some_and(|a| &*a.pickup_item.item == "minecraft:spectral_arrow")
-                {
-                    "minecraft:spectral_arrow"
-                } else {
-                    p.kind.id()
-                };
+                let kind = p.entity_type();
                 let projectile = horizon_client::advancements::EntityView {
                     kind: kind.to_owned(),
                     position: [p.position.x, p.position.y, p.position.z],
@@ -5556,21 +5611,7 @@ impl Game<'_> {
         self.combat.projectile_direct = match hit {
             Hit::Entity {
                 who: Who::Player, ..
-            } => {
-                let spectral = p
-                    .arrow
-                    .as_ref()
-                    .is_some_and(|a| &*a.pickup_item.item == "minecraft:spectral_arrow");
-                let id = if spectral {
-                    "minecraft:spectral_arrow"
-                } else {
-                    p.kind.id()
-                };
-                Some(Text::translate(
-                    &format!("entity.{}", id.replace(':', ".")),
-                    &[],
-                ))
-            }
+            } => Some(self.target_name(super::commands::Target::Projectile(p.id))),
             _ => None,
         };
         let at = match hit {
@@ -6238,6 +6279,12 @@ impl Game<'_> {
                         });
                         if hurt {
                             self.player_hurt_mob(p, id);
+                            self.shot_post_attack(
+                                p,
+                                who,
+                                "minecraft:small_fireball",
+                                "minecraft:fireball",
+                            );
                         } else if !self.mobs.iter().any(|m| m.id == id) {
                             // SmallFireball.onHitEntity: 5 damage to a boat or minecart.
                             self.hurt_vehicle(p, id, 5.0);
@@ -6297,6 +6344,12 @@ impl Game<'_> {
                             }) {
                                 self.player_hurt_mob(p, id);
                             }
+                            self.shot_post_attack(
+                                p,
+                                who,
+                                "minecraft:fireball",
+                                "minecraft:fireball",
+                            );
                         }
                     }
                 }
@@ -6385,14 +6438,16 @@ impl Game<'_> {
                     );
                 }
                 Who::Mob(id) => {
-                    if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-                        m.damage_projectile(
+                    if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
+                        && m.damage_projectile(
                             crate::game::entity::damage_level_of!(self, scoped),
                             1.0,
                             source,
                             aim,
                             [p.velocity.x, p.velocity.z],
-                        );
+                        )
+                    {
+                        self.shot_post_attack(p, who, "minecraft:llama_spit", "minecraft:spit");
                     }
                 }
             },
@@ -6431,6 +6486,12 @@ impl Game<'_> {
                         // The hurt's teleport (`teleportSomewhere`,
                         // `hitByShulkerBullet`) comes before the levitation.
                         self.settle_hurt_teleports()?;
+                        self.shot_post_attack(
+                            p,
+                            who,
+                            "minecraft:shulker_bullet",
+                            "minecraft:mob_projectile",
+                        );
                         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                             m.add_effect("minecraft:levitation", 200, 0);
                         }
@@ -8778,7 +8839,7 @@ fn to_loot(stack: &ItemStack) -> horizon_world::loot::LootStack {
     }
 }
 /// A generated loot stack as a Horizon item stack.
-fn from_loot(stack: &horizon_world::loot::LootStack) -> ItemStack {
+pub(super) fn from_loot(stack: &horizon_world::loot::LootStack) -> ItemStack {
     let mut item = ItemStack {
         item: Arc::from(stack.item.as_str()),
         count: stack.count.max(1) as u32,
@@ -12174,7 +12235,7 @@ mod breeding_orb_tests {
                 game.award_breeding_experience(7, [8.5, 64.0, 8.5]);
                 assert_eq!(game.orbs.len(), orbs + 1, "a fresh orb, not merged");
                 assert_eq!(
-                    game.orbs.last().map(|o| (o.value, o.count)),
+                    game.orbs.last().map(|o| (o.points(), o.count)),
                     Some((roll, 1))
                 );
                 values.insert(roll);

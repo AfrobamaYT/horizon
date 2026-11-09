@@ -52,8 +52,11 @@ pub fn open_uri(uri: &str) {
     #[cfg(not(windows))]
     open_folder(Path::new(uri));
 }
-/// The resource root to load from, given the vanilla root, the selection and
-/// a server's packs, which go on top (`Pack.Position.TOP`, fixed).
+/// The resource root to load from: the selection and a server's packs, which go on top
+/// (`Pack.Position.TOP`, fixed), laid over `base`. `base` is the mods' content root
+/// ([`super::mods::content_root`] of `vanilla`), so mod resources sit below the player's packs
+/// as in vanilla, and a pack change leaves the content root's cache alone (#12403). Built-in
+/// packs are found in `vanilla`.
 pub fn startup_root(
     vanilla: &Path,
     selected: &[String],
