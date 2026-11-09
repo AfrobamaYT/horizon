@@ -1776,7 +1776,8 @@ mod lectern_reach_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_lectern_screen_closes_out_of_reach() {
-        let mut game = server_game();
+        let mut game_resources = None;
+        let mut game = server_game(&mut game_resources);
         game.player = Some(
             PlayerMotion::new(game.motion, Vec3::new(8.5, 64.0, 8.5)).expect("a player position"),
         );

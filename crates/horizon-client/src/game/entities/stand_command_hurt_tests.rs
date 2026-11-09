@@ -206,7 +206,8 @@ fn with_player(game: &mut Game<'_>) {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_player_attack_from_damage_wobbles_then_breaks_the_stand() {
-    let mut game = game();
+    let mut game_resources = None;
+    let mut game = game(&mut game_resources);
     summon(
         &mut game,
         r#",equipment:{head:{id:"minecraft:diamond_helmet",count:1}}"#,
@@ -242,7 +243,8 @@ fn a_player_attack_from_damage_wobbles_then_breaks_the_stand() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn an_always_killing_source_breaks_the_stand_on_the_first_hit() {
-    let mut game = game();
+    let mut game_resources = None;
+    let mut game = game(&mut game_resources);
     summon(&mut game, "");
     // minecraft:arrow is in #always_kills_armor_stands.
     assert!(game.run_command(&format!("damage {STAND} 1 minecraft:arrow")));
@@ -253,7 +255,8 @@ fn an_always_killing_source_breaks_the_stand_on_the_first_hit() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_creative_player_breaks_the_stand_at_once_without_drops() {
-    let mut game = game();
+    let mut game_resources = None;
+    let mut game = game(&mut game_resources);
     with_player(&mut game);
     summon(
         &mut game,
@@ -269,7 +272,8 @@ fn a_creative_player_breaks_the_stand_at_once_without_drops() {
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_player_who_may_not_build_cannot_hurt_the_stand() {
     for mode in ["adventure", "spectator"] {
-        let mut game = game();
+        let mut game_resources = None;
+        let mut game = game(&mut game_resources);
         with_player(&mut game);
         summon(&mut game, "");
         assert!(game.run_command(&format!("gamemode {mode} @p")));
@@ -290,7 +294,8 @@ fn a_player_who_may_not_build_cannot_hurt_the_stand() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn control_a_source_in_neither_tag_still_fails_without_a_hurt() {
-    let mut game = game();
+    let mut game_resources = None;
+    let mut game = game(&mut game_resources);
     summon(&mut game, "");
     assert!(!game.run_command(&format!("damage {STAND} 1 minecraft:generic")));
     assert!(game.run_command(&format!("execute if entity {STAND}")));
@@ -314,7 +319,8 @@ fn events(game: &mut Game<'_>, f: impl FnOnce(&mut Game<'_>)) -> Vec<(&'static s
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_hit_from_damage_posts_entity_damage_then_entity_die_for_its_causing_entity() {
-    let mut game = game();
+    let mut game_resources = None;
+    let mut game = game(&mut game_resources);
     summon(&mut game, "");
     assert!(game.run_command("summon pig 14.5 100 2.5 {NoAI:1b}"));
     let by_pig = format!("damage {STAND} 1 minecraft:player_attack by @e[type=pig,limit=1]");
@@ -335,7 +341,8 @@ fn a_hit_from_damage_posts_entity_damage_then_entity_die_for_its_causing_entity(
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn an_always_killing_source_posts_only_entity_die_for_a_stand_without_a_cause() {
-    let mut game = game();
+    let mut game_resources = None;
+    let mut game = game(&mut game_resources);
     summon(&mut game, "");
     // No causing entity: kill attributes the event to the stand itself, which
     // the listeners see as no source. always_kills skips the wobble.

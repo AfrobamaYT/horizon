@@ -101,7 +101,8 @@ fn items_past_the_simulation_distance_enter_no_end_gateway() {
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_ticking_gateway_counts_its_age_in_its_block_entity() {
     use horizon_client::containers::BlockEntity;
-    let mut game = server_game();
+    let mut game_resources = None;
+    let mut game = server_game(&mut game_resources);
     game.dim = Dim::End;
     game.player = Some(
         horizon_client::motion::PlayerMotion::new(game.motion, Vec3::new(8.5, 65.0, 8.5)).unwrap(),
