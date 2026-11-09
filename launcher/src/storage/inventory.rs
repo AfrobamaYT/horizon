@@ -638,7 +638,7 @@ impl Storage {
         let mut report = self.apply_retaining(entries, clear, all, true)?;
         if clear.is_none() && !all {
             for entry in self.entries()? {
-                if let Err(error) = entry.access().check() {
+                if let Err(error) = entry.access().and_then(|access| access.check()) {
                     let bytes = allocated_bytes(&entry.path)?;
                     if bytes > 0 {
                         report

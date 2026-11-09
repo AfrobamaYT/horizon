@@ -156,7 +156,6 @@ pub(crate) fn shared(command: &Command) -> Result<Vec<Claim>, Error> {
     if paths.is_empty() {
         return Ok(Vec::new());
     }
-    let registry = Registry::open()?;
     for path in &paths {
         crate::storage::mark_used(path)?;
     }

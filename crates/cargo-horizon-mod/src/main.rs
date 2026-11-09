@@ -628,11 +628,7 @@ mod wrapper_suffix_tests {
             ("cargo-horizon-mod", false),
             ("/rustc/tool", false),
         ] {
-            assert_eq!(
-                super::is_compiler_wrapper(name),
-                expected,
-                "{name}"
-            );
+            assert_eq!(super::is_compiler_wrapper(name), expected, "{name}");
         }
     }
 }
