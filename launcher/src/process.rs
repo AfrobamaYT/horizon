@@ -3,6 +3,8 @@
 pub mod leases;
 #[cfg(test)]
 mod output_tests;
+#[cfg(unix)]
+pub mod supervisor;
 
 use std::ffi::OsStr;
 use std::process::Command;
