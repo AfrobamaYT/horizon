@@ -1881,7 +1881,7 @@ fn main() {{ generated::dispatch_setting_changed(&mut (), "a", "toggle"); assert
             r#"
 #![allow(dead_code)]
 mod mod_api {{
-    #[derive(Clone, Debug, PartialEq)] pub enum SettingValue {{ Toggle(bool), Choice(usize), Range(f64), Color(u32) }}
+    #[derive(Clone, Copy, Debug, PartialEq)] pub enum SettingValue {{ Toggle(bool), Choice(usize), Range(f64), Color(u32) }}
     pub struct Spec;
     impl Spec {{ pub fn store(&self, value: SettingValue) -> Option<String> {{ match value {{ SettingValue::Toggle(v) => Some(v.to_string()), _ => None }} }} pub fn read(&self, raw: Option<&str>) -> SettingValue {{ SettingValue::Toggle(raw == Some("true")) }} }}
     pub mod crash {{ pub fn current_native_mod() -> Option<&'static str> {{ Some("a") }} }}

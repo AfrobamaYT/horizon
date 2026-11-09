@@ -70,11 +70,11 @@ pub(super) fn store(dir: &Path, owner: &str, key: &str, value: &str) -> bool {
 fn read_typed(dir: &Path, owner: &str, key: &str) -> Option<mod_api::SettingValue> {
     let at = (dir.to_path_buf(), key.to_owned());
     if let Some(value) = READ.lock().ok()?.get(&at) {
-        return Some(value.clone());
+        return Some(*value);
     }
     let spec = mod_api::__private::setting(owner, key)?;
     let value = spec.read(read_raw(dir, owner, key).as_deref());
-    READ.lock().ok()?.insert(at, value.clone());
+    READ.lock().ok()?.insert(at, value);
     Some(value)
 }
 
