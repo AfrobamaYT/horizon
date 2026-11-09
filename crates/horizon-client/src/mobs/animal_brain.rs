@@ -563,7 +563,7 @@ pub fn tick(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, events: &mut
         }
     }
     brain_mut(m).list = list;
-    update_activity(m);
+    update_activity(m, w);
     m.ai.panicking = is_panicking(m);
     if m.species() == Species::Axolotl {
         m.extra.axolotl.playing_dead = mem(m)
@@ -576,13 +576,25 @@ pub fn tick(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, events: &mut
 
 /// `SnifferAi.updateActivity` / `HappyGhastAi.updateActivity`:
 /// `setActiveActivityToFirstValid`.
-fn update_activity(m: &mut Mob) {
-    let b = brain_mut(m);
-    let mm = &b.mem;
-    if b.kind == Kind::Axolotl {
-        update_axolotl_activity(b);
+fn update_activity(m: &mut Mob, w: &MobWorld) {
+    if brain_mut(m).kind == Kind::Axolotl {
+        let target = mem(m).attack_target.value();
+        let clearing = brain_mut(m).activity == Act::Fight
+            && mem(m).play_dead_ticks.present()
+            && target.is_some();
+        let change = clearing.then(|| w.change_target(m, true, None));
+        update_axolotl_activity(brain_mut(m));
+        if let Some(change) = change {
+            let target = match change {
+                super::TargetChange::Keep => target,
+                super::TargetChange::Set(next) => next,
+            };
+            mem(m).attack_target.set_opt(target);
+        }
         return;
     }
+    let b = brain_mut(m);
+    let mm = &b.mem;
     let order: &[Act] = match b.kind {
         Kind::Sniffer => &[Act::Dig, Act::Sniff, Act::Idle],
         Kind::Ghastling => &[Act::Panic, Act::Idle],
@@ -681,7 +693,9 @@ fn targetable(m: &mut Mob, w: &MobWorld, who: Who) -> bool {
         Who::Player => {
             // TargetingConditions.forNonCombat(): in range (scaled by the
             // player's visibility, at least 2) and in sight.
-            let Some(p) = &w.player else { return false };
+            let Some(p) = w.selected_player() else {
+                return false;
+            };
             if !p.alive || p.spectator {
                 return false;
             }
@@ -728,8 +742,7 @@ fn visible_contains(m: &mut Mob, w: &MobWorld, who: Who) -> bool {
 fn sense_players(m: &mut Mob, w: &MobWorld) {
     let range = m.attrs.follow_range;
     let near = w
-        .player
-        .as_ref()
+        .selected_player()
         .is_some_and(|p| !p.spectator && m.distance_sqr(p.position) < range * range);
     let players: Vec<Who> = if near { vec![Who::Player] } else { vec![] };
     let visible: Vec<Who> = players
@@ -787,7 +800,7 @@ fn sense_tempting(m: &mut Mob, w: &MobWorld) {
         item.as_deref()
             .is_some_and(|i| food.iter().any(|f| f.as_str() == i))
     };
-    let tempting = w.player.as_ref().is_some_and(|p| {
+    let tempting = w.selected_player().is_some_and(|p| {
         p.alive
             && !p.spectator
             && m.distance_sqr(p.position) <= range * range
@@ -2456,6 +2469,10 @@ fn axolotl_action(m: &mut Mob, cx: &mut Bx, action: AxolotlAction, until: &mut i
             {
                 return false;
             }
+            let super::TargetChange::Set(Some(target)) = cx.w.change_target(m, true, Some(target))
+            else {
+                return false;
+            };
             mem(m).attack_target.set(target);
             mem(m).cant_reach_walk_target_since.clear();
             m.ai.target = Some(target);
@@ -2476,10 +2493,14 @@ fn axolotl_action(m: &mut Mob, cx: &mut Bx, action: AxolotlAction, until: &mut i
                         Who::Mob(id) => cx.w.seen(id).is_some_and(|s| !s.playing_dead),
                         Who::Player => true,
                     };
-            if tired || !valid {
-                super::axolotl::on_stop_attacking(m, cx.w, target, cx.events);
-                mem(m).attack_target.clear();
-                m.ai.target = None;
+            if (tired || !valid)
+                && let super::TargetChange::Set(next) = cx.w.change_target(m, true, None)
+            {
+                if next != Some(target) {
+                    super::axolotl::on_stop_attacking(m, cx.w, target, cx.events);
+                }
+                mem(m).attack_target.set_opt(next);
+                m.ai.target = next;
             }
             true
         }
@@ -2541,7 +2562,10 @@ fn axolotl_action(m: &mut Mob, cx: &mut Bx, action: AxolotlAction, until: &mut i
                 return false;
             }
             if matches!(action, EraseAttackBreeding) {
-                mem(m).attack_target.clear();
+                if let super::TargetChange::Set(next) = cx.w.change_target(m, true, None) {
+                    mem(m).attack_target.set_opt(next);
+                    m.ai.target = next;
+                }
             } else {
                 mem(m).play_dead_ticks.clear();
             }

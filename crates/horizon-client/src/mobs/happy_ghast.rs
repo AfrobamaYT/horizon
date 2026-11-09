@@ -326,7 +326,7 @@ pub fn still_tick(m: &mut Mob, w: &MobWorld) {
 /// `scanPlayerAboveGhast`: a player (not one riding a happy ghast) within
 /// a block around the top, up to half the ghast's height above it.
 pub fn player_above(m: &Mob, w: &MobWorld) -> bool {
-    let Some(p) = w.player.as_ref().filter(|p| !p.spectator) else {
+    let Some(p) = w.selected_player().filter(|p| !p.spectator) else {
         return false;
     };
     if m.rider.is_some() {
@@ -392,7 +392,9 @@ impl Goal for GhastTempt {
             self.calm_down -= 1;
             return false;
         }
-        let Some(p) = &cx.w.player else { return false };
+        let Some(p) = cx.w.selected_player() else {
+            return false;
+        };
         // getNearestPlayer(TargetingConditions.forNonCombat()
         // .ignoreLineOfSight().range(TEMPT_RANGE 16)): creative players too.
         // The selector (the held items) comes before the range in
@@ -412,7 +414,9 @@ impl Goal for GhastTempt {
         self.calm_down = super::goals::reduced(100);
     }
     fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
-        let Some(p) = cx.w.player.clone() else { return };
+        let Some(p) = cx.w.selected_player().cloned() else {
+            return;
+        };
         m.look_at(p.eye);
         // stopDistance 7.
         if m.distance_sqr(p.position) < 49.0 {

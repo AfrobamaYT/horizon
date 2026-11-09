@@ -1254,7 +1254,7 @@ impl Game<'_> {
         }
         let burn = self.boats[i].fire_ticks % 20 == 0 && !self.in_lava(self.boats[i].bounds());
         self.boats.update(i, |b| b.fire_ticks -= 1);
-        burn && self.burn_boat(i, 1.0)
+        burn && self.burn_boat(i, 1.0, "minecraft:on_fire")
     }
     /// The fire of the two `applyEffectsFromBlocks` in `AbstractBoat.tick`.
     /// `Entity.checkInsideBlocks` meets the blocks of the box the boat started
@@ -1296,7 +1296,7 @@ impl Game<'_> {
                         }
                     });
                     for &damage in &fires {
-                        if self.burn_boat(i, damage) {
+                        if self.burn_boat(i, damage, "minecraft:in_fire") {
                             return true;
                         }
                     }
@@ -1346,13 +1346,18 @@ impl Game<'_> {
     }
     /// `VehicleEntity.hurtServer` for fire (`inFire`, `onFire`), which an
     /// `Invulnerable` boat ignores. True when the boat broke.
-    fn burn_boat(&mut self, i: usize, damage: f32) -> bool {
-        let invulnerable = self
-            .persist
-            .raw
-            .get(&self.boats[i].id)
-            .is_some_and(|tag| horizon_client::entity_nbt::flag(tag, "Invulnerable"));
-        !invulnerable && self.hurt_boat(i, damage, false)
+    fn burn_boat(&mut self, i: usize, damage: f32, damage_type: &str) -> bool {
+        let id = self.boats[i].id;
+        let invulnerable = self.saved_refuses_damage(id, damage_type, false);
+        let kind = self.boats[i].entity_type();
+        let source = horizon_client::health::HurtSource {
+            damage_type,
+            causing: 0,
+            direct: 0,
+            position: None,
+        };
+        !self.native_nonliving_invulnerable(id, &kind, source, invulnerable)
+            && self.hurt_boat(i, damage, false)
     }
     /// `PowderSnowBlock.entityInside`'s `ServerLevel.sendParticles`: a boat that moved
     /// horizontally in powder snow throws snowflakes the players around see. `AbstractBoat.tick`
@@ -1383,7 +1388,17 @@ impl Game<'_> {
         }
         for _ in 0..2 {
             let p = self.boats[i].position;
-            let broke = self.hurt_boat(i, 4.0, false);
+            let id = self.boats[i].id;
+            let kind = self.boats[i].entity_type();
+            let source = horizon_client::health::HurtSource {
+                damage_type: "minecraft:lava",
+                causing: 0,
+                direct: 0,
+                position: None,
+            };
+            let vanilla = self.saved_refuses_damage(id, "minecraft:lava", false);
+            let broke = !self.native_nonliving_invulnerable(id, &kind, source, vanilla)
+                && self.hurt_boat(i, 4.0, false);
             self.lava_hurt_sound([p.x, p.y, p.z]);
             if broke {
                 return true;
@@ -1694,7 +1709,25 @@ impl Game<'_> {
         let (damage, scale, _, magic) = self.melee_damage(&kind, false, Some(id as u32));
         let sweep = self.sweep_before_hit(&kind, false);
         let chest = self.boats[i].chest;
-        let hurt = self.hurt_boat_result(i, damage, self.creative);
+        let attacker = self.own_entity_id();
+        let source = horizon_client::health::HurtSource {
+            damage_type: "minecraft:player_attack",
+            causing: attacker,
+            direct: attacker,
+            position: None,
+        };
+        let vanilla =
+            self.saved_refuses_damage(id as u32, "minecraft:player_attack", self.creative);
+        let invulnerable = crate::game::entity::damage_level_of!(self, scoped)
+            .invulnerability_check(
+                horizon_client::health::Hurting::Entity(id, &kind, source),
+                vanilla,
+            );
+        let hurt = if invulnerable {
+            None
+        } else {
+            self.hurt_boat_result(i, damage, self.creative)
+        };
         // AbstractChestBoat.destroy -> ContainerEntity.chestVehicleDestroyed:
         // with entity_drops on, a player whose hit breaks a chest boat (not a
         // creative discard) angers the piglins that see it.

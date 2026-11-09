@@ -457,10 +457,22 @@ pub(super) fn emit<'a>(
         };
         // Reuse the exact host and drawing conversions for generated game-side calls.
         if in_game {
+            // A scoped read hook can run against either the game or a borrowed
+            // tick view. Its native receiver carries the selected host.
+            let scoped_read_host = target.contains("::NativeHookHost<");
+            if scoped_read_host
+                && (hook.host != Some(HostAccess::Read) || receiver_mut != Some(false))
+            {
+                return Err(format!(
+                    "{name}: NativeHookHost requires a read-only host and receiver"
+                ));
+            }
             let passed = host
                 .as_ref()
                 .map(|(_, param)| {
-                    if param.call == "&*self" && receiver_mut == Some(false) {
+                    if scoped_read_host {
+                        "self.host".to_owned()
+                    } else if param.call == "&*self" && receiver_mut == Some(false) {
                         "self".to_owned()
                     } else {
                         param.call.to_owned()
@@ -554,7 +566,9 @@ pub(super) fn emit<'a>(
                 let passed = host
                     .as_ref()
                     .map(|(_, param)| {
-                        if param.call == "&*self" && receiver_mut == Some(false) {
+                        if scoped_read_host {
+                            "self.host".to_owned()
+                        } else if param.call == "&*self" && receiver_mut == Some(false) {
                             "self".to_owned()
                         } else {
                             param.call.to_owned()
@@ -1725,5 +1739,18 @@ mod tests {
         assert!(target_parameters("new_hook", "native_new_hook", 7, "NewHookCall").is_ok());
         let refused = target_parameters("new_hook", "native_new_hook", 8, "NewHookCall");
         assert!(refused.unwrap_err().contains("one NewHookCall"));
+    }
+
+    #[test]
+    fn scoped_native_hook_uses_selected_host_and_game_hooks_keep_their_receiver() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let fire = super::super::sources(&root, super::super::FillMode::Require)
+            .unwrap()
+            .fire;
+        let compact: String = fire.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(compact.contains("mod_api::dispatch_living_change_target(self.host,call)"));
+        assert!(
+            compact.contains("mod_api::dispatch_living_visibility(self,entity,looking,visibility)")
+        );
     }
 }

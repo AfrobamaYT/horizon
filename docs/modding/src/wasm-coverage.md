@@ -1448,6 +1448,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::entity_change_block_pre` | crosses | Wire call |
 | `Hooks::entity_constructing` | crosses | Wire call |
 | `Hooks::entity_interact_specific` | crosses | Wire call |
+| `Hooks::entity_invulnerability_check` | crosses | Wire call |
 | `Hooks::entity_mob_griefing` | crosses | Wire call |
 | `Hooks::entity_outline` | crosses | Wire call |
 | `Hooks::entity_place` | crosses | Wire call |
@@ -1490,6 +1491,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::level_save` | crosses | Wire call |
 | `Hooks::play_level_sound_at_position` | crosses | Wire call |
 | `Hooks::play_level_sound_at_entity` | crosses | Wire call |
+| `Hooks::living_change_target` | crosses | Wire call |
 | `Hooks::living_conversion_post` | crosses | Wire call |
 | `Hooks::living_conversion_pre` | crosses | Wire call |
 | `Hooks::living_damage_post` | crosses | Wire call |

@@ -11,7 +11,7 @@ use mod_api::{EntityRef, SoundSource};
 /// `Monster`'s sound source is hostile, and so are a few mobs that are not
 /// `Monster`s: `Hoglin`, `Ghast`, `Phantom`, `Shulker` and the slimes
 /// (`AbstractCubeMob`).
-fn hostile_species(species: Species) -> bool {
+pub(super) fn hostile_species(species: Species) -> bool {
     horizon_client::mobs::ai::is_monster(species)
         || matches!(
             species,

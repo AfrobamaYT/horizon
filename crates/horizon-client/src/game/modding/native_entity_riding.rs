@@ -11,6 +11,53 @@ use horizon_client::{
 use mod_api::{EntityRef, LeashHolder, LivingRef};
 
 impl Game<'_> {
+    /// The dismount search with a vehicle or passenger lent out of `self.mobs`.
+    pub(super) fn scoped_mob_dismount_location(
+        &self,
+        vehicle: Option<&Mob>,
+        vehicle_id: u32,
+        rider: Option<&Mob>,
+        passenger: EntityRef,
+    ) -> Option<[f64; 3]> {
+        let at = if let Some(rider) = rider {
+            if let Some(index) = self.boats.iter().position(|boat| boat.id == vehicle_id) {
+                Some(self.boat_dismount_target(index, f64::from(rider.width()), rider.yaw))
+            } else if let Some(mount) = vehicle {
+                Some(
+                    self.horse_dismount_mobs(mount, rider)
+                        .unwrap_or_else(|| super::mounts::on_top(mount)),
+                )
+            } else {
+                self.cart_dismount_mob(vehicle_id, rider)
+            }
+        } else if let Some(mount) = vehicle {
+            match self.native_entity_target(passenger)? {
+                Target::Player => {
+                    Some(self.player_dismount_from_lent_mob(mount, self.yaw, self.player.as_ref()?))
+                }
+                Target::Guest(conn) => {
+                    let guest = self.command_guest(conn)?;
+                    Some(self.player_dismount_from_lent_mob(
+                        mount,
+                        guest.yaw,
+                        guest.motion.as_deref()?,
+                    ))
+                }
+                _ => None,
+            }
+        } else {
+            let vehicle = self.entity(vehicle_id)?;
+            return self.entity_dismount_location(vehicle, LivingRef::new(passenger));
+        };
+        if let Some(at) = at {
+            return Some([at.x, at.y, at.z]);
+        }
+        let vehicle = self.entity(vehicle_id)?;
+        let [x, _, z] = self.entity_position(vehicle)?;
+        let [_, [_, top, _]] = self.entity_bounding_box(vehicle)?;
+        Some([x, top, z])
+    }
+
     /// The id of the entity `t` rides, if it rides one.
     fn native_vehicle_id(&self, t: Target) -> Option<u32> {
         match t {
@@ -104,7 +151,7 @@ impl Game<'_> {
     }
     /// The overrides of `getControllingPassenger` on `mob`: whether the player `rider`, its
     /// first passenger, steers it.
-    fn native_player_controls(&self, mob: &Mob, rider: Target) -> bool {
+    pub(super) fn native_player_controls(&self, mob: &Mob, rider: Target) -> bool {
         let species = mob.species();
         match species {
             Species::Pig | Species::Strider => {
