@@ -8,7 +8,8 @@
 //! are generated. Implement the same-named inherent `Game` method, without a `native_` prefix.
 //! Hook entry points keep their `native_` names.
 //!
-//! Each area file holds up to three traits, each declaration a bodiless `fn name();` with its rustdoc:
+//! Each hook has its own file, each declaration a bodiless `fn name();` with its rustdoc.
+//! Separate files hold draw contexts and general notes. The declaration traits are:
 //!
 //! - `Hooks`: `#[hook(side = "...", contract = "...", ...)]`, one per moment the game tells mods about.
 //! - `DrawContexts`: `#[draw_context(surface = "...", name = "...")]`, a drawing surface hooks draw on.
@@ -31,10 +32,10 @@
 //! | `target` | the game function that fires it; left out when it is `Game::native_<name>` in `native_hooks/<area>.rs` |
 //!
 //! Every hook needs `///` lines: they are the rustdoc of its trait method, and a hook without them
-//! is refused. The generator reads the files in name order, `base.rs` first, and each file in declaration
-//! order; that is the order of the generated `HookId`, the dispatch and the WIT, and it comes from
-//! the directory, so a new hook never edits an existing line to be placed. A new hook goes in a file
-//! of its own (or at the end of the file of its family). The generator discovers the files directly.
+//! is refused. Existing split hooks retain their generated `HookId` order through each file's
+//! `// catalog-order: N` comment. These ordinals are frozen; new hooks omit the comment and follow
+//! in file-name order. No shared list is edited: the generator discovers the files directly.
+//! Each new hook goes in a file of its own.
 //! The JSON catalog (`native-hooks.json`,
 //! `tools/native-hook-fragments/`) is retired and a file there fails the build.
 //!
