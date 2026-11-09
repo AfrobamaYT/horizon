@@ -368,6 +368,12 @@ pub trait LevelAccess {
     fn allow_spread(&self, _kind: Spread, _from: BlockPos, _to: BlockPos) -> bool {
         true
     }
+    /// Whether the fluid at `pos` may run its scheduled tick (`FlowingFluid.tick`): a native mod
+    /// that simulates a fluid itself refuses, and the tick changes nothing and schedules nothing.
+    /// The default allows.
+    fn allow_fluid_tick(&self, _pos: BlockPos, _fluid: &'static str) -> bool {
+        true
+    }
     fn allow_fluid_level_change(
         &self,
         _pos: BlockPos,

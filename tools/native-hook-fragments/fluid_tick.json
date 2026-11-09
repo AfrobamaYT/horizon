@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "fluid_tick",
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_fluid_tick",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "a fluid's scheduled tick, which a mod that simulates the fluid itself may cancel (`native_fluid_tick`).",
+  "doc_summary": "`native_fluid_tick(dimension, pos, fluid, cancel)` asks before the fluid at `pos` runs its scheduled tick (`FlowingFluid.tick`); `fluid` is `water`, `lava` or a mod fluid's id. Set `cancel` and the tick does nothing: no level change, no spreading, no new tick. For a mod that simulates a fluid itself. Server-side. Bundles need \"hooks\": @API:fluid_tick@."
+}

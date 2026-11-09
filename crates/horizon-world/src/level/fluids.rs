@@ -642,28 +642,28 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let mut state = self.state(pos);
         let mut fluid = self.b.fluid(state);
         let kind = fluid.kind();
-        if kind == FluidKind::Empty {
+        // Vanilla's by their short names, a mod fluid by its id.
+        let name = match kind.source() {
+            FluidKind::Water => "water",
+            FluidKind::Lava => "lava",
+            FluidKind::Empty => return,
+            source => source.name(),
+        };
+        if !self.level.allow_fluid_tick(pos, name) {
             return;
         }
         if !fluid.is_source() {
             let new_fluid = self.new_liquid(kind, pos, state);
             let delay = self.spread_delay(kind, pos, fluid, new_fluid);
-            if new_fluid != fluid {
-                // Vanilla's by their short names, a mod fluid by its id.
-                let name = match kind.source() {
-                    FluidKind::Water => "water",
-                    FluidKind::Lava => "lava",
-                    FluidKind::Empty => return,
-                    source => source.name(),
-                };
-                if !self.level.allow_fluid_level_change(
+            if new_fluid != fluid
+                && !self.level.allow_fluid_level_change(
                     pos,
                     name,
                     i32::from(fluid.amount()),
                     i32::from(new_fluid.amount()),
-                ) {
-                    return;
-                }
+                )
+            {
+                return;
             }
             if new_fluid.kind() == FluidKind::Empty {
                 fluid = new_fluid;

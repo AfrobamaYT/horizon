@@ -990,7 +990,7 @@
 //! Bodies have no `cfg` and no macros: horizon-mixins refuses a target with
 //! either (`tests::hook_points_stay_hookable`).
 use super::native_data_maps::NativeDataMapType;
-use super::native_guards::{box_meets, finite, finite_params, mod_image_fits};
+use super::native_guards::{box_meets, finite, finite_params, mod_image_fits, mod_sound_ok};
 use super::native_item_energy::ItemEnergyBuffer;
 use super::native_world_edit::{property_change, with_property};
 use super::{
@@ -1162,6 +1162,23 @@ impl GameLevel<'_> {
         new: BlockStateId,
     ) {
         mod_api::dispatch_block_changed(self, mod_api::mods(), dimension, pos, old, new);
+    }
+
+    /// The fluid at `pos` is about to run its scheduled tick (`FlowingFluid.tick`). `fluid` is
+    /// `water`, `lava` or a mod fluid's id. Set `cancel` and the tick does nothing at all: no
+    /// level change, no spreading and no new tick. For a mod that simulates a fluid itself;
+    /// `native_fluid_level_change` and `native_block_spread` still ask about each change of a
+    /// tick that runs. It's asked once per tick, so keep it cheap. Server-side.
+    /// API @API:fluid_tick@.
+    #[inline(always)]
+    pub(super) fn native_fluid_tick(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        fluid: &str,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_fluid_tick(self, mod_api::mods(), dimension, pos, fluid, cancel);
     }
 
     /// A flowing fluid at `pos` is about to change level. `fluid` is `water`
@@ -9991,28 +10008,6 @@ fn mob_source(damage: &Damage) -> HurtSource<'static> {
     }
 }
 
-/// Whether `id` is a sound event's id, `namespace:path` as `Identifier`
-/// allows: the namespace of `[a-z0-9_.-]`, the path also with `/`.
-/// Whether a native mod's sound can be sent: a namespaced event, a sound
-/// source, a position inside the world's range and a finite, non-negative
-/// volume and pitch.
-pub(super) fn mod_sound_ok(
-    sound: &str,
-    at: [f64; 3],
-    source: usize,
-    volume: f32,
-    pitch: f32,
-) -> bool {
-    let position_ok = at
-        .into_iter()
-        .all(|v| v.is_finite() && v.abs() <= f64::from(i32::MAX) / 8.0);
-    let gain_ok = volume.is_finite() && volume >= 0.0 && pitch.is_finite() && pitch >= 0.0;
-    sound_id(sound)
-        && source < horizon_client::settings::SOUND_SOURCES.len()
-        && position_ok
-        && gain_ok
-}
-
 /// Whether a native mod's particles can be sent. Block particle types need
 /// a known state (`state_ok`); item, trail and vibration particles aren't
 /// supported by the network dispatch; a mod's own type must be namespaced.
@@ -10057,7 +10052,9 @@ pub(super) fn mod_particles_ok(
         && options.scale.is_finite()
 }
 
-fn sound_id(id: &str) -> bool {
+/// Whether `id` is a sound event's id, `namespace:path` as `Identifier`
+/// allows: the namespace of `[a-z0-9_.-]`, the path also with `/`.
+pub(super) fn sound_id(id: &str) -> bool {
     let Some((namespace, path)) = id.split_once(':') else {
         return false;
     };
