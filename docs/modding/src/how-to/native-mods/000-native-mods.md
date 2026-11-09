@@ -20,8 +20,8 @@ bound to the calling mod and refuses any other mod's files. A mod that lists its
 `native_register_configs` gets them read for it, written from their defaults when missing, and handed over again
 when edited (`native_config_loading`, `native_config_reloading`, as NeoForge's `ModConfigEvent`), and a world can
 keep its own server config in `serverconfig/` ([native mods](../native-mods.md)). Settings kept with `set_setting` stay in `horizon-mods/.horizon-mod-data/<id>/`.
-`setting` and `set_setting` are bound to the calling mod: naming another mod's ID never reads or changes its settings.
-Reads use the load's settings snapshot plus successful writes, rather than opening a file on each call.
+`setting` and `set_setting` are bound to the calling mod and its registered keys: naming another mod's ID or an unregistered key never reads or changes a file.
+Typed reads cache values by data folder and key; a successful `set_setting` invalidates that key, while a failed write leaves the cached value unchanged. Raw `setting` reads access the file.
 Register typed settings with `Registrar::register_setting` to put them on Options > Mods; edits persist before
 `setting_changed` runs, and only the owning mod receives that event.
 8c838a6b381b93150deaeed2057acd1

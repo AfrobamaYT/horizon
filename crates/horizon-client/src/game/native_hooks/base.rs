@@ -625,7 +625,8 @@ impl Game<'_> {
     /// merged, load conditions held — to every Horizon client when it joins
     /// and again after each `/reload`; a vanilla client is sent nothing new.
     /// Asked once per load, when the server's data tables are built, and the
-    /// same types go to every player: it can't differ between players. Push nothing and
+    /// same types go to every player: unlike NeoForge, which asks again for
+    /// each joining player, it can't differ between players. Push nothing and
     /// nothing is sent; push nothing after a load that pushed some and the
     /// clients go back to their own recipes. Server-side (the single
     /// player's integrated server included).
@@ -1549,7 +1550,8 @@ impl Game<'_> {
     /// leaves none to hear its character, where vanilla's closed screen hears
     /// nothing, and one that moves the focus types into the box it moved to.
     /// They fire even when `native_screen_key_pressed_pre` cancelled the press
-    /// that carried the text: the characters left reach the text box
+    /// that carried the text, as NeoForge delivers `CharacterTyped.Pre` for a
+    /// cancelled `KeyPressed.Pre`: the characters left reach the text box
     /// without the key's own effects. Cancelling one character drops only that
     /// one. The control socket's `type` fires it too, but not for its `\b`
     /// backspace. Same screens as the key press, and it fires with no text box
@@ -1844,8 +1846,8 @@ impl Game<'_> {
     ) {
         self.fire_sign_changed(call);
     }
-    /// A command a player typed (NeoForge's `CommandEvent`), asked before
-    /// vanilla's `Commands.performCommand` runs it, without its slash: any command,
+    /// A command a player typed (NeoForge's `CommandEvent`, before
+    /// `Commands.performCommand` runs it), without its slash: any command,
     /// vanilla's and the mods' own, also one the player may not run. Set
     /// `canceled` to stop it: nothing runs and nothing is answered but the
     /// lines pushed to `replies`, which go to the player as system chat.
@@ -2241,7 +2243,7 @@ impl Game<'_> {
     /// (`FishingHook.catchingFish`), 2 the reel-in of a bite, which gives the
     /// catch, 3 the reel-in with nothing on the line, 4 the reel-in of a
     /// bobber hooked to an entity or item (like Bukkit's `PlayerFishEvent`;
-    /// not NeoForge's `ItemFishedEvent`). Set `cancel` on the cast and nothing
+    /// NeoForge's `ItemFishedEvent` is later, in `FishingHook.retrieve`). Set `cancel` on the cast and nothing
     /// is thrown; on a bite the fish gets away and the wait starts over; on
     /// a reel-in (2 to 4) nothing happens, the bobber stays out and the rod
     /// takes no wear. The bobber ending by itself (too far, the rod put
@@ -2974,13 +2976,14 @@ impl Game<'_> {
     /// the clock to `wake_up_from_sleep`): `new_time` comes in as the next
     /// morning's day time and may be changed to wake everyone at another
     /// time. A time before `current` (the day time now) is refused, as
-    /// `setTimeAddition` refuses one, and the morning stays. The check runs once
+    /// `setTimeAddition` refuses one, and the morning stays. Unlike
+    /// NeoForge, which refuses a bad value as it is set, the check runs once
     /// after every mod, so a later mod sees the value an earlier one left.
     /// On the server, only when the `advance_time` rule is on;
     /// `native_time_skip` then hears the jump to the time chosen here and
     /// may still cancel it. The players wake and the weather resets as
-    /// usual either way. Set `canceled` and the clock is left where it is:
-    /// `native_time_skip` is not asked either.
+    /// usual either way. Set `canceled` and the clock is left where it is, as
+    /// NeoForge's cancel leaves it: `native_time_skip` is not asked either.
     pub(in crate::game) fn native_sleep_finished_time(
         &mut self,
         dimension: &str,
@@ -5055,44 +5058,30 @@ impl Game<'_> {
     pub(in crate::game) fn instance_dir(&self) -> PathBuf {
         Self::game_dir()
     }
-    /// A mod's setting `key` (one file per key in `native_data_dir`).
+    /// A mod's setting `key` (one file per key in `native_data_dir`). A mod's hook or part reads
+    /// only its own mod's: another mod's id gives None.
     pub(in crate::game) fn setting(&self, mod_id: &str, key: &str) -> Option<String> {
-        if mod_api::crash::current_native_mod()? != mod_id {
+        if Self::another_mods(mod_id) {
             return None;
         }
         self.stored_setting(mod_id, key)
     }
     pub(super) fn stored_setting(&self, mod_id: &str, key: &str) -> Option<String> {
-        self.setting_overrides
-            .borrow()
-            .get(&(mod_id.to_owned(), key.to_owned()))
-            .cloned()
-            .or_else(|| self.loop_context.setting(mod_id, key))
+        mod_settings::read_raw(&self.native_data_dir(mod_id), mod_id, key)
     }
-    /// Keeps only the calling mod's setting `key`.
+    /// Keeps a mod's setting `key`. A mod's hook or part keeps only its own mod's.
     pub(in crate::game) fn set_setting(&self, mod_id: &str, key: &str, value: &str) {
-        if mod_api::crash::current_native_mod() != Some(mod_id) {
+        if Self::another_mods(mod_id) {
             return;
         }
         self.store_setting(mod_id, key, value);
     }
     pub(super) fn store_setting(&self, mod_id: &str, key: &str, value: &str) -> bool {
-        // Registered keys are validated at registration; never join an arbitrary mod input.
-        if mod_api::__private::setting(mod_id, key).is_none() {
-            return false;
-        }
-        let dir = self.native_data_dir(mod_id);
-        if fs::create_dir_all(&dir)
-            .and_then(|()| fs::write(dir.join(key), value))
-            .is_ok()
-        {
-            self.setting_overrides
-                .borrow_mut()
-                .insert((mod_id.to_owned(), key.to_owned()), value.to_owned());
-            true
-        } else {
-            false
-        }
+        mod_settings::store(&self.native_data_dir(mod_id), mod_id, key, value)
+    }
+    /// A mod's hook or part is running, and `mod_id` is another mod's.
+    fn another_mods(mod_id: &str) -> bool {
+        mod_api::crash::current_native_mod().is_some_and(|running| running != mod_id)
     }
     /// Shows the panel beside container screens with these items (at most
     /// 8192), as the game's own slots in pages, with a search box; the
