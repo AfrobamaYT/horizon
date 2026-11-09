@@ -27,8 +27,7 @@ membership masks, and hot-path linear lookup. Keep the fork's custom models and
 data-carrying kinds. Diverges from upstream: generated block and optional bucket
 are owned by the fluid declaration rather than independent block references.
 
-Vanilla 26.3 was inspected through `tools/rea_vanilla.py method` in
-`/workspace/horizon`: `WaterFluid.getTickDelay` returns 5;
+Vanilla 26.3 was inspected through `tools/rea_vanilla.py method`: `WaterFluid.getTickDelay` returns 5;
 `LavaFluid.getTickDelay` returns 10 for fast lava and 30 otherwise.
 `FlowingFluid.spread` is the flow reference, not a declaration API. Preserve
 vanilla timing, conversion, mixing and dimension-sensitive behaviour for vanilla
@@ -71,9 +70,13 @@ Validate all generated source/flowing/block/bucket names before publishing any.
 Keep the fork's flowing-name convention (`a:flowing_dir/oil` for `a:dir/oil`),
 reject collisions, and never silently rename it to upstream's last-segment rule.
 
-API-owned `FluidDeclarationWire`, `FluidPlacementWire`, `FluidTemplateWire` and
-`FluidAppearanceWire` are generated from the API catalog, with explicit enum
-tags and bounded decoding. Engine structs never become the ABI. Both targets
+The API-owned declaration, placement, template and appearance types each carry
+an explicit `#[derive(horizon_mod_api_macros::Wire)]`, using the shared Wire
+mechanism rather than catalog-generated per-type serialization forms. This
+follows `crates/horizon-mod-api/src/world/game_rule_value.rs:7` and the derive
+entry point at `crates/horizon-mod-api-macros/src/lib.rs:6`. The generator builds
+host call tables only; engine structs stay out of the public API and ABI.
+Explicit enum tags and bounded decoding remain requirements. Both targets
 submit the same fields and receive the same refusal. Bound strings and list
 sizes using existing package limits before allocation; reject malformed tags,
 unknown fields, overflowing integers, NaN and infinity rather than clamp content.
@@ -125,6 +128,14 @@ and rollback semantics, rebasing against whichever version lands first.
 | --- | --- |
 | Tank `m:oil` | One tank key; zero blocks, buckets, flowing entries or ticks |
 | World `m:brine`, water defaults | Own liquid block and optional `m:brine_bucket`; delay 5, drop-off 1, slope 4, light 0 |
+| World lava, normal context | Proposed template defaults: delay 30, drop-off 2, slope 2, light 15 |
+| World lava, fast context | Proposed template defaults: delay 10, drop-off 1, slope 4, light 15 |
+| Source conversion | Default false: two adjacent sources do not create a source; explicit true with the required support creates this mod identity, never vanilla water |
+| Replacement | Preserve current mod-fluid refusal to be replaced; empty accepts flow; vanilla water accepts a different fluid only downward |
+| Mixing | A lava-template mod keeps its own identity and does not acquire vanilla lava mixing solely from its template; vanilla water/lava mixing remains unchanged |
+| Tag membership | A declared member matches its tag for source and flowing states; a nonmember does not; membership never truncates at 128 identities |
+| Generated bucket | Placement creates the declared source block; pickup returns the declared bucket and removes that source; tank mode generates neither route |
+| Client appearance | Shared sprite/tint supplies the default model; an explicit model override decorates the same identity without registering another fluid |
 | World overrides | Delay 12, drop-off 2, slope 3, light 7 remain exactly 12/2/3/7 after native and wasm round trips |
 | Invalid bounds | Delay 0, drop-off 8, slope 5, light 16, viscosity 0 each refuse with InvalidRange and zero publication |
 | Unsupported viscosity motion | UnsupportedCapability; no silently ignored drag request |
@@ -135,6 +146,15 @@ and rollback semantics, rebasing against whichever version lands first.
 | Save/reload | Name round trip preserves identity despite changed process ordering; open savepoint refuses save |
 | Transaction abort | Tank insert followed by abort restores original amount; forged authority follows #2453 refusal |
 
+Tag membership also requires replacing the current vanilla-only mask behavior
+(`crates/horizon-world/src/fluid.rs:258`); custom membership is proposed here.
+These are implementation acceptance requirements, not claims that the unified
+API exists today. Current reference routes are
+`crates/horizon-world/src/level/fluids.rs:77` (timing), `:189` (drop-off),
+`:199` (slope), `:209` (conversion), `:101` (replacement), `:312` (container liquid
+placement), `:365` (source pickup), `:750` (mixing), and
+`crates/horizon-client-render/src/fluid_models.rs:32` (appearance collection).
+
 Port upstream's world-physics fixtures through the fork API: own-block spreading,
 source/flowing resolution, replacement and mixing, configurable timing/drop-off,
 light and template rendering. Hand-write expected states and amounts; compare
@@ -144,7 +164,9 @@ against vanilla before treating its NeoForge claims as an oracle.
 ## Proposed stages (file none)
 
 1. Approve declaration shape, refusal policy and publicly verified capabilities.
-2. Replace package and API declarations together; generate Wire for both targets.
+2. Replace package and API declarations together; apply the shared explicit Wire
+   derive to API-owned types for both native and wasm. Generate host call tables
+   only, with no catalog-generated per-type Wire forms.
    Update every caller, sample, fixture, catalog note, docs/mods.md and affected
    modding book pages in that same implementation change.
 3. Resolve world/template/light/model tables and port the upstream physics tests.
@@ -153,6 +175,18 @@ against vanilla before treating its NeoForge claims as an oracle.
 Migration is a clean break: delete FluidLook and the separate world declaration
 entry point, rewrite existing content and samples to Fluid placement modes, and
 rebuild mods. No alias, shim, fallback parser, deprecated name or version gate.
+
+Saved-world policy (proposed): mode and generated source/flowing/block/bucket
+names form the persistent content schema. A mode change or generated-name change
+requires a new world; refuse opening an existing world with that schema mismatch
+before loading chunks or writing saves, and report the owner and changed names.
+Rebuilding mods does not migrate saved data. Implement an explicit saved-schema
+check in the implementation stage; this is not an existing loader guarantee.
+Current scheduled-fluid ticks serialize names and resolve them on load
+(`crates/horizon-client/src/save.rs:625`, `:632`, `:1982`), so renaming cannot be
+treated as a process-index change. Add acceptance fixtures for both mode changes
+and name changes: refusal leaves the original save untouched. Add no alias,
+fallback parser or automatic remapping.
 
 ## Open questions
 
