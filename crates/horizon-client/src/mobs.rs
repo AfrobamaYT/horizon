@@ -108,8 +108,8 @@ pub mod warden_brain;
 pub mod witch;
 pub mod wither;
 mod world;
-pub use living::totem_death_effects;
-use world::{TargetInfo, visual_clip};
+use living::totem_death_effects;
+pub use world::{TargetInfo, visual_clip};
 pub mod dragon_contacts;
 pub mod zombie_villager;
 

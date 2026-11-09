@@ -31,7 +31,7 @@ source = source[:start] + source[end:]
 if method:
     target += "\nimpl Game<'_> {\n" + body + "}\n"
 else:
-    source = source.replace("use ", "use living::totem_death_effects;\nuse ", 1)
+    source = re.sub(r"^(?=(?:pub )?use )", "use living::totem_death_effects;\n", source, count=1, flags=re.M)
     target += "\n" + body
 assert target.count(body) == 1
 print(f"moved verbatim {name}: {hashlib.sha256(body.encode()).hexdigest()}")
