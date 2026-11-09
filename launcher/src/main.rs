@@ -1,8 +1,6 @@
 //! Horizon launcher: installs Horizon builds, prepares them from the player's own Minecraft,
 //! and starts the client or a dedicated server.
-
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
-
 mod agents_page;
 mod art;
 mod blocks;
@@ -84,7 +82,6 @@ mod themes_page;
 mod titlebar;
 mod while_playing;
 mod worlds_page;
-
 use gpui::{
     actions, div, ease_out_quint, prelude::*, px, relative, size, Animation, AnimationExt,
     AnyElement, App, Bounds, ClickEvent, Context, Div, ElementId, FocusHandle, FontWeight, Hsla,

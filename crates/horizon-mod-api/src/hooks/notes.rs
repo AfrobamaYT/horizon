@@ -1,5 +1,4 @@
 //! Notes that belong to no one hook or helper: the general catalog, counterpart and roadmap prose.
-
 pub trait Notes {
     #[notes = r##"## Named hook catalog (draft)
 

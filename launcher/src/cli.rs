@@ -12,13 +12,11 @@ use horizon_launcher::native_mods;
 use horizon_launcher::other_launchers;
 use horizon_launcher::server_list;
 use horizon_launcher::storage::{Category, Storage};
-
 #[derive(Clone, Debug)]
 enum ClearStorage {
     All,
     Row(Category),
 }
-
 fn parse_storage_row(value: &str) -> Result<ClearStorage, String> {
     use clap::ValueEnum;
     if value == "all" {
@@ -34,7 +32,6 @@ fn parse_storage_row(value: &str) -> Result<ClearStorage, String> {
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-
 #[derive(Parser)]
 #[command(
     name = "horizon-launcher",
@@ -48,7 +45,6 @@ struct Cli {
     #[command(subcommand)]
     command: Option<Cmd>,
 }
-
 #[derive(Subcommand)]
 enum JavaCmd {
     /// The Java runtimes Horizon downloaded from Mojang and the ones installed on this computer
@@ -57,7 +53,6 @@ enum JavaCmd {
     /// version's JSON (java-runtime-delta)
     Install { java: String },
 }
-
 #[derive(Subcommand)]
 enum RustCmd {
     /// Whether it is installed, its version and whether this computer can link with it
@@ -67,7 +62,6 @@ enum RustCmd {
     /// Delete the toolchain and the native builds' Cargo home
     Remove,
 }
-
 #[derive(Subcommand)]
 enum ServersCmd {
     /// The servers, their folder and whether they run
@@ -122,7 +116,6 @@ enum ServersCmd {
     /// Take a server off the list (its folder stays)
     Forget { server: String },
 }
-
 #[derive(Subcommand)]
 enum AccountCmd {
     /// The signed-in accounts and which one plays
