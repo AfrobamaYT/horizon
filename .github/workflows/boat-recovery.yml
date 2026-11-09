@@ -21,7 +21,8 @@ jobs:
       actions: write
     steps:
       # ONLY the controller workflow's trusted default-branch revision. Never use
-      # workflow_run.head_sha, PR refs, artifacts, or files from the triggering PR.
+      # workflow_run.head_sha or PR refs here. The API script may parse bounded
+      # base-SHA metadata from a PR artifact, but never extracts or executes it.
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.workflow_sha }}

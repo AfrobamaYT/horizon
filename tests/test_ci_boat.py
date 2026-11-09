@@ -6,6 +6,11 @@ import sys
 from unittest.mock import patch
 import os
 import tempfile
+import io
+import json
+import zipfile
+import subprocess
+from types import SimpleNamespace
 from datetime import datetime, timezone
 
 spec = importlib.util.spec_from_file_location("boat_health", Path(__file__).parents[1] / "tools/ci/boat_health.py")
@@ -142,7 +147,7 @@ class BoatHealthTests(unittest.TestCase):
         for files in ([dict(filename="tools/ci/boat_health.py")], [dict(filename="renamed", previous_filename=".github/workflows/dyna-ci.yml")], [dict(filename="other")] * 300):
             with patch.object(controller, "api", side_effect=[dict(sha="same")] * 4 + [dict(files=files)]):
                 self.assertTrue(controller.unsupported_reason("repo", run, "trusted"))
-        with patch.object(controller, "api") as api:
+        with patch.object(controller, "api") as api, patch.object(controller, "recorded_base", return_value=""):
             self.assertIn("unavailable", controller.unsupported_reason("repo", dict(pull_requests=[]), "trusted"))
             api.assert_not_called()
 
@@ -156,6 +161,56 @@ class BoatHealthTests(unittest.TestCase):
         self.assertIn("page=2", urls[1])
         self.assertIn("status=in_progress", urls[2])
         self.assertIn("status=failure", urls[3])
+
+    def test_real_fork_shape_uses_validated_recorded_base(self):
+        # Observed API shape: run 42566379987 (KBroneZ/horizon), no PR association.
+        run = dict(id=42566379987, head_sha="72d5f90f5aacc33db72a0592ffd7c58ace36dbf0", pull_requests=[])
+        metadata = dict(run_id=str(run["id"]), attempt="1", head=run["head_sha"], base="b" * 40)
+        for field, value in [(None, None), ("run_id", "123"), ("head", "c" * 40), ("base", "not-a-sha"), ("attempt", "2")]:
+            record = dict(metadata)
+            if field:
+                record[field] = value
+            archive = io.BytesIO()
+            with zipfile.ZipFile(archive, "w") as zipped:
+                zipped.writestr("boat-base.json", json.dumps(record))
+            artifact = dict(id=99, name="boat-base-1", expired=False, size_in_bytes=len(archive.getvalue()))
+            with patch.object(controller, "api", return_value=dict(artifacts=[artifact])), patch.object(controller.subprocess, "run", return_value=SimpleNamespace(stdout=archive.getvalue())):
+                self.assertEqual(controller.recorded_base("repo", run), "" if field else "b" * 40)
+        with patch.object(controller, "recorded_base", return_value="b" * 40), patch.object(controller, "api", side_effect=[dict(sha="same")] * 4 + [dict(files=[])]):
+            self.assertEqual(controller.unsupported_reason("repo", run, "trusted"), "")
+
+    def test_metadata_artifact_is_bounded_and_never_extracted(self):
+        run = dict(id=123, head_sha="a" * 40)
+        for artifacts in ([], [dict(id=99, name="boat-base-1", expired=False, size_in_bytes=65537)]):
+            with patch.object(controller, "api", return_value=dict(artifacts=artifacts)), patch.object(controller.subprocess, "run") as download:
+                self.assertEqual(controller.recorded_base("repo", run), "")
+                download.assert_not_called()
+        for filename, data in [("../boat-base.json", "{}"), ("boat-base.json", "x" * 4097)]:
+            archive = io.BytesIO()
+            with zipfile.ZipFile(archive, "w") as zipped:
+                zipped.writestr(filename, data)
+            artifact = dict(id=99, name="boat-base-1", expired=False, size_in_bytes=len(archive.getvalue()))
+            with patch.object(controller, "api", return_value=dict(artifacts=[artifact])), patch.object(controller.subprocess, "run", return_value=SimpleNamespace(stdout=archive.getvalue())):
+                self.assertEqual(controller.recorded_base("repo", run), "")
+
+    def test_sweep_continues_after_one_candidate_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            event = Path(directory) / "event.json"
+            event.write_text("{}")
+            with patch.dict(os.environ, dict(GITHUB_REPOSITORY="repo", GITHUB_EVENT_NAME="schedule", GITHUB_EVENT_PATH=str(event), GITHUB_WORKFLOW_SHA="trusted")), patch.object(controller, "api", return_value=dict(id=123)), patch.object(controller, "candidates", return_value=[dict(id=1), dict(id=2)]), patch.object(controller, "consider", side_effect=[RuntimeError("refused"), None]) as consider, patch.object(controller, "log") as log:
+                controller.main()
+            self.assertEqual([call.args[1]["id"] for call in consider.call_args_list], [1, 2])
+            self.assertIn("Run 1", log.call_args.args[0])
+
+    def test_prior_api_failure_forces_github_instead_of_aborting(self):
+        for failure in (subprocess.CalledProcessError(1, "gh"), json.JSONDecodeError("bad", "", 0), KeyError("jobs")):
+            with tempfile.TemporaryDirectory() as directory:
+                output, summary = Path(directory) / "output", Path(directory) / "summary"
+                with patch.dict(os.environ, dict(GITHUB_REPOSITORY="repo", GITHUB_RUN_ID="123", GITHUB_RUN_ATTEMPT="2", BOAT_CI="off", AUTHOR="alice", ACTOR="alice", GITHUB_OUTPUT=str(output), GITHUB_STEP_SUMMARY=str(summary))), patch.object(boat, "api", side_effect=failure):
+                    boat.main()
+                self.assertIn("forced_github=true", output.read_text())
+                self.assertIn("label=ubuntu-latest", output.read_text())
+                self.assertIn("history is unavailable", summary.read_text())
 
     def test_allowlist_and_switch(self):
         for enabled, author, actor in [("off", "alice", "alice"), ("on", "bob", "alice"), ("on", "alice", "bob")]:

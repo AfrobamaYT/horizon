@@ -6,7 +6,10 @@ It neither downloads nor executes code from the triggering PR.
 """
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
+import io
 import json
+import re
+import zipfile
 import os
 import subprocess
 import time
@@ -58,6 +61,26 @@ def recover(repo, run):
     post(path + "/rerun")
 
 
+def recorded_base(repo, run):
+    """Read a bounded metadata artifact, never extract or execute PR content."""
+    artifacts = api(f"repos/{repo}/actions/runs/{run['id']}/artifacts?per_page=100")["artifacts"]
+    matches = [item for item in artifacts if item["name"] == "boat-base-1" and not item["expired"]]
+    if len(matches) != 1 or matches[0]["size_in_bytes"] > 65536:
+        return ""
+    archive = subprocess.run(["gh", "api", f"repos/{repo}/actions/artifacts/{matches[0]['id']}/zip"],
+                             check=True, capture_output=True).stdout
+    with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
+        entries = zipped.infolist()
+        if len(entries) != 1 or entries[0].filename != "boat-base.json" or entries[0].file_size > 4096:
+            return ""
+        metadata = json.loads(zipped.read(entries[0]))
+    if (not isinstance(metadata, dict) or metadata.get("run_id") != str(run["id"])
+            or metadata.get("attempt") != "1" or metadata.get("head") != run["head_sha"]):
+        return ""
+    base = metadata.get("base")
+    return base if isinstance(base, str) and re.fullmatch(r"[0-9a-f]{40}", base) else ""
+
+
 def unsupported_reason(repo, run, trusted_ref):
     """Require the original merge's trusted base to contain our exact routing gate.
 
@@ -65,9 +88,14 @@ def unsupported_reason(repo, run, trusted_ref):
     can retrofit old runs, or execute PR content to find out whether it can.
     """
     pulls = run.get("pull_requests", [])
-    if len(pulls) != 1:
-        return "original PR base SHA is unavailable or ambiguous"
-    base = pulls[0]["base"]["sha"]
+    if len(pulls) == 1:
+        base = pulls[0]["base"]["sha"]
+    elif not pulls:
+        base = recorded_base(repo, run)
+        if not base:
+            return "original PR base metadata is unavailable or invalid"
+    else:
+        return "original PR base SHA is ambiguous"
     paths = ("tools/ci/boat_health.py", ".github/workflows/dyna-ci.yml")
     for path in paths:
         try:
@@ -130,7 +158,10 @@ def main():
         consider(repo, run, workflow, os.environ["GITHUB_WORKFLOW_SHA"])
     else:
         for run in candidates(repo, workflow):
-            consider(repo, run, workflow, os.environ["GITHUB_WORKFLOW_SHA"])
+            try:
+                consider(repo, run, workflow, os.environ["GITHUB_WORKFLOW_SHA"])
+            except (subprocess.CalledProcessError, RuntimeError, KeyError, ValueError, zipfile.BadZipFile) as failure:
+                log(f"Run {run['id']}: recovery inspection failed ({type(failure).__name__}); continuing sweep.")
 
 
 if __name__ == "__main__":
