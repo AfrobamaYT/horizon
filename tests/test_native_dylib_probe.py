@@ -37,3 +37,36 @@ class PreflightTests(unittest.TestCase):
             (sdk / "horizon-prebuilt.json").write_text(json.dumps({"rustc": compiler, "files": {}}))
             with self.assertRaisesRegex(ValueError, "pinned"):
                 probe.preflight(sdk, compiler)
+
+
+ALLOC = "_RNvCs5fGHjzWXRav_7___rustc12___rust_alloc"
+BACKTRACE = "_RINvNtNtCs9q_3std3sys9backtrace28___rust_begin_short_backtraceINtNtCsi_5alloc3vec3VecEE"
+
+
+class WindowsAllocatorTests(unittest.TestCase):
+    def verdict(self, tables):
+        original = probe.pe_symbols
+        probe.pe_symbols = lambda image: tables[image.name]
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                return probe.windows_allocator([Path(name) for name in tables], None, Path(directory) / "rows.json")
+        finally:
+            probe.pe_symbols = original
+
+    def test_game_without_allocator_and_imports_from_std_pass(self):
+        rows = self.verdict({
+            "horizon-client.exe": ([], {"std.dll": [ALLOC]}),
+            "horizon_client.dll": ([BACKTRACE], {"std.dll": [ALLOC]}),
+            "std.dll": ([ALLOC], {}),
+        })
+        self.assertEqual(rows["horizon_client.dll"]["exports"], [])
+
+    def test_second_exporter_refused(self):
+        with self.assertRaisesRegex(ValueError, "one image exporting"):
+            self.verdict({"horizon-client.exe": ([], {"std.dll": [ALLOC]}),
+                          "horizon_client.dll": ([ALLOC], {}), "std.dll": ([ALLOC], {})})
+
+    def test_import_from_a_non_exporter_refused(self):
+        with self.assertRaisesRegex(ValueError, "other than std.dll"):
+            self.verdict({"horizon-client.exe": ([], {"horizon_client.dll": [ALLOC]}),
+                          "horizon_client.dll": ([], {}), "std.dll": ([ALLOC], {})})

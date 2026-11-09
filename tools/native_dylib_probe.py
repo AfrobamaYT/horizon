@@ -15,7 +15,9 @@ import prebuilt_game as sdk_tools
 
 FIXTURES = Path(__file__).with_suffix("")
 PINNED = sdk_tools.ROOT / "launcher/src/rust_toolchain.rs"
-ALLOCATOR = "___rust_alloc"
+# The allocator shim's entry points. Matched as name suffixes: mangled names that merely mention `alloc`
+# (backtrace frames over `alloc::vec`) are not an allocator.
+ALLOCATOR = tuple(f"___rust_{kind}" for kind in ("alloc", "dealloc", "realloc", "alloc_zeroed"))
 
 
 def pinned_release():
@@ -71,9 +73,9 @@ def windows_allocator(images, game, evidence):
     for image in images:
         exported, imported = pe_symbols(image)
         rows[image.name] = {
-            "exports": [name for name in exported if ALLOCATOR in name],
-            "imports": {dll: [n for n in names if ALLOCATOR in n] for dll, names in imported.items()
-                        if any(ALLOCATOR in n for n in names)},
+            "exports": [name for name in exported if name.endswith(ALLOCATOR)],
+            "imports": {dll: [n for n in names if n.endswith(ALLOCATOR)] for dll, names in imported.items()
+                        if any(n.endswith(ALLOCATOR) for n in names)},
         }
     evidence.write_text(json.dumps(rows, indent=2))
     definitions = [name for name, row in rows.items() if row["exports"]]
@@ -195,19 +197,11 @@ def main():
         # std's DLL always exports the allocator shim; the game exports one only if it has its own allocator.
         exported, _ = pe_symbols(std_runtime[0])
         names = {kind: next(n for n in exported if n.endswith(f"___rust_{kind}")) for kind in ("alloc", "dealloc")}
-        shipped_rows = {}
-        for image in [shipped_exe, game, *std_runtime]:
-            image_exports, image_imports = pe_symbols(image)
-            shipped_rows[image.name] = {
-                "exports": [n for n in image_exports if "___rust_" in n and ("alloc" in n or "___rdl_" in n)],
-                "imports": {dll: [n for n in found if "alloc" in n and ("___rust_" in n or "___rdl_" in n)]
-                            for dll, found in image_imports.items()},
-            }
-        (shipped / "allocator-imports.json").write_text(json.dumps(shipped_rows, indent=2))
-        print("shipped route allocator imports and exports:\n" + json.dumps(shipped_rows, indent=2))
-        exporters = [name for name, row in shipped_rows.items() if row["exports"]]
-        if len(exporters) != 1:
-            failures.append(f"the shipped route has {len(exporters)} images exporting the Rust allocator: {exporters}")
+        try:
+            windows_allocator([shipped_exe, game, *std_runtime], game, shipped / "allocator-imports.json")
+        except ValueError as error:
+            failures.append(f"shipped route: {error}")
+        print("shipped route allocator imports and exports:\n" + (shipped / "allocator-imports.json").read_text())
         # 3. At run time, which heap each allocator draws from (classified, never freed across).
         heap_exe = shipped / "route_heap.exe"
         run([*route, "--crate-name=route_heap", *extern("horizon_client"), *extern("mod_api"),
