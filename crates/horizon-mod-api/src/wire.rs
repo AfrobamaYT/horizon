@@ -1183,7 +1183,17 @@ mod tests {
                 }
             }
         }
-        assert_eq!(Nonempty::LAYOUT, String::LAYOUT);
+        #[derive(mod_api::Wire, Debug, PartialEq)]
+        struct Outer {
+            first: u8,
+            checked: Nonempty,
+            last: u32,
+        }
+        assert_eq!(
+            Reader::decode::<Outer>(&[1, 0, 0, 0, 0]),
+            Err(WireError::Invalid("Nonempty"))
+        );
+        assert_eq!(Nonempty::layout(&mut vec![]), String::layout(&mut vec![]));
         let mut out = Writer::new();
         out.put(&Nonempty("ab".into()));
         assert_eq!(out.bytes(), &[2, 0, 0, 0, 97, 98]);
@@ -1195,6 +1205,42 @@ mod tests {
             Reader::decode::<Nonempty>(&[0, 0, 0, 0]),
             Err(WireError::Invalid("Nonempty"))
         );
+    }
+
+    #[test]
+    fn derived_owned_fields_forward_ownership() {
+        struct Resource;
+        impl Wire for Resource {
+            const MIN: usize = 1;
+            const LAYOUT: u64 = layout_name("test resource");
+            fn put(&self, out: &mut Writer) {
+                out.put(&1u8);
+            }
+            fn put_owned(self, out: &mut Writer) {
+                out.put(&2u8);
+            }
+            fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+                let _: u8 = input.take()?;
+                Ok(Self)
+            }
+        }
+        #[derive(mod_api::Wire)]
+        struct Owned {
+            resource: Resource,
+        }
+        #[derive(mod_api::Wire)]
+        enum Payload {
+            Resource(Resource),
+        }
+        let mut out = Writer::new();
+        out.put(&Owned { resource: Resource });
+        assert_eq!(out.bytes(), &[1]);
+        out.clear();
+        out.put_owned(Owned { resource: Resource });
+        assert_eq!(out.bytes(), &[2]);
+        out.clear();
+        out.put_owned(Payload::Resource(Resource));
+        assert_eq!(out.bytes(), &[0, 0, 0, 0, 2]);
     }
 
     #[test]

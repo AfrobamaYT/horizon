@@ -22,6 +22,18 @@ pub(crate) fn expand(mut input: DeriveInput) -> syn::Result<TokenStream> {
             param.bounds.push(parse_quote!(::mod_api::wire::Wire));
         }
     }
+    if let Some(via) = &via {
+        let where_clause = input.generics.make_where_clause();
+        where_clause
+            .predicates
+            .push(parse_quote!(#via: ::mod_api::wire::Wire));
+        where_clause
+            .predicates
+            .push(parse_quote!(#via: for<'__wire> ::core::convert::From<&'__wire Self>));
+        where_clause
+            .predicates
+            .push(parse_quote!(Self: ::core::convert::TryFrom<#via>));
+    }
     let (imp, ty, clause) = input.generics.split_for_impl();
     let w = quote!(::mod_api::wire);
     if let Some(via) = via {
@@ -249,6 +261,7 @@ mod tests {
             "struct Borrow<'a> { value: Vec<&'a u8> }",
             "struct Borrow { value: &'static [u8] }",
             "struct Borrow { value: &'static mut str }",
+            "struct Borrow<'a> { value: Option<Other<'a>> }",
         ] {
             let err = expand(syn::parse_str(source).unwrap()).unwrap_err();
             assert!(err.to_string().contains("Wire is for owned values"));
