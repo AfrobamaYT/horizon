@@ -1443,7 +1443,7 @@ mod tests {
     /// loaded, as `native_machines`' tests make one; None without them.
     fn server_game<'a>(
         resources: &'a mut Option<std::sync::Arc<crate::game::Resources>>,
-    ) -> Option<Game<'a>> {
+    ) -> Option<Box<Game<'a>>> {
         use crate::game::*;
         let root = std::env::var_os("HORIZON_TEST_RESOURCES")
             .map(std::path::PathBuf::from)
@@ -1473,18 +1473,22 @@ mod tests {
         options.resources = root.clone();
         options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
         let res = resources.insert(loaded.resources);
-        let mut game = Game::new(
-            res,
-            loaded.pack,
-            loaded.gui.unwrap(),
-            options,
-            settings,
-            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
-                root.clone(),
-            )),
-            None,
-        )
-        .unwrap();
+        // Keep nested fixture helpers from copying the large Game value
+        // through several test-thread stack frames.
+        let mut game = Box::new(
+            Game::new(
+                res,
+                loaded.pack,
+                loaded.gui.unwrap(),
+                options,
+                settings,
+                Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                    root.clone(),
+                )),
+                None,
+            )
+            .unwrap(),
+        );
         game.options.dedicated = Some(Vec::new());
         game.world.chunks.insert(
             (0, 0),
@@ -1956,7 +1960,7 @@ mod tests {
 
     fn source_silence_game(
         resources: &mut Option<std::sync::Arc<crate::game::Resources>>,
-    ) -> Option<Game<'_>> {
+    ) -> Option<Box<Game<'_>>> {
         let mut game = server_game(resources)?;
         // Observe the server's real emission requests without a camera or render tick.
         game.particles.requested = Some(Vec::new());
