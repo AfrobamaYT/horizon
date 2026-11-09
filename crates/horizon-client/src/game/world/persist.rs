@@ -5329,6 +5329,35 @@ mod summon_uuid_conflict_tests {
 
     #[test]
     #[ignore = "needs prepared resources"]
+    fn data_load_keeps_passenger_links_on_both_sides_of_an_offlevel_object() {
+        with_game(|game, _| {
+            assert!(summon(
+                game,
+                "data_root",
+                175,
+                &riders(&[pig(
+                    "data_rejected",
+                    175,
+                    &riders(&[pig("data_leaf", 176, "")])
+                )])
+            ));
+            let root = mob_tagged(game, "data_root")[0];
+            let leaf = mob_tagged(game, "data_leaf")[0];
+            let rejected = mount(game, leaf).unwrap();
+            for tag in ["data_root", "data_leaf"] {
+                assert!(game.run_command(&format!(
+                    "data merge entity @e[tag={tag},limit=1] {{Health:7.0f}}"
+                )));
+            }
+            assert_eq!(mount(game, leaf), Some(rejected));
+            assert_eq!(game.mob_object(root).unwrap().extra.rider, Some(rejected));
+            assert_eq!(game.mob_object(rejected).unwrap().extra.rider, Some(leaf));
+            assert!(game.mob_object(leaf).unwrap().extra.passenger);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
     fn dismount_uses_the_retained_vehicle_and_repairs_both_object_lists() {
         with_game(|game, _| {
             assert!(summon(

@@ -405,6 +405,16 @@ impl Game<'_> {
                     // Runtime identity and lifetime stay on the resident owner.
                     new.join = slot.join;
                     let old = horizon_client::join_seq::store_back(slot, new);
+                    // Entity.load does not replace the live passenger graph or
+                    // the runtime seating state, even for an off-level vehicle.
+                    slot.extra.mount = old.extra.mount;
+                    slot.extra.rider = old.extra.rider;
+                    slot.extra.passenger = old.extra.passenger;
+                    slot.extra.vehicle_order = old.extra.vehicle_order;
+                    slot.extra.seat = old.extra.seat;
+                    slot.extra.vehicle_body = old.extra.vehicle_body;
+                    slot.extra.boarding_cooldown = old.extra.boarding_cooldown;
+                    slot.rider = old.rider;
                     // Runtime-only state (AI, animation) carries over.
                     if keep_liked_player {
                         slot.extra.tame = old.extra.tame;
