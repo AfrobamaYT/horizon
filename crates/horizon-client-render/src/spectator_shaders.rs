@@ -113,6 +113,16 @@ pub fn chains() -> impl Iterator<Item = &'static str> {
     table().chains()
 }
 
+/// Entities whose registration requires this chain, for load diagnostics only.
+impl SpectatorShaders {
+    pub(crate) fn entities_for_chain(&self, id: &str) -> Vec<&str> {
+        self.by_entity
+            .iter()
+            .filter_map(|(entity, chain)| (chain == id).then_some(entity.as_str()))
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,15 +179,5 @@ mod tests {
                 "example:wisp_vision"
             ]
         );
-    }
-}
-
-/// Entities whose registration requires this chain, for load diagnostics only.
-impl SpectatorShaders {
-    pub(crate) fn entities_for_chain(&self, id: &str) -> Vec<&str> {
-        self.by_entity
-            .iter()
-            .filter_map(|(entity, chain)| (chain == id).then_some(entity.as_str()))
-            .collect()
     }
 }
