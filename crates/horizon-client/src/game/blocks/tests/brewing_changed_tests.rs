@@ -7,7 +7,8 @@ use horizon_client::{brewing::BrewingStand, containers::BlockEntity, items::Item
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn starting_a_brew_marks_the_chunk() {
-    let mut game = server_game();
+    let mut game_resources = None;
+    let mut game = server_game(&mut game_resources);
     let state = game
         .pack
         .assets

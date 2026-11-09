@@ -711,7 +711,8 @@ mod furnace_changed_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_finished_smelt_marks_the_chunk() {
-        let mut game = server_game();
+        let mut game_resources = None;
+        let mut game = server_game(&mut game_resources);
         let state = game
             .pack
             .assets
@@ -760,7 +761,8 @@ mod furnace_changed_tests {
     fn a_refuel_while_lit_marks_the_chunk() {
         // litTimeRemaining goes 1 -> 0 and the furnace takes new fuel in the
         // same tick: it stays LIT, and consuming the fuel sets changed.
-        let mut game = server_game();
+        let mut game_resources = None;
+        let mut game = server_game(&mut game_resources);
         let state = game
             .pack
             .assets

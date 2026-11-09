@@ -18551,7 +18551,8 @@ mod escape_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn an_item_escapes_a_block_at_its_own_randoms_speed() {
-        let mut game = server_game();
+        let mut game_resources = None;
+        let mut game = server_game(&mut game_resources);
         let feet = horizon_core::geometry::Vec3::new(8.5, 70.0, 8.5);
         game.player = Some(horizon_client::motion::PlayerMotion::new(game.motion, feet).unwrap());
         game.world

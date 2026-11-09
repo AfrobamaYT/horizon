@@ -627,7 +627,8 @@ mod changed_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_released_bee_marks_the_chunk() {
-        let mut game = server_game();
+        let mut game_resources = None;
+        let mut game = server_game(&mut game_resources);
         let key = (8, 64, 8);
         hive_at(
             &mut game,
@@ -662,7 +663,8 @@ mod changed_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_bee_going_in_marks_the_chunk() {
-        let mut game = server_game();
+        let mut game_resources = None;
+        let mut game = server_game(&mut game_resources);
         let key = (8, 64, 8);
         hive_at(&mut game, key, Beehive::default());
         let kind = game.res.mob_types().get("minecraft:bee").unwrap().clone();
