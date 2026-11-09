@@ -11,7 +11,7 @@ The launcher generates the private horizon-mixins input; mods name a Rust `with`
 not a source payload file or expression selector.
 
 An API point injection names a crate-root `with` function and listens at an admitted head or return
-slot ([shape rules](#which-methods-are-points)). The prebuilt game fills those slots at load with the
+slot ([shape rules](#which-functions-are-points)). The prebuilt game fills those slots at load with the
 mods' listeners, without changing game source.
 
 There are two access tiers, and they never mix:
@@ -116,7 +116,7 @@ hash or missing target is refused, not silently redirected. Points order by desc
 then registration (dependency) order; ties within a mod use inject id. Sites retain priority, mod id
 and inject id order. `modify_arg` is accepted on listed head slots but is a typed refusal on the
 source route. `modify_call_arg` remains a typed refusal until its operand payload is specified.
-API call sites, API source injects, `replace`, locals and extension fields remain refused.
+Native API call sites, API source injects, `replace`, locals and extension fields remain refused.
 The `native` table accepts only build pins and supporting modules; unknown fields are rejected.
 API head/return functions also load from wasm, with the same record.
 
@@ -410,7 +410,7 @@ fails at that registration line, naming the injection. `return` uses the point's
 listener and `raw::tick_return` constructor. Raw listeners work against the prebuilt game as
 well as source builds; unlisted source points and modules require a game rebuild.
 
-Both routes check the actual game's metadata before compiling mods:
+Native slot and source routes check the actual game's metadata before compiling mods:
 
 - `E_INTERNAL_MISSING`: the declared path is absent (type shapes not exposed as internals
   cannot be declared). Run `cargo horizon-mod internals sync` to discover this pin's used
@@ -457,7 +457,9 @@ A changed or missing context refuses with `E_INJECT_LOST`. Two calls to the same
 contexts are also lost, even when `nth` still matches: the tool cannot prove which identical statement
 was intended. Refresh a moved ordinal with `inject update`; reselect a lost call with `inject add`.
 Function signature changes and missing functions use `E_INJECT_CHANGED` and `E_INJECT_MISSING` at the
-unified routing boundary. Freshness errors never silently select a different call.
+unified routing boundary. `E_INJECT_NO_SLOT` reports an unsupported route or kind, with its reason
+and requested slot declaration. `E_INJECT_INVALID` reports malformed declaration fields.
+Freshness errors never silently select a different call.
 
 ```toml
 [[inject]]
@@ -506,10 +508,5 @@ These call kinds are not available to wasm mods.
   atomic load and a branch.
 - A point injection's `hook`, bindings and horizon-mixins fields are refused: a hook is its own `Hooks` method,
   and the record carries what the point passes.
-- A helper on a `GameLevel` method that takes `&mut self` (`native_random_tick`, `native_tick_block`,
-  `native_perform_bonemeal`, `native_is_bonemeal_success`), bind
-  `{ name = "level", ty = "&mut dyn crate::mod_api::LevelRandomHost", value = "&mut *self" }` for attachments and
-  `random()`. Scheduling and `set_block_property` stay on the `LevelTicksHost` and `LevelWriteHost` the hook points
-  pass.
-- A hook point's contract is versioned: `hook_version` names the contract a mod built against. A contract
-  never changes; an incompatible change adds a version.
+- `[[inject]]` has no binding or hook-version fields. Implement a catalog hook through `Hooks`;
+  use the slot's generated callback signature for an injection.
