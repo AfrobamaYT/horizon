@@ -1801,21 +1801,15 @@ mod iterative_tests {
             .spawn(|| {
                 use horizon_client_core::text::{Span, Style, Text as Engine};
                 for depth in [512, 513] {
-                    let mut text = Engine::empty();
-                    text.spans.push(Span {
-                        text: "leaf".into(),
-                        style: Style::default(),
-                    });
+                    let mut text = Engine::from_spans(vec![Span::new("leaf", Style::default())]);
                     for _ in 1..depth {
-                        let mut parent = Engine::empty();
-                        parent.spans.push(Span {
-                            text: "parent".into(),
-                            style: Style {
+                        text = Engine::from_spans(vec![Span::new(
+                            "parent",
+                            Style {
                                 hover: Some(std::sync::Arc::new(text)),
                                 ..Style::default()
                             },
-                        });
-                        text = parent;
+                        )]);
                     }
                     let api = text.try_into_api();
                     if depth == 513 {

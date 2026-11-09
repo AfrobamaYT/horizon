@@ -26,7 +26,7 @@ pub fn bracketed(inner: Text) -> Text {
 }
 fn hover_name(text: Text, name: &str) -> Text {
     text.with_style(&Style {
-        hover: Some(std::sync::Arc::new(Text::literal(name))),
+        hover: Some(std::sync::Arc::new(Text::untrusted(name))),
         ..Style::default()
     })
 }
@@ -733,7 +733,7 @@ impl ScoreEntry {
     pub fn owner_name(&self) -> Text {
         match &self.display {
             Some(d) => comp_text(d),
-            None => Text::literal(self.owner.clone()),
+            None => Text::untrusted(self.owner.clone()),
         }
     }
     pub fn format_value(&self, default: &NumberFormat) -> Text {

@@ -1373,7 +1373,10 @@ impl Game<'_> {
         } else {
             let line = Text::translate(
                 "chat.type.text",
-                &[self.player_display_name(), Text::literal(message.as_str())],
+                &[
+                    self.player_display_name(),
+                    Text::untrusted(message.as_str()),
+                ],
             );
             let focused = self.screen == Screen::Chat;
             self.ui.chat.add(

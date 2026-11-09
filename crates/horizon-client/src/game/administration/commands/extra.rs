@@ -897,12 +897,17 @@ impl Game<'_> {
         // `Component.object(new PlayerSprite(profile, true))`, encoded: `hat`
         // is left out at its default.
         let encoded_component = snbt::to_snbt(&Tag::compound([("player", profile_tag)]));
-        let mut head = Text::literal("\u{FFFC}");
-        head.spans[0].style.inline_object = Some(InlineObject::Player {
-            profile: json.into(),
-            hat: true,
-            fallback: format!("[{} head]", profile.name),
-        });
+        let head = Text::styled(
+            "\u{FFFC}",
+            Style {
+                inline_object: Some(InlineObject::Player {
+                    profile: json.into(),
+                    hat: true,
+                    fallback: format!("[{} head]", profile.name),
+                }),
+                ..Style::default()
+            },
+        );
         let item = |key: &str, args: &[Text], click: ClickEvent| {
             let inner = Text::translate(key, args)
                 .with_color(text::GREEN)
