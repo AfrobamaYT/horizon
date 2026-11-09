@@ -626,6 +626,9 @@ mod tests {
             .into_iter()
             .enumerate()
             .map(|(index, kind)| Inject {
+                local: None,
+                local_type: None,
+                position: None,
                 id: format!("listen_{index}"),
                 at: "game::Game<'_>::tick".into(),
                 kind,

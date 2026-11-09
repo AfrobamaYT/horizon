@@ -45,8 +45,10 @@ fn no_slot_reason(reason: NoSlotReason) -> &'static str {
         NoSlotReason::NotListed => tr("not listed"),
         NoSlotReason::KindHasNoSlot => tr("kind has no slot"),
         NoSlotReason::NativeOnly => tr("native-only place"),
-        NoSlotReason::WasmSitesPending => tr("wasm sites pending"),
-        NoSlotReason::LocalSlotsPending => tr("local slots pending (I5)"),
+        NoSlotReason::WasmSitesUnsupported => {
+            tr("wasm does not support internals or call-site injections; use a hook")
+        }
+        NoSlotReason::LocalSourceOnly => tr("modify_local requires native internals source rebuilding; use internals, or request a hook"),
         NoSlotReason::ExtensionSlotsPending => tr("extension slots pending (I6)"),
         NoSlotReason::ApiSitesUnsupported => tr("API call-site injections require internals"),
         NoSlotReason::SourcePending => tr("source injects pending (U5)"),
@@ -66,8 +68,8 @@ mod tests {
             NoSlotReason::NotListed,
             NoSlotReason::KindHasNoSlot,
             NoSlotReason::NativeOnly,
-            NoSlotReason::WasmSitesPending,
-            NoSlotReason::LocalSlotsPending,
+            NoSlotReason::WasmSitesUnsupported,
+            NoSlotReason::LocalSourceOnly,
             NoSlotReason::ExtensionSlotsPending,
             NoSlotReason::ApiSitesUnsupported,
             NoSlotReason::SourcePending,

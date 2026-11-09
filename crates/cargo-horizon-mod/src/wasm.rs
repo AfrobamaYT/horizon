@@ -626,6 +626,9 @@ mod route_tests {
 
     fn inject(id: &str, kind: Kind, access: Access, call: Option<&str>) -> Inject {
         Inject {
+            local: None,
+            local_type: None,
+            position: None,
             id: id.into(),
             at: "game::tick".into(),
             kind,

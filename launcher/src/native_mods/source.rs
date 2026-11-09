@@ -125,8 +125,26 @@ pub(super) fn stage(
                 let ordinal = inject.nth.expect("validated call ordinal");
                 let ctx = inject.ctx.clone().expect("validated statement identity");
                 calls
-                    .entry((target.clone(), selector.clone(), ordinal, ctx.clone()))
+                    .entry((
+                        target.clone(),
+                        selector.clone(),
+                        ordinal,
+                        ctx.clone(),
+                        inject.local.clone(),
+                        inject.local_type.clone(),
+                        inject
+                            .position
+                            .map(|p| p == horizon_mod_package::manifest::inject::Position::After),
+                    ))
                     .or_insert(Declaration {
+                        local: inject.local.as_ref().map(|binding| {
+                            horizon_mod_api_gen::sites::Local {
+                                binding: binding.clone(),
+                                ty: inject.local_type.clone().expect("validated type"),
+                                after: inject.position
+                                    == Some(horizon_mod_package::manifest::inject::Position::After),
+                            }
+                        }),
                         target,
                         selector,
                         ordinal: Some(ordinal),
@@ -423,6 +441,7 @@ fn private_calls_use_ctx_shared_ids_and_real_registration_priorities() {
         &root,
         &entries,
         &[Declaration {
+            local: None,
             target: target.into(),
             selector: callee.into(),
             ordinal: Some(0),
@@ -516,4 +535,79 @@ fn unsupported_source_signatures_are_refused() {
             Err(InjectError::Invalid { field: "at", .. })
         ));
     }
+}
+
+#[test]
+fn local_source_stage_keeps_real_binding_and_registers_each_listener() {
+    use super::{api, internals::Catalog, Bundle};
+    let root = std::env::temp_dir().join(format!("horizon-local-stage-{}", std::process::id()));
+    let file = root.join("crates/horizon-client/src/game.rs");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(root.join("crates/horizon-mod-api-gen/slots")).unwrap();
+    std::fs::create_dir_all(root.join("crates/horizon-mod-points")).unwrap();
+    std::fs::write(
+        root.join("crates/horizon-mod-points/Cargo.toml"),
+        "[package]\nname='horizon-mod-points'\n",
+    )
+    .unwrap();
+    let source = "fn f() -> i32 { let mut n = 3; sink(n); n * 2 } fn sink(n: i32) {}";
+    let metadata = serde_json::json!([
+        {"path":"horizon_client::game::f", "kind":"fn", "signature":"fn f() -> i32", "hash":"fingerprint"},
+        {"path":"horizon_client::game::sink", "kind":"fn", "signature":"fn sink(n: i32)", "hash":"sink"}
+    ]).to_string();
+    let entries = horizon_mod_api_gen::internals_view::catalog(&metadata).unwrap();
+    let local = horizon_mod_api_gen::sites::Local {
+        binding: "n".into(),
+        ty: "i32".into(),
+        after: false,
+    };
+    let request = horizon_mod_api_gen::sites::Declaration {
+        target: "horizon_client::game::f".into(),
+        selector: "horizon_client::game::sink".into(),
+        ordinal: Some(0),
+        ctx: String::new(),
+        origin: "discovery".into(),
+        local: Some(local),
+    };
+    std::fs::write(&file, source).unwrap();
+    let discovered = horizon_mod_api_gen::sites::source::stage(&root, &entries, &[request])
+        .unwrap()
+        .remove(0);
+    std::fs::write(&file, source).unwrap();
+    let dir = root.join("catalog");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("points.json"), r#"{"points":[],"sites":[]}"#).unwrap();
+    std::fs::write(dir.join("internals.json"), metadata).unwrap();
+    let mut manifest = declaration("one", "add", "horizon_client::game::f", "head");
+    let entry = &mut manifest.inject[0];
+    entry.kind = Kind::ModifyLocal;
+    entry.call = Some("horizon_client::game::sink".into());
+    entry.nth = Some(0);
+    entry.ctx = Some(discovered.ctx);
+    entry.local = Some("n".into());
+    entry.local_type = Some("i32".into());
+    entry.position = Some(horizon_mod_package::manifest::inject::Position::Before);
+    let mut second = entry.clone();
+    second.id = "multiply".into();
+    manifest.inject.push(second);
+    let bundle = Bundle {
+        manifest,
+        dir: root.clone(),
+    };
+    stage(&root, &dir, std::slice::from_ref(&bundle)).unwrap();
+    let catalog = Catalog::read(&dir).unwrap();
+    assert_eq!(catalog.sites.len(), 1);
+    let facade = catalog.facade(&bundle.manifest).unwrap();
+    assert!(facade.source.contains(&catalog.sites[0].constructor()));
+    let main = api::main_rs(
+        "/* MOD_SLOTS */",
+        &[&bundle.manifest],
+        &catalog.points,
+        &catalog.sites,
+    );
+    assert_eq!(main.matches("mod_0::callback(receiver)").count(), 2);
+    assert!(main.contains("\"add\""));
+    assert!(main.contains("\"multiply\""));
+    assert!(std::fs::read_to_string(file).unwrap().contains("& mut n"));
+    std::fs::remove_dir_all(root).unwrap();
 }

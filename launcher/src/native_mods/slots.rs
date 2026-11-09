@@ -49,6 +49,15 @@ fn selected<'a>(sites: &'a [Site], entry: &Inject) -> Option<&'a Site> {
             && Some(&site.call) == entry.call.as_ref()
             && Some(&site.ctx) == entry.ctx.as_ref()
             && Some(site.ordinal) == entry.nth
+            && site.local.as_ref().map(|l| (&l.binding, &l.ty, l.after))
+                == entry.local.as_ref().map(|name| {
+                    (
+                        name,
+                        entry.local_type.as_ref().expect("validated type"),
+                        entry.position
+                            == Some(horizon_mod_package::manifest::inject::Position::After),
+                    )
+                })
     })
 }
 
@@ -141,6 +150,7 @@ pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<Route
                 Kind::Head
                 | Kind::Return
                 | Kind::BeforeCall
+                | Kind::ModifyLocal
                 | Kind::AfterCall
                 | Kind::ModifyValue
                 | Kind::WrapCall
