@@ -175,7 +175,9 @@ impl WorldOptions {
         }
         let all_presets = defaults
             .iter()
-            .map(|id| (*id).to_owned())
+            .copied()
+            .chain([crate::save::WorldPreset::Debug.id()])
+            .map(str::to_owned)
             .chain(
                 self.presets
                     .keys()

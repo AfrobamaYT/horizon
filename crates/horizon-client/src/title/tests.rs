@@ -150,12 +150,17 @@ fn an_empty_normal_world_preset_tag_falls_back_to_all_registry_presets() {
     };
     assert_eq!(
         options.preset_order.len(),
-        crate::save::WorldPreset::ALL.len() + 1
+        crate::save::WorldPreset::ALL.len() + 2
     );
     for preset in crate::save::WorldPreset::ALL {
         assert!(options.preset_order.iter().any(|id| id == preset.id()));
     }
     options.cycle_preset(-1);
+    assert_eq!(options.preset_id(), "example:islands");
+    options.cycle_preset(-1);
+    assert_eq!(options.preset_id(), "minecraft:debug_all_block_states");
+    assert_eq!(options.world_type, crate::save::WorldPreset::Debug);
+    options.cycle_preset(1);
     assert_eq!(options.preset_id(), "example:islands");
     options.cycle_preset(1);
     assert_eq!(options.preset_id(), "minecraft:normal");
