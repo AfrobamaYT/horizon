@@ -41,7 +41,14 @@ fn loaded_queue_join_save_refuses_without_losing_remaining_rows() {
         let tags = (1..=2)
             .map(|i| {
                 Tag::compound([
-                    ("id", Tag::String("minecraft:armor_stand".into())),
+                    ("id", Tag::String("minecraft:item".into())),
+                    (
+                        "Item",
+                        horizon_client::save::item_to_nbt(&ItemStack::new(
+                            "minecraft:diamond",
+                            i as u32,
+                        )),
+                    ),
                     ("UUID", Tag::IntArray(vec![i, 2, 3, 4])),
                     (
                         "Pos",
@@ -72,7 +79,7 @@ fn loaded_queue_join_save_refuses_without_losing_remaining_rows() {
             2,
             "both loaded rows must notify"
         );
-        assert_eq!(game.armor_stands.len(), 2, "both rows remain live");
+        assert_eq!(game.dropped.len(), 2, "both rows remain live");
         game.save.flush().unwrap();
         let disk = game.save.load_entities(0, 0);
         assert!(
