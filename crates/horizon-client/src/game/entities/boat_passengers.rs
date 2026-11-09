@@ -110,7 +110,11 @@ impl Game<'_> {
     }
     /// `getPassengers().size()` of boat `id`.
     pub(super) fn boat_passengers(&self, id: u32) -> usize {
-        self.boat_players(id) + self.boat_mobs(id).len()
+        self.boat_players(id)
+            + self
+                .mob_objects()
+                .filter(|m| m.extra.mount == Some(id) && !m.removed)
+                .count()
     }
     /// `AbstractBoat.canAddPassenger`: a seat is free and the boat is not
     /// under water.
@@ -122,7 +126,12 @@ impl Game<'_> {
     /// mob.
     pub(super) fn player_boat_seat(&self, i: usize) -> Vec3 {
         let b = &self.boats[i];
-        let count = self.boat_players(b.id).max(1) + self.boat_mobs(b.id).len();
+        let players = self.boat_players(b.id);
+        let count = if self.persist.off_level.is_empty() {
+            players.max(1) + self.boat_mobs(b.id).len()
+        } else {
+            self.boat_passengers(b.id) + usize::from(players == 0)
+        };
         b.seat(0, count, false, PLAYER_RIDING_OFFSET, false)
     }
     /// `getRootVehicle` of mob `j`: the mob or boat at the bottom of what it
@@ -491,19 +500,37 @@ impl Game<'_> {
     pub(super) fn eject_boat_mobs(&mut self, i: usize, broken: bool) {
         let b = &self.boats[i];
         let (id, y) = (b.id, b.position.y);
-        for j in self.boat_mobs(id) {
-            let m = &self.mobs[j];
-            let at = if broken {
-                Vec3::new(m.position.x, m.position.y.max(y), m.position.z)
-            } else {
-                self.boat_dismount_target(i, f64::from(m.width()), m.yaw)
+        for rider in self.mob_passenger_ids(id) {
+            if !self.native_mob_may_ride(rider, id, false) {
+                continue;
+            }
+            let Some(m) = self.mob_object(rider).filter(|m| m.extra.mount == Some(id)) else {
+                continue;
             };
-            let m = &mut self.mobs[j];
+            let at = if broken {
+                self.removed_vehicle_dismount_point(
+                    m.position,
+                    f64::from(m.width()),
+                    f64::from(m.height()),
+                    y,
+                )
+            } else if let Some(i) = self.boats.iter().position(|b| b.id == id) {
+                self.boat_dismount_target(i, f64::from(m.width()), m.yaw)
+            } else {
+                self.removed_vehicle_dismount_point(
+                    m.position,
+                    f64::from(m.width()),
+                    f64::from(m.height()),
+                    y,
+                )
+            };
+            let m = self.mob_object_mut(rider).unwrap();
             m.extra.mount = None;
             m.extra.passenger = false;
             m.extra.boarding_cooldown = BOARDING_COOLDOWN;
             m.position = at;
             m.previous = at;
+            self.snap_mob_passengers(rider);
         }
     }
 }
@@ -511,6 +538,34 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn rejected_boat_passengers_fill_actual_capacity_without_becoming_resident() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            game.boats.push(super::super::boats::Boat::new(
+                71,
+                "oak".into(),
+                Vec3::ZERO,
+                0.0,
+            ));
+            for id in [72, 73] {
+                let mut rider = Mob::new(id, kind.clone(), Vec3::ZERO, 0.0);
+                rider.extra.mount = Some(71);
+                game.persist
+                    .off_level
+                    .insert(id, super::super::persist::OffLevel::Mob(rider));
+            }
+            assert!(game.boat_mobs(71).is_empty());
+            // An ordinary oak boat has two seats; rejected passengers still own both.
+            assert_eq!(game.boat_passengers(71), 2);
+            assert!(!game.boat_has_room(0));
+            game.mob_object_mut(73).unwrap().extra.mount = None;
+            assert_eq!(game.boat_passengers(71), 1);
+            assert!(game.boat_has_room(0));
+        });
+    }
 
     #[test]
     fn push_is_capped_and_scaled() {

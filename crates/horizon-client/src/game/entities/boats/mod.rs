@@ -1909,6 +1909,62 @@ mod tests {
         Boat::new(1, Arc::from("oak"), Vec3::ZERO, 0.0)
     }
 
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn destruction_and_underwater_ejection_snap_rejected_passenger_descendants() {
+        for broken in [false, true] {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+                let mut boat = Boat::new(71, "oak".into(), Vec3::new(10.0, 200.0, 20.0), 0.0);
+                boat.status = Status::UnderWater;
+                boat.out_of_control = 60.0;
+                game.boats.push(boat);
+                let mut rider = horizon_client::mobs::Mob::new(
+                    72,
+                    kind.clone(),
+                    Vec3::new(5.0, 190.0, 6.0),
+                    0.0,
+                );
+                rider.extra.mount = Some(71);
+                rider.extra.passenger = true;
+                game.persist
+                    .off_level
+                    .insert(72, super::super::persist::OffLevel::Mob(rider));
+                let mut child = horizon_client::mobs::Mob::new(73, kind, Vec3::ZERO, 0.0);
+                child.extra.mount = Some(72);
+                child.age = 19;
+                game.mobs.push(child);
+                if broken {
+                    assert!(game.hurt_boat(0, 5.0, true));
+                    assert!(game.boats.is_empty());
+                } else {
+                    // The actual ejection entry used by AbstractBoat.tick at 60 submerged ticks.
+                    game.eject_boat_riders(0);
+                    assert_eq!(game.boats.len(), 1);
+                }
+                let rider = game.mob_object(72).unwrap();
+                assert_eq!(rider.extra.mount, None);
+                assert!(!rider.extra.passenger);
+                assert_eq!(rider.extra.boarding_cooldown, 60);
+                // Removed vehicle: retain x/z and clamp y to the boat's y.
+                // Live underwater boat over air: getDismountLocation's box-top fallback.
+                let expected = if broken {
+                    Vec3::new(5.0, 200.0, 6.0)
+                } else {
+                    Vec3::new(10.0, 200.5625, 20.0)
+                };
+                assert_eq!(rider.position, expected);
+                let child = game.mob_object(73).unwrap();
+                assert_eq!(child.position.x, expected.x);
+                assert_eq!(child.position.z, expected.z);
+                assert!((child.position.y - expected.y - 0.86875).abs() < 1e-6);
+                assert_eq!(child.previous, child.position);
+                assert_eq!(child.age, 19);
+                assert_eq!(child.extra.mount, Some(72));
+            });
+        }
+    }
+
     /// `AbstractBoat.tickBubbleColumn` on a client: the wobble grows while the
     /// bubble time runs and fades after.
     #[test]
