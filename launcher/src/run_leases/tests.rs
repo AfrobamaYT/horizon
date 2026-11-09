@@ -94,10 +94,8 @@ fn lease_holder_actor() {
     command
         .current_dir(root.join("game"))
         .env("HORIZON_HOME", root.join("home"))
-        .arg(format!(
-            "--resources={}",
-            root.join("base/resources").display()
-        ));
+        .arg("--resources")
+        .arg(root.join("base/resources"));
     mark(&mut command, &root.join("versions/native-fixture"));
     let (_command, _guard) = crate::backend::prepare_command(command).unwrap();
     println!("LEASE-READY");
