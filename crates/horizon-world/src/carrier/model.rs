@@ -19,7 +19,9 @@
 //! - at most [`MAX_CELL_DATA_BYTES`] decoded block-entity payload bytes
 //!   per cell and [`MAX_CARRIER_DATA_BYTES`] per carrier;
 //! - no duplicate cells, no NaN/infinity, no zero quaternion, no
-//!   arithmetic overflow, and no empty or malformed block-state names.
+//!   arithmetic overflow, and no empty or malformed block-state names —
+//!   while property names and values carry no length limits of their
+//!   own, matching the registry's declaration contract.
 
 use super::contact::{RigidTransform, Rotation};
 use horizon_core::geometry::Vec3;
@@ -39,16 +41,13 @@ pub const MAX_CARRIER_DATA_BYTES: usize = 16 * 1024 * 1024;
 pub const MIN_LOCAL_COORD: i32 = -128;
 /// See [`MIN_LOCAL_COORD`].
 pub const MAX_LOCAL_COORD: i32 = 127;
-/// The block name plus every property name and value together are at
-/// most this many bytes. Canonical states are short — vanilla's longest
-/// block-state name with full properties is about sixty bytes — and the
-/// bound keeps 4,096 full states inside the codec's input envelope next
-/// to a full 16 MiB payload.
-pub const MAX_STATE_BYTES: usize = 1024;
-/// At most this many state properties per cell.
-pub const MAX_PROPERTIES: usize = 64;
-/// A property name or value is at most this many bytes.
-pub const MAX_PROPERTY_BYTES: usize = 64;
+/// The block-declaration boundary (`BlockDefinition::new`,
+/// `horizon-mod-runtime/src/block_definitions.rs`) bounds neither the
+/// number of properties nor the length of any name or value, and neither
+/// does the identifier charset — so the model sets no length of its own
+/// either. A state's only bound is the codec's input budget: a carrier
+/// whose encoded form does not fit it does not decode, whatever its
+/// cells hold.
 /// How far a stored quaternion's squared norm may sit from one and still
 /// count as the encoder's normalized output: renormalizing rounds each
 /// component, leaving the squared norm within a few units in the last
@@ -97,22 +96,11 @@ pub enum Invalid {
     AirCell,
     /// An empty, malformed block identifier.
     BlockName,
-    /// A property name or value that is empty, longer than
-    /// [`MAX_PROPERTY_BYTES`], or holds a character outside `[a-z0-9_]`.
+    /// A property name or value that is empty or holds a character
+    /// outside `[a-z0-9_]` (every vanilla registry token matches).
     InvalidProperty,
     /// Two properties with the same name.
     DuplicateProperty,
-    /// More properties than [`MAX_PROPERTIES`].
-    PropertyCount {
-        /// The offending property count.
-        count: usize,
-    },
-    /// The block name plus all property names and values together exceed
-    /// [`MAX_STATE_BYTES`].
-    StateBytes {
-        /// The offending total.
-        total: usize,
-    },
 }
 impl fmt::Display for Invalid {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -137,12 +125,6 @@ impl fmt::Display for Invalid {
             Self::BlockName => write!(f, "invalid block name"),
             Self::InvalidProperty => write!(f, "invalid property name or value"),
             Self::DuplicateProperty => write!(f, "duplicate property name"),
-            Self::PropertyCount { count } => {
-                write!(f, "{count} properties exceeds {MAX_PROPERTIES}")
-            }
-            Self::StateBytes { total } => {
-                write!(f, "block state of {total} bytes exceeds {MAX_STATE_BYTES}")
-            }
         }
     }
 }
@@ -197,13 +179,12 @@ impl Cell {
     /// Validates and builds one cell. The block name must be a canonical
     /// namespaced identifier (explicit namespace, nonempty path) and must
     /// not be one of the vanilla air states. Each property name and value
-    /// must be nonempty, at most [`MAX_PROPERTY_BYTES`] and drawn from
-    /// `[a-z0-9_]`; there are at most [`MAX_PROPERTIES`] of them, names
-    /// must not repeat, and the name plus every property name and value
-    /// together must fit [`MAX_STATE_BYTES`]. The payload must fit
-    /// [`MAX_CELL_DATA_BYTES`]. Every bound is checked as it is reached —
-    /// properties are consumed lazily and nothing is pre-allocated from an
-    /// unchecked count.
+    /// must be nonempty and drawn from `[a-z0-9_]` — vanilla's registry
+    /// tokens all match — with no length or count limit, exactly as the
+    /// declaration boundary sets none; names must not repeat. The payload
+    /// must fit [`MAX_CELL_DATA_BYTES`]. Every bound is checked as it is
+    /// reached — properties are consumed lazily and nothing is
+    /// pre-allocated from an unchecked count.
     pub fn new(
         pos: LocalPos,
         name: &str,
@@ -213,12 +194,6 @@ impl Cell {
         if Identifier::parse_namespaced(name).is_none() {
             return Err(Invalid::BlockName);
         }
-        // The name and the properties share one budget, so the name is
-        // checked on its own before any property is consumed.
-        let mut total = name.len();
-        if total > MAX_STATE_BYTES {
-            return Err(Invalid::StateBytes { total });
-        }
         if AIR_STATES.contains(&name) {
             return Err(Invalid::AirCell);
         }
@@ -226,15 +201,6 @@ impl Cell {
         for (key, value) in properties {
             if !valid_property_token(&key) || !valid_property_token(&value) {
                 return Err(Invalid::InvalidProperty);
-            }
-            if sorted.len() == MAX_PROPERTIES {
-                return Err(Invalid::PropertyCount {
-                    count: sorted.len() + 1,
-                });
-            }
-            total += key.len() + value.len();
-            if total > MAX_STATE_BYTES {
-                return Err(Invalid::StateBytes { total });
             }
             sorted.push((key.into_boxed_str(), value.into_boxed_str()));
         }
@@ -279,11 +245,11 @@ impl Cell {
     }
 }
 
-/// A nonempty property name or value: at most [`MAX_PROPERTY_BYTES`],
-/// drawn from `[a-z0-9_]`.
+/// A nonempty property name or value drawn from `[a-z0-9_]`, the pattern
+/// every vanilla registry token matches. Length is unbounded, as the
+/// declaration boundary leaves it.
 fn valid_property_token(token: &str) -> bool {
     !token.is_empty()
-        && token.len() <= MAX_PROPERTY_BYTES
         && token
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
@@ -501,29 +467,22 @@ mod tests {
                 Err(Invalid::AirCell)
             );
         }
-        let long = format!(
-            "minecraft:{}",
-            "a".repeat(MAX_STATE_BYTES + 1 - "minecraft:".len())
-        );
-        assert_eq!(long.len(), MAX_STATE_BYTES + 1);
-        assert_eq!(
-            Cell::new(LocalPos::new(0, 0, 0), &long, Vec::new(), None),
-            Err(Invalid::StateBytes {
-                total: MAX_STATE_BYTES + 1
-            })
-        );
-        let fitting = format!("minecraft:{}", "a".repeat(MAX_STATE_BYTES - 10));
-        assert!(Cell::new(LocalPos::new(0, 0, 0), &fitting, Vec::new(), None).is_ok());
+        // A long block identifier is legal: neither the identifier
+        // charset nor the declaration boundary bounds its length.
+        let long = format!("minecraft:{}", "a".repeat(1015));
+        assert_eq!(long.len(), 1025);
+        assert!(Cell::new(LocalPos::new(0, 0, 0), &long, Vec::new(), None).is_ok());
     }
 
     #[test]
     fn cell_payload_limit_is_checked_at_construction() {
+        // Literal bounds: changing the constant must fail this test.
         assert!(
             Cell::new(
                 LocalPos::new(0, 0, 0),
                 "minecraft:stone",
                 Vec::new(),
-                Some(vec![0; MAX_CELL_DATA_BYTES])
+                Some(vec![0; 65536])
             )
             .is_ok()
         );
@@ -532,52 +491,49 @@ mod tests {
                 LocalPos::new(0, 0, 0),
                 "minecraft:stone",
                 Vec::new(),
-                Some(vec![0; MAX_CELL_DATA_BYTES + 1])
+                Some(vec![0; 65537])
             ),
-            Err(Invalid::CellData {
-                len: MAX_CELL_DATA_BYTES + 1
-            })
+            Err(Invalid::CellData { len: 65537 })
         );
     }
 
     #[test]
     fn carrier_cell_count_limit_is_checked_before_allocation() {
-        let cells = (0..MAX_CELLS)
+        let cells = (0..4096)
             .map(|i| {
                 stone(LocalPos::new(
-                    ((i % 256) as i32 - 128) as i8,
-                    (i / 256) as i8 - 8,
-                    (i / 1024) as i8 - 4,
+                    (i % 256 - 128) as i8,
+                    (i / 256 - 8) as i8,
+                    (i / 1024 - 4) as i8,
                 ))
             })
             .collect();
         assert!(Carrier::new(1, 0, 0, identity_transform(), cells).is_ok());
-        let over = (0..=MAX_CELLS)
+        let over = (0..4097)
             .map(|i| {
                 stone(LocalPos::new(
-                    ((i % 256) as i32 - 128) as i8,
-                    (i / 256) as i8 - 8,
-                    (i / 1024) as i8 - 4,
+                    (i % 256 - 128) as i8,
+                    (i / 256 - 8) as i8,
+                    (i / 1024 - 4) as i8,
                 ))
             })
             .collect::<Vec<_>>();
         assert_eq!(
             Carrier::new(1, 0, 0, identity_transform(), over),
-            Err(Invalid::CellCount {
-                count: MAX_CELLS + 1
-            })
+            Err(Invalid::CellCount { count: 4097 })
         );
     }
 
     #[test]
     fn carrier_payload_budget_is_checked() {
-        let full = (0..MAX_CARRIER_DATA_BYTES / MAX_CELL_DATA_BYTES)
+        // 256 cells of 65,536 bytes fill the 16,777,216-byte budget.
+        let full = (0..256)
             .map(|i| {
                 Cell::new(
                     LocalPos::new(i as i8, 0, 0),
                     "minecraft:stone",
                     Vec::new(),
-                    Some(vec![0; MAX_CELL_DATA_BYTES]),
+                    Some(vec![0; 65536]),
                 )
                 .unwrap()
             })
@@ -589,9 +545,7 @@ mod tests {
         over.push(last);
         assert_eq!(
             Carrier::new(1, 0, 0, identity_transform(), over),
-            Err(Invalid::CarrierData {
-                total: MAX_CARRIER_DATA_BYTES + 1
-            })
+            Err(Invalid::CarrierData { total: 16777217 })
         );
     }
 
@@ -670,60 +624,26 @@ mod tests {
             cell(vec![("not-a-key".to_string(), "north".to_string())]),
             Err(Invalid::InvalidProperty)
         );
-        // Sixty-five properties.
-        let many = (0..=MAX_PROPERTIES)
-            .map(|i| (format!("p{i:02}"), "1".to_string()))
-            .collect();
-        assert_eq!(
-            cell(many),
-            Err(Invalid::PropertyCount {
-                count: MAX_PROPERTIES + 1
-            })
+        // Long names and values are legal, and so are many properties:
+        // the declaration boundary sets no count or length, so a
+        // 65-letter name (past every vanilla maximum) is just a state.
+        assert!(
+            cell(vec![
+                ("a".repeat(65), "b".repeat(66)),
+                (
+                    "creaking_heart_state".to_string(),
+                    "waiting_for_reward_ejection".to_string()
+                ),
+            ])
+            .is_ok()
         );
-        // Sixty-four distinct properties fit the count bound.
         assert!(
             cell(
-                (0..MAX_PROPERTIES)
-                    .map(|i| (format!("p{i:02}"), "1".to_string()))
+                (0..200)
+                    .map(|i| (format!("p{i:03}"), "1".to_string()))
                     .collect()
             )
             .is_ok()
-        );
-    }
-
-    #[test]
-    fn state_byte_budget_covers_name_and_properties_together() {
-        // The name plus property names and values share the budget. Each
-        // token stays under the 64-byte cap, so the budget is filled with
-        // many small properties, not a few huge ones.
-        let name = "minecraft:stone";
-        let mut properties = Vec::new();
-        let mut total = name.len();
-        let mut index = 0;
-        // Single-byte keys keep the arithmetic exact; 'a' + index stays a
-        // valid lowercase token for the handful of properties needed.
-        while total + 1 + MAX_PROPERTY_BYTES <= MAX_STATE_BYTES {
-            let key = char::from(b'a' + index as u8).to_string();
-            properties.push((key, "x".repeat(MAX_PROPERTY_BYTES)));
-            total += 1 + MAX_PROPERTY_BYTES;
-            index += 1;
-        }
-        let room = MAX_STATE_BYTES - total;
-        if room > 0 {
-            properties.push(("z".to_string(), "x".repeat(room - 1)));
-            total += room;
-        }
-        assert_eq!(total, MAX_STATE_BYTES);
-        assert!(Cell::new(LocalPos::new(0, 0, 0), name, properties.clone(), None).is_ok());
-        // One more byte in the last value tips the total over.
-        let mut over = properties;
-        let (_, last_value) = over.last_mut().unwrap();
-        *last_value = format!("{last_value}x");
-        assert_eq!(
-            Cell::new(LocalPos::new(0, 0, 0), name, over, None),
-            Err(Invalid::StateBytes {
-                total: MAX_STATE_BYTES + 1
-            })
         );
     }
 
