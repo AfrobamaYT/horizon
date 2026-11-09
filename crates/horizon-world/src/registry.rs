@@ -2,6 +2,7 @@
 //! This supplies identities and default properties, not block behavior.
 mod data;
 mod facts;
+mod intern;
 mod json;
 pub(crate) mod snapshot;
 use horizon_core::fast_hash::FxHashMap;

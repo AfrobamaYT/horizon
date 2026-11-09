@@ -2,6 +2,7 @@
 use super::{BlockState, BlockStateId, state_key};
 use std::collections::{BTreeMap, HashMap};
 
+#[derive(PartialEq, Eq)]
 pub(super) struct Data {
     pub(super) states: Vec<BlockState>,
     /// Ids by a hash of their state, checked against `states`: 12 bytes per

@@ -285,7 +285,7 @@ impl Assets {
         // Chunks hold every state of this registry: content mods can take it
         // past vanilla's 16-bit global palette.
         crate::chunk::set_block_states(registry.len());
-        let registry: &'static BlockRegistry = Box::leak(Box::new(registry));
+        let registry = registry.intern(mod_api::__private::registry_installation_identity());
         Ok(Self {
             registry,
             properties,
@@ -474,6 +474,10 @@ impl RenderAssets {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "assets_registry_tests.rs"]
+mod registry_tests;
 
 #[cfg(test)]
 mod tests {
