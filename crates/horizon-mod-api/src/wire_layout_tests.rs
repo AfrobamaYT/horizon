@@ -629,3 +629,218 @@ fn newtype_widths_and_unit_enum_tags_match_their_layouts() {
     );
     fields(Tag::End, (0u32,));
 }
+
+#[test]
+fn every_item_place_case_has_declared_tag_and_field_types() {
+    let epoch = NativeWorldEpoch::new(47);
+    let level = LevelRef::new(epoch, DimensionKey::OVERWORLD);
+    let entity = EntityRef::new(epoch, 29);
+    let player = crate::__private::game::player_ref(entity, 0x1234);
+    let menu = MenuRef {
+        player,
+        window: -2,
+        generation: 91,
+    };
+    fields(
+        ItemPlace::PlayerSlot {
+            player: 0x1234,
+            slot: -106,
+        },
+        (0u32, 0x1234u128, -106i32),
+    );
+    fields(
+        ItemPlace::PlayerHand {
+            player: 0x1234,
+            hand: Hand::Off,
+        },
+        (1u32, 0x1234u128, Hand::Off),
+    );
+    fields(ItemPlace::PlayerCursor { menu }, (2u32, menu));
+    fields(
+        ItemPlace::BlockEntity {
+            level,
+            pos: [7, -8, 9],
+            side: Some(Direction::West),
+            slot: 13,
+        },
+        (3u32, level, [7i32, -8, 9], Some(Direction::West), 13usize),
+    );
+    fields(ItemPlace::ItemEntity { id: 71 }, (4u32, 71u32));
+    fields(
+        ItemPlace::EntitySlot {
+            entity: 29,
+            slot: 17,
+        },
+        (5u32, 29u32, 17usize),
+    );
+    let parent = Box::new(ItemPlace::ItemEntity { id: 71 });
+    fields(
+        ItemPlace::Nested {
+            parent: parent.clone(),
+            slot: 19,
+        },
+        (6u32, parent, 19usize),
+    );
+    fields(
+        ItemPlace::MenuSlot { menu, slot: 23 },
+        (7u32, menu, 23usize),
+    );
+    fields(
+        ItemPlace::Mod {
+            provider: "example:bag",
+            key: 37,
+        },
+        (8u32, "example:bag".to_owned(), 37u64),
+    );
+    fields(
+        ItemPlace::Equipment {
+            entity: 29,
+            slot: EquipmentSlot::Saddle,
+        },
+        (9u32, 29u32, EquipmentSlot::Saddle),
+    );
+    // The other four holder cases are exercised in handle_records above.
+    fields(AttachmentHolder::Level(level), (4u32, level));
+    fields(AttachmentRowError::StaleHolder, (1u32,));
+}
+
+#[test]
+fn every_direction_and_equipment_case_has_declared_tag_type() {
+    for (value, tag) in [
+        (Direction::Down, 0u32),
+        (Direction::Up, 1),
+        (Direction::North, 2),
+        (Direction::South, 3),
+        (Direction::West, 4),
+        (Direction::East, 5),
+    ] {
+        fields(value, (tag,));
+    }
+    for (value, tag) in [
+        (EquipmentSlot::MainHand, 0u32),
+        (EquipmentSlot::OffHand, 1),
+        (EquipmentSlot::Feet, 2),
+        (EquipmentSlot::Legs, 3),
+        (EquipmentSlot::Chest, 4),
+        (EquipmentSlot::Head, 5),
+        (EquipmentSlot::Body, 6),
+        (EquipmentSlot::Saddle, 7),
+    ] {
+        fields(value, (tag,));
+    }
+    for (value, tag) in [
+        (EquipmentSlotGroup::Any, 0u32),
+        (EquipmentSlotGroup::MainHand, 1),
+        (EquipmentSlotGroup::OffHand, 2),
+        (EquipmentSlotGroup::Hand, 3),
+        (EquipmentSlotGroup::Feet, 4),
+        (EquipmentSlotGroup::Legs, 5),
+        (EquipmentSlotGroup::Chest, 6),
+        (EquipmentSlotGroup::Head, 7),
+        (EquipmentSlotGroup::Armor, 8),
+        (EquipmentSlotGroup::Body, 9),
+        (EquipmentSlotGroup::Saddle, 10),
+    ] {
+        fields(value, (tag,));
+    }
+}
+
+#[test]
+fn every_reduction_spawner_package_and_neighbour_case_has_declared_tag_type() {
+    for (value, tag) in [
+        (Reduction::Invulnerability, 0u8),
+        (Reduction::Armor, 1),
+        (Reduction::Enchantments, 2),
+        (Reduction::MobEffects, 3),
+        (Reduction::Absorption, 4),
+        (Reduction::InnateResistance, 5),
+    ] {
+        fields(value, (tag,));
+    }
+    for (value, tag) in [
+        (SpawnerKind::Phantom, 0u32),
+        (SpawnerKind::Patrol, 1),
+        (SpawnerKind::Cat, 2),
+        (SpawnerKind::VillageSiege, 3),
+        (SpawnerKind::WanderingTrader, 4),
+    ] {
+        fields(value, (tag,));
+    }
+    fields(PackageKind::Code, (0u32,));
+    fields(PackageKind::Content, (1u32,));
+    fields(Side::Client, (0u32,));
+    fields(Side::Both, (1u32,));
+    fields(LevelDimension::Overworld, (0u32,));
+    fields(LevelDimension::Nether, (1u32,));
+    fields(LevelDimension::End, (2u32,));
+    fields(NeighbourUpdate::OutputSignal, (0u32,));
+    fields(NeighbourUpdate::Neighbours, (1u32,));
+    fields(
+        NeighbourUpdate::NeighboursExcept(Direction::East),
+        (2u32, Direction::East),
+    );
+}
+
+#[test]
+fn every_game_mode_pose_animation_and_connection_case_has_declared_tag_type() {
+    for (value, tag) in [
+        (GameMode::Survival, 0u32),
+        (GameMode::Creative, 1),
+        (GameMode::Adventure, 2),
+        (GameMode::Spectator, 3),
+    ] {
+        fields(value, (tag,));
+    }
+    for (value, tag) in [
+        (ArmPose::Empty, 0u32),
+        (ArmPose::Item, 1),
+        (ArmPose::Block, 2),
+        (ArmPose::Bow, 3),
+        (ArmPose::CrossbowHold, 4),
+        (ArmPose::CrossbowCharge, 5),
+        (ArmPose::ThrowTrident, 6),
+        (ArmPose::TootHorn, 7),
+        (ArmPose::Spyglass, 8),
+        (ArmPose::Spear, 9),
+        (ArmPose::Brush, 10),
+    ] {
+        fields(value, (tag,));
+    }
+    for (value, tag) in [
+        (UseAnimation::None, 0u32),
+        (UseAnimation::Eat, 1),
+        (UseAnimation::Drink, 2),
+        (UseAnimation::Block, 3),
+        (UseAnimation::Bow, 4),
+        (UseAnimation::Trident, 5),
+        (UseAnimation::Crossbow, 6),
+        (UseAnimation::Spyglass, 7),
+        (UseAnimation::TootHorn, 8),
+        (UseAnimation::Brush, 9),
+        (UseAnimation::Bundle, 10),
+        (UseAnimation::Spear, 11),
+    ] {
+        fields(value, (tag,));
+    }
+    fields(ConnectionKind::Fence, (0u32,));
+    fields(ConnectionKind::Wall, (1u32,));
+    fields(ConnectionKind::Bars, (2u32,));
+}
+
+#[test]
+fn every_attachment_error_and_write_case_has_declared_tag_type() {
+    for (value, tag) in [
+        (AttachmentError::MissingHolder, 0u32),
+        (AttachmentError::TypeMismatch, 1),
+        (AttachmentError::Decode, 2),
+        (AttachmentError::Encode, 3),
+        (AttachmentError::InvalidNamespace, 4),
+        (AttachmentError::InvalidCopyPolicy, 5),
+        (AttachmentError::InvalidSyncPolicy, 6),
+    ] {
+        fields(value, (tag,));
+    }
+    fields(AttachmentWrite::Decoded, (0u32,));
+    fields(AttachmentWrite::Default, (1u32,));
+    fields(AttachmentWrite::Set, (2u32,));
+}
