@@ -1049,11 +1049,6 @@ pub fn mob_to_nbt(
                 map.remove(&"Items".into());
             }
             // The `equipment` compound is written below, for every mob.
-            let modelled = [
-                ("minecraft:max_health", f64::from(m.attrs.max_health)),
-                ("minecraft:movement_speed", m.attrs.speed),
-                ("minecraft:jump_strength", m.extra.vector[0]),
-            ];
             // AttributeMap.pack writes the instances that exist: the ones the
             // entity was loaded with. When the tag had no attributes list,
             // instances are not synthesized (SummonCommand without finalizeSpawn

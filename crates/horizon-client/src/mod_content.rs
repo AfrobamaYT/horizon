@@ -2478,6 +2478,7 @@ fn place_in_biomes(
     base: &Path,
     overlay: &Overlay<'_>,
     modifiers: &[biomes::Modifier],
+    enabled_mods: Vec<String>,
     biome_tags: Option<J>,
     placed: Option<J>,
     tags: &BTreeMap<String, TagMerge>,
@@ -2508,29 +2509,19 @@ fn place_in_biomes(
     let placed: BTreeSet<String> = bundle(placed, PLACED_FEATURES)?.into_keys().collect();
     let feature_tags = bundle(None, FEATURE_TAGS)?;
     let (entity_categories, entity_tags) = modifier_entities(base, overlay, tags)?;
-    let entity_ids = entity_categories.keys().cloned().collect();
-    let changed = biomes::apply(
-        &mut doc,
-        modifiers,
-        &biomes::Registry {
-            what: "biome",
-            ids: &biome_ids,
-            tags: &biome_tags,
-        },
-        &biomes::Registry {
-            what: "placed feature",
-            ids: &placed,
-            tags: &feature_tags,
-        },
-        &biomes::Registry {
-            what: "entity type",
-            ids: &entity_ids,
-            tags: &entity_tags,
-        },
-        &entity_categories,
-        warnings,
-    )?;
-    for (id, text) in changed {
+    let mut saved = SavedModifiers {
+        enabled_mods,
+        modifiers: modifiers.iter().map(|m| m.source.clone()).collect(),
+        unmodified: BTreeMap::new(),
+        feature_tags,
+        entity_categories,
+        entity_tags,
+    };
+    let before = doc.clone();
+    for (id, text) in saved.apply(&mut doc, modifiers, &biome_tags, &placed, warnings)? {
+        if let Some(J::Str(old)) = before.get(&id) {
+            saved.unmodified.insert(id.clone(), old.clone());
+        }
         if let Some((ns, path)) = id.split_once(':') {
             let file = format!("data/{ns}/worldgen/biome/{path}.json");
             overlay.write(&file, text.as_bytes())?;
@@ -2619,6 +2610,7 @@ const MODIFIERS: &str = "biome-modifiers.json";
 /// applied them.
 #[derive(Serialize, Deserialize)]
 struct SavedModifiers {
+    enabled_mods: Vec<String>,
     /// Each modifier's mod, file and text, in the order they apply.
     modifiers: Vec<[String; 3]>,
     /// The biomes the modifiers changed, as they were before.
@@ -2725,7 +2717,7 @@ pub fn biome_modifiers_over_packs(
             Some(J::Bool(true)) => None,
             _ => biome_tags.get(id).map(String::as_str),
         };
-        let merged = merge_tag(old, values, id)?;
+        let merged = merge_tag(old, values, id, &|id| id == "minecraft" || saved.enabled_mods.iter().any(|enabled| enabled == id))?;
         biome_tags.insert(id.to_owned(), merged);
     }
     let placed = packs
@@ -3287,7 +3279,8 @@ pub fn build(
         out.file_name().unwrap_or_default().to_string_lossy()
     ));
     let overlay = Overlay::new(base, &tables_root)?;
-    tables(base, &plan, &overlay)?;
+    let jobs = table_jobs(base, &overlay)?;
+    tables(base, &plan, &overlay, &jobs)?;
     // Mod files, and every tag addition gathered per tag file.
     let mut copies = Vec::new();
     let mut tags: BTreeMap<String, TagMerge> = BTreeMap::new();
@@ -3485,6 +3478,7 @@ pub fn build(
             base,
             &overlay,
             &modifiers,
+            inventory.server_ids().map(str::to_owned).collect(),
             biome_tag_doc,
             placed_doc,
             &tags,

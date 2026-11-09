@@ -1587,9 +1587,9 @@ fn network_stack(
         if d.ominous_banner {
             stack.added.push((
                 horizon_protocol::item::component::ITEM_NAME,
-                horizon_protocol::item::Component::Text(horizon_world::nbt::Tag::compound([(
+                horizon_protocol::item::Component::Text(horizon_core::nbt::Tag::compound([(
                     "translate",
-                    horizon_world::nbt::Tag::String("block.minecraft.ominous_banner".into()),
+                    horizon_core::nbt::Tag::String("block.minecraft.ominous_banner".into()),
                 )])),
             ));
             stack.added.push((

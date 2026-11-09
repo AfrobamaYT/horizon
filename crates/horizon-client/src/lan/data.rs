@@ -376,9 +376,9 @@ impl SyncData {
         biomes: Option<&crate::biome::Biomes>,
         kept: Option<&Self>,
         damage: Option<&FrozenDamage>,
+        same_files: bool,
         defaults: &horizon_world::item_defaults::ItemDefaults,
         sources: &crate::crafting::ResolvedSources,
-        same_files: bool,
     ) -> Result<Self, String> {
         use crate::spans::startup;
         // The recipe book, the recipe sync and the advancements read the
