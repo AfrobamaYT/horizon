@@ -17,6 +17,8 @@ use crate::{
 };
 use horizon_core::geometry::Vec3;
 use std::{collections::HashMap, sync::Arc};
+mod projectile_fields;
+use projectile_fields::{load_projectile_entity_fields, put_projectile_entity_fields};
 mod saved_attributes;
 
 use {
@@ -2852,7 +2854,6 @@ pub fn item_entity_from_nbt(tag: &Tag, id: u32, bob_offset: f32) -> Option<ItemE
     let position = position(tag)?;
     Some(ItemEntity {
         attachment_lifetime: Default::default(),
-        fall_distance: float(tag.get("fall_distance")).unwrap_or(0.0),
         rotation: rotation(tag),
         join: Default::default(),
         no_gravity: flag(tag, "NoGravity"),
@@ -2873,6 +2874,8 @@ pub fn item_entity_from_nbt(tag: &Tag, id: u32, bob_offset: f32) -> Option<ItemE
         on_ground: flag(tag, "OnGround"),
         vertical_collision: false,
         horizontal_collision: false,
+        // Entity.load: getDoubleOr, any number widened.
+        fall_distance: float(tag.get("fall_distance")).unwrap_or(0.0),
         age: number(tag.get("Age")).unwrap_or(0) as i32,
         pickup_delay: number(tag.get("PickupDelay")).unwrap_or(0),
         bob_offset,
@@ -2880,6 +2883,8 @@ pub fn item_entity_from_nbt(tag: &Tag, id: u32, bob_offset: f32) -> Option<ItemE
         needs_sync: false,
         stuck: Vec3::ZERO,
         was_touching_water: false,
+        // The caller gives it the own random that drew its UUID and bobOffs.
+        random: horizon_core::random::LegacyRandom::new(0),
     })
 }
 
@@ -3161,7 +3166,7 @@ pub fn fireball_to_nbt(
         motion: p.velocity,
         rotation: [p.yaw, p.pitch],
         on_ground: p.on_ground,
-        fall_distance: 0.0,
+        fall_distance: p.fall_distance,
     };
     let mut tag = base.tag(raw);
     put(
@@ -3186,27 +3191,6 @@ pub fn fireball_to_nbt(
         put(&mut tag, "Item", item_to_nbt(item));
     }
     Some(tag)
-}
-
-/// `Entity.load`: fire is read as a short, air as an int and the visual
-/// fire flag as a byte-valued boolean. Portal state lives on the level.
-fn load_projectile_entity_fields(p: &mut Projectile, tag: &Tag) {
-    p.fire_ticks = i32::from(tag.get("Fire").and_then(int_value).unwrap_or(0) as i16);
-    p.air_supply = tag.get("Air").and_then(int_value).unwrap_or(p.air_supply);
-    p.has_visual_fire = flag(tag, "HasVisualFire");
-}
-
-/// `Entity.saveWithoutId`: save the current fire and air as shorts, and
-/// only write the optional visual fire flag when it is true.
-fn put_projectile_entity_fields(tag: &mut Tag, p: &Projectile) {
-    put(tag, "Fire", Tag::Short(p.fire_ticks as i16));
-    put(tag, "Air", Tag::Short(p.air_supply as i16));
-    if let Tag::Compound(map) = tag {
-        map.remove(&"HasVisualFire".into());
-    }
-    if p.has_visual_fire {
-        put(tag, "HasVisualFire", Tag::Byte(1));
-    }
 }
 
 /// `Projectile.addAdditionalSaveData`: Owner, LeftOwner only when set, and
@@ -3312,7 +3296,7 @@ pub fn throwable_to_nbt(
         motion: p.velocity,
         rotation: [p.yaw, p.pitch],
         on_ground: p.on_ground,
-        fall_distance: 0.0,
+        fall_distance: p.fall_distance,
     };
     let mut tag = base.tag(raw);
     put_projectile(&mut tag, p, owner);
@@ -3498,6 +3482,7 @@ pub fn fireball_from_nbt(tag: &Tag, player: Option<[i32; 4]>) -> Option<Projecti
         load_projectile_entity_fields(&mut p, tag);
     }
     p.on_ground = flag(tag, "OnGround");
+    p.fall_distance = float(tag.get("fall_distance")).unwrap_or(0.0);
     p.acceleration = float(tag.get("acceleration_power")).unwrap_or(0.1);
     if let Some(item) = tag.get("Item").and_then(item_from_nbt) {
         p.set_item(item);
@@ -4451,74 +4436,7 @@ mod tnt_power_tests {
 }
 
 #[cfg(test)]
-mod spell_ticks_nbt_tests {
-    use super::*;
-    use crate::mobs::Species;
-
-    fn caster(species: Species, name: &str) -> Mob {
-        let mut kind = crate::mobs::sensor_scan_tests::kind();
-        let ty = Arc::make_mut(&mut kind);
-        ty.species = species;
-        ty.id = format!("minecraft:{name}");
-        Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0)
-    }
-
-    /// `SpellcasterIllager.readAdditionalSaveData`: bind loaded values to the
-    /// counter already used by casting goals and customServerAiStep.
-    #[test]
-    fn spell_ticks_load_into_the_live_counter() {
-        for (species, name) in [
-            (Species::Evoker, "evoker"),
-            (Species::Illusioner, "illusioner"),
-        ] {
-            let m = caster(species, name);
-            let types = HashMap::from([(m.kind.id.clone(), m.kind.clone())]);
-            for value in [None, Some(30), Some(0), Some(-2)] {
-                let mut raw = Tag::compound([
-                    ("id", string(&m.kind.id)),
-                    ("Pos", doubles(&[0.5, 64.0, 0.5])),
-                ]);
-                if let Some(value) = value {
-                    put(&mut raw, "SpellTicks", Tag::Int(value));
-                }
-                let loaded = mob_from_nbt(&raw, &types, 2, None).unwrap();
-                assert_eq!(
-                    loaded.extra.counter,
-                    value.unwrap_or(0),
-                    "{name}: {value:?}"
-                );
-                let saved = mob_to_nbt(&loaded, [1, 2, 3, 4], None, None, |_| None);
-                assert_eq!(saved.get("SpellTicks"), Some(&Tag::Int(value.unwrap_or(0))));
-            }
-        }
-    }
-
-    /// `SpellcasterIllager.addAdditionalSaveData`: live state wins even when
-    /// no raw input exists or the original raw counter has become stale.
-    #[test]
-    fn spell_ticks_save_the_mutated_model_without_a_raw_fallback() {
-        for (species, name) in [
-            (Species::Evoker, "evoker"),
-            (Species::Illusioner, "illusioner"),
-        ] {
-            let mut m = caster(species, name);
-            let raw = Tag::compound([
-                ("SpellTicks", Tag::Int(30)),
-                ("audit:unrelated", Tag::Int(7)),
-            ]);
-            for value in [29, 27, 20, 0, -2] {
-                m.extra.counter = value;
-                for raw in [None, Some(&raw)] {
-                    let saved = mob_to_nbt(&m, [1, 2, 3, 4], raw, None, |_| None);
-                    assert_eq!(saved.get("SpellTicks"), Some(&Tag::Int(value)), "{name}");
-                    if raw.is_some() {
-                        assert_eq!(saved.get("audit:unrelated"), Some(&Tag::Int(7)));
-                    }
-                }
-            }
-        }
-    }
-}
+mod spell_ticks_nbt_tests;
 
 #[cfg(test)]
 mod tests {
@@ -5691,27 +5609,22 @@ mod tests {
             health: 2,
             fire_ticks: 73,
             thrower: Some([5, 6, 7, 8]),
-            target: None,
-            id: 7,
-            stack: ItemStack {
-                item: Arc::from("minecraft:diamond_pickaxe"),
-                count: 1,
-                damage: 5,
-                extra: None,
-            },
-            position: Vec3::new(100.5, 64.0, -31.5),
             previous: Vec3::ZERO,
-            velocity: Vec3::new(0.0, -0.04, 0.0),
             on_ground: true,
-            vertical_collision: false,
-            horizontal_collision: false,
             age: 120,
             pickup_delay: 10,
-            ticks: 0,
-            bob_offset: 0.0,
-            needs_sync: false,
-            stuck: Vec3::ZERO,
-            was_touching_water: false,
+            ..ItemEntity::new(
+                7,
+                ItemStack {
+                    item: Arc::from("minecraft:diamond_pickaxe"),
+                    count: 1,
+                    damage: 5,
+                    extra: None,
+                },
+                Vec3::new(100.5, 64.0, -31.5),
+                Vec3::new(0.0, -0.04, 0.0),
+                0.0,
+            )
         };
         let tag = item_entity_to_nbt(&e, [1, 2, 3, 4], None);
         assert_eq!(kind(&tag).as_deref(), Some("minecraft:item"));

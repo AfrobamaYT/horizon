@@ -326,6 +326,7 @@ fn read_colors(
                 )
             }),
     );
-    horizon_client::pack_dyes::set(&colors);
+    horizon_client::pack_palette::set(&colors);
+    horizon_client::brewing::set_pack_colors(colors.effects());
     colors
 }

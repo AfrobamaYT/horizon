@@ -518,6 +518,7 @@ impl Game<'_> {
                 if let Some(slot) = self.dropped.iter_mut().find(|e| e.id == id) {
                     new.join = slot.join;
                     new.bob_offset = slot.bob_offset;
+                    new.random = slot.random.clone();
                     horizon_client::join_seq::store_back(slot, new);
                 }
             }
