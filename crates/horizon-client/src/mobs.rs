@@ -68,6 +68,7 @@ pub mod part_goals;
 pub mod path;
 pub mod phantom;
 pub mod piglin;
+pub mod player_selection;
 pub mod polar_bear;
 pub mod rabbit;
 pub mod raider;
@@ -899,6 +900,8 @@ pub enum DamageKind {
     Fireball,
     Explosion,
     Fall,
+    /// `fly_into_wall`: gliding into a horizontal collision.
+    FlyIntoWall,
     FallingBlock,
     FallingStalactite,
     OnFire,
@@ -1110,6 +1113,7 @@ impl Damage {
         matches!(
             self.kind,
             DamageKind::Fall
+                | DamageKind::FlyIntoWall
                 | DamageKind::OnFire
                 | DamageKind::Drown
                 | DamageKind::Magic
@@ -1151,6 +1155,7 @@ impl Damage {
             self.kind,
             DamageKind::Explosion
                 | DamageKind::Fall
+                | DamageKind::FlyIntoWall
                 | DamageKind::OnFire
                 | DamageKind::InFire
                 | DamageKind::Campfire
@@ -1676,22 +1681,31 @@ fn totem_death_effects() -> Vec<crate::items::ConsumeEffect> {
     ]
 }
 
-/// How far the boxes of a set of mobs reach from their positions: the widest half width and the
-/// tallest height among them. A box query over many mobs (a vehicle's, against every mob of the
-/// level) tests each mob's position against this first, and works out the box ([`Mob::bounds`],
-/// which reads the mob's whole size) only for the mobs whose position comes close.
+/// How far the boxes of a set of mobs reach from their positions: the widest reach sideways, below
+/// and above among them, worked out from each mob's real box ([`Mob::bounds`]: a shulker's grows
+/// toward its open lid, sideways or below its position). A box query over many mobs (a vehicle's,
+/// against every mob of the level) tests each mob's position against this first, and works out the
+/// box only for the mobs whose position comes close.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BoxReach {
     half_width: f64,
+    below: f64,
     height: f64,
 }
 impl BoxReach {
     pub fn of(mobs: &[Mob]) -> Self {
         mobs.iter().fold(Self::default(), |r, m| {
-            let (width, height, _) = m.dims();
+            let (b, p) = (m.bounds(), m.position);
+            let (lo, hi) = (b.min_position(), b.max_position());
             Self {
-                half_width: r.half_width.max(width / 2.0),
-                height: r.height.max(height),
+                half_width: r
+                    .half_width
+                    .max(p.x - lo.x)
+                    .max(hi.x - p.x)
+                    .max(p.z - lo.z)
+                    .max(hi.z - p.z),
+                below: r.below.max(p.y - lo.y),
+                height: r.height.max(hi.y - p.y),
             }
         })
     }
@@ -1704,7 +1718,7 @@ impl BoxReach {
             && p.x + self.half_width >= lo.x
             && p.z - self.half_width <= hi.z
             && p.z + self.half_width >= lo.z
-            && p.y <= hi.y
+            && p.y - self.below <= hi.y
             && p.y + self.height >= lo.y
     }
 }
@@ -1754,6 +1768,9 @@ pub struct Mob {
     /// (`Entity.isTemporarilyInvulnerable`), decremented by the base tick.
     pub invulnerable_time: i32,
     pub death_time: i32,
+    /// `LivingEntity.currentImpulseContextResetGraceTime`: ticks left to keep
+    /// the impulse context after a wind charge or mace impulse.
+    pub impulse_grace_time: i32,
     pub age: u32,
     pub limb_position: f32,
     pub limb_speed: f32,
@@ -1815,6 +1832,9 @@ pub struct Mob {
     pub on_climbable: bool,
     pub fire_ticks: i32,
     pub ticks_frozen: i32,
+    /// `Entity.isInPowderSnow` as of the last mob tick, for the skeleton's
+    /// freezing tracker read at save time.
+    pub in_powder_snow: bool,
     pub glowing: bool,
     pub air: i32,
     pub last_hurt: f32,
@@ -1923,6 +1943,12 @@ pub fn after_break(events: &mut Vec<MobEvent>, asks: bool, mob: u32, start: usiz
 /// Events a mob tick asks the game to act on.
 #[derive(Clone, Debug)]
 pub enum MobEvent {
+    /// A player-directed event remembers the player selected at emission.
+    /// `None` is the server's own player; `Some` is a guest connection.
+    ForPlayer {
+        conn: Option<u32>,
+        event: Box<MobEvent>,
+    },
     /// Squid.handleEntityEvent(19), resetting the remote tentacle cycle.
     SquidCycle {
         mob: u32,
@@ -2181,6 +2207,14 @@ pub enum MobEvent {
         target: Who,
         delta: [f64; 3],
     },
+    /// `Shulker.onPeekAmountChange` for the entities kept outside the mob
+    /// list: the opening lid of `shulker` moves every armor stand with
+    /// physics whose box meets `area` (the box the lid swept) by `delta`.
+    LidPush {
+        shulker: u32,
+        area: Aabb,
+        delta: [f64; 3],
+    },
     /// `EvokerWololoSpellGoal`: a blue sheep turns red.
     Wololo {
         mob: u32,
@@ -2222,7 +2256,14 @@ pub enum MobEvent {
         ambient: Vec<&'static str>,
         color: u32,
     },
-    /// Melee or ranged damage to another mob.
+    /// Damage that bypasses `EnchantmentHelper.doPostAttackEffects` (roars,
+    /// beams, retaliation and hot-cube contact).
+    DamageMob {
+        target: u32,
+        amount: f32,
+        source: Damage,
+    },
+    /// An attack that runs post-attack effects when the hit lands.
     AttackMob {
         target: u32,
         amount: f32,
@@ -2283,6 +2324,12 @@ pub enum MobEvent {
     },
     /// Set another mob's attack target (HurtByTargetGoal alerts).
     SetTarget {
+        mob: u32,
+        target: Who,
+    },
+    /// `HoglinAi.broadcastAttackTarget` to one visible adult hoglin: its
+    /// `setAttackTargetIfCloserThanCurrent` (`piglin::receive_attack_target`).
+    HoglinAttackTarget {
         mob: u32,
         target: Who,
     },
@@ -2756,6 +2803,33 @@ pub enum MobEvent {
 }
 
 impl MobEvent {
+    /// Whether this event acts on the `Who::Player` seen by the mob.
+    pub fn targets_player(&self) -> bool {
+        match self {
+            Self::AttackPlayer(..)
+            | Self::CubeHurtPlayer { .. }
+            | Self::AttackPlayerWithEffect { .. }
+            | Self::StingPlayer { .. }
+            | Self::DamagePlayer { .. }
+            | Self::EffectPlayer { .. }
+            | Self::AxolotlSupportPlayer { .. }
+            | Self::ParrotToShoulder { .. } => true,
+            Self::SonicBoom { target, .. }
+            | Self::Push { target, .. }
+            | Self::Knockback { target, .. }
+            | Self::StabDismount { target }
+            | Self::Ignite { target, .. }
+            | Self::IronGolemHit { target, .. } => *target == Who::Player,
+            Self::Projectile(projectile) => matches!(
+                &projectile.kind,
+                crate::projectiles::ProjectileKind::ShulkerBullet {
+                    target: Some(Who::Player),
+                    ..
+                }
+            ),
+            _ => false,
+        }
+    }
     /// `level.playSound(null, m, sound, source, volume, pitch)` from where
     /// `m` stands.
     pub fn bound_sound(
@@ -3490,6 +3564,13 @@ pub fn breeding_experience(parent: &mut Mob, mob_drops: bool) -> Option<u32> {
     mob_drops.then(|| 1 + parent.random.next_int_bound(7).unwrap_or(0) as u32)
 }
 
+/// Read-only access to the live mobs outside the actor's current tick loan.
+pub trait LiveMobs {
+    fn find(&self, id: u32) -> Option<&Mob>;
+    /// Visit each mob in the disjoint loan, without allocating a snapshot.
+    fn for_each(&self, visitor: &mut dyn FnMut(&Mob));
+}
+
 #[derive(Clone)]
 pub struct MobWorld<'a> {
     /// What the motion value hooks are given: the loop context of the side that
@@ -3507,6 +3588,9 @@ pub struct MobWorld<'a> {
     pub suffocation: &'a horizon_world::suffocation::SuffocationRegistry<'a>,
     pub data: &'a MobData,
     pub player: Option<PlayerView>,
+    /// Switchable per-tick player views, present only when target listeners
+    /// can redirect a mob to a different real player.
+    pub player_selection: Option<&'a player_selection::PlayerSelection>,
     /// The uuid and entity id of the player whose view `player` is (#1077):
     /// captured once where the tick lends its player — the game's own, or the
     /// guest a server's mob sees — so a goal resolves that player without a
@@ -3519,6 +3603,8 @@ pub struct MobWorld<'a> {
     /// player in the level stands, alive or not (the despawn distance).
     pub nearest_player: Option<Vec3>,
     pub others: &'a [Seen],
+    /// Disjoint live mob state, available only while an actor is ticked.
+    pub live_mobs: Option<&'a dyn LiveMobs>,
     /// The separately simulated dragon, visible to revenge and melee goals.
     pub dragon: Option<(u32, TargetInfo)>,
     /// The boats and rafts a lead can hang on (`Holder::Boat`): id and state.
@@ -3624,8 +3710,114 @@ pub trait MobHooks {
     /// `LivingVisibilityEvent`: `visibility`, the player's visibility
     /// percent as mob `looking` targets it, as mods scale it.
     fn living_visibility(&self, player: &PlayerView, looking: u32, visibility: f64) -> f64;
+    /// A proposed target change. A listener may cancel or substitute a target.
+    fn living_change_target(
+        &self,
+        _mob: &mut Mob,
+        _world: &MobWorld<'_>,
+        _is_brain: bool,
+        target: Option<Who>,
+    ) -> TargetChange {
+        TargetChange::Set(target)
+    }
+}
+/// Outcome of a target-change event.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TargetChange {
+    /// Apply the resulting target.
+    Set(Option<Who>),
+    /// Keep the previous target.
+    Keep,
 }
 impl MobWorld<'_> {
+    /// The currently selected player view. The ordinary tick uses `player`;
+    /// target-change callbacks can switch a scoped selection during a tick.
+    pub fn selected_player(&self) -> Option<&PlayerView> {
+        match self.player_selection {
+            Some(selection) => selection.selected().map(|player| &player.view),
+            None => self.player.as_ref(),
+        }
+    }
+
+    /// UUID and entity ID of the currently selected player, if any.
+    pub fn selected_player_identity(&self) -> Option<([i32; 4], u32)> {
+        match self.player_selection {
+            Some(selection) => selection
+                .selected()
+                .map(|player| (player.view.uuid, player.entity_id)),
+            None => self.player_identity,
+        }
+    }
+
+    /// Capture a player-directed event's recipient after a listener switches
+    /// the selected player. Before the first switch retain the plain event and
+    /// the existing allocation-free routing path.
+    pub fn route_player_event(&self, event: MobEvent) -> MobEvent {
+        if event.targets_player()
+            && let Some(selection) = self.player_selection
+            && selection.has_switched()
+            && let Some(player) = selection.selected()
+        {
+            return MobEvent::ForPlayer {
+                conn: player.connection,
+                event: Box::new(event),
+            };
+        }
+        event
+    }
+
+    /// An action directed at the player already bound at tick start, such as
+    /// retaliation against the attacker, must not follow a later target change.
+    pub fn route_initial_player_event(&self, event: MobEvent) -> MobEvent {
+        if event.targets_player()
+            && let Some(selection) = self.player_selection
+            && selection.has_switched()
+            && let Some(player) = selection.initial()
+        {
+            return MobEvent::ForPlayer {
+                conn: player.connection,
+                event: Box::new(event),
+            };
+        }
+        event
+    }
+
+    /// Keep a mount's rider as the recipient even when a target-change hook
+    /// redirects the mount to a different player later in the same tick.
+    /// Before any switch the existing allocation-free routing is unchanged.
+    pub fn route_rider_event(&self, mount: u32, event: MobEvent) -> MobEvent {
+        if event.targets_player()
+            && let Some(selection) = self.player_selection
+            && selection.has_switched()
+            && let Some(rider) = selection.rider(mount).or_else(|| selection.initial())
+        {
+            return MobEvent::ForPlayer {
+                conn: rider.connection,
+                event: Box::new(event),
+            };
+        }
+        event
+    }
+
+    /// Dispatch a proposed AI target change, validating a substituted target.
+    pub fn change_target(
+        &self,
+        mob: &mut Mob,
+        is_brain: bool,
+        target: Option<Who>,
+    ) -> TargetChange {
+        let Some(hooks) = self.mob_hooks else {
+            return TargetChange::Set(target);
+        };
+        match hooks.living_change_target(mob, self, is_brain, target) {
+            TargetChange::Set(Some(who))
+                if Some(who) != target && self.target_info(who).is_none() =>
+            {
+                TargetChange::Keep
+            }
+            change => change,
+        }
+    }
     /// Whether a mob may grief here at all: the rule, or a mod that may say
     /// yes against it.
     pub fn griefing_possible(&self) -> bool {
@@ -3762,6 +3954,7 @@ impl Mob {
             invulnerable: 0,
             invulnerable_time: 0,
             death_time: 0,
+            impulse_grace_time: 0,
             age: 0,
             limb_position: 0.0,
             limb_speed: 0.0,
@@ -3793,6 +3986,7 @@ impl Mob {
             on_climbable: false,
             fire_ticks: 0,
             ticks_frozen: 0,
+            in_powder_snow: false,
             glowing: false,
             air: 300,
             last_hurt: 0.0,
@@ -3903,6 +4097,10 @@ impl Mob {
     }
     /// `Entity.makeBoundingBox(position)`.
     pub fn bounds_at(&self, position: Vec3) -> Aabb {
+        // Shulker.makeBoundingBox: the lid's lift, not the dimensions.
+        if self.kind.species == Species::Shulker {
+            return shulker::bounds_at(self, position);
+        }
         // `width()` and `height()` in one `dims()`: every box asked for (each
         // collision, push and cart test) read the whole size twice.
         let (width, height, _) = self.dims();
@@ -4045,11 +4243,16 @@ impl Mob {
         // Enderman.hurtServer: past `isInvulnerableTo`, the teleport draw
         // follows `super.hurtServer` whatever it answered (a hurt cooldown, a
         // dead enderman), its hurt sound's pitch included.
-        let enderman = self.species() == Species::Enderman
-            && !self.removed
-            && !(self.invulnerable_flag && !source.kind.bypasses_invulnerability());
-        let hurt = self.hurt_server(level, amount, source, armor_effectiveness);
-        if enderman {
+        let enderman = self.species() == Species::Enderman;
+        let mut passed_invulnerability = false;
+        let hurt = self.hurt_server(
+            level,
+            amount,
+            source,
+            armor_effectiveness,
+            &mut passed_invulnerability,
+        );
+        if enderman && passed_invulnerability {
             enderman::after_hurt(self, &source);
         }
         hurt
@@ -4060,6 +4263,7 @@ impl Mob {
         amount: f32,
         source: Damage,
         armor_effectiveness: Option<&mut dyn FnMut(f32, &mut LegacyRandom) -> f32>,
+        passed_invulnerability: &mut bool,
     ) -> bool {
         axolotl::before_damage(self, amount, &source);
         raider::note_hurt(self);
@@ -4073,12 +4277,28 @@ impl Mob {
             // about, so `Player.attack` goes on with its extra knockback and its aftermath.
             return sulfur_cube::immune_to(&source);
         }
-        if self.refuses_damage(&source) {
+        // Warden and ghast overrides can answer before Entity's base check.
+        let bypasses = source.kind.bypasses_invulnerability();
+        let reflected = self.reflected_fireball(&source);
+        let flagged = self.is_invulnerable() && !bypasses;
+        if self.species() == Species::Warden && warden::digging_or_emerging(self) && !bypasses {
             return false;
         }
-        // Ghast.isReflectedFireball: a fireball a player turned back is
-        // no fire to it, and kills it (Ghast.hurtServer: 1000 damage).
-        let reflected = self.reflected_fireball(&source);
+        let vanilla = self.removed
+            || flagged
+            || (source.is_fire() && self.kind.flags.fire_immune && !reflected);
+        let invulnerable = if self.species() == Species::Ghast && (flagged || reflected) {
+            self.removed || flagged
+        } else {
+            level.invulnerability_check(crate::health::Hurting::Mob(self, &source), vanilla)
+        };
+        if invulnerable {
+            return false;
+        }
+        *passed_invulnerability = true;
+        if !self.alive() {
+            return false;
+        }
         if !ai::accepts_damage(self, &source, amount, level.attack().player_uuid) {
             return false;
         }
@@ -4445,7 +4665,7 @@ impl Mob {
         let cloud = self.species() == Species::Enderman
             && direct == "minecraft:area_effect_cloud"
             && !self.removed
-            && !(self.invulnerable_flag && !source.kind.bypasses_invulnerability());
+            && !(self.is_invulnerable() && !source.kind.bypasses_invulnerability());
         let hurt = self.damage(level, amount, source);
         if cloud {
             enderman::teleport_chance(self, &source);
@@ -4606,12 +4826,25 @@ impl Mob {
         level: &mut DamageLevel<'_>,
         events: &mut Vec<MobEvent>,
     ) -> bool {
+        self.prepare_tick();
+        ai::tick(self, w, level, events)
+    }
+    /// A game-owned tick may pause before fox consumption to release its loans.
+    pub fn tick_until_consumption(
+        &mut self,
+        w: &MobWorld,
+        level: &mut DamageLevel<'_>,
+        events: &mut Vec<MobEvent>,
+    ) -> ai::TickProgress {
+        self.prepare_tick();
+        ai::tick_until_consumption(self, w, level, events)
+    }
+    fn prepare_tick(&mut self) {
         self.track_section();
         // LivingEntity.tick: CombatTracker.recheckStatus.
         let alive = self.alive();
         self.combat.recheck(alive, self.age);
         self.extra.stuck.tick();
-        ai::tick(self, w, level, events)
     }
     /// The section the mob is in, noted when it changes (`EntitySection` lists).
     fn track_section(&mut self) {

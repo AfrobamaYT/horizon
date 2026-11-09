@@ -96,6 +96,11 @@ pub const ITEMS: CapabilityKey<dyn ResourceHandler<ItemResource>> = CapabilityKe
 /// follow.
 struct GameItems(BlockSide);
 impl ResourceHandler<ItemResource> for GameItems {
+    fn set_max_stack_size(&self, host: &mut dyn ServerHost, tx: &Transaction, limit: u32) -> bool {
+        backend_mut_of(host)
+            .is_some_and(|backend| backend.container_set_stack_limit(self.0, limit, tx))
+    }
+
     fn size(&self, host: &mut dyn ServerHost) -> usize {
         backend_of(&*host)
             .and_then(|backend| backend.container_size(self.0))

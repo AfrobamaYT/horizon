@@ -27,6 +27,7 @@ impl FluidIdentity {
 }
 
 impl UnresolvedFluid {
+    #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn from_slot(slot: u64) -> Result<Self, &'static str> {
         let table = TABLE.read().unwrap();
         (slot < table.names.len() as u64)

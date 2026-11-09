@@ -4,9 +4,6 @@
 //! Hooks use `&self + Send + Sync` for shared and reentrant calls; see `docs/modding/src/how-to/native-mods.md`.
 //! Generate the trait and dispatch with `cargo run -p xtask -- mod-api`.
 #![deny(missing_docs)]
-// The generated `impl_*_areas!` macros are exported for test doubles outside the crate, and this crate's
-// own test doubles use them by path too.
-#![allow(macro_expanded_macro_exports_accessed_by_absolute_paths)]
 extern crate self as mod_api;
 
 /// A saved fluid name retained for the lifetime of the process.
@@ -3423,6 +3420,18 @@ impl NativeDifficulty {
     /// A difficulty of `base` and `effective`.
     pub fn new(base: u8, effective: f32) -> Self {
         Self { base, effective }
+    }
+    /// `DifficultyInstance.getSpecialMultiplier`: 0 below an effective difficulty of 2, 1
+    /// above 4, and rising in a straight line between them. Mobs read it for their chance to
+    /// pick up loot, a zombie's reinforcements and a skeleton's enchanted bow.
+    pub fn special_multiplier(&self) -> f32 {
+        if self.effective < 2.0 {
+            0.0
+        } else if self.effective > 4.0 {
+            1.0
+        } else {
+            (self.effective - 2.0) / 2.0
+        }
     }
 }
 

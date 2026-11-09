@@ -30,9 +30,13 @@
 - [Design: worldgen features and placers](concepts/worldgen-features.md)
 - [Design: moving structures](concepts/moving-structures.md)
 - [Design: custom recipe-book settings](concepts/recipe-book-types.md)
+- [Design: main target configuration](concepts/main-target-config.md)
+- [Design: resource-backed special item renderers](concepts/resource-renderers.md)
 - [Design: section meshing](concepts/section-meshing.md)
 - [Design: section geometry](concepts/section-geometry.md)
+- [Design: level extracted state](concepts/level-extracted-state.md)
 - [Design: mesh visibility](concepts/mesh-visibility.md)
+- [Design: client extensions](concepts/client-extensions.md)
 - [Design: baked models and ModelData](concepts/baked-models.md)
 - [Design: travel and move hooks](concepts/travel-and-move.md)
 

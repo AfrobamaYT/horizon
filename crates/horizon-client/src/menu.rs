@@ -431,6 +431,7 @@ pub struct Menu {
     slots: Vec<Slot>,
     containers: [Vec<Option<ItemStack>>; 4],
     grid_size: usize,
+    container_limits: Vec<Option<u32>>,
     pub carried: Option<ItemStack>,
     pub data: Vec<i32>,
     pub creative: bool,
@@ -980,6 +981,7 @@ impl Menu {
             slots,
             containers,
             grid_size,
+            container_limits: Vec::new(),
             carried: None,
             data: vec![0; data],
             creative: false,
@@ -1332,9 +1334,9 @@ impl Menu {
     /// `EnchantmentMenu.slotsChanged`: no costs or clues without an
     /// enchantable item; with one, a level fills them (`enchant_changed`).
     fn enchant_changed(&mut self, env: &Env) {
-        let enchantable = self.containers[MAIN][0].as_ref().is_some_and(|s| {
-            env.enchantments.enchantable(&s.item) > 0 && s.enchantments().is_empty()
-        });
+        let enchantable = self.containers[MAIN][0]
+            .as_ref()
+            .is_some_and(|s| env.enchantments.enchantable_of(s) > 0 && s.enchantments().is_empty());
         if enchantable {
             self.enchant_changed = true;
         } else {
@@ -1902,16 +1904,32 @@ impl Menu {
         )
     }
 
+    /// Capacity overrides for the backing container slots, refreshed before each server edit.
+    pub fn set_container_limits(&mut self, limits: Vec<Option<u32>>) {
+        self.container_limits = limits;
+    }
+
     /// `Slot.getMaxStackSize(stack)`.
     fn slot_max(&self, env: &Env, s: usize, stack: &ItemStack) -> u32 {
-        self.slot_rules(
-            env,
-            s,
-            stack,
-            self.vanilla_may_place(env, s, stack),
-            self.vanilla_slot_max(s, stack),
-        )
-        .1
+        let max = self
+            .slot_rules(
+                env,
+                s,
+                stack,
+                self.vanilla_may_place(env, s, stack),
+                self.vanilla_slot_max(s, stack),
+            )
+            .1;
+        let slot = self.slots[s];
+        if slot.container == MAIN {
+            self.container_limits
+                .get(slot.index)
+                .copied()
+                .flatten()
+                .map_or(max, |limit| max.min(limit))
+        } else {
+            max
+        }
     }
 
     fn vanilla_slot_max(&self, s: usize, stack: &ItemStack) -> u32 {
@@ -2453,11 +2471,11 @@ impl Menu {
 }
 
 /// `ItemStack.getMaxStackSize`: the stack's component, else the item's; a removed
-/// component (`!minecraft:max_stack_size`) falls back to the item.
+/// component (`!minecraft:max_stack_size`) uses vanilla's fallback of one.
 pub(crate) fn item_max_stack(items: &Items, stack: &ItemStack) -> u32 {
     let patched = stack.data().and_then(|d| {
         if d.other("!minecraft:max_stack_size").is_some() {
-            return None;
+            return Some(1);
         }
         match d.other("minecraft:max_stack_size") {
             Some(horizon_core::nbt::Tag::Int(n)) if (1..=99).contains(n) => Some(*n as u32),
@@ -3898,6 +3916,31 @@ pub(crate) mod tests {
                 menu.set_slot(env, i, stack(shown, 1));
             }
             test(env, menu);
+        });
+    }
+
+    /// A menu reads a stack's own `MAX_STACK_SIZE`: a removed component is
+    /// vanilla's default of one, so two cannot merge into one slot.
+    #[test]
+    fn a_removed_max_stack_size_leaves_one_per_slot() {
+        with_menu(Kind::Inventory, |env, menu| {
+            let removed = || {
+                Some(horizon_core::nbt::Tag::compound(Vec::<(
+                    &str,
+                    horizon_core::nbt::Tag,
+                )>::new()))
+            };
+            let mut stone = stack("stone", 1).unwrap();
+            stone
+                .data_mut()
+                .set_other("!minecraft:max_stack_size", removed());
+            menu.set_slot(env, 9, Some(stone.clone()));
+            menu.carried = Some(stone);
+            menu.click(env, 9, 0, Input::Pickup).unwrap();
+            // Vanilla leaves both stacks at one; the item's default of 64 no
+            // longer lets the click merge them.
+            assert_eq!(menu.slot(9).map(|s| s.count), Some(1));
+            assert_eq!(menu.carried.as_ref().map(|s| s.count), Some(1));
         });
     }
 

@@ -9,6 +9,9 @@ use horizon_core::random::LegacyRandom;
 use horizon_world::registry::BlockStateId;
 use std::sync::Arc;
 
+mod modified;
+pub use modified::ModifiedChunks;
+
 /// Sections (x, section index, z) waiting to be remeshed, kept by column
 /// (a bit per section index), so the mesh scheduler looks at each column once
 /// rather than at every section of it.
@@ -20,6 +23,10 @@ impl DirtySections {
     pub fn insert(&mut self, (x, sy, z): (i32, i32, i32)) {
         debug_assert!((0..SectionMask::CAPACITY as i32).contains(&sy));
         self.columns.entry((x, z)).or_default().insert(sy as usize);
+    }
+    /// Mark all sections in `mask` dirty for column `(x, z)`.
+    pub fn insert_column_mask(&mut self, (x, z): (i32, i32), mask: SectionMask) {
+        *self.columns.entry((x, z)).or_default() |= mask;
     }
     pub fn contains(&self, &(x, sy, z): &(i32, i32, i32)) -> bool {
         (0..SectionMask::CAPACITY as i32).contains(&sy)
@@ -83,7 +90,7 @@ pub struct World {
     /// was generated rather than read from the save: the game tells native mods.
     pub loaded_chunks: Vec<(i32, i32, bool)>,
     /// Chunks changed since the last save.
-    pub modified: FxHashSet<(i32, i32)>,
+    pub modified: ModifiedChunks,
     /// Block entities, and the order they tick in.
     pub block_entities: crate::block_entities::BlockEntities,
     /// Each chest's `ContainerOpenersCounter`: opener count and largest
@@ -238,7 +245,7 @@ impl World {
             loaded_entities: Vec::new(),
             entities_pending: FxHashSet::default(),
             loaded_chunks: Vec::new(),
-            modified: FxHashSet::default(),
+            modified: ModifiedChunks::default(),
             attachments: Default::default(),
             attachment_syncs: FxHashSet::default(),
             block_entities: Default::default(),
@@ -515,6 +522,30 @@ impl World {
     pub fn is_loaded_at(&self, x: i32, y: i32, z: i32) -> bool {
         self.shape.contains_y(y) && self.loaded(x, z)
     }
+    /// Persisted container capacity override; absence preserves vanilla capacity.
+    pub fn container_stack_limit(&self, key: (i32, i32, i32)) -> Option<u32> {
+        self.chunks
+            .get(&(key.0 >> 4, key.2 >> 4))
+            .and_then(|c| c.container_stack_limits.get(&key).copied())
+    }
+    /// Store with the authoritative saved block entity fields.
+    pub fn set_container_stack_limit(&mut self, key: (i32, i32, i32), limit: u32) {
+        use horizon_core::nbt::{Compound, Tag};
+        self.with_chunk_extras(key, |extras| {
+            if !extras.block_entity_sources.iter().any(|(p, _)| *p == key) {
+                extras
+                    .block_entity_sources
+                    .push((key, Tag::Compound(Compound::new())));
+            }
+            if let Some((_, Tag::Compound(tag))) = extras
+                .block_entity_sources
+                .iter_mut()
+                .find(|(p, _)| *p == key)
+            {
+                tag.insert("horizon:stack_limit".into(), Tag::Int(limit as i32));
+            }
+        });
+    }
     /// `LockCode`: the `lock` a container block entity refuses to open
     /// without, as the tag it was loaded or set with carries it (Horizon's
     /// model holds no field for it).
@@ -618,6 +649,23 @@ impl World {
             .map(Arc::unwrap_or_clone)
             .unwrap_or_default();
         f(&mut extras);
+        let limit = extras
+            .block_entity_sources
+            .iter()
+            .find(|(p, _)| *p == key)
+            .and_then(|(_, tag)| tag.get("horizon:stack_limit"))
+            .and_then(|tag| match tag {
+                horizon_core::nbt::Tag::Int(n) if (1..=99).contains(n) => Some(*n as u32),
+                _ => None,
+            });
+        match limit {
+            Some(limit) => {
+                chunk.container_stack_limits.insert(key, limit);
+            }
+            None => {
+                chunk.container_stack_limits.remove(&key);
+            }
+        }
         chunk.saved = Some(Arc::new(extras));
         self.modified.insert(chunk_key);
     }
@@ -655,6 +703,36 @@ mod tests {
     use crate::chunk::{Chunk, MIN_Y, SECTIONS};
     use horizon_world::registry::BlockStateId;
     use std::sync::Arc;
+
+    #[test]
+    fn container_limit_index_tracks_load_rollback_removal_and_replacement() {
+        use crate::chunk::ChunkExtras;
+        use horizon_core::nbt::{Compound, Tag};
+        let key = (3, 70, 4);
+        let mut extras = ChunkExtras::default();
+        for (pos, n) in [(key, 10), ((4, 70, 4), 100), ((5, 70, 4), 0)] {
+            let mut tag = Compound::new();
+            tag.insert("horizon:stack_limit".into(), Tag::Int(n));
+            extras.block_entity_sources.push((pos, Tag::Compound(tag)));
+        }
+        let mut chunk = Chunk::empty(0, 0);
+        chunk.saved = Some(Arc::new(extras));
+        let mut world = World::new(BlockStateId(0), 0);
+        world.chunks.insert((0, 0), Arc::new(chunk));
+        assert_eq!(world.container_stack_limit(key), Some(10));
+        assert_eq!(world.container_stack_limit((4, 70, 4)), None);
+        assert_eq!(world.container_stack_limit((5, 70, 4)), None);
+        let kept = world.block_entity_extras(key);
+        world.set_container_stack_limit(key, 20);
+        assert_eq!(world.container_stack_limit(key), Some(20));
+        world.set_block_entity_extras(key, kept);
+        assert_eq!(world.container_stack_limit(key), Some(10));
+        world.forget_block_entity_source(key);
+        assert_eq!(world.container_stack_limit(key), None);
+        world.set_container_stack_limit(key, 30);
+        world.chunks.insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        assert_eq!(world.container_stack_limit(key), None);
+    }
 
     /// `/weather thunder` then `/weather clear` in a frozen world: the levels sit at their
     /// targets at every partial tick, where a tick of fading would have moved them 0.01.

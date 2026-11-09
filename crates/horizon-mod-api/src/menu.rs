@@ -74,6 +74,8 @@ pub enum LogicalSide {
 /// Operations on the clicked slot, including its placement and take rules.
 pub trait SlotView {
     fn item(&self) -> Option<ItemStack>;
+    /// Test placement without imposing resident stack count or damage maxima.
+    /// Unknown item identities or unrepresentable component payloads still refuse.
     fn may_place(&self, stack: &ItemStack) -> bool;
     fn may_pickup(&self) -> bool;
     fn allow_modification(&self) -> bool;
