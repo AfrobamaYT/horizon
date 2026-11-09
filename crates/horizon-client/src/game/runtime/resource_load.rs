@@ -380,31 +380,29 @@ pub(super) fn with_mod_attributes(
     catalog: &horizon_world::attributes::entity::Catalog,
     declared: &[mod_api::__private::AttributeDeclaration],
 ) -> std::result::Result<horizon_world::attributes::entity::Catalog, String> {
-    catalog
-        .with_attributes(
-            &declared
-                .iter()
-                .map(
-                    |declared| horizon_world::attributes::entity::AddedAttribute {
-                        mod_id: declared.mod_id.clone(),
-                        id: declared.id.clone(),
-                        definition: declared.definition,
-                        syncable: declared.syncable,
-                        sentiment: match declared.sentiment {
-                            mod_api::Sentiment::Positive => {
-                                horizon_world::attributes::Sentiment::Positive
-                            }
-                            mod_api::Sentiment::Negative => {
-                                horizon_world::attributes::Sentiment::Negative
-                            }
-                            mod_api::Sentiment::Neutral => {
-                                horizon_world::attributes::Sentiment::Neutral
-                            }
-                        },
-                    },
+    let added = declared
+        .iter()
+        .map(|declared| {
+            Ok(horizon_world::attributes::entity::AddedAttribute {
+                mod_id: declared.mod_id.clone(),
+                id: declared.id.clone(),
+                definition: horizon_world::attributes::Definition::ranged(
+                    declared.default,
+                    declared.min,
+                    declared.max,
                 )
-                .collect::<Vec<_>>(),
-        )
+                .map_err(|error| format!("mod attribute {}: {error}", declared.id))?,
+                syncable: declared.syncable,
+                sentiment: match declared.sentiment {
+                    mod_api::Sentiment::Positive => horizon_world::attributes::Sentiment::Positive,
+                    mod_api::Sentiment::Negative => horizon_world::attributes::Sentiment::Negative,
+                    mod_api::Sentiment::Neutral => horizon_world::attributes::Sentiment::Neutral,
+                },
+            })
+        })
+        .collect::<std::result::Result<Vec<_>, String>>()?;
+    catalog
+        .with_attributes(&added)
         .map_err(|error| format!("mod attribute declarations: {error}"))
 }
 
