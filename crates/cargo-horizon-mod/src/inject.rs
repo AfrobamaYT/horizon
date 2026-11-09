@@ -161,7 +161,9 @@ fn library(
     wire: &std::collections::BTreeSet<String>,
 ) -> Result<Option<ModPoints>, String> {
     let krate = at.split("::").next().unwrap_or_default();
-    let mut command = crate::wasm::pinned("cargo");
+    // Metadata needs no particular toolchain: the cargo running this subcommand lists it.
+    let mut command =
+        std::process::Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
     command
         .args(["metadata", "--format-version", "1"])
         .current_dir(dir);
