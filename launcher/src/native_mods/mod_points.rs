@@ -56,7 +56,7 @@ pub(super) fn stage(dir: &Path, wire: &BTreeSet<String>) -> Result<(), String> {
 pub(super) fn routes<'a>(
     catalog: &'a Catalog,
     manifest: &'a Manifest,
-) -> Result<Vec<(&'a ModLibrary, Routed<'a>, &'a Inject)>, Box<Refusal>> {
+) -> Result<Vec<(&'a ModLibrary, Routed<'a>, &'a Inject)>, Refusal> {
     manifest
         .inject
         .iter()
@@ -74,8 +74,7 @@ pub(super) fn routes<'a>(
                     version: &library.version,
                     catalog: &library.points,
                 },
-            )
-            .map_err(Box::new)?;
+            )?;
             Ok((library, routed, inject))
         })
         .collect()
@@ -144,24 +143,16 @@ pub(super) fn internals(catalog: &Catalog, mods: &[&Manifest], index: usize) -> 
 pub(super) fn refusal(refusal: &Refusal) -> String {
     match refusal {
         Refusal::Inject(error) => super::inject_text::inject_error(error),
-        Refusal::Changed {
-            id,
-            library,
-            version,
-            at,
-            pinned,
-            installed,
-            signature,
-        } => trf(
+        Refusal::Changed(changed) => trf(
             "E_INJECT_CHANGED: {id}: {library} {version} changed {at}: pinned {pinned}, installed {installed} ({signature}); update the declaration with `cargo horizon-mod inject update` and rebuild against it",
             &[
-                ("id", id),
-                ("library", library),
-                ("version", version),
-                ("at", at),
-                ("pinned", pinned),
-                ("installed", installed),
-                ("signature", signature),
+                ("id", &changed.id),
+                ("library", &changed.library),
+                ("version", &changed.version),
+                ("at", &changed.at),
+                ("pinned", &changed.pinned),
+                ("installed", &changed.installed),
+                ("signature", &changed.signature),
             ],
         ),
         Refusal::OptedOut { id, at } => trf(

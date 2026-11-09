@@ -101,15 +101,7 @@ pub enum Refusal {
     /// A routing refusal shared with the game's points (missing, no slot, no API record).
     Inject(InjectError),
     /// The library's function changed since the addon pinned it.
-    Changed {
-        id: String,
-        library: String,
-        version: String,
-        at: String,
-        pinned: String,
-        installed: String,
-        signature: String,
-    },
+    Changed(Box<Changed>),
     /// The function exists but its author opted it out with `#[mod_api::no_point]`.
     OptedOut { id: String, at: String },
     /// `internals` reaches the library's own types, so it needs the library's target.
@@ -122,24 +114,39 @@ pub enum Refusal {
     },
 }
 
+/// A mod point an addon pinned, changed in the installed library.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Changed {
+    pub id: String,
+    pub library: String,
+    pub version: String,
+    pub at: String,
+    pub pinned: String,
+    pub installed: String,
+    pub signature: String,
+}
+
 impl fmt::Display for Refusal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Inject(error) => error.fmt(f),
-            Self::Changed {
-                id,
-                library,
-                version,
-                at,
-                pinned,
-                installed,
-                signature,
-            } => write!(
-                f,
-                "E_INJECT_CHANGED: {id}: {library} {version} changed {at}: pinned {pinned}, \
+            Self::Changed(changed) => {
+                let Changed {
+                    id,
+                    library,
+                    version,
+                    at,
+                    pinned,
+                    installed,
+                    signature,
+                } = &**changed;
+                write!(
+                    f,
+                    "E_INJECT_CHANGED: {id}: {library} {version} changed {at}: pinned {pinned}, \
                  installed {installed} ({signature}); update the declaration with `cargo \
                  horizon-mod inject update` and rebuild against it"
-            ),
+                )
+            }
             Self::OptedOut { id, at } => write!(
                 f,
                 "E_INJECT_MISSING: {id}: {at} has no point (opted out with #[mod_api::no_point])"
@@ -195,7 +202,7 @@ pub fn route<'a>(
         }));
     };
     if point.hash != inject.hash {
-        return Err(Refusal::Changed {
+        return Err(Refusal::Changed(Box::new(Changed {
             id,
             library: library.id.to_owned(),
             version: library.version.to_owned(),
@@ -203,7 +210,7 @@ pub fn route<'a>(
             pinned: inject.hash.clone(),
             installed: point.hash.clone(),
             signature: point.signature.clone(),
-        });
+        })));
     }
     let api = inject.access == super::Access::Api;
     if let (true, Some(why)) = (api, &point.api_refusal) {
