@@ -393,7 +393,7 @@ Native and wasm mods can't call each other's functions: they live in different a
   3. for `api` declarations, the `layout` of every record field's type (section 0), computed when the catalog is built, so a changed field in a parameter type also refuses.
 
   At load, a declaration whose hash differs from the installed library's is refused, naming the library, its version, the function, and both hashes and signatures. This is the `E_INJECT_CHANGED` path that `inject update` already reports. Engine points don't need this check at load, because a native mod is pinned to one game build.
-- **Cost when nothing listens.** The same single check as an engine point: one relaxed load of the point's `AtomicBool` slot and a branch, inside the body, so inlining keeps the check. **Unmeasured** on a real library. The first mod-point PR measures it on the chemicals sample's hottest function (a per-tick transfer), on native and wasm, and reports it in the PR.
+- **Cost when nothing listens.** The same check as an engine point: one load of the point's `AtomicBool` slot and a branch at the head, and one at the return; the listened path runs out of line. Measured on the chemicals fixture's per-tick transfer (a function of about 2 ns, 63 calls per tick): about 1.2 ns a call natively (1.7 → 2.9 ns, release) and 1.6–2 ns on wasm (2.9 → 4.5–4.9 ns, wasmtime). The rest of the cost is that the staged function is no longer inlined into its caller.
 
 ### How `cargo horizon-mod build` stages it
 
@@ -403,17 +403,19 @@ It mirrors the engine's staging pass (`horizon-mod-api-gen/src/points.rs`, `stag
 3. Emit the mod's `points.json`: path, kind, side, record, `api_refusal`, hash. Emit its `mod_points`-style module: records, typed slots, `PointId`. Both are build outputs, recorded in the build identity and covered by the package hash.
 4. For wasm, as now, compile into each member only the declared places' guest codecs and dispatch. The group build already knows its addons' declarations. The full catalog still sets the layout hash.
 
-### What has to change in #2242's machinery (after it merges)
+### How it is built
 
-1. The `#[point]` expansion is game-bound: it calls `crate::game::points::mirror_in/out` and the game's `POINTS`. It needs a crate parameter so a mod crate expands against its own slot table. Mod points have no engine mirrors, so the mirror step is empty for them.
-2. `horizon_mod_points::registry` holds one static `POINTS: [AtomicBool; POINT_COUNT]`, sealed once. Each mod crate gets its own generated slot table. The loader registers those tables, in dependency order, before the one seal.
-3. Staging runs in `cargo horizon-mod build` (above), not only in `horizon-stage`.
-4. The wasm build's `--points` input becomes the library's catalog plus its addons' declared places.
-5. `api` records need `Wire` on mod types: section 0 (D1) first.
+Built as stage P (the [how-to](../injections.md#mod-points-patching-another-mod) is the reference):
+1. Every point table, the game's and each mod crate's, is a `Table` in one registry (`mod_api::__private::points`). A listener carries its table, and the one seal sets every table that has listeners.
+2. `#[point(table = "…")]` expands against its table: the game's `mod_points` by default, a mod crate's generated `crate::__horizon_points` for a mod point. Mod points have no engine mirrors.
+3. `stage_mod` (`horizon-mod-api-gen/src/points/mod_crate.rs`) is the staging pass for a mod crate. `cargo horizon-mod build --wasm` runs it on every member, and the launcher on every native mod crate it compiles.
+4. The mod's catalog and the routing of an addon's injection to it (`horizon-mod-package`, `manifest::inject::mod_points`) are shared by every loader.
+5. The listened paths run out of line (`mod_api::__private::points::cold`), so an unlistened point costs a slot load and a branch at its head and one at its return.
+6. Wasm group routing (a wasm addon's listeners registered in its library's table inside the group) follows in its own change.
 
 ### Mixed native and wasm
 
-`api` points cross through the game, as an engine point with a wasm listener does today (#2242's `real_member`): the record crosses over Wire, and the listener's changes come back. `internals` points are refused across targets (above). There is no load-time module rewriting: it can't work on native, and it would miss code the compiler has inlined.
+`internals` points are refused across targets (above). `api` points will cross through the game, as an engine point with a wasm listener does (#2242's `real_member`), once mixed-target dependencies are supported (stage 6): until then an `api` listener across targets is refused, naming a parameter without a `Wire` form when there is one. There is no load-time module rewriting: it can't work on native, and it would miss code the compiler has inlined.
 
 ## Where it lives after the restructure
 

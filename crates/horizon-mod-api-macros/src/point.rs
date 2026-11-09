@@ -363,8 +363,6 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
     // back only for `&mut` ones); then the raw listeners get the value returned itself.
     let has_api_return = api && shape.has_return();
     let back = has_api_return.then(|| {
-        let variant = shape.return_variant();
-        let return_listened = listened(&variant);
         // A by-value argument is spent by the body: it is copied (or converted) before.
         let before: Vec<_> = args
             .iter()
@@ -382,8 +380,8 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
             .collect();
         let (names, values): (Vec<_>, Vec<_>) = before.into_iter().unzip();
         let before = quote! {
-            let __back = if #return_listened {
-                ::std::option::Option::Some((#(#values,)*))
+            let __back = if __returned {
+                ::mod_api::__private::points::cold(|| ::std::option::Option::Some((#(#values,)*)))
             } else {
                 ::std::option::Option::None
             };
@@ -453,7 +451,6 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         });
         let raw_part = shape.raw.then(|| {
             let variant = shape.return_variant();
-            let return_listened = listened(&variant);
             let listener = shape.raw_return_listener();
             let (receiver, erased_receiver) = if shape.borrowed_return {
                 (quote!(), quote!(::std::ptr::null_mut()))
@@ -465,7 +462,7 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
                 syn::ReturnType::Default => quote!(),
             };
             quote! {
-                if #return_listened {
+                {
                     #table::__private::fire_raw(
                         #table::PointId::#variant,
                         &mut |__kind| match __kind {
@@ -492,9 +489,27 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
                 }
             }
         });
-        quote!(#api_part #raw_part)
+        // One check of the return's slot, before the body: the return path runs out of line.
+        (api_part.is_some() || raw_part.is_some()).then(|| {
+            quote! {
+                if __returned {
+                    ::mod_api::__private::points::cold(|| { #api_part #raw_part });
+                }
+            }
+        })
     };
     let back = back.map(|(before, _)| before);
+    let returned_local = returned.is_some().then(|| {
+        let listened = listened(&shape.return_variant());
+        quote!(let __returned = #listened;)
+    });
+    // The head's listened path moves the by-value arguments into its record: it runs out of line
+    // and hands them back, the listeners' changes included.
+    let owned: Vec<syn::Ident> = args
+        .iter()
+        .filter(|(arg, _)| arg.pass == Pass::Value)
+        .map(|(_, input)| local(*input))
+        .collect();
     let cancel_local = cancels.then(|| quote!(let mut __cancel = false;));
     let result_local =
         results.then(|| quote!(let mut __result_slot = ::std::option::Option::None;));
@@ -502,12 +517,14 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         #cancel_local
         #result_local
         #(#shared_locals)*
+        // The listened path stays out of line, so a point nothing listens at keeps the function
+        // small enough to inline: one load and a branch.
         if #head_listened {
-            #head_api
-            #head_raw
+            (#(#owned,)*) = ::mod_api::__private::points::cold(|| { #head_api #head_raw (#(#owned,)*) });
             #stop
         }
         #(#shared_refs)*
+        #returned_local
         #back
         #[allow(unused_mut)]
         let mut __result = #callee #turbofish(#(#call),*);

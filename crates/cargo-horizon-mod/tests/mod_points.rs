@@ -103,6 +103,92 @@ fn an_addon_patches_a_library_through_its_mod_points() {
     );
     copy("chemlib", &library);
     copy("chem_addon", &addon);
+    std::fs::write(
+        scratch.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"chemlib\", \"chem_addon\", \"probe\"]\nresolver = \"3\"\n",
+    )
+    .unwrap();
+    std::fs::copy(repo().join("Cargo.lock"), scratch.join("Cargo.lock")).unwrap();
+    // `inject add` pins a dependency's mod point, and `inject update` refuses once it changed.
+    let prebuilt =
+        addon.join("target/horizon-mod/prebuilt/0000000000000000000000000000000000000000");
+    std::fs::create_dir_all(&prebuilt).unwrap();
+    std::fs::write(prebuilt.join("internals.json"), "[]").unwrap();
+    std::fs::write(prebuilt.join("points.json"), r#"{"sites":[]}"#).unwrap();
+    std::fs::create_dir_all(probe.join("src")).unwrap();
+    std::fs::write(
+        probe.join("Cargo.toml"),
+        "[package]\nname = \"probe\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .unwrap();
+    std::fs::write(probe.join("src/main.rs"), "fn main() {}\n").unwrap();
+    let tool = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_cargo-horizon-mod"))
+            .arg("horizon-mod")
+            .args(args)
+            .current_dir(&addon)
+            .output()
+            .unwrap()
+    };
+    let added = tool(&[
+        "inject",
+        "add",
+        "chemlib::transfer",
+        "--kind",
+        "head",
+        "--with",
+        "double_rate",
+    ]);
+    assert!(
+        added.status.success(),
+        "{}",
+        String::from_utf8_lossy(&added.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&added.stdout),
+        "api: available\ninternals: from the library's own target\n"
+    );
+    let pinned = horizon_mod_package::Manifest::parse(
+        &std::fs::read_to_string(addon.join("horizon-mod.toml")).unwrap(),
+    )
+    .unwrap();
+    let listed =
+        horizon_mod_api_gen::points::mod_crate::mod_points(&library, &Default::default()).unwrap();
+    assert_eq!(
+        pinned.inject[0].hash,
+        listed
+            .points
+            .iter()
+            .find(|p| p.target == "chemlib::transfer")
+            .unwrap()
+            .hash
+    );
+    let opted = tool(&[
+        "inject",
+        "add",
+        "chemlib::audit",
+        "--kind",
+        "head",
+        "--with",
+        "double_rate",
+    ]);
+    assert!(String::from_utf8_lossy(&opted.stderr).contains("opted out"));
+    let source = library.join("src/lib.rs");
+    let text = std::fs::read_to_string(&source).unwrap();
+    std::fs::write(
+        &source,
+        text.replace("rate: u32) -> u32", "rate: u64) -> u32"),
+    )
+    .unwrap();
+    let update = tool(&["inject", "update"]);
+    assert!(!update.status.success());
+    assert!(
+        String::from_utf8_lossy(&update.stdout)
+            .contains("E_INJECT_CHANGED: chem_addon:double_rate: chemlib::transfer"),
+        "{}",
+        String::from_utf8_lossy(&update.stdout)
+    );
+    copy("chemlib", &library);
     let catalog: Catalog =
         horizon_mod_api_gen::points::mod_crate::stage_mod(&library, &Default::default()).unwrap();
     assert_eq!(catalog.opted_out, ["chemlib::audit"]);
@@ -209,7 +295,6 @@ fn an_addon_patches_a_library_through_its_mod_points() {
             }
         });
     }
-    std::fs::create_dir_all(probe.join("src")).unwrap();
     let api = repo().join("crates/horizon-mod-api");
     std::fs::write(
         probe.join("Cargo.toml"),
@@ -224,12 +309,6 @@ fn an_addon_patches_a_library_through_its_mod_points() {
         PROBE.replace("/* SLOTS */", &slots.join(", ")),
     )
     .unwrap();
-    std::fs::write(
-        scratch.join("Cargo.toml"),
-        "[workspace]\nmembers = [\"chemlib\", \"chem_addon\", \"probe\"]\nresolver = \"3\"\n",
-    )
-    .unwrap();
-    std::fs::copy(repo().join("Cargo.lock"), scratch.join("Cargo.lock")).unwrap();
     let output = Command::new(env!("CARGO"))
         .args(["run", "--quiet", "-p", "probe"])
         .current_dir(&scratch)

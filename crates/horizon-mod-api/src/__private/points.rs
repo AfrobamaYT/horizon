@@ -10,6 +10,14 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
+/// Runs a point's listened path out of line: the code that builds its record and calls its
+/// listeners stays out of the function, which nothing listening leaves small enough to inline.
+#[cold]
+#[inline(never)]
+pub fn cold<R>(path: impl FnOnce() -> R) -> R {
+    path()
+}
+
 /// One injection point table: its point slots, then its call-site slots.
 pub struct Table {
     points: &'static [AtomicBool],

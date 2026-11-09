@@ -186,3 +186,70 @@ pub(super) fn refusal(refusal: &Refusal) -> String {
         ),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use horizon_mod_package::manifest::inject::mod_points::Point;
+
+    const MANIFEST: &str = "name = 'Mod'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = ['registries']\n[native]\ngame = '26.3'\nhorizon = '0000000000000000000000000000000000000000'\nmixins = '0000000000000000000000000000000000000000'\n";
+
+    fn manifest(id: &str, injects: &str) -> Manifest {
+        Manifest::parse(&format!("id = '{id}'\n{MANIFEST}{injects}")).unwrap()
+    }
+
+    fn catalog() -> Catalog {
+        Catalog {
+            mods: vec![ModLibrary {
+                id: "chemlib".into(),
+                version: "1.0.0".into(),
+                points: Points {
+                    krate: "chemlib".into(),
+                    table: "__horizon_points".into(),
+                    opted_out: vec![],
+                    points: vec![Point {
+                        name: "transfer".into(),
+                        target: "chemlib::transfer".into(),
+                        hash: "0123456789abcdef".into(),
+                        signature: "chemlib::transfer: fn f(rate: u32) -> u32 [u32]".into(),
+                        raw: true,
+                        at_return: true,
+                        api_refusal: None,
+                        returns: "result".into(),
+                        host: "none".into(),
+                        return_ty: "u32".into(),
+                        listener: Some("crate::__TransferListener".into()),
+                        return_listener: Some("crate::__TransferReturnListener".into()),
+                    }],
+                },
+            }],
+            ..Default::default()
+        }
+    }
+
+    const INJECTS: &str = "[[inject]]\nid = 'double'\nat = 'chemlib::transfer'\nkind = 'head'\nwith = 'double'\nhash = '0123456789abcdef'\n[[inject]]\nid = 'seen'\nat = 'chemlib::transfer'\nkind = 'return'\nwith = 'seen'\naccess = 'internals'\npriority = 4\nhash = '0123456789abcdef'\n";
+
+    #[test]
+    fn the_generated_main_registers_an_addons_listeners_in_the_librarys_table() {
+        let catalog = catalog();
+        let (library, addon) = (manifest("chemlib", ""), manifest("addon", INJECTS));
+        catalog.check(&addon).unwrap();
+        let main = super::super::api::main_rs("/* MOD_SLOTS */", &[&library, &addon], &catalog);
+        assert!(main.contains("        mod_0::__horizon_points::listeners::transfer(\"addon\", 0, \"double\", mod_1::double),\n"), "{main}");
+        assert!(main.contains("        mod_0::__horizon_points::raw::transfer_return(\"addon\", mod_1::seen).ordered(4, \"seen\"),\n"), "{main}");
+        assert!(!main.contains("mod_points::listeners::transfer"), "{main}");
+    }
+
+    #[test]
+    fn a_changed_library_function_refuses_the_addon_naming_both_hashes() {
+        let catalog = catalog();
+        let addon = manifest(
+            "addon",
+            &INJECTS.replacen("0123456789abcdef", "fedcba9876543210", 1),
+        );
+        assert_eq!(
+            catalog.check(&addon).unwrap_err().to_string(),
+            "E_INJECT_CHANGED: addon:double: chemlib 1.0.0 changed chemlib::transfer: pinned fedcba9876543210, installed 0123456789abcdef (chemlib::transfer: fn f(rate: u32) -> u32 [u32]); update the declaration with `cargo horizon-mod inject update` and rebuild against it"
+        );
+    }
+}

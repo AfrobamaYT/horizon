@@ -234,6 +234,18 @@ fn listed<'a>(files: &'a [File], krate: &str, wire: &WireTypes) -> Result<Vec<Li
         );
         let uses = imports(&file.parsed.items, krate);
         for found in found {
+            if found.attrs.iter().any(|attr| {
+                attr.path()
+                    .segments
+                    .last()
+                    .is_some_and(|segment| segment.ident == "point" || segment.ident == "__point")
+            }) {
+                return Err(format!(
+                    "{}: {} already has a #[point]: list and stage the mod's own source, not a staged copy",
+                    file.path.display(),
+                    found.target()
+                ));
+            }
             let name = name(&found, krate);
             let mut attribute = vec![
                 format!("name = {name:?}"),

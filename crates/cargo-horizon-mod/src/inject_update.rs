@@ -17,12 +17,30 @@ pub(super) fn run(dir: &Path, args: &[String]) -> Result<(), String> {
         .native
         .as_ref()
         .ok_or("inject update needs a [native] mod")?;
-    let internals = crate::internals::load(dir, &native.horizon)?;
+    let mut internals = crate::internals::load(dir, &native.horizon)?;
     let cache = dir.join("target/horizon-mod/prebuilt");
     let points = cache.join(&native.horizon).join("points.json");
     let catalog: Catalog =
         serde_json::from_str(&crate::bounded::read(&points, crate::bounded::MAX_CATALOG)?)
             .map_err(|e| e.to_string())?;
+    // A declaration at a dependency's function is checked against that mod's points (#2339).
+    let mut libraries = std::collections::BTreeSet::new();
+    for inject in &manifest.inject {
+        let krate = inject.at.split("::").next().unwrap_or_default();
+        if !libraries.insert(krate) {
+            continue;
+        }
+        if let Some(library) = super::library(dir, &inject.at, &catalog.wire)? {
+            internals.extend(library.points.into_iter().map(|point| ListedInternal {
+                path: point.target,
+                kind: "fn".into(),
+                cfg: String::new(),
+                signature: point.signature,
+                hash: point.hash,
+                shape_only: false,
+            }));
+        }
+    }
     // Older cached snapshots provide the signature behind a declaration's old hash.
     let mut old = Vec::new();
     for entry in fs::read_dir(cache).map_err(|e| e.to_string())? {
