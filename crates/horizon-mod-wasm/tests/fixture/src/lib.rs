@@ -1,8 +1,10 @@
 use mod_api::Hooks;
 
 pub mod area_macros;
+pub mod modify_arg;
 pub mod replace;
 pub mod shutdown;
+pub use modify_arg::turn_angle;
 pub use replace::own_average;
 pub use shutdown::on_shutdown;
 

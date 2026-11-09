@@ -1,4 +1,6 @@
 //! The wasm fixture's shutdown listener, registered natively: the same answers as `real_member`.
+#[path = "fixture/src/modify_arg.rs"]
+mod modify_arg;
 #[path = "fixture/src/replace.rs"]
 mod replace;
 #[path = "fixture/src/shutdown.rs"]
@@ -18,8 +20,24 @@ fn average(a: u32, b: u32) -> u32 {
     (a + b) / 2
 }
 
+/// `horizon_client::game::commands::wrap_degrees` (`Mth.wrapDegrees`), as the staging pass
+/// marks it.
+#[horizon_mod_api_macros::point(name = "game_commands_wrap_degrees", free)]
+fn wrap_degrees(angle: f32) -> f32 {
+    let wrapped = angle % 360.0;
+    if wrapped >= 180.0 {
+        wrapped - 360.0
+    } else if wrapped < -180.0 {
+        wrapped + 360.0
+    } else {
+        wrapped
+    }
+}
+
 #[test]
 fn the_shared_listener_source_answers_natively_as_in_wasm() {
+    // Without a listener the body wraps the angle as given.
+    assert_eq!(wrap_degrees(10.0), 10.0);
     // Without a listener the body averages.
     assert_eq!(average(3, 7), 5);
     // Without a listener the body runs as written.
@@ -46,6 +64,14 @@ fn the_shared_listener_source_answers_natively_as_in_wasm() {
         replace::own_average
     ))
     .unwrap();
+    // A `modify_arg` registers with the head's constructor, as the emitter writes it.
+    mod_points::register(&mod_points::listeners::game_commands_wrap_degrees(
+        "native",
+        0,
+        "turn",
+        modify_arg::turn_angle,
+    ))
+    .unwrap();
     mod_points::__private::seal();
     for (before, message, after) in shutdown::CASES {
         let mut failure = before.map(String::from);
@@ -54,5 +80,8 @@ fn the_shared_listener_source_answers_natively_as_in_wasm() {
     }
     for (a, b, value) in replace::CASES {
         assert_eq!(average(a, b), value, "{a} {b}");
+    }
+    for (angle, wrapped) in modify_arg::CASES {
+        assert_eq!(wrap_degrees(angle), wrapped, "{angle}");
     }
 }

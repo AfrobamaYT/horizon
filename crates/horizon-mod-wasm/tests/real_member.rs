@@ -1,6 +1,8 @@
 //! The build-tool fixture is a real shared module, not a component.
 // Generated fixtures exercise every shape; TODO(#2273): make the generator emit clippy-clean code.
 #![allow(clippy::all, unused_comparisons, unreachable_patterns, dead_code)]
+#[path = "fixture/src/modify_arg.rs"]
+mod modify_arg;
 #[path = "fixture/src/replace.rs"]
 mod replace;
 #[path = "fixture/src/shutdown.rs"]
@@ -124,6 +126,25 @@ fn real_member() {
     let _: fn(&mut mod_points::GameBeaconAverageArgs) -> u32 = replace::own_average;
     for (a, b, value) in replace::CASES {
         assert_eq!(average(a, b), value, "{a} {b}");
+    }
+    // The guest's `modify_arg` (`modify_arg::turn_angle`): the body runs with its argument.
+    let _: mod_points::listeners::GameCommandsWrapDegreesListener = modify_arg::turn_angle;
+    for (angle, wrapped) in modify_arg::CASES {
+        assert_eq!(wrap_degrees(angle), wrapped, "{angle}");
+    }
+}
+
+/// `horizon_client::game::commands::wrap_degrees` (`Mth.wrapDegrees`), as the staging pass
+/// marks it.
+#[horizon_mod_api_macros::point(name = "game_commands_wrap_degrees", free)]
+fn wrap_degrees(angle: f32) -> f32 {
+    let wrapped = angle % 360.0;
+    if wrapped >= 180.0 {
+        wrapped - 360.0
+    } else if wrapped < -180.0 {
+        wrapped + 360.0
+    } else {
+        wrapped
     }
 }
 

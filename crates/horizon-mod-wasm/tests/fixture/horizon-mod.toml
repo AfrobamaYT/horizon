@@ -29,3 +29,11 @@ kind = "replace"
 with = "own_average"
 access = "api"
 hash = "fixture"
+
+[[inject]]
+id = "turn"
+at = "horizon_client::game::commands::wrap_degrees"
+kind = "modify_arg"
+with = "turn_angle"
+access = "api"
+hash = "fixture"
