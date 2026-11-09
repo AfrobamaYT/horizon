@@ -565,10 +565,8 @@ impl Game<'_> {
                         id,
                         duration,
                         amplifier,
-                    } => {
-                        if game.remote.is_none() && game.ui.difficulty != 0 {
-                            game.give_player_effect(id, *duration, i32::from(*amplifier));
-                        }
+                    } if game.remote.is_none() && game.ui.difficulty != 0 => {
+                        game.give_player_effect(id, *duration, i32::from(*amplifier));
                     }
                     _ => {}
                 }

@@ -211,7 +211,7 @@ pub struct Hooks {
         &mut DamageLevel<'_>,
         &'static str,
         i32,
-        &'static str,
+        &str,
         BlockStateId,
         BlockPos,
         bool,
