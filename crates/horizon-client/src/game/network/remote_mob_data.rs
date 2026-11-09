@@ -78,6 +78,10 @@ fn apply(m: &mut Mob, values: &[(u8, i32, Value)], builtin: &Builtin, local_enti
             // the swirls of its effects (`tickEffects` draws them).
             (10, Value::Particles(list)) => m.extra.effect_particles = swirls(list, builtin),
             (11, Value::Bool(ambient)) => m.extra.effect_ambient = *ambient,
+            // LivingEntity.DATA_ARROW_COUNT_ID and DATA_STINGER_COUNT_ID: what
+            // is stuck in the body, which a player's layers draw.
+            (12, Value::Int(count)) => m.extra.stuck.arrows = *count,
+            (13, Value::Int(count)) => m.extra.stuck.stingers = *count,
             // Mob.DATA_MOB_FLAGS_ID: no AI 1, left-handed 2, aggressive 4.
             // Mob.isAggressive draws the illagers' and skeletons' attack
             // poses and the vindicator's axe.
@@ -426,9 +430,6 @@ fn player_poses(m: &mut Mob, values: &[(u8, i32, Value)]) {
             (0, Value::Byte(flags)) => m.extra.fall_flying = flags & -128 != 0,
             (6, Value::Id(pose)) => m.extra.synced_pose = (*pose).clamp(0, 17) as u8,
             (8, Value::Byte(flags)) => m.extra.auto_spin_attack = flags & 4 != 0,
-            // LivingEntity.DATA_ARROW_COUNT_ID and DATA_STINGER_COUNT_ID.
-            (12, Value::Int(count)) => m.extra.arrow_count = *count,
-            (13, Value::Int(count)) => m.extra.stinger_count = *count,
             // Player.DATA_SHOULDER_PARROT_LEFT and _RIGHT.
             (19, Value::Id(v)) => {
                 m.extra.shoulder_parrots[0] = (*v > 0).then(|| (*v - 1).clamp(0, 4))
@@ -1340,17 +1341,19 @@ mod tests {
     }
 
     /// LivingEntity.DATA_ARROW_COUNT_ID and DATA_STINGER_COUNT_ID of another
-    /// player, which ArrowLayer and BeeStingerLayer draw.
+    /// player, which ArrowLayer and BeeStingerLayer draw, and of a mob.
     #[test]
-    fn another_players_stuck_arrows_and_stingers_are_kept() {
-        let Some(mut m) = mob("minecraft:player") else {
-            return;
-        };
-        apply(&mut m, &[(12, s::INT, Value::Int(4))]);
-        apply(&mut m, &[(13, s::INT, Value::Int(2))]);
-        assert_eq!((m.extra.arrow_count, m.extra.stinger_count), (4, 2));
-        apply(&mut m, &[(12, s::INT, Value::Int(0))]);
-        assert_eq!((m.extra.arrow_count, m.extra.stinger_count), (0, 2));
+    fn stuck_arrows_and_stingers_are_kept() {
+        for kind in ["minecraft:player", "minecraft:zombie"] {
+            let Some(mut m) = mob(kind) else {
+                return;
+            };
+            apply(&mut m, &[(12, s::INT, Value::Int(4))]);
+            apply(&mut m, &[(13, s::INT, Value::Int(2))]);
+            assert_eq!((m.extra.stuck.arrows, m.extra.stuck.stingers), (4, 2));
+            apply(&mut m, &[(12, s::INT, Value::Int(0))]);
+            assert_eq!((m.extra.stuck.arrows, m.extra.stuck.stingers), (0, 2));
+        }
     }
 
     #[test]
