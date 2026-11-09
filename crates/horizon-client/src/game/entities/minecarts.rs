@@ -4297,3 +4297,172 @@ mod rejected_passenger_tests {
         });
     }
 }
+
+#[cfg(test)]
+mod hook_mutation_regressions {
+    use super::*;
+    use horizon_client::mobs::Mob;
+    use std::sync::{Arc, Mutex};
+
+    struct MutateRider {
+        discard: bool,
+        heard: Arc<Mutex<Vec<(u32, bool)>>>,
+    }
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for MutateRider {
+        fn entity_mount(
+            &self,
+            host: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::EntityMountEvent<'_>,
+        ) -> mod_api::Flow {
+            self.heard
+                .lock()
+                .unwrap()
+                .push((event.entity, event.mounting));
+            if !event.mounting && event.entity == 72 {
+                if self.discard {
+                    assert!(host.entity(72).unwrap().discard(host));
+                } else {
+                    let later = host.entity(73).unwrap();
+                    let replacement = host.entity(74).unwrap();
+                    assert!(later.start_riding(host, replacement, true));
+                }
+            }
+            mod_api::Flow::Continue
+        }
+    }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn activator_preserves_a_later_passengers_callback_reparenting() {
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "mutate_rider",
+            Box::new(MutateRider {
+                discard: false,
+                heard: heard.clone(),
+            }),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
+                game.carts
+                    .push(Minecart::new(71, CartKind::Rideable, Vec3::ZERO));
+                let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+                for id in [72, 73, 74] {
+                    let mut mob = Mob::new(id, kind.clone(), Vec3::ZERO, 0.0);
+                    mob.extra.mount = (id != 74).then_some(71);
+                    mob.extra.vehicle_order = i64::from(id);
+                    game.mobs.push(mob);
+                }
+                let mut active = game.carts[0].clone();
+                game.activate_cart(&mut active, true);
+                assert_eq!(game.mob_object(73).unwrap().extra.mount, Some(74));
+                assert_eq!(
+                    heard
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .filter(|&&(id, mounting)| id == 73 && !mounting)
+                        .count(),
+                    1,
+                    "only the callback's deliberate reparenting dismounts this rider"
+                );
+            });
+        });
+    }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn activator_does_not_snap_a_rider_discarded_by_its_callback() {
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "mutate_rider",
+            Box::new(MutateRider {
+                discard: true,
+                heard: Arc::default(),
+            }),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
+                game.carts
+                    .push(Minecart::new(71, CartKind::Rideable, Vec3::ZERO));
+                let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+                let original = Vec3::new(2.0, 60.0, 3.0);
+                let mut rider = Mob::new(72, kind.clone(), original, 0.0);
+                rider.extra.mount = Some(71);
+                game.mobs.push(rider);
+                let mut child = Mob::new(73, kind, original, 0.0);
+                child.extra.mount = Some(72);
+                game.mobs.push(child);
+                let mut active = game.carts[0].clone();
+                active.position = Vec3::new(40.0, 70.0, 40.0);
+                game.activate_cart(&mut active, true);
+                assert!(game.mob_object(72).unwrap().removed);
+                assert_eq!(game.mob_object(72).unwrap().position, original);
+                assert_eq!(game.mob_object(73).unwrap().position, original);
+            });
+        });
+    }
+    struct DiscardDamagedVehicle(Arc<Mutex<usize>>);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for DiscardDamagedVehicle {
+        fn vehicle_damage(
+            &self,
+            host: &mut dyn mod_api::ServerHost,
+            _: &mut mod_api::VehicleDamageEvent<'_>,
+        ) -> mod_api::Flow {
+            assert!(host.entity(71).unwrap().discard(host));
+            mod_api::Flow::Continue
+        }
+        fn vehicle_destroy(
+            &self,
+            _: &mut dyn mod_api::ServerHost,
+            _: &mut mod_api::VehicleDestroyEvent<'_>,
+        ) {
+            *self.0.lock().unwrap() += 1;
+        }
+    }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_damage_callback_discard_does_not_also_destroy_or_drop_the_vehicle() {
+        for cart in [false, true] {
+            let destroyed = Arc::new(Mutex::new(0));
+            let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+                "discard_damaged",
+                Box::new(DiscardDamagedVehicle(destroyed.clone())),
+            )]
+            .into();
+            mod_api::testing::with_mods(mods, || {
+                super::super::native_entity_refs::tests::with_game(|game| {
+                    game.options.dedicated = Some(Vec::new());
+                    game.ui
+                        .rules
+                        .set("entity_drops", horizon_client::gamerules::Value::Bool(true));
+                    if cart {
+                        game.carts
+                            .push(Minecart::new(71, CartKind::Rideable, Vec3::ZERO));
+                        game.hurt_cart(0, 5.0, false, false);
+                    } else {
+                        game.boats.push(super::super::boats::Boat::new(
+                            71,
+                            "oak".into(),
+                            Vec3::ZERO,
+                            0.0,
+                        ));
+                        game.hurt_boat(0, 5.0, false);
+                    }
+                    assert_eq!(*destroyed.lock().unwrap(), 0);
+                    assert!(
+                        game.dropped.is_empty(),
+                        "discard must not create the vehicle item"
+                    );
+                    game.native_removals_flush();
+                    assert_eq!(*destroyed.lock().unwrap(), 0);
+                    assert!(game.dropped.is_empty());
+                    assert!(game.entity(71).is_none());
+                });
+            });
+        }
+    }
+}
