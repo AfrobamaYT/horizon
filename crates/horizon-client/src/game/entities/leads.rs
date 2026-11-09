@@ -184,16 +184,24 @@ impl Game<'_> {
             .any(|h| h == Some(Holder::Knot(fence)))
             .then_some(fence)
     }
+    /// Live natural knots without allocating; shared fences may repeat an id.
+    pub(super) fn natural_knot_id_iter(&self) -> impl Iterator<Item = u32> + '_ {
+        self.mobs
+            .iter()
+            .filter(|mob| !mob.removed)
+            .map(|mob| mob.extra.leash)
+            .chain(self.boats.iter().map(|boat| boat.leash))
+            .filter_map(move |holder| match holder {
+                Some(Holder::Knot(fence)) => self.knot_ids.get(&fence).copied(),
+                _ => None,
+            })
+    }
     /// The ids of the level's natural knots that a lead still holds, in the
     /// order they were made.
     pub(super) fn natural_knot_ids(&self) -> Vec<u32> {
-        let mut ids: Vec<u32> = self
-            .knot_ids
-            .values()
-            .copied()
-            .filter(|&id| self.natural_knot(id).is_some())
-            .collect();
+        let mut ids: Vec<u32> = self.natural_knot_id_iter().collect();
         ids.sort_unstable();
+        ids.dedup();
         ids
     }
     /// BlockAttachedEntity.tick / LeashFenceKnotEntity.survives for explicitly loaded knots.
