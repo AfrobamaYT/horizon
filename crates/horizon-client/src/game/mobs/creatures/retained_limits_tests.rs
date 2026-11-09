@@ -149,7 +149,7 @@ fn repeated_producer_panic_has_bounded_batches() {
     crate::entry::install_client_hooks();
     let probe = Arc::new(MovementPanic {
         id: 9000,
-        remaining: AtomicUsize::new(MAX_PENDING_MOB_BATCHES + 1),
+        remaining: AtomicUsize::new(MAX_PENDING_MOB_PASSES + 1),
         calls: AtomicUsize::new(0),
     });
     mod_api::testing::with_mods(
@@ -191,7 +191,7 @@ fn repeated_producer_panic_has_bounded_batches() {
                 mob.on_ground = true;
                 mob.ai.speed = 0.2;
                 game.mobs.push(mob);
-                for _ in 0..MAX_PENDING_MOB_BATCHES {
+                for _ in 0..MAX_PENDING_MOB_PASSES {
                     for mob in &mut game.mobs {
                         if mob.id != 9000 {
                             mob.extra.egg_time = 1;
@@ -208,7 +208,7 @@ fn repeated_producer_panic_has_bounded_batches() {
                     assert_eq!(panic.downcast_ref::<u32>(), Some(&89));
                 }
                 let pending = &game.creatures.pending[game.dim.id()];
-                assert_eq!(pending.batches.len(), MAX_PENDING_MOB_BATCHES);
+                assert_eq!(pending.batches.len(), MAX_PENDING_MOB_PASSES);
                 let produced_eggs = pending
                     .batches
                     .iter()
@@ -233,7 +233,7 @@ fn repeated_producer_panic_has_bounded_batches() {
                     produced_eggs > 1024,
                     "stress must retain multiple real producer passes"
                 );
-                assert_eq!(probe.calls.load(Ordering::SeqCst), MAX_PENDING_MOB_BATCHES);
+                assert_eq!(probe.calls.load(Ordering::SeqCst), MAX_PENDING_MOB_PASSES);
                 assert!(
                     game.dropped.is_empty(),
                     "consumer must not have entered before refusal"
@@ -243,7 +243,7 @@ fn repeated_producer_panic_has_bounded_batches() {
                 game.tick_creature_entities().unwrap();
                 assert_eq!(
                     probe.calls.load(Ordering::SeqCst),
-                    MAX_PENDING_MOB_BATCHES,
+                    MAX_PENDING_MOB_PASSES,
                     "full backlog must refuse the next producer pass"
                 );
                 assert!(game.creatures.pending[game.dim.id()].batches.is_empty());
@@ -348,9 +348,11 @@ fn interrupted_refusal_stays_latched_until_empty() {
                     game.mobs.push(mob);
                 }
                 let pending = game.creatures.pending.entry(game.dim.id()).or_default();
+                pending.retained_passes = MAX_PENDING_MOB_PASSES;
+                pending.pushes.push(71, Vec3::new(0.25, 0.0, 0.0));
                 // These are already accepted consumer batches. The first completes
                 // before the second's real native item callback interrupts the drain.
-                for index in 0..MAX_PENDING_MOB_BATCHES {
+                for index in 0..MAX_PENDING_MOB_PASSES {
                     let events = (0..if index == 1 { 3 } else { 1 })
                         .map(|_| MobEvent::LayEgg {
                             mob: 71,
@@ -374,6 +376,8 @@ fn interrupted_refusal_stays_latched_until_empty() {
                         "consumer interruption, not fresh producer panic, must escape"
                     );
                     assert_eq!(items.load(Ordering::SeqCst), expected_items);
+                    assert!(!game.creatures.pending[game.dim.id()].pushes.is_empty());
+                    assert_eq!(game.mobs[0].velocity.x, 0.0);
                     assert_eq!(
                         producer.calls.load(Ordering::SeqCst),
                         0,
@@ -381,15 +385,21 @@ fn interrupted_refusal_stays_latched_until_empty() {
                     );
                     assert_eq!(
                         game.creatures.pending[game.dim.id()].batches.len(),
-                        MAX_PENDING_MOB_BATCHES - 1
+                        MAX_PENDING_MOB_PASSES - 1
                     );
                 }
                 game.tick_creature_entities().unwrap();
                 assert_eq!(producer.calls.load(Ordering::SeqCst), 0);
                 assert!(game.creatures.pending[game.dim.id()].batches.is_empty());
+                assert!(game.creatures.pending[game.dim.id()].pushes.is_empty());
+                assert_eq!(game.creatures.pending[game.dim.id()].retained_passes, 0);
+                assert_eq!(
+                    game.mobs[0].velocity.x, 0.25,
+                    "push survives both consumer interruptions"
+                );
                 assert_eq!(
                     items.load(Ordering::SeqCst),
-                    MAX_PENDING_MOB_BATCHES + 2,
+                    MAX_PENDING_MOB_PASSES + 2,
                     "entered actions must not replay and unentered tails must not disappear"
                 );
                 let egg_count = |game: &Game<'_>| -> u32 {
@@ -404,15 +414,118 @@ fn interrupted_refusal_stays_latched_until_empty() {
                         .map(|d| d.stack.count)
                         .sum()
                 };
-                assert_eq!(egg_count(game), (MAX_PENDING_MOB_BATCHES + 2) as u32);
+                assert_eq!(egg_count(game), (MAX_PENDING_MOB_PASSES + 2) as u32);
                 producer.remaining.store(0, Ordering::SeqCst);
                 game.mobs[0].extra.egg_time = 1;
                 game.tick_creature_entities().unwrap();
                 assert_eq!(
                     egg_count(game),
-                    (MAX_PENDING_MOB_BATCHES + 3) as u32,
+                    (MAX_PENDING_MOB_PASSES + 3) as u32,
                     "normal production resumes only after the refused backlog is empty"
                 );
+            });
+        },
+    );
+}
+
+#[test]
+#[ignore = "needs prepared resources and an isolated HORIZON_HOME"]
+fn push_only_failed_passes_are_refused_and_delivered_without_loss() {
+    crate::entry::install_client_hooks();
+    let probe = Arc::new(MovementPanic {
+        id: 9000,
+        remaining: AtomicUsize::new(40),
+        calls: AtomicUsize::new(0),
+    });
+    mod_api::testing::with_mods(
+        vec![mod_api::ModEntry::new(
+            "push_only",
+            Box::new(Hooks(probe.clone())),
+        )]
+        .into(),
+        || {
+            crate::game::native_entity_refs::tests::with_game(|game| {
+                prepare(game);
+                for (id, name, x) in [
+                    (70, "minecraft:pig", 1.2),
+                    (9000, "minecraft:zombie", 10.0),
+                    (72, "minecraft:pig", 1.0),
+                ] {
+                    let kind = game.res.mob_types().get(name).unwrap().clone();
+                    let mut mob = Mob::new(id, kind, Vec3::new(x, 80.0, 0.5), 0.0);
+                    mob.on_ground = true;
+                    mob.ai.speed = 0.2;
+                    mob.no_ai = id != 9000;
+                    game.mobs.push(mob);
+                }
+                let mut delivered = 0.0;
+                // The pig before the panicking zombie pushes the pig after it.
+                // Its vanilla impulse is -sqrt(0.2) * 0.05f32 on X, once per pass.
+                let impulse = -0.022360680108198;
+                for attempt in 1..=40 {
+                    for (mob, x) in game.mobs.iter_mut().zip([1.2, 10.0, 1.0]) {
+                        mob.position = Vec3::new(x, 80.0, 0.5);
+                        mob.velocity = Vec3::ZERO;
+                        mob.on_ground = true;
+                        mob.ambient_timer = -10000;
+                    }
+                    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        game.tick_creature_entities()
+                    }));
+                    if attempt % 17 == 0 {
+                        outcome
+                            .expect("the seventeenth pass must refuse fresh production")
+                            .unwrap();
+                        assert!((game.mobs[2].velocity.x - 16.0 * impulse).abs() < 1e-9);
+                        delivered += game.mobs[2].velocity.x;
+                    } else {
+                        assert_eq!(outcome.unwrap_err().downcast_ref::<u32>(), Some(&89));
+                    }
+                    assert!(game.creatures.pending[game.dim.id()].batches.is_empty());
+                }
+                assert_eq!(probe.calls.load(Ordering::SeqCst), 38);
+                game.mobs[2].velocity = Vec3::ZERO;
+                game.deliver_pending_mob_actions(game.dim.id()).unwrap();
+                delivered += game.mobs[2].velocity.x;
+                assert!(
+                    (delivered - 38.0 * impulse).abs() < 1e-9,
+                    "every accepted push is delivered"
+                );
+                game.mobs[2].velocity = Vec3::ZERO;
+                game.deliver_pending_mob_actions(game.dim.id()).unwrap();
+                assert_eq!(game.mobs[2].velocity, Vec3::ZERO, "no replay after drain");
+                // A world reset retires the old backlog and its admission state together.
+                for (mob, x) in game.mobs.iter_mut().zip([1.2, 10.0, 1.0]) {
+                    mob.position = Vec3::new(x, 80.0, 0.5);
+                    mob.velocity = Vec3::ZERO;
+                    mob.ambient_timer = -10000;
+                }
+                let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    game.tick_creature_entities()
+                }))
+                .unwrap_err();
+                assert_eq!(panic.downcast_ref::<u32>(), Some(&89));
+                assert_eq!(game.creatures.pending[game.dim.id()].retained_passes, 1);
+                assert!(!game.creatures.pending[game.dim.id()].pushes.is_empty());
+                game.clear_pending_mob_actions();
+                assert!(game.creatures.pending.is_empty());
+                game.deliver_pending_mob_actions(game.dim.id()).unwrap();
+                assert_eq!(
+                    game.mobs[2].velocity,
+                    Vec3::ZERO,
+                    "reset must not replay old pushes"
+                );
+                let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    game.tick_creature_entities()
+                }))
+                .unwrap_err();
+                assert_eq!(
+                    panic.downcast_ref::<u32>(),
+                    Some(&89),
+                    "fresh production remains eligible after reset"
+                );
+                assert_eq!(game.creatures.pending[game.dim.id()].retained_passes, 1);
+                game.clear_pending_mob_actions();
             });
         },
     );

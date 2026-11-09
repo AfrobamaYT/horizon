@@ -170,12 +170,13 @@ struct MobOutputBatch {
     guests: Vec<(u32, u32, MobEvent)>,
 }
 // Backpressure applies only to retained failed passes, never to healthy mob counts.
-// Sixteen batches permit 0.8 seconds of failed production at the vanilla tick rate.
-const MAX_PENDING_MOB_BATCHES: usize = 16;
+// Sixteen failed passes permit 0.8 seconds of failed production at the vanilla tick rate.
+const MAX_PENDING_MOB_PASSES: usize = 16;
 #[derive(Default)]
 struct PendingMobBatch {
     batches: std::collections::VecDeque<MobOutputBatch>,
     pushes: horizon_client::mobs::PendingPushes,
+    retained_passes: usize,
     refusal_logged: bool,
 }
 
@@ -1433,12 +1434,12 @@ impl Game<'_> {
         let mut laps = horizon_client::spans::laps();
         let level_id = self.dim.id();
         if let Some(pending) = self.creatures.pending.get_mut(level_id)
-            && (pending.refusal_logged || pending.batches.len() >= MAX_PENDING_MOB_BATCHES)
+            && (pending.refusal_logged || pending.retained_passes >= MAX_PENDING_MOB_PASSES)
         {
             if !pending.refusal_logged {
                 log::warn!(
-                    "Refusing mob production in {level_id}: {} retained batches (limit {MAX_PENDING_MOB_BATCHES}); draining before retry",
-                    pending.batches.len()
+                    "Refusing mob production in {level_id}: {} retained producer passes (limit {MAX_PENDING_MOB_PASSES}); draining before retry",
+                    pending.retained_passes
                 );
                 pending.refusal_logged = true;
             }
@@ -1612,7 +1613,9 @@ impl Game<'_> {
                 guests: std::mem::take(&mut guest_events),
             });
         }
-        if dispatch_panic.is_none() {
+        if dispatch_panic.is_some() {
+            pending.retained_passes += 1;
+        } else {
             // The successful final sweep consumed all pushes for surviving mobs.
             pending.pushes = Default::default();
         }
@@ -1675,9 +1678,18 @@ impl Game<'_> {
                     .events
                     .into();
             }
+            if !pending.pushes.is_empty() {
+                for mob in &mut self.mobs {
+                    horizon_client::mobs::apply_mob_pushes(mob, &mut pending.pushes);
+                }
+                // As in the producer's successful final sweep, removed targets
+                // have no remaining owner to receive a push.
+                pending.pushes = Default::default();
+            }
             Ok(())
         }));
-        if pending.batches.is_empty() {
+        if pending.batches.is_empty() && pending.pushes.is_empty() {
+            pending.retained_passes = 0;
             pending.refusal_logged = false;
         }
         self.creatures.pending.insert(level_id, pending);
