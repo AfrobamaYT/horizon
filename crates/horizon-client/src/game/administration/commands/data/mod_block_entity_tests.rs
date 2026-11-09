@@ -85,6 +85,15 @@ fn actual_data_commands_preserve_same_mod_entity_runtime_state() {
             .name
             .clone()
     }));
+    // Normal mod startup freezes canonical membership before loading resources.
+    // This fixture bypasses that startup, but saved-data commands still validate
+    // the entity against the block before loading its fields in place.
+    let mut types = horizon_client::block_entity_types::BlockEntityTypes::new(
+        [(BLOCK.to_owned(), ENTITY.to_owned())].into(),
+        vec![ENTITY.to_owned(), "fixture:replacement".to_owned()],
+    );
+    types.add_valid(BLOCK, "fixture:replacement").unwrap();
+    horizon_client::block_entity_types::install(types).unwrap();
     let settings = Settings::default();
     let loaded = load_resources(
         horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
@@ -193,8 +202,8 @@ fn actual_data_commands_preserve_same_mod_entity_runtime_state() {
     changed(&game, before);
     assert!(!entity(&game).nbt.contains_key(&"Items".into()));
 
-    // Keep the pre-existing type-changing behavior: this patch adds no new
-    // block/type validation policy to /data, and a new type has fresh state.
+    // A registered additional valid type can replace the current entity;
+    // the replacement has fresh runtime state and identity.
     let before = run(
         &mut game,
         r#"data merge block 2 64 2 {id:"fixture:replacement",fuel:12}"#,
