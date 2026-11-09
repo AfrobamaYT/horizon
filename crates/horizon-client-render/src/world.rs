@@ -519,13 +519,7 @@ impl World {
     pub fn container_stack_limit(&self, key: (i32, i32, i32)) -> Option<u32> {
         self.chunks
             .get(&(key.0 >> 4, key.2 >> 4))
-            .and_then(|c| c.saved.as_ref())
-            .and_then(|s| s.block_entity_sources.iter().find(|(p, _)| *p == key))
-            .and_then(|(_, tag)| tag.get("horizon:stack_limit"))
-            .and_then(|tag| match tag {
-                horizon_core::nbt::Tag::Int(n) if (1..=99).contains(n) => Some(*n as u32),
-                _ => None,
-            })
+            .and_then(|c| c.container_stack_limits.get(&key).copied())
     }
     /// Store with the authoritative saved block entity fields.
     pub fn set_container_stack_limit(&mut self, key: (i32, i32, i32), limit: u32) {
@@ -648,6 +642,23 @@ impl World {
             .map(Arc::unwrap_or_clone)
             .unwrap_or_default();
         f(&mut extras);
+        let limit = extras
+            .block_entity_sources
+            .iter()
+            .find(|(p, _)| *p == key)
+            .and_then(|(_, tag)| tag.get("horizon:stack_limit"))
+            .and_then(|tag| match tag {
+                horizon_core::nbt::Tag::Int(n) if (1..=99).contains(n) => Some(*n as u32),
+                _ => None,
+            });
+        match limit {
+            Some(limit) => {
+                chunk.container_stack_limits.insert(key, limit);
+            }
+            None => {
+                chunk.container_stack_limits.remove(&key);
+            }
+        }
         chunk.saved = Some(Arc::new(extras));
         self.modified.insert(chunk_key);
     }
@@ -685,6 +696,36 @@ mod tests {
     use crate::chunk::{Chunk, MIN_Y, SECTIONS};
     use horizon_world::registry::BlockStateId;
     use std::sync::Arc;
+
+    #[test]
+    fn container_limit_index_tracks_load_rollback_removal_and_replacement() {
+        use crate::chunk::ChunkExtras;
+        use horizon_core::nbt::{Compound, Tag};
+        let key = (3, 70, 4);
+        let mut extras = ChunkExtras::default();
+        for (pos, n) in [(key, 10), ((4, 70, 4), 100), ((5, 70, 4), 0)] {
+            let mut tag = Compound::new();
+            tag.insert("horizon:stack_limit".into(), Tag::Int(n));
+            extras.block_entity_sources.push((pos, Tag::Compound(tag)));
+        }
+        let mut chunk = Chunk::empty(0, 0);
+        chunk.saved = Some(Arc::new(extras));
+        let mut world = World::new(BlockStateId(0), 0);
+        world.chunks.insert((0, 0), Arc::new(chunk));
+        assert_eq!(world.container_stack_limit(key), Some(10));
+        assert_eq!(world.container_stack_limit((4, 70, 4)), None);
+        assert_eq!(world.container_stack_limit((5, 70, 4)), None);
+        let kept = world.block_entity_extras(key);
+        world.set_container_stack_limit(key, 20);
+        assert_eq!(world.container_stack_limit(key), Some(20));
+        world.set_block_entity_extras(key, kept);
+        assert_eq!(world.container_stack_limit(key), Some(10));
+        world.forget_block_entity_source(key);
+        assert_eq!(world.container_stack_limit(key), None);
+        world.set_container_stack_limit(key, 30);
+        world.chunks.insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        assert_eq!(world.container_stack_limit(key), None);
+    }
 
     /// `/weather thunder` then `/weather clear` in a frozen world: the levels sit at their
     /// targets at every partial tick, where a tick of fading would have moved them 0.01.

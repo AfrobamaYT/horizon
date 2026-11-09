@@ -620,6 +620,8 @@ pub struct Chunk {
     pub postprocess: Vec<[i32; 3]>,
     /// Saved data Horizon keeps but does not simulate (save.rs).
     pub saved: Option<Arc<ChunkExtras>>,
+    /// Validated container limits, rebuilt on chunk admission and extras writes.
+    pub container_stack_limits: std::collections::HashMap<(i32, i32, i32), u32>,
     /// Entities read from a save (vanilla entity NBT), spawned on arrival.
     pub entities: Vec<horizon_core::nbt::Tag>,
     /// Structure starts reaching into this chunk (`structures.References`):
@@ -655,6 +657,7 @@ impl Chunk {
             structure_starts: Vec::new(),
             postprocess: Vec::new(),
             saved: None,
+            container_stack_limits: Default::default(),
             entities: Vec::new(),
         }
     }
