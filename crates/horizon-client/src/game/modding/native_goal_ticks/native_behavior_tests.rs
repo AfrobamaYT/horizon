@@ -14,6 +14,9 @@ use mod_api::{
 };
 use std::sync::Mutex;
 
+// The journals and registration plan below are shared across these tests.
+static TEST: Mutex<()> = Mutex::new(());
+
 /// The mods of these tests, installed with their parts, as a game's open does.
 fn install_game_mods() {
     mod_api::__private::install(vec![ModEntry::new("test", Box::new(Mod))].into());
@@ -186,6 +189,7 @@ impl Hooks for Mod {
 #[test]
 #[ignore = "needs prepared resources"]
 fn a_start_that_passes_its_checks_draws_once_and_runs() {
+    let _test = TEST.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     CALLS.lock().unwrap().clear();
     with_game(|game| {
         zombie(game, 8, [3.5, 65.0, 3.5]);
@@ -203,6 +207,7 @@ fn a_start_that_passes_its_checks_draws_once_and_runs() {
 #[test]
 #[ignore = "needs prepared resources"]
 fn a_failed_entry_condition_draws_nothing_and_calls_nothing() {
+    let _test = TEST.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     CALLS.lock().unwrap().clear();
     with_game(|game| {
         zombie(game, 8, [3.5, 65.0, 3.5]);
@@ -235,6 +240,7 @@ fn a_failed_entry_condition_draws_nothing_and_calls_nothing() {
 #[test]
 #[ignore = "needs prepared resources"]
 fn the_duration_ends_it_and_can_still_use_keeps_it() {
+    let _test = TEST.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     CALLS.lock().unwrap().clear();
     with_game(|game| {
         zombie(game, 8, [3.5, 65.0, 3.5]);
@@ -267,6 +273,7 @@ fn the_duration_ends_it_and_can_still_use_keeps_it() {
 #[test]
 #[ignore = "needs prepared resources"]
 fn without_can_still_use_it_lives_one_brain_tick() {
+    let _test = TEST.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     CALLS.lock().unwrap().clear();
     with_game(|game| {
         zombie(game, 8, [3.5, 65.0, 3.5]);
@@ -288,6 +295,7 @@ fn without_can_still_use_it_lives_one_brain_tick() {
 #[test]
 #[ignore = "needs prepared resources"]
 fn a_panic_is_contained_and_the_behavior_is_done() {
+    let _test = TEST.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     CALLS.lock().unwrap().clear();
     with_game(|game| {
         zombie(game, 8, [3.5, 65.0, 3.5]);
@@ -309,6 +317,7 @@ fn a_panic_is_contained_and_the_behavior_is_done() {
 #[test]
 #[ignore = "needs prepared resources"]
 fn a_type_with_no_brain_is_refused_at_construction() {
+    let _test = TEST.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     REFUSALS.lock().unwrap().clear();
     install_game_mods();
     with_game(|game| {
@@ -435,6 +444,7 @@ fn random_states(
 #[test]
 #[ignore = "needs prepared resources"]
 fn behaviors_join_after_vanilla_of_their_priority_and_activity() {
+    let _test = TEST.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     ADDS.lock().unwrap().clear();
     ADDS.lock().unwrap().push(plan("minecraft:villager", |b| {
         b.add(Activity::Core, 0, 60, 60, &[], Probe::still_for(1))
@@ -473,6 +483,7 @@ fn behaviors_join_after_vanilla_of_their_priority_and_activity() {
 #[test]
 #[ignore = "needs prepared resources"]
 fn a_behavior_writes_the_walk_target_and_the_refusals_hold() {
+    let _test = TEST.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     CALLS.lock().unwrap().clear();
     READS.lock().unwrap().clear();
     ADDS.lock().unwrap().clear();
@@ -506,6 +517,7 @@ fn a_behavior_writes_the_walk_target_and_the_refusals_hold() {
 #[test]
 #[ignore = "needs prepared resources"]
 fn only_an_active_activity_starts_but_core_always_does() {
+    let _test = TEST.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     CALLS.lock().unwrap().clear();
     ADDS.lock().unwrap().clear();
     // Hide runs only in a raid; Idle is the day's fallback activity (no job
@@ -552,6 +564,7 @@ fn only_an_active_activity_starts_but_core_always_does() {
 #[test]
 #[ignore = "needs prepared resources"]
 fn a_running_behavior_keeps_ticking_across_the_activity_change() {
+    let _test = TEST.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     CALLS.lock().unwrap().clear();
     ADDS.lock().unwrap().clear();
     ADDS.lock().unwrap().push(plan("minecraft:villager", |b| {
@@ -596,6 +609,7 @@ fn a_running_behavior_keeps_ticking_across_the_activity_change() {
 #[test]
 #[ignore = "needs prepared resources"]
 fn refresh_stops_a_running_behavior_and_the_rebuild_is_fresh() {
+    let _test = TEST.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     CALLS.lock().unwrap().clear();
     ADDS.lock().unwrap().clear();
     ADDS.lock().unwrap().push(plan("minecraft:villager", |b| {
@@ -652,6 +666,7 @@ fn refresh_stops_a_running_behavior_and_the_rebuild_is_fresh() {
 #[test]
 #[ignore = "needs prepared resources"]
 fn a_villager_without_mod_behaviors_draws_what_a_parts_free_one_does() {
+    let _test = TEST.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     // The 50-tick run of one phase: the same villager spot, the same game
     // times, one level random of the test's own.
     fn fifty_ticks(game: &mut super::super::Game<'_>) -> ((u64, Option<f64>), (u64, Option<f64>)) {
@@ -720,6 +735,7 @@ fn animal_tick(
 #[test]
 #[ignore = "needs prepared resources"]
 fn a_sniffer_behavior_sets_a_walk_target() {
+    let _test = TEST.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     READS.lock().unwrap().clear();
     ADDS.lock().unwrap().clear();
     ADDS.lock().unwrap().push(plan("minecraft:sniffer", |b| {
@@ -750,6 +766,7 @@ fn a_sniffer_behavior_sets_a_walk_target() {
 #[test]
 #[ignore = "needs prepared resources"]
 fn animal_behaviors_join_after_vanilla_of_their_priority() {
+    let _test = TEST.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     ADDS.lock().unwrap().clear();
     ADDS.lock().unwrap().push(plan("minecraft:sniffer", |b| {
         b.add(Activity::Core, 0, 60, 60, &[], Probe::still_for(1))
@@ -814,6 +831,7 @@ fn animal_behaviors_join_after_vanilla_of_their_priority() {
 #[test]
 #[ignore = "needs prepared resources"]
 fn grown_up_stops_a_running_ghastling_behavior() {
+    let _test = TEST.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     CALLS.lock().unwrap().clear();
     ADDS.lock().unwrap().clear();
     ADDS.lock()
@@ -911,6 +929,7 @@ fn warden_tick(
 #[test]
 #[ignore = "needs prepared resources"]
 fn a_breeze_behavior_starts_in_fight_and_writes_its_target() {
+    let _test = TEST.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     READS.lock().unwrap().clear();
     ADDS.lock().unwrap().clear();
     ADDS.lock().unwrap().push(plan("minecraft:breeze", |b| {
@@ -942,6 +961,7 @@ fn a_breeze_behavior_starts_in_fight_and_writes_its_target() {
 #[test]
 #[ignore = "needs prepared resources"]
 fn warden_behaviors_join_after_vanilla_of_their_priority() {
+    let _test = TEST.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     ADDS.lock().unwrap().clear();
     ADDS.lock().unwrap().push(plan("minecraft:warden", |b| {
         b.add(Activity::Idle, 10, 60, 60, &[], Probe::still_for(1))
@@ -1000,6 +1020,7 @@ fn warden_behaviors_join_after_vanilla_of_their_priority() {
 #[test]
 #[ignore = "needs prepared resources"]
 fn a_panicking_behavior_leaves_the_rest_of_the_tick_working() {
+    let _test = TEST.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     CALLS
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
