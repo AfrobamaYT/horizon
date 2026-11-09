@@ -930,6 +930,35 @@ impl Wire for std::time::Duration {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn golden_value_bytes() {
+        fn bytes<T: super::Wire>(value: T, expected: &[u8]) {
+            let mut out = super::Writer::new();
+            out.put(&value);
+            assert_eq!(out.error(), None);
+            assert_eq!(out.bytes(), expected);
+            let mut owned = super::Writer::new();
+            owned.put_owned(value);
+            assert_eq!(owned.error(), None);
+            assert_eq!(owned.bytes(), expected);
+        }
+        bytes(
+            crate::Vec3 {
+                x: 1.0,
+                y: 2.0,
+                z: -0.5,
+            },
+            &[
+                0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 64, 0, 0, 0, 0, 0, 0, 224, 191,
+            ],
+        );
+        bytes(crate::Direction::North, &[2, 0, 0, 0]);
+        bytes(crate::BlockStateId(7), &[7, 0, 0, 0]);
+        bytes(crate::Tag::Byte(5), &[1, 0, 0, 0, 5]);
+        bytes(Some(1u16), &[1, 1, 0]);
+        bytes(vec!["ab".to_owned()], &[1, 0, 0, 0, 2, 0, 0, 0, 97, 98]);
+        bytes(serde_json::json!(1), &[1, 0, 0, 0, 49]);
+    }
+    #[test]
     fn resource_context_is_scoped_and_encoding_keeps_first_error() {
         use std::{
             any::{Any, TypeId},
