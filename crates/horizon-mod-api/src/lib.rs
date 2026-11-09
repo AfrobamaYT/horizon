@@ -3922,13 +3922,23 @@ pub(crate) struct Installed {
 
 impl Installed {
     fn new(mods: Mods) -> Self {
+        // Each hook's subscribers are ordered once here: by the priority their `#[listener]`
+        // gives, then in dependency order.
         let subscriptions = mods.iter().enumerate().flat_map(|(index, entry)| {
-            entry
-                .hooks
-                .subscribed()
-                .iter()
-                .flatten()
-                .map(move |hook| (index, *hook as usize))
+            let listeners = entry.hooks.listeners();
+            entry.hooks.subscribed().iter().flatten().map(move |hook| {
+                let listener = listeners.iter().find(|listener| {
+                    listener
+                        .hook
+                        .is_some_and(|id| id as usize == *hook as usize)
+                });
+                horizon_mod_runtime::subscribers::Subscription {
+                    index,
+                    hook: *hook as usize,
+                    priority: listener.map_or(0, |listener| listener.priority),
+                    receives_cancelled: listener.is_some_and(|listener| listener.receive_cancelled),
+                }
+            })
         });
         let subscribers = horizon_mod_runtime::subscribers::Subscribers::new(
             generated::HOOK_COUNT,
@@ -3988,6 +3998,12 @@ pub(crate) fn listened(hook: generated::HookId) -> bool {
     installed().is_some_and(|installed| installed.subscribers.contains_any(hook as usize))
 }
 
+/// Whether a subscriber of a cancel hook is still told once the event is cancelled: the generated
+/// dispatch of an event the game hands over cancelled returns early without one.
+fn receives_cancelled(hook: generated::HookId) -> bool {
+    installed().is_some_and(|installed| installed.subscribers.receives_cancelled(hook as usize))
+}
+
 /// Switch an installed trait mod's subsequent dispatches on or off.
 pub(crate) fn set_mod_enabled(id: &str, on: bool) -> bool {
     let Some(installed) = installed() else {
@@ -4039,7 +4055,7 @@ fn entered(
     hook_id: generated::HookId,
     hook: &'static str,
 ) -> impl Iterator<Item = &'static dyn Hooks> {
-    entered_with_id(hook_id, hook).map(|(_, hooks)| hooks)
+    entered_subscribers(hook_id, hook).map(|entry| &*entry.hooks)
 }
 
 /// [`entered`] with each mod's own `[mod] id`, for a hook that names the mod that answered.
@@ -4047,21 +4063,49 @@ fn entered_with_id(
     hook_id: generated::HookId,
     hook: &'static str,
 ) -> impl Iterator<Item = (&'static str, &'static dyn Hooks)> {
+    entered_subscribers(hook_id, hook).map(|entry| (entry.id, &*entry.hooks))
+}
+
+/// A cancel hook's enabled subscribers in dispatch order, each with whether it is still told
+/// once the event is cancelled. Unlike [`entered`], nothing is marked: the dispatch enters only
+/// the mods it calls, through [`enter_listener`].
+fn listening(hook_id: generated::HookId) -> impl Iterator<Item = (bool, &'static ModEntry)> {
     installed().into_iter().flat_map(move |installed| {
-        let mut crash_guard = None;
         installed
             .subscribers
-            .indices(hook_id as usize)
-            .filter(move |&index| {
-                !installed.disabled[index].load(std::sync::atomic::Ordering::Relaxed)
+            .subscribers(hook_id as usize)
+            .filter(move |subscriber| {
+                !installed.disabled[subscriber.index].load(std::sync::atomic::Ordering::Relaxed)
             })
-            .map(move |index| {
-                drop(crash_guard.take());
-                let entry = &installed.mods[index];
-                let hooks = &*entry.hooks;
-                crash_guard = Some(mark_mod(entry.id, hook));
-                (entry.id, hooks)
+            .map(move |subscriber| {
+                (
+                    subscriber.receives_cancelled,
+                    &installed.mods[subscriber.index],
+                )
             })
+    })
+}
+
+/// Marks the thread as inside `entry`'s `hook` until the guard drops, and hands back its hooks.
+fn enter_listener(
+    entry: &'static ModEntry,
+    hook: &'static str,
+) -> (crate::crash::NativeModGuard, &'static dyn Hooks) {
+    (mark_mod(entry.id, hook), &*entry.hooks)
+}
+
+/// A hook's enabled subscribers in dispatch order (descending priority, then dependency order),
+/// each marked as running `hook` until the next one is (or the loop ends), so a panic in it
+/// names the mod.
+fn entered_subscribers(
+    hook_id: generated::HookId,
+    hook: &'static str,
+) -> impl Iterator<Item = &'static ModEntry> {
+    let mut crash_guard = None;
+    listening(hook_id).map(move |(_, entry)| {
+        drop(crash_guard.take());
+        crash_guard = Some(mark_mod(entry.id, hook));
+        entry
     })
 }
 
@@ -4116,6 +4160,36 @@ impl<'a> Iterator for Entered<'a> {
 }
 
 /// Whether a mod claims a cancellable hook.
+///
+/// A mod still told once an earlier one cancelled marks its method `#[listener(receive_cancelled)]`
+/// and reads the event's `cancelled` field, which it may set back to `false`:
+///
+/// ```
+/// use mod_api::{ClientHost, Flow, Hooks, RenderGuiPreEvent};
+/// #[derive(Default)]
+/// struct Gui;
+/// #[mod_api::horizon_mod]
+/// impl Hooks for Gui {
+///     #[listener(priority = -10, receive_cancelled)]
+///     fn render_gui_pre(&self, _: &dyn ClientHost, event: &mut RenderGuiPreEvent) -> Flow {
+///         event.cancelled = false;
+///         Flow::Continue
+///     }
+/// }
+/// ```
+///
+/// A hook no mod can cancel has no cancel to receive, so the option doesn't compile there:
+///
+/// ```compile_fail
+/// use mod_api::{ClientHost, ClientTickPreEvent, Hooks};
+/// #[derive(Default)]
+/// struct Ticker;
+/// #[mod_api::horizon_mod]
+/// impl Hooks for Ticker {
+///     #[listener(receive_cancelled)]
+///     fn client_tick_pre(&self, _: &mut dyn ClientHost, _: &mut ClientTickPreEvent) {}
+/// }
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Flow {

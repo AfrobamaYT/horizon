@@ -326,6 +326,178 @@ fn render_gui_pre_cancel_reaches_the_game() {
     assert_eq!(*heard.lock().unwrap(), ["pre"]);
 }
 
+/// What the GUI listeners below heard, in order: each mod's name and whether it saw a cancel.
+type Heard = Arc<std::sync::Mutex<Vec<(&'static str, bool)>>>;
+
+/// A `render_gui_pre` listener of each kind `#[listener]` gives: it records the event and answers
+/// `answer`; `Uncancels` clears a cancel it receives.
+#[derive(Clone, Copy)]
+enum Answer {
+    Continues,
+    Cancels,
+    Uncancels,
+}
+
+/// Dispatches `render_gui_pre` to `mods` (name, listener) in that dependency order, with the
+/// event cancelled up front when `cancelled`; returns what reached the game and who heard what.
+fn gui_dispatch(
+    cancelled: bool,
+    mods: Vec<(&'static str, Box<dyn Fn(Heard) -> Box<dyn Hooks>>)>,
+) -> (bool, Vec<(&'static str, bool)>) {
+    let heard = Heard::default();
+    let mods: Vec<_> = mods
+        .into_iter()
+        .map(|(id, make)| ModEntry::new(id, make(heard.clone())))
+        .collect();
+    let mut cancelled = cancelled;
+    testing::with_mods(mods.into(), || {
+        dispatch_render_gui_pre(&FakeHost::new(), &mut cancelled)
+    });
+    let heard = heard.lock().unwrap().clone();
+    (cancelled, heard)
+}
+
+fn answer(
+    heard: &Heard,
+    name: &'static str,
+    answer: Answer,
+    event: &mut RenderGuiPreEvent,
+) -> Flow {
+    heard.lock().unwrap().push((name, event.cancelled));
+    match answer {
+        Answer::Continues => Flow::Continue,
+        Answer::Cancels => Flow::Cancel,
+        Answer::Uncancels => {
+            event.cancelled = false;
+            Flow::Continue
+        }
+    }
+}
+
+/// A listener at the default priority, not told of cancelled events.
+fn plain(name: &'static str, kind: Answer) -> (&'static str, Box<dyn Fn(Heard) -> Box<dyn Hooks>>) {
+    struct Plain(Heard, &'static str, Answer);
+    #[mod_api::__subscriptions]
+    impl Hooks for Plain {
+        fn render_gui_pre(&self, _: &dyn ClientHost, event: &mut RenderGuiPreEvent) -> Flow {
+            answer(&self.0, self.1, self.2, event)
+        }
+    }
+    (
+        name,
+        Box::new(move |heard| Box::new(Plain(heard, name, kind))),
+    )
+}
+
+#[test]
+fn listeners_run_by_priority_then_dependency_order() {
+    struct First(Heard);
+    #[mod_api::__subscriptions]
+    impl Hooks for First {
+        #[listener(priority = 10)]
+        fn render_gui_pre(&self, _: &dyn ClientHost, event: &mut RenderGuiPreEvent) -> Flow {
+            answer(&self.0, "first", Answer::Continues, event)
+        }
+    }
+    struct AlsoFirst(Heard);
+    #[mod_api::__subscriptions]
+    impl Hooks for AlsoFirst {
+        #[listener(priority = 10)]
+        fn render_gui_pre(&self, _: &dyn ClientHost, event: &mut RenderGuiPreEvent) -> Flow {
+            answer(&self.0, "also_first", Answer::Continues, event)
+        }
+    }
+    struct Last(Heard);
+    #[mod_api::__subscriptions]
+    impl Hooks for Last {
+        #[listener(priority = -5)]
+        fn render_gui_pre(&self, _: &dyn ClientHost, event: &mut RenderGuiPreEvent) -> Flow {
+            answer(&self.0, "last", Answer::Continues, event)
+        }
+    }
+    let (cancelled, heard) = gui_dispatch(
+        false,
+        vec![
+            plain("plain", Answer::Continues),
+            ("last", Box::new(|heard| Box::new(Last(heard)))),
+            ("first", Box::new(|heard| Box::new(First(heard)))),
+            ("also_first", Box::new(|heard| Box::new(AlsoFirst(heard)))),
+        ],
+    );
+    assert!(!cancelled);
+    let order: Vec<_> = heard.iter().map(|(name, _)| *name).collect();
+    // Equal priorities keep dependency order: `first` was installed before `also_first`.
+    assert_eq!(order, ["first", "also_first", "plain", "last"]);
+}
+
+/// Receives cancelled events at the default priority, answering `kind`.
+struct Receiver(Heard, &'static str, Answer);
+#[mod_api::__subscriptions]
+impl Hooks for Receiver {
+    #[listener(receive_cancelled)]
+    fn render_gui_pre(&self, _: &dyn ClientHost, event: &mut RenderGuiPreEvent) -> Flow {
+        answer(&self.0, self.1, self.2, event)
+    }
+}
+
+fn receiver(
+    name: &'static str,
+    kind: Answer,
+) -> (&'static str, Box<dyn Fn(Heard) -> Box<dyn Hooks>>) {
+    (
+        name,
+        Box::new(move |heard| Box::new(Receiver(heard, name, kind))),
+    )
+}
+
+#[test]
+fn a_cancel_skips_later_listeners_except_those_receiving_cancelled_events() {
+    let (cancelled, heard) = gui_dispatch(
+        false,
+        vec![
+            plain("canceller", Answer::Cancels),
+            plain("skipped", Answer::Continues),
+            receiver("watcher", Answer::Continues),
+        ],
+    );
+    assert!(cancelled, "the cancel reaches the game");
+    assert_eq!(heard, [("canceller", false), ("watcher", true)]);
+}
+
+#[test]
+fn a_listener_receiving_a_cancel_can_undo_it() {
+    let (cancelled, heard) = gui_dispatch(
+        false,
+        vec![
+            plain("canceller", Answer::Cancels),
+            receiver("undoer", Answer::Uncancels),
+            plain("after", Answer::Continues),
+        ],
+    );
+    assert!(!cancelled, "the undone cancel does not reach the game");
+    // Once the cancel is undone, the listeners after it are told again.
+    assert_eq!(
+        heard,
+        [("canceller", false), ("undoer", true), ("after", false)]
+    );
+}
+
+#[test]
+fn an_event_cancelled_before_dispatch_reaches_only_listeners_receiving_cancelled_events() {
+    let (cancelled, heard) = gui_dispatch(true, vec![plain("plain", Answer::Continues)]);
+    assert!(cancelled);
+    assert!(heard.is_empty(), "no listener receives cancelled events");
+    let (cancelled, heard) = gui_dispatch(
+        true,
+        vec![
+            plain("plain", Answer::Continues),
+            receiver("undoer", Answer::Uncancels),
+        ],
+    );
+    assert!(!cancelled);
+    assert_eq!(heard, [("undoer", true)]);
+}
+
 #[test]
 fn window_resize_delivers_physical_and_gui_dimensions() {
     use std::sync::Mutex;
