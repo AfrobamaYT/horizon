@@ -6,6 +6,8 @@
 //! the spikes, its parts (head and neck take full damage, the rest a quarter
 //! plus one), wing knockback, block breaking, the death flight and rays, the
 //! exit portal, the egg and the next gateway; and its rendering and boss bar.
+#[path = "dragon/save_lending.rs"]
+mod save_lending;
 use super::api_values::TryIntoApi;
 use super::commands::Target;
 use super::{
@@ -4379,26 +4381,6 @@ impl Game<'_> {
             self.crystal_destroyed(i, &c, None, respawn);
             self.crystals.retain(|crystal| crystal.id != id);
             self.entity_killed_event([c.position.x, c.position.y, c.position.z], false);
-        }
-    }
-    /// `EnderDragon.kill` (`/kill`): `Entity.kill` removes the entity, it
-    /// does not hurt it (the dragon flies its death flight when its health
-    /// runs out). The fight's dragon ends the fight there and then
-    /// (`dragonFight.setDragonKilled`): the exit portal, a gateway and the
-    /// first dragon's egg, and no new dragon. No experience: `tickDeath`
-    /// drops it, and a killed dragon never gets there.
-    pub(super) fn kill_dragon(&mut self, id: u32) {
-        if self.dragon.as_ref().is_some_and(|d| d.id == id) {
-            // Only the fight's own dragon (`dragonFight`) ends it.
-            let fight = self.is_fight_dragon();
-            let _save_lease = horizon_client::join_seq::visibility::PassLease::enter();
-            if let Some(d) = self.dragon.extract() {
-                // remove, then gameEvent(ENTITY_DIE), before the fight hears of it.
-                self.dragon_died_event(d.id, d.position, d.alive());
-            }
-            if fight {
-                self.dragon_killed();
-            }
         }
     }
     /// Any entity touching `room` (`Level.getEntities(null, box)`).

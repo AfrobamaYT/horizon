@@ -8,6 +8,8 @@
 //! copy: the local player and the entities the server told it of, in the level
 //! it shows. The entities are those of the level in place (the one a hook runs
 //! in) and the server's players, whatever their level.
+#[path = "native_entity_refs/save_lending.rs"]
+mod save_lending;
 use super::{
     Game,
     commands::Target,
@@ -80,22 +82,6 @@ impl Game<'_> {
             return None;
         }
         remote.tracked_entity(i32::try_from(entity.id()).ok()?)
-    }
-
-    /// Keep a held-out entity inaccessible until its copy has been stored back.
-    pub(super) fn with_entity_held_out<R>(
-        &mut self,
-        id: u32,
-        action: impl FnOnce(&mut Self) -> R,
-    ) -> R {
-        let _save_lease = horizon_client::join_seq::visibility::PassLease::enter();
-        if mod_api::__private::mods().is_empty() {
-            return action(self);
-        }
-        self.held_out.push(id);
-        let result = action(self);
-        self.held_out.pop();
-        result
     }
 
     /// What a handle names now, or None for a stale or foreign one.
