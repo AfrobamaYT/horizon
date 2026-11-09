@@ -1687,8 +1687,8 @@ pub trait Hooks {
         cancellable = true
     )]
     fn screen_mouse_scrolled_pre();
-    /// A command a player typed (NeoForge's `CommandEvent`, before
-    /// `Commands.performCommand` runs it), without its slash: any command,
+    /// A command a player typed (NeoForge's `CommandEvent`), asked before
+    /// vanilla's `Commands.performCommand` runs it, without its slash: any command,
     /// vanilla's and the mods' own, also one the player may not run. Set
     /// `canceled` to stop it: nothing runs and nothing is answered but the
     /// lines pushed to `replies`, which go to the player as system chat.
@@ -4627,8 +4627,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// the clock to `wake_up_from_sleep`): `new_time` comes in as the next
     /// morning's day time and may be changed to wake everyone at another
     /// time. A time before `current` (the day time now) is refused, as
-    /// `setTimeAddition` refuses one, and the morning stays. Unlike
-    /// NeoForge, which refuses a bad value as it is set, the check runs once
+    /// `setTimeAddition` refuses one, and the morning stays. The check runs once
     /// after every mod, so a later mod sees the value an earlier one left.
     /// On the server, only when the `advance_time` rule is on;
     /// `native_time_skip` then hears the jump to the time chosen here and

@@ -272,7 +272,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   after the trade's statistic and `villager_trade` trigger. `merchant` is the trader's entity id, `kind` its type
   (`minecraft:villager` or `minecraft:wandering_trader`), and `offer` the `MerchantOffer` as it was right after the
   trade: its costs, `result`, `uses` (this trade counted), `max_uses` and `xp`. Listen only, heard once the whole click
-  is done (its payments taken; NeoForge fires during each take). The player's state is swapped in, so `host.players().acting_player` names
+  is done (its payments taken). The player's state is swapped in, so `host.players().acting_player` names
   them. Unlike `native_player_trade`, which is heard once per click with no offer. `MerchantRef` operations that
   conflict with an active menu operation are refused.
 - **`native_player_shield_disable(player, name, ticks)`**: a blocked melee hit disabled the server player’s shield for `ticks` ticks. It fires just before the cooldown is set.
@@ -337,7 +337,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_lightning_strike(player, pos, cause, cancel)`**: a weather, Channeling-trident, or `/summon` lightning bolt
   is about to be created. Set `cancel` to prevent the bolt and its effects; `cause` names the creation path.
 - **`native_entity_struck_by_lightning(entity, bolt, cancel)`**: a lightning bolt is about to hit `entity`
-  (NeoForge's `EntityStruckByLightningEvent`, before `Entity.thunderHit`), once per strike for each mob, player,
+  (NeoForge's `EntityStruckByLightningEvent`), asked before vanilla's `Entity.thunderHit`, once per strike for each mob, player,
   item, vehicle or other entity whose box meets the strike box. Set `cancel` to spare it: no fire, damage or
   conversion, and `native_creeper_power` is not called. It still counts as struck for Channeling's advancement, as
   in NeoForge. A visual-only bolt asks nothing. With no listener the cost is one `listened` check per struck entity.
@@ -462,11 +462,10 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   original_state, state)`** (on `GameLevel`): NeoForge's `CropGrowEvent.Pre` and `.Post`, at the random-tick growth of
   crops (beetroot and torchflowers after their own 1 in 3 skip), stems, nether wart, cocoa, sweet berries, bamboo,
   cactus, chorus flowers, sugar cane, kelp and the vines. `result` is a `NativeTriState`: `Default` keeps vanilla's
-  chance, `True` grows, `False` doesn't. Pre fires at NeoForge's positions (the block above for cactus and chorus,
+  chance, `True` grows, `False` doesn't. Pre fires at the position that grows (the block above for cactus and chorus,
   the block grown into for kelp and vines). Vanilla's random roll is drawn first, in vanilla's order, and passed as
-  the default. Diverges from NeoForge, which draws bamboo's and sweet berries' roll later (only after the
-  other checks), so a NeoForge server's crops drift from vanilla's random sequence. Pitcher crops, bamboo
-  saplings and mangrove propagules don't fire, as in NeoForge.
+  the default, so crops keep vanilla's random sequence. Pitcher crops, bamboo saplings and mangrove propagules
+  don't fire.
 - **`native_dragon_egg_form(dimension, pos, cancel)`** (on `GameLevel`): the first Ender Dragon fight is about to place
   its egg at `pos`. Set `cancel` to leave the block unchanged.
 - **`native_fluid_level_change(dimension, pos, fluid, from, to, cancel)`** (on `GameLevel`): flowing `water` or `lava`
@@ -1453,7 +1452,7 @@ Four client hooks take the `LoopContext` from the sound engine, which has no gam
 
 - `play_sound` is `PlaySoundEvent`. It fires at the start of vanilla's `SoundEngine.play`, before the engine's own checks, for every sound the client plays. `original` is the sound as asked for and `sound` is `&mut Option<SoundPlay>`, a copy of it that later mods see edited: change its volume, pitch, source, position, identifier, looping, delay, attenuation or `relative`, or set it to `None` to play nothing. A changed identifier is resolved again, with its own weighted pick. Only the fields of `SoundPlay` carry over; the engine's random, ticking and resolved sound never leave it. Setting `None` is the mod's own answer (there is no constant): a sound nobody edits plays as before.
 - `play_sound_source` is `PlaySoundSourceEvent` and `play_streaming_source` is `PlayStreamingSourceEvent`. A sound fires exactly one of them, after the engine started it on a channel: streamed sounds (music, records) the second, every other sound the first. They are notices, and `ChannelRef` is an id only: a mod cannot drive the channel. A mod that needs channel control names the mixin it replaces.
-- `sound_engine_load` is `SoundEngineLoadEvent`, which NeoForge fires on the mod bus. It fires when the output is open: at window start, after each resource reload (with the new generation's context) and when the output device changes. With no audio (no device, or `HORIZON_NO_AUDIO`) the engine never loads: this hook and the two source hooks do not fire, while `play_sound` still does, since it comes before the engine's check that it loaded.
+- `sound_engine_load` is `SoundEngineLoadEvent`. It fires when the output is open: at window start, after each resource reload (with the new generation's context) and when the output device changes. With no audio (no device, or `HORIZON_NO_AUDIO`) the engine never loads: this hook and the two source hooks do not fire, while `play_sound` still does, since it comes before the engine's check that it loaded.
 
 All four early-out on the mod's subscription before building a `SoundPlay`, so a game with no listener pays one branch per play. They are client-side only: a server has no sound engine and builds no context.
 
@@ -2352,7 +2351,7 @@ registration path.
 
 - The server's difficulty changed, from one of `peaceful`, `easy`, `normal`, `hard` to another, through `native_difficulty_changed` (NeoForge's `DifficultyChangeEvent`). It is vanilla's `MinecraftServer.setDifficulty`, which `/difficulty`, a dedicated server's management and a test environment's difficulty all go through, and it is told only when the difficulty is another one. It only hears: the change has already happened.
 
-- A player's fishing rod: `native_player_fish(player, name, state, cancel)` is heard for the cast (`state` 0), a fish biting (1), the reel-in with a catch (2), the reel-in with nothing on the line (3) and the reel-in of a bobber hooked to an entity or item (4), for a player of a server (Bukkit's `PlayerFishEvent`; NeoForge's `ItemFishedEvent` fires later, once the loot is rolled). A mod sets `cancel` to stop a cast, make the fish get away, or leave the bobber out on a reel-in. The player's state is swapped in.
+- A player's fishing rod: `native_player_fish(player, name, state, cancel)` is heard for the cast (`state` 0), a fish biting (1), the reel-in with a catch (2), the reel-in with nothing on the line (3) and the reel-in of a bobber hooked to an entity or item (4), for a player of a server (Bukkit's `PlayerFishEvent`; not NeoForge's `ItemFishedEvent`). A mod sets `cancel` to stop a cast, make the fish get away, or leave the bobber out on a reel-in. The player's state is swapped in.
 
 - A player took a crafting grid's result, through `native_item_crafted` (NeoForge's `PlayerEvent.ItemCraftedEvent`): the player's uuid, the recipe the grid matched (`minecraft:oak_planks`) and the result stack it took, with its components. It only hears; the take has already happened. It fires for the crafting grid of an inventory or a crafting table, on the integrated server and on a dedicated server, guests included, and not for a stonecutter's, a smithing table's or a furnace's result.
 
