@@ -1456,6 +1456,12 @@ mod tests {
                     minecarts::CartKind::Rideable,
                     Vec3::ZERO,
                 ));
+                let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+                let mut child = Mob::new(base + 10, kind, Vec3::ZERO, 0.0);
+                child.extra.mount = Some(base + 1);
+                game.persist
+                    .off_level
+                    .insert(base + 10, super::super::persist::OffLevel::Mob(child));
                 // It left with 7; the source level has run it down to 3 since.
                 game.portals.entities.entry(base + 1).or_default().cooldown = 3;
                 game.portals.carried_cooldown.insert(base + 1, 7);
@@ -1468,6 +1474,10 @@ mod tests {
                 ));
                 game.native_joins_flush(false, 0);
                 game.arrive_vehicle(source, base + 1, Vec3::ZERO, 0.0);
+                assert!(
+                    game.mob_object(base + 10).is_some(),
+                    "natural carrier arrival must transfer retained passenger"
+                );
                 assert_eq!(game.portals.entities[&(base + 1)].cooldown, 7);
                 assert!(
                     !game

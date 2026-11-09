@@ -1311,4 +1311,56 @@ mod nested_vehicle_discard_tests {
     fn scoped_cross_level_callbacks_restore_context_and_clear_notification_keys() {
         live_cancels(true);
     }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn review_cycle_through_retained_object_is_refused() {
+        with_vehicle_tree(false, true, |game| {
+            let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            game.mobs.push(Mob::new(74, kind, Vec3::ZERO, 0.0));
+            game.mob_object_mut(72).unwrap().extra.mount = Some(74);
+            assert!(
+                !game.start_riding_target(
+                    super::super::commands::Target::Mob(74),
+                    super::super::commands::Target::Mob(73),
+                    true
+                ),
+                "cycle through retained object must be rejected"
+            );
+        });
+    }
+    struct ReviewKillOnMount;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for ReviewKillOnMount {
+        fn entity_mount(
+            &self,
+            host: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::EntityMountEvent<'_>,
+        ) -> mod_api::Flow {
+            if event.mounting {
+                host.entity(event.vehicle).unwrap().discard(host);
+            }
+            mod_api::Flow::Continue
+        }
+    }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn review_mount_callback_must_not_link_removed_vehicle() {
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "review",
+            Box::new(ReviewKillOnMount),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_vehicle_tree(false, false, |game| {
+                game.mob_object_mut(72).unwrap().extra.mount = None;
+                let ok = game.start_riding_target(
+                    super::super::commands::Target::Mob(72),
+                    super::super::commands::Target::Boat(71),
+                    true,
+                );
+                assert!(!ok, "mount must refuse when callback removes vehicle");
+                assert_eq!(game.mob_object(72).unwrap().extra.mount, None);
+            })
+        });
+    }
 }
