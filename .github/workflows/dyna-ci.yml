@@ -322,6 +322,9 @@ jobs:
       # type-checks and the parity job builds and runs (they were most of this step's build and link time).
       # cargo test, not nextest: nextest's process per test reloads each binary's shared tables for every test, and on
       # these 4-core runners it was no faster (#4978).
+      - name: Build the runtime holder test actor
+        if: steps.rust.outputs.required != 'false'
+        run: cargo +stable build $JOBS -p horizon-mod-package --features runtime-process --example holder_actor
       - name: Test Rust core and voxel kernel correctness
         if: steps.rust.outputs.required != 'false'
         run: cargo +stable test $JOBS --workspace --lib --bins --tests
@@ -395,7 +398,7 @@ jobs:
           done
           HORIZON_DYNA_CACHE=true HORIZON_PREPARED_CACHE="$DYNA_CI_BUILD/vanilla" HORIZON_SHARED_SOURCE=/cache/horizon-local bash tools/ci/vanilla-data.sh
       - name: Generate the fishing test's vanilla reference inputs
-        if: steps.data.outputs.present != 'false' && matrix.shard == 'horizon-client'
+        if: steps.data.outputs.present != 'false' && (matrix.shard == 'horizon-client' || startsWith(matrix.shard, 'horizon-client#'))
         run: |
           reference=$(mktemp -d "$RUNNER_TEMP/fishing-reference.XXXXXX")
           python3 tools/test_fishing_rng_parity.py --prepare-reference "$reference" --env-file "$GITHUB_ENV"
@@ -480,6 +483,8 @@ jobs:
           cargo +stable clippy $JOBS --all-targets --locked -- -D warnings
           cargo +stable test $JOBS --locked --lib --bins
           cargo +stable test $JOBS --locked --test storage
+          cargo +stable build $JOBS --manifest-path ../Cargo.toml --locked -p horizon-mod-package --features runtime-process --example holder_actor
+          cargo +stable test $JOBS --manifest-path ../Cargo.toml --locked -p horizon-mod-package --features runtime-process --lib
   # The fork's Dyna runners have the owner's prepared vanilla data in a read-only cache.
   prepared-output-check:
     if: github.event_name == 'workflow_dispatch' && inputs.prepare-output-check && github.repository == 'arismoko/horizon'

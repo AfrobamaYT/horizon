@@ -522,13 +522,19 @@ pub fn native_player_tab_list_name_format(
 }
 
 /// `LivingEntity.DATA_ARROW_COUNT_ID` (12) and `DATA_STINGER_COUNT_ID` (13):
-/// the counts of what is stuck in a player, 0 by default.
-fn stuck_meta(state: &mut EntityState, (arrows, stingers): (i32, i32)) {
+/// the counts of what is stuck in a player or a mob, 0 by default. `meta`
+/// gets the counts that are set and `defaults` both, so one back at zero is
+/// sent as the default.
+pub fn stuck_meta(
+    meta: &mut Vec<(u8, i32, Value)>,
+    defaults: &mut Vec<(u8, i32, Value)>,
+    (arrows, stingers): (i32, i32),
+) {
     for (index, count) in [(12, arrows), (13, stingers)] {
         if count != 0 {
-            state.meta.push((index, serializer::INT, Value::Int(count)));
+            meta.push((index, serializer::INT, Value::Int(count)));
         }
-        state.defaults.push((index, serializer::INT, Value::Int(0)));
+        defaults.push((index, serializer::INT, Value::Int(0)));
     }
 }
 
@@ -3686,7 +3692,7 @@ impl Hub {
                 state.spectator = g.spectator();
                 state.watching = g.watching;
                 state.hidden = self.hidden.get(&g.uuid).copied();
-                stuck_meta(&mut state, g.stuck);
+                stuck_meta(&mut state.meta, &mut state.defaults, g.stuck);
                 frozen_meta(&mut state, g.motion.as_ref().map_or(0, |m| m.ticks_frozen));
                 shoulder_meta(&mut state, g.shoulders);
                 state
@@ -7245,12 +7251,12 @@ mod tests {
         assert_eq!((left[1].0, &left[1].2), (20, &Value::Id(0)));
     }
 
-    /// The counts of what is stuck in a player are sent when set, and a
+    /// The counts of what is stuck in a player or a mob are sent when set, and a
     /// count back at zero is sent as the default.
     #[test]
     fn stuck_counts_are_synched_as_entity_data() {
         let mut state = EntityState::default();
-        stuck_meta(&mut state, (3, 0));
+        stuck_meta(&mut state.meta, &mut state.defaults, (3, 0));
         assert_eq!(state.meta, vec![(12, serializer::INT, Value::Int(3))]);
         assert_eq!(
             state.defaults,

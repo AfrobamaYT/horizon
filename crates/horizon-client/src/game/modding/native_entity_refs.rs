@@ -865,11 +865,39 @@ pub(super) mod tests {
                 std::fs::create_dir(&home).unwrap();
                 command.env(key, home);
             }
-            let status = command.status().unwrap();
+            let output = command.output().unwrap();
             std::fs::remove_dir_all(scratch).unwrap();
-            assert!(status.success(), "{name}: {case}");
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            // The child's log, captured with this test's own output.
+            print!("{stdout}");
+            eprint!("{}", String::from_utf8_lossy(&output.stderr));
+            assert!(output.status.success(), "{name}: {case}");
+            assert!(
+                ran_one_test(&stdout),
+                "{name}: {case}: the child matched no test of that name"
+            );
         }
         true
+    }
+
+    /// Whether libtest's summary says exactly one test passed: `--exact` with a name no test
+    /// has runs nothing and still exits 0.
+    fn ran_one_test(stdout: &str) -> bool {
+        stdout
+            .lines()
+            .any(|line| line.starts_with("test result: ok. 1 passed;"))
+    }
+
+    /// A child run with a name no test has fails the parent instead of passing vacuously.
+    #[test]
+    #[ignore = "runs in an isolated scratch process"]
+    #[should_panic(expected = "matched no test of that name")]
+    fn a_fresh_case_whose_name_matches_no_test_fails() {
+        run_fresh_cases(
+            "game::native_entity_refs::tests::no_test_has_this_name",
+            "HORIZON_NO_MATCH_CHILD",
+            &["missing"],
+        );
     }
 
     /// The parent runs and checks an isolated child; the child loads the Part fixtures' types.
@@ -900,6 +928,20 @@ pub(super) mod tests {
             root,
             super::super::execution_role::ExecutionRole::IntegratedServer,
             test,
+        );
+    }
+
+    /// Keep a key that a test mod's `register` declared. The game fixture registers the
+    /// installed mods again (`register_game_keys`), and a key's slot is stable for the process,
+    /// so the repeat must declare the same key.
+    pub(in crate::game) fn record_key<K: Copy + PartialEq + std::fmt::Debug>(
+        slot: &std::sync::OnceLock<K>,
+        key: K,
+    ) {
+        assert_eq!(
+            *slot.get_or_init(|| key),
+            key,
+            "a repeat registration declared another key"
         );
     }
 

@@ -491,6 +491,9 @@ fn screen_ids_are_distinct_and_stable() {
         Screen::ConfirmLink,
         Screen::DialogWarning,
         Screen::Win,
+        Screen::Mod,
+        Screen::HudEditor,
+        Screen::Studio,
         Screen::DebugOptions,
     ];
     let ids: Vec<&'static str> = all.iter().map(|screen| screen.id()).collect();
@@ -507,6 +510,8 @@ fn screen_ids_are_distinct_and_stable() {
     assert_eq!(Screen::Playing.id(), "playing");
     assert_eq!(Screen::Inventory.id(), "inventory");
     assert_eq!(Screen::Win.id(), "win");
+    assert_eq!(Screen::Studio.id(), "studio");
+    assert_ne!(Screen::Studio.id(), Screen::Chat.id());
 }
 
 /// The `modifiers` a native mod's input hooks hand over are GLFW's bits
@@ -1134,4 +1139,26 @@ fn integrated_server_save_persists_owner_player_data() {
     );
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `Screen::Studio` is the Studio script slot: it never draws the chat screen
+/// (`Screen::Studio => {}` in `game.rs`'s draw match, unlike
+/// `Screen::Chat => draw_chat_screen`), it never blurs the background, and
+/// while it is up gameplay does not own the keyboard (WASD cannot walk
+/// through it, and movement keys are cleared on open).
+#[test]
+fn studio_screen_stays_off_the_chat_slot() {
+    assert!(Screen::Studio != Screen::Chat);
+    assert_eq!(Screen::Studio.id(), "studio");
+    assert!(!Screen::Studio.blurs_background(false));
+    assert!(!Screen::Studio.blurs_background(true));
+    assert!(!gameplay_has_keyboard(Screen::Studio, false, false));
+    // The pure gate behind `Game::open_studio_screen`, as
+    // `native_mod_screen_open`'s `mod_screen_opens` is gated.
+    use super::studio::studio_screen_opens;
+    assert_eq!(studio_screen_opens(Screen::Playing, false), None);
+    assert_eq!(studio_screen_opens(Screen::Playing, true), Some(false));
+    assert_eq!(studio_screen_opens(Screen::Chat, false), Some(false));
+    assert_eq!(studio_screen_opens(Screen::Studio, false), Some(true));
+    assert_eq!(studio_screen_opens(Screen::Studio, true), Some(true));
 }

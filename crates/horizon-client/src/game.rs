@@ -72,6 +72,37 @@ pub mod points {
     pub(super) fn host_side<'a>(game: &'a mut super::Game<'_>) -> mod_api::HostSide<'a> {
         super::execution_role::host_side(game)
     }
+
+    /// An engine value's `mod_api` mirror for a point record, through the boundary's conversion.
+    #[allow(dead_code, reason = "used by the staged copy's points")]
+    pub(super) fn mirror_in<T: super::api_values::TryIntoApi + ?Sized>(
+        value: &T,
+    ) -> Option<T::Api> {
+        value.try_into_api().ok()
+    }
+
+    /// A listener's `mod_api` value as the engine's, validated as every mod value is; a value the
+    /// engine refuses leaves the engine's own in place.
+    #[allow(dead_code, reason = "used by the staged copy's points")]
+    pub(super) fn mirror_out<A: super::api_values::TryIntoEngine<()>>(
+        value: &A,
+        point: &str,
+    ) -> Option<A::Engine> {
+        let engine = value.try_into_engine(&()).ok();
+        if engine.is_none() {
+            log::warn!(
+                "point {point}: a listener's value has no engine form; the engine's is kept"
+            );
+        }
+        engine
+    }
+
+    /// An engine value with no `mod_api` form at this call: its listeners are skipped this once.
+    #[cold]
+    #[allow(dead_code, reason = "used by the staged copy's points")]
+    pub(super) fn unconverted(point: &str) {
+        log::warn!("point {point}: a value has no API form; its listeners were skipped");
+    }
 }
 mod host;
 mod native_hooks;
@@ -604,6 +635,9 @@ enum Screen {
     Mod,
     /// PvP & HUD's widget editor (game/interface/hud_editor.rs).
     HudEditor,
+    /// Horizon Studio script screen (`studio_screen_open`): canvas draws
+    /// itself, takes input through the screen hooks, does not draw chat.
+    Studio,
 }
 impl Screen {
     /// The id native mods see for this screen (`NativeScreenView.id`, the
@@ -633,6 +667,7 @@ impl Screen {
             Screen::DebugOptions => "debug_options",
             Screen::Mod => "mod",
             Screen::HudEditor => "hud_editor",
+            Screen::Studio => "studio",
         }
     }
 }
@@ -2254,6 +2289,9 @@ pub struct PackResources {
     forcefield: Arc<(u32, u32, Vec<u8>)>,
     /// OptiFine custom sky layers (`optifine/sky`) with their textures; empty without them.
     custom_sky: Arc<horizon_client::custom_sky::CustomSky>,
+    /// The overworld's, Nether's and End's attribute stacks with the packs' Polytone biome and
+    /// dimension modifiers (#11486), when a pack has some: what the frame draws.
+    environments: Option<Arc<[Environment; 3]>>,
 }
 
 /// A quick craft drag as the screen draws it: each dragged slot's count and
@@ -3742,10 +3780,10 @@ impl Game<'_> {
     }
     /// The level's dimension type: a mod's or a data pack's own when it has one, else the
     /// built-in level's.
-    fn dimension_type(&self) -> &'static horizon_world::dimension_type::DimensionFacts {
+    fn dimension_type(&self) -> &horizon_world::dimension_type::DimensionFacts {
         // A client of a server has the facts its server sent for the level, which are its own,
         // not the table the server's levels (in this process, for an integrated server) read.
-        if let Some(facts) = self.remote.as_ref().and_then(|r| r.level_facts) {
+        if let Some(facts) = self.remote.as_ref().and_then(|r| r.level_facts.as_deref()) {
             return facts;
         }
         // Else the level the server named, whether or not the client has the mod that
@@ -3756,9 +3794,26 @@ impl Game<'_> {
             .map(|r| r.level.as_str())
             .filter(|level| !level.is_empty())
             .unwrap_or_else(|| self.dim.id());
-        horizon_world::dimension_type::DimensionFacts::of_level(
+        self.dimension_facts_for(
             horizon_core::LevelKey::parse(level).unwrap_or(horizon_core::LevelKey::OVERWORLD),
         )
+    }
+    /// A client only knows its current level's type; other keys use built-in defaults.
+    fn dimension_facts_for(
+        &self,
+        key: horizon_core::LevelKey,
+    ) -> &horizon_world::dimension_type::DimensionFacts {
+        use horizon_world::dimension_type::DimensionFacts;
+        if let Some(remote) = &self.remote {
+            if horizon_core::LevelKey::parse(&remote.level).ok() == Some(key)
+                && let Some(facts) = remote.level_facts.as_deref()
+            {
+                return facts;
+            }
+            DimensionFacts::of_builtin_level(key)
+        } else {
+            DimensionFacts::of_level(key)
+        }
     }
     fn dimension_type_of(
         &self,
@@ -4777,22 +4832,30 @@ impl Game<'_> {
             return;
         }
         let mut lent = horizon_client::health::LentLevel::take(&mut self.world);
-        let mut level = horizon_client::health::DamageLevel::lent(
-            &self.world,
-            self.pack.assets.registry,
-            &mut lent,
-            Some(world_items!(self)),
-            Some(&self.pack.block_registries),
-            &self.damage_hooks,
-        );
-        let contact = horizon_client::block_contact::Contact {
-            entity: id as i32,
-            kind: "minecraft:item",
-            state,
-            position: on,
-        };
-        let _ = horizon_client::block_contact::fall(&mut level, contact, distance, 0.0);
+        // A native fall_on Part can unwind. Keep the persistent level carrier
+        // outside the callback's temporary views, and return its progressed state
+        // before propagating the original panic. This does not restore the item batch.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut level = horizon_client::health::DamageLevel::lent(
+                &self.world,
+                self.pack.assets.registry,
+                &mut lent,
+                Some(world_items!(self)),
+                Some(&self.pack.block_registries),
+                &self.damage_hooks,
+            );
+            let contact = horizon_client::block_contact::Contact {
+                entity: id as i32,
+                kind: "minecraft:item",
+                state,
+                position: on,
+            };
+            let _ = horizon_client::block_contact::fall(&mut level, contact, distance, 0.0);
+        }));
         lent.give_back(&mut self.world);
+        if let Err(payload) = result {
+            std::panic::resume_unwind(payload);
+        }
     }
     /// An item that joined during this tick's entity pass: it first ticks on
     /// the next one.
@@ -4807,7 +4870,8 @@ impl Game<'_> {
         let mut cells = horizon_client::entities::ItemCells::new(&items);
         // A LAN or server guest only shows the host's items.
         let merging = self.remote.is_none();
-        let obstacles = horizon_client::entities::ObstacleGrid::new(self.item_entity_collisions());
+        let mut obstacles =
+            horizon_client::entities::ObstacleGrid::new(self.item_entity_collisions());
         let mut nearby = Vec::new();
         let mut bubble_tops = Vec::new();
         // `ItemUtils.onContainerDestroyed`: what a destroyed item held, and
@@ -8540,6 +8604,10 @@ impl Game<'_> {
         self.title.is_some() && self.screen != Screen::DebugOptions
     }
     fn hud(&mut self, size: [u32; 2]) -> HudBatch {
+        // Off a world (title, options, Win, a prompt before joining) the HUD shows nothing to
+        // keep clear of; `hud_layers` fills it in once the world's HUD draws.
+        let gui = HudBatch::new(size, self.settings.gui_scale_inputs());
+        self.ui.room = horizon_client::hud_kit::room::Room::new(gui.width, gui.height);
         // The pack prompt replaces the connecting screen (setScreen), but
         // in game it opens over the world.
         let mut batch = if (self.server_packs.prompt.is_some()
@@ -8686,6 +8754,7 @@ impl Game<'_> {
         let show_hud = !self.ui.hide_gui && !gui_canceled && self.studio_replay.is_none();
         // The mods' layers (`register_gui_layers`) draw among vanilla's while the HUD shows.
         self.hud_layer_next = show_hud.then_some(0);
+        self.ui.room = self.hud_room(w, h, show_hud);
         let mut guide_from = 0;
         if show_hud {
             self.draw_spyglass(&mut batch);
@@ -8976,6 +9045,7 @@ impl Game<'_> {
             Screen::BlockEditor => self.draw_block_editor(&mut batch),
             Screen::DebugOptions => self.draw_debug_options(&mut batch),
             Screen::HudEditor => self.draw_hud_editor(&mut batch),
+            Screen::Studio => {}
             Screen::Inventory => {
                 let from = batch.vertices.len();
                 self.draw_inventory(&mut batch);
@@ -15200,7 +15270,7 @@ impl Game<'_> {
             .get(&(block[0] >> 4, block[2] >> 4))
             .map(|c| c.biome(block[0], block[1], block[2]))
             .unwrap_or(0);
-        let environment = self.dim_environment();
+        let environment = self.view_environment();
         // EnvironmentAttributeProbe: the spatially interpolated biome colours,
         // Gaussian-weighted over the noise biomes around the camera (plains
         // where no chunk is loaded, as ClientLevel.getUncachedNoiseBiome).
@@ -15218,18 +15288,64 @@ impl Game<'_> {
         let water_fog = horizon_client::biome::blend_rgb(&weights, |b| {
             horizon_client::biome::rgb(biomes.get(b).water_fog)
         });
-        // The attribute stack, with the camera's biome mix in the probe's order.
+        // The attribute stack, with the camera's biome mix in the probe's order; the biome
+        // maps as the packs left them.
+        let attributes_of = |b: u16| {
+            let info = biomes.get(b);
+            environment.biome(&info.name).unwrap_or(&info.attributes)
+        };
         let mut blend = horizon_world::environment_system::BiomeBlend::default();
         for &(b, weight) in &weights {
-            blend.accumulate(weight, &biomes.get(b).attributes);
+            blend.accumulate(weight, attributes_of(b));
+        }
+        // The packs' biome post-process group, mixed the same way where they set one.
+        let empty = horizon_world::environment_attributes::AttributeMap::default();
+        let post_of = |b: u16| {
+            environment
+                .biome_post(&biomes.get(b).name)
+                .unwrap_or(&empty)
+        };
+        let mut post_blend = horizon_world::environment_system::BiomeBlend::default();
+        if environment.has_biome_post() {
+            for &(b, weight) in &weights {
+                post_blend.accumulate(weight, post_of(b));
+            }
         }
         let (rain, thunder) = self.view_weather(alpha as f32);
+        // What the packs' attribute expressions read (only a pack's stack has any).
+        if self.pack.environments.is_some() {
+            let light = self.world.light(block[0], block[1], block[2]);
+            environment.set_frame(horizon_client::environment::Frame {
+                rain,
+                thunder,
+                game_time: self.world.game_time,
+                day_time: self.view_day_time(),
+                render_distance: self.streaming.radius,
+                sky_type: match self.dim {
+                    Dim::Overworld | Dim::Extra(_) => 1,
+                    Dim::End => 2,
+                    Dim::Nether => 0,
+                },
+                dimension: self.dim.id().to_owned(),
+                player: self.player.as_ref().map_or(camera.to_array(), |p| {
+                    [p.position.x, p.position.y, p.position.z]
+                }),
+                in_water: underwater,
+                camera: camera.to_array(),
+                sky_light: i32::from(light >> 4),
+                block_light: i32::from(light & 15),
+                temperature: biomes.get(biome).temperature,
+                downfall: biomes.get(biome).downfall,
+            });
+        }
         let mut sky = environment.sample(&horizon_client::environment::Sample {
             day_time: self.view_day_time(),
             rain,
             thunder,
             blend: Some(&blend),
-            biome: Some(&biomes.get(biome).attributes),
+            biome: Some(attributes_of(biome)),
+            post_blend: Some(&post_blend),
+            post_biome: Some(post_of(biome)),
         });
         self.end_flash_sky(&mut sky, alpha);
         if self.flash > 0 && !self.settings.file.bool("hideLightningFlashes") {
@@ -16164,7 +16280,15 @@ impl Game<'_> {
                     }
                 }
                 let centre = self.streaming.center;
-                let far = |k: &(i32, i32, i32)| (k.0 - centre.0).pow(2) + (k.2 - centre.1).pow(2);
+                // Section keys count from the world's bottom (`origin`'s min_y + y * 16).
+                let bottom = f64::from(self.world.bottom_y());
+                let cam_y = self
+                    .player
+                    .as_ref()
+                    .map_or(4, |p| ((p.position.y - bottom) / 16.0).floor() as i32);
+                let far = |k: &(i32, i32, i32)| {
+                    (k.0 - centre.0).pow(2) + (k.1 - cam_y).pow(2) + (k.2 - centre.1).pow(2)
+                };
                 pending.sort_unstable_by_key(|(k, _)| std::cmp::Reverse(far(k)));
                 let (limit, budget) = if budgeted {
                     (
@@ -17614,7 +17738,6 @@ pub fn run_with(
         use mod_api::__private::game::RegistrationContextNew;
         let context = mod_api::RegistrationContext::new();
         let inventory: Vec<_> = context.mods().iter().cloned().collect();
-        horizon_client::install_points_catalog();
         horizon_mod_wasm::initialize(&inventory);
     }
     mod_points::__private::seal();
@@ -17658,6 +17781,7 @@ pub fn run_with(
     mods::register_item_tint_sources(options.execution_role);
     mods::register_enchantment_damage_effects();
     mods::register_dimension_transition_screens(options.execution_role);
+    mods::register_color_resolvers(options.execution_role);
     mods::register_block_tint_sources(options.execution_role);
     mods::register_particle_providers(options.execution_role);
     mods::freeze_declarations();
