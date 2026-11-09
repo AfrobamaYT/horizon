@@ -112,6 +112,7 @@ impl Game<'_> {
                     return Some(Hit {
                         pos,
                         face,
+                        inside: face == [0; 3],
                         point: [
                             origin[0] + dir[0] * t,
                             origin[1] + dir[1] * t,
@@ -128,6 +129,7 @@ impl Game<'_> {
                 return Some(Hit {
                     pos,
                     face,
+                    inside: face == [0; 3],
                     point: [
                         origin[0] + dir[0] * t,
                         origin[1] + dir[1] * t,

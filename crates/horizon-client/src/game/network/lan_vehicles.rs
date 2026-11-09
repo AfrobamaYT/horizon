@@ -589,13 +589,7 @@ impl Game<'_> {
                     speed,
                 } = e
                 {
-                    self.landing_dust(
-                        Some(host),
-                        state,
-                        Vec3::new(at[0], at[1], at[2]),
-                        count,
-                        speed,
-                    );
+                    self.landing_dust(state, Vec3::new(at[0], at[1], at[2]), count, speed);
                 }
             }
             let _ = self.handle_mob_events(events);
@@ -608,7 +602,7 @@ impl Game<'_> {
                     .map(|g| g.conn)
                     .collect();
                 for conn in riders {
-                    self.guest_hit_by(host, conn, |g| g.rider_fall_damage(distance, modifier));
+                    self.guest_hit_by(conn, |g| g.rider_fall_damage(distance, modifier));
                 }
             }
             return;

@@ -85,6 +85,7 @@ impl Game<'_> {
             velocity,
             age: 0,
             no_gravity: false,
+            on_ground: false,
             drop_item: falling.drop_item,
             fall_distance: 0.0,
             stuck: Vec3::ZERO,

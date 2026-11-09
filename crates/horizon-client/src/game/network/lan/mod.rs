@@ -3959,11 +3959,6 @@ impl Game<'_> {
             .hub
             .loading_chunks(|g| super::game_mode::loads_chunks(rule, g.spectator()))
             .map(|chunk| (chunk, radius))
-            // Fake players load a small area.
-            .chain(
-                host.hub
-                    .fake_loading_areas(|g| super::game_mode::loads_chunks(rule, g.spectator())),
-            )
             .chain(
                 self.arrival_chunks(self.dim)
                     .into_iter()

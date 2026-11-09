@@ -730,7 +730,7 @@ impl Game<'_> {
                     // `TurtleEggBlock.decreaseEggs`' destroy): a sculk sensor, a
                     // calibrated sensor and a warden hear it.
                     if let Some(vibration) = self.landing_block_updates(player, &event) {
-                        self.as_guest(host, conn, |game| game.post_landing_vibration(vibration));
+                        self.as_guest(conn, |game| game.post_landing_vibration(vibration));
                     }
                 }
                 // PowderSnowBlock.entityInside: every player around sees the

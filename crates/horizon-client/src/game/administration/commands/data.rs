@@ -362,6 +362,8 @@ impl Game<'_> {
                 let fence = self.natural_knot(id)?;
                 let uuid = *self.persist.uuids.get(&id)?;
                 let knot = super::OtherEntity {
+                    // A serialization view, not a second resident entity.
+                    join: horizon_client::join_seq::JoinSeq::UNJOINED,
                     id,
                     kind: "minecraft:leash_knot".into(),
                     position: horizon_client::mobs::leash::knot_state(fence).position,
@@ -498,7 +500,6 @@ impl Game<'_> {
                 let slot = &self.others[i];
                 let mut new = Self::other_from_nbt(&tag, id, &slot.kind).ok_or_else(stale)?;
                 new.join = slot.join;
-                new.random = slot.random.clone();
                 let is_display = matches!(
                     slot.kind.as_str(),
                     "minecraft:block_display" | "minecraft:item_display" | "minecraft:text_display"
@@ -514,7 +515,6 @@ impl Game<'_> {
                 let mut new = entity_nbt::item_entity_from_nbt(&tag, id, 0.0).ok_or_else(stale)?;
                 if let Some(slot) = self.dropped.iter_mut().find(|e| e.id == id) {
                     new.join = slot.join;
-                    new.random = slot.random.clone();
                     new.bob_offset = slot.bob_offset;
                     horizon_client::join_seq::store_back(slot, new);
                 }
@@ -539,7 +539,6 @@ impl Game<'_> {
                     // and its place in the level's join order.
                     new.first_tick = slot.first_tick;
                     new.join = slot.join;
-                    new.random = slot.random.clone();
                     horizon_client::join_seq::store_back(slot, new);
                 }
             }

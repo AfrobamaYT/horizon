@@ -124,7 +124,7 @@ impl<'scope, T: Send + 'scope> Step<'scope, T> {
 pub(super) struct CoreTables {
     pub(super) item_data: Arc<horizon_world::item_defaults::ItemData>,
     pub(super) entity_models: Option<Arc<horizon_client::mobs::EntityModelDocument>>,
-    pub(super) item_defaults: Arc<horizon_world::item_defaults::Defaults>,
+    pub(super) item_defaults: Arc<horizon_world::item_defaults::ItemDefaults>,
     pub(super) assets: Assets,
     pub(super) render: RenderAssets,
     pub(super) item_renderer: horizon_client::item_render::ItemRenderer,

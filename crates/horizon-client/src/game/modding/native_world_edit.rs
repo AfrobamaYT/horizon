@@ -29,13 +29,6 @@ impl Game<'_> {
         dimension: &str,
         edit: &NativeBlockEdit,
     ) -> Result<u64, String> {
-        if dimension != self.dim.id() {
-            return self
-                .npc_in_level(dimension, |g| g.native_edit_blocks(dimension, edit))
-                .unwrap_or_else(|| {
-                    Err(format!("{dimension} is not a level the server has loaded"))
-                });
-        }
         if !self.native_level_open(dimension) {
             return Err(format!("{dimension} is not the level being ticked"));
         }

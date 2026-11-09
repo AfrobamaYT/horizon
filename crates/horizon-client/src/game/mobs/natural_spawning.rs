@@ -1202,7 +1202,7 @@ impl<'a> Game<'a> {
                 .hub
                 .guests
                 .iter()
-                .filter(|g| g.fake)
+                .filter(|g| g.is_fake())
                 .map(|g| g.uuid)
                 .collect();
             if !fake.is_empty() {
