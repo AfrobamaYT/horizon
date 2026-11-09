@@ -524,19 +524,7 @@ fn logged<T>(
     // Keep this build lease through installation/export, including failed builds. It does not
     // exclude independent game starts; automatic trimming can conservatively retain the cache.
     if let Ok(cache) = cache {
-        match crate::storage::Storage::after_build(&cache) {
-            Ok(report) => {
-                if let Some(message) = crate::storage::eviction::freed_message(&report) {
-                    let _ = append_log(&message);
-                }
-                for row in report.rows {
-                    for kept in row.kept {
-                        log_warning(&format!("{} ({} bytes)", kept.reason, kept.bytes));
-                    }
-                }
-            }
-            Err(error) => log_warning(&cache_error(error)),
-        }
+        crate::storage::eviction::after_build_logged(&cache, append_log, log_warning);
     }
     match &result {
         Ok(_) => {
