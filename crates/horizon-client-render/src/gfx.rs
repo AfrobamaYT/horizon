@@ -255,6 +255,7 @@ mod visbuffer;
 mod wgsl_prefix;
 mod world_post;
 pub mod world_primitives;
+mod world_views;
 mod world_warp;
 use off_page::move_off_page;
 
@@ -473,6 +474,8 @@ struct Globals {
     /// (`Hdr::draw_params`).
     hdr_settings: [f32; 4],
     hdr_shares: [f32; 4],
+    /// The camera-relative eye fog is measured from: zero but in a mod's world view.
+    view_origin: [f32; 4],
 }
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -1241,6 +1244,8 @@ pub struct Renderer {
     mirror_globals: wgpu::Buffer,
     mirror_group: wgpu::BindGroup,
     mirror: Option<MirrorTarget>,
+    /// Native mods' world views' targets, by id.
+    world_views: world_views::Targets,
     entity_pipeline: wgpu::RenderPipeline,
     static_entity_pipeline: wgpu::RenderPipeline,
     static_entity_group: wgpu::BindGroup,
@@ -5159,6 +5164,7 @@ impl Renderer {
             mirror_globals,
             mirror_group,
             mirror: None,
+            world_views: Default::default(),
             entity_pipeline,
             static_entity_pipeline,
             hdr_mark_pipeline,
@@ -7828,9 +7834,9 @@ impl Renderer {
         depth_far: f32,
     ) -> Frustum {
         let views = ViewSet::single(self.screen_view(fov_degrees, yaw, pitch, depth_far));
-        Frustum {
+        world_views::open_while_asked(Frustum {
             planes: frustum(views.cull().view_proj(bob)),
-        }
+        })
     }
     /// A conservative view for geometry built before TAA chooses this frame's
     /// jitter. Cover a whole rendered pixel on each side, at the configured
@@ -7844,11 +7850,11 @@ impl Renderer {
         depth_far: f32,
     ) -> Frustum {
         let views = ViewSet::single(self.screen_view(fov_degrees, yaw, pitch, depth_far));
-        taa_frustum(
+        world_views::open_while_asked(taa_frustum(
             views.cull().view_proj(bob),
             self.world_post
                 .taa_render_size([self.config.width, self.config.height]),
-        )
+        ))
     }
     fn screen_view(&self, fov_degrees: f32, yaw: f32, pitch: f32, far: f32) -> View {
         let aspect = self.config.width as f32 / self.config.height.max(1) as f32;
@@ -8514,6 +8520,7 @@ impl Renderer {
             ],
             hdr_settings,
             hdr_shares,
+            view_origin: [0.0; 4],
         };
         self.uploads
             .buffer(&mut encoder, &self.globals, 0, bytemuck::bytes_of(&globals));
@@ -8605,6 +8612,9 @@ impl Renderer {
         };
         let camera = frame.camera;
         let camera_section = camera_section(camera, self.layout.min_y());
+        // Native mods' world views (`world_views`): the lists take in their frusta, and nothing is
+        // left out by what follows the camera alone.
+        let asked = world_views::Asked::new(frame);
         // The water mirror draws the same lists: they take in what its camera sees too
         // (above the screen's top, the far shore, the trees against the sky).
         let mirror_plane = frame
@@ -8619,11 +8629,11 @@ impl Renderer {
         // Solid quads facing away from the eye are left out: the bob moves
         // the eye off `camera`, so it is found from the projection. With the mirror, those
         // facing its eye are kept too: it sits straight below, at this camera-relative y.
-        let eye = projection_center(cull_proj).filter(|_| self.sides_on && !warp_on);
+        let eye = projection_center(cull_proj).filter(|_| self.sides_on && !warp_on && !asked.on());
         let mirror_low = mirror_plane
             .zip(eye)
             .map(|(plane, eye)| 2.0 * (plane - frame.camera.y as f32) - eye.y);
-        let culling = !frame.title && frame.cave_culling && !warp_on;
+        let culling = !frame.title && frame.cave_culling && !warp_on && !asked.on();
         if culling {
             crate::spans::time("occlusion", || {
                 self.start_occlusion(camera, frame.detail_distance)
@@ -8678,7 +8688,8 @@ impl Renderer {
             && shadow_view.is_none()
             && mirror_plane.is_none()
             && !displaced
-            && !warp_on;
+            && !warp_on
+            && !asked.on();
         #[cfg(debug_assertions)]
         if gpu_frame {
             if self.gpu_checks.is_multiple_of(64) {
@@ -8747,7 +8758,7 @@ impl Renderer {
             self.sections.walk(
                 camera,
                 radius,
-                &Frusta(view, mirror),
+                &world_views::Union(Frusta(view, mirror), &asked.frusta),
                 |k| !culling || reachable.contains(k),
                 |x, z| {
                     (!cutout.is_empty() && cutout.contains(&(x, z)))
@@ -8976,7 +8987,7 @@ impl Renderer {
                     && self.multi_draw
                     // Occlusion is found from the camera, not the mirror's eye.
                     && mirror.is_none()
-                    && !warp_on
+                    && !warp_on && !asked.on()
                     // It tests the CPU's lists, which leave out GPU culling's sections.
                     && !gpu_frame
                     && visible.len() >= c.min_sections
@@ -11825,6 +11836,15 @@ impl Renderer {
             );
         }
         if !frame.title {
+            let counts = [solid_draws, translucent_draws, entity_quads];
+            self.draw_world_views(
+                &mut encoder,
+                frame,
+                &asked.views,
+                globals,
+                flat_frame,
+                counts,
+            );
             let (depth, depth_size) = match &scaled {
                 Some((_, depth)) => (depth, self.world_post.size().unwrap_or(size)),
                 None => (&self.depth, size),

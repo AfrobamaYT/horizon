@@ -15,7 +15,8 @@ use std::sync::{
 /// the game's build checks that the file is current.
 mod generated;
 pub use generated::{
-    HandDrawnEvent, RenderHooks, RenderNeedsEvent, WorldDrawnEvent, WorldWarpEvent,
+    HandDrawnEvent, RenderHooks, RenderNeedsEvent, WorldDrawnEvent, WorldViewDrawnEvent,
+    WorldViewsEvent, WorldWarpEvent,
 };
 pub use wgpu;
 
@@ -210,6 +211,131 @@ pub fn world_warp() -> WorldWarp {
     let mut warp = WorldWarp::default();
     native_world_warp(&mut warp);
     warp
+}
+
+/// The most world views ([`native_world_views`]) one frame draws.
+pub const MAX_WORLD_VIEWS: usize = 4;
+/// The largest side of a world view's target, in pixels.
+pub const MAX_WORLD_VIEW_SIDE: u32 = 4096;
+
+/// A view of the world a mod asks for ([`native_world_views`]): the same world, drawn again
+/// from a camera of its own into a target of its own (a camera monitor, a second camera's
+/// preview, a still for a film strip).
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct WorldView {
+    /// The mod's name for the view: [`native_world_view_drawn`] hands its picture back with it,
+    /// and the target stays the view's while each frame asks for it again.
+    pub id: u64,
+    /// Where the camera is in the world.
+    pub camera: DVec3,
+    /// Degrees, as the player's camera turns: yaw, pitch, and a roll about the view direction
+    /// (positive turns the picture counterclockwise).
+    pub yaw: f32,
+    pub pitch: f32,
+    pub roll: f32,
+    /// The vertical field of view, in degrees (1 to 170).
+    pub fov_degrees: f32,
+    /// The target's width and height, in pixels (1 to [`MAX_WORLD_VIEW_SIDE`]).
+    pub size: [u32; 2],
+}
+
+impl WorldView {
+    pub fn new(
+        id: u64,
+        camera: DVec3,
+        yaw: f32,
+        pitch: f32,
+        fov_degrees: f32,
+        size: [u32; 2],
+    ) -> Self {
+        Self {
+            id,
+            camera,
+            yaw,
+            pitch,
+            roll: 0.0,
+            fov_degrees,
+            size,
+        }
+    }
+    pub fn with_roll(self, roll: f32) -> Self {
+        Self { roll, ..self }
+    }
+    /// Whether it can be drawn: every value finite and in range.
+    fn valid(&self) -> bool {
+        self.camera.is_finite()
+            && [self.yaw, self.pitch, self.roll]
+                .iter()
+                .all(|v| v.is_finite())
+            && (1.0..=170.0).contains(&self.fov_degrees)
+            && self
+                .size
+                .iter()
+                .all(|&s| (1..=MAX_WORLD_VIEW_SIDE).contains(&s))
+    }
+}
+
+/// A world view just drawn ([`native_world_view_drawn`]): its picture and depth, and what a mod
+/// needs to draw into it or copy it out. Drawn after the frame's world and before
+/// [`native_world_drawn`], so a mod can show it in the frame's picture there.
+#[non_exhaustive]
+pub struct WorldViewDrawn<'a> {
+    /// The [`WorldView::id`] it was asked with.
+    pub id: u64,
+    pub device: &'a wgpu::Device,
+    pub queue: &'a wgpu::Queue,
+    pub encoder: &'a mut wgpu::CommandEncoder,
+    /// The view's picture (the world's light in `color_format`, as [`WorldDrawn::color`]
+    /// holds it, before the tone curve and without the hand or the HUD), and a view of it.
+    /// The target is the view's while it is asked for each frame and is drawn over the next
+    /// frame: copy it (it can be copied and sampled) to keep a still.
+    pub color: &'a wgpu::Texture,
+    pub color_view: &'a wgpu::TextureView,
+    pub color_format: wgpu::TextureFormat,
+    pub size: [u32; 2],
+    /// Its depth (Depth32Float, reversed: 0 is the sky), sampleable.
+    pub depth: &'a wgpu::TextureView,
+    /// World relative to [`WorldViewDrawn::camera`] to clip space.
+    pub view_proj: Mat4,
+    /// The view's camera.
+    pub camera: DVec3,
+}
+
+/// Asked as each frame is built and drawn (not on the title screen's panorama), more than once:
+/// push the world views your mod wants drawn this frame, the same each time. The first
+/// [`MAX_WORLD_VIEWS`] valid ones draw; one with a value out of range, or an `id` already asked
+/// for, is left out. While any is asked for, the frame culls nothing by the player's camera
+/// alone (frustum, caves, occlusion, faces turned away): a view sees what lies in its own
+/// frustum within the render distance. Keep it cheap.
+#[inline(never)]
+pub fn native_world_views(views: &mut Vec<WorldView>) {
+    generated::dispatch_world_views(RENDERERS.get().map_or(&[], |renderers| renderers), views);
+}
+
+/// A world view is drawn (see [`WorldViewDrawn`]): once per view asked for this frame.
+#[inline(never)]
+pub fn native_world_view_drawn(view: &mut WorldViewDrawn<'_>) {
+    generated::dispatch_world_view_drawn(RENDERERS.get().map_or(&[], |renderers| renderers), view);
+}
+
+/// This frame's world views ([`native_world_views`]), those that can be drawn.
+pub fn world_views() -> Vec<WorldView> {
+    let mut views = Vec::new();
+    native_world_views(&mut views);
+    drawable_views(views)
+}
+
+fn drawable_views(mut views: Vec<WorldView>) -> Vec<WorldView> {
+    let mut ids = Vec::new();
+    views.retain(|v| {
+        v.valid() && !ids.contains(&v.id) && {
+            ids.push(v.id);
+            true
+        }
+    });
+    views.truncate(MAX_WORLD_VIEWS);
+    views
 }
 
 #[cfg(test)]
@@ -437,6 +563,32 @@ mod tests {
         generated::dispatch_world_warp(&[], &mut warp);
         assert_eq!(warp, WorldWarp::default());
         assert!(warp.source.is_none() && !warp.on);
+    }
+
+    #[test]
+    fn only_drawable_views_draw() {
+        let view =
+            |id, fov, size| WorldView::new(id, DVec3::new(1.0, 70.0, -3.0), 30.0, 10.0, fov, size);
+        let mut asked = vec![
+            view(1, 70.0, [320, 180]),
+            view(1, 70.0, [64, 64]),
+            view(2, 0.5, [64, 64]),
+            view(3, 70.0, [0, 64]),
+            view(4, 70.0, [MAX_WORLD_VIEW_SIDE + 1, 64]),
+            view(5, 70.0, [64, 64]).with_roll(f32::NAN),
+            WorldView::new(
+                6,
+                DVec3::new(f64::INFINITY, 0.0, 0.0),
+                0.0,
+                0.0,
+                70.0,
+                [64, 64],
+            ),
+        ];
+        asked.extend((10..20).map(|id| view(id, 170.0, [1, MAX_WORLD_VIEW_SIDE])));
+        let drawn: Vec<u64> = drawable_views(asked).iter().map(|v| v.id).collect();
+        // the first id 1 only; the out-of-range ones left out; at most four in all
+        assert_eq!(drawn, [1, 10, 11, 12]);
     }
 
     #[test]

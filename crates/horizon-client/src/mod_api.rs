@@ -49,7 +49,8 @@ pub use crate::gamerules::Value as GameRuleValue;
 pub use crate::gfx::WorldHold;
 pub use crate::gfx::native_render::{
     BlockSpriteArrays, RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn, WorldDrawnEvent,
-    WorldWarp, WorldWarpEvent, wgpu,
+    WorldView, WorldViewDrawn, WorldViewDrawnEvent, WorldViewsEvent, WorldWarp, WorldWarpEvent,
+    wgpu,
 };
 pub use crate::hud::HudBatch;
 pub use crate::hud_layout::{GuiDraw, HealthHud, HealthInputs};

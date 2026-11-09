@@ -1,0 +1,20 @@
+{
+  "hooks": [
+    {
+      "name": "world_views",
+      "target": "horizon_client_render::gfx::native_render::native_world_views",
+      "side": "client",
+      "cancellable": false,
+      "mod_api": {"contract": "collect", "out": "views"}
+    },
+    {
+      "name": "world_view_drawn",
+      "target": "horizon_client_render::gfx::native_render::native_world_view_drawn",
+      "side": "client",
+      "cancellable": false,
+      "mod_api": {"contract": "listen"}
+    }
+  ],
+  "rust_summary": "world views (`native_world_views`, `native_world_view_drawn`): the world drawn again from a mod's own cameras into targets of their own.",
+  "doc_summary": "world views through `native_world_views` and `native_world_view_drawn`: as each frame is built a client mod may ask for up to four views of the world, each from a camera of its own (position, yaw, pitch, roll, field of view) at a size of its own; each is drawn with the frame's terrain, sky and entities into its own target, which `native_world_view_drawn` hands back with the device and the frame's encoder to draw into, sample or copy out ([World views](#world-views)). A frame without one costs nothing more. Bundles need \"hooks\": @API:world_views@."
+}

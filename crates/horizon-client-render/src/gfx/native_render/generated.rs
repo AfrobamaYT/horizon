@@ -24,6 +24,21 @@ pub trait RenderHooks: Send + Sync {
     fn world_warp(&self, event: &mut WorldWarpEvent<'_>) {
         let _ = event;
     }
+    /// Asked as each frame is built and drawn (not on the title screen's panorama), more than once:
+    /// push the world views your mod wants drawn this frame, the same each time. The first
+    /// [`MAX_WORLD_VIEWS`] valid ones draw; one with a value out of range, or an `id` already asked
+    /// for, is left out. While any is asked for, the frame culls nothing by the player's camera
+    /// alone (frustum, caves, occlusion, faces turned away): a view sees what lies in its own
+    /// frustum within the render distance. Keep it cheap.
+    ///
+    /// Every mod gets `event.views` in order and may add, change or remove views.
+    fn world_views(&self, event: &mut WorldViewsEvent<'_>) {
+        let _ = event;
+    }
+    /// A world view is drawn (see [`WorldViewDrawn`]): once per view asked for this frame.
+    fn world_view_drawn(&self, event: &mut WorldViewDrawnEvent<'_, '_>) {
+        let _ = event;
+    }
 }
 /// What [`RenderHooks::world_drawn`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
@@ -67,5 +82,27 @@ pub fn dispatch_world_warp(mods: &[&dyn RenderHooks], warp: &mut WorldWarp) {
     let mut event = WorldWarpEvent { warp };
     for mod_hook in mods {
         mod_hook.world_warp(&mut event);
+    }
+}
+/// What [`RenderHooks::world_views`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct WorldViewsEvent<'a> {
+    pub views: &'a mut Vec<WorldView>,
+}
+pub fn dispatch_world_views(mods: &[&dyn RenderHooks], views: &mut Vec<WorldView>) {
+    let mut event = WorldViewsEvent { views };
+    for mod_hook in mods {
+        mod_hook.world_views(&mut event);
+    }
+}
+/// What [`RenderHooks::world_view_drawn`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct WorldViewDrawnEvent<'a, 'b> {
+    pub view: &'a mut WorldViewDrawn<'b>,
+}
+pub fn dispatch_world_view_drawn(mods: &[&dyn RenderHooks], view: &mut WorldViewDrawn<'_>) {
+    let mut event = WorldViewDrawnEvent { view };
+    for mod_hook in mods {
+        mod_hook.world_view_drawn(&mut event);
     }
 }
