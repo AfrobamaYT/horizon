@@ -37,13 +37,13 @@ impl<S> FakeJournal<S> {
         let close = token | 1 << 63;
         self.next += 1;
         self.kept.push((token, close, now));
-        crate::transaction::transaction_seal(token, close)
+        crate::item::transaction::transaction_seal(token, close)
     }
     /// Closes the transaction `seal` ends, committed or aborted, aborting first every one
     /// opened inside it and left open. What the host puts back: the state the first transaction
     /// aborted began with, if any. Nothing when `seal` names no open transaction.
     pub fn close(&mut self, seal: &crate::TransactionSeal, commit: bool) -> Option<S> {
-        let (token, close) = crate::transaction::seal_tokens(seal);
+        let (token, close) = crate::item::transaction::seal_tokens(seal);
         let at = self
             .kept
             .iter()
