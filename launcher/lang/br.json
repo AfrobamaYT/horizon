@@ -148,7 +148,6 @@
   "Choose…": "Dibab...",
   "Classic arms": "Divrec'h klasel",
   "Clear filters": "Diverkañ ar siloù",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Skarzhet ez eus bet {bytes} eizhbit eus krubuilh ar sevel genidik. Ar sevel kemmet da-heul a vo kempunet adalek an deroù.",
   "Click again to delete": "Klikit en-dro evit dilemel",
   "Click again to remove": "Klikit en-dro evit lemel",
   "Client": "Klient",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} n'eo ket staliet",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (pe .mcp.json en ur raktres)",
   "← All servers": "← An holl servijerioù",
-  "← Newer": "← Nevesoc'h"
+  "← Newer": "← Nevesoc'h",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

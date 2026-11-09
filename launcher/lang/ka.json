@@ -148,7 +148,6 @@
   "Choose…": "აირჩიეთ…",
   "Classic arms": "კლასიკური იარაღი",
   "Clear filters": "ფილტრების გასუფთავება",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "ნატიური აწყობის ქეშიდან წაიშალა {bytes} ბაიტი. შემდეგი შეცვლილი აწყობა თავიდან დაკომპილირდება.",
   "Click again to delete": "ისევ დააწკაპუნეთ წასაშლელად",
   "Click again to remove": "ისევ დააწკაპუნეთ წასაშლელად",
   "Client": "კლიენტი",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} არ არის დაინსტალირებული",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ან .mcp.json პროექტში)",
   "← All servers": "← ყველა სერვერი",
-  "← Newer": "← უფრო ახალი"
+  "← Newer": "← უფრო ახალი",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

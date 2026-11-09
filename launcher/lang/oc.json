@@ -148,7 +148,6 @@
   "Choose…": "Causissètz...",
   "Classic arms": "Braces classics",
   "Clear filters": "Escafar los filtres",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "{bytes} octets de la memòria cache de compilacion nativa son estats escafats. La compilacion modificada seguenta serà compilada de zèro.",
   "Click again to delete": "Clicatz tornarmai per suprimir",
   "Click again to remove": "Clicatz tornarmai per suprimir",
   "Client": "Client",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} es pas installat",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (o .mcp.json dins un projècte)",
   "← All servers": "← Totes los servidors",
-  "← Newer": "← Mai novèl"
+  "← Newer": "← Mai novèl",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

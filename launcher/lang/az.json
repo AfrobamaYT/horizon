@@ -148,7 +148,6 @@
   "Choose…": "Seçin...",
   "Classic arms": "Klassik qollar",
   "Clear filters": "Filtrləri təmizləyin",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Yerli quruluş keşindən {bytes} bayt təmizləndi. Növbəti dəyişmiş quruluş sıfırdan kompilyasiya olunacaq.",
   "Click again to delete": "Silmək üçün yenidən klikləyin",
   "Click again to remove": "Silmək üçün yenidən klikləyin",
   "Client": "Müştəri",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} quraşdırılmayıb",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (və ya layihədə .mcp.json)",
   "← All servers": "← Bütün serverlər",
-  "← Newer": "← Daha yeni"
+  "← Newer": "← Daha yeni",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

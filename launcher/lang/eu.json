@@ -148,7 +148,6 @@
   "Choose…": "Aukeratu…",
   "Classic arms": "Beso klasikoak",
   "Clear filters": "Garbitu iragazkiak",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Jatorrizko konpilazioaren cachetik {bytes} byte garbitu dira. Hurrengo konpilazio aldatua hutsetik konpilatuko da.",
   "Click again to delete": "Egin klik berriro ezabatzeko",
   "Click again to remove": "Egin klik berriro kentzeko",
   "Client": "Bezeroa",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} ez dago instalatuta",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (edo .mcp.json proiektu batean)",
   "← All servers": "← Zerbitzari guztiak",
-  "← Newer": "← Berriagoa"
+  "← Newer": "← Berriagoa",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

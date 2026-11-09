@@ -148,7 +148,6 @@
   "Choose…": "선택...",
   "Classic arms": "기본 팔",
   "Clear filters": "필터 초기화",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "네이티브 빌드 캐시에서 {bytes}바이트를 정리했습니다. 다음 변경된 빌드는 처음부터 컴파일됩니다.",
   "Click again to delete": "삭제하려면 다시 클릭하세요",
   "Click again to remove": "제거하려면 다시 클릭하세요",
   "Client": "클라이언트",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version}이(가) 설치되지 않았습니다.",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (또는 프로젝트 내 .mcp.json)",
   "← All servers": "← 모든 서버",
-  "← Newer": "← 최신"
+  "← Newer": "← 최신",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

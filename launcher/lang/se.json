@@ -148,7 +148,6 @@
   "Choose…": "Vállje...",
   "Classic arms": "Klassihkalaš gieđat",
   "Clear filters": "Buhtis filteriid",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "{bytes} byte ruovttuvuođa huksema gaskarájusas leat buhtistuvvon. Boahtte rievdaduvvon huksen čohkkejuvvo álggu rájes.",
   "Click again to delete": "Deaddilat fas vai beasat sihkkut",
   "Click again to remove": "Deaddilat fas vai beasat eret",
   "Client": "Áššehas",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} ii leat installerejuvvon",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (dahje .mcp.json prošeavttas)",
   "← All servers": "← Buot bálvaleaddjit",
-  "← Newer": "← Ođđaseabbo"
+  "← Newer": "← Ođđaseabbo",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

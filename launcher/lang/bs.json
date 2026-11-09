@@ -148,7 +148,6 @@
   "Choose…": "Odaberite…",
   "Classic arms": "Klasične ruke",
   "Clear filters": "Obriši filtere",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Očišćeno je {bytes} bajtova keša nativne izgradnje. Sljedeća izmijenjena izgradnja kompajlirat će se ispočetka.",
   "Click again to delete": "Kliknite ponovo za brisanje",
   "Click again to remove": "Kliknite ponovo da uklonite",
   "Client": "Klijent",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} nije instaliran",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ili .mcp.json u projektu)",
   "← All servers": "← Svi serveri",
-  "← Newer": "← Novije"
+  "← Newer": "← Novije",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

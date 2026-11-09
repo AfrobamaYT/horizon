@@ -148,7 +148,6 @@
   "Choose…": "اختر…",
   "Classic arms": "أذرع كلاسيكية",
   "Clear filters": "مسح المرشحات",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "تم تحرير {bytes} بايت من ذاكرة التخزين المؤقت للبناء الأصلي. سيُجمّع البناء التالي الذي يتضمن تغييرات من البداية.",
   "Click again to delete": "انقر مرة أخرى للحذف",
   "Click again to remove": "انقر مرة أخرى للإزالة",
   "Client": "العميل",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "الإصدار {version} غير مثبت",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (أو .mcp.json في المشروع)",
   "← All servers": "← جميع الخوادم",
-  "← Newer": "← الأحدث"
+  "← Newer": "← الأحدث",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

@@ -148,7 +148,6 @@
   "Choose…": "Изберете…",
   "Classic arms": "Класични раце",
   "Clear filters": "Исчистете ги филтрите",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Исчистени се {bytes} бајти од кешот за нативна изградба. Следната изменета изградба ќе се компајлира од почеток.",
   "Click again to delete": "Кликнете повторно за да избришете",
   "Click again to remove": "Кликнете повторно за да го отстраните",
   "Client": "Клиент",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} не е инсталиран",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (или .mcp.json во проект)",
   "← All servers": "← Сите сервери",
-  "← Newer": "← Понови"
+  "← Newer": "← Понови",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

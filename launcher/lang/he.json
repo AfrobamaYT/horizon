@@ -148,7 +148,6 @@
   "Choose…": "בחר…",
   "Classic arms": "זרועות קלאסיות",
   "Clear filters": "נקה מסננים",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "נוקו {bytes} בתים ממטמון הבנייה המקומית. הבנייה הבאה עם שינויים תתחיל מאפס.",
   "Click again to delete": "לחץ שוב כדי למחוק",
   "Click again to remove": "לחץ שוב כדי להסיר",
   "Client": "לקוח",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} אינו מותקן",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (או .mcp.json בפרויקט)",
   "← All servers": "← כל השרתים",
-  "← Newer": "← חדש יותר"
+  "← Newer": "← חדש יותר",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

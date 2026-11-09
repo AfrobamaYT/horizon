@@ -148,7 +148,6 @@
   "Choose…": "Vyberte si…",
   "Classic arms": "Klasické ramená",
   "Clear filters": "Vymazať filtre",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Z vyrovnávacej pamäte kompilácie natívneho kódu bolo odstránených {bytes} bajtov. Ďalšia kompilácia so zmenami sa začne od začiatku.",
   "Click again to delete": "Opätovným kliknutím odstránite",
   "Click again to remove": "Opätovným kliknutím odstránite",
   "Client": "Klient",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} nie je nainštalovaný",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (alebo .mcp.json v projekte)",
   "← All servers": "← Všetky servery",
-  "← Newer": "← Novšie"
+  "← Newer": "← Novšie",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

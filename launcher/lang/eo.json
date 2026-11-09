@@ -148,7 +148,6 @@
   "Choose…": "Elektu…",
   "Classic arms": "Klasikaj brakoj",
   "Clear filters": "Malplenigi filtrilojn",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Forigis {bytes} bajtojn de la denaska konstrua kaŝmemoro. La sekva ŝanĝita konstruo kompiliĝos de nulo.",
   "Click again to delete": "Alklaku denove por forigi",
   "Click again to remove": "Alklaku denove por forigi",
   "Client": "Kliento",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} ne estas instalita",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (aŭ .mcp.json en projekto)",
   "← All servers": "← Ĉiuj serviloj",
-  "← Newer": "← Pli nova"
+  "← Newer": "← Pli nova",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

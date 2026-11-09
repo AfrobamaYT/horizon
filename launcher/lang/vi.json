@@ -148,7 +148,6 @@
   "Choose…": "Chọn…",
   "Classic arms": "Cánh tay cổ điển",
   "Clear filters": "Xóa bộ lọc",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Đã xóa {bytes} byte khỏi bộ nhớ đệm biên dịch mã gốc. Lần biên dịch tiếp theo có thay đổi sẽ bắt đầu lại từ đầu.",
   "Click again to delete": "Nhấn lần nữa để xóa",
   "Click again to remove": "Nhấn lần nữa để xóa",
   "Client": "khách hàng",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} chưa được cài đặt",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (hoặc .mcp.json trong một dự án)",
   "← All servers": "← Tất cả máy chủ",
-  "← Newer": "← Mới hơn"
+  "← Newer": "← Mới hơn",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

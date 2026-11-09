@@ -148,7 +148,6 @@
   "Choose…": "Elegir…",
   "Classic arms": "Brazos clásicos",
   "Clear filters": "Limpiar filtros",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Se liberaron {bytes} bytes de la caché de compilación nativa. La próxima compilación con cambios se hará desde cero.",
   "Click again to delete": "Haz clic de nuevo para eliminar",
   "Click again to remove": "Haz clic otra vez para quitar",
   "Client": "Cliente",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} no está instalada",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (o .mcp.json en un proyecto)",
   "← All servers": "← Todos los servidores",
-  "← Newer": "← Más recientes"
+  "← Newer": "← Más recientes",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

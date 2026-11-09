@@ -148,7 +148,6 @@
   "Choose…": "Tria…",
   "Classic arms": "Braços clàssics",
   "Clear filters": "Esborra els filtres",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "S'han esborrat {bytes} bytes de la memòria cau de compilació nativa. La propera compilació amb canvis començarà de zero.",
   "Click again to delete": "Feu clic de nou per suprimir",
   "Click again to remove": "Feu clic de nou per eliminar-lo",
   "Client": "Client",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} no està instal·lat",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (o .mcp.json en un projecte)",
   "← All servers": "← Tots els servidors",
-  "← Newer": "← Més recent"
+  "← Newer": "← Més recent",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

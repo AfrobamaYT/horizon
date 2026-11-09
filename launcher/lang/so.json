@@ -148,7 +148,6 @@
   "Choose…": "Dooro…",
   "Classic arms": "Gacmaha caadiga ah",
   "Clear filters": "Nadiifi filtarrada",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Waxaa la nadiifiyay {bytes} baytka kaydka dhismaha asalka ah. Dhismaha xiga ee la beddelay wuxuu ka bilaabmi doonaa eber.",
   "Click again to delete": "Mar kale guji si aad u tirtirto",
   "Click again to remove": "Mar kale ku dhufo si aad meesha uga saarto",
   "Client": "Macmiil",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} lama rakibin",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ama .mcp.json mashruuc)",
   "← All servers": "← Dhammaan server-yada",
-  "← Newer": "← Ka cusub"
+  "← Newer": "← Ka cusub",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

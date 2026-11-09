@@ -857,8 +857,8 @@ enum Cmd {
     /// system|en|fr|ru|de|zh|es|uk|pl (the window's language; system follows the computer's), accent
     /// violet|blue|teal|green|amber|red|pink|#rrggbb|DEGREES (a named accent, any colour, or any
     /// hue), background PATH (a picture behind Home; "default"
-    /// shows Horizon's landscape), native-cache-gib N (combined native compilation cache limit
-    /// in GiB, default 30; 0 disables automatic cleanup)
+    /// shows Horizon's landscape), cache-limit-gib N (managed cache limit
+    /// in GiB: 10, 25 (default), 50, 100; 0 disables automatic cleanup)
     Settings {
         #[arg(value_parser = SETTING_KEYS)]
         key: Option<String>,
@@ -1022,7 +1022,7 @@ const SETTING_KEYS: [&str; 14] = [
     "language",
     "accent",
     "background",
-    "native-cache-gib",
+    "cache-limit-gib",
 ];
 
 fn on_off(value: &str) -> Result<bool, String> {
@@ -1097,13 +1097,13 @@ fn set_setting(s: &mut backend::Settings, key: &str, value: &str) -> Result<(), 
                 })?),
             }
         }
-        "native-cache-gib" => {
-            s.native_cache_gib = match value {
+        "cache-limit-gib" => {
+            s.cache_limit_gib = match value {
                 "default" => None,
                 n => Some(
                     n.parse::<u64>()
                         .ok()
-                        .filter(|n| n.checked_mul(1 << 30).is_some())
+                        .filter(|n| matches!(n, 0 | 10 | 25 | 50 | 100))
                         .ok_or_else(|| {
                             tr("Enter a cache limit in GiB; 0 disables automatic cleanup.")
                                 .to_string()
@@ -1143,7 +1143,7 @@ fn settings_json(s: &backend::Settings) -> serde_json::Value {
         "language": s.language.map_or("system", |l| l.code()),
         "accent": s.accent.name(),
         "background": horizon_launcher::themes::background(&backend::data_dir(), s.background.as_deref()),
-        "native_cache_gib": s.native_cache_gib.unwrap_or(native_mods::DEFAULT_CACHE_GIB),
+        "cache_limit_gib": s.cache_limit_gib.unwrap_or(horizon_launcher::storage::policy::DEFAULT_LIMIT_GIB),
         "no_ai": backend::no_ai(),
     })
 }
@@ -4148,15 +4148,21 @@ mod tests {
             Cli::try_parse_from(["horizon-launcher", "storage", "--clear", "other-caches"]).is_ok()
         );
         let mut settings = backend::Settings::default();
-        set_setting(&mut settings, "native-cache-gib", "12").unwrap();
+        for value in ["10", "25", "50", "100", "0"] {
+            set_setting(&mut settings, "cache-limit-gib", value).unwrap();
+        }
+        assert!(set_setting(&mut settings, "cache-limit-gib", "12").is_err());
+        let old: backend::Settings = serde_json::from_str(r#"{"native_cache_gib":100}"#).unwrap();
+        assert_eq!(old.cache_limit_gib, None);
+        set_setting(&mut settings, "cache-limit-gib", "25").unwrap();
         let saved = serde_json::to_string(&settings).unwrap();
         let loaded: backend::Settings = serde_json::from_str(&saved).unwrap();
-        assert_eq!(loaded.native_cache_gib, Some(12));
-        assert!(set_setting(&mut settings, "native-cache-gib", "18446744073709551615").is_err());
-        assert!(set_setting(&mut settings, "native-cache-gib", "-1").is_err());
-        set_setting(&mut settings, "native-cache-gib", "0").unwrap();
-        assert_eq!(settings.native_cache_gib, Some(0));
-        set_setting(&mut settings, "native-cache-gib", "default").unwrap();
-        assert_eq!(settings.native_cache_gib, None);
+        assert_eq!(loaded.cache_limit_gib, Some(25));
+        assert!(set_setting(&mut settings, "cache-limit-gib", "18446744073709551615").is_err());
+        assert!(set_setting(&mut settings, "cache-limit-gib", "-1").is_err());
+        set_setting(&mut settings, "cache-limit-gib", "0").unwrap();
+        assert_eq!(settings.cache_limit_gib, Some(0));
+        set_setting(&mut settings, "cache-limit-gib", "default").unwrap();
+        assert_eq!(settings.cache_limit_gib, None);
     }
 }

@@ -148,7 +148,6 @@
   "Choose…": "Һайла...",
   "Classic arms": "Классик ҡоралдар",
   "Clear filters": "Фильтрҙарҙы таҙартыу",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Туған йыйыу кэшынан {bytes} байт таҙартылды. Киләһе үҙгәргән йыйыу башынан компиляцияланасаҡ.",
   "Click again to delete": "Юйыр өсөн тағы баҫығыҙ",
   "Click again to remove": "Юйыр өсөн тағы баҫығыҙ",
   "Client": "Клиент",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} ҡуйылмаған",
   "~/.claude.json (or .mcp.json in a project)": "~/.клод.json (йәки проектта .mcp.json)",
   "← All servers": "← Бөтә серверҙар",
-  "← Newer": "← Яңыраҡ"
+  "← Newer": "← Яңыраҡ",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

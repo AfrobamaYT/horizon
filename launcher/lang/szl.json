@@ -148,7 +148,6 @@
   "Choose…": "Ôbiyraj...",
   "Classic arms": "Klasyczne ramiōna",
   "Clear filters": "Wyczyść filtry",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Wyczyszczōno {bytes} bajtōw cache natywnego budowanio. Nastympne zmiyniōne budowanie skōmpiluje sie ôd nowa.",
   "Click again to delete": "Kliknij jeszcze raz, coby ususić",
   "Click again to remove": "Kliknij jeszcze raz, coby usuniynć",
   "Client": "Klijynt",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} niy ma zainstalowane",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.jsōn (abo .mcp.jsōn w projektie)",
   "← All servers": "← Wszyske serwery",
-  "← Newer": "← Nowszy"
+  "← Newer": "← Nowszy",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

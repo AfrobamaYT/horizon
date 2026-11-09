@@ -148,7 +148,6 @@
   "Choose…": "انتخاب کنید…",
   "Classic arms": "بازوهای کلاسیک",
   "Clear filters": "فیلترها را پاک کنید",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "{bytes} بایت از حافظهٔ نهان ساخت کد بومی پاک شد. ساخت بعدی که تغییراتی داشته باشد از ابتدا انجام می‌شود.",
   "Click again to delete": "برای حذف دوباره کلیک کنید",
   "Click again to remove": "برای حذف دوباره کلیک کنید",
   "Client": "مشتری",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} نصب نشده است",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (یا mcp.json. در پروژه)",
   "← All servers": "← همه سرورها",
-  "← Newer": "← جدیدتر"
+  "← Newer": "← جدیدتر",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

@@ -148,7 +148,6 @@
   "Choose…": "Вибрати…",
   "Classic arms": "Класичні руки",
   "Clear filters": "Очистити фільтри",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Звільнено {bytes} байтів кешу нативної збірки. Наступну збірку зі змінами буде виконано з нуля.",
   "Click again to delete": "Натисніть ще раз, щоб видалити",
   "Click again to remove": "Натисніть ще раз, щоб вилучити",
   "Client": "Клієнт",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} не встановлено",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (or .mcp.json in a project)",
   "← All servers": "← Усі сервери",
-  "← Newer": "← Новіші"
+  "← Newer": "← Новіші",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

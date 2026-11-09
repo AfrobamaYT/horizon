@@ -148,7 +148,6 @@
   "Choose…": "Agħżel…",
   "Classic arms": "Armi klassiċi",
   "Clear filters": "Filtri ċari",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Tneħħew {bytes} bytes mill-cache tal-bini nattiv. Il-bini mibdul li jmiss se jiġi kkompilat mill-bidu.",
   "Click again to delete": "Erġa' ikklikkja biex tħassar",
   "Click again to remove": "Erġa' ikklikkja biex tneħħi",
   "Client": "Klijent",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} mhux installat",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (jew .mcp.json fi proġett)",
   "← All servers": "← Is-servers kollha",
-  "← Newer": "← Aktar ġodda"
+  "← Newer": "← Aktar ġodda",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

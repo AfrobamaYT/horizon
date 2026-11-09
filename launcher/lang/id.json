@@ -148,7 +148,6 @@
   "Choose…": "Pilih…",
   "Classic arms": "Lengan klasik",
   "Clear filters": "Hapus filter",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Membersihkan {bytes} bita cache build native. Build berikutnya yang memiliki perubahan akan dikompilasi dari awal.",
   "Click again to delete": "Klik lagi untuk menghapus",
   "Click again to remove": "Klik lagi untuk menghapus",
   "Client": "Klien",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} tidak diinstal",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (atau .mcp.json di dalam proyek)",
   "← All servers": "← Semua server",
-  "← Newer": "← Lebih baru"
+  "← Newer": "← Lebih baru",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

@@ -148,7 +148,6 @@
   "Choose…": "Pumili...",
   "Classic arms": "Mga klasikong armas",
   "Clear filters": "I-clear ang mga filter",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Nalinis ang {bytes} bytes ng native build cache. Ang susunod na binagong build ay magko-compile mula sa simula.",
   "Click again to delete": "I-click muli para tanggalin",
   "Click again to remove": "I-click muli upang alisin",
   "Client": "Kliyente",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "Hindi naka-install ang {version}",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (o .mcp.json sa isang proyekto)",
   "← All servers": "← Lahat ng mga server",
-  "← Newer": "← Mas bago"
+  "← Newer": "← Mas bago",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

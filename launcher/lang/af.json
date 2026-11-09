@@ -148,7 +148,6 @@
   "Choose…": "Kies...",
   "Classic arms": "Klassieke arms",
   "Clear filters": "Vee filters uit",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "{bytes} grepe van die inheemse bou-kas is skoongemaak. Die volgende veranderde bou sal van voor af saamstel.",
   "Click again to delete": "Klik weer om uit te vee",
   "Click again to remove": "Klik weer om te verwyder",
   "Client": "Kliënt",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} is nie geïnstalleer nie",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (of .mcp.json in 'n projek)",
   "← All servers": "← Alle bedieners",
-  "← Newer": "← Nuwer"
+  "← Newer": "← Nuwer",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

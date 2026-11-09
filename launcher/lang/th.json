@@ -148,7 +148,6 @@
   "Choose…": "เลือก…",
   "Classic arms": "แขนแบบคลาสสิก",
   "Clear filters": "ล้างตัวกรอง",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "ล้างแคชบิลด์เนทีฟแล้ว {bytes} ไบต์ บิลด์ครั้งถัดไปที่มีการเปลี่ยนแปลงจะคอมไพล์ใหม่ทั้งหมด",
   "Click again to delete": "คลิกอีกครั้งเพื่อลบ",
   "Click again to remove": "คลิกอีกครั้งเพื่อลบ",
   "Client": "ไคลเอนต์",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} ยังไม่ได้ติดตั้ง",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (หรือ .mcp.json ในโปรเจ็กต์)",
   "← All servers": "← เซิร์ฟเวอร์ทั้งหมด",
-  "← Newer": "← ใหม่กว่า"
+  "← Newer": "← ใหม่กว่า",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

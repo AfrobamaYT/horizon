@@ -148,7 +148,6 @@
   "Choose…": "Keze…",
   "Classic arms": "Klassieke wapes",
   "Clear filters": "Filters wies",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "{bytes} bytes vanne native bouwcache opgeruump. De volgende verangerde bouw wurt van 't begin aaf gecompileerd.",
   "Click again to delete": "Klik nog ummer um te verwijdere",
   "Click again to remove": "Klik weer um te verwijdere",
   "Client": "Klant",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} is neet geïnstalleerd",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (of .mcp.json in un projek)",
   "← All servers": "← Alle servers",
-  "← Newer": "← Nuujer"
+  "← Newer": "← Nuujer",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

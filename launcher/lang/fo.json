@@ -148,7 +148,6 @@
   "Choose…": "Vel...",
   "Classic arms": "Klassiskir armar",
   "Clear filters": "Rudda filtur",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "{bytes} být av goymsluni til upprunabygging eru strikað. Næsta broytta bygging verður samansett frá byrjan.",
   "Click again to delete": "Trýst aftur fyri at strika",
   "Click again to remove": "Trýst aftur fyri at strika",
   "Client": "Kundi",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} er ikki sett upp",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ella .mcp.json í verkætlan)",
   "← All servers": "← Allir ambætarar",
-  "← Newer": "← Nýggjari"
+  "← Newer": "← Nýggjari",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

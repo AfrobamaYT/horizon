@@ -494,6 +494,18 @@ impl Launcher {
             }
         })
         .detach();
+        cx.spawn(async move |_, cx| {
+            cx.background_executor()
+                .timer(Duration::from_secs(60))
+                .await;
+            std::thread::spawn(|| {
+                if let Err(error) = horizon_launcher::storage::eviction::cleanup() {
+                    // Busy is a refusal, not a retry loop. Keep the held build untouched.
+                    eprintln!("{}", native_mods::cache_error(error));
+                }
+            });
+        })
+        .detach();
         let mut settings = Settings::load();
         i18n::set(settings.language());
         if settings.minecraft_dir.is_none() {

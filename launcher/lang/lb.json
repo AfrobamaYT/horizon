@@ -148,7 +148,6 @@
   "Choose…": "Wielt…",
   "Classic arms": "Klassesch Waffen",
   "Clear filters": "Filteren kloer",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "{bytes} Bytes vum nativen Build-Cache goufe geläscht. Den nächste geännerte Build gëtt vun Ufank un kompiléiert.",
   "Click again to delete": "Klickt nach eng Kéier fir ze läschen",
   "Click again to remove": "Klickt nach eng Kéier fir ze läschen",
   "Client": "Client",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} ass net installéiert",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (oder .mcp.json an engem Projet)",
   "← All servers": "← All Server",
-  "← Newer": "← Méi nei"
+  "← Newer": "← Méi nei",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

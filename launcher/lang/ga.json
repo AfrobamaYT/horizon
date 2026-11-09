@@ -148,7 +148,6 @@
   "Choose…": "Roghnaigh…",
   "Classic arms": "Armas clasaiceach",
   "Clear filters": "Glan na scagairí",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Glanadh {bytes} beart den taisce tógála dúchasaí. Tiomsófar an chéad tógáil athraithe eile ón tús.",
   "Click again to delete": "Cliceáil arís le scriosadh",
   "Click again to remove": "Cliceáil arís chun é a bhaint",
   "Client": "Cliant",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "Níl {version} suiteáilte",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (nó .mcp.json i dtionscadal)",
   "← All servers": "← Gach freastalaí",
-  "← Newer": "← Níos nuaí"
+  "← Newer": "← Níos nuaí",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

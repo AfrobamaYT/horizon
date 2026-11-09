@@ -148,7 +148,6 @@
   "Choose…": "קלייַבן…",
   "Classic arms": "קלאַסיש געווער",
   "Clear filters": "קלאָר פילטערס",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "אויסגעליידיקט {bytes} בייטן פֿון דעם נאַטיוון בוי־קעש. דער קומעדיקער געענדערטער בוי וועט קאָמפּילירט ווערן פֿון אָנהייב.",
   "Click again to delete": "דריקט ווידער צו ויסמעקן",
   "Click again to remove": "דריקט ווידער צו באַזייַטיקן",
   "Client": "קליענט",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} איז נישט אינסטאַלירן",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (אָדער .mcp.json אין אַ פּרויעקט)",
   "← All servers": "← אַלע סערווערס",
-  "← Newer": "← נייַער"
+  "← Newer": "← נייַער",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

@@ -29,6 +29,14 @@ pub struct Row {
     pub bytes: u64,
     pub freed_bytes: u64,
     pub remaining_bytes: u64,
+    /// Refused or busy units are retained, with their allocated bytes and a visible reason.
+    pub kept: Vec<Kept>,
+}
+
+#[derive(Serialize)]
+pub struct Kept {
+    pub bytes: u64,
+    pub reason: String,
 }
 
 #[derive(Serialize)]
@@ -107,6 +115,107 @@ impl Entry {
         })
     }
 
+    /// Parse the exact revision-bearing names written by the cache constructors.
+    fn revision(&self) -> Option<&str> {
+        let name = self.relative.file_name()?.to_str()?;
+        let parent = self.relative.parent()?;
+        let revision = if parent == Path::new("native/tools") {
+            (name.len() == 12).then_some(name)?
+        } else if parent == Path::new("native/prebuilt") {
+            let (revision, archive) = name.split_once('-')?;
+            crate::rust_toolchain::hosts()
+                .iter()
+                .any(|host| {
+                    [false, true].into_iter().any(|server| {
+                        horizon_mod_package::index::native::prebuilt_archive(host.target, server)
+                            .trim_end_matches(".tar.gz")
+                            == archive
+                    })
+                })
+                .then_some(revision)?
+        } else if parent == Path::new("native/internals-sync") {
+            if let Some(catalog) = name.strip_prefix("catalog-") {
+                let (revision, host) = catalog.split_once('-')?;
+                crate::rust_toolchain::hosts()
+                    .iter()
+                    .any(|candidate| candidate.target == host)
+                    .then_some(revision)?
+            } else {
+                name
+            }
+        } else if parent == Path::new("native/source") {
+            name
+        } else {
+            return None;
+        };
+        let expected = if parent == Path::new("native/tools") {
+            12
+        } else {
+            40
+        };
+        (revision.len() == expected
+            && revision
+                .bytes()
+                .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')))
+        .then_some(revision)
+    }
+
+    fn last_used(&self) -> Result<Option<std::time::SystemTime>, Error> {
+        let Some(root) = &self.directory else {
+            return Ok(None);
+        };
+        let meta = match fs::symlink_metadata(&self.path) {
+            Ok(meta) => meta,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        if linked(&meta) {
+            return Err(Error::Unsafe(self.path.clone()));
+        }
+        let (relative, stamp) = if meta.is_dir() {
+            (
+                self.relative.as_path(),
+                std::ffi::OsString::from(".last-used"),
+            )
+        } else {
+            let Some(name) = self.relative.file_name() else {
+                return Ok(None);
+            };
+            let mut stamp = std::ffi::OsString::from(".");
+            stamp.push(name);
+            stamp.push(".last-used");
+            (self.relative.parent().unwrap_or(Path::new("")), stamp)
+        };
+        let mut directory = root.try_clone()?;
+        for part in relative.components() {
+            directory = directory.open_dir_nofollow(part.as_os_str())?;
+        }
+        use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
+        let mut options = cap_std::fs::OpenOptions::new();
+        options
+            .write(true)
+            .create_new(true)
+            .follow(FollowSymlinks::No);
+        match directory.open_with(&stamp, &options) {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.into()),
+        }
+        let meta = directory.symlink_metadata(&stamp)?;
+        if !meta.is_file() || meta.file_type().is_symlink() {
+            return Err(Error::Unsafe(self.path.join(stamp)));
+        }
+        Ok(Some(meta.modified()?.into_std()))
+    }
+
+    /// The lease integration changes this classification, not policy or deletion code.
+    fn access(&self) -> Access {
+        match self.category {
+            Category::RustCompiler => Access::BuildTools,
+            _ => Access::UninstrumentedGame,
+        }
+    }
+
     fn clear(&self) -> Result<(), Error> {
         if !self.path.try_exists()? {
             return Ok(());
@@ -114,17 +223,18 @@ impl Entry {
         let Some(root) = &self.directory else {
             return Ok(());
         };
-        match self.category {
-            Category::RustCompiler => Access::BuildTools,
-            _ => Access::UninstrumentedGame,
-        }
-        .check()?;
+        self.access().check()?;
         let mut parent = root.try_clone()?;
         for part in self.relative.parent().unwrap_or(Path::new("")).components() {
             parent = parent.open_dir_nofollow(part.as_os_str())?;
         }
         Storage::clear_entry(root, &parent, Path::new(self.relative.file_name().unwrap()))
     }
+}
+
+fn usage_stamp(name: &Path) -> bool {
+    let name = name.as_os_str().to_string_lossy();
+    name == ".last-used" || (name.starts_with('.') && name.ends_with(".last-used"))
 }
 
 fn add(
@@ -142,12 +252,37 @@ impl Storage {
         let mut entries = Vec::new();
         let build_root = Root::open(&self.root)?;
         for cache in BUILD_CACHES {
-            add(
-                &mut entries,
-                &build_root,
-                cache.relative(),
-                cache.category(),
-            )?;
+            if matches!(
+                cache,
+                BuildCache::Rust
+                    | BuildCache::Source
+                    | BuildCache::Tools
+                    | BuildCache::Prebuilt
+                    | BuildCache::InternalsSync
+                    | BuildCache::Patched
+            ) {
+                let parent = self.root.join(cache.relative());
+                if checked(&parent, true)?.is_some() {
+                    for child in fs::read_dir(parent)? {
+                        let child = child?;
+                        if usage_stamp(Path::new(&child.file_name())) {
+                            continue;
+                        }
+                        entries.push(Entry::fixed(
+                            &build_root,
+                            &Path::new(cache.relative()).join(child.file_name()),
+                            cache.category(),
+                        )?);
+                    }
+                }
+            } else {
+                add(
+                    &mut entries,
+                    &build_root,
+                    cache.relative(),
+                    cache.category(),
+                )?;
+            }
         }
         let build_files = Category::BuildFiles;
         for name in [
@@ -166,7 +301,38 @@ impl Storage {
         }
         // The target lock files must remain in place. Their contents are inventoried here but
         // deletion goes through Cache, which also acquires Cargo's locks.
-        add(&mut entries, &build_root, "native/target", build_files)?;
+        let target = self.root.join("native/target");
+        if checked(&target, true)?.is_some() {
+            for child in fs::read_dir(&target)? {
+                let child = child?;
+                if crate::cache_cleanup::reserved(Path::new(&child.file_name()))
+                    || usage_stamp(Path::new(&child.file_name()))
+                {
+                    continue;
+                }
+                let relative = Path::new("native/target").join(child.file_name());
+                checked(&child.path(), child.file_type()?.is_dir())?;
+                if child.file_type()?.is_dir() && child.file_name().to_string_lossy().contains('-')
+                {
+                    // Cross-compilation target triples own independent profile units too.
+                    for profile in fs::read_dir(child.path())? {
+                        let profile = profile?;
+                        if crate::cache_cleanup::reserved(Path::new(&profile.file_name()))
+                            || usage_stamp(Path::new(&profile.file_name()))
+                        {
+                            continue;
+                        }
+                        entries.push(Entry::fixed(
+                            &build_root,
+                            &relative.join(profile.file_name()),
+                            build_files,
+                        )?);
+                    }
+                } else {
+                    entries.push(Entry::fixed(&build_root, &relative, build_files)?);
+                }
+            }
+        }
         let data = Root::open(&backend::data_dir())?;
         let played: HashSet<_> = instances::list()
             .into_iter()
@@ -225,7 +391,189 @@ impl Storage {
                 }
             }
         }
+        for entry in &entries {
+            entry.last_used()?;
+        }
         Ok(entries)
+    }
+
+    pub(super) fn stamp_build(&self) -> Result<(), Error> {
+        for entry in self.entries()? {
+            if !entry.path.starts_with(&self.root) || !entry.path.is_dir() {
+                continue;
+            }
+            let relative = entry.path.strip_prefix(&self.root).unwrap();
+            if !(relative == Path::new("cargo")
+                || relative == Path::new("tmp")
+                || (relative.starts_with("rust")
+                    && entry.path.file_name().is_some_and(|name| {
+                        name.to_string_lossy()
+                            .starts_with(crate::rust_toolchain::VERSION)
+                    })))
+            {
+                continue;
+            }
+            let Some(root) = &entry.directory else {
+                continue;
+            };
+            let mut directory = root.try_clone()?;
+            for part in entry.relative.components() {
+                directory = directory.open_dir_nofollow(part.as_os_str())?;
+            }
+            use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
+            let mut options = cap_std::fs::OpenOptions::new();
+            options
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .follow(FollowSymlinks::No);
+            directory.open_with(".last-used", &options)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn evict_inventory(&self, now: std::time::SystemTime) -> Result<Report, Error> {
+        use super::policy::{self, Tier, Unit};
+        let entries = self.entries()?;
+        let settings = backend::Settings::load();
+        let mut revisions = HashSet::new();
+        let mut unknown_revision = false;
+        let mut native_enabled = false;
+        for instance in instances::list() {
+            for bundle in crate::native_status::bundles_on(&instance.home) {
+                if let Some(native) = bundle.manifest.native {
+                    native_enabled = true;
+                    revisions.insert(native.horizon);
+                }
+            }
+            match instance.resolve_version(None) {
+                Ok(version) => {
+                    if let Some(about) = native_mods::about(&version) {
+                        revisions.insert(about.horizon);
+                    } else if let Some(nightly) = version.strip_prefix("nightly-") {
+                        revisions.insert(nightly.rsplit('-').next().unwrap_or(nightly).to_owned());
+                    } else {
+                        unknown_revision = true;
+                    }
+                }
+                Err(_) => unknown_revision = true,
+            }
+        }
+        let mut seen = HashSet::new();
+        let units: Vec<_> = entries
+            .iter()
+            .map(|entry| {
+                let last_used = entry.last_used()?;
+                let tier = if entry.relative.starts_with("rust")
+                    && entry.path.file_name().is_some_and(|name| {
+                        name.to_string_lossy()
+                            .starts_with(crate::rust_toolchain::VERSION)
+                    })
+                    && settings.native_mods_allowed_at.is_some()
+                    && native_enabled
+                {
+                    // Conservatively retain the whole toolchain set while consent is enabled.
+                    Tier::Protected
+                } else if [
+                    "native/source",
+                    "native/tools",
+                    "native/internals-sync",
+                    "native/prebuilt",
+                ]
+                .iter()
+                .any(|root| entry.relative.starts_with(root))
+                {
+                    let Some(unit_revision) = entry.revision() else {
+                        return Ok(Unit {
+                            eligible: false,
+                            bytes: walk(&entry.path, &mut seen)?,
+                            last_used,
+                            tier: Tier::Protected,
+                        });
+                    };
+                    let tool = entry.relative.starts_with("native/tools");
+                    let used = unknown_revision
+                        || (tool && native_mods::MIXINS_REV.get(..12) == Some(unit_revision))
+                        || revisions.iter().any(|revision| {
+                            let length = revision.len().min(unit_revision.len());
+                            revision.get(..length) == unit_revision.get(..length)
+                        });
+                    if used && entry.category == Category::PrebuiltGames {
+                        Tier::Lru
+                    } else if used {
+                        Tier::Protected
+                    } else {
+                        Tier::Expiring
+                    }
+                } else if entry.relative.starts_with("rust")
+                    || entry
+                        .path
+                        .file_name()
+                        .is_some_and(|name| name.to_string_lossy().starts_with(".trash-"))
+                {
+                    Tier::Expiring
+                } else {
+                    Tier::Lru
+                };
+                Ok(Unit {
+                    eligible: entry.access().check().is_ok(),
+                    bytes: walk(&entry.path, &mut seen)?,
+                    last_used,
+                    tier,
+                })
+            })
+            .collect::<Result<_, Error>>()?;
+        let limit = settings
+            .cache_limit_gib
+            .unwrap_or(policy::DEFAULT_LIMIT_GIB);
+        let selected = policy::select(
+            &units,
+            (limit != 0).then(|| limit.saturating_mul(1 << 30)),
+            now,
+        );
+        let mut report = self.apply_retaining(Vec::new(), None, false, true)?;
+        for row in &mut report.rows {
+            row.bytes = allocated(&entries, row.category)?;
+        }
+        for (index, entry) in entries.iter().enumerate() {
+            let row = report
+                .rows
+                .iter_mut()
+                .find(|row| row.category == entry.category)
+                .unwrap();
+            if selected.contains(&index) {
+                let result = if entry.path == self.root.join("native/target") {
+                    self.lease.clear().map(|_| ())
+                } else {
+                    entry.clear()
+                };
+                match result {
+                    Ok(()) => {}
+                    Err(error @ (Error::Busy | Error::UnprovenExclusion)) => row.kept.push(Kept {
+                        bytes: allocated_bytes(&entry.path)?,
+                        reason: native_mods::cache_error(error),
+                    }),
+                    Err(error) => return Err(error),
+                }
+            }
+            let remaining = allocated_bytes(&entry.path)?;
+            if !selected.contains(&index) && remaining > 0 {
+                row.kept.push(Kept {
+                    bytes: remaining,
+                    reason: if !units[index].eligible {
+                        native_mods::cache_error(Error::UnprovenExclusion)
+                    } else {
+                        crate::i18n::tr("Space it couldn't free: protected, recently used, or unknown last use.").into()
+                    },
+                });
+            }
+        }
+        for row in &mut report.rows {
+            row.remaining_bytes = allocated(&entries, row.category)?;
+            row.freed_bytes = row.bytes.saturating_sub(row.remaining_bytes);
+        }
+        report.total_bytes = report.rows.iter().map(|row| row.bytes).sum();
+        Ok(report)
     }
 
     pub fn report(&self, clear: Option<Category>, all: bool) -> Result<Report, Error> {
@@ -243,14 +591,25 @@ impl Storage {
                 Err(error) => return Err(error.into()),
             }
         }
-        self.apply(self.entries()?, clear, all)
+        self.apply_retaining(self.entries()?, clear, all, true)
     }
 
+    #[cfg(test)]
     fn apply(
         &self,
         entries: Vec<Entry>,
         clear: Option<Category>,
         all: bool,
+    ) -> Result<Report, Error> {
+        self.apply_retaining(entries, clear, all, false)
+    }
+
+    fn apply_retaining(
+        &self,
+        entries: Vec<Entry>,
+        clear: Option<Category>,
+        all: bool,
+        retain: bool,
     ) -> Result<Report, Error> {
         // Validate every descendant before any deletion and deduplicate allocated blocks per row.
         let mut rows = Vec::new();
@@ -261,14 +620,29 @@ impl Storage {
                 bytes,
                 freed_bytes: 0,
                 remaining_bytes: bytes,
+                kept: Vec::new(),
             });
         }
         for entry in &entries {
             if all || clear == Some(entry.category) {
-                if entry.path == self.root.join("native/target") {
-                    self.lease.clear()?;
+                let result = if entry.path == self.root.join("native/target") {
+                    self.lease.clear().map(|_| ())
                 } else {
-                    entry.clear()?;
+                    entry.clear()
+                };
+                match result {
+                    Ok(()) => {}
+                    Err(error @ (Error::Busy | Error::UnprovenExclusion)) if retain => {
+                        let row = rows
+                            .iter_mut()
+                            .find(|row| row.category == entry.category)
+                            .unwrap();
+                        row.kept.push(Kept {
+                            bytes: allocated_bytes(&entry.path)?,
+                            reason: native_mods::cache_error(error),
+                        });
+                    }
+                    Err(error) => return Err(error),
                 }
             }
         }
@@ -307,7 +681,9 @@ fn old_logs(entries: &mut Vec<Entry>, home: &Root) -> Result<(), Error> {
         let mut files = Vec::new();
         for entry in fs::read_dir(&folder)? {
             let entry = entry?;
-            if crate::cache_cleanup::reserved(Path::new(&entry.file_name())) {
+            if crate::cache_cleanup::reserved(Path::new(&entry.file_name()))
+                || usage_stamp(Path::new(&entry.file_name()))
+            {
                 continue;
             }
             let Some(meta) = checked(&entry.path(), false)? else {
@@ -362,6 +738,7 @@ fn unused_jars(entries: &mut Vec<Entry>, home: &Root) -> Result<(), Error> {
     for entry in fs::read_dir(folder)? {
         let entry = entry?;
         if !crate::cache_cleanup::reserved(Path::new(&entry.file_name()))
+            && !usage_stamp(Path::new(&entry.file_name()))
             && !referenced.contains(&entry.path())
         {
             entries.push(Entry::fixed(
@@ -372,4 +749,131 @@ fn unused_jars(entries: &mut Vec<Entry>, home: &Root) -> Result<(), Error> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod eviction_tests {
+    use super::*;
+    #[test]
+    fn first_seen_stamp_ages_without_being_refreshed_by_inventory() {
+        let home = crate::storage::tests::Home::new();
+        home.seed("rust/old/payload");
+        let root = Root::open(&home.0).unwrap();
+        let entry = Entry::fixed(&root, Path::new("rust/old"), Category::RustCompiler).unwrap();
+        let used = entry.last_used().unwrap().unwrap();
+        assert_eq!(entry.last_used().unwrap(), Some(used));
+        let units = [policy::Unit {
+            bytes: 100,
+            eligible: true,
+            last_used: Some(used),
+            tier: policy::Tier::Expiring,
+        }];
+        assert!(policy::select(&units, None, used).is_empty());
+        assert_eq!(
+            policy::select(
+                &units,
+                None,
+                used + std::time::Duration::from_secs(7 * 86400)
+            ),
+            [0]
+        );
+    }
+
+    #[test]
+    fn revision_names_are_parsed_not_searched() {
+        let home = crate::storage::tests::Home::new();
+        let root = Root::open(&home.0).unwrap();
+        let sha = "0123456789abcdef0123456789abcdef01234567";
+        for (path, expected) in [
+            (format!("native/source/{sha}"), Some(sha)),
+            (format!("native/source/not-{sha}"), None),
+            (format!("native/tools/{}", &sha[..12]), Some(&sha[..12])),
+            (
+                format!("native/prebuilt/{sha}-horizon-prebuilt-v3-x86_64-unknown-linux-gnu"),
+                Some(sha),
+            ),
+            (
+                format!("native/internals-sync/catalog-{sha}-x86_64-unknown-linux-gnu"),
+                Some(sha),
+            ),
+            (format!("native/internals-sync/garbage-{sha}"), None),
+        ] {
+            assert_eq!(
+                Entry::fixed(&root, Path::new(&path), Category::BuildFiles)
+                    .unwrap()
+                    .revision(),
+                expected
+            );
+        }
+    }
+    #[test]
+    fn refused_units_are_residual_with_bytes_and_reason() {
+        let home = crate::storage::tests::Home::new();
+        let file = home.seed("game/output");
+        let storage = Storage::at(&home.0).unwrap();
+        let root = Root::open(&home.0).unwrap();
+        let entries = vec![Entry::fixed(&root, Path::new("game"), Category::BuildFiles).unwrap()];
+        let bytes = allocated_bytes(&file).unwrap();
+        let report = storage.apply_retaining(entries, None, true, true).unwrap();
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.category == Category::BuildFiles)
+            .unwrap();
+        assert_eq!(row.freed_bytes, 0);
+        assert_eq!(row.remaining_bytes, bytes);
+        assert_eq!(row.kept[0].bytes, bytes);
+        assert!(!row.kept[0].reason.is_empty());
+        assert!(file.exists());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "manual allocated 40 GiB proof; requires HORIZON_EVICTION_PROOF_ROOT in checkout scratch"]
+    fn allocated_forty_gib_cleanup_proof() {
+        let path = PathBuf::from(
+            std::env::var_os("HORIZON_EVICTION_PROOF_ROOT").expect("isolated proof root"),
+        );
+        fs::create_dir_all(&path).unwrap();
+        let home = crate::storage::tests::Home(path.canonicalize().unwrap());
+        for (folder, gib) in [
+            ("rust/old", 16),
+            ("cargo", 12),
+            ("tmp", 4),
+            ("native/patched/proof", 8),
+        ] {
+            let file = home.seed(&format!("{folder}/payload"));
+            assert!(std::process::Command::new("fallocate")
+                .args(["-l", &format!("{gib}G")])
+                .arg(file)
+                .status()
+                .unwrap()
+                .success());
+        }
+        let storage = Storage::at(&home.0).unwrap();
+        assert!(matches!(Cache::acquire(&home.0), Err(Error::Busy)));
+        let now = std::time::SystemTime::now();
+        let first = storage.evict_inventory(now).unwrap();
+        let later = now + std::time::Duration::from_secs(8 * 86400);
+        let second = storage.evict_inventory(later).unwrap();
+        let freed: u64 = first
+            .rows
+            .iter()
+            .chain(&second.rows)
+            .map(|row| row.freed_bytes)
+            .sum();
+        let residual: u64 = second.rows.iter().map(|row| row.remaining_bytes).sum();
+        println!(
+            "before={} freed={freed} residual={residual}",
+            first.total_bytes
+        );
+        assert!(freed >= 32 * (1 << 30));
+        assert!(residual >= 8 * (1 << 30));
+        assert!(home.0.join("native/patched/proof/payload").exists());
+        assert!(second.rows.iter().any(|row| row
+            .kept
+            .iter()
+            .any(|kept| kept.bytes >= 8 * (1 << 30) && !kept.reason.is_empty())));
+        assert!(matches!(Cache::acquire(&home.0), Err(Error::Busy)));
+    }
 }

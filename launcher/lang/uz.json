@@ -148,7 +148,6 @@
   "Choose…": "Tanlang…",
   "Classic arms": "Klassik qo'llar",
   "Clear filters": "Filtrlarni tozalash",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Mahalliy yig'ish keshidan {bytes} bayt tozalandi. Keyingi o'zgargan yig'ish boshidan kompilyatsiya qilinadi.",
   "Click again to delete": "Oʻchirish uchun yana bosing",
   "Click again to remove": "Oʻchirish uchun yana bosing",
   "Client": "Mijoz",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} oʻrnatilmagan",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (yoki loyihada .mcp.json)",
   "← All servers": "← Barcha serverlar",
-  "← Newer": "← Yangiroq"
+  "← Newer": "← Yangiroq",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

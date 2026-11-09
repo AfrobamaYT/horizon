@@ -148,7 +148,6 @@
   "Choose…": "Elige…",
   "Classic arms": "Classica arma",
   "Clear filters": "Patet Filtra",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "{bytes} octeti thesauri aedificationis nativae purgati sunt. Proxima aedificatio mutata ab initio componetur.",
   "Click again to delete": "Click iterum delere",
   "Click again to remove": "Click iterum ad removendum",
   "Client": "Cliens",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version}non installed",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (vel .mcp.json in project)",
   "← All servers": "Omnes servers",
-  "← Newer": "Recentior"
+  "← Newer": "Recentior",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

@@ -148,7 +148,6 @@
   "Choose…": "E koho…",
   "Classic arms": "Nā lima kahiko",
   "Clear filters": "Holoi i nā kānana",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Ua hoʻomaʻemaʻe ʻia nā paita {bytes} o ka waihona kūkulu maoli. E hōʻuluʻulu hou ʻia ke kūkulu hoʻololi aʻe mai ka hoʻomaka.",
   "Click again to delete": "Kaomi hou e holoi",
   "Click again to remove": "Kaomi hou e wehe",
   "Client": "Mea kūʻai",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "ʻAʻole hoʻokomo ʻia ʻo {version}",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (a i ʻole .mcp.json ma kahi papahana)",
   "← All servers": "← Nā kikowaena āpau",
-  "← Newer": "← Mea hou"
+  "← Newer": "← Mea hou",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

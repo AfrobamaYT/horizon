@@ -148,7 +148,6 @@
   "Choose…": "Valitse…",
   "Classic arms": "Klassiset käsivarret",
   "Clear filters": "Selkeät suodattimet",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Natiivikoodin käännösvälimuistista tyhjennettiin {bytes} tavua. Seuraava muutoksia sisältävä käännös aloitetaan alusta.",
   "Click again to delete": "Napsauta uudelleen poistaaksesi",
   "Click again to remove": "Napsauta uudelleen poistaaksesi",
   "Client": "Asiakas",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} ei ole asennettu",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (tai .mcp.json projektissa)",
   "← All servers": "← Kaikki palvelimet",
-  "← Newer": "← Uudempi"
+  "← Newer": "← Uudempi",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

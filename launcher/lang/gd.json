@@ -148,7 +148,6 @@
   "Choose…": "Tagh…",
   "Classic arms": "Gàirdeanan clasaigeach",
   "Clear filters": "Glan sìoltachain",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Chaidh {bytes} baidht dhen tasgadan togail dhùthchasaich fhalamhachadh. Thèid an ath-thogail atharraichte a chur ri chèile on toiseach.",
   "Click again to delete": "Cliog a-rithist gus a sguabadh às",
   "Click again to remove": "Cliog a-rithist gus a thoirt air falbh",
   "Client": "Cliant",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "Chan eil {version} air a stàladh",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (no .mcp.json ann am pròiseact)",
   "← All servers": "← A h-uile frithealaiche",
-  "← Newer": "← Nas ùire"
+  "← Newer": "← Nas ùire",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

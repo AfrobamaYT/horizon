@@ -148,7 +148,6 @@
   "Choose…": "Yan…",
   "Classic arms": "Classic apá",
   "Clear filters": "Ko awọn asẹ kuro",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "A ti pa {bytes} bytes rẹ́ kúrò nínú cache ìkọ́lé abínibí. Ìkọ́lé tí a yí padà tó kàn yóò kó jọ láti ìbẹ̀rẹ̀.",
   "Click again to delete": "Tẹ lẹẹkansi lati parẹ",
   "Click again to remove": "Tẹ lẹẹkansi lati yọkuro",
   "Client": "Onibara",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} ko fi sori ẹrọ",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (tabi .mcp.json ninu ise agbese kan)",
   "← All servers": "← Gbogbo olupin",
-  "← Newer": "← Tuntun"
+  "← Newer": "← Tuntun",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

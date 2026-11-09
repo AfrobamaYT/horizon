@@ -521,6 +521,23 @@ fn logged<T>(
         log_warning(warning);
     }
     let result = build(cache.as_ref().map_err(String::as_str));
+    // Keep this build lease through installation/export, including failed builds. It does not
+    // exclude independent game starts; automatic trimming can conservatively retain the cache.
+    if let Ok(cache) = cache {
+        match crate::storage::Storage::after_build(&cache) {
+            Ok(report) => {
+                if let Some(message) = crate::storage::eviction::freed_message(&report) {
+                    let _ = append_log(&message);
+                }
+                for row in report.rows {
+                    for kept in row.kept {
+                        log_warning(&format!("{} ({} bytes)", kept.reason, kept.bytes));
+                    }
+                }
+            }
+            Err(error) => log_warning(&cache_error(error)),
+        }
+    }
     match &result {
         Ok(_) => {
             let _ = append_log("Build completed.");
@@ -528,25 +545,6 @@ fn logged<T>(
         Err(error) => {
             let _ = append_log(&format!("The build failed: {error}"));
         }
-    }
-    // Keep this build lease through installation/export, including failed builds. It does not
-    // exclude independent game starts; automatic trimming can conservatively retain the cache.
-    let Ok(cache) = cache else {
-        return result;
-    };
-    let limit = backend::Settings::load()
-        .native_cache_gib
-        .unwrap_or(DEFAULT_CACHE_GIB);
-    match cache.trim(limit.saturating_mul(1 << 30)) {
-        Ok(bytes) if bytes > 0 => {
-            let _ = append_log(&trf(
-                "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.",
-                &[("bytes", &bytes.to_string())],
-            ));
-        }
-        Err(crate::native_cache::Error::UnprovenExclusion) => {} // Quietly defer automatic eviction.
-        Err(error) => log_warning(&cache_error(error)),
-        _ => {}
     }
     result
 }
@@ -563,8 +561,6 @@ pub fn sync_internals(
     require_consent()?;
     internals_sync::check(folder).map_err(|error| Failed::Other(error.to_string()))
 }
-
-pub const DEFAULT_CACHE_GIB: u64 = 30;
 
 pub fn cache_error(error: crate::storage::Error) -> String {
     match error {
@@ -1462,6 +1458,7 @@ fn tool(rust: &Toolchain, rev: &str, progress: &impl Fn(Step)) -> Result<PathBuf
         .arg("horizon-mixins-cli");
         run(cmd, "Building horizon-mixins", |_| {})?;
     }
+    crate::storage::mark_used(&dir).map_err(cache_error)?;
     Ok(bin)
 }
 
@@ -1579,6 +1576,7 @@ fn lock_crates(
 fn source(revision: &str) -> Result<PathBuf, String> {
     let dir = root().join("source").join(revision);
     if dir.join(".horizon-revision").is_file() {
+        crate::storage::mark_used(&dir).map_err(cache_error)?;
         return Ok(dir);
     }
     let archive = format!(
@@ -1591,6 +1589,7 @@ fn source(revision: &str) -> Result<PathBuf, String> {
     let _ = fs::remove_dir_all(&dir);
     fs::rename(&top, &dir).map_err(|e| e.to_string())?;
     let _ = fs::remove_dir_all(&partial);
+    crate::storage::mark_used(&dir).map_err(cache_error)?;
     Ok(dir)
 }
 
@@ -2095,7 +2094,7 @@ fn pipeline(
                 sync(&fresh, &partial)?;
                 fs::rename(&partial, &snapshot).map_err(|e| e.to_string())?;
             }
-            inject_cache::touch_and_prune(&real, &key)?;
+            crate::storage::mark_used(&inject_cache::snapshot(&real, &key)).map_err(cache_error)?;
         } else {
             sync(&source, &fresh)?;
         }
@@ -2193,6 +2192,10 @@ fn pipeline(
             target_dir.push(cache_dir);
         }
         let compiled = profile;
+        let profile_dir = target_dir.join(compiled.cargo().0);
+        fs::create_dir_all(&profile_dir).map_err(|error| Failed::Other(error.to_string()))?;
+        crate::storage::mark_used(&profile_dir)
+            .map_err(|error| Failed::Other(cache_error(error)))?;
         let (mut crates, mut total, mut name) = (0, None, String::new());
         let identities: Vec<_> = mods
             .iter()

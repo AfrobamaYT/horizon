@@ -52,7 +52,23 @@ pub(crate) fn shared(command: &Command) -> Result<Vec<Claim>, Error> {
         });
     let mut paths = Vec::new();
     if let Some(home) = command.get_current_dir() {
-        paths.push(home.canonicalize()?);
+        let home = home.canonicalize()?;
+        for relative in [".horizon-cache", "wasm-cache", "cache"] {
+            crate::storage::mark_used(&home.join(relative))?;
+        }
+        use horizon_mod_package::{mod_list, Package};
+        for folder in [mod_list::DIR, mod_list::NATIVE_DIR] {
+            for path in horizon_mod_package::find(&home.join(folder)) {
+                if let Ok(package) = Package::read(&path) {
+                    if crate::browser::java::is_enabled(&home, &package.manifest.id) {
+                        for jar in package.manifest.jar {
+                            crate::storage::mark_used(&jar.cache_path(&home.join("jars")))?;
+                        }
+                    }
+                }
+            }
+        }
+        paths.push(home);
     }
     if let Some(logs) = logs.filter(|path| !path.as_os_str().is_empty()) {
         fs::create_dir_all(&logs)?;
@@ -71,6 +87,9 @@ pub(crate) fn shared(command: &Command) -> Result<Vec<Claim>, Error> {
         return Ok(Vec::new());
     }
     let registry = Registry::open()?;
+    for path in &paths {
+        crate::storage::mark_used(path)?;
+    }
     paths
         .into_iter()
         .map(|path| {

@@ -2981,6 +2981,7 @@ pub fn remove_version(tag: &str) -> Result<(), String> {
         return Err(format!("{tag} is running. Quit it first."));
     }
     remove(tag)?;
+    crate::storage::eviction::request_cleanup();
     let mut settings = Settings::load();
     if settings.selected.as_deref() == Some(tag) {
         settings.selected = installed().first().cloned();
@@ -4475,10 +4476,10 @@ pub struct Settings {
     /// First-use native code permission for this launcher install, Unix seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native_mods_allowed_at: Option<u64>,
-    /// Combined fast/release compilation cache limit in GiB. Unset is 30; zero disables
+    /// Managed launcher cache limit in GiB. Unset is 25; zero disables
     /// automatic cleanup. Installed native versions and player data are not this cache.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_cache_gib: Option<u64>,
+    pub cache_limit_gib: Option<u64>,
     /// Developer options (hidden: seven clicks on the sidebar's launcher version reveal them):
     /// offline names play without an account that owns the game, in the window only
     /// (`account::Accounts::play_as_with`, `account::launch_for_game`). Never a download: the game still

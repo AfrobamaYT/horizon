@@ -148,7 +148,6 @@
   "Choose…": "ಆಯ್ಕೆಮಾಡಿ...",
   "Classic arms": "ಕ್ಲಾಸಿಕ್ ತೋಳುಗಳು",
   "Clear filters": "ಫಿಲ್ಟರ್‌ಗಳನ್ನು ತೆರವುಗೊಳಿಸಿ",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "ಸ್ಥಳೀಯ ಬಿಲ್ಡ್ ಕ್ಯಾಶ್‌ನಿಂದ {bytes} ಬೈಟ್‌ಗಳನ್ನು ತೆರವುಗೊಳಿಸಲಾಗಿದೆ. ಮುಂದಿನ ಬದಲಾದ ಬಿಲ್ಡ್ ಮೊದಲಿನಿಂದ ಕಂಪೈಲ್ ಆಗುತ್ತದೆ.",
   "Click again to delete": "ಅಳಿಸಲು ಮತ್ತೊಮ್ಮೆ ಕ್ಲಿಕ್ ಮಾಡಿ",
   "Click again to remove": "ತೆಗೆದುಹಾಕಲು ಮತ್ತೊಮ್ಮೆ ಕ್ಲಿಕ್ ಮಾಡಿ",
   "Client": "ಗ್ರಾಹಕ",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} ಅನ್ನು ಸ್ಥಾಪಿಸಲಾಗಿಲ್ಲ",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ಅಥವಾ ಯೋಜನೆಯಲ್ಲಿ .mcp.json)",
   "← All servers": "← ಎಲ್ಲಾ ಸರ್ವರ್‌ಗಳು",
-  "← Newer": "← ಹೊಸದು"
+  "← Newer": "← ಹೊಸದು",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

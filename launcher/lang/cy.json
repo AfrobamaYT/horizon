@@ -148,7 +148,6 @@
   "Choose…": "Dewiswch…",
   "Classic arms": "Breichiau clasurol",
   "Clear filters": "Clirio hidlwyr",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Wedi clirio {bytes} beit o storfa'r adeiladu brodorol. Bydd yr adeiladu nesaf sydd wedi newid yn crynhoi o'r dechrau.",
   "Click again to delete": "Cliciwch eto i ddileu",
   "Click again to remove": "Cliciwch eto i gael gwared",
   "Client": "Cleient",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "Nid yw {version} wedi'i osod",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (neu .mcp.json mewn prosiect)",
   "← All servers": "← Pob gweinydd",
-  "← Newer": "← Newyddach"
+  "← Newer": "← Newyddach",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

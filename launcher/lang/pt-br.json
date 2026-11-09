@@ -137,7 +137,6 @@
   "Choose…": "Escolher…",
   "Classic arms": "Braços clássicos",
   "Clear filters": "Limpar filtros",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Liberados {bytes} bytes do cache de compilação nativa. A próxima compilação com alterações será feita do zero.",
   "Click again to delete": "Clique de novo para excluir",
   "Click again to remove": "Clique de novo para remover",
   "Client": "Cliente",
@@ -1228,5 +1227,7 @@
   "API site listeners pending (U4c)": "API site listeners pending (U4c)",
   "source injects pending (U5)": "source injects pending (U5)",
   "replace listeners pending (U9)": "replace listeners pending (U9)",
-  "no API record: a parameter has no API type yet": "no API record: a parameter has no API type yet"
+  "no API record: a parameter has no API type yet": "no API record: a parameter has no API type yet",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }

@@ -148,7 +148,6 @@
   "Choose…": "Изберете...",
   "Classic arms": "Класически оръжия",
   "Clear filters": "Изчистване на филтрите",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Изчистени са {bytes} байта от кеша за компилация на нативен код. Следващата компилация с промени ще започне отначало.",
   "Click again to delete": "Кликнете отново, за да изтриете",
   "Click again to remove": "Кликнете отново, за да премахнете",
   "Client": "Клиент",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} не е инсталиран",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (или .mcp.json в проект)",
   "← All servers": "← Всички сървъри",
-  "← Newer": "← По-нови"
+  "← Newer": "← По-нови",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use."
 }
