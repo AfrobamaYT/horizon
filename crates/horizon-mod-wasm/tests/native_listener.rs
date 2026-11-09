@@ -1,4 +1,6 @@
 //! The wasm fixture's shutdown listener, registered natively: the same answers as `real_member`.
+#[path = "support/no_hooks.rs"]
+mod no_hooks;
 #[path = "fixture/src/shutdown.rs"]
 mod shutdown;
 

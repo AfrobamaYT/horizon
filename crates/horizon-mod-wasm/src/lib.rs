@@ -3,6 +3,9 @@
 //! versions, one library copy shared by its dependents). Every refusal names its reason for the
 //! Mods page.
 pub mod link;
+#[cfg(test)]
+#[path = "../tests/support/no_hooks.rs"]
+mod no_hooks;
 mod points;
 mod runtime;
 #[allow(

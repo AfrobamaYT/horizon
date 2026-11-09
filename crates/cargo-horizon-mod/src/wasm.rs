@@ -325,6 +325,49 @@ fn group_export(name: &str, krate: &str) -> bool {
                 .is_some_and(|receiver| receiver.contains(&format!("{krate}::"))))
 }
 
+/// One argument of the response file rustc hands the linker, one per line. On Windows rustc
+/// quotes each line the Windows way (`"D:\dir\a b.rlib"`, a quote inside as `\"`, backslashes
+/// doubled only in front of a quote); elsewhere
+/// it escapes `\` and space with a backslash.
+fn response_file_arg(line: &str) -> String {
+    let mut arg = String::new();
+    if let Some(quoted) = line
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+    {
+        // A run of backslashes is literal unless a quote follows it: then each pair is one
+        // backslash and an odd one left over escapes the quote.
+        let mut backslashes = 0;
+        for c in quoted.chars() {
+            match c {
+                '\\' => backslashes += 1,
+                '"' => {
+                    arg.extend(std::iter::repeat_n('\\', backslashes / 2));
+                    arg.push('"');
+                    backslashes = 0;
+                }
+                _ => {
+                    arg.extend(std::iter::repeat_n('\\', backslashes));
+                    arg.push(c);
+                    backslashes = 0;
+                }
+            }
+        }
+        // The closing quote follows these, so they were doubled too.
+        arg.extend(std::iter::repeat_n('\\', backslashes / 2));
+        return arg;
+    }
+    let mut chars = line.chars();
+    while let Some(c) = chars.next() {
+        arg.push(if c == '\\' {
+            chars.next().unwrap_or(c)
+        } else {
+            c
+        });
+    }
+    arg
+}
+
 /// The link step, run by cargo as the linker: rust-lld linking a shared module, then rustc's
 /// own metadata sections dropped.
 pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
@@ -351,7 +394,7 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
         .into_iter()
         .flat_map(|arg| match arg.strip_prefix('@') {
             Some(file) => std::fs::read_to_string(file)
-                .map(|t| t.lines().map(str::to_owned).collect())
+                .map(|t| t.lines().map(response_file_arg).collect())
                 .unwrap_or_else(|_| vec![arg]),
             None => vec![arg],
         });
@@ -525,6 +568,31 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
         });
     }
     std::fs::write(&output, module.finish()).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod response_file_tests {
+    use super::response_file_arg;
+    #[test]
+    fn windows_quoted_lines_lose_their_quotes_and_keep_path_backslashes() {
+        assert_eq!(response_file_arg(r#""--export""#), "--export");
+        assert_eq!(
+            response_file_arg(r#""D:\dir\a b\libx-1.rlib""#),
+            r"D:\dir\a b\libx-1.rlib"
+        );
+        assert_eq!(response_file_arg(r#""a\"b""#), r#"a"b"#);
+        assert_eq!(response_file_arg(r#""a\\\"b""#), r#"a\"b"#);
+        assert_eq!(response_file_arg(r#""dir\\""#), r"dir\");
+    }
+    #[test]
+    fn gnu_escaped_lines_lose_their_escapes() {
+        assert_eq!(response_file_arg("--export"), "--export");
+        assert_eq!(
+            response_file_arg(r"/tmp/a\ b/libx.rlib"),
+            "/tmp/a b/libx.rlib"
+        );
+        assert_eq!(response_file_arg(r"a\\b"), r"a\b");
+    }
 }
 
 #[cfg(test)]

@@ -503,6 +503,7 @@ name = "cargo-horizon-mod"
 version = "0.1.0"
 dependencies = [
  "cap-std",
+ "dunce",
  "horizon-mod-api-gen",
  "horizon-mod-package",
  "horizon-mod-point-emit",
