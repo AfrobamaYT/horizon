@@ -2940,7 +2940,8 @@ impl Game<'_> {
         thundering: bool,
         cancel: &mut bool,
     ) {
-        self.fire_weather_change(dimension, raining, thundering, cancel);
+        crate::game::level_control_hooks::LevelControl::Weather
+            .hear(|| self.fire_weather_change(dimension, raining, thundering, cancel));
     }
 
     /// The server changed its thunder state through `/weather`. Set `cancel`
@@ -2951,7 +2952,8 @@ impl Game<'_> {
         thundering: bool,
         cancel: &mut bool,
     ) {
-        self.fire_thunder_change(dimension, thundering, cancel);
+        crate::game::level_control_hooks::LevelControl::Weather
+            .hear(|| self.fire_thunder_change(dimension, thundering, cancel));
     }
 
     /// A server lightning bolt is about to be created. `cause` is `weather`,
@@ -3011,12 +3013,14 @@ impl Game<'_> {
     /// The server world's border bounds changed, either immediately or when
     /// its timed size change was requested.
     pub(in crate::game) fn native_world_border_bounds_changed(&mut self) {
-        self.fire_world_border_bounds_changed();
+        crate::game::level_control_hooks::LevelControl::BorderBounds
+            .hear(|| self.fire_world_border_bounds_changed());
     }
 
     /// The server world's border center changed.
     pub(in crate::game) fn native_world_border_center_changed(&mut self) {
-        self.fire_world_border_center_changed();
+        crate::game::level_control_hooks::LevelControl::BorderCenter
+            .hear(|| self.fire_world_border_center_changed());
     }
 
     /// A Nether portal was built for a dimension travel, or an End platform
