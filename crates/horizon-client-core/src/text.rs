@@ -1814,15 +1814,34 @@ mod tests {
     }
     #[test]
     fn styling_installs_atlas_and_player_metadata() {
-        for object in [InlineObject::Atlas { atlas: "a".into(), sprite: "b".into(), fallback: "".into() }, InlineObject::Player { profile: std::sync::Arc::new(json!({})), hat: true, fallback: "".into() }] {
-            let text = Text::styled("\u{fffc}", Style { inline_object: Some(object), ..Style::default() });
+        for object in [
+            InlineObject::Atlas {
+                atlas: "a".into(),
+                sprite: "b".into(),
+                fallback: "".into(),
+            },
+            InlineObject::Player {
+                profile: std::sync::Arc::new(json!({})),
+                hat: true,
+                fallback: "".into(),
+            },
+        ] {
+            let text = Text::styled(
+                "\u{fffc}",
+                Style {
+                    inline_object: Some(object),
+                    ..Style::default()
+                },
+            );
             assert!(text.spans[0].style.inline_object.is_some());
         }
     }
     #[test]
     fn styling_remote_span_drops_local_file_action() {
-        let text = Text::from(json!({"text":"remote"})).with_style(&Style { click: Some(ClickEvent::OpenFile("secret".into())), ..Style::default() });
+        let text = Text::from(json!({"text":"remote"})).with_style(&Style {
+            click: Some(ClickEvent::OpenFile("secret".into())),
+            ..Style::default()
+        });
         assert!(text.spans[0].style.click.is_none());
     }
-
 }

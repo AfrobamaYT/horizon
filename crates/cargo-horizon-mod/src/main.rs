@@ -612,8 +612,23 @@ mod tests {
 mod wrapper_suffix_tests {
     #[test]
     fn compiler_names_keep_suffix_contract() {
-        for (name, expected) in [("diagnostic-rustc", true), ("xrustc", true), ("rustc", true), ("/path/to/rustc", true), ("rustc.exe", true), ("diagnostic-rustc.exe", true), ("rustc.custom", false), ("rustc-wrapper", false), ("cargo-horizon-mod", false), ("/rustc/tool", false)] {
-            assert_eq!(name.strip_suffix(".exe").unwrap_or(name).ends_with("rustc"), expected, "{name}");
+        for (name, expected) in [
+            ("diagnostic-rustc", true),
+            ("xrustc", true),
+            ("rustc", true),
+            ("/path/to/rustc", true),
+            ("rustc.exe", true),
+            ("diagnostic-rustc.exe", true),
+            ("rustc.custom", false),
+            ("rustc-wrapper", false),
+            ("cargo-horizon-mod", false),
+            ("/rustc/tool", false),
+        ] {
+            assert_eq!(
+                name.strip_suffix(".exe").unwrap_or(name).ends_with("rustc"),
+                expected,
+                "{name}"
+            );
         }
     }
 }
