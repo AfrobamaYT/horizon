@@ -60,6 +60,7 @@ impl Game<'_> {
         // For mods (`render.frame-stats`, `native_frame_rate`).
         let now = self.extras_now();
         self.extras.fps.record(now, elapsed.as_secs_f32() * 1000.0);
+        self.recipe_lookups_now();
         self.native_render_frame_pre(elapsed);
         // A clear a mod asked for (in this frame's `RenderFrameEvent.Pre`, or after the last
         // frame was drawn) lands before this frame's particles are drawn, paused or not.

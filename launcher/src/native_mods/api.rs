@@ -1,7 +1,7 @@
 //! The launcher's generated executable for trait mods.
 use super::{internals, Bundle};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub(super) fn read(path: &Path) -> Result<toml::Table, String> {
     let text = fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -315,6 +315,92 @@ fn dependency_tables(cargo: &toml::Table) -> impl Iterator<Item = (Option<&str>,
         .filter_map(|(target, table)| Some((target, table?.as_table()?)))
 }
 
+/// The bundle's `[[crate]]` folders, by id, as canonical paths. horizon-mixins stages each one as
+/// `native-crates/<mod>/<id>`.
+fn bundle_crates(dir: &Path) -> Result<Vec<(String, PathBuf)>, String> {
+    let manifest = read(&dir.join("horizon-mod.toml"))?;
+    let crates = manifest.get("crate").and_then(toml::Value::as_array);
+    let mut out = Vec::new();
+    for entry in crates
+        .into_iter()
+        .flatten()
+        .filter_map(toml::Value::as_table)
+    {
+        let id = entry.get("id").and_then(toml::Value::as_str);
+        let path = entry.get("path").and_then(toml::Value::as_str);
+        if let (Some(id), Some(path)) = (id, path) {
+            if let Ok(folder) = dir.join(path).canonicalize() {
+                out.push((id.to_owned(), folder));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Points the trait package's path dependencies at the bundle's `[[crate]]` folders, staged one
+/// level up from the copied package (`../../native-crates/<mod>/<id>`). `source` is the package's
+/// folder in the bundle, so `../<crate>` is a sibling. Any other path is refused: only the
+/// package's own folder is copied.
+fn crate_paths(
+    bundle: &Bundle,
+    source: &Path,
+    manifest_path: &Path,
+    manifest: &mut toml::Table,
+) -> Result<(), String> {
+    let crates = bundle_crates(&bundle.dir)?;
+    let rewrite = |table: &mut toml::Table| -> Result<(), String> {
+        for (key, dep) in table.iter_mut() {
+            // horizon-client's own edge is rewritten to the game below, whatever its source.
+            let package = dep.get("package").and_then(toml::Value::as_str);
+            if PACKAGES
+                .iter()
+                .any(|(name, _)| key == name || package == Some(*name))
+            {
+                continue;
+            }
+            let Some(path) = dep.get("path").and_then(toml::Value::as_str) else {
+                continue;
+            };
+            let resolved = source.join(path).canonicalize().ok();
+            let Some((id, _)) = crates
+                .iter()
+                .find(|(_, folder)| Some(folder) == resolved.as_ref())
+            else {
+                return Err(format!(
+                    "{}: dependency {key} path {path:?} is not a [[crate]] of this bundle",
+                    manifest_path.display()
+                ));
+            };
+            let staged = format!("../../{}/{}/{id}", super::crates::DIR, bundle.manifest.id);
+            if let Some(entry) = dep.as_table_mut() {
+                entry.insert("path".into(), staged.into());
+            }
+        }
+        Ok(())
+    };
+    for kind in ["dependencies", "dev-dependencies", "build-dependencies"] {
+        if let Some(table) = manifest.get_mut(kind).and_then(toml::Value::as_table_mut) {
+            rewrite(table)?;
+        }
+    }
+    if let Some(targets) = manifest
+        .get_mut("target")
+        .and_then(toml::Value::as_table_mut)
+    {
+        for (_, target) in targets.iter_mut() {
+            let Some(target) = target.as_table_mut() else {
+                continue;
+            };
+            for kind in ["dependencies", "dev-dependencies", "build-dependencies"] {
+                if let Some(table) = target.get_mut(kind).and_then(toml::Value::as_table_mut) {
+                    rewrite(table)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Add API packages and the generated executable to the fresh staged workspace.
 pub(super) fn stage(
     stage: &Path,
@@ -365,6 +451,7 @@ pub(super) fn stage(
         super::copy_bundle(bundle, &dest)?;
         let path = dest.join("Cargo.toml");
         let mut manifest = project.cargo.clone();
+        crate_paths(bundle, &bundle.dir, &path, &mut manifest)?;
         let package = project.package.clone();
         for api in &project.api_deps {
             let dependency = api.value_mut(&mut manifest);
@@ -375,7 +462,7 @@ pub(super) fn stage(
             });
             if let Some(old) = dependency.as_table() {
                 // A renamed dependency also needs its package name.
-                for key in ["package", "features"] {
+                for key in ["package", "features", "default-features"] {
                     if let Some(value) = old.get(key) {
                         rewritten.insert(key.into(), value.clone());
                     }
@@ -842,6 +929,37 @@ mod tests {
         let dir = fixture();
         let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
         assert!(!bundle.needs_mixins());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn bundle_crate_paths_are_rewritten_and_other_siblings_refused() {
+        let dir = fixture();
+        fs::create_dir_all(dir.join("shared")).unwrap();
+        let manifest_path = dir.join(horizon_mod_package::manifest::MANIFEST);
+        let mut text = fs::read_to_string(&manifest_path).unwrap();
+        text.push_str("\n[[crate]]\nid='shared'\npath='shared'\n");
+        fs::write(&manifest_path, text).unwrap();
+        let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
+        let mut cargo: toml::Table =
+            "[dependencies]\nshared={path='shared',package='example-shared'}\n"
+                .parse()
+                .unwrap();
+        crate_paths(&bundle, &dir, &dir.join("Cargo.toml"), &mut cargo).unwrap();
+        assert_eq!(
+            cargo["dependencies"]["shared"]["path"].as_str(),
+            Some("../../native-crates/example/shared")
+        );
+        assert_eq!(
+            cargo["dependencies"]["shared"]["package"].as_str(),
+            Some("example-shared")
+        );
+        cargo["dependencies"]["shared"]["path"] = "../outside".into();
+        assert!(
+            crate_paths(&bundle, &dir, &dir.join("Cargo.toml"), &mut cargo)
+                .unwrap_err()
+                .contains("is not a [[crate]]")
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 }

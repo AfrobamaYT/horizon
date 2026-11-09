@@ -4,10 +4,22 @@ use super::Game;
 pub use mod_api::game::{NativeBlockEdit, NativeBlockRun, NativeHeightmap};
 
 impl Game<'_> {
+    /// A block state written at `data_version`, upgraded as the datafixers do it
+    /// (`horizon_world::datafix::native_upgrade_block_state`). API @API:upgrade_block_state@.
+    pub(super) fn native_upgrade_block_state(
+        &self,
+        name: &str,
+        props: &[(String, String)],
+        data_version: i32,
+    ) -> (String, Vec<(String, String)>) {
+        horizon_world::datafix::native_upgrade_block_state(name, props, data_version)
+    }
+
     /// For a server mod: the runs made at once, straight into the chunks of the authoritative level `dimension`
     /// (the one being ticked, as for `native_set_block`), with what `fill ... strict` does for block entities (a
     /// block replaced by another loses its block entity, and a new block gets the one `native_set_block` would
-    /// give it, a mod block's included); no neighbour is told, and the chunks changed go to the players whole.
+    /// give it, a mod block's included); no neighbour is told unless `neighbour_updates`, and the chunks changed
+    /// go to the players whole.
     /// Runs in chunks not loaded, and the parts of runs outside the column, are left out. The blocks changed, or
     /// why the edit was left out, with nothing changed: another dimension, a client of a server, a palette entry
     /// or filter that doesn't read or carries NBT (refused), a run naming a palette entry or filter past the end,
@@ -17,6 +29,13 @@ impl Game<'_> {
         dimension: &str,
         edit: &NativeBlockEdit,
     ) -> Result<u64, String> {
+        if dimension != self.dim.id() {
+            return self
+                .npc_in_level(dimension, |g| g.native_edit_blocks(dimension, edit))
+                .unwrap_or_else(|| {
+                    Err(format!("{dimension} is not a level the server has loaded"))
+                });
+        }
         if !self.native_level_open(dimension) {
             return Err(format!("{dimension} is not the level being ticked"));
         }
@@ -34,5 +53,87 @@ impl Game<'_> {
     /// Whether `dimension` is the authoritative level being ticked: where a server mod's world helpers act.
     pub(super) fn native_level_open(&self, dimension: &str) -> bool {
         (self.serving.is_some() || self.options.dedicated.is_some()) && dimension == self.dim.id()
+    }
+    /// The data of the block entity at `pos` in the loaded level `dimension`, as `save` writes it without its id
+    /// and position (`BlockEntity.saveWithoutMetadata`); None when there is none, or the level isn't loaded (also
+    /// on a client). Read-only: a mod that writes one sets the block again. API @API:block_entity_tag@.
+    pub(super) fn native_block_entity_tag(
+        &mut self,
+        dimension: &str,
+        pos: [i32; 3],
+    ) -> Option<Tag> {
+        self.npc_in_level(dimension, |g| g.block_entity_tag(pos))
+            .flatten()
+    }
+    /// The block entity at `pos` in the loaded level `dimension` takes `tag` as its data, as `save` writes it
+    /// without its id and position (which stay): what a paste or a schematic restores (a chest's items, a sign's
+    /// text) once the block is placed. True when its data changed; false also when it already holds `tag`, when
+    /// there is no block entity at `pos`, and on a client. Place the block first (`native_set_block`,
+    /// `native_edit_blocks`). API @API:set_block_tag@.
+    pub(super) fn native_set_block_tag(
+        &mut self,
+        dimension: &str,
+        pos: [i32; 3],
+        tag: Tag,
+    ) -> bool {
+        if dimension != self.dim.id() {
+            return self
+                .npc_in_level(dimension, |g| g.native_set_block_tag(dimension, pos, tag))
+                .unwrap_or(false);
+        }
+        if !self.native_level_open(dimension) || !matches!(tag, Tag::Compound(_)) {
+            return false;
+        }
+        let snbt = horizon_client::snbt::to_snbt(&tag);
+        self.load_block_entity_nbt(pos, &snbt)
+    }
+    /// The first block a ray from `eye` along `dir` meets in the level being ticked, within `range` (at most
+    /// `RAYCAST_MAX`), as the player's own view reads it: the block outline it crosses; with `fluids`, a fluid
+    /// block counts too, at its near face (`ClipContext.Fluid.ANY`). `dir` need not be a unit vector. None on a
+    /// client, for a zero `dir`, and with no hit in range. API @API:pick_block@.
+    pub(super) fn native_pick_block(
+        &self,
+        eye: [f64; 3],
+        dir: [f64; 3],
+        range: f64,
+        fluids: bool,
+    ) -> Option<NativeHit> {
+        if self.serving.is_none() && self.options.dedicated.is_none() {
+            return None;
+        }
+        let len = dir.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if len == 0.0 || !len.is_finite() {
+            return None;
+        }
+        let dir = dir.map(|v| v / len);
+        let reach = range.clamp(0.0, f64::from(RAYCAST_MAX));
+        let hit = self.clip_ray_fluids(eye, dir, reach, fluids)?;
+        let [x, y, z] = hit.pos;
+        let state = self.world.block(x, y, z);
+        Some(NativeHit {
+            block_x: x,
+            block_y: y,
+            block_z: z,
+            x: hit.point[0],
+            y: hit.point[1],
+            z: hit.point[2],
+            block: self.res.facts().get(state).name.to_string(),
+        })
+    }
+    /// The entities of the loaded level `dimension` inside the box from `min` to `max` (both corners included), by
+    /// id, as `native_level_entities` lists them; players the hub holds are included. Empty for a level not loaded,
+    /// and on a client. Walks every entity of the level: a mod calls it for a few boxes, not every tick. API
+    /// @API:entities_in@.
+    pub(super) fn native_entities_in(
+        &mut self,
+        dimension: &str,
+        min: [f64; 3],
+        max: [f64; 3],
+    ) -> Vec<u32> {
+        self.native_level_entities(dimension)
+            .into_iter()
+            .filter(|(_, _, p)| (0..3).all(|i| min[i] <= p[i] && p[i] <= max[i]))
+            .map(|(id, _, _)| id)
+            .collect()
     }
 }

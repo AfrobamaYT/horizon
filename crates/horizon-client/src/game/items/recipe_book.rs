@@ -580,6 +580,7 @@ impl Game<'_> {
                         stack,
                         self.items().get(&stack.item),
                         &crate::game::native_hooks::HookedAttributeTooltips::new(self, None),
+                        self.enchantments(),
                         &|k| self.pack.names.display_get(k),
                     )
                 })

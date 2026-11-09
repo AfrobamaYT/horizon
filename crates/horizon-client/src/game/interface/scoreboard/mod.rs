@@ -291,6 +291,8 @@ impl Game<'_> {
                 .iter()
                 .find(|f| f.id == id)
                 .and_then(|f| f.saved.as_ref().map(|s| &s.1)),
+            // A natural knot keeps no saved compound: it has no tags.
+            Target::Knot(_) => None,
         };
         match raw.and_then(|r| r.get("Tags")) {
             Some(Tag::List(l)) => l

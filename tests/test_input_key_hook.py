@@ -133,6 +133,7 @@ fn all_actions_consumption_and_window_gates() {
     let mut game = Game { window: Some(Window), modifiers: 5, early: false, input: false, calls: vec![], observed: vec![] };
     game.window_event(&ActiveEventLoop, 7, WindowEvent::Other);
     assert!(game.observed.is_empty());
+
 }
 """.replace("METHOD", actual)
         target = ROOT / "target"

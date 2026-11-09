@@ -163,16 +163,24 @@ pub(super) fn load_core(
     // read and the block facts; on a cold cache that read was most of a
     // second on the critical path, and warm it is still ~30 ms.
     // A server draws nothing and parses no models, so it skips this.
-    let (assets, parsed_models) = std::thread::scope(|scope| {
+    let (assets, parsed_models, entity_models) = std::thread::scope(|scope| {
         let models = (parallel && !headless).then(|| {
             scope.spawn(|| {
                 let _step = startup::step("core.models_parse");
                 horizon_client::model_library::ParsedModels::load(resources.source())
             })
         });
+        let entity_models = (!headless).then(|| {
+            Step::spawn(scope, parallel, "entity_models", || {
+                startup::time("core.entity_models", || {
+                    horizon_client::mobs::EntityModelDocument::load(root).ok()
+                })
+            })
+        });
         let assets = startup::time("core.assets", || Assets::load(root));
         let models = models.map(|m| m.join().unwrap_or_else(|e| std::panic::resume_unwind(e)));
-        (assets, models)
+        let entity_models = entity_models.and_then(|step| step.join()).map(Arc::new);
+        (assets, models, entity_models)
     });
     let assets = match assets {
         Ok(assets) => assets,
@@ -181,6 +189,7 @@ pub(super) fn load_core(
     progress.set(1);
     let item_data = Arc::new(mods::load_item_data(root, role).map_err(|e| e.to_string())?);
     let registry = assets.registry;
+    let entity_models_for_render = entity_models.clone();
     let (render, gameplay, visibility, biomes, environment, collision) =
         std::thread::scope(|scope| {
             let assets = &assets;
@@ -560,7 +569,6 @@ pub(super) fn load_resources(
         );
     };
     log::info!("load core tables: {:.2}s", started.elapsed().as_secs_f32());
-    let entity_models = entity_models.map(Arc::new);
     let CoreTables {
         item_data,
         assets,
@@ -669,6 +677,7 @@ pub(super) fn load_resources(
                     &behaviour_json,
                     &gameplay_projection,
                     entity_models.as_deref(),
+                    item_defaults.as_ref(),
                     visibility,
                     &progress,
                     started,
@@ -699,6 +708,7 @@ pub(super) fn load_resources(
             &behaviour_json,
             &gameplay_projection,
             entity_models.as_deref(),
+            item_defaults.as_ref(),
             visibility,
             progress,
             started,
