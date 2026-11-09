@@ -11,7 +11,10 @@ def merge(base, ours, theirs):
     result, conflicts = {}, []
     for key in sorted(base.keys() | ours.keys() | theirs.keys()):
         b, o, t = (obj.get(key, MISSING) for obj in (base, ours, theirs))
-        if o == t or t == b:
+        if o is MISSING and b is not MISSING:
+            # A fork removal is intentional even when upstream retranslates it.
+            value = MISSING
+        elif o == t or t == b:
             value = o
         elif o == b:
             value = t

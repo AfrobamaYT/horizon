@@ -61,3 +61,4 @@ docs/cosmetics.md
 launcher/src/partner.rs
 launcher/src/telemetry.rs
 tools/discord_presence_e2e.py
+crates/horizon-mods/**
