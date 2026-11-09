@@ -41,7 +41,7 @@ The derive implements the existing trait (`crates/horizon-mod-api/src/wire/wire.
 - `put_owned` moves each field with `out.put_owned`, as the generator does, so resource fields hand over ownership.
 - On a `#[non_exhaustive]` type the derive emits the same `_ => unreachable!` arm under `#[allow(unreachable_patterns)]`. Within the defining crate, `non_exhaustive` adds no case.
 
-**Names.** Type names in this section are as of `54bee0f608`. D1, D2 and the golden test use the names as of D1's base. The restructure drops the `Native` prefix (106 renames, among them `WorldEpoch`→`WorldEpoch`, `TickId`→`TickId`, `GoalSpec`→`GoalSpec`, `HeldItemSlot`→`HeldItemSlot`, `SpawnSource`→`SpawnSource`; the restructure PR carries the full table).
+**Names.** Type names in this section are as of `54bee0f608`. D1, D2 and the golden test use the names as of D1's base. The restructure drops the `Native` prefix (106 renames, among them `NativeWorldEpoch`→`WorldEpoch`, `NativeTickId`→`TickId`, `NativeGoal`→`GoalSpec`, `NativeHeldItem`→`HeldItemSlot`, `NativeSpawner`→`SpawnSource`; the restructure PR carries the full table).
 
 **Golden bytes.** These were taken from the current generated and hand-written impls at `54bee0f608` with a throwaway test, which was not committed:
 
