@@ -87,7 +87,7 @@ use mod_api::{
 };
 use mod_api::{
     BlockKey, DebugEntry, DebugRenderer, EffectKey, GuiLayer, MapDecorationType, RuntimeSprite,
-    TaskId,
+    TaskId, TextureAtlasRegistration,
 };
 use mod_api::{
     CameraType, Identifier, MobRef, NativeDespawn, NativePermissionLevel, SoundPlay, SoundRef,
