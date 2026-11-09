@@ -83,8 +83,11 @@ def main():
     attempt = int(os.environ.get("GITHUB_RUN_ATTEMPT", "1"))
     prior = ""
     if attempt > 1:
-        previous = api(f"repos/{repo}/actions/runs/{os.environ['GITHUB_RUN_ID']}/attempts/{attempt - 1}/jobs?per_page=100")["jobs"]
-        prior = previous_attempt_reason(previous, datetime.now(timezone.utc))
+        try:
+            previous = api(f"repos/{repo}/actions/runs/{os.environ['GITHUB_RUN_ID']}/attempts/{attempt - 1}/jobs?per_page=100")["jobs"]
+            prior = previous_attempt_reason(previous, datetime.now(timezone.utc))
+        except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError) as failure:
+            prior = f"previous attempt history is unavailable ({type(failure).__name__})"
     forced = bool(reason or prior or (label == "ubuntu-latest" and health_reason(jobs, datetime.now(timezone.utc))))
     if reason or prior:
         label, decision = "ubuntu-latest", prior or reason

@@ -64,6 +64,27 @@ jobs:
       forced_github: ${{ steps.hosted.outputs.forced_github }}
     steps:
       - uses: actions/checkout@v4
+      # workflow_run omits pull_requests for fork runs. Record only immutable IDs;
+      # the trusted controller reads this as bounded data, never as executable code.
+      - name: Record the original PR base for boat recovery
+        if: github.event_name == 'pull_request' && github.run_attempt == 1
+        run: |
+          python3 -I - <<'PY'
+          import json, os
+          from pathlib import Path
+          event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())
+          Path('boat-base.json').write_text(json.dumps({
+              'run_id': os.environ['GITHUB_RUN_ID'], 'attempt': '1',
+              'base': event['pull_request']['base']['sha'],
+              'head': event['pull_request']['head']['sha'],
+          }))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'pull_request' && github.run_attempt == 1
+        with:
+          name: boat-base-1
+          path: boat-base.json
+          retention-days: 2
       # The pool's switch and lease are read live: `vars` is fixed when the run is created, and a main run
       # that waits in the concurrency group would otherwise see a lease that expired while it waited.
       # A fork's pull request gets no token to read them and stays on GitHub's runners.

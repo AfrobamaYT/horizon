@@ -2,7 +2,7 @@ name: boat-recovery
 on:
   workflow_run:
     workflows: [dyna-checks]
-    types: [requested, in_progress, completed]
+    types: [completed]
   # A queued runner does not emit a new event when it crosses the ten-minute limit.
   schedule:
     - cron: '*/5 * * * *'
@@ -21,7 +21,8 @@ jobs:
       actions: write
     steps:
       # ONLY the controller workflow's trusted default-branch revision. Never use
-      # workflow_run.head_sha, PR refs, artifacts, or files from the triggering PR.
+      # workflow_run.head_sha or PR refs here. The API script may parse bounded
+      # base-SHA metadata from a PR artifact, but never extracts or executes it.
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.workflow_sha }}
