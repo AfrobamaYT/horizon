@@ -148,7 +148,6 @@
   "Choose…": "اختر…",
   "Classic arms": "أذرع كلاسيكية",
   "Clear filters": "مسح المرشحات",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "تم تحرير {bytes} بايت من ذاكرة التخزين المؤقت للبناء الأصلي. سيُجمّع البناء التالي الذي يتضمن تغييرات من البداية.",
   "Click again to delete": "انقر مرة أخرى للحذف",
   "Click again to remove": "انقر مرة أخرى للإزالة",
   "Client": "العميل",
@@ -1237,5 +1236,7 @@
   "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
   "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "replace needs a return the API carries": "replace needs a return the API carries",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
   "Runtime lease registry entries: {count}": "Runtime lease registry entries: {count}"
 }

@@ -148,7 +148,6 @@
   "Choose…": "चुनें…",
   "Classic arms": "क्लासिक आर्म्स",
   "Clear filters": "फ़िल्टर साफ़ करें",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "नेटिव बिल्ड कैश से {bytes} बाइट खाली किए गए। बदलाव वाला अगला बिल्ड शुरुआत से कंपाइल होगा।",
   "Click again to delete": "हटाने के लिए फिर क्लिक करें",
   "Click again to remove": "हटाने के लिए फिर क्लिक करें",
   "Client": "क्लाइंट",
@@ -1237,5 +1236,7 @@
   "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
   "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "replace needs a return the API carries": "replace needs a return the API carries",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
   "Runtime lease registry entries: {count}": "Runtime lease registry entries: {count}"
 }

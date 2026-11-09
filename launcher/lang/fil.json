@@ -148,7 +148,6 @@
   "Choose…": "Pumili...",
   "Classic arms": "Mga klasikong armas",
   "Clear filters": "I-clear ang mga filter",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Nalinis ang {bytes} bytes ng native build cache. Ang susunod na binagong build ay magko-compile mula sa simula.",
   "Click again to delete": "I-click muli para tanggalin",
   "Click again to remove": "I-click muli upang alisin",
   "Client": "Kliyente",
@@ -1237,5 +1236,7 @@
   "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
   "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "replace needs a return the API carries": "replace needs a return the API carries",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
   "Runtime lease registry entries: {count}": "Runtime lease registry entries: {count}"
 }

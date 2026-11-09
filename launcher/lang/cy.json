@@ -148,7 +148,6 @@
   "Choose…": "Dewiswch…",
   "Classic arms": "Breichiau clasurol",
   "Clear filters": "Clirio hidlwyr",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Wedi clirio {bytes} beit o storfa'r adeiladu brodorol. Bydd yr adeiladu nesaf sydd wedi newid yn crynhoi o'r dechrau.",
   "Click again to delete": "Cliciwch eto i ddileu",
   "Click again to remove": "Cliciwch eto i gael gwared",
   "Client": "Cleient",
@@ -1237,5 +1236,7 @@
   "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
   "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "replace needs a return the API carries": "replace needs a return the API carries",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
   "Runtime lease registry entries: {count}": "Runtime lease registry entries: {count}"
 }

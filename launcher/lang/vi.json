@@ -148,7 +148,6 @@
   "Choose…": "Chọn…",
   "Classic arms": "Cánh tay cổ điển",
   "Clear filters": "Xóa bộ lọc",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Đã xóa {bytes} byte khỏi bộ nhớ đệm biên dịch mã gốc. Lần biên dịch tiếp theo có thay đổi sẽ bắt đầu lại từ đầu.",
   "Click again to delete": "Nhấn lần nữa để xóa",
   "Click again to remove": "Nhấn lần nữa để xóa",
   "Client": "khách hàng",
@@ -1237,5 +1236,7 @@
   "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
   "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "replace needs a return the API carries": "replace needs a return the API carries",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
   "Runtime lease registry entries: {count}": "Runtime lease registry entries: {count}"
 }

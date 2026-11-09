@@ -148,7 +148,6 @@
   "Choose…": "ಆಯ್ಕೆಮಾಡಿ...",
   "Classic arms": "ಕ್ಲಾಸಿಕ್ ತೋಳುಗಳು",
   "Clear filters": "ಫಿಲ್ಟರ್‌ಗಳನ್ನು ತೆರವುಗೊಳಿಸಿ",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "ಸ್ಥಳೀಯ ಬಿಲ್ಡ್ ಕ್ಯಾಶ್‌ನಿಂದ {bytes} ಬೈಟ್‌ಗಳನ್ನು ತೆರವುಗೊಳಿಸಲಾಗಿದೆ. ಮುಂದಿನ ಬದಲಾದ ಬಿಲ್ಡ್ ಮೊದಲಿನಿಂದ ಕಂಪೈಲ್ ಆಗುತ್ತದೆ.",
   "Click again to delete": "ಅಳಿಸಲು ಮತ್ತೊಮ್ಮೆ ಕ್ಲಿಕ್ ಮಾಡಿ",
   "Click again to remove": "ತೆಗೆದುಹಾಕಲು ಮತ್ತೊಮ್ಮೆ ಕ್ಲಿಕ್ ಮಾಡಿ",
   "Client": "ಗ್ರಾಹಕ",
@@ -1237,5 +1236,7 @@
   "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
   "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "replace needs a return the API carries": "replace needs a return the API carries",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
   "Runtime lease registry entries: {count}": "Runtime lease registry entries: {count}"
 }

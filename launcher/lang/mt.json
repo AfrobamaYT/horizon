@@ -148,7 +148,6 @@
   "Choose…": "Agħżel…",
   "Classic arms": "Armi klassiċi",
   "Clear filters": "Filtri ċari",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Tneħħew {bytes} bytes mill-cache tal-bini nattiv. Il-bini mibdul li jmiss se jiġi kkompilat mill-bidu.",
   "Click again to delete": "Erġa' ikklikkja biex tħassar",
   "Click again to remove": "Erġa' ikklikkja biex tneħħi",
   "Client": "Klijent",
@@ -1237,5 +1236,7 @@
   "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
   "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "replace needs a return the API carries": "replace needs a return the API carries",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
   "Runtime lease registry entries: {count}": "Runtime lease registry entries: {count}"
 }

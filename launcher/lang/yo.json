@@ -148,7 +148,6 @@
   "Choose…": "Yan…",
   "Classic arms": "Classic apá",
   "Clear filters": "Ko awọn asẹ kuro",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "A ti pa {bytes} bytes rẹ́ kúrò nínú cache ìkọ́lé abínibí. Ìkọ́lé tí a yí padà tó kàn yóò kó jọ láti ìbẹ̀rẹ̀.",
   "Click again to delete": "Tẹ lẹẹkansi lati parẹ",
   "Click again to remove": "Tẹ lẹẹkansi lati yọkuro",
   "Client": "Onibara",
@@ -1237,5 +1236,7 @@
   "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
   "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "replace needs a return the API carries": "replace needs a return the API carries",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
   "Runtime lease registry entries: {count}": "Runtime lease registry entries: {count}"
 }

@@ -148,7 +148,6 @@
   "Choose…": "Veldu…",
   "Classic arms": "Klassískir armar",
   "Clear filters": "Hreinsaðu síur",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Hreinsaði {bytes} bæti úr skyndiminni innbyggðrar smíði. Næsta breytta smíði verður þýdd frá grunni.",
   "Click again to delete": "Smelltu aftur til að eyða",
   "Click again to remove": "Smelltu aftur til að fjarlægja",
   "Client": "Viðskiptavinur",
@@ -1237,5 +1236,7 @@
   "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
   "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "replace needs a return the API carries": "replace needs a return the API carries",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
   "Runtime lease registry entries: {count}": "Runtime lease registry entries: {count}"
 }

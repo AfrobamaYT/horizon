@@ -148,7 +148,6 @@
   "Choose…": "選択…",
   "Classic arms": "クラシック腕",
   "Clear filters": "フィルターをクリア",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "ネイティブビルドキャッシュから {bytes} バイトを解放しました。次回変更を含むビルドは最初からコンパイルされます。",
   "Click again to delete": "もう一度クリックで削除",
   "Click again to remove": "もう一度クリックして削除",
   "Client": "クライアント",
@@ -1237,5 +1236,7 @@
   "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
   "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "replace needs a return the API carries": "replace needs a return the API carries",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
   "Runtime lease registry entries: {count}": "Runtime lease registry entries: {count}"
 }

@@ -148,7 +148,6 @@
   "Choose…": "தேர்ந்தெடு…",
   "Classic arms": "கிளாசிக் ஆயுதங்கள்",
   "Clear filters": "வடிகட்டிகளை அழிக்கவும்",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "நேட்டிவ் உருவாக்க தற்காலிக சேமிப்பிலிருந்து {bytes} பைட்டுகள் அழிக்கப்பட்டன. அடுத்த மாற்றப்பட்ட உருவாக்கம் தொடக்கத்திலிருந்து தொகுக்கப்படும்.",
   "Click again to delete": "நீக்க மீண்டும் கிளிக் செய்யவும்",
   "Click again to remove": "அகற்ற மீண்டும் கிளிக் செய்யவும்",
   "Client": "வாடிக்கையாளர்",
@@ -1237,5 +1236,7 @@
   "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
   "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "replace needs a return the API carries": "replace needs a return the API carries",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
   "Runtime lease registry entries: {count}": "Runtime lease registry entries: {count}"
 }

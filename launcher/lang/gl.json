@@ -148,7 +148,6 @@
   "Choose…": "Escolle…",
   "Classic arms": "Armas clásicas",
   "Clear filters": "Borrar filtros",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Borráronse {bytes} bytes da caché de compilación nativa. A seguinte compilación con cambios compilarase desde cero.",
   "Click again to delete": "Fai clic de novo para eliminar",
   "Click again to remove": "Fai clic de novo para eliminar",
   "Client": "Cliente",
@@ -1237,5 +1236,7 @@
   "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
   "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "replace needs a return the API carries": "replace needs a return the API carries",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
   "Runtime lease registry entries: {count}": "Runtime lease registry entries: {count}"
 }

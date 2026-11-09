@@ -148,7 +148,6 @@
   "Choose…": "ເລືອກ...",
   "Classic arms": "ແຂນຄລາສສິກ",
   "Clear filters": "ລ້າງຕົວກອງ",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "ລ້າງແຄຊການສ້າງແບບເນທີຟແລ້ວ {bytes} ໄບຕ໌. ການສ້າງທີ່ມີການປ່ຽນແປງຄັ້ງຕໍ່ໄປຈະຄອມໄພລ໌ໃໝ່ທັງໝົດ.",
   "Click again to delete": "ຄລິກອີກຄັ້ງເພື່ອລຶບ",
   "Click again to remove": "ຄລິກອີກຄັ້ງເພື່ອລຶບອອກ",
   "Client": "ລູກຄ້າ",
@@ -1237,5 +1236,7 @@
   "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
   "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "replace needs a return the API carries": "replace needs a return the API carries",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
   "Runtime lease registry entries: {count}": "Runtime lease registry entries: {count}"
 }

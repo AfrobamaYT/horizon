@@ -148,7 +148,6 @@
   "Choose…": "Tanlang…",
   "Classic arms": "Klassik qo'llar",
   "Clear filters": "Filtrlarni tozalash",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Mahalliy yig'ish keshidan {bytes} bayt tozalandi. Keyingi o'zgargan yig'ish boshidan kompilyatsiya qilinadi.",
   "Click again to delete": "Oʻchirish uchun yana bosing",
   "Click again to remove": "Oʻchirish uchun yana bosing",
   "Client": "Mijoz",
@@ -1237,5 +1236,7 @@
   "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
   "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "replace needs a return the API carries": "replace needs a return the API carries",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
   "Runtime lease registry entries: {count}": "Runtime lease registry entries: {count}"
 }

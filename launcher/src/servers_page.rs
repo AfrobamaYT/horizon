@@ -408,13 +408,7 @@ fn own_name(accounts: &Accounts) -> Option<String> {
         .or_else(crate::offline_name)
 }
 
-fn bytes(n: u64) -> String {
-    match n {
-        0..1_000_000 => format!("{} kB", n.div_ceil(1000)),
-        1_000_000..1_000_000_000 => format!("{:.1} MB", n as f64 / 1e6),
-        _ => format!("{:.2} GB", n as f64 / 1e9),
-    }
-}
+use horizon_launcher::storage::format_bytes as bytes;
 
 /// A backup's date and kind from its name (`2026-10-19_11-28-57-manual.zip`, UTC), for people.
 fn backup_label(b: &Backup) -> (String, String) {

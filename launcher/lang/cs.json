@@ -148,7 +148,6 @@
   "Choose…": "Vyberte si…",
   "Classic arms": "Klasické paže",
   "Clear filters": "Vymazat filtry",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Z mezipaměti nativního sestavení bylo odstraněno {bytes} bajtů. Příští sestavení se změnami začne od začátku.",
   "Click again to delete": "Pro smazání klikněte znovu",
   "Click again to remove": "Opětovným kliknutím odeberete",
   "Client": "Klient",
@@ -1237,5 +1236,7 @@
   "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
   "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "replace needs a return the API carries": "replace needs a return the API carries",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
   "Runtime lease registry entries: {count}": "Runtime lease registry entries: {count}"
 }

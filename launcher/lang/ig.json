@@ -148,7 +148,6 @@
   "Choose…": "Họrọ…",
   "Classic arms": "Ochie ogwe aka",
   "Clear filters": "Kpochapụ ihe nzacha",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Ehichapụla {bytes} bytes nke cache owuwu nke obodo. Owuwu ọzọ gbanwere ga-achịkọta site na mmalite.",
   "Click again to delete": "Pịa ọzọ ka ihichapụ",
   "Click again to remove": "Pịa ọzọ ka iwepụ",
   "Client": "Onye ahịa",
@@ -1237,5 +1236,7 @@
   "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
   "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "replace needs a return the API carries": "replace needs a return the API carries",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
   "Runtime lease registry entries: {count}": "Runtime lease registry entries: {count}"
 }

@@ -148,7 +148,6 @@
   "Choose…": "Izvēlieties…",
   "Classic arms": "Klasiskās rokas",
   "Clear filters": "Notīrīt filtrus",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Notīrīti {bytes} baiti vietējās būvēšanas kešatmiņas. Nākamā mainītā būvēšana tiks kompilēta no sākuma.",
   "Click again to delete": "Noklikšķiniet vēlreiz, lai dzēstu",
   "Click again to remove": "Noklikšķiniet vēlreiz, lai noņemtu",
   "Client": "Klients",
@@ -1237,5 +1236,7 @@
   "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
   "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "replace needs a return the API carries": "replace needs a return the API carries",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
   "Runtime lease registry entries: {count}": "Runtime lease registry entries: {count}"
 }

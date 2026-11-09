@@ -148,7 +148,6 @@
   "Choose…": "选择…",
   "Classic arms": "经典手臂",
   "Clear filters": "清除筛选",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "已清理 {bytes} 字节的原生构建缓存。下次有更改的构建将从头编译。",
   "Click again to delete": "再次点击以删除",
   "Click again to remove": "再次点击以移除",
   "Client": "客户端",
@@ -1237,5 +1236,7 @@
   "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
   "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "replace needs a return the API carries": "replace needs a return the API carries",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
   "Runtime lease registry entries: {count}": "Runtime lease registry entries: {count}"
 }

@@ -148,7 +148,6 @@
   "Choose…": "선택...",
   "Classic arms": "기본 팔",
   "Clear filters": "필터 초기화",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "네이티브 빌드 캐시에서 {bytes}바이트를 정리했습니다. 다음 변경된 빌드는 처음부터 컴파일됩니다.",
   "Click again to delete": "삭제하려면 다시 클릭하세요",
   "Click again to remove": "제거하려면 다시 클릭하세요",
   "Client": "클라이언트",
@@ -1237,5 +1236,7 @@
   "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
   "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "replace needs a return the API carries": "replace needs a return the API carries",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
   "Runtime lease registry entries: {count}": "Runtime lease registry entries: {count}"
 }

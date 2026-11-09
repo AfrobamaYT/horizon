@@ -148,7 +148,6 @@
   "Choose…": "בחר…",
   "Classic arms": "זרועות קלאסיות",
   "Clear filters": "נקה מסננים",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "נוקו {bytes} בתים ממטמון הבנייה המקומית. הבנייה הבאה עם שינויים תתחיל מאפס.",
   "Click again to delete": "לחץ שוב כדי למחוק",
   "Click again to remove": "לחץ שוב כדי להסיר",
   "Client": "לקוח",
@@ -1237,5 +1236,7 @@
   "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
   "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "replace needs a return the API carries": "replace needs a return the API carries",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
   "Runtime lease registry entries: {count}": "Runtime lease registry entries: {count}"
 }

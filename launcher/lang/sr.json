@@ -148,7 +148,6 @@
   "Choose…": "Изаберите…",
   "Classic arms": "Класичне руке",
   "Clear filters": "Обриши филтере",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Очишћено је {bytes} бајтова кеша нативне изградње. Следећа измењена изградња ће се компајлирати од почетка.",
   "Click again to delete": "Кликните поново да бисте избрисали",
   "Click again to remove": "Кликните поново да бисте уклонили",
   "Client": "Клијент",
@@ -1237,5 +1236,7 @@
   "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
   "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "replace needs a return the API carries": "replace needs a return the API carries",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
   "Runtime lease registry entries: {count}": "Runtime lease registry entries: {count}"
 }

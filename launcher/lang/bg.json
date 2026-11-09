@@ -148,7 +148,6 @@
   "Choose…": "Изберете...",
   "Classic arms": "Класически оръжия",
   "Clear filters": "Изчистване на филтрите",
-  "Cleared {bytes} bytes of native build cache. The next changed build will compile from scratch.": "Изчистени са {bytes} байта от кеша за компилация на нативен код. Следващата компилация с промени ще започне отначало.",
   "Click again to delete": "Кликнете отново, за да изтриете",
   "Click again to remove": "Кликнете отново, за да премахнете",
   "Client": "Клиент",
@@ -1237,5 +1236,7 @@
   "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
   "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
   "replace needs a return the API carries": "replace needs a return the API carries",
+  "Freed {size} of old caches": "Freed {size} of old caches",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
   "Runtime lease registry entries: {count}": "Runtime lease registry entries: {count}"
 }
