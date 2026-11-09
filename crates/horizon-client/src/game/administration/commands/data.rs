@@ -694,13 +694,13 @@ impl Game<'_> {
             }
             Target::Projectile(id) => {
                 let uuid = self.uuid_for(id);
-                let i = self
+                let index = self
                     .creatures
                     .projectiles
                     .iter()
                     .position(|p| p.id == id)
                     .ok_or_else(stale)?;
-                self.creatures.projectiles.update(i, |p| {
+                self.creatures.projectiles.update(index, |p| {
                     if let Some(pos) = entity_nbt::position(&tag) {
                         p.position = pos;
                         p.previous = pos;

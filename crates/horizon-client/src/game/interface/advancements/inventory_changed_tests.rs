@@ -1,7 +1,7 @@
 //! Run alone with private prepared resources: installs process-wide trait mods.
 use super::super::*;
 use horizon_client::chunk::Chunk;
-use mod_api::{self, Hooks, PlayerInventoryChangedEvent, ServerHost};
+use mod_api::{Hooks, PlayerInventoryChangedEvent, ServerHost};
 use std::sync::Mutex;
 
 type Heard = (u128, Vec<Option<(String, u32)>>);
@@ -20,7 +20,16 @@ impl Hooks for Probe {
         let stacks = event
             .stacks
             .iter()
-            .map(|s| s.as_ref().map(|s| (s.item().to_string(), s.count())))
+            .map(|s| {
+                s.as_ref().map(|s| {
+                    (
+                        mod_api::__private::item_key_id(s.item())
+                            .unwrap()
+                            .to_owned(),
+                        s.count(),
+                    )
+                })
+            })
             .collect();
         self.heard.lock().unwrap().push((event.player, stacks));
     }
@@ -29,87 +38,60 @@ impl Hooks for Probe {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated mod registry"]
 fn a_changed_inventory_is_heard_once_with_its_41_slots() {
-    let root = PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-    let settings = Settings::default();
-    let loaded = load_resources(
-        horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
-        Vec::new(),
-        None,
-        &root,
-        &settings,
-        Instant::now(),
-        false,
-        execution_role::ExecutionRole::IntegratedServer,
-        &Progress::new(),
-        &mut |_, _| unreachable!(),
-    )
-    .unwrap();
-    let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
-    options.resources = root.clone();
-    options.execution_role = execution_role::ExecutionRole::IntegratedServer;
-    let heard_state = Arc::new(Mutex::new(Vec::new()));
-    let probe = Probe {
-        heard: heard_state.clone(),
-    };
-    let mods = vec![mod_api::ModEntry::new("probe", Box::new(probe))].into();
-    mod_api::testing::with_mods(mods, || {
-        let mut game = Game::new(
-            &loaded.resources,
-            loaded.pack,
-            loaded.gui.unwrap(),
-            options,
-            settings,
-            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
-                root.clone(),
-            )),
-            None,
-        )
-        .unwrap();
-        game.world = World::new(game.res.facts().air, 1);
-        game.world
-            .chunks
-            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-        game.player = Some(PlayerMotion::new(game.motion, Vec3::new(0.5, 64.0, 0.5)).unwrap());
-        let me = game.native_acting_id();
-        let heard = || std::mem::take(&mut *heard_state.lock().unwrap());
+    crate::game::native_entity_refs::tests::with_game(|game| {
+        let probe = Probe::default();
+        let heard_values = probe.heard.clone();
+        mod_api::testing::with_mods(
+            vec![mod_api::ModEntry::new("inventory_watch", Box::new(probe))].into(),
+            || {
+                game.world = World::new(game.res.facts().air, 1);
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                game.player =
+                    Some(PlayerMotion::new(game.motion, Vec3::new(0.5, 64.0, 0.5)).unwrap());
+                let me = game.native_acting_id();
+                let heard = || std::mem::take(&mut *heard_values.lock().unwrap());
 
-        // The first check after joining reports what the player holds.
-        game.check_inventory_trigger();
-        let first = heard();
-        assert_eq!(first.len(), 1);
-        assert_eq!(first[0].0, me);
-        assert_eq!(first[0].1.len(), 41);
-        assert!(first[0].1.iter().all(Option::is_none));
+                // The first check after joining reports what the player holds.
+                game.check_inventory_trigger();
+                let first = heard();
+                assert_eq!(first.len(), 1);
+                assert_eq!(first[0].0, me);
+                assert_eq!(first[0].1.len(), 41);
+                assert!(first[0].1.iter().all(Option::is_none));
 
-        // Nothing changed: nothing heard.
-        game.check_inventory_trigger();
-        assert!(heard().is_empty());
+                // Nothing changed: nothing heard.
+                game.check_inventory_trigger();
+                assert!(heard().is_empty());
 
-        // An item picked up is heard once, in its slot.
-        game.inventory[4] = Some(ItemStack::new("minecraft:diamond", 3));
-        game.check_inventory_trigger();
-        game.check_inventory_trigger();
-        let added = heard();
-        assert_eq!(added.len(), 1);
-        assert_eq!(added[0].1[4], Some(("minecraft:diamond".into(), 3)));
+                // An item picked up is heard once, in its slot.
+                game.inventory[4] = Some(ItemStack::new("minecraft:diamond", 3));
+                game.check_inventory_trigger();
+                game.check_inventory_trigger();
+                let added = heard();
+                assert_eq!(added.len(), 1);
+                assert_eq!(added[0].1[4], Some(("minecraft:diamond".into(), 3)));
 
-        // Armour feet to head (36..40), the off hand at 40.
-        game.armor[3] = Some(ItemStack::new("minecraft:iron_boots", 1));
-        game.armor[0] = Some(ItemStack::new("minecraft:iron_helmet", 1));
-        game.offhand = Some(ItemStack::new("minecraft:shield", 1));
-        game.check_inventory_trigger();
-        let worn = heard();
-        assert_eq!(worn.len(), 1);
-        let slots = &worn[0].1;
-        assert_eq!(slots[36], Some(("minecraft:iron_boots".into(), 1)));
-        assert_eq!(slots[39], Some(("minecraft:iron_helmet".into(), 1)));
-        assert_eq!(slots[40], Some(("minecraft:shield".into(), 1)));
-        assert_eq!(slots[4], Some(("minecraft:diamond".into(), 3)));
+                // Armour feet to head (36..40), the off hand at 40.
+                game.armor[3] = Some(ItemStack::new("minecraft:iron_boots", 1));
+                game.armor[0] = Some(ItemStack::new("minecraft:iron_helmet", 1));
+                game.offhand = Some(ItemStack::new("minecraft:shield", 1));
+                game.check_inventory_trigger();
+                let worn = heard();
+                assert_eq!(worn.len(), 1);
+                let slots = &worn[0].1;
+                assert_eq!(slots[36], Some(("minecraft:iron_boots".into(), 1)));
+                assert_eq!(slots[39], Some(("minecraft:iron_helmet".into(), 1)));
+                assert_eq!(slots[40], Some(("minecraft:shield".into(), 1)));
+                assert_eq!(slots[4], Some(("minecraft:diamond".into(), 3)));
 
-        // A count change is a change.
-        game.inventory[4].as_mut().unwrap().count = 1;
-        game.check_inventory_trigger();
-        assert_eq!(heard()[0].1[4], Some(("minecraft:diamond".into(), 1)));
+                // A count change is a change.
+                game.inventory[4].as_mut().unwrap().count = 1;
+                game.check_inventory_trigger();
+                assert_eq!(heard()[0].1[4], Some(("minecraft:diamond".into(), 1)));
+            },
+        );
     });
 }
 

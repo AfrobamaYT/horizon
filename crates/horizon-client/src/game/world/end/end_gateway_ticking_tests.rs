@@ -13,6 +13,8 @@ use std::sync::Arc;
 
 fn item(id: u32, at: Vec3) -> ItemEntity {
     ItemEntity {
+        attachment_lifetime: Default::default(),
+        fall_distance: 0.0,
         rotation: [0.0, 0.0],
         join: Default::default(),
         no_gravity: true,

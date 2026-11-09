@@ -1627,7 +1627,7 @@ impl Game<'_> {
             .map(|o| NativeExperienceOrb {
                 id: o.id,
                 position: [o.position.x, o.position.y, o.position.z],
-                value: o.value,
+                value: o.points(),
                 count: o.count,
             })
             .filter(|o| orb_meets(o.position, min, max))
@@ -1656,7 +1656,9 @@ impl Game<'_> {
         let Some(orb) = self.orbs.iter_mut().find(|o| o.id == id) else {
             return false;
         };
-        orb.value = value.unwrap_or(orb.value);
+        orb.value = value
+            .map(|v| v.min(i32::MAX as u32) as i32)
+            .unwrap_or(orb.value);
         orb.count = count.unwrap_or(orb.count);
         orb.age = age.unwrap_or(orb.age);
         true

@@ -601,6 +601,7 @@ pub(super) fn load_resources(
             visibility,
             api_values::mod_tint_values(assets.registry)?,
         )
+        .map(|tables| tables.with_polytone_colormaps(resolved.source(), assets.registry))
     })?);
     let pack_step = startup::step("pack.assemble");
     let mut pack = PackResources::assemble(

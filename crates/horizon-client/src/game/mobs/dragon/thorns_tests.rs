@@ -5,6 +5,7 @@ use horizon_client::{
     mobs::{Damage, DamageKind, Mob, MobEvent, Who, finalize as f},
     projectiles::{Hit, Projectile, ProjectileKind},
 };
+use horizon_core::random::LegacyRandom;
 
 fn with_game(test: impl FnOnce(&mut Game<'_>)) {
     let root = PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
@@ -201,7 +202,7 @@ fn dragon_takes_player_thorns_through_its_body() {
             g.armor[1] = Some(thorny());
             let mut d = Dragon::new(Vec3::new(0.0, 70.0, 0.0), 0.0, 1);
             d.id = SPECIAL;
-            g.dragon = Some(d);
+            g.dragon.replace(d);
             g.audio.capture.as_mut().unwrap().clear();
             if wing {
                 g.dragon_wing_knock_back(Vec3::ZERO, false);

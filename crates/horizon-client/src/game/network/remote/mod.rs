@@ -4832,11 +4832,14 @@ impl Game<'_> {
                             .name("minecraft:damage_type", p.source_type)
                             .map(str::to_owned)
                     });
-                    let by = p.cause.and_then(|id| {
-                        self.mob_index
-                            .get(&self.mobs, id as u32)
-                            .map(|m| m.kind.id.to_string())
-                    });
+                    let by = p
+                        .cause
+                        .and_then(|id| u32::try_from(id).ok())
+                        .and_then(|id| {
+                            self.mob_index
+                                .get(&self.mobs, id)
+                                .map(|m| m.kind.id.to_string())
+                        });
                     self.events
                         .note_hit(cause.unwrap_or_else(|| "unknown".into()), by);
                     if let Some(pl) = self.player.as_mut() {

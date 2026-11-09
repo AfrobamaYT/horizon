@@ -3652,7 +3652,7 @@ mod custom_data_equipment_tests {
 
 #[cfg(test)]
 mod movement_predicate_tests {
-    use super::super::game_tests::tests::server_game;
+    use crate::game::game_tests::tests::server_game;
     use horizon_core::geometry::Vec3;
     use horizon_core::position::BlockPos;
     use serde_json::json;
@@ -3709,7 +3709,7 @@ mod movement_predicate_tests {
         )
         .unwrap();
         game.world_root = root;
-        game.reload_datapacks(false);
+        game.reload_datapacks(false, &[]);
         assert!(game.run_command("scoreboard objectives add motion dummy"));
         assert!(game.run_command("execute if predicate motion:always"));
         let clock = game.world.game_time;

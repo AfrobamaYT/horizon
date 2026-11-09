@@ -1726,6 +1726,8 @@ impl Game<'_> {
         kind: DamageKind,
         direct: Option<&Projectile>,
     ) -> Hurt {
+        // `dealDefaultKnockback` for a player's melee: away from the attacker's
+        // feet. The scope names that player to the knockback hook.
         let from = (matches!(kind, DamageKind::PlayerAttack | DamageKind::Thorns))
             .then(|| self.player.as_ref().map(|p| p.position))
             .flatten();

@@ -48,10 +48,10 @@ pub(super) struct ThrownTrident {
     pub(super) no_gravity: bool,
     /// `Entity.remainingFireTicks`; on clients, the synchronized on-fire flag.
     pub(super) fire_ticks: i32,
+    pub(super) random: horizon_core::random::LegacyRandom,
     /// Water membership from the preceding `baseTick` (not updated while stuck).
     was_touching_water: bool,
     /// `Entity.random`, used for the extinguishing sound and a breeze's turn.
-    pub(super) random: horizon_core::random::LegacyRandom,
     /// `AbstractArrow.lastState`: the block it stuck in; not saved.
     last_state: Option<horizon_world::registry::BlockStateId>,
     /// `Projectile.lastDeflectedBy`: the breeze that already turned this trident.

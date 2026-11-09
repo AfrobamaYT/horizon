@@ -451,45 +451,33 @@ impl Colormap {
 /// The colormaps of the Polytone block and fluid modifiers of the packs merged at `pack_root`:
 /// (a fluid modifier, its targets, the colormap's id). Inline colormaps aren't read.
 pub(crate) fn polytone_colormap_modifiers(
-    pack_root: &std::path::Path,
+    pack_root: &ResourceSource,
 ) -> Vec<(bool, horizon_polytone::Targets, String)> {
     let mut out = Vec::new();
-    let namespaces = std::fs::read_dir(pack_root.join("assets"))
-        .into_iter()
-        .flatten()
-        .flatten();
-    for namespace in namespaces {
+    for relative in pack_root.list("assets/") {
         for (kind, fluid) in [("block_modifiers", false), ("fluid_modifiers", true)] {
-            let mut stack = vec![namespace.path().join("polytone").join(kind)];
-            while let Some(dir) = stack.pop() {
-                for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
-                    let path = entry.path();
-                    if path.is_dir() {
-                        stack.push(path);
-                        continue;
-                    }
-                    let Ok(json) = horizon_world::json_file::read::<Json>(&path) else {
-                        continue;
-                    };
-                    let Some(id) = json.get("colormap").and_then(Json::as_str) else {
-                        continue;
-                    };
-                    let id = if id.contains(':') {
-                        id.to_owned()
-                    } else {
-                        format!("minecraft:{id}")
-                    };
-                    let relative = path
-                        .strip_prefix(pack_root)
-                        .unwrap_or(&path)
-                        .to_string_lossy();
-                    let implicit = horizon_polytone::implicit_id(&relative, kind);
-                    match horizon_polytone::Targets::parse(json.get("targets"), implicit.as_deref())
-                    {
-                        Ok(targets) => out.push((fluid, targets, id)),
-                        Err(e) => log::warn!("{relative}: {e}"),
-                    }
-                }
+            if !relative.ends_with(".json") || !relative.contains(&format!("/polytone/{kind}/")) {
+                continue;
+            }
+            let Some(json) = pack_root
+                .read(&relative)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<Json>(&bytes).ok())
+            else {
+                continue;
+            };
+            let Some(id) = json.get("colormap").and_then(Json::as_str) else {
+                continue;
+            };
+            let id = if id.contains(':') {
+                id.to_owned()
+            } else {
+                format!("minecraft:{id}")
+            };
+            let implicit = horizon_polytone::implicit_id(&relative, kind);
+            match horizon_polytone::Targets::parse(json.get("targets"), implicit.as_deref()) {
+                Ok(targets) => out.push((fluid, targets, id)),
+                Err(e) => log::warn!("{relative}: {e}"),
             }
         }
     }

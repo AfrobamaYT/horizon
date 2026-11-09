@@ -2104,10 +2104,23 @@ impl Game<'_> {
         let vehicle = self
             .parent_vehicle_in(&dim, riding, &others, false)
             .map(|(tag, _)| tag);
-        let host = self.lan.take()?;
+        let mut host = self.lan.take()?;
         let mut stored = None;
-        if let Some(g) = host.hub.online_players().find(|g| g.uuid == uuid) {
-            playerdata::store(g, &mut self.level, vehicle);
+        if let Some(i) = host
+            .hub
+            .guests
+            .iter()
+            .position(|g| g.uuid == uuid && g.placed)
+        {
+            let live = Some(self.player_attachments.clone());
+            host.hub.guests.update(i, |g| {
+                let held = live.map(|a| std::mem::replace(&mut g.attachments, a));
+                playerdata::store(g, &mut self.level, vehicle);
+                if let Some(held) = held {
+                    g.attachments = held;
+                }
+            });
+            let g = &host.hub.guests[i];
             self.save_guest_records(&host, g);
             stored = Some(g.name.clone());
         } else if let Some(saved) = host.owner.as_ref().and_then(|o| o.saved.as_ref()) {
@@ -5972,7 +5985,6 @@ mod mob_swing_sync_tests {
                 latency: Arc::new(AtomicI32::new(0)),
                 address: "127.0.0.1:1".parse().unwrap(),
                 expected: false,
-                configured: Default::default(),
             },
             1,
             at,
@@ -6006,7 +6018,7 @@ mod mob_swing_sync_tests {
     #[test]
     #[ignore = "needs prepared resources and scratch homes/cwd"]
     fn an_off_hand_mob_swing_reaches_guests_as_the_off_hand() {
-        let mut game = super::super::game_tests::tests::server_game();
+        let mut game = crate::game::game_tests::tests::server_game();
         game.build_registries();
         game.set_allow_commands(true);
         let piglin = "{NoAI:1b,PersistenceRequired:1b}";
@@ -6016,8 +6028,10 @@ mod mob_swing_sync_tests {
         let rx = guest_at(&mut game, [8.5, 80.0, 8.5]);
         game.mobs[0].swing_hand_modified(true, SwingAnimation::DEFAULT);
         game.mobs[1].swing_hand_modified(false, SwingAnimation::DEFAULT);
-        let mut host = game.lan.take().expect("the hub");
-        game.lan_flush_effects(&mut host);
+        let host = game.lan.take().expect("the hub");
+        game.lan = Some(host);
+        game.lan_flush_effects();
+        let host = game.lan.take().unwrap();
         game.lan = Some(host);
         let sent = swings(&rx);
         assert!(
@@ -6063,8 +6077,11 @@ mod owner_attachment_save_tests {
         )
         .ok()
         .flatten()?;
-        Attachments::from_nbt(data.clone())
-            .get_existing(&PROGRESS)
+        PROGRESS
+            .get_existing(
+                &mut Attachments::from_nbt(data.clone()),
+                horizon_mod_runtime::attachments::Holder::Level,
+            )
             .ok()
             .flatten()
     }
@@ -6072,14 +6089,18 @@ mod owner_attachment_save_tests {
     #[test]
     #[ignore = "needs prepared resources and scratch homes/cwd"]
     fn an_autosave_writes_the_owners_live_attachments_to_the_file_it_loads() {
-        let mut game = super::super::game_tests::tests::server_game();
+        let mut game = crate::game::game_tests::tests::server_game();
         let _rx = super::world_spawn_sync_tests::host_for(&mut game);
         let uuid = 1;
         game.lan.as_mut().unwrap().owner = Some(Owner { uuid, saved: None });
         // While the owner plays, its attachments are the game's, not the guest's.
-        let mut live = Attachments::default();
-        live.set(&PROGRESS, 7).unwrap();
-        game.guest_attachments.insert(uuid, live);
+        PROGRESS
+            .set(
+                &mut game.player_attachments,
+                horizon_mod_runtime::attachments::Holder::Level,
+                7,
+            )
+            .unwrap();
         assert!(game.store_owner().is_some());
         assert_eq!(
             saved_value(&game),
@@ -6093,10 +6114,12 @@ mod owner_attachment_save_tests {
             "the map stays their one owner"
         );
         // A later change is what the next autosave writes.
-        game.guest_attachments
-            .get_mut(&uuid)
-            .unwrap()
-            .set(&PROGRESS, 9)
+        PROGRESS
+            .set(
+                &mut game.player_attachments,
+                horizon_mod_runtime::attachments::Holder::Level,
+                9,
+            )
             .unwrap();
         game.store_owner();
         assert_eq!(saved_value(&game), Some(9));

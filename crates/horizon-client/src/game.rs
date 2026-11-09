@@ -13388,7 +13388,13 @@ impl Game<'_> {
             let (a, b) = (&self.orbs[i], &self.orbs[j]);
             let (into, into_value, from, from_value, vanilla) =
                 (a.id, a.value, b.id, b.value, b.can_merge(a.id, a.value));
-            if !self.orb_merges(into, into_value, from, from_value, vanilla) {
+            if !self.orb_merges(
+                into,
+                into_value.max(0) as u32,
+                from,
+                from_value.max(0) as u32,
+                vanilla,
+            ) {
                 continue;
             }
             let Some(i) = self.orbs.locate(into_join) else {
@@ -16274,7 +16280,7 @@ impl Game<'_> {
         self.native_chunks_loaded();
         self.native_chunks_unloaded(&unloaded);
         for chunk in &unloaded {
-            self.world.modified.remove(&(chunk.x, chunk.z));
+            self.world.modified.unloaded(&(chunk.x, chunk.z));
         }
         if let Some(lod) = &mut self.lod {
             self.lod_observe
@@ -17998,7 +18004,6 @@ pub fn run_with(
     }
     let mut pack_error = None;
     let selected_root = packs::startup_root(
-        &vanilla_root,
         &vanilla_root,
         &early_settings.resource_packs,
         &[],

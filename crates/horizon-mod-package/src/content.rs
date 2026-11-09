@@ -1895,6 +1895,7 @@ capabilities = ["registries"]
             );
         }
         let oversized = BlockShapes {
+            property: String::new(),
             properties: vec![],
             values: BTreeMap::new(),
             default: Some(vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]; 17]),
@@ -3448,6 +3449,7 @@ mod context_shape_tests {
             ..Default::default()
         };
         let bad = BlockShapes {
+            property: String::new(),
             properties: vec![],
             values: BTreeMap::new(),
             default: Some(vec![[1., 0., 0., 0., 1., 1.]]),

@@ -59,7 +59,6 @@ pub fn open_uri(uri: &str) {
 /// packs are found in `vanilla`.
 pub fn startup_root(
     vanilla: &Path,
-    _base: &Path,
     selected: &[String],
     server: &[Pack],
     mod_sources: &super::mods::ModsState,
@@ -618,7 +617,7 @@ pub(super) fn stage_pack(
     japanese: bool,
     progress: &super::Progress,
 ) -> horizon_client::Result<StagedPack> {
-    let resource_root = startup_root(vanilla_root, vanilla_root, selected, server, mod_sources)?;
+    let resource_root = startup_root(vanilla_root, selected, server, mod_sources)?;
     let resource_root = super::client_reload::stage_runtime_sprites(resource_root, runtime_sprites);
     let root = resource_root.prepared().to_path_buf();
     let source = resource_root.source().clone();

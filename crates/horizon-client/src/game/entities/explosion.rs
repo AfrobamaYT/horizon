@@ -1608,7 +1608,7 @@ mod tests {
                     assert_eq!(
                         game.orbs
                             .iter()
-                            .map(|orb| orb.value * orb.count)
+                            .map(|orb| orb.points() * orb.count)
                             .sum::<u32>(),
                         5
                     );

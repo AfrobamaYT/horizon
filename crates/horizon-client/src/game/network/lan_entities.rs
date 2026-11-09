@@ -156,7 +156,7 @@ impl Game<'_> {
 
     /// Who rides what (`Entity.getPassengers`): the players in their vehicles and
     /// mobs on mobs.
-    pub(super) fn lan_riding(&self, guests: &[(u32, i32)], riding: &mut Riding) {
+    pub(super) fn lan_riding(&mut self, guests: &[(u32, i32)], riding: &mut Riding) {
         riding.clear();
         // Players arrive in boarding order; the first rider drives.
         for &(vehicle, guest) in guests {
@@ -506,17 +506,15 @@ impl Game<'_> {
             e.pitch = o.pitch;
             e.head_yaw = o.yaw;
             if let Some(tag) = self.persist.raw.get(&o.id) {
-                if let Some(stack) = self.lan_display_data(tag, e) {
-                    e.meta.retain(|(index, _, _)| *index != 23);
-                    e.meta.push((
-                        23,
-                        serializer::ITEM_STACK,
-                        Value::Item(
-                            self.lan
-                                .as_mut()
-                                .and_then(|host| host.hub.stack(&Some(stack))),
-                        ),
-                    ));
+                if let Some(item) = self.lan_display_data(tag, e) {
+                    if let Some((_, _, Value::Item(stack))) =
+                        e.meta.iter_mut().find(|(index, _, _)| *index == 23)
+                    {
+                        *stack = self
+                            .lan
+                            .as_mut()
+                            .and_then(|host| host.hub.stack(&Some(item)));
+                    }
                 }
             }
         }

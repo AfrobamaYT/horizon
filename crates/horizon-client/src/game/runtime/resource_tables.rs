@@ -146,13 +146,16 @@ impl PackResources {
     ) -> Result<Self> {
         let visibility = models::load_visibility(root.prepared(), assets.registry)?;
         api_values::resolve_block_definitions(assets.registry)?;
-        let tables = Arc::new(MeshTables::new(
-            &assets,
-            &render,
-            facts,
-            visibility,
-            api_values::mod_tint_values(assets.registry)?,
-        )?);
+        let tables = Arc::new(
+            MeshTables::new(
+                &assets,
+                &render,
+                facts,
+                visibility,
+                api_values::mod_tint_values(assets.registry)?,
+            )?
+            .with_polytone_colormaps(root.source(), assets.registry),
+        );
         let item_renderer = horizon_client::item_render::ItemRenderer::load_with_library(
             root,
             render.model_library.clone(),
