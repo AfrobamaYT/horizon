@@ -1129,6 +1129,13 @@ mod tests {
             let entity = game.entity(15).unwrap();
             assert!(game.entity_set_invulnerable(entity, true));
 
+            // Match cmd_damage's normalized direct and causing player source.
+            let source = (
+                Some(super::Target::Player),
+                Some(super::Target::Player),
+                None,
+            );
+            let before = game.dragon.as_ref().unwrap().health;
             // A survival player's blow: refused.
             game.creative = false;
             assert!(!game.command_damage_dragon(
@@ -1136,8 +1143,9 @@ mod tests {
                 10.0,
                 "minecraft:generic",
                 DamageKind::Generic,
-                (Some(super::Target::Player), None, None),
+                source,
             ));
+            assert_eq!(game.dragon.as_ref().unwrap().health, before);
             // A creative player's blow passes the flag (`isCreativePlayer`).
             game.creative = true;
             assert!(game.command_damage_dragon(
@@ -1145,8 +1153,9 @@ mod tests {
                 10.0,
                 "minecraft:generic",
                 DamageKind::Generic,
-                (Some(super::Target::Player), None, None),
+                source,
             ));
+            assert!(game.dragon.as_ref().unwrap().health < before);
             // And the void needs no creative help (`#bypasses_invulnerability`).
             game.creative = false;
             assert!(game.command_damage_dragon(
@@ -1154,7 +1163,7 @@ mod tests {
                 1000.0,
                 "minecraft:out_of_world",
                 DamageKind::OutOfWorld,
-                (Some(super::Target::Player), None, None),
+                source,
             ));
         });
     }
