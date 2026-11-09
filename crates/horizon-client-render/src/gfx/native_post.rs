@@ -2637,7 +2637,7 @@ file = \"b.wgsl\"
     /// without one: `hdr` 0, `headroom` 1, `paper_white` and `peak` 80, `black_level` 0.
     #[test]
     fn a_0_2_frame_describes_the_display_it_goes_to() {
-        let Some((device, _)) = device() else {
+        let Some((device, _)) = device(false) else {
             return;
         };
         let hud = crate::hud::HudBatch::scratch([4, 4]);
@@ -2672,7 +2672,7 @@ file = \"b.wgsl\"
     /// alone, held to the headroom. In SDR Horizon's is a clip at white.
     #[test]
     fn a_0_2_pack_is_tone_mapped_once_by_its_own_curve_or_horizons() {
-        let Some((device, queue)) = device() else {
+        let Some((device, queue)) = device(true) else {
             return;
         };
         // Light 8 times paper white, as the world's float frame stores it, in gamma.
