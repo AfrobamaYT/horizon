@@ -1044,6 +1044,7 @@ one of these moments has to move that logic into a client native mod.
 | `movement_input.rs` | `movement_input` |
 | `player_heart_type.rs` | `player_heart_type` |
 | `register_block_tint_sources.rs` | `register_block_tint_sources` |
+| `register_color_resolvers.rs` | `register_color_resolvers` |
 | `register_debug_entries.rs` | `register_debug_entries` |
 | `register_debug_renderers.rs` | `register_debug_renderers` |
 | `register_gui_layers.rs` | `register_gui_layers` |

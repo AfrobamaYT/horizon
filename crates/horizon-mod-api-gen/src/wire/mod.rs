@@ -55,6 +55,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "GameTests",
     "ClientReloadListeners",
     "PackFinders",
+    "ColorResolvers",
     "BlockTintSources",
     "ParticleProviders",
     "EnchantmentDamageEffects",
@@ -129,6 +130,7 @@ const EXPORTS: &[&str] = &[
     "ServerReloadListener",
     "GameTestFunction",
     "ClientReloadListener",
+    "BiomeColorResolver",
     "BlockTintSource",
     "ParticleProvider",
     "EnchantmentDamageEffect",
@@ -163,9 +165,14 @@ const LOAD_CONTEXTS: &[&str] = &[
 ];
 
 /// The traits the game calls on its worker threads: a mod's structure types and their pieces on
-/// the worldgen workers, its block tint sources on the meshing workers. They keep no mutable
-/// state and get no `Host`.
-const WORKERS: &[&str] = &["StructureType", "StructurePiece", "BlockTintSource"];
+/// the worldgen workers, its block tint sources and colour resolvers on the meshing workers. They
+/// keep no mutable state and get no `Host`.
+const WORKERS: &[&str] = &[
+    "StructureType",
+    "StructurePiece",
+    "BlockTintSource",
+    "BiomeColorResolver",
+];
 
 /// What a call of `method` is to the runtime, for its limits and its wait.
 pub(super) fn call_class(types: &ty::Types<'_>, method: &Method) -> &'static str {
