@@ -284,7 +284,6 @@ fn install_inside_mod(name: &'static str, part: &InsidePart) -> mod_api::Mods {
 /// own world and assets, through the production `BLOCK_CONTACT_HOOKS` fire.
 /// Returns the player's velocity x before and after, and whether it died.
 fn sweep_game_player(game: &mut Game<'_>) -> (f64, f64, bool) {
-    use horizon_client::motion::MotionWorld;
     let stone = game
         .pack
         .assets
@@ -316,6 +315,16 @@ fn sweep_game_player(game: &mut Game<'_>) -> (f64, f64, bool) {
             to: horizon_core::geometry::Vec3::new(2.5, 100.0, 0.5),
             original: None,
         });
+    sweep_game_player_runs(game, |w| w.apply_effects_from_blocks().map(|_| ()))
+}
+
+/// The same world and player setup, with the caller's passes run in the level
+/// scope: what a server turn walks, or the client's own tick.
+fn sweep_game_player_runs(
+    game: &mut Game<'_>,
+    runs: impl FnOnce(&mut horizon_client::motion::MotionWorld) -> crate::Result<()>,
+) -> (f64, f64, bool) {
+    use horizon_client::motion::MotionWorld;
     let before = game.player.as_ref().unwrap().velocity.x;
     let crate::game::Game {
         world,
@@ -330,7 +339,7 @@ fn sweep_game_player(game: &mut Game<'_>) -> (f64, f64, bool) {
     } = game;
     let entities: [horizon_core::geometry::Aabb; 0] = [];
     horizon_client::block_contact::in_level(Some("minecraft:overworld"), || {
-        MotionWorld {
+        let mut w = MotionWorld {
             tag_items: None,
             block_registries: Some(&pack.block_registries),
             loop_context,
@@ -342,9 +351,8 @@ fn sweep_game_player(game: &mut Game<'_>) -> (f64, f64, bool) {
             collision_binding: collision,
             resources: motion,
             health: health_resources,
-        }
-        .apply_effects_from_blocks()
-        .unwrap();
+        };
+        runs(&mut w).unwrap();
     });
     let player = game.player.as_ref().unwrap();
     (before, player.velocity.x, player.health.dead_or_dying())
@@ -530,5 +538,132 @@ fn an_added_effect_keeps_its_collector_position() {
                 "each contact's writes flush in InsideEffect order: the FREEZE slot before the EXTINGUISH slot"
             );
         });
+    });
+}
+
+/// A server's player is told once a tick: the early `ServerStuck` pass keeps
+/// the moves for `server_block_damage`, and only the damage pass tells the
+/// part — two blocks, two contacts, not four, as vanilla's `entityInside`
+/// runs once a move.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_servers_player_is_told_once_a_tick() {
+    let part = InsidePart::default();
+    let mods = install_inside_mod("inside-once", &part);
+    mod_api::testing::with_mods(mods, || {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            let _ = horizon_client::block_contact::HOOKS.set(BLOCK_CONTACT_HOOKS);
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            for x in [1, 2] {
+                game.world.set(x, 100, 0, stone).unwrap();
+            }
+            if game.player.is_none() {
+                game.player = Some(
+                    horizon_client::motion::PlayerMotion::new(
+                        &game.motion,
+                        horizon_core::geometry::Vec3::new(0.5, 100.0, 0.5),
+                    )
+                    .unwrap(),
+                );
+            }
+            game.player
+                .as_mut()
+                .unwrap()
+                .history
+                .add(horizon_world::entity_move::MovementRecord {
+                    from: horizon_core::geometry::Vec3::new(0.5, 100.0, 0.5),
+                    to: horizon_core::geometry::Vec3::new(2.5, 100.0, 0.5),
+                    original: None,
+                });
+            // The server turn's own order (lan_actions/tick.rs): the stuck
+            // pass before the landing is checked, then the damage pass over
+            // the same moves.
+            sweep_game_player_runs(game, |w| {
+                w.server_stuck_in_blocks(horizon_core::geometry::Vec3::new(0.5, 100.0, 0.5))?;
+                w.server_block_damage(horizon_core::geometry::Vec3::new(0.5, 100.0, 0.5))
+                    .map(|_| ())
+            });
+            assert_eq!(
+                *part.contacts.lock().unwrap(),
+                vec![[1, 100, 0], [2, 100, 0]],
+                "one contact a block, the damage pass's, not the stuck pass's too"
+            );
+        });
+    });
+}
+
+/// Without a part the two server passes leave the player as vanilla has it:
+/// the walk still reports its blocks and nothing is queued.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn the_server_passes_without_a_part_keep_vanilla_behavior() {
+    crate::game::native_entity_refs::tests::with_game(|game| {
+        let stone = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:stone")
+            .unwrap();
+        game.world.chunks.insert(
+            (0, 0),
+            std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+        );
+        for x in [1, 2] {
+            game.world.set(x, 100, 0, stone).unwrap();
+        }
+        if game.player.is_none() {
+            game.player = Some(
+                horizon_client::motion::PlayerMotion::new(
+                    &game.motion,
+                    horizon_core::geometry::Vec3::new(0.5, 100.0, 0.5),
+                )
+                .unwrap(),
+            );
+        }
+        game.player
+            .as_mut()
+            .unwrap()
+            .history
+            .add(horizon_world::entity_move::MovementRecord {
+                from: horizon_core::geometry::Vec3::new(0.5, 100.0, 0.5),
+                to: horizon_core::geometry::Vec3::new(2.5, 100.0, 0.5),
+                original: None,
+            });
+        let _ = horizon_client::block_contact::HOOKS.set(BLOCK_CONTACT_HOOKS);
+        let velocity = game.player.as_ref().unwrap().velocity.x;
+        sweep_game_player_runs(game, |w| {
+            w.server_stuck_in_blocks(horizon_core::geometry::Vec3::new(0.5, 100.0, 0.5))?;
+            w.server_block_damage(horizon_core::geometry::Vec3::new(0.5, 100.0, 0.5))
+                .map(|_| ())
+        });
+        assert_eq!(
+            game.player.as_ref().unwrap().velocity.x,
+            velocity,
+            "no writes without a part"
+        );
+        let entered = game
+            .player
+            .as_ref()
+            .unwrap()
+            .events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    horizon_client::motion::MotionEvent::EnterBlock { .. }
+                )
+            })
+            .count();
+        assert_eq!(entered, 2, "each block still reported, vanilla's moments");
+        assert!(horizon_client::block_contact::take_pending().is_empty());
     });
 }

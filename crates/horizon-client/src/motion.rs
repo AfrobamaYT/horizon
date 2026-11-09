@@ -3300,17 +3300,22 @@ impl crate::block_contact::InsideWalk for PlayerInside<'_, '_, '_, '_> {
             return Ok(());
         };
         let name = definition.name.as_str();
-        // The part's contact, mid-walk, where vanilla runs the block's own
-        // `entityInside`; its writes join this step only when it answered.
-        self.m.mod_block_inside(state, p, precise, effects);
         // The server's early pass: only what `makeStuckInBlock` does there,
-        // before the landing is checked.
+        // before the landing is checked. `server_stuck_in_blocks` keeps the
+        // history for `server_block_damage`, so the part is NOT told here —
+        // its one contact a tick, vanilla's `entityInside` count, comes from
+        // the passes that follow.
         if self.pass == BlockPass::ServerStuck {
             if matches!(name, "minecraft:cobweb" | "minecraft:sweet_berry_bush") {
                 self.m.server_stuck_in_block();
             }
             return Ok(());
         }
+        // The part's contact, mid-walk, where vanilla runs the block's own
+        // `entityInside`; its writes join this step only when it answered.
+        // Client and ServerDamage only: those passes each consume the moves
+        // they walk, so no pass pair tells the part twice.
+        self.m.mod_block_inside(state, p, precise, effects);
         // CactusBlock, CampfireBlock and the cauldrons' entityInside
         // (`entity.hurt`, the fire and the fill level), and WitherRoseBlock's
         // server-side effect.
