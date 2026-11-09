@@ -62,7 +62,6 @@
     "crates/horizon-server/src/service.rs github.com",
     "crates/horizon-server/src/update.rs api.github.com",
     "launcher/src/backend.rs api.github.com",
-    "launcher/src/backend.rs arismoko.github.io",
     "launcher/src/backend.rs github.com",
     "launcher/src/backend.rs playhorizon.dev",
     "launcher/src/backend.rs raw.githubusercontent.com",

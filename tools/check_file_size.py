@@ -24,6 +24,7 @@ code too, so Rust source quoted in a string is no module.
 """
 
 import argparse
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -183,20 +184,32 @@ def baseline_problems(sizes, previous, counts, sync):
 
 
 def sync_provenance(marker, base, head="HEAD"):
-    """Verify ancestry, not a claimed SHA: the sync must merge this exact parent."""
+    """Require a freshly verified upstream-main ancestor and its exact merge parent."""
     shallow = git("rev-parse", "--is-shallow-repository").strip()
     if shallow == "true":
         return ["sync baseline provenance needs full history; fetch --unshallow before checking"]
     if marker is None:
         return ["sync baseline provenance needs a sync-baseline header"]
-    commit = subprocess.run(["git", "cat-file", "-t", marker], cwd=ROOT,
-                            capture_output=True, text=True)
-    if commit.returncode != 0 or commit.stdout.strip() != "commit":
-        return [f"sync baseline SHA {marker} is not an available commit"]
     ancestor = subprocess.run(["git", "merge-base", "--is-ancestor", marker, base], cwd=ROOT,
                               capture_output=True)
     if ancestor.returncode == 0:
         return ["sync baseline SHA is already an ancestor of the base"]
+    upstream_url = os.environ.get("HORIZON_UPSTREAM_URL", "https://github.com/horizon-rust/horizon.git")
+    try:
+        fetched = subprocess.run(
+            ["git", "fetch", "--no-tags", "--filter=blob:none", upstream_url,
+             "+refs/heads/main:refs/sync/upstream-main"],
+            cwd=ROOT, capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        return ["cannot verify sync baseline: upstream main fetch timed out; network access is required"]
+    if fetched.returncode != 0:
+        return ["cannot verify sync baseline: upstream main fetch failed; network access is required: "
+                + fetched.stderr.strip()]
+    upstream_ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", marker, "refs/sync/upstream-main"],
+        cwd=ROOT, capture_output=True)
+    if upstream_ancestor.returncode != 0:
+        return ["sync baseline SHA is not an ancestor of upstream main"]
     merges = git("rev-list", "--merges", "--parents", f"{base}..{head}")
     if not any(marker in row.split()[1:] for row in merges.splitlines()):
         return ["sync baseline SHA must be a parent of a merge commit in base..HEAD"]

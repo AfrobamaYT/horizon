@@ -858,7 +858,7 @@ pub const CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(30 *
 /// The community, sponsor and website links and the official server's address, from
 /// `launcher/links.json` on main, so they can change without a launcher release. An empty address
 /// hides its button (an empty `official_server`: no official server offered).
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Links {
     pub discord: String,
     pub sponsor: String,
@@ -877,18 +877,8 @@ pub struct Links {
 impl Default for Links {
     /// What the launcher uses until (or unless) it can read links.json.
     fn default() -> Self {
-        Self {
-            discord: horizon_addresses::COMMUNITY_DISCORD.into(),
-            sponsor: "https://github.com/sponsors/ludovic111".into(),
-            website: "https://playhorizon.dev".into(),
-            roadmap: "https://github.com/users/arismoko/projects/1".into(),
-            docs: "https://arismoko.github.io/horizon/".into(),
-            official_server: crate::server_list::OFFICIAL_ADDRESS.into(),
-            official_server_previous: crate::server_list::OFFICIAL_PREVIOUS
-                .iter()
-                .map(|a| a.to_string())
-                .collect(),
-        }
+        serde_json::from_str(include_str!("../links.json"))
+            .expect("embedded launcher links must match Links")
     }
 }
 

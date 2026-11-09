@@ -3,6 +3,7 @@ import io
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -203,6 +204,12 @@ class SyncProvenanceTests(unittest.TestCase):
         self.run_git("checkout", "-q", "-b", "upstream")
         self.commit("upstream")
         self.upstream = self.run_git("rev-parse", "HEAD").strip()
+        self.remote = self.root / "upstream.git"
+        self.run_git("init", "-q", "--bare", str(self.remote))
+        self.run_git("push", "-q", str(self.remote), "HEAD:refs/heads/main")
+        environment = mock.patch.dict(os.environ, {"HORIZON_UPSTREAM_URL": str(self.remote)})
+        environment.start()
+        self.addCleanup(environment.stop)
         self.run_git("checkout", "-q", "-b", "work", self.base)
         self.commit("fork")
         patch = mock.patch.object(check_file_size, "ROOT", self.root)
@@ -227,10 +234,56 @@ class SyncProvenanceTests(unittest.TestCase):
             with self.subTest(marker=marker):
                 self.assertTrue(check_file_size.sync_provenance(marker, self.base))
 
+    def test_an_upstream_base_ancestor_that_is_a_merge_parent_is_rejected(self):
+        # A forced merge makes the old base an exact merge parent, and it is
+        # also in upstream main. Only the outside-base rule rejects this SHA.
+        self.run_git("checkout", "-q", "-b", "already-based", self.base)
+        self.run_git("merge", "-q", "--no-ff", "--no-edit", "upstream")
+        result = check_file_size.sync_provenance(self.base, self.base)
+        self.assertIn("already an ancestor of the base", result[0])
+
     def test_ancestor_without_merge_parent_is_not_a_sync(self):
         self.run_git("checkout", "-q", "upstream")
         self.commit("child")
         self.assertTrue(check_file_size.sync_provenance(self.upstream, self.base))
+
+    def test_a_fork_commit_is_not_an_upstream_main_ancestor(self):
+        fork = self.run_git("rev-parse", "HEAD").strip()
+        self.assertIn("not an ancestor of upstream main",
+                      check_file_size.sync_provenance(fork, self.base)[0])
+
+    def test_unreachable_upstream_fails_even_with_a_cached_ref(self):
+        self.run_git("merge", "-q", "--no-edit", "upstream")
+        self.assertEqual(check_file_size.sync_provenance(self.upstream, self.base), [])
+        with mock.patch.dict(os.environ, {"HORIZON_UPSTREAM_URL": str(self.root / "missing.git")}):
+            result = check_file_size.sync_provenance(self.upstream, self.base)
+        self.assertIn("upstream main fetch failed", result[0])
+
+    def test_fork_side_branch_merge_cannot_exempt_a_new_production_file(self):
+        self.run_git("checkout", "-q", "-b", "forgery", self.base)
+        self.commit("forged-parent")
+        forged = self.run_git("rev-parse", "HEAD").strip()
+        self.run_git("checkout", "-q", "work")
+        self.run_git("merge", "-q", "--no-edit", "forgery")
+        self.assertIn("not an ancestor of upstream main",
+                      check_file_size.sync_provenance(forged, self.base)[0])
+        (self.root / "tools").mkdir()
+        (self.root / "tools/file_size_baseline.txt").write_text(
+            f"# sync-baseline: {forged}\nproduction.rs 3101\n")
+        (self.root / "production.rs").write_text("fn production() {}\n" * 3101)
+        self.run_git("add", "tools/file_size_baseline.txt", "production.rs")
+        self.run_git("commit", "-q", "-m", "forge size exemption")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertNotEqual(check_file_size.main(["--base", self.base]), 0)
+        self.assertIn("not an ancestor of upstream main", output.getvalue())
+        self.assertIn("baseline added or raised", output.getvalue())
+        checker = self.root / "tools/check_file_size.py"
+        checker.write_text(Path(check_file_size.__file__).read_text())
+        result = subprocess.run([sys.executable, str(checker), "--base", self.base],
+                                cwd=self.root, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("not an ancestor of upstream main", result.stdout)
 
     def test_shallow_history_is_an_explicit_failure(self):
         self.run_git("merge", "-q", "--no-edit", "upstream")

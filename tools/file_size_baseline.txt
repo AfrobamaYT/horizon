@@ -7,7 +7,7 @@ crates/horizon-client/src/game/entities/minecarts.rs 3364
 crates/horizon-client/src/game/network/remote/mod.rs 12690
 crates/horizon-client/src/mobs.rs 5704
 crates/horizon-client/src/title.rs 4690
-launcher/src/backend.rs 4589
+launcher/src/backend.rs 4579
 launcher/src/main.rs 5827
 launcher/src/servers_page.rs 3458
 launcher/src/cli.rs 3830
