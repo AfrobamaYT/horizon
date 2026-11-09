@@ -855,21 +855,28 @@ mod tests {
                 .update(0, |guest| guest.vehicle = None);
             for vehicle in [70, 71, 72] {
                 let capacity = if vehicle == 72 { 4 } else { 3 };
-                for rider in 73..73 + capacity {
-                    assert!(game.start_riding_target(
-                        Target::Mob(rider),
+                // Entity.removePassenger sets a 60-tick boarding cooldown. Fresh
+                // riders isolate canAddPassenger from that unrelated refusal.
+                let first = 100 + vehicle * 10;
+                for id in first..=first + capacity {
+                    let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+                    game.mobs.push(Mob::new(id, kind, Vec3::ZERO, 0.0));
+                }
+                for rider in first..first + capacity {
+                    assert!(
+                        game.start_riding_target(Target::Mob(rider), Target::Mob(vehicle), false),
+                        "ordinary passenger {rider} must fit vehicle {vehicle}"
+                    );
+                }
+                assert!(
+                    !game.start_riding_target(
+                        Target::Mob(first + capacity),
                         Target::Mob(vehicle),
                         false
-                    ));
-                }
-                if capacity == 3 {
-                    assert!(!game.start_riding_target(
-                        Target::Mob(76),
-                        Target::Mob(vehicle),
-                        false
-                    ));
-                }
-                for rider in 73..73 + capacity {
+                    ),
+                    "a fresh passenger must not fit beyond vehicle {vehicle}'s capacity"
+                );
+                for rider in first..first + capacity {
                     game.dismount_mob(rider);
                 }
             }
