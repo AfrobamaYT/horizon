@@ -34,3 +34,12 @@ pub const STUN_SERVERS: &[&str] = &["stun.cloudflare.com:3478", "stun.l.google.c
 /// Play with Friends' troubleshooting page, shown to hosts nobody can reach.
 pub const FRIENDS_HELP: &str =
     "https://github.com/horizon-rust/horizon/blob/main/docs/play-with-friends.md#troubleshooting";
+
+/// Horizon community invite used by launcher defaults.
+pub const COMMUNITY_DISCORD: &str = "https://discord.gg/playhorizon";
+
+/// The sponsoring hosting provider’s referral page.
+pub const HOSTING_PARTNER: &str = "https://my.sculkhosting.com/ref/horizon";
+
+/// The official cosmetics shop.
+pub const SHOP: &str = "https://playhorizon.dev/shop";

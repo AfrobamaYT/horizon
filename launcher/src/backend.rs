@@ -874,7 +874,7 @@ impl Default for Links {
     /// What the launcher uses until (or unless) it can read links.json.
     fn default() -> Self {
         Self {
-            discord: "https://discord.gg/playhorizon".into(),
+            discord: horizon_addresses::COMMUNITY_DISCORD.into(),
             sponsor: "https://github.com/sponsors/ludovic111".into(),
             website: "https://playhorizon.dev".into(),
             official_server: crate::server_list::OFFICIAL_ADDRESS.into(),

@@ -8,6 +8,7 @@ description = "Downloads, prepares and starts Horizon builds"
 [workspace]
 
 [dependencies]
+horizon-addresses = { path = "../crates/horizon-addresses" }
 # The catalog and mod-owned trait injections share their generation rules.
 horizon-mod-api-gen = { path = "../crates/horizon-mod-api-gen" }
 horizon-mod-point-shape = { path = "../crates/horizon-mod-point-shape" }
