@@ -350,6 +350,31 @@ impl Game<'_> {
                 })
                 .flatten(),
             Target::Mob(mob) => {
+                if self.sulfur_archetype_attribute(t, name) {
+                    let done = self.write_generic_attribute(t, name, id, write.clone(), default)?;
+                    // The body's map owns the command value, while bodiless physics
+                    // reads the base and permanent modifiers from finalize's cache.
+                    if done && name == "minecraft:knockback_resistance" {
+                        let m = self.mobs.iter_mut().find(|m| m.id == mob && !m.removed)?;
+                        // Admission belongs to the body's map. Its archetype changes can
+                        // remove an ID without touching finalize's mirror, so an accepted
+                        // add replaces any stale copy there rather than being refused twice.
+                        let mirror = match write {
+                            AttributeWrite::Add {
+                                modifier,
+                                permanent,
+                                ..
+                            } => AttributeWrite::Add {
+                                modifier,
+                                permanent,
+                                replace: true,
+                            },
+                            other => other,
+                        };
+                        write_own_attribute(m, Attr::KnockbackResistance, mirror);
+                    }
+                    return Some(done);
+                }
                 let m = self.mobs.iter_mut().find(|m| m.id == mob && !m.removed)?;
                 if let Some(a) = own_attribute(m, name) {
                     return Some(write_own_attribute(m, a, write));

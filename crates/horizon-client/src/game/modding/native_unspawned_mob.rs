@@ -849,9 +849,8 @@ mod tests {
     fn a_panicking_listener_still_ends_the_lend() {
         let installed = || vec![mod_api::ModEntry::new("kept-goal", Box::new(KeptGoalMod))];
         mod_api::testing::with_mods(installed().into(), || {
+            super::super::api_values::install_parts(&installed()).unwrap();
             with_game(|game| {
-                super::super::api_values::install_parts(&installed()).unwrap();
-                game.resolve_parts().unwrap();
                 let kind = game
                     .res
                     .mob_types()
@@ -889,9 +888,8 @@ mod tests {
                     "the mod goal keeps its goal: {back:?}"
                 );
                 assert!(!back.contains(&"ModGoal"), "no copied mod goal: {back:?}");
-                super::super::api_values::install_parts(&[]).unwrap();
-                game.resolve_parts().unwrap();
             });
+            super::super::api_values::install_parts(&[]).unwrap();
         });
     }
 

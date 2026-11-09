@@ -865,11 +865,39 @@ pub(super) mod tests {
                 std::fs::create_dir(&home).unwrap();
                 command.env(key, home);
             }
-            let status = command.status().unwrap();
+            let output = command.output().unwrap();
             std::fs::remove_dir_all(scratch).unwrap();
-            assert!(status.success(), "{name}: {case}");
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            // The child's log, captured with this test's own output.
+            print!("{stdout}");
+            eprint!("{}", String::from_utf8_lossy(&output.stderr));
+            assert!(output.status.success(), "{name}: {case}");
+            assert!(
+                ran_one_test(&stdout),
+                "{name}: {case}: the child matched no test of that name"
+            );
         }
         true
+    }
+
+    /// Whether libtest's summary says exactly one test passed: `--exact` with a name no test
+    /// has runs nothing and still exits 0.
+    fn ran_one_test(stdout: &str) -> bool {
+        stdout
+            .lines()
+            .any(|line| line.starts_with("test result: ok. 1 passed;"))
+    }
+
+    /// A child run with a name no test has fails the parent instead of passing vacuously.
+    #[test]
+    #[ignore = "runs in an isolated scratch process"]
+    #[should_panic(expected = "matched no test of that name")]
+    fn a_fresh_case_whose_name_matches_no_test_fails() {
+        run_fresh_cases(
+            "game::native_entity_refs::tests::no_test_has_this_name",
+            "HORIZON_NO_MATCH_CHILD",
+            &["missing"],
+        );
     }
 
     /// The parent runs and checks an isolated child; the child loads the Part fixtures' types.
@@ -879,12 +907,24 @@ pub(super) mod tests {
         }
         let _mods = mod_api::__private::part_tests::game_thread();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        Some(
-            super::super::mods::content_root(&base, &Default::default())
-                .unwrap()
-                .prepared()
-                .to_path_buf(),
-        )
+        let root = super::super::mods::content_root(&base, &Default::default())
+            .unwrap()
+            .prepared()
+            .to_path_buf();
+        // game_thread installs a small synthetic key table for API-only tests.
+        // This fixture loads a real resource graph: resolve its complete keys first.
+        let (registry, _) = horizon_world::level::data::load_registry_with_flags(&root).unwrap();
+        let ids: std::collections::HashSet<_> = (0..registry.len())
+            .map(|i| {
+                registry
+                    .state(horizon_world::registry::BlockStateId(i as u32))
+                    .unwrap()
+                    .name
+                    .clone()
+            })
+            .collect();
+        crate::game::api_values::register_game_keys(ids);
+        Some(root)
     }
 
     pub(in crate::game) fn with_game(test: impl FnOnce(&mut super::Game<'_>)) {
