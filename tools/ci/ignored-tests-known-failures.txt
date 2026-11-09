@@ -52,3 +52,6 @@ horizon-client game::levels::tests::features_write_a_full_neighbour_only_through
 horizon-client game::levels::tests::an_old_chunk_saves_the_heights_its_new_neighbour_calculated #2474
 # #2474 dependency: external constructed 1.20.4 save with its partial ring removed; no committed recipe or CI provisioning.
 horizon-client game::levels::tests::the_overworld_cache_holds_the_edge_chunks_calculated_heights #2474
+
+# #2505 dependency: canonical ignored-test runner lacks HORIZON_FISHING_RESOURCES and HORIZON_FISHING_REFERENCE; remove when real oracle inputs are provisioned there.
+horizon-client game::fishing::tests::fishing_retrieve_reference #2505
