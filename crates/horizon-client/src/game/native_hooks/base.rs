@@ -2978,8 +2978,8 @@ impl Game<'_> {
     /// On the server, only when the `advance_time` rule is on;
     /// `native_time_skip` then hears the jump to the time chosen here and
     /// may still cancel it. The players wake and the weather resets as
-    /// usual either way. Set `canceled` and the clock is left where it is, as
-    /// NeoForge's cancel leaves it: `native_time_skip` is not asked either.
+    /// usual either way. Set `canceled` and the clock is left where it is:
+    /// `native_time_skip` is not asked either.
     pub(in crate::game) fn native_sleep_finished_time(
         &mut self,
         dimension: &str,
