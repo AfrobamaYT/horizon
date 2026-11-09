@@ -47,9 +47,9 @@ pub(super) fn resolve(
     if let Some(action) = pending.take() {
         match action {
             PendingConsent::Build(ids) => {
-                for id in ids {
-                    java::set_enabled(home, &id, false)?;
-                }
+                // One rewrite: a failure can never leave some declined mods on.
+                let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+                java::set_all_enabled(home, &ids, false)?;
             }
             PendingConsent::Toggle(entry) => {
                 if let Some(id) = horizon_launcher::browser::horizon::mod_id(&entry) {
@@ -97,12 +97,18 @@ mod tests {
             assert!(settings.native_mods_allowed_at.is_none());
         }
         java::set_enabled(home.path(), "sample", true).unwrap();
-        let mut pending = Some(PendingConsent::Build(vec!["sample".into()]));
+        java::set_enabled(home.path(), "second", true).unwrap();
+        java::set_enabled(home.path(), "unrelated", true).unwrap();
+        let mut pending = Some(PendingConsent::Build(vec![
+            "sample".into(),
+            "second".into(),
+        ]));
         resolve(&mut pending, false, true, &mut settings, home.path()).unwrap();
         assert!(
-            !java::is_enabled(home.path(), "sample"),
-            "NoConsent cancellation turns the build's mods off"
+            !java::is_enabled(home.path(), "sample") && !java::is_enabled(home.path(), "second"),
+            "NoConsent cancellation turns every one of the build's mods off"
         );
+        assert!(java::is_enabled(home.path(), "unrelated"));
         let mut unsupported = Some(PendingConsent::Local("sample".into()));
         assert!(resolve(&mut unsupported, true, false, &mut settings, home.path()).is_err());
         assert!(unsupported.is_some());
