@@ -222,6 +222,23 @@ fn end_portal_rotation(into_end: bool, [yaw, pitch]: [f32; 2], spawn: [f32; 2]) 
     };
     [yaw, pitch.clamp(-90.0, 90.0)]
 }
+/// Apply a resolved destination to the entity tree without resetting its cooldown.
+fn set_arrival_pose(tag: &mut Tag, at: Vec3, motion: Vec3, [yaw, pitch]: [f32; 2], yaw_turn: f32) {
+    if let Some(was) = horizon_client::entity_nbt::position(tag) {
+        move_passengers(tag, at.subtract(was), yaw_turn);
+    }
+    if let Tag::Compound(c) = tag {
+        c.insert("Pos".into(), doubles([at.x, at.y, at.z]));
+        c.insert("Motion".into(), doubles([motion.x, motion.y, motion.z]));
+        c.insert(
+            "Rotation".into(),
+            Tag::List(vec![Tag::Float(yaw.to_bits()), Tag::Float(pitch.to_bits())]),
+        );
+        // PortalCooldown keeps what setPortalCooldown gave it before
+        // the teleport (`send_through_portal`), copied by restoreFrom.
+    }
+}
+
 /// A waiting entity as `horizon_portal_arrivals.dat` keeps it.
 fn arrival_tag(a: &Arrival) -> Tag {
     let p = &a.plan;
@@ -755,7 +772,15 @@ impl Game<'_> {
     /// entity takes its first passenger's delay when that is a server player
     /// (`Player.getDimensionChangingDelay`), else 300.
     fn dimension_changing_delay(&self, id: u32) -> i32 {
-        if self.boats.iter().any(|b| b.id == id) || self.carts.iter().any(|c| c.id == id) {
+        if self.boats.iter().any(|b| b.id == id)
+            || self.carts.iter().any(|c| c.id == id)
+            || self.lan_acting_entity == Some(id)
+            || self
+                .lan
+                .iter()
+                .flat_map(|h| &h.hub.guests)
+                .any(|g| g.entity_id as u32 == id)
+        {
             VEHICLE_DELAY
         } else if self.creatures.projectiles.iter().any(|p| p.id == id)
             || self.tridents.iter().any(|t| t.id == id)
@@ -1313,20 +1338,7 @@ impl Game<'_> {
                 let (at, rotation) = self.arrival(&plan, exit);
                 (at, rotate_y(motion, -rotation), [yaw + rotation, pitch])
             };
-            let yaw_turn = yaw - was_yaw;
-            if let Some(was) = horizon_client::entity_nbt::position(&tag) {
-                move_passengers(&mut tag, at.subtract(was), yaw_turn);
-            }
-            if let Tag::Compound(c) = &mut tag {
-                c.insert("Pos".into(), doubles([at.x, at.y, at.z]));
-                c.insert("Motion".into(), doubles([motion.x, motion.y, motion.z]));
-                c.insert(
-                    "Rotation".into(),
-                    Tag::List(vec![Tag::Float(yaw.to_bits()), Tag::Float(pitch.to_bits())]),
-                );
-                // PortalCooldown keeps what setPortalCooldown gave it before
-                // the teleport (`send_through_portal`), copied by restoreFrom.
-            }
+            set_arrival_pose(&mut tag, at, motion, [yaw, pitch], yaw - was_yaw);
             // ServerLevel.addDuringTeleport: a fresh add, not loaded from disk.
             super::persist::mark_fresh(&mut tag);
             let key = ((at.x.floor() as i32) >> 4, (at.z.floor() as i32) >> 4);
@@ -1576,6 +1588,15 @@ mod tests {
             let (cow, pig) = (mob("minecraft:cow", 102), mob("minecraft:pig", 104));
             game.mobs.push(cow);
             game.mobs.push(pig);
+            assert_eq!(game.dimension_changing_delay(12), 10);
+            let mut projectile = horizon_client::projectiles::Projectile::new(
+                horizon_client::projectiles::ProjectileKind::Snowball,
+                Vec3::ZERO,
+                None,
+            );
+            projectile.id = 106;
+            game.creatures.projectiles.push(projectile);
+            assert_eq!(game.dimension_changing_delay(106), 2);
             let entry = BlockPos::new(0, 64, 0);
             // Boats and minecarts (`VehicleEntity`) are 10 whoever rides them;
             // a mob vehicle follows its first passenger. Riders: none, mob
@@ -1643,6 +1664,16 @@ mod tests {
         assert_eq!(state.cooldown, expected - 1);
     }
 
+    #[test]
+    fn resolved_arrival_keeps_source_cooldown() {
+        for cooldown in [2, 10, 300] {
+            let mut tag = Tag::compound([("PortalCooldown", Tag::Int(cooldown))]);
+            set_arrival_pose(&mut tag, Vec3::ZERO, Vec3::ZERO, [90.0, 0.0], 90.0);
+            assert_eq!(tag.get("PortalCooldown"), Some(&Tag::Int(cooldown)));
+            assert_eq!(horizon_client::entity_nbt::position(&tag), Some(Vec3::ZERO));
+        }
+    }
+
     /// `EntityTravelToDimensionEvent` for server players: both are asked with
     /// their own id, the target level and the cause; the spared one stays, the
     /// other may go.
@@ -1688,6 +1719,10 @@ mod tests {
             assert_eq!(left, [ids[0]]);
             assert_eq!(game.portals.arrivals.len(), 1);
             assert_eq!(game.portals.arrivals[0].plan.dim, Dim::Nether);
+            assert_eq!(
+                game.portals.arrivals[0].tag.get("PortalCooldown"),
+                Some(&Tag::Int(300))
+            );
             let nether = || "minecraft:the_nether".to_owned();
             let cause = || "nether_portal".to_owned();
             assert_eq!(
