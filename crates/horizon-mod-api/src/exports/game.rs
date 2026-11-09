@@ -2,11 +2,9 @@
 #[doc(hidden)]
 pub mod game;
 pub use crate::game::{
-    CubeFace, BlockEdit, BlockRun, Clock, ColumnBlocks, Config,
-    ConfigFile, ConfigKind, DataMapType, ExperienceOrb, Falling,
-    Heightmap, HeldItemSlot, Hit, MapDecoration, MapInfo,
-    MobRender, ModEvent, PlayerRender, Shake, PhantomSpawnResult,
-    SleepProblem,
+    BlockEdit, BlockRun, Clock, ColumnBlocks, Config, ConfigFile, ConfigKind, CubeFace,
+    DataMapType, ExperienceOrb, Falling, Heightmap, HeldItemSlot, Hit, MapDecoration, MapInfo,
+    MobRender, ModEvent, PhantomSpawnResult, PlayerRender, Shake, SleepProblem,
 };
 mod __private {
     mod built {
