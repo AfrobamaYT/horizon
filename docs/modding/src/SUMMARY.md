@@ -29,6 +29,7 @@
 - [Design: custom recipe-book settings](concepts/recipe-book-types.md)
 - [Design: section meshing](concepts/section-meshing.md)
 - [Design: section geometry](concepts/section-geometry.md)
+- [Design: mesh visibility](concepts/mesh-visibility.md)
 - [Design: travel and move hooks](concepts/travel-and-move.md)
 
 # How-to
