@@ -11829,12 +11829,10 @@ impl Game<'_> {
                 .play("minecraft:entity.player.attack.nodamage", from, 1.0, 1.0);
         }
     }
-    /// ServerExplosion: rays from a 16^3 grid lose (resistance + 0.3) * 0.3 per step.
     /// A mob explosion (`ServerLevel.explode` with `ExplosionInteraction.MOB`:
     /// blocks are kept without mobGriefing, else the mob_explosion_drop_decay
     /// rule picks decay). Mods are asked through `can_entity_grief` for
     /// `source`, the exploding entity (the rule alone without one).
-    /// `ServerLevel.explode` with `ExplosionInteraction.MOB` and the caller's fire flag.
     fn explode_with(
         &mut self,
         source: Option<u32>,
@@ -11850,8 +11848,6 @@ impl Game<'_> {
         };
         self.server_explode_from(center, radius, interaction, fire, blast)
     }
-    /// `SulfurCube.tickFuse`: `ExplosionInteraction.TNT` (the
-    /// tnt_explosion_drop_decay rule) with mobGriefing, `NONE` without.
     /// Copies of a save batch carrying its live block entities and save data.
     fn with_entities<'a>(
         &self,
