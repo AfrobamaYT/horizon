@@ -5,7 +5,7 @@
 
 /// A part of a humanoid model, by the name vanilla's `PlayerModel` gives it. The outer skin
 /// layer's parts (`Hat`, `Jacket`, the sleeves and the pants) are children of the part they cover.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, horizon_mod_api_macros::Wire)]
 #[non_exhaustive]
 pub enum HumanoidPart {
     /// The head.
@@ -72,7 +72,7 @@ impl HumanoidPart {
 
 /// One humanoid part as posed this frame: its pose relative to its parent, and whether it draws
 /// (`ModelPart.visible`, after Skin Customization).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, horizon_mod_api_macros::Wire)]
 #[non_exhaustive]
 pub struct PosedPart {
     /// Which part it is.
@@ -83,12 +83,12 @@ pub struct PosedPart {
     pub visible: bool,
 }
 
-/// The humanoid parts of a model, posed this frame.
-#[derive(Clone, Debug, PartialEq)]
+/// The humanoid parts of a model, posed this frame: a fixed-size snapshot, nothing allocated.
+#[derive(Clone, Copy, Debug, PartialEq, horizon_mod_api_macros::Wire)]
 #[non_exhaustive]
 pub struct PosedParts {
-    /// The parts the model has, in [`HumanoidPart::ALL`]'s order.
-    pub parts: Vec<PosedPart>,
+    /// Each of [`HumanoidPart::ALL`] at its index there: None for a part the model lacks.
+    pub parts: [Option<PosedPart>; 12],
 }
 
 impl PosedParts {
@@ -96,35 +96,38 @@ impl PosedParts {
     /// z scale) and whether they draw; None when the model lacks a head or a body (not a humanoid
     /// model). A part the model lacks, such as a zombie's sleeves, is left out.
     pub fn new(pose: impl Fn(HumanoidPart) -> Option<([f32; 9], bool)>) -> Option<Self> {
-        let parts: Vec<_> = HumanoidPart::ALL
-            .into_iter()
-            .filter_map(|part| {
-                let (v, visible) = pose(part)?;
-                let pose = crate::PartPose {
-                    x: v[0],
-                    y: v[1],
-                    z: v[2],
-                    x_rot: v[3],
-                    y_rot: v[4],
-                    z_rot: v[5],
-                    x_scale: v[6],
-                    y_scale: v[7],
-                    z_scale: v[8],
-                };
-                Some(PosedPart {
-                    part,
-                    pose,
-                    visible,
-                })
+        let parts = HumanoidPart::ALL.map(|part| {
+            let (v, visible) = pose(part)?;
+            let pose = crate::PartPose {
+                x: v[0],
+                y: v[1],
+                z: v[2],
+                x_rot: v[3],
+                y_rot: v[4],
+                z_rot: v[5],
+                x_scale: v[6],
+                y_scale: v[7],
+                z_scale: v[8],
+            };
+            Some(PosedPart {
+                part,
+                pose,
+                visible,
             })
-            .collect();
-        let has = |want: HumanoidPart| parts.iter().any(|p| p.part == want);
-        (has(HumanoidPart::Head) && has(HumanoidPart::Body)).then_some(Self { parts })
+        });
+        let posed = Self { parts };
+        (posed.get(HumanoidPart::Head).is_some() && posed.get(HumanoidPart::Body).is_some())
+            .then_some(posed)
     }
 
     /// `part` as posed this frame, if the model has it.
     pub fn get(&self, part: HumanoidPart) -> Option<PosedPart> {
-        self.parts.iter().find(|p| p.part == part).copied()
+        self.parts[part as usize]
+    }
+
+    /// The parts the model has, in [`HumanoidPart::ALL`]'s order.
+    pub fn iter(&self) -> impl Iterator<Item = PosedPart> + '_ {
+        self.parts.iter().flatten().copied()
     }
 }
 
@@ -149,7 +152,7 @@ mod tests {
         );
         assert_eq!(parts.get(HumanoidPart::RightSleeve), None);
         assert_eq!(parts.get(HumanoidPart::Head).unwrap().pose.x_rot, 0.5);
-        let order: Vec<_> = parts.parts.iter().map(|p| p.part).collect();
+        let order: Vec<_> = parts.iter().map(|p| p.part).collect();
         assert_eq!(
             order,
             [
