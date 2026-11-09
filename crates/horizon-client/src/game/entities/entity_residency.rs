@@ -222,6 +222,9 @@ impl Game<'_> {
 }
 
 #[cfg(test)]
+#[path = "entity_residency/all_family_binding_tests.rs"]
+mod all_family_binding_tests;
+#[cfg(test)]
 #[path = "entity_residency/lifetime_tests.rs"]
 mod lifetime_tests;
 
