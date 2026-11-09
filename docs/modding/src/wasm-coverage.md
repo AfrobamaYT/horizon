@@ -497,6 +497,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Backend::player_item_cooldowns` | crosses | Wire call |
 | `Backend::player_has_item_cooldown` | crosses | Wire call |
 | `Backend::player_item_cooldown_percent` | crosses | Wire call |
+| `Backend::player_attack_strength_scale` | crosses | Wire call |
 | `Backend::player_exp_cooldown` | crosses | Wire call |
 | `Backend::player_last_death_location` | crosses | Wire call |
 | `Backend::player_needs_food` | crosses | Wire call |
