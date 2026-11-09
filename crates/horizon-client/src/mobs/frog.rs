@@ -513,13 +513,16 @@ impl Goal for ShootTongue {
         // A frog can never accept a player. Hide the mutable player
         // selection from this proposal so a rejected player redirect cannot
         // change who the remainder of the mob tick sees.
-        let mut target_world = cx.w.clone();
-        target_world.player = cx.w.selected_player().cloned();
-        target_world.player_identity = cx.w.selected_player_identity();
-        target_world.player_selection = None;
-        let super::TargetChange::Set(Some(Who::Mob(id))) =
+        let change = if cx.w.mob_hooks.is_none() {
+            super::TargetChange::Set(Some(Who::Mob(t.id)))
+        } else {
+            let mut target_world = cx.w.clone();
+            target_world.player = cx.w.selected_player().cloned();
+            target_world.player_identity = cx.w.selected_player_identity();
+            target_world.player_selection = None;
             target_world.change_target(m, true, Some(Who::Mob(t.id)))
-        else {
+        };
+        let super::TargetChange::Set(Some(Who::Mob(id))) = change else {
             return false;
         };
         let Some(t) =
@@ -1119,15 +1122,16 @@ mod tests {
                 }
             },
             |world, types| {
-                for (outcome, expected) in [
-                    (TargetChange::Keep, None),
-                    (TargetChange::Set(None), None),
-                    (TargetChange::Set(Some(Who::Mob(2))), Some(2)),
-                    (TargetChange::Set(Some(Who::Mob(3))), Some(3)),
-                    (TargetChange::Set(Some(Who::Mob(4))), None),
-                    (TargetChange::Set(Some(Who::Mob(5))), None),
-                    (TargetChange::Set(Some(Who::Mob(999))), None),
-                    (TargetChange::Set(Some(Who::Player)), None),
+                for (with_hook, outcome, expected) in [
+                    (false, TargetChange::Keep, Some(2)),
+                    (true, TargetChange::Keep, None),
+                    (true, TargetChange::Set(None), None),
+                    (true, TargetChange::Set(Some(Who::Mob(2))), Some(2)),
+                    (true, TargetChange::Set(Some(Who::Mob(3))), Some(3)),
+                    (true, TargetChange::Set(Some(Who::Mob(4))), None),
+                    (true, TargetChange::Set(Some(Who::Mob(5))), None),
+                    (true, TargetChange::Set(Some(Who::Mob(999))), None),
+                    (true, TargetChange::Set(Some(Who::Player)), None),
                 ] {
                     let hook = Hook(outcome, Cell::new(0));
                     let selection = crate::mobs::player_selection::PlayerSelection::new(
@@ -1144,7 +1148,7 @@ mod tests {
                     .unwrap();
                     let mut world = world.clone();
                     world.player_selection = Some(&selection);
-                    world.mob_hooks = Some(&hook);
+                    world.mob_hooks = with_hook.then_some(&hook as &dyn MobHooks);
                     let kind = std::sync::Arc::new(types.types["minecraft:frog"].clone());
                     let mut m = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
                     register(&mut m);
@@ -1163,7 +1167,7 @@ mod tests {
                         "{outcome:?}"
                     );
                     assert_eq!(attack_target(&m), expected.map(Who::Mob));
-                    assert_eq!(hook.1.get(), 1);
+                    assert_eq!(hook.1.get(), usize::from(with_hook));
                     assert_eq!(selection.selected().unwrap().entity_id, 99);
                     assert!(!selection.has_switched());
                     if expected.is_some() {
@@ -1172,7 +1176,11 @@ mod tests {
                         ShootTongue.stop(&mut m, &mut cx);
                         assert_eq!(attack_target(&m), None);
                         assert_eq!(m.extra.frog.tongue_target, None);
-                        assert_eq!(hook.1.get(), 1, "ShootTongue.stop erases memory directly");
+                        assert_eq!(
+                            hook.1.get(),
+                            usize::from(with_hook),
+                            "ShootTongue.stop erases memory directly"
+                        );
                     }
                 }
             }
