@@ -741,7 +741,10 @@ impl Game<'_> {
         match site {
             SpawnSite::Raw => return Some(mob),
             SpawnSite::Finalizing(reason) => match self.finalize_with(&mut mob, reason, None) {
-                Finalized::Cancelled => return None,
+                Finalized::Cancelled => {
+                    self.forget_entity(mob.id);
+                    return None;
+                }
                 Finalized::Skipped => return Some(mob),
                 Finalized::Done => {}
             },
