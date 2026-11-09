@@ -18,6 +18,7 @@
 - [Design: transactional block-entity removal](concepts/block-entity-removal.md)
 - [Design: decide, fire, apply](concepts/decide-fire-apply.md)
 - [Design: client action pipeline](concepts/client-action-pipeline.md)
+- [Design: effect added](concepts/effect-added.md)
 - [Design: multi-block placement](concepts/multi-block-placement.md)
 - [Design: Part instance state](concepts/part-instance-state.md)
 - [Design: moving structures](concepts/moving-structures.md)
