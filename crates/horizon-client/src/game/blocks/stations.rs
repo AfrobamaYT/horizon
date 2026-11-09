@@ -3415,6 +3415,9 @@ impl Game<'_> {
         if let Some(ingredient) = ingredient {
             self.native_brewing_start(at, &ingredient);
         }
+        if !was_idle || consumed_fuel || started || out != brewing::BrewTick::default() {
+            self.container_changed(pos);
+        }
         let (x, y, z) = pos;
         if out.brewed {
             self.native_brewing_complete(at);
@@ -4051,3 +4054,7 @@ mod cycling_tests {
         assert_eq!(y, 4.0);
     }
 }
+
+#[cfg(test)]
+#[path = "tests/brewing_changed_tests.rs"]
+mod brewing_changed_tests;
