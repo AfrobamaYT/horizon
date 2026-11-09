@@ -22,7 +22,7 @@ pub trait SectionGeometry: Send + Sync + 'static {
 /// One quad a [`SectionGeometry`] adds. Its corners go counter-clockwise seen from the side it
 /// faces; a solid quad is culled from behind, as a block's faces are, so a quad seen from both
 /// sides is two quads.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, horizon_mod_api_macros::Wire)]
 // exhaustive: mods build quads with struct literals
 pub struct SectionQuad {
     /// The corners, in blocks from the section's lowest corner, each 0 to 16: a quad stays inside
