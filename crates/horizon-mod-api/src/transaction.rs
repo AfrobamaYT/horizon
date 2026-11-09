@@ -51,6 +51,7 @@ impl TransactionSeal {
 
 /// The seal of the transaction the game opened with write token `token` and close token
 /// `close`, for its raw open helper.
+// hidden: the game's side of the seal, re-exported through `__private`.
 #[doc(hidden)]
 pub fn transaction_seal(token: u64, close: u64) -> TransactionSeal {
     TransactionSeal {
@@ -60,12 +61,14 @@ pub fn transaction_seal(token: u64, close: u64) -> TransactionSeal {
 }
 
 /// The write token `tx` names, for the game's checks.
+// hidden: the game's side of the seal, re-exported through `__private`.
 #[doc(hidden)]
 pub fn transaction_token(tx: &Transaction) -> u64 {
     tx.0
 }
 
 /// The write and close tokens `seal` carries, for the game's checks.
+// hidden: the game's side of the seal, re-exported through `__private`.
 #[doc(hidden)]
 pub fn seal_tokens(seal: &TransactionSeal) -> (u64, u64) {
     (seal.tx.0, seal.close)
