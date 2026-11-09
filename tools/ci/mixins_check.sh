@@ -63,7 +63,9 @@ points = json.loads((scratch/'points.json').read_text())['points']
 target = "horizon_client::game::Game<'_>::tick_mobs"
 area = "horizon_client::game::using_item::Game<'_>::start_eating"
 assert not any(row['target'] == target for row in points)
-assert any(row['target'] == area and row['raw'] and row['at_return'] for row in points)
+# at_return describes API listeners only. This internals injection instead
+# requires the typed raw return listener (start_eating takes engine ItemInfo).
+assert any(row['target'] == area and row['raw'] and row.get('return_listener') for row in points)
 text = manifest.read_text()
 for token, path, kind in [('GAME_HASH', 'horizon_client::game::Game', 'struct'),
                           ('TICK_HASH', "horizon_client::game::Game<'_>::tick", 'method'),

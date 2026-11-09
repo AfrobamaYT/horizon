@@ -596,6 +596,47 @@ impl<T, const DIRECT: bool> JoinList<T, DIRECT> {
 }
 
 impl<T> JoinList<T> {
+    /// Edit one entity while reading every other entity through disjoint slices.
+    /// The slices retain list order and exclude the edited entity.
+    pub fn with_one_and_rest<R>(
+        &mut self,
+        index: usize,
+        edit: impl FnOnce(&mut T, &[T], &[T]) -> R,
+    ) -> Option<R> {
+        if index >= self.0.len() {
+            return None;
+        }
+        self.written();
+        let (before, at_and_after) = self.0.split_at_mut(index);
+        let (at, after) = at_and_after.split_first_mut()?;
+        Some(edit(at, before, after))
+    }
+
+    /// Edit two distinct entities while reading the rest through disjoint
+    /// slices in list order. Arguments `first` and `second` follow the given
+    /// indices even when those indices are reversed.
+    pub fn with_two_and_rest<R>(
+        &mut self,
+        first: usize,
+        second: usize,
+        edit: impl FnOnce(&mut T, &mut T, &[T], &[T], &[T]) -> R,
+    ) -> Option<R> {
+        if first == second || first >= self.0.len() || second >= self.0.len() {
+            return None;
+        }
+        self.written();
+        let (low, high) = (first.min(second), first.max(second));
+        let (before, low_and_after) = self.0.split_at_mut(low);
+        let (low_item, after_low) = low_and_after.split_first_mut()?;
+        let (between, high_and_after) = after_low.split_at_mut(high - low - 1);
+        let (high_item, after) = high_and_after.split_first_mut()?;
+        Some(if first == low {
+            edit(low_item, high_item, before, between, after)
+        } else {
+            edit(high_item, low_item, before, between, after)
+        })
+    }
+
     pub fn retain_mut(&mut self, keep: impl FnMut(&mut T) -> bool) {
         self.written();
         self.retain_where(keep);
@@ -1209,6 +1250,38 @@ mod tests {
                 (5, another)
             ]
         );
+    }
+
+    #[test]
+    fn scoped_edits_exclude_mutated_elements_and_preserve_order() {
+        let mut list: JoinList<_> = (0..5).map(entity).collect();
+        let stamp = list.stamp();
+        list.with_one_and_rest(2, |at, before, after| {
+            assert_eq!(before.iter().map(|x| x.value).collect::<Vec<_>>(), [0, 1]);
+            assert_eq!(after.iter().map(|x| x.value).collect::<Vec<_>>(), [3, 4]);
+            at.value = 20;
+        })
+        .unwrap();
+        assert_ne!(list.stamp(), stamp);
+
+        list.with_two_and_rest(3, 1, |first, second, before, between, after| {
+            assert_eq!((first.value, second.value), (3, 1));
+            assert_eq!(before.iter().map(|x| x.value).collect::<Vec<_>>(), [0]);
+            assert_eq!(between.iter().map(|x| x.value).collect::<Vec<_>>(), [20]);
+            assert_eq!(after.iter().map(|x| x.value).collect::<Vec<_>>(), [4]);
+            first.value = 30;
+            second.value = 10;
+        })
+        .unwrap();
+        assert_eq!(
+            list.iter().map(|x| x.value).collect::<Vec<_>>(),
+            [0, 10, 20, 30, 4]
+        );
+        let stamp = list.stamp();
+        assert!(list.with_one_and_rest(5, |_, _, _| ()).is_none());
+        assert!(list.with_two_and_rest(2, 2, |_, _, _, _, _| ()).is_none());
+        assert!(list.with_two_and_rest(0, 5, |_, _, _, _, _| ()).is_none());
+        assert_eq!(list.stamp(), stamp);
     }
 
     #[test]

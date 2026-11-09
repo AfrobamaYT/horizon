@@ -81,4 +81,24 @@ pub trait ConfigClientHost {
     /// when no language layer defines it.
     #[access(ClientSetup)]
     fn translate(&self, key: &str) -> Option<String>;
+    /// Side: client.
+    /// The calling mod's toggle `key` (`Registrar::register_setting`): the player's choice, else
+    /// its default. None when the mod registered no toggle by that key.
+    #[access(WorldOnly)]
+    fn setting_bool(&self, key: &str) -> Option<bool>;
+    /// Side: client.
+    /// The index of the option the player picked for the calling mod's choice `key`, else its
+    /// default. None when the mod registered no choice by that key.
+    #[access(WorldOnly)]
+    fn setting_choice(&self, key: &str) -> Option<u32>;
+    /// Side: client.
+    /// The calling mod's range `key`: the player's value, else its default; a kept value outside
+    /// the range reads as the default. None when the mod registered no range by that key.
+    #[access(WorldOnly)]
+    fn setting_f64(&self, key: &str) -> Option<f64>;
+    /// Side: client.
+    /// The calling mod's colour `key`, `0xRRGGBB`: the player's choice, else its default. None
+    /// when the mod registered no colour by that key.
+    #[access(WorldOnly)]
+    fn setting_color(&self, key: &str) -> Option<u32>;
 }

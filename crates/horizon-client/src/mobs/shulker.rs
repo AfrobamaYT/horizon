@@ -74,7 +74,9 @@ pub fn register(m: &mut Mob) {
     m.ai.targets.add(
         2,
         NearestTarget::player(true).gate(peaceful_off).when(|m, w| {
-            let Some(p) = &w.player else { return false };
+            let Some(p) = w.selected_player() else {
+                return false;
+            };
             let d = p.position.subtract(m.position);
             let axis = match m.extra.variant3 {
                 0 | 1 => d.y,
@@ -403,7 +405,7 @@ fn teleport(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) -> bool {
         });
         m.needs_sync = true;
         m.extra.counter = 0;
-        m.ai.target = None;
+        m.set_ai_target(w, None);
         return true;
     }
     false
@@ -552,7 +554,7 @@ fn on_peek_change(m: &Mob, w: &MobWorld, old: f32, new: f32, events: &mut Vec<Mo
         area,
         delta,
     });
-    if let Some(p) = &w.player
+    if let Some(p) = w.selected_player()
         && p.alive
         && !p.spectator
         && p.bounds.intersects(area)
@@ -843,7 +845,7 @@ impl Goal for ShulkerAttack {
         };
         m.look_at_speed([t.position.x, t.eye_y, t.position.z], 180.0, 180.0);
         if t.position.distance_squared(m.position) >= 400.0 {
-            m.ai.target = None;
+            m.set_ai_target(cx.w, None);
             return;
         }
         if self.attack_time > 0 {
@@ -862,7 +864,8 @@ impl Goal for ShulkerAttack {
         let seed = m.random.next_long() as u64 | 1;
         let bullet =
             Projectile::shulker_bullet(&probe, bullet_origin(m), Who::Mob(m.id), who, axis, seed);
-        cx.events.push(MobEvent::Projectile(bullet));
+        cx.events
+            .push(cx.w.route_player_event(MobEvent::Projectile(bullet)));
         let pitch = (m.random.next_float() - m.random.next_float()) * 0.2 + 1.0;
         cx.events.push(MobEvent::Sound(
             "entity.shulker.shoot",

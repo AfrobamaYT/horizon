@@ -583,6 +583,22 @@ impl Menu {
         let Some((source, i)) = found else {
             return -1;
         };
+        let requested = count;
+        let slot = self.slots[target];
+        let count = if slot.container == super::MAIN {
+            match self.container_limits.get(slot.index).copied().flatten() {
+                Some(limit) => {
+                    let room = limit.saturating_sub(existing.as_ref().map_or(0, |s| s.count));
+                    if room == 0 {
+                        return -1;
+                    }
+                    count.min(room as i32)
+                }
+                None => count,
+            }
+        } else {
+            count
+        };
         let cell = match source {
             None => &mut self.containers[PLAYER][i],
             Some(k) => &mut self.sources[k][i],
@@ -598,7 +614,7 @@ impl Menu {
             None => self.containers[slot.container][slot.index] = Some(taken),
             Some(have) => have.count += taken.count,
         }
-        count - taken_count
+        requested - taken_count
     }
 
     /// `clearGrid`: the slots to clear go back to the inventory (or drop),
@@ -792,5 +808,23 @@ mod tests {
         assert_eq!(s.keys().len(), 1);
         assert!(s.can_craft(&[&ing(&["minecraft:stick"]), &ing(&["minecraft:stick"])]));
         assert!(!s.can_craft(&[&ing(&["minecraft:stick"]); 3]));
+    }
+}
+
+#[cfg(test)]
+mod container_limit_tests {
+    #[test]
+    fn recipe_placement_stops_at_the_container_override() {
+        let mut menu = super::Menu::new(super::Kind::Furnace("smelting"));
+        menu.set_container_limits(vec![Some(10); 3]);
+        menu.containers[super::PLAYER][0] =
+            Some(crate::items::ItemStack::new("minecraft:stick", 20));
+        assert_eq!(menu.move_item_to_grid(0, "minecraft:stick", 20), 10);
+        assert_eq!(menu.slot(0).unwrap().count, 10);
+        assert_eq!(menu.move_item_to_grid(0, "minecraft:stick", 10), -1);
+        assert_eq!(
+            menu.containers[super::PLAYER][0].as_ref().unwrap().count,
+            10
+        );
     }
 }

@@ -13,7 +13,7 @@ use horizon_client::pose::Pose;
 use mod_api::EntityRef;
 
 /// `Pose`'s serialized names by id (`Pose.STANDING` is 0).
-const POSES: [&str; 18] = [
+pub(super) const POSES: [&str; 18] = [
     "standing",
     "fall_flying",
     "sleeping",
@@ -35,7 +35,7 @@ const POSES: [&str; 18] = [
 ];
 
 /// `Entity.getMaxAirSupply`: a dolphin's 4800, an axolotl's 6000, else 300.
-fn max_air(species: Option<Species>) -> i32 {
+pub(super) fn max_air(species: Option<Species>) -> i32 {
     match species {
         Some(Species::Dolphin) => 4800,
         Some(Species::Axolotl) => horizon_client::mobs::axolotl::MAX_AIR,

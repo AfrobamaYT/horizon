@@ -5448,7 +5448,9 @@ impl Hub {
             g.sent_xp = None;
             g.sent_air = (300, 0.0);
             g.sent_frozen = 0;
-            g.sent_shared = 0;
+            // Respawn KEEP_ALL_DATA copies the old player's tracked values,
+            // including shared flags. Preserve the publication baseline so a
+            // flag cleared after the level change is still sent to that client.
             g.sent_shoulders = [None; 2];
             g.sent_stuck = (0, 0);
             let (cx, cz) = g.chunk();

@@ -20,6 +20,18 @@ use mod_api::{
     crash::{NativeModCall, enter_native_mod},
 };
 
+mod live_backend;
+mod live_entity;
+mod live_living;
+mod live_merchant;
+mod live_mob;
+#[cfg(test)]
+mod live_read_tests;
+mod live_support;
+mod live_vehicle;
+#[cfg(test)]
+mod redirect_tests;
+
 /// What a mod goal runs with: the mob in hand, the tick's `MobWorld` (the
 /// [`mobs::part_goals::GoalHost`], the snapshot and the player view ride on
 /// it) and the game host behind the tick, for the reads that are the level's
@@ -37,6 +49,7 @@ pub(super) struct GoalCx<'a, 'w> {
 enum Resolved<'a> {
     Own,
     Player,
+    Live(&'a Mob),
     Seen(&'a Seen),
     Dragon(TargetInfo),
 }
@@ -56,10 +69,10 @@ impl GoalCx<'_, '_> {
         if id == self.m.id {
             return Some(Resolved::Own);
         }
-        if self.w.player.is_some()
+        if self.w.selected_player().is_some()
             && self
                 .w
-                .player_identity
+                .selected_player_identity()
                 .is_some_and(|(_, player)| player == id)
         {
             return Some(Resolved::Player);
@@ -68,6 +81,11 @@ impl GoalCx<'_, '_> {
             && dragon == id
         {
             return Some(Resolved::Dragon(info));
+        }
+        if let Some(mobs) = self.w.live_mobs {
+            // When the tick has a live view, it is authoritative. Falling
+            // back to an older snapshot here would resurrect a stale handle.
+            return mobs.find(id).filter(|mob| !mob.removed).map(Resolved::Live);
         }
         let others = self.w.others;
         let seen = match self.w.others_index {
@@ -95,41 +113,52 @@ impl GoalCx<'_, '_> {
     pub(crate) fn lookup_entity(&self, id: u32) -> Option<EntityRef> {
         let host = self.w.goal_host?;
         let epoch = host.epoch()?;
-        match self.resolve(EntityRef::new(epoch, id))? {
-            Resolved::Own | Resolved::Player | Resolved::Seen(_) | Resolved::Dragon(_) => {
-                Some(EntityRef::new(epoch, id))
-            }
+        let entity = EntityRef::new(epoch, id);
+        match self.resolve(entity) {
+            Some(
+                Resolved::Own
+                | Resolved::Player
+                | Resolved::Live(_)
+                | Resolved::Seen(_)
+                | Resolved::Dragon(_),
+            ) => Some(entity),
+            None => self.host.entity(id),
         }
     }
 
     /// `Host::living`: the handle resolves in the tick's view.
     pub(crate) fn lookup_living(&self, entity: EntityRef) -> Option<LivingRef> {
-        self.resolve(entity).map(|_| LivingRef::new(entity))
+        self.resolve(entity)
+            .map(|_| LivingRef::new(entity))
+            .or_else(|| self.host.living(entity))
     }
 
     /// `Host::mob`: the handle resolves in the tick's view as a mob — the
     /// ticking mob, a snapshot mob, the dragon — but never a player: a player
     /// is no `MobRef`, as the write handle's own narrowing refuses it.
     pub(crate) fn lookup_mob(&self, entity: EntityRef) -> Option<MobRef> {
-        match self.resolve(entity)? {
-            Resolved::Player => None,
-            _ => Some(MobRef::new(entity)),
+        match self.resolve(entity) {
+            Some(Resolved::Player) => None,
+            Some(_) => Some(MobRef::new(entity)),
+            None => self.host.mob(entity),
         }
     }
 
-    /// `Host::player`: the player the tick sees, by uuid.
+    /// `Host::player`: resolve any online player, including the one the tick
+    /// sees, by UUID.
     pub(crate) fn lookup_player(&self, uuid: u128) -> Option<PlayerRef> {
-        let host = self.w.goal_host?;
-        let epoch = host.epoch()?;
-        let (uuid_seen, id) = self.w.player_identity?;
-        (uuid == horizon_client::lan::playerdata::ints_uuid(uuid_seen))
+        self.host.player(uuid).or_else(|| {
+            let (uuid_seen, id) = self.w.selected_player_identity()?;
+            let epoch = self.w.goal_host?.epoch()?;
+            (self.w.selected_player().is_some()
+                && uuid == horizon_client::lan::playerdata::ints_uuid(uuid_seen))
             .then(|| mod_api::__private::game::player_ref(EntityRef::new(epoch, id), uuid))
+        })
     }
 
-    /// `Host::item_entity`: no item entity is in the tick's view.
+    /// `Host::item_entity`: items remain in the game during mob ticks.
     pub(crate) fn lookup_item_entity(&self, entity: EntityRef) -> Option<mod_api::ItemEntityRef> {
-        let _ = entity;
-        None
+        self.host.item_entity(entity)
     }
 
     /// `Host::block_entity`: block entities live in the world's chunks, which
@@ -146,7 +175,8 @@ impl GoalCx<'_, '_> {
     fn position(&self, entity: EntityRef) -> Option<horizon_core::geometry::Vec3> {
         match self.resolve(entity)? {
             Resolved::Own => Some(self.m.position),
-            Resolved::Player => self.w.player.as_ref().map(|p| p.position),
+            Resolved::Live(mob) => Some(mob.position),
+            Resolved::Player => self.w.selected_player().map(|p| p.position),
             Resolved::Seen(seen) => Some(seen.position),
             Resolved::Dragon(info) => Some(info.position),
         }
@@ -166,7 +196,8 @@ impl GoalCx<'_, '_> {
     fn r_entity_velocity(&self, entity: EntityRef) -> Option<[f64; 3]> {
         match self.resolve(entity)? {
             Resolved::Own => Some(self.m.velocity),
-            Resolved::Player => self.w.player.as_ref().map(|p| p.velocity),
+            Resolved::Live(mob) => Some(mob.velocity),
+            Resolved::Player => self.w.selected_player().map(|p| p.velocity),
             Resolved::Seen(seen) => Some(seen.velocity),
             Resolved::Dragon(_) => None,
         }
@@ -178,6 +209,7 @@ impl GoalCx<'_, '_> {
             // `getYRot` and `getXRot`: the snapshot carries no pitch and a
             // player's view no pitch either, so only the mob in hand answers.
             Resolved::Own => Some([self.m.yaw, self.m.head_pitch]),
+            Resolved::Live(mob) => Some([mob.yaw, mob.head_pitch]),
             _ => None,
         }
     }
@@ -185,7 +217,8 @@ impl GoalCx<'_, '_> {
     fn r_entity_head_yaw(&self, entity: EntityRef) -> Option<f32> {
         match self.resolve(entity)? {
             Resolved::Own => Some(self.m.head_yaw),
-            Resolved::Player => self.w.player.as_ref().map(|p| p.yaw),
+            Resolved::Live(mob) => Some(mob.head_yaw),
+            Resolved::Player => self.w.selected_player().map(|p| p.yaw),
             // `Seen::yaw` is the body's, not the head's.
             Resolved::Seen(_) | Resolved::Dragon(_) => None,
         }
@@ -194,7 +227,8 @@ impl GoalCx<'_, '_> {
     fn r_entity_bounding_box(&self, entity: EntityRef) -> Option<[[f64; 3]; 2]> {
         let bounds = match self.resolve(entity)? {
             Resolved::Own => self.m.bounds(),
-            Resolved::Player => self.w.player.as_ref().map(|p| p.bounds)?,
+            Resolved::Live(mob) => mob.bounds(),
+            Resolved::Player => self.w.selected_player().map(|p| p.bounds)?,
             Resolved::Seen(seen) => seen.bounds,
             Resolved::Dragon(info) => info.bounds,
         };
@@ -205,7 +239,8 @@ impl GoalCx<'_, '_> {
     fn r_entity_eye_height(&self, entity: EntityRef) -> Option<f64> {
         match self.resolve(entity)? {
             Resolved::Own => Some(self.m.eye_y() - self.m.position.y),
-            Resolved::Player => self.w.player.as_ref().map(|p| p.eye[1] - p.position.y),
+            Resolved::Live(mob) => Some(mob.eye_y() - mob.position.y),
+            Resolved::Player => self.w.selected_player().map(|p| p.eye[1] - p.position.y),
             Resolved::Seen(seen) => Some(seen.eye_y - seen.position.y),
             Resolved::Dragon(info) => Some(info.eye_y - info.position.y),
         }
@@ -217,7 +252,8 @@ impl GoalCx<'_, '_> {
                 let y = self.m.eye_y();
                 Some([self.m.position.x, y, self.m.position.z])
             }
-            Resolved::Player => self.w.player.as_ref().map(|p| p.eye),
+            Resolved::Player => self.w.selected_player().map(|p| p.eye),
+            Resolved::Live(mob) => Some([mob.position.x, mob.eye_y(), mob.position.z]),
             Resolved::Seen(seen) => Some([seen.position.x, seen.eye_y, seen.position.z]),
             Resolved::Dragon(info) => Some([info.position.x, info.eye_y, info.position.z]),
         }
@@ -234,6 +270,7 @@ impl GoalCx<'_, '_> {
     fn r_entity_on_ground(&self, entity: EntityRef) -> Option<bool> {
         match self.resolve(entity)? {
             Resolved::Own => Some(self.m.on_ground),
+            Resolved::Live(mob) => Some(mob.on_ground),
             // Not carried by the snapshot or a player's view.
             _ => None,
         }
@@ -243,6 +280,7 @@ impl GoalCx<'_, '_> {
         match self.resolve(entity)? {
             // The snapshot carries the species, not its type id.
             Resolved::Own => Some(self.m.kind.id.clone()),
+            Resolved::Live(mob) => Some(mob.kind.id.clone()),
             _ => None,
         }
     }
@@ -250,6 +288,7 @@ impl GoalCx<'_, '_> {
     fn r_living_health(&self, living: LivingRef) -> Option<f32> {
         match self.resolve(living.entity())? {
             Resolved::Own => Some(self.m.health),
+            Resolved::Live(mob) => Some(mob.health),
             Resolved::Seen(seen) => Some(seen.health),
             // A player's view carries no health.
             _ => None,
@@ -259,6 +298,7 @@ impl GoalCx<'_, '_> {
     fn r_living_max_health(&self, living: LivingRef) -> Option<f32> {
         match self.resolve(living.entity())? {
             Resolved::Own => Some(self.m.attrs.max_health),
+            Resolved::Live(mob) => Some(mob.attrs.max_health),
             // Not carried by the snapshot.
             _ => None,
         }
@@ -267,7 +307,8 @@ impl GoalCx<'_, '_> {
     fn r_living_alive(&self, living: LivingRef) -> Option<bool> {
         match self.resolve(living.entity())? {
             Resolved::Own => Some(self.m.alive()),
-            Resolved::Player => self.w.player.as_ref().map(|p| p.alive),
+            Resolved::Live(mob) => Some(mob.alive()),
+            Resolved::Player => self.w.selected_player().map(|p| p.alive),
             Resolved::Seen(seen) => Some(seen.alive),
             Resolved::Dragon(info) => Some(info.alive),
         }
@@ -338,7 +379,7 @@ impl GoalCxBackend for GoalCx<'_, '_> {
                 Some(Resolved::Player) => {
                     // The write handle's player rules over the tick's view,
                     // through the same valid-target rule set (#1175).
-                    let Some(p) = self.w.player.as_ref() else {
+                    let Some(p) = self.w.selected_player() else {
                         return false;
                     };
                     if !self.m.valid_target(
@@ -372,11 +413,28 @@ impl GoalCxBackend for GoalCx<'_, '_> {
                     }
                     Some(Who::Mob(seen.id))
                 }
+                Some(Resolved::Live(mob)) => {
+                    if !self.m.valid_target(
+                        self.w,
+                        &mobs::goals::TargetFacts::Mob {
+                            id: mob.id,
+                            species: mob.species(),
+                            alive: mob.alive(),
+                            invulnerable: mob.invulnerable_flag,
+                            baby: mob.is_baby(),
+                        },
+                    ) {
+                        return false;
+                    }
+                    Some(Who::Mob(mob.id))
+                }
                 Some(Resolved::Dragon(_)) | None => return false,
             },
         };
-        self.m.set_target(who);
-        true
+        matches!(
+            self.m.set_ai_target(self.w, who),
+            mobs::TargetChange::Set(_)
+        )
     }
 
     fn jump(&mut self) {
@@ -421,13 +479,14 @@ impl BehaviorCxBackend for GoalCx<'_, '_> {
 
     fn set_brain_target(&mut self, target: Option<LivingRef>) -> bool {
         // The write handle's own setter rules, over the tick's view: the mob
-        // itself, the player it sees, or a snapshot mob.
+        // itself, the player it sees, or another live/snapshot mob.
         let who = match target {
             None => None,
             Some(living) => match self.resolve(living.entity()) {
                 Some(Resolved::Own) => Some(Who::Mob(self.m.id)),
                 Some(Resolved::Player) => Some(Who::Player),
                 Some(Resolved::Seen(seen)) => Some(Who::Mob(seen.id)),
+                Some(Resolved::Live(mob)) => Some(Who::Mob(mob.id)),
                 Some(Resolved::Dragon(_)) | None => return false,
             },
         };
@@ -442,6 +501,200 @@ impl BehaviorCxBackend for GoalCx<'_, '_> {
 impl mobs::part_goals::GoalHost for Game<'_> {
     fn epoch(&self) -> Option<mod_api::NativeWorldEpoch> {
         self.native_lifecycle.epoch()
+    }
+
+    fn merchant_is_live(&self, mob: &Mob) -> bool {
+        self.is_logical_server() && !mob.removed
+    }
+
+    fn merchant_offers_lent(&self, mob: &Mob) -> Option<Vec<mod_api::MerchantOffer>> {
+        use super::api_values::TryIntoApi;
+        self.merchant_read_lent(mob, |offers, _, _| offers.try_into_api().ok())
+    }
+
+    fn merchant_trading_player_lent(&self, mob: &Mob) -> Option<mod_api::PlayerRef> {
+        let conn = self.lan_trade_conn(mob.id)?;
+        self.player(self.lan_trade_player(conn)?)
+    }
+
+    fn merchant_trade_state_lent(&self, mob: &Mob) -> (i32, i32) {
+        self.merchant_read_lent(mob, |_, xp, level| (xp, level))
+    }
+
+    fn player_passenger_seats(&self, vehicle: u32) -> Vec<(i64, u32)> {
+        self.seated_passengers(vehicle)
+            .into_iter()
+            .filter_map(|(order, id, player)| player.then_some((order, id)))
+            .collect()
+    }
+
+    fn mob_dismount_location(
+        &self,
+        vehicle: Option<&Mob>,
+        vehicle_id: u32,
+        rider: Option<&Mob>,
+        passenger: EntityRef,
+    ) -> Option<[f64; 3]> {
+        self.scoped_mob_dismount_location(vehicle, vehicle_id, rider, passenger)
+    }
+
+    fn mob_player_controls(&self, mob: &Mob, player: u32) -> bool {
+        let Some(epoch) = self.native_lifecycle.epoch() else {
+            return false;
+        };
+        let Some(target) = self.native_entity_target(EntityRef::new(epoch, player)) else {
+            return false;
+        };
+        matches!(
+            target,
+            super::commands::Target::Player | super::commands::Target::Guest(_)
+        ) && self.native_player_controls(mob, target)
+    }
+
+    fn mob_tags(&self, mob: &Mob) -> Option<Vec<String>> {
+        if self.remote.is_some() {
+            return None;
+        }
+        Some(self.tags_of(super::commands::Target::Mob(mob.id)))
+    }
+
+    fn mob_name(&self, mob: &Mob, actor: &Mob, world: &MobWorld<'_>) -> String {
+        let name = match self.mob_team_scoped(mob, actor, world) {
+            Some(team) => team.formatted_name(mob.command_name()),
+            None => mob.command_name(),
+        };
+        name.plain()
+    }
+
+    fn mob_added_to_level(&self, mob: &Mob) -> bool {
+        self.persist
+            .live
+            .binary_search_by_key(&mob.id, |entry| entry.0)
+            .is_ok()
+    }
+
+    fn mob_portal_cooldown(&self, mob: &Mob) -> i32 {
+        self.portals.entities.get(&mob.id).map_or(0, |p| p.cooldown)
+    }
+
+    fn mob_invulnerable_to_damage(&self, mob: &Mob, damage_type: &str) -> bool {
+        let source = mobs::Damage::of(Self::damage_kind(&self.motion.health.damage, damage_type));
+        mob.refuses_damage(&source)
+    }
+
+    fn mob_can_use_portal(&self, mob: &Mob) -> bool {
+        self.mob_portal_eligible(mob)
+    }
+
+    fn mob_is_climbing(&self, mob: &Mob) -> bool {
+        self.native_mob_is_climbing(mob)
+    }
+
+    fn mob_player_credit(&self, mob: &Mob) -> Option<Option<u32>> {
+        let credit = *self.last_hurt_by_player.get(&mob.id)?;
+        Some(
+            self.resolve_player_credit(credit)
+                .and_then(|conn| self.player_entity_id_by_connection(conn))
+                .and_then(|id| u32::try_from(id).ok()),
+        )
+    }
+
+    fn mob_target(&self, mob: &Mob, actor: &Mob, world: &MobWorld<'_>) -> Option<LivingRef> {
+        let target = mobs::ai::brain_target(mob).unwrap_or(mob.ai.target)?;
+        match target {
+            Who::Player => {
+                // Preserve the game's per-mob guest binding: the selected
+                // player for this tick need not be this mob's own target. A
+                // listener's redirect, however, already changed the tick's
+                // selection while the persisted binding is still borrowed.
+                let redirected = world
+                    .player_selection
+                    .filter(|selection| mob.id == actor.id && selection.has_switched())
+                    .and_then(|selection| selection.selected())
+                    .map(|player| player.entity_id);
+                let id = match redirected {
+                    Some(id) => id,
+                    None => {
+                        let host = self.lan.as_ref()?;
+                        let conn = host.mob_players.get(&mob.id)?;
+                        u32::try_from(host.hub.guest(*conn)?.entity_id).ok()?
+                    }
+                };
+                let entity = self.entity(id)?;
+                self.native_mob_valid_target(mob, self.native_entity_target(entity)?)
+                    .then(|| self.living(entity))?
+            }
+            Who::Mob(id) => {
+                // Mob tick temporarily lends the list, so the regular game
+                // lookup cannot see it. The disjoint loan holds live mobs.
+                let other = if id == mob.id {
+                    mob
+                } else {
+                    world.live_mobs?.find(id)?
+                };
+                if other.removed {
+                    return None;
+                }
+                let valid = if mob.species() == mobs::Species::Warden {
+                    let bounds = other.bounds();
+                    let border = self.border.geometry();
+                    other.alive()
+                        && !other.invulnerable_flag
+                        && other.species() != mobs::Species::Warden
+                        && !horizon_client::scoreboard::teams_allied(
+                            self.mob_team_scoped(mob, actor, world),
+                            self.mob_team_scoped(other, actor, world),
+                        )
+                        && border.is_within_bounds(bounds.min(Axis::X), bounds.min(Axis::Z), 0.0)
+                        && border.is_within_bounds(
+                            bounds.max(Axis::X) - f64::from(1.0e-5_f32),
+                            bounds.max(Axis::Z) - f64::from(1.0e-5_f32),
+                            0.0,
+                        )
+                } else {
+                    mob.valid_target(
+                        world,
+                        &mobs::goals::TargetFacts::Mob {
+                            id,
+                            species: other.species(),
+                            alive: other.alive(),
+                            invulnerable: other.invulnerable_flag,
+                            baby: other.is_baby(),
+                        },
+                    )
+                };
+                let epoch = self.native_lifecycle.epoch()?;
+                valid.then(|| LivingRef::new(EntityRef::new(epoch, id)))
+            }
+        }
+    }
+
+    fn mob_on_block(&self, mob: &Mob) -> [i32; 3] {
+        let support = mob
+            .on_ground
+            .then(|| self.supporting_block(mob.position, mob.bounds()))
+            .flatten();
+        super::native_entity_motion::on_block_position(support, mob.position)
+    }
+
+    fn entities_team_damage_allowed(
+        &self,
+        entity: EntityRef,
+        entity_mob: Option<&Mob>,
+        source: EntityRef,
+        source_mob: Option<&Mob>,
+        actor: &Mob,
+        world: &MobWorld<'_>,
+    ) -> Option<bool> {
+        let own = match entity_mob {
+            Some(mob) => self.mob_team_scoped(mob, actor, world),
+            None => self.native_target_team(self.native_entity_target(entity)?)?,
+        };
+        let other = match source_mob {
+            Some(mob) => self.mob_team_scoped(mob, actor, world),
+            None => self.native_target_team(self.native_entity_target(source)?)?,
+        };
+        Some(horizon_client::scoreboard::teams_allow_damage(own, other))
     }
 
     fn run_goal(
@@ -528,6 +781,83 @@ impl mobs::part_goals::GoalHost for Game<'_> {
                 true
             }
         })
+    }
+}
+
+impl Game<'_> {
+    /// Dispatch a target change against the mob tick's scoped read view. The
+    /// game has lent its mob list to the tick, so using `Game` itself as the
+    /// host here would make the actor and other mob handles unresolvable.
+    pub(super) fn native_mob_change_target_in_tick(
+        &self,
+        mob: &mut Mob,
+        world: &MobWorld<'_>,
+        is_brain: bool,
+        target: Option<Who>,
+    ) -> mobs::TargetChange {
+        let vanilla = mobs::TargetChange::Set(target);
+        if !mod_api::__private::listened(mod_api::HookId::LivingChangeTarget) {
+            return vanilla;
+        }
+        let Some(epoch) = self.native_lifecycle.epoch() else {
+            return vanilla;
+        };
+        let original = match target {
+            None => None,
+            Some(Who::Mob(id)) => Some(LivingRef::new(EntityRef::new(epoch, id))),
+            Some(Who::Player) => {
+                let Some((_, id)) = world.selected_player_identity() else {
+                    return vanilla;
+                };
+                Some(LivingRef::new(EntityRef::new(epoch, id)))
+            }
+        };
+        let entity = MobRef::new(EntityRef::new(epoch, mob.id));
+        let context = GoalCx {
+            m: mob,
+            w: world,
+            host: self,
+        };
+        let mut new_target = original;
+        let mut cancel = false;
+        super::native_hooks::NativeHookHost { host: &context }.native_living_change_target(
+            mod_api::__private::LivingChangeTargetCall {
+                mob: entity,
+                original_target: original,
+                new_target: &mut new_target,
+                is_brain,
+                cancel: &mut cancel,
+            },
+        );
+        if cancel {
+            return mobs::TargetChange::Keep;
+        }
+        if new_target == original {
+            return vanilla;
+        }
+        let Some(target) = new_target else {
+            return mobs::TargetChange::Set(None);
+        };
+        // A listener can redirect to another real player in this level.
+        // Select that player's stable tick view before the caller continues,
+        // so `Who::Player` and subsequent AI reads name the same player.
+        if target.entity().epoch() == epoch
+            && let Some(selection) = world.player_selection
+            && selection.get(target.entity().id()).is_some()
+            && let Some(player) = self.native_entity_target(target.entity())
+            && self.native_player_facts(player).is_some()
+            && self.native_mob_valid_target(context.m, player)
+            && selection.select(target.entity().id())
+        {
+            return mobs::TargetChange::Set(Some(Who::Player));
+        }
+        match context.resolve(target.entity()) {
+            Some(Resolved::Player) => mobs::TargetChange::Set(Some(Who::Player)),
+            Some(Resolved::Own) => mobs::TargetChange::Set(Some(Who::Mob(context.m.id))),
+            Some(Resolved::Live(mob)) => mobs::TargetChange::Set(Some(Who::Mob(mob.id))),
+            Some(Resolved::Seen(seen)) => mobs::TargetChange::Set(Some(Who::Mob(seen.id))),
+            Some(Resolved::Dragon(_)) | None => mobs::TargetChange::Keep,
+        }
     }
 }
 

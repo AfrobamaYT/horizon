@@ -226,8 +226,43 @@ pub struct StateValues<T> {
     pub default: Option<T>,
 }
 
-/// Block-local boxes selected by state.
-pub type BlockShapes = StateValues<Vec<[f64; 6]>>;
+/// Block-local boxes selected by an ordered tuple of state properties.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BlockShapes(pub StateValues<Vec<[f64; 6]>>);
+
+impl<'de> Deserialize<'de> for BlockShapes {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Shapes {
+            #[serde(default)]
+            properties: Vec<String>,
+            #[serde(default)]
+            values: BTreeMap<String, Vec<[f64; 6]>>,
+            default: Option<Vec<[f64; 6]>>,
+        }
+        let shapes = Shapes::deserialize(deserializer)?;
+        Ok(Self(StateValues {
+            property: String::new(),
+            properties: shapes.properties,
+            values: shapes.values,
+            default: shapes.default,
+        }))
+    }
+}
+
+impl std::ops::Deref for BlockShapes {
+    type Target = StateValues<Vec<[f64; 6]>>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for BlockShapes {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 /// Light emitted by a state, as an integer from 0 to 15.
 pub type StateLight = StateValues<u8>;
 
@@ -1894,12 +1929,12 @@ capabilities = ["registries"]
                 "{value}"
             );
         }
-        let oversized = BlockShapes {
+        let oversized = BlockShapes(StateValues {
             property: String::new(),
             properties: vec![],
             values: BTreeMap::new(),
             default: Some(vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]; 17]),
-        };
+        });
         assert!(oversized.check().is_err());
         let mut nonfinite = oversized;
         nonfinite.default = Some(vec![[f64::NAN; 6]]);
@@ -3448,12 +3483,12 @@ mod context_shape_tests {
             template: "minecraft:stone".into(),
             ..Default::default()
         };
-        let bad = BlockShapes {
+        let bad = BlockShapes(StateValues {
             property: String::new(),
             properties: vec![],
             values: BTreeMap::new(),
             default: Some(vec![[1., 0., 0., 0., 1., 1.]]),
-        };
+        });
         block
             .outline_context_shapes
             .insert(ShapeEntityKind::Player, bad.clone());

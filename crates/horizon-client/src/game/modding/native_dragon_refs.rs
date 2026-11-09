@@ -5,7 +5,7 @@ use super::{
     commands::Target,
     dragon::{Dragon, Fight},
 };
-use mod_api::{DragonRef, EntityRef, LivingRef, NativeDragonPhase};
+use mod_api::{DragonRef, EntityRef, LivingRef, MobRef, NativeDragonPhase};
 
 impl Game<'_> {
     /// The dragon an entity handle names now.
@@ -102,6 +102,19 @@ impl Game<'_> {
         entity: EntityRef,
         target: Option<LivingRef>,
     ) -> bool {
+        if self.native_dragon(entity).is_none() {
+            return false;
+        }
+        if let Some(target) = target
+            && !self
+                .native_entity_target(target.entity())
+                .is_some_and(|t| self.native_dragon_valid_target(t))
+        {
+            return false;
+        }
+        let Some(target) = self.native_mob_target_event(MobRef::new(entity), target, false) else {
+            return false;
+        };
         let id = match target {
             None => None,
             Some(target) => {
@@ -139,6 +152,31 @@ mod tests {
         game.dragon.replace(dragon);
         let entity = game.entity(15).unwrap();
         (entity, game.dragon(entity).unwrap())
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn dragon_target_change_can_be_cancelled() {
+        struct Cancel;
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for Cancel {
+            fn living_change_target(
+                &self,
+                host: &dyn mod_api::Host,
+                event: &mut mod_api::LivingChangeTargetEvent<'_>,
+            ) -> mod_api::Flow {
+                assert!(event.mob.living().health(host).is_some());
+                mod_api::Flow::Cancel
+            }
+        }
+        let mods = vec![mod_api::ModEntry::new("cancel-target", Box::new(Cancel))].into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                let (_, dragon) = dragon_in(game);
+                assert!(!dragon.mob().set_target(game, None));
+                assert_eq!(game.dragon.as_ref().unwrap().target, None);
+            })
+        });
     }
 
     #[test]
