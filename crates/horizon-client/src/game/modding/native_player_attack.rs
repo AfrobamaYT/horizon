@@ -39,7 +39,11 @@ impl Game<'_> {
 /// `Game.main_hand_attack_speed` for a guest between turns: its saved body's
 /// attack speed base, the main-hand item of its last tick, and its effects'
 /// modifiers.
-fn guest_attack_speed(game: &Game<'_>, guest: &horizon_client::lan::guest::Guest, item: Option<&str>) -> f64 {
+fn guest_attack_speed(
+    game: &Game<'_>,
+    guest: &horizon_client::lan::guest::Guest,
+    item: Option<&str>,
+) -> f64 {
     let base = guest
         .motion
         .as_ref()
