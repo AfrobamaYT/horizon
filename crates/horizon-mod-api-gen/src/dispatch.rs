@@ -430,7 +430,7 @@ pub(super) fn emit<'a>(
                 if generics.is_empty() { "" } else { "<'_>" }
             ));
             calls.push_str(&format!(
-                "/// What the game passes `dispatch_{name}`: the hook's declared parameters.\n#[doc(hidden)]\n#[allow(missing_docs)]\npub struct {carrier}{generics} {{\n{fields}}}\n"
+                "/// What the game passes `dispatch_{name}`: the hook's declared parameters.\n#[doc(hidden)]\n#[allow(missing_docs)]\n// no wire: internal call carrier, not an owned boundary value.\npub struct {carrier}{generics} {{\n{fields}}}\n"
             ));
         }
         let (generics, elided) = match (lifetimes.a, lifetimes.b) {
@@ -438,9 +438,14 @@ pub(super) fn emit<'a>(
             (true, false) => ("<'a>", "<'_>"),
             (false, false) => ("", ""),
         };
+        let wire_form = if generics.is_empty() {
+            "#[derive(horizon_mod_api_macros::Wire)]"
+        } else {
+            "// no wire: borrowed event crosses as call arguments."
+        };
         if is_render {
             render_dispatch.push_str(&format!(
-                "#[allow(missing_docs)]\npub struct {event_type}{generics} {{\n{fields}}}\n"
+                "#[allow(missing_docs)]\n{wire_form}\npub struct {event_type}{generics} {{\n{fields}}}\n"
             ));
             continue;
         }
@@ -457,10 +462,22 @@ pub(super) fn emit<'a>(
         };
         // Reuse the exact host and drawing conversions for generated game-side calls.
         if in_game {
+            // A scoped read hook can run against either the game or a borrowed
+            // tick view. Its native receiver carries the selected host.
+            let scoped_read_host = target.contains("::NativeHookHost<");
+            if scoped_read_host
+                && (hook.host != Some(HostAccess::Read) || receiver_mut != Some(false))
+            {
+                return Err(format!(
+                    "{name}: NativeHookHost requires a read-only host and receiver"
+                ));
+            }
             let passed = host
                 .as_ref()
                 .map(|(_, param)| {
-                    if param.call == "&*self" && receiver_mut == Some(false) {
+                    if scoped_read_host {
+                        "self.host".to_owned()
+                    } else if param.call == "&*self" && receiver_mut == Some(false) {
                         "self".to_owned()
                     } else {
                         param.call.to_owned()
@@ -554,7 +571,9 @@ pub(super) fn emit<'a>(
                 let passed = host
                     .as_ref()
                     .map(|(_, param)| {
-                        if param.call == "&*self" && receiver_mut == Some(false) {
+                        if scoped_read_host {
+                            "self.host".to_owned()
+                        } else if param.call == "&*self" && receiver_mut == Some(false) {
                             "self".to_owned()
                         } else {
                             param.call.to_owned()
@@ -667,7 +686,7 @@ pub(super) fn emit<'a>(
             .as_ref()
             .map_or(trait_name, |(part_trait, _)| part_trait);
         dispatch.push_str(&format!(
-            "/// What [`{trait_name}::{name}`] is told. Each field is that hook's argument of the same name, described in the hook's doc.\n#[allow(missing_docs)]\npub struct {event_type}{generics} {{\n{fields}}}\n"
+            "/// What [`{trait_name}::{name}`] is told. Each field is that hook's argument of the same name, described in the hook's doc.\n#[allow(missing_docs)]\n{wire_form}\npub struct {event_type}{generics} {{\n{fields}}}\n"
         ));
         let build = format!("let mut {event} = {event_type} {{ {} }};", inits.join(", "));
         // A trait mod's call is marked with the mod for a panic to name.
@@ -1725,5 +1744,18 @@ mod tests {
         assert!(target_parameters("new_hook", "native_new_hook", 7, "NewHookCall").is_ok());
         let refused = target_parameters("new_hook", "native_new_hook", 8, "NewHookCall");
         assert!(refused.unwrap_err().contains("one NewHookCall"));
+    }
+
+    #[test]
+    fn scoped_native_hook_uses_selected_host_and_game_hooks_keep_their_receiver() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let fire = super::super::sources(&root, super::super::FillMode::Require)
+            .unwrap()
+            .fire;
+        let compact: String = fire.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(compact.contains("mod_api::dispatch_living_change_target(self.host,call)"));
+        assert!(
+            compact.contains("mod_api::dispatch_living_visibility(self,entity,looking,visibility)")
+        );
     }
 }

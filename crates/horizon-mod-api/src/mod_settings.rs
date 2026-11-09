@@ -8,6 +8,7 @@ pub const SETTING_KEY_MAX: usize = 64;
 /// What a setting is, with its default.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum SettingKind {
     /// On or off.
     Toggle {
@@ -42,6 +43,7 @@ pub enum SettingKind {
 /// A setting's value, as the game keeps it and the mod reads it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum SettingValue {
     /// A toggle's state.
     Toggle(bool),
@@ -57,6 +59,7 @@ pub enum SettingValue {
 /// mod), the translation keys of its label and tooltip, and what it is.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct SettingSpec {
     /// The setting's key within its mod (`zoom_speed`): `a-z`, `0-9`, `_`, `-` and `.`, at most
     /// [`SETTING_KEY_MAX`] bytes, not starting with `.`.
@@ -72,6 +75,7 @@ pub struct SettingSpec {
 /// Why a setting was refused at registration.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum SettingError {
     /// The key is empty, too long, starts with `.` or holds another character than `a-z`,
     /// `0-9`, `_`, `-` and `.`.
@@ -240,7 +244,7 @@ impl SettingSpec {
                 .map(SettingValue::Range),
             (SettingKind::Color { .. }, Some(text)) => text
                 .strip_prefix('#')
-                .filter(|hex| hex.len() == 6)
+                .filter(|hex| hex.len() == 6 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
                 .and_then(|hex| u32::from_str_radix(hex, 16).ok())
                 .map(SettingValue::Color),
             _ => None,
@@ -374,6 +378,7 @@ mod tests {
         assert_eq!(range.read(Some("9.0")), SettingValue::Range(1.0));
         assert_eq!(range.read(Some("NaN")), SettingValue::Range(1.0));
         assert_eq!(color.read(Some("#12345")), SettingValue::Color(0x33_66CC));
+        assert_eq!(color.read(Some("#+12345")), SettingValue::Color(0x33_66CC));
         assert_eq!(toggle.store(SettingValue::Choice(0)), None);
         assert_eq!(range.store(SettingValue::Range(4.5)), None);
         assert_eq!(color.store(SettingValue::Color(0x0100_0000)), None);

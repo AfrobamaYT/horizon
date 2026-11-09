@@ -5,13 +5,9 @@
 use super::*;
 use heck::ToUpperCamelCase;
 
-/// The Backend reads a mob's goal tick answers from its read view (#1077): the
-/// ticking mob itself, the player the tick sees, and the tick's snapshot of the
-/// other entities. The generated view forwards these to the engine's
-/// `GoalCx::r_*` methods; every other backend read of entity data is refused
-/// its typed refusal (the handle docs of these carry the snapshot rule), and a
-/// read that is not entity data forwards to the real game backend the view
-/// carries, which answers it intact through the tick.
+/// Reads implemented by the scoped goal context over the active mob and its
+/// disjoint live mob loans. Players are read from the game's backend; other
+/// entity reads not supported by the scoped context remain typed refusals.
 pub(super) const GOAL_VIEW_READS: &[&str] = &[
     "entity_position",
     "entity_block_position",
@@ -27,6 +23,109 @@ pub(super) const GOAL_VIEW_READS: &[&str] = &[
     "living_health",
     "living_max_health",
     "living_alive",
+    "merchant_offers",
+    "merchant_trading_player",
+    "merchant_profession",
+    "merchant_level",
+    "merchant_villager_type",
+    "merchant_xp",
+    "entity_dismount_location",
+    "entity_root_vehicle",
+    "entity_is_passenger_of_same_vehicle",
+    "entity_passengers",
+    "entity_is_vehicle",
+    "entity_indirect_passengers",
+    "entity_controlling_passenger",
+    "entity_on_block",
+    "entity_entities_team_damage_allowed",
+    "living_can_use_portal",
+    "entity_tags",
+    "entity_name",
+    "entity_added_to_level",
+    "entity_portal_cooldown",
+    "entity_invulnerable_to_damage",
+    "living_is_climbing",
+    "living_last_attacker",
+    "living_kill_credit",
+    "entity_direction",
+    "entity_pose",
+    "entity_is_crouching",
+    "entity_view_vector",
+    "entity_up_vector",
+    "entity_level",
+    "entity_vehicle",
+    "entity_is_passenger",
+    "entity_sound_source",
+    "entity_leash_holder",
+    "entity_pick",
+    "living_attribute_value",
+    "living_attribute_base",
+    "living_attributes",
+    "living_attribute_modifiers",
+    "living_used_item_hand",
+    "mob_can_use_portal",
+    "mob_target",
+    "mob_raid",
+    "entity_custom_name_visible",
+    "entity_classification",
+    "entity_permanently_invulnerable",
+    "entity_invulnerable_time",
+    "entity_damage_cooldown_time",
+    "entity_invulnerable_to_piercing_weapon",
+    "entity_no_physics",
+    "entity_spectator",
+    "entity_is_shift_key_down",
+    "entity_is_sprinting",
+    "entity_is_in_water",
+    "entity_is_in_lava",
+    "entity_fire_immune",
+    "entity_fire_ticks",
+    "entity_air_supply",
+    "entity_max_air_supply",
+    "entity_is_silent",
+    "entity_glowing",
+    "entity_no_gravity",
+    "entity_ticks_frozen",
+    "entity_tick_count",
+    "entity_is_invisible",
+    "entity_is_multipart",
+    "entity_parts",
+    "entity_dimensions",
+    "living_effect",
+    "living_effects",
+    "living_potion_affected",
+    "living_gliding_ticks",
+    "living_is_gliding",
+    "living_is_sleeping",
+    "living_sleeping_pos",
+    "living_is_jumping",
+    "living_baby",
+    "living_equipment",
+    "living_hand_item",
+    "living_is_tamed",
+    "living_owner",
+    "living_dimensions_for_pose",
+    "living_can_freeze",
+    "living_can_breathe_underwater",
+    "living_has_line_of_sight",
+    "living_in_melee_range",
+    "living_bed_orientation",
+    "mob_goals",
+    "mob_target_goals",
+    "mob_is_done",
+    "mob_navigation_speed",
+    "mob_pathfinding_malus",
+    "mob_is_aggressive",
+    "mob_persistence_required",
+    "mob_requires_custom_persistence",
+    "mob_no_ai",
+    "mob_restrict_center",
+    "mob_restrict_radius",
+    "mob_has_restriction",
+    "mob_is_within_restriction",
+    "mob_left_handed",
+    "mob_can_pick_up_loot",
+    "mob_no_action_time",
 ];
 
 /// The handle types whose backend reads are entity data (#1077): a read taking
@@ -41,6 +140,7 @@ const GOAL_VIEW_ENTITY_ARGS: &[&str] = &[
     "MobRef",
     "PlayerRef",
     "ItemEntityRef",
+    "MerchantRef",
 ];
 
 /// The `Host` methods that find entities (#1077): the goal view answers these
@@ -242,10 +342,14 @@ pub(super) fn areas_source(root: &Path) -> Result<String, String> {
         prelude.push_str(&format!("pub use super::{}::*;\n", area.stem));
     }
     // One helper per area: it expands its item unless the area is in the skip list.
+    // Rustc rejects public re-exports of non-exported macro_rules macros. Export
+    // hidden __mod_api_* implementations and re-export their caller-facing names
+    // unqualified: absolute paths to include!-expanded macro_export definitions
+    // otherwise trigger macro_expanded_macro_exports_accessed_by_absolute_paths.
     let mut macros = String::new();
     for area in &areas {
         macros.push_str(&format!(
-            "#[doc(hidden)]\n#[macro_export]\nmacro_rules! __skip_{stem} {{ ([] $body:item) => {{ $body }}; ([{stem} $($rest:ident)*] $body:item) => {{}}; ([$other:ident $($rest:ident)*] $body:item) => {{ $crate::__skip_{stem}!([$($rest)*] $body); }}; }}\n",
+            "#[doc(hidden)]\n#[macro_export]\nmacro_rules! __mod_api_skip_{stem} {{ ([] $body:item) => {{ $body }}; ([{stem} $($rest:ident)*] $body:item) => {{}}; ([$other:ident $($rest:ident)*] $body:item) => {{ $crate::__skip_{stem}!([$($rest)*] $body); }}; }}\n#[doc(hidden)]\npub use __mod_api_skip_{stem} as __skip_{stem};\n",
             stem = area.stem
         ));
     }
@@ -290,7 +394,7 @@ pub(super) fn areas_source(root: &Path) -> Result<String, String> {
             })
             .collect();
         macros.push_str(&format!(
-            "/// Implements the area traits of `{union}` for `$host` with their defaults, except the areas listed in `except(...)`, which the caller implements itself. The union trait is left to the caller.\n#[macro_export]\nmacro_rules! {name} {{ ($host:ty $(, except($($skip:ident),*))?) => {{ {impls} }}; }}\n"
+            "/// Implements the area traits of `{union}` for `$host` with their defaults, except the areas listed in `except(...)`, which the caller implements itself. The union trait is left to the caller.\n#[doc(hidden)]\n#[macro_export]\nmacro_rules! __mod_api_{name} {{ ($host:ty $(, except($($skip:ident),*))?) => {{ {impls} }}; }}\n#[doc(hidden)]\npub use __mod_api_{name} as {name};\n"
         ));
     }
     Ok(format!(
@@ -699,7 +803,7 @@ fn handle_method(
     // The reads a mob's goal tick answers from its view carry the snapshot rule where a mod reads
     // them (#1077).
     if GOAL_VIEW_READS.contains(&name) {
-        docs.push_str("///\n/// In a mob's goal tick ([`GoalContext::host`](crate::GoalContext::host)) this reads\n/// the ticking mob itself directly; every other entity answers from the tick's\n/// snapshot, and a read the snapshot does not carry answers `None`.\n");
+        docs.push_str("///\n/// In a mob's goal tick ([`GoalContext::host`](crate::GoalContext::host)) this reads\n/// the active mob or a disjoint live mob when available; player reads use the\n/// game host. Other unsupported reads retain their typed refusal.\n");
     }
     let backend = match (mutable, tier.client()) {
         (true, true) => "client_backend_mut_of",
@@ -777,7 +881,7 @@ pub(super) fn generate(root: &Path) -> Result<(String, String), String> {
     let imports = standard_imports(&syn::parse_file(&methods).map_err(|e| e.to_string())?);
     let side_enum = |name: &str, server: &str, client: &str| {
         format!(
-            "/// The logical side of a hook's host.\npub enum {name}<'a> {{\n/// The hook fired on the server.\nServer({server}),\n/// The hook fired on the client.\nClient({client}) }}\n"
+            "/// The logical side of a hook's host.\n// no wire: borrows the active host; passed as call context.\npub enum {name}<'a> {{\n/// The hook fired on the server.\nServer({server}),\n/// The hook fired on the client.\nClient({client}) }}\n"
         )
     };
     let sides = format!(
@@ -876,6 +980,45 @@ fn goal_view(
             format!(
                 "mod_api::__private::backend_read(self.host, |backend| backend.{name}({args})){forwarded}"
             )
+        };
+        // Entities that remain in Game can use its ordinary backend. For a
+        // multi-entity query all handle arguments must be present there: the
+        // Game backend cannot see a mob lent to the current AI tick.
+        let game_entities: Vec<_> = entry
+            .sig
+            .inputs
+            .iter()
+            .skip(1)
+            .filter_map(|arg| {
+                let FnArg::Typed(arg) = arg else { return None };
+                let Pat::Ident(pat) = &*arg.pat else {
+                    return None;
+                };
+                let Type::Path(ty) = &*arg.ty else {
+                    return None;
+                };
+                let ty = ty.path.get_ident()?.to_string();
+                let name = pat.ident.to_string();
+                match ty.as_str() {
+                    "EntityRef" => Some(name),
+                    "LivingRef" | "PlayerRef" | "MobRef" | "ItemEntityRef" | "MerchantRef" => {
+                        Some(format!("{name}.entity()"))
+                    }
+                    _ => None,
+                }
+            })
+            .collect();
+        let body = if entity_data && !game_entities.is_empty() {
+            let all_available = game_entities
+                .iter()
+                .map(|entity| format!("self.is_game_entity({entity})"))
+                .collect::<Vec<_>>()
+                .join(" && ");
+            format!(
+                "if {all_available} {{ return mod_api::__private::backend_read(self.host, |backend| backend.{name}({args})){forwarded}; }} {body}"
+            )
+        } else {
+            body
         };
         impls.add(
             area.trait_name(*tier),

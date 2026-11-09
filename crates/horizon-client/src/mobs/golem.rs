@@ -45,12 +45,12 @@ impl Goal for ResetUniversalAnger {
     }
     /// `NeutralMob.forgetCurrentTargetAndRefreshUniversalAnger`:
     /// `stopBeingAngry`, then `startPersistentAngerTimer`.
-    fn start(&mut self, m: &mut Mob, _: &mut Cx) {
+    fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
         self.timestamp = m.ai.last_hurt_by_time;
         // setLastHurtByMob(null) also stamps the time.
         m.ai.last_hurt_by = None;
         m.ai.last_hurt_by_time = m.age as i32;
-        m.ai.target = None;
+        m.set_ai_target(cx.w, None);
         m.extra.angry_at = None;
         // `TimeUtil.rangeOfSeconds(20, 39)`.
         m.extra.anger = 400 + m.random.next_int_bound(381).unwrap_or(0);
@@ -245,7 +245,9 @@ impl Goal for DefendVillage {
         super::goals::TARGET
     }
     fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        let Some(p) = &cx.w.player else { return false };
+        let Some(p) = cx.w.selected_player() else {
+            return false;
+        };
         if !p.alive || p.creative || p.spectator || m.spares_players(cx.w) {
             return false;
         }
@@ -257,10 +259,14 @@ impl Goal for DefendVillage {
         // A position inside `b` puts the box's bottom face there (one block
         // wider, as the box test is strict).
         let near = b.inflate(Vec3::new(1.0, 1.0, 1.0));
+        // Villager.getPlayerReputation of the player this golem sees: the
+        // villager's gossips about that player's own UUID.
         let bad = cx.w.others_near(near).any(|s| {
             s.species == Species::Villager
                 && s.alive
-                && s.player_rep <= -100
+                && s.villager
+                    .as_ref()
+                    .is_some_and(|v| v.gossips.reputation(p.uuid) <= -100)
                 && b.contains(s.position)
                 && s.position.distance_squared(m.position) <= 64.0 * 64.0
         });
@@ -274,11 +280,11 @@ impl Goal for DefendVillage {
                 && m.position.distance_squared(t.position) <= 64.0 * 64.0
         })
     }
-    fn start(&mut self, m: &mut Mob, _cx: &mut Cx) {
-        m.ai.target = Some(Who::Player);
+    fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
+        m.set_ai_target(cx.w, Some(Who::Player));
     }
-    fn stop(&mut self, m: &mut Mob, _cx: &mut Cx) {
-        m.ai.target = None;
+    fn stop(&mut self, m: &mut Mob, cx: &mut Cx) {
+        m.set_ai_target(cx.w, None);
     }
 }
 /// `MoveTowardsTargetGoal`: close in on a target within range.
@@ -412,11 +418,12 @@ pub fn iron_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
     };
     let from = [m.position.x, m.position.y, m.position.z];
     // The hit, then the toss only if it landed (game/creatures.rs).
-    cx.events.push(MobEvent::IronGolemHit {
-        target: who,
-        amount,
-        source: super::Damage::mob(m.id, from),
-    });
+    cx.events
+        .push(cx.w.route_player_event(MobEvent::IronGolemHit {
+            target: who,
+            amount,
+            source: super::Damage::mob(m.id, from),
+        }));
     cx.events.push(MobEvent::Sound(
         "entity.iron_golem.attack",
         m.center(),
@@ -527,11 +534,13 @@ fn snowball_attack(m: &mut Mob, who: Who, _power: f32, cx: &mut Cx) {
     let Some(t) = cx.w.target_info(who) else {
         return;
     };
-    let start = Vec3::new(m.position.x, m.eye_y() - 0.1, m.position.z);
+    // ThrowableItemProjectile starts at getEyeY() - 0.1F; the aim uses 1.1F
+    // and 0.2F: all floats widened.
+    let start = Vec3::new(m.position.x, m.eye_y() - f64::from(0.1_f32), m.position.z);
     let xd = t.position.x - m.position.x;
-    let yd = t.eye_y - 1.1;
+    let yd = t.eye_y - f64::from(1.1_f32);
     let zd = t.position.z - m.position.z;
-    let yo = (xd * xd + zd * zd).sqrt() * 0.2;
+    let yo = (xd * xd + zd * zd).sqrt() * f64::from(0.2_f32);
     let mut p = Projectile::new(ProjectileKind::Snowball, start, Some(Who::Mob(m.id)));
     // SnowGolem.rangedAttackUncertainty: 12 on every difficulty.
     p.shoot(
@@ -958,6 +967,8 @@ mod crack_sound_tests {
         let mut test_level = crate::health::TestLevel::new(0);
         let level = &mut test_level.level();
         let mut m = golem();
+        // Absorption I: max_absorption 4, which a hit clamps the amount to.
+        m.add_effect("absorption", 600, 0);
         m.absorption = 4.0;
         assert!(m.damage(level, 1.5, Damage::player([0.0, 0.0, 1.0])));
         assert_eq!(m.dealt_absorbed, 15);
@@ -968,6 +979,7 @@ mod crack_sound_tests {
         m.damage(level, 2.0, Damage::player([0.0, 0.0, 1.0]));
         assert_eq!(m.dealt_absorbed, 40);
         let mut other = golem();
+        other.add_effect("absorption", 600, 0);
         other.absorption = 4.0;
         other.damage(level, 1.5, Damage::of(crate::mobs::DamageKind::Generic));
         assert_eq!(other.dealt_absorbed, 0);

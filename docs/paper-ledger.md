@@ -1,5 +1,7 @@
 # Paper and Bukkit porting ledger
 
+For executable event comparisons, see [Paper event parity](paper-parity.md).
+
 This is a map for porting plugin logic to Horizon native mods, **not** a Bukkit or
 Paper compatibility layer. Java plugins do not run through these APIs. Event-by-event
 mappings belong in the native hook catalog; this page covers other plugin services.

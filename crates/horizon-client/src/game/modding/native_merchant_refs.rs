@@ -57,7 +57,15 @@ impl Game<'_> {
         index: usize,
         read: impl FnOnce(&[MerchantOffer], i32, i32) -> T,
     ) -> T {
-        let mob = &self.mobs[index];
+        self.merchant_read_lent(&self.mobs[index], read)
+    }
+
+    /// The same read while an AI tick lends this mob out of `self.mobs`.
+    pub(super) fn merchant_read_lent<T>(
+        &self,
+        mob: &horizon_client::mobs::Mob,
+        read: impl FnOnce(&[MerchantOffer], i32, i32) -> T,
+    ) -> T {
         if mob.species() == Species::Villager && mob.extra.profession.index().is_none() {
             return read(
                 &[],
