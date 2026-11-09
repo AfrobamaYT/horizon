@@ -3,17 +3,29 @@
 //! transaction commits; an abort puts back everything its closure changed.
 use super::ServerHost;
 
-/// What the game's raw transaction helpers take, and only `host.transaction`
-/// makes: a mod opens and closes transactions through it alone, so its drop guard closes every
-/// one a mod opens.
-// exhaustive: its fields are private, so mods cannot build or destructure it
-pub struct TransactionSeal(pub(crate) ());
-
 /// An open transaction, as NeoForge's `TransactionContext`: what every write of a handler or a
-/// place takes, so none happens outside one. Only `host.transaction` makes one, and lends it to
-/// its closure alone.
-// exhaustive: its fields are private, so mods cannot build or destructure it
-pub struct Transaction(pub(crate) ());
+/// place takes. `host.transaction` gets one from the game and lends it to its closure alone.
+///
+/// The authority is the game's, not this value's: it names one transaction the game opened by an
+/// unguessable token, and the game checks it on every use. A write given a transaction that is
+/// not open changes nothing, and a close that does not name the innermost open transaction is
+/// refused, so a value decoded from bytes or kept past its closure can neither write outside
+/// the journal nor end a transaction someone else opened.
+// exhaustive: its field is private, so mods cannot build or destructure it
+#[derive(Debug, PartialEq, Eq)]
+pub struct Transaction(pub(crate) u64);
+
+/// The transaction the game opened with frame `token`, for its raw open helper.
+#[doc(hidden)]
+pub fn transaction(token: u64) -> Transaction {
+    Transaction(token)
+}
+
+/// The frame token `tx` names, for the game's checks.
+#[doc(hidden)]
+pub fn transaction_token(tx: &Transaction) -> u64 {
+    tx.0
+}
 
 /// Transactions are available only on the logical server and preserve the receiver type.
 ///
@@ -77,20 +89,21 @@ pub fn run_transaction<H: ServerHost + ?Sized, T, E>(
     /// a panic unwinding past it.
     struct Open<'a, H: ServerHost + ?Sized> {
         host: &'a mut H,
+        tx: Transaction,
         commit: bool,
     }
     impl<H: ServerHost + ?Sized> Drop for Open<'_, H> {
         fn drop(&mut self) {
-            self.host
-                .transaction_close(TransactionSeal(()), self.commit);
+            self.host.transaction_close(&self.tx, self.commit);
         }
     }
-    host.transaction_open(TransactionSeal(()));
+    let tx = host.transaction_open();
     let mut open = Open {
         host,
+        tx,
         commit: false,
     };
-    let result = f(&mut *open.host, &Transaction(()));
+    let result = f(&mut *open.host, &open.tx);
     open.commit = result.is_ok();
     result
 }
@@ -99,6 +112,34 @@ pub fn run_transaction<H: ServerHost + ?Sized, T, E>(
 mod tests {
     use super::*;
     use crate::testing::FakeHost;
+
+    #[test]
+    fn a_transaction_decoded_from_bytes_ends_no_transaction() {
+        use crate::prelude::ModStateServerHost as _;
+        assert!(
+            crate::wire::Reader::decode::<Transaction>(&[]).is_err(),
+            "no transaction from zero bytes"
+        );
+        let forged: Transaction = crate::wire::Reader::decode(&1u64.to_le_bytes()).unwrap();
+        let mut fake = FakeHost::new();
+        let host: &mut dyn ServerHost = &mut fake;
+        // Outside any transaction, and inside one the forged value does not name.
+        host.transaction_close(&forged, true);
+        let outer = host.transaction(|host, _| {
+            host.transaction(|host, _| {
+                host.transaction_close(&forged, true);
+                Ok::<_, ()>(())
+            })?;
+            Err(())
+        });
+        assert_eq!(outer, Err(()));
+        assert_eq!(
+            fake.journal.closed(),
+            [(2, true), (1, false)],
+            "only each guard closed its own"
+        );
+        assert_eq!(fake.journal.depth(), 0);
+    }
 
     #[test]
     fn a_transaction_commits_on_ok_and_aborts_on_err_and_nests() {

@@ -413,11 +413,11 @@ pub mod tests {
     mod_api::impl_server_host_areas!(TankWorld, except(mod_state));
     #[cfg(test)]
     impl crate::prelude::ModStateServerHost for TankWorld {
-        fn transaction_open(&mut self, _: TransactionSeal) {
-            self.journal.open(self.tanks.clone());
+        fn transaction_open(&mut self) -> Transaction {
+            self.journal.open(self.tanks.clone())
         }
-        fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
-            if let Some(tanks) = self.journal.close(commit) {
+        fn transaction_close(&mut self, tx: &Transaction, commit: bool) {
+            if let Some(tanks) = self.journal.close(tx, commit) {
                 self.tanks = tanks;
             }
         }

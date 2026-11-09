@@ -26,20 +26,16 @@ impl Wire for crate::OwnProvider {
     }
 }
 
+/// A transaction crosses as its frame token: decoding one builds a value, not authority, since
+/// the game checks the token against its open transactions on every use.
 impl Wire for crate::Transaction {
     const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(crate::Transaction));
-    const MIN: usize = 0;
-    fn put(&self, _: &mut Writer) {}
-    fn take(_: &mut Reader<'_>) -> Result<Self, WireError> {
-        Ok(Self(()))
+    const MIN: usize = 8;
+    fn put(&self, out: &mut Writer) {
+        out.put(&self.0);
     }
-}
-impl Wire for crate::TransactionSeal {
-    const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(crate::TransactionSeal));
-    const MIN: usize = 0;
-    fn put(&self, _: &mut Writer) {}
-    fn take(_: &mut Reader<'_>) -> Result<Self, WireError> {
-        Ok(Self(()))
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        Ok(Self(input.take()?))
     }
 }
 impl Wire for crate::LoadedMods {
@@ -129,12 +125,11 @@ mod resource_wire_tests {
     #[test]
     fn wire_tokens_and_package_inventory() {
         let mut out = Writer::new();
-        out.put(&crate::Transaction(()));
-        out.put(&crate::TransactionSeal(()));
-        assert!(out.bytes().is_empty());
+        out.put(&crate::Transaction(7));
+        assert_eq!(out.bytes().len(), 8, "a transaction crosses as its frame token");
         let mut input = Reader::new(out.bytes());
-        let _: crate::Transaction = input.take().unwrap();
-        let _: crate::TransactionSeal = input.take().unwrap();
+        let tx: crate::Transaction = input.take().unwrap();
+        assert_eq!(tx, crate::Transaction(7));
         crate::phase::with_test_packages(&["test_mod"], || {
             let mods: crate::LoadedMods = input.take().unwrap();
             let context: crate::RegistrationContext = input.take().unwrap();

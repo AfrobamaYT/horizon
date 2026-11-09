@@ -24,7 +24,7 @@
 use super::{BlockEntity, BlockStateId, Game, machines::HopperState};
 use horizon_client::{items::ItemStack, world::BlockEntityExtras};
 use horizon_mod_runtime::attachments::{Attachments, Holder};
-use mod_api::TransactionSeal;
+use mod_api::Transaction;
 use std::collections::HashMap;
 
 type Pos = (i32, i32, i32);
@@ -32,6 +32,9 @@ type Pos = (i32, i32, i32);
 /// One open transaction.
 #[derive(Default)]
 pub(super) struct Level {
+    /// What names it to the mods that write in it and close it (`Transaction`): unguessable, so
+    /// only the value the game handed out names it.
+    token: u64,
     dimension: Option<super::Dim>,
     /// Each block entity as it was before this transaction first wrote it.
     block_entities: HashMap<Pos, Kept>,
@@ -160,6 +163,17 @@ pub(super) enum DeferredEffect {
     },
 }
 
+/// A fresh transaction token: a process-wide count through a randomly keyed hash, so a mod
+/// cannot guess the token of a transaction it was not handed.
+fn frame_token() -> u64 {
+    use std::hash::BuildHasher;
+    use std::sync::{OnceLock, atomic::AtomicU64, atomic::Ordering};
+    static KEYS: OnceLock<std::hash::RandomState> = OnceLock::new();
+    static COUNT: AtomicU64 = AtomicU64::new(0);
+    KEYS.get_or_init(std::hash::RandomState::new)
+        .hash_one(COUNT.fetch_add(1, Ordering::Relaxed))
+}
+
 impl Level {
     /// Keeps chested mob `id`'s item list's length, `len`, before `entity_slots` grows it, if
     /// this transaction hasn't yet.
@@ -169,22 +183,37 @@ impl Level {
 }
 
 impl Game<'_> {
-    /// Opens a transaction, nested in the open one if any (`Transaction.open`). Only
-    /// `host.transaction` reaches it, through its seal.
-    pub(in crate::game) fn transaction_open(&mut self, seal: TransactionSeal) {
-        let _ = seal;
-        self.open_storage_transaction();
+    /// Opens a transaction, nested in the open one if any (`Transaction.open`), and gives back
+    /// the value naming it.
+    pub(in crate::game) fn transaction_open(&mut self) -> Transaction {
+        mod_api::__private::transaction(self.open_storage_transaction())
     }
-    /// `transaction_close`, which only `host.transaction` reaches, through its seal.
-    pub(in crate::game) fn transaction_close(&mut self, seal: TransactionSeal, commit: bool) {
-        let _ = seal;
-        self.close_storage_transaction(commit);
-    }
-    fn open_storage_transaction(&mut self) {
+    /// Opens a transaction and gives back its token.
+    fn open_storage_transaction(&mut self) -> u64 {
+        let token = frame_token();
         self.transactions.push(Level {
+            token,
             dimension: Some(self.dim),
             ..Level::default()
         });
+        token
+    }
+    /// Closes the innermost open transaction when `tx` names it. Any other is refused: a mod
+    /// ends only the transaction it opened, never one around it, the game's own (a hopper's
+    /// move) or another mod's.
+    pub(in crate::game) fn transaction_close(&mut self, tx: &Transaction, commit: bool) {
+        let named = mod_api::__private::transaction_token(tx);
+        if self.transactions.last().map(|level| level.token) != Some(named) {
+            log::warn!("Horizon: refused to close a transaction that is not the innermost open one");
+            return;
+        }
+        self.close_storage_transaction(commit);
+    }
+    /// Whether `tx` names an open transaction: a write given any other changes nothing, so none
+    /// happens outside the journal.
+    pub(in crate::game) fn transaction_holds(&self, tx: &Transaction) -> bool {
+        let named = mod_api::__private::transaction_token(tx);
+        self.transactions.iter().any(|level| level.token == named)
     }
     /// Closes the innermost transaction: `commit` hands its changes to the one around it, or
     /// at the root makes them final and tells the world; otherwise every storage it wrote goes
@@ -1330,6 +1359,26 @@ mod tests {
             })
         }));
         assert!(caught.is_err());
+        assert_eq!(chest_items(&game), [(0, 3)]);
+        assert!(game.transactions.is_empty());
+
+        // A transaction decoded from bytes, which the game never handed out, names no open
+        // transaction (#2424): a write given it changes nothing, and a close given it ends
+        // nothing, so the game's own transaction still puts back everything at its abort.
+        use mod_api::prelude::ModStateServerHost as _;
+        let forged: mod_api::Transaction =
+            mod_api::wire::Reader::decode(&0u64.to_le_bytes()).unwrap();
+        let host: &mut dyn ServerHost = &mut game;
+        assert!(insert(host, on([0, 64, 0], None), 0, sticks(1), &forged).is_some());
+        assert_eq!(chest_items(&game), [(0, 3)]);
+        let host: &mut dyn ServerHost = &mut game;
+        let aborted: Result<(), ()> = host.transaction(|host, tx| {
+            assert!(insert(host, on([0, 64, 0], None), 0, sticks(1), tx).is_none());
+            host.transaction_close(&forged, true);
+            assert!(insert(host, on([0, 64, 0], None), 0, sticks(1), tx).is_none());
+            Err(())
+        });
+        assert_eq!(aborted, Err(()));
         assert_eq!(chest_items(&game), [(0, 3)]);
         assert!(game.transactions.is_empty());
 

@@ -147,7 +147,8 @@ Many hand-written impls exist only because the type is built through a checked c
 | generated: `serde_json::Value`, `Map` | 2 | **move to `wire.rs` by hand** | foreign types; JSON string form kept byte for byte |
 | generated: `ModelPart`, `MeshDefinition` | 2 | **hand-written JSON impls** beside the types | keeps their bytes; a structural derive later would be a deliberate layout change |
 | generated: other value types | 528 | **`#[derive(Wire)]`** on the type | the rules above |
-| `wire_types.rs`: `Transaction`, `TransactionSeal`, `LoadedMods`, `RegistrationContext` | 4 | **stay hand-written** | zero-byte lent tokens: the receiver rebuilds its own token. Boundary policy, not a layout |
+| `wire_types.rs`: `Transaction` | 1 | **stays hand-written** | its game-issued frame token (`u64`); the game checks it on every use (#2424) |
+| `wire_types.rs`: `LoadedMods`, `RegistrationContext` | 2 | **stay hand-written** | zero-byte lent tokens: the receiver rebuilds its own token. Boundary policy, not a layout |
 | `wire_types.rs`: `OwnProvider`; `wire_slots.rs`: `Id` | 2 | **stay hand-written** | resource handles (group-scoped ids, the `Unsupported` marker) |
 | `wire_types.rs`: slot keys (9 `u32`, `UnresolvedFluid` `u64`) | 1 macro | **stay hand-written** | the host checks each slot with `from_slot`; the guest carries it unchecked, which differs by target |
 | `wire_types.rs`: field-by-field handles and values with plain constructors (`NativeWorldEpoch`, `NativeTickId`, `EntityRef` and the 9 entity handles, `LevelRef`, `ChunkRef`, `GlobalPos`, `Corners`, `PackageKind`, `Side`, `PackageInfo`, …) | ~35 | **derive**, after checking the field order matches the hand impl's `put` order | same bytes. `PackageKind`/`Side` return `WireError::Tag` in place of `Invalid` for an unknown case, a different error with the same refusal |
