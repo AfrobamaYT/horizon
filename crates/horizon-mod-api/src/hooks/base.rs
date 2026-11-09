@@ -256,7 +256,7 @@ pub trait Hooks {
     fn minimap();
     /// The player changed setting `key` of mod `mod_id` on its page in Options > Mods
     /// (`Registrar::register_setting`); the new value is kept already, so read it with
-    /// `setting_bool` and its siblings. Every mod hears every change: check `mod_id`.
+    /// `setting_bool` and its siblings. Only the setting owner's listeners receive this event.
     #[hook(
         side = "client",
         contract = "listen",

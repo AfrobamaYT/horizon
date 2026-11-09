@@ -3608,7 +3608,7 @@ impl Game<'_> {
             .iter()
             .filter(|(owner, _)| *owner == mod_id)
             .map(|(_, spec)| {
-                let kept = self.setting(mod_id, &spec.key);
+                let kept = self.stored_setting(mod_id, &spec.key);
                 let value = match (&spec.kind, spec.read(kept.as_deref())) {
                     (_, mod_api::SettingValue::Toggle(on)) => NativeSettingValue::Toggle(on),
                     (
@@ -3659,8 +3659,9 @@ impl Game<'_> {
         let Some(kept) = kept else {
             return;
         };
-        self.set_setting(&id, &key, &kept);
-        self.native_setting_changed(&id, &key);
+        if self.store_setting(&id, &key, &kept) {
+            self.native_setting_changed(&id, &key);
+        }
     }
     /// Native mod `i`'s page opened: its settings' kept values read again.
     pub(super) fn native_settings_refresh(&mut self, i: usize) {

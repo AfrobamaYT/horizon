@@ -5054,12 +5054,42 @@ impl Game<'_> {
     }
     /// A mod's setting `key` (one file per key in `native_data_dir`).
     pub(in crate::game) fn setting(&self, mod_id: &str, key: &str) -> Option<String> {
-        horizon_world::native_load_context::read_setting(&self.native_data_dir(mod_id), key)
+        if mod_api::crash::current_native_mod()? != mod_id {
+            return None;
+        }
+        self.stored_setting(mod_id, key)
     }
-    /// Keeps a mod's setting `key`.
+    pub(super) fn stored_setting(&self, mod_id: &str, key: &str) -> Option<String> {
+        self.setting_overrides
+            .borrow()
+            .get(&(mod_id.to_owned(), key.to_owned()))
+            .cloned()
+            .or_else(|| self.loop_context.setting(mod_id, key))
+    }
+    /// Keeps only the calling mod's setting `key`.
     pub(in crate::game) fn set_setting(&self, mod_id: &str, key: &str, value: &str) {
+        if mod_api::crash::current_native_mod() != Some(mod_id) {
+            return;
+        }
+        self.store_setting(mod_id, key, value);
+    }
+    pub(super) fn store_setting(&self, mod_id: &str, key: &str, value: &str) -> bool {
+        // Registered keys are validated at registration; never join an arbitrary mod input.
+        if mod_api::__private::setting(mod_id, key).is_none() {
+            return false;
+        }
         let dir = self.native_data_dir(mod_id);
-        let _ = fs::create_dir_all(&dir).and_then(|()| fs::write(dir.join(key), value));
+        if fs::create_dir_all(&dir)
+            .and_then(|()| fs::write(dir.join(key), value))
+            .is_ok()
+        {
+            self.setting_overrides
+                .borrow_mut()
+                .insert((mod_id.to_owned(), key.to_owned()), value.to_owned());
+            true
+        } else {
+            false
+        }
     }
     /// Shows the panel beside container screens with these items (at most
     /// 8192), as the game's own slots in pages, with a search box; the
