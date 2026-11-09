@@ -3,7 +3,7 @@
 //! hosted server's tracker both name. Two leads on one fence share it, a
 //! knot made again after its last lead went is a new entity, and the same
 //! fence position in another level is another knot.
-use super::*;
+use crate::game::*;
 use horizon_client::{
     chunk::Chunk,
     lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig},
@@ -25,20 +25,21 @@ fn game() -> Game<'static> {
     );
     let settings = Settings::default();
     let loaded = load_resources(
-        root.clone(),
+        horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+        Vec::new(),
         None,
         &root,
         &settings,
         std::time::Instant::now(),
         false,
-        true,
+        crate::game::execution_role::ExecutionRole::IntegratedServer,
         &Progress::new(),
         &mut |_, _| unreachable!(),
     )
     .unwrap();
     let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
     options.resources = root.clone();
-    options.execution_role = execution_role::ExecutionRole::IntegratedServer;
+    options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
     let res: &'static _ = Box::leak(Box::new(loaded.resources));
     let mut game = Game::new(
         res,
@@ -46,7 +47,9 @@ fn game() -> Game<'static> {
         loaded.gui.unwrap(),
         options,
         settings,
-        Audio::silent(&root),
+        Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            root.clone(),
+        )),
         None,
     )
     .unwrap();
@@ -86,9 +89,7 @@ fn step(game: &mut Game<'_>) {
 
 fn mob(game: &mut Game<'_>, uuid: &str) -> usize {
     match game.target_with_uuid(horizon_client::save::uuid_from_text(uuid).unwrap()) {
-        Some(super::commands::Target::Mob(id)) => {
-            game.mobs.iter().position(|m| m.id == id).unwrap()
-        }
+        Some(super::Target::Mob(id)) => game.mobs.iter().position(|m| m.id == id).unwrap(),
         other => panic!("{other:?}"),
     }
 }
@@ -98,7 +99,7 @@ fn knots(game: &Game<'_>) -> Vec<u32> {
     game.level_candidates()
         .into_iter()
         .filter_map(|t| match t {
-            super::commands::Target::Knot(id) => Some(id),
+            super::Target::Knot(id) => Some(id),
             _ => None,
         })
         .collect()
@@ -109,9 +110,12 @@ fn knot_uuid(game: &mut Game<'_>) -> [i32; 4] {
     let [id] = knots(game)[..] else {
         panic!("one knot: {:?}", knots(game));
     };
-    let target = super::commands::Target::Knot(id);
-    match game.entity_nbt(target).and_then(|t| t.get("UUID").cloned()) {
-        Some(horizon_world::nbt::Tag::IntArray(v)) => [v[0], v[1], v[2], v[3]],
+    let target = super::Target::Knot(id);
+    match game
+        .command_target_nbt(target)
+        .and_then(|t| t.get("UUID").cloned())
+    {
+        Some(horizon_core::nbt::Tag::IntArray(v)) => [v[0], v[1], v[2], v[3]],
         other => panic!("{other:?}"),
     }
 }
@@ -122,7 +126,7 @@ fn host(game: &mut Game<'_>) {
         ..NetConfig::lan(0, "knot-identity-test".into(), 2)
     };
     game.lan_host(
-        super::lan::LanSettings {
+        crate::game::lan::LanSettings {
             port: 0,
             guest_commands: true,
             force_game_mode: false,
@@ -157,7 +161,6 @@ fn host(game: &mut Game<'_>) {
             latency: Arc::new(AtomicI32::new(0)),
             address: "127.0.0.1:25565".parse().unwrap(),
             expected: false,
-            configured: Default::default(),
         },
         2,
         [12.5, 201.0, 4.5],
@@ -198,7 +201,7 @@ fn a_server_that_starts_tracking_later_shows_the_same_knot() {
     assert_eq!(knots(&game), [id]);
     assert_eq!(knot_uuid(&mut game), uuid);
     assert_eq!(
-        game.network_entity_id(super::commands::Target::Knot(id)),
+        game.network_entity_id(super::Target::Knot(id)),
         Some(id as i32)
     );
 }
@@ -326,7 +329,7 @@ fn commands_that_would_move_or_remove_a_natural_knot_fail() {
     assert_eq!(game.mobs[i].extra.leash, Some(Holder::Knot([8, 201, 0])));
     let at = horizon_client::mobs::leash::knot_state([8, 201, 0]).position;
     assert_eq!(
-        game.target_position(super::commands::Target::Knot(id)),
+        game.target_position(super::Target::Knot(id)),
         Some([at.x, at.y, at.z])
     );
 }

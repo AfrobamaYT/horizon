@@ -24,7 +24,6 @@ use horizon_client::{
         menu::{Rules, Slots},
     },
     motion::{MotionEvent, MotionWorld, PlayerMotion},
-    particles::TrackingTarget,
     pose::Dimensions,
 };
 use horizon_core::{

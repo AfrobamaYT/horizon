@@ -32,20 +32,21 @@ fn game() -> Game<'static> {
     );
     let settings = Settings::default();
     let loaded = load_resources(
-        root.clone(),
+        horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+        Vec::new(),
         None,
         &root,
         &settings,
         std::time::Instant::now(),
         false,
-        true,
+        crate::game::execution_role::ExecutionRole::IntegratedServer,
         &Progress::new(),
         &mut |_, _| unreachable!(),
     )
     .unwrap();
     let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
     options.resources = root.clone();
-    options.execution_role = execution_role::ExecutionRole::IntegratedServer;
+    options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
     let res: &'static _ = Box::leak(Box::new(loaded.resources));
     let mut game = Game::new(
         res,
@@ -53,7 +54,9 @@ fn game() -> Game<'static> {
         loaded.gui.unwrap(),
         options,
         settings,
-        Audio::silent(&root),
+        Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            root.clone(),
+        )),
         None,
     )
     .unwrap();
@@ -108,7 +111,6 @@ fn game() -> Game<'static> {
             latency: Arc::new(AtomicI32::new(0)),
             address: "127.0.0.1:25565".parse().unwrap(),
             expected: false,
-            configured: Default::default(),
         },
         2,
         [24.5, 201.0, 10.5],

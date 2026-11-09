@@ -4285,8 +4285,8 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn client_host_reads_current_pause_state() {
-        use super::super::execution_role::ExecutionRole;
         use super::super::native_entity_refs::tests::with_game;
+        use crate::game::execution_role::ExecutionRole;
 
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;
@@ -4301,8 +4301,8 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn client_host_reads_playing_and_key_mappings() {
         use super::super::Screen;
-        use super::super::execution_role::ExecutionRole;
         use super::super::native_entity_refs::tests::with_game;
+        use crate::game::execution_role::ExecutionRole;
 
         use winit::keyboard::KeyCode;
 
@@ -4593,14 +4593,14 @@ mod tests {
             &settings,
             std::time::Instant::now(),
             false,
-            super::super::execution_role::ExecutionRole::IntegratedServer,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
         .unwrap();
         let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
         options.resources = root.clone();
-        options.execution_role = super::super::execution_role::ExecutionRole::IntegratedServer;
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
         let game = Game::new(
             &loaded.resources,
             loaded.pack,
@@ -4704,7 +4704,7 @@ mod tests {
             &settings,
             std::time::Instant::now(),
             false,
-            super::super::execution_role::ExecutionRole::IntegratedServer,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!("no menu handoff"),
         )

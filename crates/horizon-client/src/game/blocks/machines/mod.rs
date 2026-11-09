@@ -2072,7 +2072,7 @@ mod item_column_tests {
     /// length and last id; the stamped columns still see where it went.
     #[test]
     fn a_moved_item_is_seen_where_it_went() {
-        let mut items = horizon_client::join_seq::JoinList::from(vec![
+        let mut items = horizon_client::join_seq::JoinList::<_, true>::from_iter([
             item(1, 0.5, 64.0, 0.5),
             item(2, 40.5, 64.0, 40.5),
         ]);
@@ -2081,7 +2081,9 @@ mod item_column_tests {
         // The first question for a list scans; the second builds the columns.
         assert!(columns.may_reach_area(&items, far.0, far.1));
         assert!(!columns.may_reach_area(&items, far.0, far.1));
-        items[0].position = horizon_core::geometry::Vec3::new(100.5, 64.0, 100.5);
+        items.update(0, |item| {
+            item.position = horizon_core::geometry::Vec3::new(100.5, 64.0, 100.5)
+        });
         assert!(columns.may_reach_area(&items, far.0, far.1));
         assert!(columns.may_reach_area(&items, far.0, far.1));
         assert!(!columns.may_reach_area(&items, (0, 0), (0, 0)));

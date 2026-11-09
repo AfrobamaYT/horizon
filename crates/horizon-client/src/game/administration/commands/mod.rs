@@ -6712,3 +6712,7 @@ mod global_selector_order_tests {
         });
     }
 }
+
+#[cfg(test)]
+#[path = "incoming_tests/knot_identity.rs"]
+mod knot_identity_tests;

@@ -543,8 +543,6 @@ fn glfw_modifier_bits_are_glfw_modifier_bits() {
     assert_eq!(glfw_modifiers(ModifiersState::all()), 15);
 }
 
-#[path = "knot_identity_tests.rs"]
-mod knot_identity_tests;
 /// The `button` a native mod's mouse hooks hand over is GLFW's index (0
 /// left, 1 right, 2 middle, 3 back, 4 forward, else the button's number),
 /// the one `keybinds::mouse_name` names (`key.mouse.<index + 1>` from the
@@ -620,8 +618,6 @@ fn an_interact_packet_clicks_the_entity_it_names_not_the_nearest() {
     assert_eq!(Game::named_entity(&cows, 31, |c| c.0), None);
 }
 
-#[path = "building_cache_tests.rs"]
-mod building_cache_tests;
 /// The id path keeps the crosshair pick's filters, so a packet cannot name
 /// a mob the pick would refuse: one in its death animation, the one the
 /// player rides, or the camera entity. Without them a guest could shear,
@@ -688,6 +684,7 @@ fn a_mod_screen_on_a_machine_menu_takes_the_stock_layout_out() {
 fn a_falling_block_keeps_its_model_offset() {
     let at = Vec3::new(3.5, 70.25, -1.5);
     let falling = FallingBlock {
+        on_ground: false,
         attachment_lifetime: Default::default(),
         rotation: [0.0, 0.0],
         join: Default::default(),

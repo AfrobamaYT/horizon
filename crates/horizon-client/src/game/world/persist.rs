@@ -1209,7 +1209,7 @@ impl Game<'_> {
             None
         };
         // The mob's own random makes its UUID, kept unless the tag has one.
-        let (own, fresh) = horizon_client::mobs::living_random();
+        let (own, _fresh) = horizon_client::mobs::living_random();
         let mut m = entity_nbt::mob_from_nbt_with_random(
             &tag,
             self.res.mob_types(),

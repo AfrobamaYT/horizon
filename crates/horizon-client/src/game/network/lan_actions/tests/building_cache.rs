@@ -2,7 +2,7 @@
 //! a guest teleported, killed or put in spectator mode in the middle of the
 //! tick blocks placement where it is now, as when each turn built the boxes
 //! afresh, not at its box from the start of the tick.
-use super::*;
+use crate::game::*;
 use horizon_client::{
     chunk::Chunk,
     lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig},
@@ -20,20 +20,21 @@ fn game() -> Game<'static> {
     );
     let settings = Settings::default();
     let loaded = load_resources(
-        root.clone(),
+        horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+        Vec::new(),
         None,
         &root,
         &settings,
         std::time::Instant::now(),
         false,
-        true,
+        crate::game::execution_role::ExecutionRole::IntegratedServer,
         &Progress::new(),
         &mut |_, _| unreachable!(),
     )
     .unwrap();
     let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
     options.resources = root.clone();
-    options.execution_role = execution_role::ExecutionRole::IntegratedServer;
+    options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
     let res: &'static _ = Box::leak(Box::new(loaded.resources));
     let mut game = Game::new(
         res,
@@ -41,7 +42,9 @@ fn game() -> Game<'static> {
         loaded.gui.unwrap(),
         options,
         settings,
-        Audio::silent(&root),
+        Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            root.clone(),
+        )),
         None,
     )
     .unwrap();
@@ -62,7 +65,7 @@ fn game() -> Game<'static> {
         ..NetConfig::lan(0, "building-cache-test".into(), 3)
     };
     game.lan_host(
-        super::lan::LanSettings {
+        crate::game::lan::LanSettings {
             port: 0,
             guest_commands: true,
             force_game_mode: false,
@@ -98,7 +101,6 @@ fn game() -> Game<'static> {
                 latency: Arc::new(AtomicI32::new(0)),
                 address: "127.0.0.1:25565".parse().unwrap(),
                 expected: false,
-                configured: Default::default(),
             },
             conn as i32,
             [x, 100.0, 8.5],
@@ -113,9 +115,8 @@ fn game() -> Game<'static> {
 
 /// The other players' boxes in the Builder's turn: what blocks its placing.
 fn seen_by_builder(game: &mut Game<'_>) -> Boxes {
-    let mut host = game.lan.take().unwrap();
-    let seen = game.as_guest(&mut host, 3, |g| g.lan_building_boxes.boxes(Dim::Overworld));
-    game.lan = Some(host);
+    let seen = game.as_guest(3, |g| g.lan_building_boxes.boxes(Dim::Overworld));
+
     seen.unwrap()
 }
 
@@ -124,16 +125,14 @@ fn seen_by_builder(game: &mut Game<'_>) -> Boxes {
 /// without the shared boxes.
 fn the_mover_changed_mid_tick(command: &str, turns: bool) -> (Boxes, Boxes, Boxes) {
     let mut game = game();
-    super::lan_actions::building_cache(game.lan.as_ref());
+    crate::game::lan_actions::building_cache(game.lan.as_ref());
     let before = seen_by_builder(&mut game);
     assert!(game.run_command(command), "{command}");
     if turns {
-        let mut host = game.lan.take().unwrap();
-        game.tick_guests_inner(&mut host);
-        game.lan = Some(host);
+        game.tick_guests_inner();
     }
     let cached = seen_by_builder(&mut game);
-    super::lan_actions::building_cache(None);
+    crate::game::lan_actions::building_cache(None);
     let fresh = seen_by_builder(&mut game);
     (before, cached, fresh)
 }

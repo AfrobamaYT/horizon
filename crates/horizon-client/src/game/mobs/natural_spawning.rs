@@ -1390,7 +1390,7 @@ mod tests {
         use horizon_client::lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig};
         use horizon_protocol::packets::configuration::ClientInformation;
         use std::sync::{Arc, atomic::AtomicI32, mpsc};
-        let mut game = crate::game::native_machines::tests::server_game();
+        let mut game = crate::game::game_tests::tests::server_game();
         let net = NetConfig {
             announce: false,
             ..NetConfig::lan(0, "spawner-players-test".into(), 8)
@@ -1438,7 +1438,6 @@ mod tests {
                     latency: Arc::new(AtomicI32::new(0)),
                     address: "127.0.0.1:25565".parse().unwrap(),
                     expected: false,
-                    configured: Default::default(),
                 },
                 conn as i32,
                 [x, 64.0, 0.5],

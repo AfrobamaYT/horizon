@@ -158,13 +158,14 @@ fn a_landing_posts_the_block_game_event_its_rule_posts() {
     let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
     let settings = Settings::default();
     let loaded = load_resources(
-        root.clone(),
+        horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+        Vec::new(),
         None,
         &root,
         &settings,
         std::time::Instant::now(),
         false,
-        true,
+        crate::game::execution_role::ExecutionRole::IntegratedServer,
         &Progress::new(),
         &mut |_, _| unreachable!(),
     )
@@ -178,7 +179,9 @@ fn a_landing_posts_the_block_game_event_its_rule_posts() {
         loaded.gui.unwrap(),
         options,
         settings,
-        Audio::silent(&root),
+        Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            root.clone(),
+        )),
         None,
     )
     .unwrap();
@@ -207,6 +210,10 @@ fn a_landing_posts_the_block_game_event_its_rule_posts() {
                 collision_binding: game.collision,
                 resources: game.motion,
                 health: &game.health_resources,
+                tag_items: Some(game.res.items()),
+                loop_context: &game.loop_context,
+                damage_hooks: &game.damage_hooks,
+                block_registries: Some(&game.ui.registries),
             };
             FallDamageWorld::fall_on(&mut world, state, at, 3.0).unwrap();
         }

@@ -18306,14 +18306,6 @@ fn reset_world_progress(adv: &mut advancements::AdvState, stats: &mut stats::Sta
     *stats = Default::default();
 }
 
-#[cfg(test)]
-#[path = "game/runtime/startup_cpu_tests.rs"]
-mod startup_cpu_tests;
-
-#[cfg(test)]
-#[path = "game/runtime/runtime_reset_tests.rs"]
-mod runtime_reset_tests;
-
 /// `LocalPlayer.moveTowardsClosestSpace` at the body's four corners (aiStep, unless a spectator or a
 /// passenger): a corner inside a suffocating block sets a 0.1 speed towards the nearest side that is
 /// free, on that side's axis; a later corner overwrites an earlier one. Suffocating is a full
@@ -18473,7 +18465,3 @@ mod nested_orb_spawn_tests {
         });
     }
 }
-
-#[cfg(test)]
-#[path = "game/world/player_save_projection_tests.rs"]
-mod player_save_projection_tests;

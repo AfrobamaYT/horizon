@@ -1,8 +1,8 @@
 //! A flying bobber that strikes a block calls its `onProjectileHit`
 //! (`FishingHook.onHitBlock` -> `Projectile.onHitBlock`, #12936): a target
 //! block is powered and a bell rings, both credited to the rod's owner.
-use super::super::*;
-use super::Hook;
+use crate::game::fishing::Hook;
+use crate::game::*;
 use horizon_client::chunk::Chunk;
 use horizon_core::position::ChunkPos;
 
@@ -13,20 +13,21 @@ fn game() -> Game<'static> {
     );
     let settings = Settings::default();
     let loaded = load_resources(
-        root.clone(),
+        horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+        Vec::new(),
         None,
         &root,
         &settings,
         Instant::now(),
         false,
-        true,
+        crate::game::execution_role::ExecutionRole::IntegratedServer,
         &Progress::new(),
         &mut |_, _| unreachable!(),
     )
     .unwrap();
     let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
     options.resources = root.clone();
-    options.execution_role = execution_role::ExecutionRole::IntegratedServer;
+    options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
     let res: &'static _ = Box::leak(Box::new(loaded.resources));
     let mut game = Game::new(
         res,
@@ -34,7 +35,9 @@ fn game() -> Game<'static> {
         loaded.gui.unwrap(),
         options,
         settings,
-        Audio::silent(&root),
+        Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            root.clone(),
+        )),
         None,
     )
     .unwrap();

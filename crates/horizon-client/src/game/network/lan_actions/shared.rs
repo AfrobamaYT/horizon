@@ -2041,10 +2041,6 @@ fn bundle_inventory_slot(slot: usize, own: Option<usize>) -> Option<usize> {
     }
 }
 
-#[cfg(test)]
-#[path = "bundle_slot_tests.rs"]
-mod bundle_slot_tests;
-
 /// Where the server aims a guest's attack or interact on a mob. The packet names only the
 /// entity, so the server picked the mob's centre; a slab, trapdoor, stair or fence between the
 /// eyes and that centre then hid a mob the guest's own crosshair hit through the gap (#5772).
@@ -2094,10 +2090,6 @@ fn visible_aim_point(
         .unwrap_or(centre)
 }
 
-#[cfg(test)]
-#[path = "aim_point_tests.rs"]
-mod aim_point_tests;
-
 /// The first target `(id, removed, bounds)` whose box meets the swept box,
 /// skipping removed ones and the vehicle the player rides.
 fn first_spin_target(
@@ -2107,10 +2099,6 @@ fn first_spin_target(
 ) -> Option<usize> {
     targets.position(|(id, removed, b)| !removed && Some(id) != riding && b.intersects(swept))
 }
-
-#[cfg(test)]
-#[path = "spin_target_tests.rs"]
-mod spin_target_tests;
 
 #[cfg(test)]
 mod hotbar_tests {
@@ -2736,10 +2724,6 @@ fn touching_unloaded_chunk(
 }
 
 #[cfg(test)]
-#[path = "unloaded_chunk_tests.rs"]
-mod unloaded_chunk_tests;
-
-#[cfg(test)]
 mod guest_close_listener_tests {
     use super::*;
     use crate::game::{Audio, Options, Progress, Settings, load_resources};
@@ -2766,9 +2750,8 @@ mod guest_close_listener_tests {
         game.sculk_sync_index();
         assert!(selected(game).is_none());
     }
-    fn open(game: &mut Game<'_>, host: &mut LanHost, conn: u32, sequence: i32) -> i32 {
+    fn open(game: &mut Game<'_>, conn: u32, sequence: i32) -> i32 {
         game.lan_guest_packet(
-            host,
             conn,
             S::UseItemOn(play::UseItemOn {
                 hand: 0,
@@ -2780,7 +2763,7 @@ mod guest_close_listener_tests {
                 sequence,
             }),
         );
-        let guest = host.hub.guest(conn).unwrap();
+        let guest = game.lan.as_mut().unwrap().hub.guest(conn).unwrap();
         assert!(guest.ack_up_to.get() >= sequence);
         assert_eq!(guest.health, 20.0);
         assert_eq!(guest.position, [4.5, 100.0, 4.5]);
@@ -2792,9 +2775,8 @@ mod guest_close_listener_tests {
         assert_eq!(menu.size, 27);
         menu.window
     }
-    fn close(game: &mut Game<'_>, host: &mut LanHost, conn: u32, window: i32) {
+    fn close(game: &mut Game<'_>, conn: u32, window: i32) {
         game.lan_guest_packet(
-            host,
             conn,
             S::ContainerClose(play::ContainerClose { container: window }),
         );
@@ -2808,13 +2790,14 @@ mod guest_close_listener_tests {
         );
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -2828,7 +2811,9 @@ mod guest_close_listener_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();
@@ -2873,7 +2858,7 @@ mod guest_close_listener_tests {
             },
         )
         .unwrap();
-        let mut host = game.lan.take().unwrap();
+
         let mut receivers = Vec::new();
         for conn in 1..=3 {
             let (tx, rx) = mpsc::channel();
@@ -2890,7 +2875,6 @@ mod guest_close_listener_tests {
                     latency: Arc::new(AtomicI32::new(0)),
                     address: "127.0.0.1:25565".parse().unwrap(),
                     expected: false,
-                    configured: Default::default(),
                 },
                 conn as i32 + 100,
                 [4.5, 100.0, 4.5],
@@ -2902,23 +2886,41 @@ mod guest_close_listener_tests {
             guest.game_mode = if conn == 3 { 3 } else { 0 };
             guest.on_ground = true;
             assert_eq!(guest.health, 20.0);
-            host.hub.guests.push(guest);
+            game.lan.as_mut().unwrap().hub.guests.push(guest);
         }
         let clock = game.world.game_time;
         let mut missing = Vec::new();
-        let window = open(&mut game, &mut host, 1, 1);
+        let window = open(&mut game, 1, 1);
         assert_eq!(game.lid_openers.get(&(6, 100, 4)), Some(&1));
         assert_eq!(selected(&game).unwrap().event, "minecraft:container_open");
         reset_listener(&mut game);
-        close(&mut game, &mut host, 1, window + 20);
+        close(&mut game, 1, window + 20);
         assert_eq!(
-            host.hub.guest(1).unwrap().menu.as_ref().unwrap().window,
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .guest(1)
+                .unwrap()
+                .menu
+                .as_ref()
+                .unwrap()
+                .window,
             window
         );
         assert_eq!(game.lid_openers.get(&(6, 100, 4)), Some(&1));
         assert!(selected(&game).is_none());
-        close(&mut game, &mut host, 1, window);
-        assert!(host.hub.guest(1).unwrap().menu.is_none());
+        close(&mut game, 1, window);
+        assert!(
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .guest(1)
+                .unwrap()
+                .menu
+                .is_none()
+        );
         assert!(!game.lid_openers.contains_key(&(6, 100, 4)));
         match selected(&game) {
             Some(info) => {
@@ -2928,17 +2930,26 @@ mod guest_close_listener_tests {
             None => missing.push("single final close"),
         }
         reset_listener(&mut game);
-        let first = open(&mut game, &mut host, 1, 2);
+        let first = open(&mut game, 1, 2);
         assert_eq!(selected(&game).unwrap().event, "minecraft:container_open");
         reset_listener(&mut game);
-        let last = open(&mut game, &mut host, 2, 1);
+        let last = open(&mut game, 2, 1);
         assert_eq!(game.lid_openers.get(&(6, 100, 4)), Some(&2));
         assert!(selected(&game).is_none());
-        close(&mut game, &mut host, 1, first);
-        assert!(host.hub.guest(2).unwrap().menu.is_some());
+        close(&mut game, 1, first);
+        assert!(
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .guest(2)
+                .unwrap()
+                .menu
+                .is_some()
+        );
         assert_eq!(game.lid_openers.get(&(6, 100, 4)), Some(&1));
         assert!(selected(&game).is_none());
-        close(&mut game, &mut host, 2, last);
+        close(&mut game, 2, last);
         assert!(!game.lid_openers.contains_key(&(6, 100, 4)));
         match selected(&game) {
             Some(info) => {
@@ -2948,11 +2959,20 @@ mod guest_close_listener_tests {
             None => missing.push("shared final close"),
         }
         reset_listener(&mut game);
-        let spectator = open(&mut game, &mut host, 3, 1);
+        let spectator = open(&mut game, 3, 1);
         assert!(!game.lid_openers.contains_key(&(6, 100, 4)));
         assert!(selected(&game).is_none());
-        close(&mut game, &mut host, 3, spectator);
-        assert!(host.hub.guest(3).unwrap().menu.is_none());
+        close(&mut game, 3, spectator);
+        assert!(
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .guest(3)
+                .unwrap()
+                .menu
+                .is_none()
+        );
         assert!(selected(&game).is_none());
         assert!(game.run_command("setblock 6 100 4 air strict"));
         assert!(
@@ -2960,14 +2980,12 @@ mod guest_close_listener_tests {
         );
         let boat = game.boats.last().unwrap().id;
         // Chest boats open for a sneaking guest; a plain empty-hand click boards.
-        host.hub
-            .guests
-            .iter_mut()
-            .find(|g| g.conn == 1)
+        game.lan
+            .as_mut()
             .unwrap()
-            .sneaking = true;
+            .hub
+            .update_guest(1, |g| g.sneaking = true);
         game.lan_guest_packet(
-            &mut host,
             1,
             S::Interact(play::Interact {
                 id: boat as i32,
@@ -2976,7 +2994,10 @@ mod guest_close_listener_tests {
                 secondary: true,
             }),
         );
-        let vehicle_window = host
+        let vehicle_window = game
+            .lan
+            .as_ref()
+            .unwrap()
             .hub
             .guest(1)
             .unwrap()
@@ -2985,11 +3006,20 @@ mod guest_close_listener_tests {
             .expect("actual vehicle interaction must open menu")
             .window;
         reset_listener(&mut game);
-        close(&mut game, &mut host, 1, vehicle_window);
-        assert!(host.hub.guest(1).unwrap().menu.is_none());
+        close(&mut game, 1, vehicle_window);
+        assert!(
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .guest(1)
+                .unwrap()
+                .menu
+                .is_none()
+        );
         assert_eq!(selected(&game).unwrap().event, "minecraft:container_close");
         assert_eq!(selected(&game).unwrap().pos, [6.5, 100.0, 4.5]);
-        for guest in &host.hub.guests {
+        for guest in &game.lan.as_mut().unwrap().hub.guests {
             assert_eq!(guest.uuid, u128::from(guest.conn) + 11200);
             assert_eq!(guest.health, 20.0);
             assert_eq!(guest.position, [4.5, 100.0, 4.5]);
@@ -3002,41 +3032,6 @@ mod guest_close_listener_tests {
         drop(receivers);
     }
 }
-
-/// Whether a guest's plugin channel message is for one of Horizon's own handlers in
-/// `lan_guest_packet` (its `CustomPayload` arms), not for the mods.
-fn horizon_channel(channel: &str) -> bool {
-    [
-        horizon_protocol::quiet::CHANNEL,
-        horizon_protocol::mod_net::CHANNEL,
-        horizon_client::lod_net::CHANNEL,
-        horizon_client::lan::recipes::TRANSFER_CHANNEL,
-    ]
-    .contains(&channel)
-}
-
-#[cfg(test)]
-mod horizon_channel_tests {
-    use super::horizon_channel;
-
-    #[test]
-    fn horizon_channels_reach_their_handlers_and_others_go_to_the_mods() {
-        // The recipe viewer's transfer (`native_transfer_recipe`) was handed to the mods
-        // before its own arm could run, so a viewer's "+" never reached the server.
-        assert!(horizon_channel(
-            horizon_client::lan::recipes::TRANSFER_CHANNEL
-        ));
-        assert!(horizon_channel(horizon_protocol::quiet::CHANNEL));
-        assert!(horizon_channel(horizon_protocol::mod_net::CHANNEL));
-        assert!(horizon_channel(horizon_client::lod_net::CHANNEL));
-        assert!(!horizon_channel("mymod:hello"));
-        assert!(!horizon_channel("minecraft:brand"));
-    }
-}
-
-#[cfg(test)]
-#[path = "boat_holder_movement_tests.rs"]
-mod boat_holder_movement_tests;
 
 #[cfg(test)]
 mod item_on_block_cooldown_tests {
@@ -3056,13 +3051,14 @@ mod item_on_block_cooldown_tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -3079,7 +3075,9 @@ mod item_on_block_cooldown_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();
@@ -3142,7 +3140,6 @@ mod item_on_block_cooldown_tests {
                 latency: Arc::new(AtomicI32::new(0)),
                 address: "127.0.0.1:25565".parse().unwrap(),
                 expected: false,
-                configured: Default::default(),
             },
             2,
             [4.5, 200.0, 4.5],
@@ -3153,23 +3150,31 @@ mod item_on_block_cooldown_tests {
         guest.loaded = true;
         guest.inventory[0] = Some(ItemStack::new("minecraft:stone", 16));
         guest.selected = 0;
-        let mut host = game.lan.take().unwrap();
-        host.hub.guests.push(guest);
-        assert_eq!(host.hub.guests[0].uuid, 331);
-        assert!(host.hub.guests[0].placed && host.hub.guests[0].loaded);
-        assert_eq!(host.hub.guests[0].game_mode, 0);
+
+        game.lan.as_mut().unwrap().hub.guests.push(guest);
+        assert_eq!(game.lan.as_mut().unwrap().hub.guests[0].uuid, 331);
+        assert!(
+            game.lan.as_mut().unwrap().hub.guests[0].placed
+                && game.lan.as_mut().unwrap().hub.guests[0].loaded
+        );
+        assert_eq!(game.lan.as_mut().unwrap().hub.guests[0].game_mode, 0);
         let mut planks = ItemStack::new("minecraft:oak_planks", 5);
         planks.data_mut().set_other(
             "minecraft:use_cooldown",
-            Some(horizon_world::nbt::Tag::compound([
-                ("seconds", horizon_world::nbt::Tag::Float(30.0f32.to_bits())),
+            Some(horizon_core::nbt::Tag::compound([
+                ("seconds", horizon_core::nbt::Tag::Float(30.0f32.to_bits())),
                 (
                     "cooldown_group",
-                    horizon_world::nbt::Tag::String("probe:group".into()),
+                    horizon_core::nbt::Tag::String("probe:group".into()),
                 ),
             ])),
         );
-        host.hub.guests[0].inventory[0] = Some(planks);
+        game.lan
+            .as_mut()
+            .unwrap()
+            .hub
+            .guests
+            .update(0, |guest| guest.inventory[0] = Some(planks));
         let use_on = |x, sequence| {
             Serverbound::UseItemOn(play::UseItemOn {
                 hand: 0,
@@ -3183,22 +3188,42 @@ mod item_on_block_cooldown_tests {
         };
         assert!(game.world.is_air(game.world.block(5, 200, 6)));
         if check_start.is_none() {
-            let mut stick = host.hub.guests[0].inventory[0].as_ref().unwrap().clone();
+            let mut stick = game.lan.as_mut().unwrap().hub.guests[0].inventory[0]
+                .as_ref()
+                .unwrap()
+                .clone();
             stick.item = "minecraft:stick".into();
             stick.count = 1;
-            host.hub.guests[0].inventory[0] = Some(stick);
-            game.lan_guest_packet(&mut host, 2, use_on(5, 1));
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .guests
+                .update(0, |guest| guest.inventory[0] = Some(stick));
+            game.lan_guest_packet(2, use_on(5, 1));
             assert!(
                 game.world.is_air(game.world.block(5, 200, 6)),
                 "failed stick use"
             );
-            assert!(!host.play[&2].cooldowns.is_on_cooldown("probe:group"));
-            let mut planks = host.hub.guests[0].inventory[0].as_ref().unwrap().clone();
+            assert!(
+                !game.lan.as_mut().unwrap().play[&2]
+                    .cooldowns
+                    .is_on_cooldown("probe:group")
+            );
+            let mut planks = game.lan.as_mut().unwrap().hub.guests[0].inventory[0]
+                .as_ref()
+                .unwrap()
+                .clone();
             planks.item = "minecraft:oak_planks".into();
             planks.count = 5;
-            host.hub.guests[0].inventory[0] = Some(planks);
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .guests
+                .update(0, |guest| guest.inventory[0] = Some(planks));
         }
-        game.lan_guest_packet(&mut host, 2, use_on(5, 2));
+        game.lan_guest_packet(2, use_on(5, 2));
         let oak = game
             .pack
             .assets
@@ -3206,14 +3231,22 @@ mod item_on_block_cooldown_tests {
             .default_state("minecraft:oak_planks")
             .unwrap();
         assert_eq!(game.world.block(5, 200, 6), oak, "actual first placement");
-        assert_eq!(host.hub.guests[0].inventory[0].as_ref().unwrap().count, 4);
+        assert_eq!(
+            game.lan.as_mut().unwrap().hub.guests[0].inventory[0]
+                .as_ref()
+                .unwrap()
+                .count,
+            4
+        );
         assert!(
-            host.play.contains_key(&2),
+            game.lan.as_mut().unwrap().play.contains_key(&2),
             "real acting guest context installed"
         );
         if check_start == Some(true) {
             assert!(
-                host.play[&2].cooldowns.is_on_cooldown("probe:group"),
+                game.lan.as_mut().unwrap().play[&2]
+                    .cooldowns
+                    .is_on_cooldown("probe:group"),
                 "successful use starts the actual guest's group"
             );
             assert!(rx.try_iter().any(|out| {
@@ -3224,12 +3257,18 @@ mod item_on_block_cooldown_tests {
                 })
             }), "existing helper's actual cooldown packet");
         } else if check_start == Some(false) {
-            game.lan_guest_packet(&mut host, 2, use_on(6, 2));
+            game.lan_guest_packet(2, use_on(6, 2));
             assert!(
                 game.world.is_air(game.world.block(6, 200, 6)),
                 "same-group second placement is rejected"
             );
-            assert_eq!(host.hub.guests[0].inventory[0].as_ref().unwrap().count, 4);
+            assert_eq!(
+                game.lan.as_mut().unwrap().hub.guests[0].inventory[0]
+                    .as_ref()
+                    .unwrap()
+                    .count,
+                4
+            );
         }
     }
     #[test]
@@ -3248,3 +3287,31 @@ mod item_on_block_cooldown_tests {
         placement_control(Some(false));
     }
 }
+
+#[cfg(test)]
+#[path = "tests/aim_point_tests.rs"]
+mod aim_point_tests;
+
+#[cfg(test)]
+#[path = "tests/boat_holder_movement_tests.rs"]
+mod boat_holder_movement_tests;
+
+#[cfg(test)]
+#[path = "tests/bundle_slot_tests.rs"]
+mod bundle_slot_tests;
+
+#[cfg(test)]
+#[path = "tests/crack_feedback_tests.rs"]
+mod crack_feedback_tests;
+
+#[cfg(test)]
+#[path = "tests/projectile_lifecycle_tests.rs"]
+mod projectile_lifecycle_tests;
+
+#[cfg(test)]
+#[path = "tests/spin_target_tests.rs"]
+mod spin_target_tests;
+
+#[cfg(test)]
+#[path = "tests/unloaded_chunk_tests.rs"]
+mod unloaded_chunk_tests;

@@ -908,13 +908,14 @@ mod controller_tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -931,7 +932,9 @@ mod controller_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();
@@ -957,7 +960,7 @@ mod controller_tests {
         assert!(game.run_command("forceload add 0 0"));
         assert!(game.run_command("summon minecraft:horse 4.5 210 4.5 {NoAI:1b,Tame:1b}"));
         let horse = game.mobs[0].id;
-        game.mobs[0].extra.saddled = true;
+        game.mobs[0].extra.set_saddled(true);
         game.mobs[0].rider = Some(horizon_client::mobs::equine::Rider {
             client: true,
             ..Default::default()
@@ -988,13 +991,19 @@ mod controller_tests {
             },
         )
         .unwrap();
-        let mut host = game.lan.take().unwrap();
+
         let (mut rider, packets) = guest_with_packets(2, 21);
         (rider.vehicle, rider.vehicle_order) = (Some(horse), 1);
-        host.hub.guests.push(rider);
+        game.lan.as_mut().unwrap().hub.guests.push(rider);
         // What the landing should do: the horse's own fall damage for the whole drop.
         let mut twin = game.mobs[0].clone();
-        twin.cause_fall_damage_from(10.0, 1.0, &mut Vec::new());
+        twin.cause_fall_damage_from(
+            &game.loop_context,
+            &mut crate::health::TestLevel::new(0).level(),
+            10.0,
+            1.0,
+            &mut Vec::new(),
+        );
         assert!(
             twin.health < game.mobs[0].health,
             "a 10-block fall hurts a horse"
@@ -1007,14 +1016,14 @@ mod controller_tests {
             on_ground,
         };
         for y in [209.0, 207.0, 204.0] {
-            game.guest_move_vehicle(&mut host, 2, &move_to(y, false));
+            game.guest_move_vehicle(2, &move_to(y, false));
         }
         assert_eq!(game.mobs[0].position.y, 204.0, "the guest moves the horse");
         assert_eq!(
             game.mobs[0].fall_distance, 6.0,
             "each drop adds to the fall"
         );
-        game.guest_move_vehicle(&mut host, 2, &move_to(200.0, true));
+        game.guest_move_vehicle(2, &move_to(200.0, true));
         assert_eq!(game.mobs[0].fall_distance, 0.0, "the landing ends the fall");
         assert_eq!(
             game.mobs[0].health, twin.health,
@@ -1023,7 +1032,8 @@ mod controller_tests {
         // propagateFallToPassengers: the rider's own causeFallDamage of the fall,
         // ceil((10 - 3) * 1) = 7.
         assert_eq!(
-            host.hub.guests[0].health, 13.0,
+            game.lan.as_mut().unwrap().hub.guests[0].health,
+            13.0,
             "the rider takes the fall too"
         );
         // LivingEntity.checkFallDamage sends the landing's block crumbs to every

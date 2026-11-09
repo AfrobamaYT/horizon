@@ -595,13 +595,14 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources and isolated homes/cwd"]
     fn non_guest_holder_branches_keep_their_existing_velocity_sources() {
-        let mut game = super::super::native_machines::tests::server_game();
+        let mut game = crate::game::game_tests::tests::server_game();
         game.build_registries();
         game.set_allow_commands(true);
         assert!(game.run_command("summon oak_boat 6.5 100 4.5 {UUID:[I;327,1,0,1]}"));
-        let boat = &mut game.boats[0];
-        boat.velocity = Vec3::new(0.25, -0.125, 0.5);
-        let (id, expected) = (boat.id, boat.velocity);
+        let (id, expected) = game.boats.update(0, |boat| {
+            boat.velocity = Vec3::new(0.25, -0.125, 0.5);
+            (boat.id, boat.velocity)
+        });
         let Held::At(state, quad) = game.boat_holder(Holder::Boat(id), None) else {
             panic!("actual boat holder must resolve");
         };

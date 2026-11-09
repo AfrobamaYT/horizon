@@ -9,7 +9,7 @@ use horizon_protocol::packets::configuration::ClientInformation;
 use std::sync::{Arc, atomic::AtomicI32, mpsc};
 
 fn scene() -> (Game<'static>, mpsc::Receiver<Out>) {
-    let mut g = super::super::native_machines::tests::server_game();
+    let mut g = crate::game::game_tests::tests::server_game();
     g.build_registries();
     g.set_allow_commands(true);
     let stone = g
@@ -70,7 +70,6 @@ fn scene() -> (Game<'static>, mpsc::Receiver<Out>) {
             latency: Arc::new(AtomicI32::new(0)),
             address: "127.0.0.1:1".parse().unwrap(),
             expected: false,
-            configured: Default::default(),
         },
         1,
         [0.5, 100.0, 0.5],
@@ -112,20 +111,23 @@ fn snapshot(g: &Game<'_>) -> Snapshot {
     }
 }
 fn group(g: &mut Game<'_>, packets: Vec<S>, token: i32) {
-    let p = &mut g.lan.as_mut().unwrap().hub.guests[0];
-    for packet in packets {
-        p.inbox.push_back((packet, 0));
-    }
+    g.lan.as_mut().unwrap().hub.guests.update(0, |p| {
+        for packet in packets {
+            p.inbox.push_back((packet, 0));
+        }
+    });
     // Real Hub queue/collision/event dispatch, before the receipt marker.
     g.tick_lan_packets();
     assert!(g.lan.as_ref().unwrap().hub.guests[0].inbox.is_empty());
     let before = snapshot(g);
     assert!(before.hand.is_none(), "original lead was consumed");
     assert!(before.using.is_none());
-    let mut host = g.lan.take().unwrap();
-    let (yaw, pitch) = (host.hub.guests[0].yaw, host.hub.guests[0].pitch);
+
+    let (yaw, pitch) = (
+        g.lan.as_ref().unwrap().hub.guests[0].yaw,
+        g.lan.as_ref().unwrap().hub.guests[0].pitch,
+    );
     g.lan_guest_packet(
-        &mut host,
         1,
         S::UseItem(play::UseItem {
             hand: 0,
@@ -134,7 +136,7 @@ fn group(g: &mut Game<'_>, packets: Vec<S>, token: i32) {
             pitch,
         }),
     );
-    g.lan = Some(host);
+
     let after = snapshot(g);
     assert_eq!(
         after, before,

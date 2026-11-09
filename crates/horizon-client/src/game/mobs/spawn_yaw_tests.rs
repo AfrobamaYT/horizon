@@ -3,8 +3,9 @@
 //! level-random draw (`SummonCommand.createEntity`), and `EntityType.create`
 //! (spawn eggs, a dispenser's eggs, mob buckets) wraps its draw with
 //! `Mth.wrapDegrees`.
-use super::creatures::SpawnYaw;
-use super::*;
+use crate::game::creatures::SpawnReason;
+use crate::game::creatures::SpawnSite;
+use crate::game::*;
 use horizon_client::chunk::Chunk;
 use horizon_core::position::ChunkPos;
 use std::sync::Arc;
@@ -16,20 +17,21 @@ fn game() -> Game<'static> {
     );
     let settings = Settings::default();
     let loaded = load_resources(
-        root.clone(),
+        horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+        Vec::new(),
         None,
         &root,
         &settings,
         std::time::Instant::now(),
         false,
-        true,
+        crate::game::execution_role::ExecutionRole::IntegratedServer,
         &Progress::new(),
         &mut |_, _| unreachable!(),
     )
     .unwrap();
     let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
     options.resources = root.clone();
-    options.execution_role = execution_role::ExecutionRole::IntegratedServer;
+    options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
     let res: &'static _ = Box::leak(Box::new(loaded.resources));
     let mut game = Game::new(
         res,
@@ -37,7 +39,9 @@ fn game() -> Game<'static> {
         loaded.gui.unwrap(),
         options,
         settings,
-        Audio::silent(&root),
+        Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            root.clone(),
+        )),
         None,
     )
     .unwrap();
@@ -83,7 +87,11 @@ fn a_spawn_eggs_yaw_is_the_wrapped_level_draw() {
         let mut level = game.world.random.clone();
         let draw = level.next_float() * 360.0;
         let id = game
-            .spawn_mob_spawned("pig", [4.5, 100.0, 8.5], SpawnYaw::Created)
+            .spawn_mob_spawned(
+                "pig",
+                [4.5, 100.0, 8.5],
+                SpawnSite::Finalizing(SpawnReason::SpawnItemUse),
+            )
             .expect("pig");
         let yaw = yaw_of(&game, id);
         assert_eq!(yaw, horizon_client::camera::wrap_degrees(draw));

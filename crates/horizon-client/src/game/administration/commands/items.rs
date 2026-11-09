@@ -2514,7 +2514,7 @@ mod registered_slot_source_read_tests {
     #[test]
     #[ignore = "needs prepared resources and isolated homes/cwd"]
     fn registered_first_three_reads_match_inline_and_keep_the_chest() {
-        let mut game = crate::game::native_machines::tests::server_game();
+        let mut game = crate::game::game_tests::tests::server_game();
         game.build_registries();
         game.set_allow_commands(true);
         let root = std::env::current_dir()
@@ -2535,7 +2535,9 @@ mod registered_slot_source_read_tests {
         game.ensure_datapacks();
         assert_eq!(
             game.fns
-                .pack_file("data/parity/slot_source/first_three.json")
+                .data_resource("data/parity/slot_source/first_three.json")
+                .unwrap()
+                .read()
                 .unwrap(),
             definition.as_bytes()
         );
@@ -2609,7 +2611,7 @@ mod registered_slot_source_preservation_tests {
     use super::*;
 
     fn scene(name: &str) -> (Game<'static>, std::path::PathBuf) {
-        let mut game = crate::game::native_machines::tests::server_game();
+        let mut game = crate::game::game_tests::tests::server_game();
         game.build_registries();
         game.set_allow_commands(true);
         let root = std::env::current_dir().unwrap().join(name);
@@ -2647,10 +2649,12 @@ mod registered_slot_source_preservation_tests {
         count(&mut game, 3); // Higher-priority pack overrides the same id.
         std::fs::write(&file, r#"{"type":"minecraft:limit_slots","limit":2,"slot_source":{"type":"minecraft:slot_range","slots":"container.*"}}"#).unwrap();
         count(&mut game, 3); // Disk edits do not change the loaded snapshot.
-        game.reload_datapacks(true);
+        game.reload_datapacks(true, &game.level.enabled_features.clone())
+            .unwrap();
         count(&mut game, 2);
         std::fs::write(file, "{").unwrap();
-        game.reload_datapacks(true);
+        game.reload_datapacks(true, &game.level.enabled_features.clone())
+            .unwrap();
         count(&mut game, 1); // Existing policy: invalid higher JSON is skipped.
         assert!(!game.run_command("execute if slots block 0 100 0 first_three"));
         assert_eq!(game.block_entity_nbt([0, 100, 0]).as_ref(), Some(&before));
@@ -2679,9 +2683,7 @@ mod registered_slot_source_preservation_tests {
             ));
         }
         for command in commands {
-            let dispatcher = horizon_client::command::vanilla::game_dispatcher_with_features(
-                &game.level.enabled_features,
-            );
+            let dispatcher = horizon_client::command::vanilla::game_dispatcher();
             assert!(
                 dispatcher
                     .parse(&command, &game.ui.registries)

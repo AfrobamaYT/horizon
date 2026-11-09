@@ -813,3 +813,7 @@ impl Game<'_> {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/building_cache.rs"]
+mod building_cache_tests;

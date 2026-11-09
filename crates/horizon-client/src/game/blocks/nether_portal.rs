@@ -10,7 +10,7 @@
 //! cooldowns follow their level; shared `Arrival`s hold each traveller's
 //! saved compound until its destination chunks are loaded.
 use super::entity::{Entity as _, entity_lists_of, for_each_entity};
-use super::{Dim, Game, Result, Screen, level_flags};
+use super::{Dim, Game, Screen};
 use horizon_client::fast_hash::FxHashMap;
 use horizon_client::nether_portal::{ENTITY_DELAY, PortalState};
 use horizon_core::{

@@ -273,6 +273,7 @@ mod tests {
                 .unwrap();
             let at = Vec3::new(0.5, 70.0, 0.5);
             game.falling.push(FallingBlock {
+                on_ground: false,
                 attachment_lifetime: Default::default(),
                 rotation: [0.0; 2],
                 join: Default::default(),

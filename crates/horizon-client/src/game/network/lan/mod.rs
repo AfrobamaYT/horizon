@@ -6231,7 +6231,7 @@ mod connected_statistics_save_tests {
     fn connected_stats_save_control(stale: bool) {
         use super::super::{execution_role::ExecutionRole, stats};
         use std::sync::{Arc, Mutex};
-        let mut game = super::super::native_machines::tests::server_game();
+        let mut game = crate::game::game_tests::tests::server_game();
         game.options.execution_role = ExecutionRole::DedicatedServer;
         let dir = std::env::current_dir().unwrap().join(if stale {
             "stats-stale"
@@ -6262,7 +6262,9 @@ mod connected_statistics_save_tests {
         let _rx = super::world_spawn_sync_tests::host_for(&mut game);
         let host = game.lan.as_mut().unwrap();
         host.owner = None;
-        host.hub.guests[0].dimension = "minecraft:overworld".into();
+        host.hub
+            .guests
+            .update(0, |guest| guest.dimension = "minecraft:overworld".into());
         assert!(host.hub.guests[0].placed);
         assert!(!host.hub.guests[0].released);
         assert_eq!(host.hub.guests[0].uuid, 1);
@@ -6335,7 +6337,7 @@ mod connected_statistics_save_exclusion_tests {
     #[test]
     #[ignore = "needs prepared resources and scratch homes/cwd"]
     fn excluded_guest_records_are_not_invented_or_written() {
-        let mut game = super::super::native_machines::tests::server_game();
+        let mut game = crate::game::game_tests::tests::server_game();
         let _rx = super::world_spawn_sync_tests::host_for(&mut game);
         game.world_root = std::env::current_dir().unwrap().join("stats-excluded");
         std::fs::create_dir_all(&game.world_root).unwrap();
@@ -6346,14 +6348,14 @@ mod connected_statistics_save_exclusion_tests {
             .or_default()
             .stats
             .add("used", "minecraft:diamond_sword", 1);
-        host.hub.guests[0].placed = false;
+        host.hub.guests.update(0, |guest| guest.placed = false);
         game.save_connected_guest_statistics(&host);
         assert!(!path.exists(), "not placed: no statistics file");
-        host.hub.guests[0].placed = true;
-        host.hub.guests[0].released = true;
+        host.hub.guests.update(0, |guest| guest.placed = true);
+        host.hub.guests.update(0, |guest| guest.released = true);
         game.save_connected_guest_statistics(&host);
         assert!(!path.exists(), "released: no statistics file");
-        host.hub.guests[0].released = false;
+        host.hub.guests.update(0, |guest| guest.released = false);
         let play = host.play.remove(&1).unwrap();
         game.save_connected_guest_statistics(&host);
         assert!(!path.exists(), "no play record: no invented statistics");
@@ -6363,10 +6365,10 @@ mod connected_statistics_save_exclusion_tests {
         game.save_game_metadata().unwrap();
         assert!(!path.exists(), "the existing dedicated gate is preserved");
         game.options.dedicated = Some(Vec::new());
-        game.options.execution_role = super::super::execution_role::ExecutionRole::Client;
+        game.options.execution_role = crate::game::execution_role::ExecutionRole::Client;
         game.save_game_metadata().unwrap();
         assert!(!path.exists(), "the existing nonclient gate is preserved");
-        game.options.execution_role = super::super::execution_role::ExecutionRole::DedicatedServer;
+        game.options.execution_role = crate::game::execution_role::ExecutionRole::DedicatedServer;
         let host = game.lan.take().unwrap();
         game.save_game_metadata().unwrap();
         assert!(!path.exists(), "no hub: no substituted record");
