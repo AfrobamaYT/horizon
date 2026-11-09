@@ -1423,7 +1423,10 @@ mod tests {
         });
         assert_eq!(failed, Err(()));
         assert_eq!(chest_items(&game), [(0, 3)]);
-        assert!(game.transactions.is_empty(), "both closed before the next tick");
+        assert!(
+            game.transactions.is_empty(),
+            "both closed before the next tick"
+        );
 
         // An attachment map a write made inside an aborted transaction is gone with it.
         let chest_holder = mod_api::Holder::BlockEntity([0, 64, 0]);
