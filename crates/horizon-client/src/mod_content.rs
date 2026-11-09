@@ -1001,11 +1001,9 @@ impl Plan<'_> {
     /// `entity-types.json` with a row for each mod type: its template's, so its
     /// size, eyes and category are the template's (`execute anchored eyes`,
     /// spawner checks and the commands' entity type list, `reg.entity_types`),
-    /// with `template` naming it and a living type's own attribute bases
-    /// (`MobTypes` makes the mob from it). The rows are appended as text, each
-    /// value as the template has it: parsed and written back, a float such as
-    /// a zombie's `movement_speed` can come back one ulp off.
-    /// Mod passenger attachments are appended alongside attribute overrides.
+    /// with `template`, passenger attachments and a living type's attribute bases (`MobTypes`
+    /// makes the mob from it). Template values stay raw text: parsing and rewriting a float
+    /// such as a zombie's `movement_speed` can come back one ulp off.
     fn entity_types_json(&self, bytes: &[u8]) -> std::result::Result<Vec<u8>, String> {
         use serde_json::value::RawValue;
         let rows: BTreeMap<String, Box<RawValue>> =
