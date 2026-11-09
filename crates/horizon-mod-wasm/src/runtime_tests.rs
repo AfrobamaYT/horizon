@@ -117,6 +117,37 @@ fn hook_round_trip_and_malformed_reply_poison() {
     assert!(module.running.poisoned.load(Ordering::Relaxed));
     assert_eq!(call(&module), None);
 }
+/// The reply a hook names is read only where it lies inside guest memory.
+#[test]
+fn a_reply_reaching_past_guest_memory_is_refused_and_one_ending_at_its_edge_is_read() {
+    fn invoke(reply: impl Fn(u64) -> u64) -> (u64, Result<usize, String>) {
+        let size = {
+            let module = module("i64.const 0");
+            let group = module.running.group.lock().unwrap();
+            group.store.data().memory.unwrap().data_size(&group.store) as u64
+        };
+        let module = module(&format!("i64.const {}", reply(size) as i64));
+        let mut group = module.running.group.lock().unwrap();
+        group.store.set_epoch_deadline(30_000);
+        let mut input = Writer::new();
+        input.put(&42u32);
+        let mut output = Vec::new();
+        let result = module
+            .invoke(&mut group.store.as_context_mut(), 0, &input, &mut output)
+            .map(|()| output.len())
+            .map_err(|error| error.to_string());
+        (size, result)
+    }
+    // The reply starts at 512 and ends exactly at the end of memory.
+    let (size, result) = invoke(|size| 512 << 32 | (size - 512));
+    assert_eq!(result, Ok(size as usize - 512));
+    // One byte longer reaches past the end.
+    let (_, result) = invoke(|size| 512 << 32 | (size - 511));
+    assert_eq!(result, Err("reply outside memory".into()));
+    // An error reply (length u32::MAX) that starts past the end.
+    let (_, result) = invoke(|size| (size + 1) << 32 | u64::from(u32::MAX));
+    assert_eq!(result, Err("error reply outside memory".into()));
+}
 #[test]
 fn encoding_failure_refuses_partial_arguments() {
     let module = module("i64.const 2199023255556");
