@@ -866,10 +866,7 @@ pub(in crate::game) fn style_hover(style: &engine::Style) -> Option<TextHover> {
     if style.hover.is_none() && style.hover_item.is_none() && style.hover_entity.is_none() {
         return None;
     }
-    let span = engine::Span {
-        text: String::new(),
-        style: style.clone(),
-    };
+    let span = engine::Span::new(String::new(), style.clone());
     capture(Source::Span(&span)).ok()?.style.hover.take()
 }
 impl TryIntoApi for engine::Text {
