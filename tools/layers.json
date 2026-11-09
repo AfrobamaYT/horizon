@@ -129,7 +129,6 @@
     "horizon-client-lib -> horizon-shaders",
     "horizon-client-lib -> horizon-theme",
     "horizon-client-render -> horizon-hdr",
-    "horizon-client-render -> horizon-mod-api-gen",
     "horizon-client-render -> horizon-optifine",
     "horizon-client-render -> horizon-polytone",
     "horizon-client-render -> horizon-shader-api",
@@ -152,7 +151,10 @@
     "horizon-client-lib -> horizon-mod-api",
     "horizon-client-render -> horizon-mod-api",
     "horizon-client-render -> horizon-mod-api-macros",
-    "horizon-client-render -> horizon-mod-render"
+    "horizon-client-render -> horizon-mod-render",
+    "horizon-launcher -> horizon-mod-package",
+    "horizon-launcher -> horizon-system",
+    "horizon-mod-registry -> horizon-mod-package"
   ],
   "_fork_baselines": {
     "horizon-internals": "Existing fork mod/platform boundary; no engine ownership moved by this sync.",
@@ -178,6 +180,9 @@
     "horizon-client-lib -> horizon-mod-api": "Existing fork dependency across the upstream layer split; recorded baseline, not a new dependency.",
     "horizon-client-render -> horizon-mod-api": "Existing fork dependency across the upstream layer split; recorded baseline, not a new dependency.",
     "horizon-client-render -> horizon-mod-api-macros": "Existing fork dependency across the upstream layer split; recorded baseline, not a new dependency.",
-    "horizon-client-render -> horizon-mod-render": "Existing fork dependency across the upstream layer split; recorded baseline, not a new dependency."
+    "horizon-client-render -> horizon-mod-render": "Existing fork dependency across the upstream layer split; recorded baseline, not a new dependency.",
+    "horizon-launcher -> horizon-mod-package": "Fork mod packaging: the launcher and registry read and build .hmod packages; recorded baseline, not a new dependency.",
+    "horizon-launcher -> horizon-system": "Machine probes moved from the telemetry crate into horizon-system; the launcher reads them (upstream 8a9f5a1288).",
+    "horizon-mod-registry -> horizon-mod-package": "Fork mod packaging: the launcher and registry read and build .hmod packages; recorded baseline, not a new dependency."
   }
 }
