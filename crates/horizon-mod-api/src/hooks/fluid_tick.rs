@@ -5,6 +5,7 @@ pub trait Hooks {
     /// `water`, `lava` or a mod fluid's id. Set `cancel` and the tick does nothing at all: no
     /// level change, no spreading and no new tick. For a mod that simulates a fluid itself;
     /// `fluid_level_change` and `block_spread` still ask about each change of a tick that runs.
+    /// A cancelled tick schedules nothing; a mod taking over must re-schedule itself.
     /// It's asked once per tick, so keep it cheap. Server-side.
     #[hook(
         side = "server",
