@@ -2003,8 +2003,8 @@ impl ItemEnchantments {
 /// (`minecraft:speed`, a content mod's `mod:custom`),
 /// the ticks left (-1 is infinite), the amplifier from 0, and the flags a
 /// beacon-style effect carries: `ambient` (an ambient one gives no
-/// particles) and `visible` (whether its particles show). Horizon keeps no
-/// separate show-icon flag: the icon always shows.
+/// particles), `visible` (whether its particles show) and `show_icon`
+/// (whether the HUD and inventory list it).
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 #[derive(horizon_mod_api_macros::Wire)]
@@ -2019,17 +2019,29 @@ pub struct NativeActiveEffect {
     pub ambient: bool,
     /// `MobEffectInstance.isVisible`: whether its particles show.
     pub visible: bool,
+    /// `MobEffectInstance.showIcon`: whether the HUD and the inventory list
+    /// it. Vanilla keeps it apart from `visible`.
+    pub show_icon: bool,
 }
 
 impl NativeActiveEffect {
-    /// Construct an effect with its duration, amplifier and visual flags.
-    pub fn new(id: EffectKey, duration: i32, amplifier: i32, ambient: bool, visible: bool) -> Self {
+    /// Construct an effect with its duration, amplifier and visual flags, as
+    /// vanilla's six-argument `MobEffectInstance` constructor takes them.
+    pub fn new(
+        id: EffectKey,
+        duration: i32,
+        amplifier: i32,
+        ambient: bool,
+        visible: bool,
+        show_icon: bool,
+    ) -> Self {
         Self {
             id,
             duration,
             amplifier,
             ambient,
             visible,
+            show_icon,
         }
     }
 }
@@ -6565,6 +6577,7 @@ pub(crate) mod built {
         pub amplifier: i32,
         pub ambient: bool,
         pub visible: bool,
+        pub show_icon: bool,
     }
     impl From<NativeActiveEffect> for super::NativeActiveEffect {
         fn from(v: NativeActiveEffect) -> Self {
@@ -6574,6 +6587,7 @@ pub(crate) mod built {
                 amplifier,
                 ambient,
                 visible,
+                show_icon,
             } = v;
             Self {
                 id,
@@ -6581,6 +6595,7 @@ pub(crate) mod built {
                 amplifier,
                 ambient,
                 visible,
+                show_icon,
             }
         }
     }

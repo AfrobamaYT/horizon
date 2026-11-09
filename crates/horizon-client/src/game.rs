@@ -8250,6 +8250,7 @@ impl Game<'_> {
                             eff.amplifier,
                             eff.ambient,
                             eff.show_particles,
+                            eff.show_icon,
                         );
                         changed |= self.living_add_effect(living, &effect);
                     } else {

@@ -787,8 +787,8 @@ handle, an entity the client doesn't track and a level it doesn't show:
   trident have no release for a mob. A piglin with something in its off hand and a drinking witch refuse a start and have no
   use to read or release: the counter is their own timer.
 - `living.effects(host)` lists a living entity's active effects (vanilla's `activeEffects`) as `NativeActiveEffect`s — the
-  load-owned `EffectKey` (read its canonical name with `key.id(host)`), the ticks left (-1 infinite), the amplifier, and the `ambient` and `visible` flags; Horizon keeps no separate
-  show-icon flag, the icon always shows. `living.effect(host, key)` reads one (`getEffect`) and `living.potion_affected(host,
+  load-owned `EffectKey` (read its canonical name with `key.id(host)`), the ticks left (-1 infinite), the amplifier, and the `ambient`, `visible` and `show_icon` flags
+  (`show_icon` is vanilla's `showIcon`, apart from the particles). `living.effect(host, key)` reads one (`getEffect`) and `living.potion_affected(host,
   key)` answers `hasEffect`; request the key once through `Registrar::effect_key`. `living.add_effect(host, &effect)` is
   `LivingEntity.addEffect` by the game's own path: a player's or a guest's goes through the potion machinery (its attribute
   modifiers, absorption, and the added-effect hooks for a content mod's effect), a mob's past `canBeAffected` (a spider
