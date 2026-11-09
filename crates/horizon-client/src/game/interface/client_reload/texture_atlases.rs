@@ -44,13 +44,15 @@ pub(in crate::game) fn stage_texture_atlases(
             log::warn!("Horizon: texture atlas {atlas} skipped: {error}");
             continue;
         }
-        let sources = match definition(source, &registration.definition) {
+        let file = definition_file(&registration.definition);
+        let Ok(text) = source.read_to_string(&file) else {
+            log::warn!("Horizon: texture atlas {atlas} skipped: no definition {file}");
+            continue;
+        };
+        let sources = match atlas_sources::decode(&text) {
             Ok(sources) => sources,
             Err(error) => {
-                log::warn!(
-                    "Horizon: texture atlas {atlas} skipped: definition {}: {error}",
-                    registration.definition
-                );
+                log::warn!("Horizon: texture atlas {atlas} skipped: {file}: {error}");
                 continue;
             }
         };
@@ -93,18 +95,11 @@ fn admit(registration: &TextureAtlasRegistration, seen: &[Identifier]) -> Result
     Ok(())
 }
 
-/// `assets/<namespace>/atlases/<path>.json`'s sources. The root already holds the file's
+/// The definition `assets/<namespace>/atlases/<path>.json`. The root already holds the file's
 /// whole resource stack (`packs::resources` merges every pack's copy, bottom first, after
 /// the pack filters, as `SpriteSourceList.load` does), so this one read sees all of them.
-fn definition(
-    source: &ResourceSource,
-    id: &Identifier,
-) -> Result<Vec<atlas_sources::SpriteSource>, String> {
-    let file = format!("assets/{}/atlases/{}.json", id.namespace(), id.path());
-    let text = source
-        .read_to_string(&file)
-        .map_err(|_| format!("no file {file}"))?;
-    atlas_sources::decode(&text)
+fn definition_file(id: &Identifier) -> String {
+    format!("assets/{}/atlases/{}.json", id.namespace(), id.path())
 }
 
 fn stage_sprite(
@@ -522,7 +517,10 @@ mod tests {
             );
             stage_texture_atlases(
                 root(&[
-                    ("assets/icons_mod/atlases/icons.json", definition.into_bytes()),
+                    (
+                        "assets/icons_mod/atlases/icons.json",
+                        definition.into_bytes(),
+                    ),
                     (
                         "assets/icons_mod/textures/icons/heart.png",
                         fixture_png(2, 2, 1),
@@ -554,12 +552,12 @@ mod tests {
                 ["checker_mod:checker"]
             );
             let first = stage(40);
-            assert_eq!(
-                checker_pixels(&first),
-                (2, 2, [40, 40, 40, 255].repeat(4))
-            );
+            assert_eq!(checker_pixels(&first), (2, 2, [40, 40, 40, 255].repeat(4)));
             assert!(first.source().contains(&heart));
-            assert!(!first.source().contains(&star), "the source removed the star");
+            assert!(
+                !first.source().contains(&star),
+                "the source removed the star"
+            );
             let reloaded = stage(90);
             assert_eq!(checker_pixels(&reloaded).2[..4], [90, 90, 90, 255]);
         });

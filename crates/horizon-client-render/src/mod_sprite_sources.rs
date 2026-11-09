@@ -68,9 +68,13 @@ mod tests {
         Identifier::parse(text).unwrap()
     }
     fn textures() -> Vec<String> {
-        ["srctest:item/apple", "srctest:item/gem", "srctest:item/stick"]
-            .map(String::from)
-            .to_vec()
+        [
+            "srctest:item/apple",
+            "srctest:item/gem",
+            "srctest:item/stick",
+        ]
+        .map(String::from)
+        .to_vec()
     }
     fn pixels(sprite: &str, width: u32, height: u32, rgba: Vec<u8>) -> SpriteSourceOutput {
         SpriteSourceOutput::Pixels {
@@ -107,14 +111,17 @@ mod tests {
         );
         assert!(is_registered("srcreg:one") && is_registered("srcreg:two"));
         assert!(!is_registered("minecraft:mine") && !is_registered("no_namespace"));
-        assert!(register(vec!["srcreg:one".into()]).is_empty(), "already registered");
+        assert!(
+            register(vec!["srcreg:one".into()]).is_empty(),
+            "already registered"
+        );
     }
 
     #[test]
     fn an_unregistered_type_fails_its_definition_by_name() {
         let text = r#"{"sources":[{"type":"directory","source":"item","prefix":""},{"type":"srcfree:nobody"}]}"#;
         assert_eq!(
-            decode(text).unwrap_err(),
+            decode(text).unwrap_err().to_string(),
             "sources[1]: unknown sprite source type srcfree:nobody"
         );
         register(vec!["srcfree:nobody".into()]);
@@ -128,8 +135,15 @@ mod tests {
     fn the_source_is_asked_with_its_entry_and_what_was_listed_before_it() {
         let mut asked = Vec::new();
         list(&definition(), &textures(), &mut |kind, config, listed| {
-            assert!(matches!(config, Tag::Compound(_)), "an object converts to a compound");
-            asked.push((kind.to_owned(), config.get("shade").cloned(), listed.to_vec()));
+            assert!(
+                matches!(config, Tag::Compound(_)),
+                "an object converts to a compound"
+            );
+            asked.push((
+                kind.to_owned(),
+                config.get("shade").cloned(),
+                listed.to_vec(),
+            ));
             Vec::new()
         });
         assert_eq!(
@@ -138,7 +152,11 @@ mod tests {
                 "srctest:own".to_owned(),
                 // A JSON number converts to the narrowest tag that holds it.
                 Some(Tag::Byte(7)),
-                vec![id("srctest:item/apple"), id("srctest:item/gem"), id("srctest:item/stick")]
+                vec![
+                    id("srctest:item/apple"),
+                    id("srctest:item/gem"),
+                    id("srctest:item/stick")
+                ]
             )]
         );
     }
@@ -162,13 +180,20 @@ mod tests {
             listed["srctest:item/apple"],
             SpriteOrigin::File("srctest:item/gem".into())
         );
-        assert_eq!(listed["srctest:new"], SpriteOrigin::Pixels((1, 2, vec![9; 8])));
+        assert_eq!(
+            listed["srctest:new"],
+            SpriteOrigin::Pixels((1, 2, vec![9; 8]))
+        );
         assert_eq!(
             listed["srctest:late"],
             SpriteOrigin::File("srctest:item/stick".into())
         );
         let generated = crate::atlas_sources::generate(&listed["srctest:new"], &|_, _| None);
-        assert_eq!(generated, Some((1, 2, vec![9; 8])), "a mod's pixels need no file");
+        assert_eq!(
+            generated,
+            Some((1, 2, vec![9; 8])),
+            "a mod's pixels need no file"
+        );
     }
 
     #[test]
@@ -184,7 +209,10 @@ mod tests {
             ]
         });
         let ids: Vec<&str> = listed.keys().map(String::as_str).collect();
-        assert_eq!(ids, ["srctest:item/apple", "srctest:item/stick", "srctest:late"]);
+        assert_eq!(
+            ids,
+            ["srctest:item/apple", "srctest:item/stick", "srctest:late"]
+        );
     }
 
     #[test]
@@ -197,7 +225,12 @@ mod tests {
                 pixels("srctest:empty", 0, 4, Vec::new()),
                 // The product overflows: refused without a panic.
                 pixels("srctest:overflow", u32::MAX, u32::MAX, vec![0; 4]),
-                pixels("srctest:too_wide", side + 1, 1, vec![0; (side as usize + 1) * 4]),
+                pixels(
+                    "srctest:too_wide",
+                    side + 1,
+                    1,
+                    vec![0; (side as usize + 1) * 4],
+                ),
                 SpriteSourceOutput::Texture {
                     sprite: id("srctest:missing"),
                     texture: id("srctest:item/nothing"),

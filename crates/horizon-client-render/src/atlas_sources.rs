@@ -98,25 +98,49 @@ fn number(v: &Value, key: &str, default: f64) -> Option<f64> {
     }
 }
 
+/// Why an atlas definition can't be decoded ([`decode`]).
+#[derive(Debug)]
+pub enum DefinitionError {
+    /// The file isn't JSON.
+    Json(serde_json::Error),
+    /// It has no `sources` list.
+    NoSources,
+    /// The entry at `index` doesn't decode as its type.
+    Malformed { index: usize },
+    /// The entry at `index` is of a type neither built in nor registered by a mod.
+    UnknownType { index: usize, kind: String },
+}
+impl std::fmt::Display for DefinitionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Json(error) => error.fmt(f),
+            Self::NoSources => f.write_str("no `sources` list"),
+            Self::Malformed { index } => write!(f, "sources[{index}]: malformed source"),
+            Self::UnknownType { index, kind } => {
+                write!(f, "sources[{index}]: unknown sprite source type {kind}")
+            }
+        }
+    }
+}
+impl std::error::Error for DefinitionError {}
+
 /// `SpriteSources.FILE_CODEC`: the `sources` list of an atlas definition.
 /// A malformed source fails the whole file, as the codec does; the error names
-/// the first one, and the type when no source has it.
-pub fn decode(text: &str) -> Result<Vec<SpriteSource>, String> {
-    let json: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
+/// the first one, and its type when no source has it.
+pub fn decode(text: &str) -> Result<Vec<SpriteSource>, DefinitionError> {
+    let json: Value = serde_json::from_str(text).map_err(DefinitionError::Json)?;
     let sources = json
         .get("sources")
         .and_then(Value::as_array)
-        .ok_or("no `sources` list")?;
+        .ok_or(DefinitionError::NoSources)?;
     sources
         .iter()
         .enumerate()
         .map(|(index, source)| {
             let kind = source.get("type").and_then(Value::as_str).map(qualified);
             decode_source(source).ok_or_else(|| match kind {
-                Some(kind) if !known(&kind) => {
-                    format!("sources[{index}]: unknown sprite source type {kind}")
-                }
-                _ => format!("sources[{index}]: malformed source"),
+                Some(kind) if !known(&kind) => DefinitionError::UnknownType { index, kind },
+                _ => DefinitionError::Malformed { index },
             })
         })
         .collect()
@@ -520,7 +544,13 @@ pub fn atlases(
         .filter_map(|file| {
             let (namespace, path) = file.strip_prefix("assets/")?.split_once("/atlases/")?;
             let name = path.strip_suffix(".json")?;
-            let sources = decode(&source.read_to_string(&file).ok()?).ok()?;
+            let sources = match decode(&source.read_to_string(&file).ok()?) {
+                Ok(sources) => sources,
+                Err(error) => {
+                    log::warn!("Horizon: atlas {namespace}:{name} skipped: {error}");
+                    return None;
+                }
+            };
             Some((format!("{namespace}:{name}"), sources))
         })
         .collect()
@@ -599,16 +629,21 @@ mod tests {
     #[test]
     fn malformed_sources_fail_the_file() {
         assert_eq!(
-            decode(r#"{"sources":[{"type":"directory","source":"item"}]}"#).unwrap_err(),
+            decode(r#"{"sources":[{"type":"directory","source":"item"}]}"#)
+                .unwrap_err()
+                .to_string(),
             "sources[0]: malformed source"
         );
         assert_eq!(
             decode(r#"{"sources":[{"type":"directory","source":"a","prefix":""},{"type":"unstitch","resource":"x","regions":[]}]}"#)
-                .unwrap_err(),
+                .unwrap_err()
+                .to_string(),
             "sources[1]: malformed source"
         );
         assert_eq!(
-            decode(r#"{"sources":[{"type":"horizon"}]}"#).unwrap_err(),
+            decode(r#"{"sources":[{"type":"horizon"}]}"#)
+                .unwrap_err()
+                .to_string(),
             "sources[0]: unknown sprite source type minecraft:horizon"
         );
     }
