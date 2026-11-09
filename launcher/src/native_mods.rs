@@ -2559,9 +2559,8 @@ fn copy_runtime(from: &Path, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Installs `binary` as version `version`: a copy of installed version `base`'s folder (its
-/// resources included; cloned where the disk can) with the built binary, as `target` names it,
-/// in place of `base`'s.
+/// Installs `binary` as version `version`, retaining the base's runtime helpers. Clients
+/// reference the base's prepared resources; standalone server exports still carry their own.
 fn install(
     base: &str,
     version: &str,
@@ -2575,7 +2574,7 @@ fn install(
     let partial = target.directory(&format!(".{version}.partial"));
     let _ = fs::remove_dir_all(&partial);
     fs::create_dir_all(&partial).map_err(|e| e.to_string())?;
-    copy_base(&from, &partial, target)?;
+    copy_base(&from, &partial, target, target == Target::Client)?;
     let installed = partial.join(target.binary());
     fs::copy(binary, &installed).map_err(|e| format!("The built game: {e}"))?;
     // The prebuilt game's libraries load from beside the executable.
@@ -2604,10 +2603,15 @@ fn install(
 
 /// Copies version folder `from` into `to` but for what a new build of `target` makes its own
 /// ([`carried_over`]), cloned where the disk can. Also an imported build's start (`build_import`).
-pub(crate) fn copy_base(from: &Path, to: &Path, target: Target) -> Result<(), String> {
+pub(crate) fn copy_base(
+    from: &Path,
+    to: &Path,
+    target: Target,
+    share_resources: bool,
+) -> Result<(), String> {
     for entry in fs::read_dir(from).map_err(|e| e.to_string())?.flatten() {
         let name = entry.file_name();
-        if !carried_over(&name, target) {
+        if !carried_over(&name, target) || (share_resources && name == ".local") {
             continue;
         }
         let to = to.join(&name);
@@ -2726,6 +2730,133 @@ mod tests {
 
     use super::*;
 
+    /// The player's route, from a fresh data folder with nothing registered by hand: the
+    /// launcher's own install of a release, a native build on it, then an update to a newer
+    /// release and a switch to it. The native build reads its base's resources throughout.
+    #[test]
+    fn a_native_build_starts_from_a_release_the_launcher_installed() {
+        use std::io::Write;
+        use std::net::TcpListener;
+        if std::env::var_os("HORIZON_PLAYER_FLOW_CHILD").is_none() {
+            let home = tempfile::tempdir().unwrap();
+            let status = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "native_mods::tests::a_native_build_starts_from_a_release_the_launcher_installed",
+                ])
+                .env("HORIZON_PLAYER_FLOW_CHILD", "1")
+                .env("HORIZON_LAUNCHER_HOME", home.path().join("launcher"))
+                .env("HORIZON_HOME", home.path().join("home"))
+                .env("XDG_DATA_HOME", home.path().join("data"))
+                .env("XDG_CONFIG_HOME", home.path().join("config"))
+                .env("HORIZON_LAUNCHER_NO_SELF_UPDATE", "1")
+                .status()
+                .unwrap();
+            assert!(status.success());
+            return;
+        }
+        // A release archive as GitHub serves it: one top folder holding the game.
+        let mut archive = Vec::new();
+        {
+            let mut tar = tar::Builder::new(flate2::write::GzEncoder::new(
+                &mut archive,
+                flate2::Compression::fast(),
+            ));
+            let game = b"release game";
+            let mut header = tar::Header::new_gnu();
+            header.set_size(game.len() as u64);
+            header.set_mode(0o755);
+            header.set_cksum();
+            tar.append_data(
+                &mut header,
+                format!("horizon-linux-x86_64/{}", backend::CLIENT),
+                &game[..],
+            )
+            .unwrap();
+            tar.into_inner().unwrap().finish().unwrap();
+        }
+        let sha256: String =
+            sha2::Digest::finalize(<sha2::Sha256 as sha2::Digest>::new_with_prefix(&archive))
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect();
+        let install_release = |tag: &str| {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let url = format!(
+                "http://{}/horizon-linux-x86_64.tar.gz",
+                listener.local_addr().unwrap()
+            );
+            let body = archive.clone();
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0; 4096];
+                let _ = std::io::Read::read(&mut stream, &mut request);
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                )
+                .unwrap();
+                stream.write_all(&body).unwrap();
+            });
+            let release = backend::Release {
+                tag: tag.into(),
+                name: tag.into(),
+                body: String::new(),
+                date: String::new(),
+                time: String::new(),
+                asset: Some((url, archive.len() as u64)),
+                prerelease: false,
+                nightly: None,
+            };
+            backend::install_as(&release, tag, &sha256, None, |_| {}).unwrap();
+            server.join().unwrap();
+            // `horizon-launcher prepare` writes the resources from the player's own Minecraft.
+            let resources = backend::resources(tag);
+            fs::create_dir_all(&resources).unwrap();
+            fs::write(resources.join("horizon-resources.json"), b"{}").unwrap();
+        };
+        let (old, new) = ("v2026.11.01", "v2026.11.02");
+        // (a) A fresh install: the release is the build's base, chosen as the launcher chooses.
+        install_release(old);
+        let base = base_for(None, &backend::installed(), false).unwrap();
+        assert_eq!(base, old);
+        let binary = dir("player-flow").join("built");
+        fs::write(&binary, b"native game").unwrap();
+        let native = "native-player-flow";
+        install(
+            &base,
+            native,
+            Target::Client,
+            &binary,
+            &[],
+            &serde_json::json!({"base": base, "horizon": "0".repeat(40), "target": "client"}),
+            &[],
+        )
+        .unwrap();
+        backend::need_prepared(native).unwrap();
+        assert_eq!(backend::resources(native), backend::resources(old));
+        // (b) An update: a newer release arrives, and a rebuild with `update` moves to it. The
+        // build made before it still plays, on the base it was made from, which stays installed.
+        install_release(new);
+        assert_eq!(
+            base_for(Some(native), &backend::installed(), true).as_deref(),
+            Some(new)
+        );
+        assert_eq!(
+            update_for(native, &backend::installed()).as_deref(),
+            Some(new)
+        );
+        backend::need_prepared(native).unwrap();
+        assert!(backend::remove_version(old).unwrap_err().contains(native));
+        // (c) Switching the selected version leaves the build and its base as they are.
+        let mut settings = backend::Settings::load();
+        settings.selected = Some(new.into());
+        settings.save().unwrap();
+        backend::need_prepared(native).unwrap();
+        assert_eq!(backend::resources(native), backend::resources(old));
+    }
+
     #[test]
     fn isolation_keeps_cancellation_exact_after_a_retry() {
         let _guard = TEST_STATE.lock().unwrap();
@@ -2833,6 +2964,27 @@ mod tests {
         )
         .is_err());
         assert!(windows_build_platform(0xa641, rust_toolchain::WINDOWS_ARM64_TARGET).is_err());
+    }
+
+    #[test]
+    fn client_runtime_reuses_base_resources_but_server_exports_remain_standalone() {
+        let source = dir("resource-base");
+        let client = dir("resource-client");
+        let server = dir("resource-server");
+        fs::create_dir_all(source.join(".local/horizon-client/26.3")).unwrap();
+        fs::write(source.join(".local/horizon-client/26.3/data"), b"prepared").unwrap();
+        fs::write(source.join("horizon-ctl"), b"control").unwrap();
+        copy_base(&source, &client, Target::Client, true).unwrap();
+        copy_base(&source, &server, Target::Server, false).unwrap();
+        assert!(!client.join(".local").exists());
+        assert_eq!(fs::read(client.join("horizon-ctl")).unwrap(), b"control");
+        assert_eq!(
+            fs::read(server.join(".local/horizon-client/26.3/data")).unwrap(),
+            b"prepared"
+        );
+        for path in [source, client, server] {
+            fs::remove_dir_all(path).unwrap();
+        }
     }
 
     #[test]
