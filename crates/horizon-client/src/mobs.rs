@@ -108,7 +108,8 @@ pub mod warden_brain;
 pub mod witch;
 pub mod wither;
 mod world;
-pub use world::{TargetInfo, visual_clip};
+pub use living::totem_death_effects;
+use world::{TargetInfo, visual_clip};
 pub mod dragon_contacts;
 pub mod zombie_villager;
 
@@ -1701,30 +1702,6 @@ impl Extra {
     }
 }
 
-/// `DeathProtection.TOTEM_EFFECTS`: clear, then regeneration II, absorption II
-/// and fire resistance.
-fn totem_death_effects() -> Vec<crate::items::ConsumeEffect> {
-    use crate::items::{ConsumeEffect, ConsumeEffectSpec};
-    let spec = |id: &str, duration, amplifier| ConsumeEffectSpec {
-        id: id.to_owned(),
-        duration,
-        amplifier,
-        ambient: false,
-        show_particles: true,
-        show_icon: true,
-    };
-    vec![
-        ConsumeEffect::ClearAllEffects,
-        ConsumeEffect::ApplyEffects {
-            effects: vec![
-                spec("minecraft:regeneration", 900, 1),
-                spec("minecraft:absorption", 100, 1),
-                spec("minecraft:fire_resistance", 800, 0),
-            ],
-            probability: 1.0,
-        },
-    ]
-}
 
 /// How far the boxes of a set of mobs reach from their positions: the widest reach sideways, below
 /// and above among them, worked out from each mob's real box ([`Mob::bounds`]: a shulker's grows
