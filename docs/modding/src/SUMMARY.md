@@ -17,6 +17,7 @@
 - [Where the mod API is going](concepts/design.md)
 - [Design: transactional block-entity removal](concepts/block-entity-removal.md)
 - [Design: client action pipeline](concepts/client-action-pipeline.md)
+- [Design: effect added](concepts/effect-added.md)
 - [Design: multi-block placement](concepts/multi-block-placement.md)
 - [Design: moving structures](concepts/moving-structures.md)
 - [Design: custom recipe-book settings](concepts/recipe-book-types.md)
