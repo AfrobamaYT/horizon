@@ -573,6 +573,7 @@ fn create_in(
         let _ = fs::remove_dir_all(&dir);
         return Err(format!("Could not make {}: {e}", dir.display()));
     }
+    crate::run_leases::publish(&dir).map_err(crate::native_mods::cache_error)?;
     let mut store = Store::load(data);
     let meta = store.instances.entry(slug.clone()).or_default();
     meta.name = (name != slug).then(|| name.to_string());

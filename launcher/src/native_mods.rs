@@ -2193,6 +2193,8 @@ fn pipeline(
             target_dir.push(cache_dir);
         }
         let compiled = profile;
+        fs::create_dir_all(target_dir.join(compiled.cargo().0)).map_err(|e| e.to_string())?;
+        crate::run_leases::publish(&target_dir.join(compiled.cargo().0)).map_err(cache_error)?;
         let (mut crates, mut total, mut name) = (0, None, String::new());
         let identities: Vec<_> = mods
             .iter()
@@ -2561,45 +2563,8 @@ fn copy_runtime(from: &Path, to: &Path) -> std::io::Result<()> {
 
 /// Installs `binary` as version `version`, retaining the base's runtime helpers. Clients
 /// reference the base's prepared resources; standalone server exports still carry their own.
-fn install(
-    base: &str,
-    version: &str,
-    target: Target,
-    binary: &Path,
-    libraries: &[PathBuf],
-    about: &serde_json::Value,
-    mods: &[Bundle],
-) -> Result<(), String> {
-    let from = backend::version_dir(base);
-    let partial = target.directory(&format!(".{version}.partial"));
-    let _ = fs::remove_dir_all(&partial);
-    fs::create_dir_all(&partial).map_err(|e| e.to_string())?;
-    copy_base(&from, &partial, target, target == Target::Client)?;
-    let installed = partial.join(target.binary());
-    fs::copy(binary, &installed).map_err(|e| format!("The built game: {e}"))?;
-    // The prebuilt game's libraries load from beside the executable.
-    for library in libraries {
-        let name = library.file_name().ok_or("invalid library path")?;
-        fs::copy(library, partial.join(name)).map_err(|e| format!("{}: {e}", library.display()))?;
-    }
-    fs::write(partial.join("native-mods.json"), about.to_string()).map_err(|e| e.to_string())?;
-    for bundle in mods {
-        package::copy(
-            bundle,
-            &partial
-                .join(horizon_mod_package::mod_list::NATIVE_DIR)
-                .join(&bundle.manifest.id),
-        )?;
-    }
-    if let Err(cancelled) = check_cancelled() {
-        let _ = fs::remove_dir_all(&partial);
-        return Err(cancelled);
-    }
-    let dir = target.directory(version);
-    let _ = fs::remove_dir_all(&dir);
-    fs::rename(&partial, &dir).map_err(|e| e.to_string())?;
-    fs::write(dir.join(".installed"), "").map_err(|e| e.to_string())
-}
+mod installation;
+use installation::install;
 
 /// Copies version folder `from` into `to` but for what a new build of `target` makes its own
 /// ([`carried_over`]), cloned where the disk can. Also an imported build's start (`build_import`).
@@ -4688,3 +4653,7 @@ mod registry_binary_tests {
             .is_err());
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "native_mods/tests/runtime_leases.rs"]
+mod runtime_leases_tests;

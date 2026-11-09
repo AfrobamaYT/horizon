@@ -782,8 +782,8 @@ enum Cmd {
     /// removal and automatic runtime eviction retain files while any launch path lacks enforceable
     /// lifetime exclusion; an empty process scan is not authorization. Read-only reports stay available.
     /// Private launch records and raw captures are collected together only after all participating owners
-    /// exit, under the exclusive permanent namespace gate. Registry housekeeping starts at 4,096 recognized
-    /// empty lock entries; the gate and unknown entries remain.
+    /// exit, under the exclusive permanent namespace gate. Published unit keys persist until exclusive
+    /// unit removal. Registry entry counts are logged; lock entries are not age-collected.
     Storage {
         /// Request cleanup of build-files, prebuilt-games, spare-game-builds, rust-compiler, other-caches or all rows; game-accessible caches refuse cleanup without enforceable lifetime exclusion
         #[arg(long, value_parser = parse_storage_row)]
@@ -1204,8 +1204,8 @@ fn json(value: serde_json::Value) {
 /// Runs a game process in this terminal and reports how it ended.
 fn attached(cmd: Command) -> Result<i32, String> {
     let (mut cmd, _runtime) = backend::prepare_command(cmd)?;
-    let status = cmd
-        .status()
+    let status = backend::spawn_attached(&mut cmd)
+        .and_then(|mut child| child.wait())
         .map_err(|e| format!("Could not start {:?}: {e}", cmd.get_program()))?;
     #[cfg(unix)]
     {
