@@ -15,7 +15,8 @@ use horizon_core::{
 };
 
 // Happy ghast state: `head` the harness, `scratch[0]` 1 once set up as a
-// baby and 2 as an adult, `ai.home` the restriction, `counter`
+// baby, 2 as an adult and 3 awaiting the grown-up brain callback,
+// `ai.home` the restriction, `counter`
 // the end tick of the follow-an-adult range pick.
 // `scratch[1]` is `leashHolderTime` on the server and `IS_LEASH_HOLDER` (1 or 0) on a client.
 /// `HappyGhast.notifyLeashHolder` for a leashed mob that supports a quad lead.
@@ -45,8 +46,14 @@ fn setup(m: &mut Mob, baby: bool, w: Option<&MobWorld<'_>>) {
     let was = m.extra.scratch[0];
     // Feeding crosses the age boundary without a world. Clear vanilla state
     // immediately, but leave setup pending until behavior stop callbacks can run.
-    let pending = was == 1 && !baby && w.is_none();
-    m.extra.scratch[0] = if baby || pending { 1 } else { 2 };
+    let pending = matches!(was, 1 | 3) && !baby && w.is_none();
+    m.extra.scratch[0] = if baby {
+        1
+    } else if pending {
+        3
+    } else {
+        2
+    };
     if pending {
         if let Some(b) = m.extra.animal_brain.as_deref_mut() {
             b.mem = super::animal_brain::Memories::default();
@@ -78,7 +85,7 @@ fn setup(m: &mut Mob, baby: bool, w: Option<&MobWorld<'_>>) {
         m.set_required_path_length(48.0);
         return;
     }
-    if was == 1
+    if matches!(was, 1 | 3)
         && let Some(w) = w
     {
         super::animal_brain::grown_up(m, w);

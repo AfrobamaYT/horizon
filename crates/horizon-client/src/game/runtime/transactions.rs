@@ -1233,6 +1233,7 @@ mod tests {
             .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
         game.native_lifecycle
             .begin_open(NativeAuthority::IntegratedServer);
+        super::super::native_entity_refs::tests::resolve_parts(&game).unwrap();
         // Pins the opaque backend: a real game always hands one out, so a None
         // from Host::backend is a bug, never a fallback.
         assert!(mod_api::Host::backend(&game).is_some());

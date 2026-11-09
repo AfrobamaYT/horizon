@@ -4355,7 +4355,10 @@ mod tests {
             let attack = mod_api::prelude::ClientInputClientHost::mapping(game, "key.attack")
                 .unwrap()
                 .unwrap();
-            assert_eq!(attack.label, mod_api::Text::literal("Left Button"));
+            assert_eq!(
+                attack.label,
+                mod_api::Text::translate("key.mouse.left", Vec::new())
+            );
             assert!(
                 mod_api::prelude::ClientInputClientHost::mapping(game, "key.mymod.boost")
                     .unwrap()
