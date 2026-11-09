@@ -905,7 +905,7 @@ mod tests {
         assert!(!goes_on(tick_left(20, -1, false, false)));
         // a use a mod ran out stays out on the next ticks (a crossbow frozen).
         assert!(!goes_on(tick_left(-1, -1, false, true)));
-        // and goes on again if a mod gives it ticks back, as NeoForge's.
+        // and goes on again if a mod gives it ticks back.
         assert!(goes_on(tick_left(-1, 10, false, true)));
     }
 

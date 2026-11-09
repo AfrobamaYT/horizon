@@ -7,8 +7,7 @@
 //!
 //! They rewrite the biomes' `features` lists and
 //! `minecraft:gameplay/natural_mob_spawns` attributes when the content root
-//! builds: an added feature goes at the end of its step's list, as NeoForge
-//! adds it, and the generator orders every biome's lists as vanilla's
+//! builds: an added feature goes at the end of its step's list, and the generator orders every biome's lists as vanilla's
 //! `FeatureSorter` does; an added spawner goes at the end of its entity type's
 //! spawn category with `minCount` and `maxCount` converted to 26.3's `count`.
 //! Biomes no modifier names keep their text byte for byte, and a root with no
