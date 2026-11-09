@@ -394,7 +394,7 @@ fn dimension_is_vanilla_like(key: &str, dimension: &Tag) -> bool {
 }
 /// A data pack's JSON as the NBT `dimension_is_vanilla_like` reads (what a codec gets from
 /// either one is the same data).
-fn json_tag(value: &serde_json::Value) -> Tag {
+pub(crate) fn json_tag(value: &serde_json::Value) -> Tag {
     use serde_json::Value;
     match value {
         Value::Null => Tag::compound(std::iter::empty::<(&str, Tag)>()),
@@ -3715,6 +3715,30 @@ pub fn world_gen_settings(world: &Path) -> Option<Tag> {
             .cloned()
     })
 }
+/// Saved preset/editor stems fill only levels that mods and enabled packs did not define.
+pub fn merge_saved_world_gen_dimensions(
+    world: &Path,
+    overrides: &mut horizon_world::worldgen::overrides::WorldgenOverrides,
+) {
+    use horizon_world::worldgen::overrides::DIMENSIONS;
+    let Some(Tag::Compound(dimensions)) =
+        world_gen_settings(world).and_then(|settings| settings.get("dimensions").cloned())
+    else {
+        return;
+    };
+    for (id, stem) in dimensions {
+        let id = id.to_string_lossy();
+        if horizon_core::level_id::valid_level_id(&id)
+            && !overrides.entries(DIMENSIONS).any(|(level, _)| level == id)
+        {
+            overrides.set(
+                DIMENSIONS,
+                &id,
+                crate::scoreboard::tag_to_json(&stem).to_string(),
+            );
+        }
+    }
+}
 fn write_saved_data(world: &Path, name: &str, data: Tag) -> Result<()> {
     write_dat(
         &saved_data_path(world, name),
@@ -3959,21 +3983,74 @@ impl Default for WorldGen {
 }
 /// Writes a new world's `world_gen_settings` (seed, options and dimensions).
 pub fn write_world_gen_settings(dir: &Path, seed: i64, options: WorldGen) -> Result<()> {
-    write_world_gen_settings_with(dir, seed, options, None, None)
+    write_world_gen_settings_with(dir, seed, options, None, None, None)
 }
+/// Structural boundary checks; generator-specific codecs run on world loading.
+pub(crate) fn valid_world_gen_dimensions(dimensions: &Tag) -> bool {
+    use horizon_core::identifier::Identifier;
+    let Tag::Compound(stems) = dimensions else {
+        return false;
+    };
+    dimensions.get("minecraft:overworld").is_some()
+        && stems.iter().all(|(id, stem)| {
+            let Some(generator) = stem.get("generator") else {
+                return false;
+            };
+            let Some(kind) = text(generator.get("type")).and_then(|id| Identifier::parse(&id).ok())
+            else {
+                return false;
+            };
+            horizon_core::level_id::valid_level_id(&id.to_string_lossy())
+                && match stem.get("type") {
+                    Some(Tag::String(id)) => id
+                        .to_string()
+                        .ok()
+                        .is_some_and(|id| Identifier::parse(&id).is_ok()),
+                    Some(Tag::Compound(_)) => true,
+                    _ => false,
+                }
+                && (kind.namespace() != "minecraft"
+                    || kind.path() != "flat"
+                    || generator
+                        .get("settings")
+                        .is_some_and(crate::flatgen::valid_layer_heights))
+        })
+}
+
 /// [`write_world_gen_settings`] with a flat overworld's own generator
 /// settings (FlatLevelGeneratorSettings, as `flatgen::settings_from_json`
 /// reads them) instead of the Superflat preset's classic layers, and with the
 /// biome the single-biome preset fixes (`CreateBuffetWorldScreen`'s choice,
 /// `minecraft:plains` when none was made).
+/// `dimensions` replaces the preset's stems with a validated editor/data-pack result.
 pub fn write_world_gen_settings_with(
     dir: &Path,
     seed: i64,
     options: WorldGen,
     flat_settings: Option<Tag>,
     single_biome: Option<&str>,
+    dimensions: Option<Tag>,
 ) -> Result<()> {
+    let mut settings = new_world_gen_settings(seed, options, flat_settings, single_biome);
+    if let Some(dimensions) = dimensions {
+        if !valid_world_gen_dimensions(&dimensions) {
+            return Err("invalid world preset dimensions".into());
+        }
+        let Tag::Compound(settings) = &mut settings else {
+            unreachable!()
+        };
+        settings.insert("dimensions".into(), dimensions);
+    }
     fs::create_dir_all(dir)?;
+    write_saved_data(dir, "world_gen_settings", settings)
+}
+/// Build the vanilla preset's creation settings without touching disk.
+pub(crate) fn new_world_gen_settings(
+    seed: i64,
+    options: WorldGen,
+    flat_settings: Option<Tag>,
+    single_biome: Option<&str>,
+) -> Tag {
     // worldgen/world_preset/flat.json's overworld: the classic flat layers.
     let layer = |block: &str, height: i32| {
         Tag::compound([("block", string(block)), ("height", Tag::Int(height))])
@@ -4065,40 +4142,36 @@ pub fn write_world_gen_settings_with(
             ),
         ]),
     };
-    write_saved_data(
-        dir,
-        "world_gen_settings",
-        Tag::compound([
-            ("seed", Tag::Long(seed)),
-            (
-                "generate_structures",
-                Tag::Byte(i8::from(options.structures)),
-            ),
-            ("bonus_chest", Tag::Byte(i8::from(options.bonus_chest))),
-            (
-                "dimensions",
-                Tag::compound([
-                    ("minecraft:overworld", overworld),
-                    (
+    Tag::compound([
+        ("seed", Tag::Long(seed)),
+        (
+            "generate_structures",
+            Tag::Byte(i8::from(options.structures)),
+        ),
+        ("bonus_chest", Tag::Byte(i8::from(options.bonus_chest))),
+        (
+            "dimensions",
+            Tag::compound([
+                ("minecraft:overworld", overworld),
+                (
+                    "minecraft:the_nether",
+                    dimension(
                         "minecraft:the_nether",
-                        dimension(
-                            "minecraft:the_nether",
-                            "minecraft:nether",
-                            preset("minecraft:nether"),
-                        ),
+                        "minecraft:nether",
+                        preset("minecraft:nether"),
                     ),
-                    (
+                ),
+                (
+                    "minecraft:the_end",
+                    dimension(
                         "minecraft:the_end",
-                        dimension(
-                            "minecraft:the_end",
-                            "minecraft:end",
-                            Tag::compound([("type", string("minecraft:the_end"))]),
-                        ),
+                        "minecraft:end",
+                        Tag::compound([("type", string("minecraft:the_end"))]),
                     ),
-                ]),
-            ),
-        ]),
-    )
+                ),
+            ]),
+        ),
+    ])
 }
 #[derive(Clone, Debug, Default)]
 pub struct Level {
@@ -5835,6 +5908,63 @@ fn effect_details(e: &crate::effects::SavedEffect) -> Vec<(&'static str, Tag)> {
 #[cfg(test)]
 mod tests {
     use crate::mobs::spawner::SpawnDataExt;
+
+    #[test]
+    fn saved_preset_editor_stems_supply_shapes_and_facts_below_pack_stems() {
+        use super::*;
+        use horizon_world::worldgen::overrides::{DIMENSIONS, WorldgenOverrides};
+        let dir = std::env::temp_dir().join(format!(
+            "horizon-preset-shapes-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let dimensions = json_tag(&serde_json::json!({
+            "minecraft:overworld": {"type":"minecraft:the_nether","generator":{"type":"minecraft:debug"}},
+            "example:pocket": {
+                "type":{"min_y":-128,"height":448,"logical_height":320,"has_skylight":false,"has_ceiling":true},
+                "generator":{"type":"minecraft:debug"}
+            }
+        }));
+        write_world_gen_settings_with(&dir, 1, WorldGen::default(), None, None, Some(dimensions))
+            .unwrap();
+        let mut overrides = WorldgenOverrides::default();
+        merge_saved_world_gen_dimensions(&dir, &mut overrides);
+        let overworld = overrides.level_height("minecraft:overworld").unwrap();
+        assert_eq!((overworld.min_y, overworld.height), (0, 256));
+        assert!(overworld.has_ceiling && !overworld.has_skylight);
+        let pocket = overrides.level_height("example:pocket").unwrap();
+        assert_eq!(
+            (pocket.min_y, pocket.height, pocket.logical_height),
+            (-128, 448, 320)
+        );
+        assert!(pocket.has_ceiling && !pocket.has_skylight);
+        assert!(
+            overrides
+                .level_facts("minecraft:overworld")
+                .unwrap()
+                .unwrap()
+                .fast_lava
+        );
+        let pack_stem = r#"{"type":"minecraft:overworld","generator":{"type":"minecraft:debug"}}"#;
+        overrides.set(DIMENSIONS, "minecraft:overworld", pack_stem.into());
+        merge_saved_world_gen_dimensions(&dir, &mut overrides);
+        assert_eq!(
+            overrides
+                .entries(DIMENSIONS)
+                .find(|(id, _)| *id == "minecraft:overworld")
+                .unwrap()
+                .1,
+            pack_stem
+        );
+        assert_eq!(
+            overrides.level_height("minecraft:overworld").unwrap().min_y,
+            -64
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn an_ender_chest_saves_none_of_the_players_items() {

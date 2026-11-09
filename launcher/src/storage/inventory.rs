@@ -916,8 +916,10 @@ mod eviction_tests {
             .iter()
             .find(|row| row.category == Category::BuildFiles)
             .unwrap();
+        assert_eq!(row.bytes, bytes);
         assert_eq!(row.freed_bytes, 0);
         assert_eq!(row.remaining_bytes, bytes);
+        assert_eq!(row.kept.len(), 1);
         assert_eq!(row.kept[0].bytes, bytes);
         assert!(!row.kept[0].reason.is_empty());
         assert!(file.exists());
