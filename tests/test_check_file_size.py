@@ -163,5 +163,32 @@ class GitTests(unittest.TestCase):
             self.assertIn("big.rs: 3101 lines without test modules (3100 on the base)", out.getvalue())
 
 
+
+class SyncBaselineTests(unittest.TestCase):
+    def test_the_cap_allows_equal_or_lower_but_not_growth(self):
+        self.assertEqual(check_file_size.problems([entry("a.rs", 3100, 3200)], baseline={"a.rs": 3200}), [])
+        self.assertEqual(check_file_size.problems([entry("a.rs", 3100, 3199)], baseline={"a.rs": 3200}), [])
+        self.assertTrue(check_file_size.problems([entry("a.rs", 3100, 3201)], baseline={"a.rs": 3200}))
+
+    def test_only_a_sync_declaration_allows_new_or_raised_entries(self):
+        sizes, previous, counts = {"a.rs": 3200, "b.rs": 3300}, {"a.rs": 3100}, {"a.rs": 3200, "b.rs": 3300}
+        self.assertEqual(len(check_file_size.baseline_problems(sizes, previous, counts, False)), 2)
+        self.assertEqual(check_file_size.baseline_problems(sizes, previous, counts, True), [])
+        self.assertEqual(check_file_size.baseline_problems({"a.rs": 3000}, previous, {"a.rs": 3000}, False), [])
+
+    def test_stale_high_and_deleted_entries_fail_even_in_syncs(self):
+        found = check_file_size.baseline_problems({"a.rs": 3200, "gone.rs": 3500}, {}, {"a.rs": 3199}, True)
+        self.assertEqual(len(found), 2)
+        self.assertTrue(all("stale-high" in problem for problem in found))
+
+    def test_the_sync_marker_is_a_full_sha_and_entries_are_unique(self):
+        marker = "a" * 40
+        self.assertEqual(check_file_size.parse_baseline(f"# sync-baseline: {marker}\na.rs 3200\n"),
+                         (marker, {"a.rs": 3200}))
+        with self.assertRaises(ValueError):
+            check_file_size.parse_baseline("# sync-baseline: not-a-sha")
+        with self.assertRaises(ValueError):
+            check_file_size.parse_baseline("a.rs 3200\na.rs 3300")
+
 if __name__ == "__main__":
     unittest.main()

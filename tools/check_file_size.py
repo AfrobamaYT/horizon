@@ -4,7 +4,10 @@
 Big files slow incremental builds (game.rs, gfx.rs). Any file may grow up to the limit; a file over it may shrink or
 stay the same. A renamed file is compared with its old name, and a new file counts from zero. Files under
 third_party/ and files that say they are generated (`@generated` in their first lines) are not checked. There is no
-list of files: nothing to update when a file shrinks.
+general exemption list. The sync-only ratchet in tools/file_size_baseline.txt records
+restored upstream growth at its exact size. Its sync-baseline header declares the
+upstream SHA for a sync; only a changed header permits new or raised entries.
+Entries above the current size fail, forcing them down as code shrinks.
 
 Inline test modules don't count, on the base or now: a normal build doesn't compile them. A test module is a
 `#[cfg(test)]` line directly followed by `mod name {` (or `pub mod`, `pub(crate) mod`...) at the same indentation,
@@ -155,11 +158,42 @@ def changes(base):
     return merge_base, out
 
 
-def problems(entries, limit=LIMIT):
+def parse_baseline(text):
+    """Validate the committed boundary once; return its sync declaration and sizes."""
+    marker, sizes = None, {}
+    for line in text.splitlines():
+        if line.startswith("# sync-baseline:"):
+            value = line.removeprefix("# sync-baseline:").strip()
+            if marker is not None or not re.fullmatch(r"[0-9a-f]{40}", value):
+                raise ValueError("baseline needs one full upstream SHA in its sync-baseline header")
+            marker = value
+        elif line.strip() and not line.startswith("#"):
+            path, size = line.split()
+            if path in sizes or not path.endswith(".rs") or int(size) <= 0:
+                raise ValueError(f"invalid file-size baseline entry: {line}")
+            sizes[path] = int(size)
+    return marker, sizes
+
+
+def baseline_problems(sizes, previous, counts, sync):
+    out = []
+    for path, size in sizes.items():
+        if size > previous.get(path, 0) and not sync:
+            out.append(f"{path}: baseline added or raised without a changed sync-baseline upstream SHA")
+        if path not in counts or size > counts[path]:
+            out.append(f"{path}: stale-high baseline {size}; lower it to the current size or remove it")
+    return out
+
+
+def problems(entries, limit=LIMIT, baseline=None):
     """entries: (path, base line count, line count now, generated). The problem lines."""
     out = []
     for path, before, now, is_generated in entries:
         if path.startswith(EXEMPT_PREFIXES) or is_generated or TEST_FILE.search(path):
+            continue
+        if baseline is not None and path in baseline:
+            if now > baseline[path]:
+                out.append(f"{path}: {now} lines exceeds its sync baseline {baseline[path]}")
             continue
         if now > limit and now > before:
             was = f"{before} on the base" if before else "a new file"
@@ -186,13 +220,22 @@ def main(argv=None):
         text = file.read_text(encoding="utf-8", errors="replace")
         before = code_lines(git("show", f"{merge_base}:{old}")) if old else 0
         entries.append((path, before, code_lines(text), generated(text)))
-    found = problems(entries)
+    baseline_path = "tools/file_size_baseline.txt"
+    file = ROOT / baseline_path
+    marker, sizes = parse_baseline(file.read_text() if file.exists() else "")
+    old = subprocess.run(["git", "show", f"{merge_base}:{baseline_path}"], cwd=ROOT,
+                         capture_output=True, encoding="utf-8")
+    previous_marker, previous = parse_baseline(old.stdout if old.returncode == 0 else "")
+    counts = {path: code_lines((ROOT / path).read_text()) for path in sizes if (ROOT / path).is_file()}
+    sync = marker is not None and marker != previous_marker
+    found = baseline_problems(sizes, previous, counts, sync)
+    found.extend(problems(entries, baseline=sizes))
     if found:
         print(f"File size check failed ({DOC}):")
         for problem in found:
             print(f"  {problem}")
         return 1
-    print(f"File size check passed: {len(entries)} changed Rust files, none over {LIMIT} lines grew "
+    print(f"File size check passed: {len(entries)} changed Rust files, {len(sizes)} sync baselines; none over {LIMIT} lines grew beyond their cap "
           f"(test modules and test files not counted).")
     return 0
 
