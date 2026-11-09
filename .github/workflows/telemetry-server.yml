@@ -1,18 +1,8 @@
 name: telemetry-server
-# The ingest server is its own workspace (crates/horizon-telemetry-server), so the checks job doesn't build
-# it: this one does, when it or the crate it shares with the launcher and the game changes.
+# Diverges from upstream: automatic runs are disabled pending root CI-capacity approval.
+# The separate ingest workspace can still be checked explicitly when capacity permits.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'crates/horizon-telemetry/**'
-      - 'crates/horizon-telemetry-server/**'
-      - '.github/workflows/telemetry-server.yml'
-  pull_request:
-    paths:
-      - 'crates/horizon-telemetry/**'
-      - 'crates/horizon-telemetry-server/**'
-      - '.github/workflows/telemetry-server.yml'
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
