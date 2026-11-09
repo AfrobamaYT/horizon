@@ -281,13 +281,6 @@ mod tests {
 
     fn test_device() -> Option<(wgpu::Device, wgpu::Queue)> {
         let adapter = crate::gfx::test_gpu::adapter()?;
-        if !crate::gfx::test_gpu::supports_texture_usage(
-            &adapter,
-            wgpu::TextureFormat::R32Float,
-            wgpu::TextureUsages::RENDER_ATTACHMENT,
-        ) {
-            return None;
-        }
         Some(crate::gfx::test_gpu::device(&adapter))
     }
 
