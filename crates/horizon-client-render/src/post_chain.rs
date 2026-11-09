@@ -596,10 +596,14 @@ fn resource_path(id: &str) -> String {
     format!("assets/{ns}/post_effect/{path}.json")
 }
 
-fn read_chain(root: &ResourceSource, id: &str) -> Result<String, String> {
+fn read_chain(
+    root: &ResourceSource,
+    id: &str,
+    shaders: &crate::spectator_shaders::SpectatorShaders,
+) -> Result<String, String> {
     let resource = resource_path(id);
     root.read_to_string(&resource).map_err(|error| {
-        let entities = crate::spectator_shaders::entities_for_chain(id);
+        let entities = shaders.entities_for_chain(id);
         format!("Spectator entities {entities:?}, shader {id}, resource {resource}: {error}")
     })
 }
@@ -830,7 +834,7 @@ impl PostEffects {
         id: &str,
         extras: &Extras,
     ) -> Result<Option<Chain>, String> {
-        let text = read_chain(root, id)?;
+        let text = read_chain(root, id, crate::spectator_shaders::table())?;
         let mut config = Config::parse(&text)?;
         for (target, t) in &extras.targets {
             config
@@ -2523,7 +2527,14 @@ mod missing_resource_test {
     #[test]
     fn missing_registered_resource_is_diagnosed() {
         let source = super::ResourceSource::indexed(Default::default());
-        let error = super::read_chain(&source, "example:cow_vison").unwrap_err();
+        let shaders =
+            crate::spectator_shaders::SpectatorShaders::new(vec![mod_api::EntitySpectatorShader {
+                entity: "minecraft:cow".into(),
+                shader: "example:cow_vison".into(),
+            }]);
+        let error = super::read_chain(&source, shaders.chain("minecraft:cow").unwrap(), &shaders)
+            .unwrap_err();
+        assert!(error.contains("minecraft:cow"));
         assert!(error.contains("example:cow_vison"));
         assert!(error.contains("assets/example/post_effect/cow_vison.json"));
     }

@@ -86,7 +86,7 @@ impl SpectatorShaders {
 
 /// The registered table, or vanilla's until registration publishes one: a lookup never claims
 /// the registered slot, so registration at start always lands.
-fn table() -> &'static SpectatorShaders {
+pub(crate) fn table() -> &'static SpectatorShaders {
     static VANILLA_ONLY: OnceLock<SpectatorShaders> = OnceLock::new();
     SHADERS
         .get()
@@ -173,10 +173,11 @@ mod tests {
 }
 
 /// Entities whose registration requires this chain, for load diagnostics only.
-pub(crate) fn entities_for_chain(id: &str) -> Vec<&'static str> {
-    table()
-        .by_entity
-        .iter()
-        .filter_map(|(entity, chain)| (chain == id).then_some(entity.as_str()))
-        .collect()
+impl SpectatorShaders {
+    pub(crate) fn entities_for_chain(&self, id: &str) -> Vec<&str> {
+        self.by_entity
+            .iter()
+            .filter_map(|(entity, chain)| (chain == id).then_some(entity.as_str()))
+            .collect()
+    }
 }
