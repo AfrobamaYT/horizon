@@ -10,6 +10,7 @@ use super::{
 };
 use std::{fmt::Debug, marker::PhantomData, ops::Deref};
 
+// no wire: process-local capability declaration carries a provider function pointer and type identity.
 /// A capability: its name (`horizon:items`, `mymod:chemicals`), the handler trait `T` it answers
 /// with, and the game's own provider, if the game has one.
 // exhaustive: its fields are private, so mods cannot build or destructure it
@@ -34,6 +35,7 @@ pub struct BlockSide {
     pub side: Option<Direction>,
 }
 
+// no wire: owned trait-object capability handler; invoked through its provider, not serialized.
 /// A capability's handler, with who answered: a mod's provider or the game's own.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct Capability<T: ?Sized> {

@@ -315,6 +315,7 @@ impl Default for TextStyle {
 /// Flat representation of a component tree.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct TextForm {
     /// Nodes in parent-before-child order.
     pub nodes: Vec<TextNode>,
@@ -322,6 +323,7 @@ pub struct TextForm {
 /// One typed shallow component and its position in the tree.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct TextNode {
     /// Parent node index, or None for the root.
     pub parent: Option<u32>,
@@ -349,6 +351,7 @@ impl TextNode {
 /// Shallow content. Recursive values appear only in related rows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 // exhaustive: closed wire vocabulary
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum TextNodeContent {
     /// Literal characters.
     Literal(String),
@@ -400,6 +403,7 @@ pub enum TextNodeContent {
 /// Shallow hover event. Text and entity-name values use related rows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 // exhaustive: closed wire vocabulary
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum TextNodeHover {
     /// Exactly one HoverText row is required.
     Text,
@@ -423,6 +427,7 @@ pub enum TextNodeHover {
 /// The nonrecursive form of TextStyle, with the same inheritance semantics.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct TextNodeStyle {
     /// Named colour or `#RRGGBB` component colour.
     pub color: Option<String>,
@@ -452,6 +457,7 @@ pub struct TextNodeStyle {
 /// Relation to an earlier row. Unknown discriminants are rejected by bindings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum TextRelation {
     /// Appended component.
     Child,

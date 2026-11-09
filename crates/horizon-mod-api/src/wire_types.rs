@@ -1857,7 +1857,6 @@ impl crate::wire::Wire for crate::AttachmentRowError {
                 out.fail(crate::wire::WireError::Invalid(
                     "unknown AttachmentRowError",
                 ));
-                return;
             }
         }
     }
@@ -1872,7 +1871,6 @@ impl crate::wire::Wire for crate::AttachmentRowError {
                 out.fail(crate::wire::WireError::Invalid(
                     "unknown AttachmentRowError",
                 ));
-                return;
             }
         }
     }
@@ -1989,7 +1987,6 @@ impl crate::wire::Wire for crate::Holder {
             Self::Level => out.put(&4u32),
             _ => {
                 out.fail(crate::wire::WireError::Invalid("unknown Holder"));
-                return;
             }
         }
     }
@@ -2014,7 +2011,6 @@ impl crate::wire::Wire for crate::Holder {
             Self::Level => out.put_owned(4u32),
             _ => {
                 out.fail(crate::wire::WireError::Invalid("unknown Holder"));
-                return;
             }
         }
     }

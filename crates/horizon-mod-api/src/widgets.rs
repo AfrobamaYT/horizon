@@ -48,11 +48,13 @@ const TEXT_COLOR_INACTIVE: u32 = 0xFF70_7070;
 /// A widget of a [`Widgets`] group, as it answered when added.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 // exhaustive: an index into its group; mods only compare and pass it back
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct WidgetId(usize);
 
 /// What a widget made of an input.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum Outcome {
     /// No widget took it: leave the hook's `canceled` alone.
     Ignored,
@@ -76,6 +78,7 @@ impl Outcome {
 /// A push button (`Button`): a label on the game's `widget/button` sprite.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct Button {
     /// Where it is, `[x, y, width, height]` in GUI pixels (vanilla's are 20 high).
     pub rect: [f32; 4],
@@ -99,6 +102,7 @@ impl Button {
 /// A single-line text field (`EditBox`).
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct TextField {
     /// Where it is, `[x, y, width, height]` in GUI pixels (vanilla's are 20 high).
     pub rect: [f32; 4],
@@ -260,6 +264,7 @@ impl TextFieldLayout {
 /// A widget of a group.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum Widget {
     /// A button.
     Button(Button),
@@ -291,6 +296,7 @@ fn over([x, y, w, h]: [f32; 4], [px, py]: [f32; 2]) -> bool {
 /// The widgets of one screen in focus order, and which one has the keyboard focus.
 #[derive(Clone, Debug, Default, PartialEq)]
 // exhaustive: every field is private; mods build it with `Widgets::new`
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct Widgets {
     widgets: Vec<Widget>,
     focus: Option<usize>,

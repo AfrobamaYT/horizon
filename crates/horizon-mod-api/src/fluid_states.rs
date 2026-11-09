@@ -84,6 +84,7 @@ pub trait HostFluidStates {
     fn fluid_states(&self) -> FluidStates<'_>;
 }
 
+// no wire: borrowed host or registrar backend; access stays scoped to the owning call.
 /// The fluid-state facts service, available in setup, reload and world callbacks after keys resolve.
 // exhaustive: only the host constructs this service
 pub struct FluidStates<'a> {

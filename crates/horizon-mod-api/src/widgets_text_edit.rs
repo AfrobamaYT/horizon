@@ -37,6 +37,7 @@ impl Default for TextEdit {
 /// and `shift` extends the selection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: the keys EditBox.keyPressed edits with; a field matches them all
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum EditKey {
     /// Deletes the character (with Ctrl, the word) before the cursor, or the selection.
     Backspace,

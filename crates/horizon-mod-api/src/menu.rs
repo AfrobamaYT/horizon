@@ -3,8 +3,7 @@
 use crate::*;
 /// One click on the local player's open menu, submitted with `MenuRef::click`.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[derive(horizon_mod_api_macros::Wire)]
+#[derive(Clone, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
 pub enum MenuClick {
     /// Pick up, place or drop the carried stack; `None` means outside.
     Pickup {
@@ -81,6 +80,7 @@ pub trait SlotView {
     fn safe_insert(&mut self, stack: Option<ItemStack>, count: u32) -> Option<ItemStack>;
     fn safe_take(&mut self, count: u32, max: u32) -> Option<ItemStack>;
 }
+// no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
 /// Access to the carried stack, as `createCarriedSlotAccess`.
 // exhaustive: the game builds it with a literal; mods only read it
 pub struct CarriedAccess<'a>(#[doc(hidden)] pub &'a mut Option<ItemStack>);
@@ -92,6 +92,7 @@ impl CarriedAccess<'_> {
         *self.0 = stack;
     }
 }
+// no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
 /// A pickup click's slot and cursor, including empty stacks.
 // exhaustive: the game builds it with a literal; mods only read it
 pub struct StackedOnOther<'a> {

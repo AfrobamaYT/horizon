@@ -24,6 +24,7 @@ pub enum StatePredicateTarget {
 #[doc(hidden)]
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct StatePredicateRecord {
     pub target: StatePredicateTarget,
     pub constraints: Vec<StateConstraint>,

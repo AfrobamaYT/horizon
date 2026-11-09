@@ -354,6 +354,7 @@ impl FluidState {
     }
 }
 
+// no wire: borrowed host or registrar backend; access stays scoped to the owning call.
 /// A hook's mutable block entity payload, with a read-only type identity.
 /// The private handle cannot be constructed or taken out by a mod.
 ///
@@ -681,6 +682,7 @@ pub struct ClientAudioOptions {
     pub master_volume: f32,
 }
 
+// no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
 /// Borrowed humanoid inputs at arm-pose extraction, shared by players and mobs.
 /// Poses are in main/off-hand order, before listeners answer; item declarations
 /// are already included. Model-specific animation may subsequently adjust the arms.
@@ -704,6 +706,7 @@ pub struct HumanoidRenderState<'a> {
     pub off_arm_pose: ArmPose,
 }
 
+// no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
 /// Context and adjustable pose for a first-person hand render.
 ///
 /// Translation is in blocks and rotation is in degrees (pitch, yaw, roll).
@@ -736,6 +739,7 @@ pub struct NativeHandRender<'a> {
     pub scale: f32,
 }
 
+// no wire: type alias inherits the Wire policy of its tuple or Result target.
 /// A dispenser hook's answer: the slot's remainder (None empties it) and the
 /// level event to play, `CLICK` (1000), `FAIL` (1001) or 0 for none.
 pub type NativeDispensed = (Option<ItemStack>, i32);
@@ -755,6 +759,7 @@ pub struct NativeNoteBlockChange {
     pub old_note: i32,
 }
 
+// no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
 /// What dropped the items heard by the `loot_drops` hook.
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
@@ -1193,6 +1198,7 @@ pub struct ChannelRef {
     pub id: u64,
 }
 
+// no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
 /// A server explosion about to happen, for `explosion_start`
 /// (`ServerLevel.explode`'s `ServerExplosion`).
 #[derive(Clone, Copy, Debug)]
@@ -1235,6 +1241,7 @@ pub enum NativeBlockInteraction {
     TriggerBlock,
 }
 
+// no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
 /// A fishing catch, for `item_fished` (`ItemFishedEvent`).
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
@@ -1248,6 +1255,7 @@ pub struct NativeItemFished<'a> {
     pub drops: &'a [ItemStack],
 }
 
+// no wire: dispatch result retains a static owning-mod identity; not an owned transport record.
 /// A replace hook's answer with the mod that gave it: the dispatch fills in `mod_id` (the
 /// answering mod's `[mod] id`), so no mod can answer for another.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1283,6 +1291,7 @@ pub struct ScreenId {
     pub id: String,
 }
 
+// no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
 /// The open screen, for the screen hooks (`native_screen_render_post`, the
 /// mouse ones `native_screen_mouse_button_pressed_pre`, `..._released_pre` and
 /// `native_screen_mouse_scrolled_pre`, and the key ones
@@ -1503,6 +1512,7 @@ pub struct NativeZoom {
 /// A player on the server, as a server hook sees them.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeServerPlayer {
     /// The player's UUID.
     pub uuid: u128,
@@ -1728,8 +1738,7 @@ impl From<LivingRef> for EntityRef {
 /// `AddValue`, then grows by that sum times each `AddMultipliedBase`, then is
 /// multiplied by one plus each `AddMultipliedTotal`.
 #[non_exhaustive]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[derive(horizon_mod_api_macros::Wire)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, horizon_mod_api_macros::Wire)]
 pub enum AttributeOperation {
     /// `add_value`: adds the amount.
     AddValue,
@@ -1742,8 +1751,7 @@ pub enum AttributeOperation {
 /// An attribute modifier (vanilla's `AttributeModifier`): its id, which is
 /// unique on one attribute of one entity, the amount and the operation.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq)]
-#[derive(horizon_mod_api_macros::Wire)]
+#[derive(Clone, Debug, PartialEq, horizon_mod_api_macros::Wire)]
 pub struct AttributeModifier {
     /// The modifier's id (`mymod:sprint_boost`).
     pub id: Identifier,
@@ -1769,8 +1777,7 @@ impl AttributeModifier {
 /// unloads (`addTransientModifier`), as the modifiers of worn items and
 /// effects do.
 #[non_exhaustive]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[derive(horizon_mod_api_macros::Wire)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, horizon_mod_api_macros::Wire)]
 pub enum ModifierLifetime {
     /// Not saved: gone when the entity is saved and loaded again.
     Transient,
@@ -3115,8 +3122,7 @@ pub struct NativeClientInfo {
 
 /// A block face for a level support query.
 #[non_exhaustive]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[derive(horizon_mod_api_macros::Wire)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
 pub enum NativeBlockFace {
     /// Facing down (-y).
     Down,
@@ -3134,8 +3140,7 @@ pub enum NativeBlockFace {
 
 /// The support area tested on a block face.
 #[non_exhaustive]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[derive(horizon_mod_api_macros::Wire)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
 pub enum NativeSupportType {
     /// Full.
     Full,
@@ -3492,8 +3497,7 @@ pub enum NativeDespawn {
 
 /// Block shape used by an empty-context level ray.
 #[non_exhaustive]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[derive(horizon_mod_api_macros::Wire)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
 pub enum NativeClipBlock {
     /// Collider.
     Collider,
@@ -3503,8 +3507,7 @@ pub enum NativeClipBlock {
 
 /// Fluid mode for a level ray. More modes are a follow-up.
 #[non_exhaustive]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[derive(horizon_mod_api_macros::Wire)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
 pub enum NativeClipFluid {
     /// None.
     None,
@@ -4001,6 +4004,7 @@ pub enum ToolAbility {
     HoeTill,
 }
 
+// no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
 /// The player responsible for a game rule change.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: the game builds it with a literal; mods only read it
@@ -4044,6 +4048,7 @@ pub struct ToolUse {
     pub simulated: bool,
 }
 
+// no wire: installed hook trait objects and shared dispatch ownership are process-local.
 /// One native mod, with its bundle's `[mod] id` and hook implementation.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ModEntry {
@@ -4067,6 +4072,7 @@ impl ModEntry {
     }
 }
 
+// no wire: installed hook trait objects and shared dispatch ownership are process-local.
 /// The ordered list of named mods shared by the client and server.
 pub type Mods = Arc<[ModEntry]>;
 
@@ -4650,6 +4656,7 @@ impl From<Vec3> for glam::DVec3 {
     }
 }
 
+// no wire: borrowed host or registrar backend; access stays scoped to the owning call.
 /// The game's read-only native backend, as [`Host::backend`] hands it out.
 ///
 /// The backend is reached only through [`Host::backend`] and
@@ -4679,6 +4686,7 @@ pub struct BackendRef<'a> {
     inner: &'a dyn Backend,
 }
 
+// no wire: borrowed host or registrar backend; access stays scoped to the owning call.
 /// The game's mutable native backend, as `Host::backend_mut` hands it out;
 /// the same opaque rule as [`BackendRef`], and a wrapper exposes no backend
 /// method of its own:
@@ -4694,6 +4702,7 @@ pub struct BackendMutRef<'a> {
     inner: &'a mut dyn BackendMut,
 }
 
+// no wire: borrowed host or registrar backend; access stays scoped to the owning call.
 /// The opaque client-write backend, with no access to server writes.
 ///
 /// Only the API can construct or open this value.
@@ -4884,6 +4893,7 @@ pub enum Placement {
     Multi(Vec<BlockPlacement>),
 }
 
+// no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
 /// A player's right click on a block, shared by the block's use behaviours
 /// and `right_click_block` (`PlayerInteractEvent.RightClickBlock`). The
 /// event hears it once per hand on the clicking client and on the server.
@@ -4961,6 +4971,7 @@ pub enum UsePhase {
     ItemAfterBlock,
 }
 
+// no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
 /// A player's item use without a block or entity target (`RightClickItem`).
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
@@ -5038,6 +5049,7 @@ mod generated_host {
     include!(concat!(env!("OUT_DIR"), "/mod_api_generated_host.rs"));
 }
 
+// no wire: type alias inherits the Wire policy of its tuple or Result target.
 /// Result of accessing or decoding an attachment.
 pub type AttachmentResult<T> = std::result::Result<T, AttachmentError>;
 
@@ -6318,6 +6330,7 @@ pub(crate) mod built {
         }
     }
     // exhaustive: the game builds it with a literal; mods only read it
+    // no wire: borrowed game-to-hook adapter; its call fields cross separately.
     pub struct NativeLootDrops<'a> {
         pub table: &'a str,
         pub dimension: &'a str,
@@ -6356,6 +6369,7 @@ pub(crate) mod built {
         }
     }
     // exhaustive: the game builds it with a literal; mods only read it
+    // no wire: borrowed game-to-hook adapter; its call fields cross separately.
     pub struct NativeExplosionStart<'a> {
         pub dimension: &'a str,
         pub center: [f64; 3],
@@ -6391,6 +6405,7 @@ pub(crate) mod built {
         }
     }
     // exhaustive: the game builds it with a literal; mods only read it
+    // no wire: borrowed game-to-hook adapter; its call fields cross separately.
     pub struct NativeItemFished<'a> {
         pub hook: u32,
         pub position: [f64; 3],
@@ -6411,6 +6426,7 @@ pub(crate) mod built {
         }
     }
     // exhaustive: the game builds it with a literal; mods only read it
+    // no wire: borrowed game-to-hook adapter; its call fields cross separately.
     pub struct NativeScreenView<'a> {
         pub id: &'static str,
         pub menu: Option<&'a str>,
@@ -6443,6 +6459,7 @@ pub(crate) mod built {
         }
     }
     // exhaustive: the game builds it with a literal; mods only read it
+    // no wire: borrowed game-to-hook adapter; its call fields cross separately.
     pub struct NativeItemClick<'a> {
         pub side: LogicalSide,
         pub dimension: LevelDimension,
@@ -6475,6 +6492,7 @@ pub(crate) mod built {
         }
     }
     // exhaustive: the game builds it with a literal; mods only read it
+    // no wire: borrowed game-to-hook adapter; its call fields cross separately.
     pub struct NativeBlockClick<'a> {
         pub side: LogicalSide,
         pub dimension: LevelDimension,
@@ -6633,6 +6651,7 @@ pub(crate) mod built {
         }
     }
     // exhaustive: the game builds it with a literal; mods only read it
+    // no wire: borrowed game-to-hook adapter; its call fields cross separately.
     pub struct NativeServerPlayer {
         pub uuid: u128,
         pub name: String,

@@ -160,6 +160,7 @@ impl DamageContainer {
     }
 }
 
+// no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
 /// A hit's `DamageSource` for `HURT_SERVER`: its type (`minecraft:fall`),
 /// the entity ids of `getEntity` (`causing`) and `getDirectEntity`
 /// (`direct`), 0 for none or not known, and where it comes from

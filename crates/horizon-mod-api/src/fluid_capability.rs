@@ -101,6 +101,7 @@ impl fmt::Debug for FluidResource {
 /// Why a fluid ingredient could not be parsed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum FluidIngredientError {
     /// Invalid or unsupported ingredient shape.
     Invalid,
@@ -117,6 +118,7 @@ pub enum FluidIngredientError {
 /// Components are not checked — any stack of a named fluid answers.
 #[derive(Clone, Debug)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct FluidIngredient {
     fluids: Vec<FluidKey>,
 }
@@ -185,6 +187,7 @@ const BUCKET_VOLUME: u32 = 1000;
 /// millibuckets of them (a bucket is 1000).
 #[derive(Clone, Debug)]
 // exhaustive: plain data the mod reads out of a recipe and matches stacks with
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct SizedFluidIngredient {
     /// The fluids it accepts, without an amount.
     pub ingredient: FluidIngredient,

@@ -68,6 +68,7 @@ pub trait ParticleProviders {
     fn register(&mut self, name: String, provider: Arc<dyn ParticleProvider>);
 }
 
+// no wire: process-local listener or callback storage; trait objects are invoked through host dispatch, not serialized.
 /// The game's [`ParticleProviders`]: the registrations by name.
 #[derive(Default)]
 // exhaustive: its field is private; the game builds it

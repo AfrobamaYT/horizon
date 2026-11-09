@@ -177,6 +177,7 @@ pub fn dimension_id(key: DimensionKey) -> Option<&'static str> {
     horizon_mod_runtime::registry_keys::dimension_id(key.0)
 }
 
+// no wire: process-local registration diagnostic retains a static hook or mod identity.
 /// A fluid requested by a mod but absent from the completed registry.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]

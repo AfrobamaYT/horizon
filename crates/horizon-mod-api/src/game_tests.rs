@@ -3,8 +3,7 @@ use crate::ServerHost;
 use std::{collections::BTreeMap, sync::Arc};
 
 /// The outcome of a function invocation. Pending keeps the runner's timeout active.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[derive(horizon_mod_api_macros::Wire)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, horizon_mod_api_macros::Wire)]
 pub enum GameTestResult {
     /// Complete this attempt successfully.
     Pass,

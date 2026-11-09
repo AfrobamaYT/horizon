@@ -33,6 +33,7 @@ pub enum TerrainShade {
     Entity,
 }
 
+// no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
 /// Faces textured by `source_sprite` drawn with `target_sprite` instead, their unit UVs
 /// multiplied by `scale` then moved by `offset`: a belt's or a scrolling screen's texture.
 /// Only faces of that exact sprite change.
@@ -67,6 +68,7 @@ impl<'a> TerrainUvShift<'a> {
     }
 }
 
+// no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
 /// How [`BlockEntityDrawContext::terrain_model`](crate::BlockEntityDrawContext::terrain_model)
 /// draws a model. The default is the model's own materials and shading, its baked UVs and no
 /// tint.

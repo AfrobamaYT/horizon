@@ -56,6 +56,7 @@ pub enum StateMatchError {
     InvalidValue(u32),
 }
 
+// no wire: borrowed host or registrar backend; access stays scoped to the owning call.
 /// The block-state facts service: `host.block_states()`.
 // exhaustive: its field is private; only `host.block_states()` builds one
 pub struct BlockStates<'a> {

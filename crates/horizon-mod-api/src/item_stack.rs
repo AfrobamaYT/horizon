@@ -137,6 +137,7 @@ impl crate::NoBackend for StackWriteError {
 /// The two nonempty portions of a consuming split. Either portion can be absent.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct StackSplit {
     /// Up to the requested number of items.
     pub taken: Option<ItemStack>,

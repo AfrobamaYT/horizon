@@ -514,6 +514,7 @@ impl<'a> Reader<'a> {
 }
 
 /// FNV-1a hash of an encoding name, independent of its source module.
+// hidden: shared stable encoding hash primitive used by Wire derives.
 #[doc(hidden)]
 pub const fn layout_name(name: &str) -> u64 {
     let bytes = name.as_bytes();
@@ -527,6 +528,7 @@ pub const fn layout_name(name: &str) -> u64 {
 }
 
 /// Compose a layout hash with a child encoding.
+// hidden: shared stable encoding hash composition used by Wire derives.
 #[doc(hidden)]
 pub const fn layout_mix(mut hash: u64, child: u64) -> u64 {
     let bytes = child.to_le_bytes();
@@ -545,9 +547,11 @@ pub const fn layout_mix(mut hash: u64, child: u64) -> u64 {
 )]
 pub trait Wire: Sized {
     /// Leaf seed only; composed encoding identity comes from `layout`.
+    // hidden: leaf seed for handwritten encodings; not the composed layout identity.
     #[doc(hidden)]
     const LAYOUT_SEED: u64;
     /// Compose this encoding with its children, marking recursive visits.
+    // hidden: load-time compatibility identity, including transitive fields and recursion.
     #[doc(hidden)]
     fn layout(_visiting: &mut Vec<&'static str>) -> u64 {
         Self::LAYOUT_SEED
@@ -1011,6 +1015,7 @@ tuples!(
 
 /// A duration as seconds and nanoseconds.
 impl Wire for std::time::Duration {
+    crate::wire::layout_fields!("secs" => u64, "nanos" => u32);
     const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(std::time::Duration));
     const MIN: usize = 12;
     fn put(&self, out: &mut Writer) {
@@ -1026,6 +1031,24 @@ impl Wire for std::time::Duration {
         }
     }
 }
+
+// Checked encodings declare their written fields here rather than relying on the
+// Rust representation (which may contain caches or validated constructor state).
+macro_rules! layout_fields {
+    ($($field:literal => $ty:ty),* $(,)?) => {
+        fn layout(visiting: &mut Vec<&'static str>) -> u64 {
+            let identity = std::any::type_name::<Self>();
+            if visiting.contains(&identity) { return crate::wire::layout_name("recursive"); }
+            visiting.push(identity);
+            let hash = Self::LAYOUT_SEED;
+            $(let hash = crate::wire::layout_mix(crate::wire::layout_mix(hash, crate::wire::layout_name($field)), <$ty as $crate::wire::Wire>::layout(visiting));)*
+            visiting.pop();
+            hash
+        }
+    };
+}
+
+pub(crate) use layout_fields;
 
 #[cfg(test)]
 mod tests {
@@ -1496,21 +1519,3 @@ mod tests {
         assert_eq!(dive(&mut reader, 3), Ok(()));
     }
 }
-
-// Checked encodings declare their written fields here rather than relying on the
-// Rust representation (which may contain caches or validated constructor state).
-macro_rules! layout_fields {
-    ($($field:literal => $ty:ty),* $(,)?) => {
-        fn layout(visiting: &mut Vec<&'static str>) -> u64 {
-            let identity = std::any::type_name::<Self>();
-            if visiting.contains(&identity) { return crate::wire::layout_name("recursive"); }
-            visiting.push(identity);
-            let hash = Self::LAYOUT_SEED;
-            $(let hash = crate::wire::layout_mix(crate::wire::layout_mix(hash, crate::wire::layout_name($field)), <$ty as $crate::wire::Wire>::layout(visiting));)*
-            visiting.pop();
-            hash
-        }
-    };
-}
-
-pub(crate) use layout_fields;

@@ -245,6 +245,7 @@ pub enum NativeModEvent {
     /// claim, the player respawns, or the game joins a server.
     UseStop(NativeHeldItem, u32),
 }
+// no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
 /// A map as a native mod sees it when `native_map_decorations` is asked.
 // Native mods read it; nothing in Horizon does.
 #[derive(Clone, Copy, Debug)]
@@ -282,6 +283,7 @@ pub struct NativeMapDecoration {
     /// (`MapDecorationType.showOnItemFrame`); a held map shows all.
     pub shown_on_frame: bool,
 }
+// no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
 /// One mob's frame, as `EntityRenderer.extractRenderState` fills a
 /// `LivingEntityRenderState`: what a model reads to pose and animate itself.
 /// Angles are in degrees, interpolated to the frame's partial tick.
@@ -318,6 +320,7 @@ pub struct NativeMobRender<'a> {
     pub death_time: i32,
     pub on_ground: bool,
 }
+// no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
 /// Which player a [`NativeMobRender`] is, for `native_player_submit` and
 /// `native_mob_layer`.
 // Native mods read it; nothing in Horizon does.
@@ -329,6 +332,7 @@ pub struct NativePlayerRender<'a> {
     /// Whether it is the player of this window, drawn in third person.
     pub local: bool,
 }
+// no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
 /// One face of a `native_draw_cube` box: its sprite (`mymod:entity/cog`,
 /// `mymod:block/casing`) and its UVs in texels of 16 per side, as a model
 /// face's `uv` (none takes the box's own, as a model's default).

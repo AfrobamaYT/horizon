@@ -12,6 +12,7 @@ use std::fmt;
 /// `DataComponentType`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct ComponentId(Box<str>);
 
 impl ComponentId {
@@ -28,6 +29,7 @@ impl ComponentId {
     }
 }
 
+// no wire: static registration identity; mod-local storage cannot be reconstructed from a wire string.
 /// An enchantment effect component type (`EnchantmentEffectComponents`): what an enchantment's
 /// `effects` are keyed by, and what [`ItemResource::has_enchantment_effect`] asks for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -55,6 +57,7 @@ pub const PREVENT_ARMOR_CHANGE: EnchantmentEffect =
 /// The effective rarity of an item stack, after its enchantment upgrade.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum ItemRarity {
     /// The ordinary rarity.
     Common,
@@ -542,6 +545,7 @@ pub trait ResourceHandler<R> {
 /// neither end keeps any of it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct Overanswered {
     /// The mod whose handler answered, or "the game".
     pub owner: String,

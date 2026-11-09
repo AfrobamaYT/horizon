@@ -81,6 +81,7 @@ pub trait ColorResolvers {
     fn register(&mut self, resolver: Arc<dyn BiomeColorResolver>) -> ColorResolver;
 }
 
+// no wire: process-local listener or callback storage; trait objects are invoked through host dispatch, not serialized.
 /// The game's [`ColorResolvers`]: the registered resolvers, each at the index its handle names.
 #[derive(Default)]
 // exhaustive: its field is private; the game builds it
@@ -251,6 +252,7 @@ pub trait BlockTintSources {
 /// The game's [`BlockTintSources`]: the registrations in order.
 #[derive(Default)]
 // exhaustive: its field is private; the game builds it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct BlockTintRegistry {
     registrations: Vec<(Vec<TintLayer>, Vec<String>)>,
 }
