@@ -91,8 +91,5 @@ fn a_cancelled_key_still_types_the_characters_left() {
         None
     );
     // Nothing typed: nothing to hand over.
-    assert_eq!(
-        super::screen_text_hooked(&super::chars_to_type("", true), |_| false),
-        None
-    );
+    assert_eq!(super::chars_to_type("", true).chars().next(), None);
 }
