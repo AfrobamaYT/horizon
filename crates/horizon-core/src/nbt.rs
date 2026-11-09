@@ -247,11 +247,12 @@ impl Limits {
 
 /// A compound entry that [`read_named_bounded`] reads under a budget of its own, without
 /// changing the limits of the rest of the file: the entry keyed `key` directly inside a
-/// compound keyed `parent`.
+/// compound reached from the root by one of the key paths in `parents`.
 #[derive(Clone, Copy, Debug)]
 pub struct Bounded {
-    /// The key of the compound that holds the entry.
-    pub parent: &'static str,
+    /// The key paths from the root to each compound that holds the entry, at most
+    /// [`MAX_BOUNDED_PARENTS`]. `&["a", "b"]` is the root's `a`, then its `b`.
+    pub parents: &'static [&'static [&'static str]],
     /// The entry's key.
     pub key: &'static str,
     /// The most bytes its payload may take.
@@ -288,8 +289,9 @@ struct Reader<'a, 's> {
     bounded: Option<Bounded>,
     /// Inside a bounded entry, where a repeated key is an error.
     strict: bool,
-    /// The compound about to be read is the value of a [`Bounded::parent`] key.
-    entering_parent: bool,
+    /// The [`Bounded::parents`] paths (one bit each) that lead to the compound about to be
+    /// read, at its depth.
+    entering: u32,
     /// Bounded entries left out.
     rejected: usize,
 }
@@ -400,7 +402,8 @@ impl<'a> Reader<'a, '_> {
                 Tag::List(values)
             }
             10 => {
-                let parent = std::mem::take(&mut self.entering_parent);
+                let paths = std::mem::take(&mut self.entering);
+                let parent = self.holds_bounded(paths, depth);
                 let mut map = Compound::new();
                 loop {
                     let id = self.byte()?;
@@ -419,7 +422,11 @@ impl<'a> Reader<'a, '_> {
                             None => continue,
                         }
                     } else {
-                        self.entering_parent = id == 10 && !self.strict && self.parents(&name);
+                        self.entering = if id == 10 && !self.strict {
+                            self.descend(paths, depth, &name)
+                        } else {
+                            0
+                        };
                         self.payload(id, depth + 1)?
                     };
                     map.insert(name, value); // Java maps retain the last duplicate key.
@@ -448,8 +455,24 @@ impl<'a> Reader<'a, '_> {
     fn bounds(&self, name: &JavaString) -> bool {
         self.bounded.is_some_and(|b| is_key(name, b.key))
     }
-    fn parents(&self, name: &JavaString) -> bool {
-        self.bounded.is_some_and(|b| is_key(name, b.parent))
+    /// The `paths` that end at the compound at `depth`, so its [`Bounded::key`] is bounded.
+    fn holds_bounded(&self, paths: u32, depth: usize) -> bool {
+        self.parent_paths(paths)
+            .any(|(_, path)| path.len() == depth)
+    }
+    /// The `paths` that lead on from the compound at `depth` through its child `name`.
+    fn descend(&self, paths: u32, depth: usize, name: &JavaString) -> u32 {
+        self.parent_paths(paths)
+            .filter(|(_, path)| path.get(depth).is_some_and(|key| is_key(name, key)))
+            .fold(0, |next, (i, _)| next | 1 << i)
+    }
+    /// The [`Bounded::parents`] paths whose bits are set in `paths`, with their indices.
+    fn parent_paths(&self, paths: u32) -> impl Iterator<Item = (usize, &'static [&'static str])> {
+        let parents = self.bounded.map_or(&[][..], |b| b.parents);
+        let parents = &parents[..parents.len().min(MAX_BOUNDED_PARENTS)];
+        (0..parents.len())
+            .filter(move |i| paths & (1 << i) != 0)
+            .map(move |i| (i, parents[i]))
     }
     /// Whether `len` elements of type `element_id` can fit in what is left of the input and of
     /// the byte limit, each taking at least its type's smallest payload.
@@ -666,7 +689,7 @@ pub fn read_named(bytes: &[u8], limits: Limits) -> Result<(NamedTag, usize), Err
         stream: None,
         bounded: None,
         strict: false,
-        entering_parent: false,
+        entering: 0,
         rejected: 0,
     };
     let id = reader.byte()?;
@@ -679,10 +702,14 @@ pub fn read_named(bytes: &[u8], limits: Limits) -> Result<(NamedTag, usize), Err
     Ok((NamedTag { name, tag }, reader.offset))
 }
 
-/// [`read_named`], except that every compound entry keyed `bounded.key` directly inside a
-/// compound keyed `bounded.parent` is read under that budget and may repeat no key inside it. An entry that passes its budget or repeats a key
-/// is read past without being built and left out of its compound; the third value counts
-/// those. The rest of the file reads as [`read_named`] reads it.
+/// [`read_named`], except that the entry keyed `bounded.key` in each of the compounds
+/// `bounded.parents` names is read under that budget and may repeat no key inside it. An
+/// entry that passes its budget or repeats a key is read past without being built and left
+/// out of its compound; the third value counts those. The rest of the file reads as
+/// [`read_named`] reads it.
+/// The most [`Bounded::parents`] paths; later ones are ignored.
+pub const MAX_BOUNDED_PARENTS: usize = 31;
+
 pub fn read_named_bounded(
     bytes: &[u8],
     limits: Limits,
@@ -696,7 +723,7 @@ pub fn read_named_bounded(
         stream: None,
         bounded: Some(bounded),
         strict: false,
-        entering_parent: false,
+        entering: (1u32 << bounded.parents.len().min(MAX_BOUNDED_PARENTS)) - 1,
         rejected: 0,
     };
     let id = reader.byte()?;
@@ -728,7 +755,7 @@ pub fn read_named_streaming(
         stream: Some((key, visit)),
         bounded: None,
         strict: false,
-        entering_parent: false,
+        entering: 0,
         rejected: 0,
     };
     let id = reader.byte()?;
@@ -751,7 +778,7 @@ pub fn read_network(bytes: &[u8], limits: Limits) -> Result<(Tag, usize), Error>
         stream: None,
         bounded: None,
         strict: false,
-        entering_parent: false,
+        entering: 0,
         rejected: 0,
     };
     let id = reader.byte()?;
@@ -1582,11 +1609,12 @@ mod tests {
     }
 
     /// A bounded entry with a key twice or past its budget is left out unbuilt; the rest of
-    /// the file, the same key under another parent, and the input read plainly are as before.
+    /// the file, the same key under another parent or a parent of the same name deeper down,
+    /// and the input read plainly are as before.
     #[test]
     fn a_bounded_entry_over_its_budget_or_with_a_repeated_key_is_left_out() {
         let budget = Bounded {
-            parent: "p",
+            parents: &[&["p"]],
             key: "b",
             max_bytes: 16,
             max_depth: 1,
@@ -1651,5 +1679,17 @@ mod tests {
             .and_then(|q| q.get("b"))
             .and_then(|b| b.get("x"));
         assert_eq!(x, Some(&Tag::Byte(2)), "Java keeps the last");
+        // {q:{p:{b:{x:1b, x:2b}}}}: a `p` below the root is not the path's `p`.
+        let mut nested = vec![10, 0, 0];
+        key(&mut nested, 10, "q");
+        nested.extend(&file("p", &twice)[3..]);
+        nested.push(0);
+        let (named, _, rejected) = read_named_bounded(&nested, Limits::default(), budget).unwrap();
+        let (plain, _) = read_named(&nested, Limits::default()).unwrap();
+        assert_eq!(
+            (named, rejected),
+            (plain, 0),
+            "only the root's `p` is bounded"
+        );
     }
 }

@@ -29,7 +29,7 @@ static ALLOCATOR: Largest = Largest;
 fn a_bounded_list_past_its_budget_reserves_nothing_for_its_count() {
     const ELEMENTS: usize = 1_000_000;
     let budget = Bounded {
-        parent: "p",
+        parents: &[&["p"]],
         key: "b",
         max_bytes: 512 * 1024,
         max_depth: 2,

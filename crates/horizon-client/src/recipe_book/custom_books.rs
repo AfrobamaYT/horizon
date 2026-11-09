@@ -19,7 +19,7 @@ pub const MAX_ENCODED_BYTES: usize = 512 * 1024;
 /// [`MAX_ENCODED_BYTES`], two levels deep (the map and a book's flags), and no key twice. The
 /// same key under any other compound reads as the plain reader reads it.
 pub const READ_BUDGET: nbt::Bounded = nbt::Bounded {
-    parent: "recipeBook",
+    parents: &[&["recipeBook"], &["Data", "Player", "recipeBook"]],
     key: EXTENSION,
     max_bytes: MAX_ENCODED_BYTES,
     max_depth: 2,

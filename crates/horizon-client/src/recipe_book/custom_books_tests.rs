@@ -365,3 +365,40 @@ fn the_same_key_outside_recipe_book_reads_as_before() {
         .and_then(|e| e.get("x"));
     assert_eq!(x, Some(&Tag::Byte(2)));
 }
+
+/// The extension with `x` twice, inside `recipeBook` under the compounds `path` names.
+fn nested_book(path: &[&str]) -> Vec<u8> {
+    let mut raw = vec![10, 0, 0];
+    for name in path.iter().chain(["recipeBook"].iter()) {
+        key(&mut raw, 10, name);
+    }
+    key(&mut raw, 10, EXTENSION);
+    for value in [1, 2] {
+        key(&mut raw, 1, "x");
+        raw.push(value);
+    }
+    raw.extend(std::iter::repeat_n(0, path.len() + 3));
+    raw
+}
+
+#[test]
+fn only_the_players_own_recipe_book_is_budgeted() {
+    // A `recipeBook` that is not the player's reads as the plain reader reads it.
+    let raw = nested_book(&["OtherData"]);
+    let (named, _) = read_saved(&raw).unwrap();
+    let (plain, _) = horizon_core::nbt::read_named(&raw, Limits::saved()).unwrap();
+    assert_eq!(named, plain);
+    let x = ["OtherData", "recipeBook", EXTENSION, "x"]
+        .iter()
+        .try_fold(&named.tag, |tag, key| tag.get(key));
+    assert_eq!(x, Some(&Tag::Byte(2)));
+    // The player's book: the root's, or `level.dat`'s `Data.Player`.
+    for path in [&[][..], &["Data", "Player"]] {
+        let (named, _) = read_saved(&nested_book(path)).unwrap();
+        let book = path
+            .iter()
+            .chain(["recipeBook"].iter())
+            .try_fold(&named.tag, |tag, key| tag.get(key));
+        assert_eq!(book.map(|b| b.get(EXTENSION)), Some(None), "{path:?}");
+    }
+}
