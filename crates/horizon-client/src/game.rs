@@ -4166,22 +4166,7 @@ impl Game<'_> {
         (out, stars)
     }
 
-    pub(super) fn visual_ticks(&self) -> u64 {
-        if self.clock.still() {
-            self.world.game_time.max(0) as u64
-        } else {
-            self.ticks
-        }
-    }
-
     /// Frame time in milliseconds, fixed to world time in still mode.
-    pub(super) fn visual_millis(&self) -> i64 {
-        if self.clock.still() {
-            self.visual_ticks() as i64 * 50
-        } else {
-            self.started.elapsed().as_millis() as i64
-        }
-    }
 
     /// `Level.canHaveWeather`, from the level's dimension type (sky light, no
     /// ceiling) and the End, which vanilla names by id. Every rain, thunder
@@ -8396,13 +8381,7 @@ impl Game<'_> {
     }
     /// The clock of the animated textures: `Minecraft.runTick` ticks the `TextureManager`
     /// only while the level runs normally. Under `HORIZON_STILL` it is the world's ticks.
-    pub(super) fn texture_clock(&self) -> u64 {
-        if self.clock.still() {
-            self.visual_ticks()
-        } else {
-            self.texture_ticks
-        }
-    }
+
     fn tick(&mut self) -> Result<()> {
         if self.agent.hold_server {
             return Ok(());
