@@ -125,6 +125,7 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         Err(e) => return e.to_compile_error(),
     };
     let name = shape.name.clone();
+    let table = shape.table.clone();
     // The body moves to an inlined inner function, so the return listeners run however it
     // returns; the outer function takes each parameter by a plain, mutable name.
     let inner = syn::Ident::new(
@@ -215,7 +216,7 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
     let cancels =
         matches!(shape.returns, Returns::Unit | Returns::UnitResult) && (api || shape.raw);
     let results = (shape.raw && matches!(outcome, RawOutcome::Result(_))) || api_value.is_some();
-    let listened = |variant: &syn::Ident| quote!(mod_points::__private::POINTS[mod_points::PointId::#variant as usize].load(::std::sync::atomic::Ordering::Acquire));
+    let listened = |variant: &syn::Ident| quote!(#table::__private::POINTS[#table::PointId::#variant as usize].load(::std::sync::atomic::Ordering::Acquire));
 
     // The head: copy in, the API listeners, copy out; then the raw listeners on the same places.
     let shared_locals =
@@ -239,7 +240,7 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         });
     let record_call = |after: bool, mirrored: &[(syn::Ident, TokenStream)]| {
         let fields = args.iter().map(|(arg, input)| copy_in(arg, *input, after));
-        let made = quote!(mod_points::#record::__new(#(#fields),*));
+        let made = quote!(#table::#record::__new(#(#fields),*));
         let (names, values): (Vec<_>, Vec<_>) = mirrored.iter().cloned().unzip();
         (made, names, values)
     };
@@ -266,7 +267,7 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         let body = quote! {
             #[allow(unused_mut)]
             let mut __args = #made;
-            mod_points::dispatch::#method(#host &mut __args);
+            #table::dispatch::#method(#host &mut __args);
             #(#outs)*
             #outcome
         };
@@ -292,11 +293,10 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
         let variant = shape.variant();
         let raw_record = raw_places(false);
         let fire = quote! {
-            mod_points::__private::fire_raw(
-                mod_points::PointId::#variant,
-                #name,
+            #table::__private::fire_raw(
+                #table::PointId::#variant,
                 &mut |__kind| match __kind {
-                    mod_points::__private::RawKind::Typed(__function) => {
+                    #table::__private::RawKind::Typed(__function) => {
                         // SAFETY: registration guarantees this point's listener type.
                         unsafe {
                             ::std::mem::transmute::<*const (), #listener>(__function)(
@@ -304,11 +304,11 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
                             )
                         }
                     }
-                    mod_points::__private::RawKind::Erased(__function) => {
+                    #table::__private::RawKind::Erased(__function) => {
                         // SAFETY: this slot supplies its exact receiver and raw record types.
                         unsafe {
                             __function(
-                                mod_points::PointId::#variant as usize,
+                                #table::PointId::#variant as usize,
                                 #erased_receiver,
                                 &mut #raw_record as *mut _ as *mut (),
                             )
@@ -330,7 +330,7 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
             quote!(if let ::std::option::Option::Some(__value) = __owned { __result_slot = ::std::option::Option::Some(__value); })
         });
         quote! {
-            let __replaced = mod_points::__private::replaced(mod_points::PointId::#variant);
+            let __replaced = #table::__private::replaced(#table::PointId::#variant);
             #keep
             #fire
             #force
@@ -440,7 +440,7 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
                 #[allow(unused_mut)]
                 let mut __args = #made;
                 #result_in
-                mod_points::dispatch::#method(#host &mut __args);
+                #table::dispatch::#method(#host &mut __args);
                 #result_out
                 #(#outs)*
             };
@@ -464,14 +464,12 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
                 syn::ReturnType::Type(..) => quote!(&mut __result),
                 syn::ReturnType::Default => quote!(),
             };
-            let return_name = format!("{name}_return");
             quote! {
                 if #return_listened {
-                    mod_points::__private::fire_raw(
-                        mod_points::PointId::#variant,
-                        #return_name,
+                    #table::__private::fire_raw(
+                        #table::PointId::#variant,
                         &mut |__kind| match __kind {
-                            mod_points::__private::RawKind::Typed(__function) => {
+                            #table::__private::RawKind::Typed(__function) => {
                                 // SAFETY: registration guarantees this place's return listener type.
                                 unsafe {
                                     ::std::mem::transmute::<*const (), #listener>(__function)(
@@ -479,11 +477,11 @@ pub fn expand(attribute: TokenStream, mut function: ImplItemFn) -> TokenStream {
                                     )
                                 }
                             }
-                            mod_points::__private::RawKind::Erased(__function) => {
+                            #table::__private::RawKind::Erased(__function) => {
                                 // SAFETY: this slot supplies its exact receiver and return types.
                                 unsafe {
                                     __function(
-                                        mod_points::PointId::#variant as usize,
+                                        #table::PointId::#variant as usize,
                                         #erased_receiver,
                                         &mut __result as *mut _ as *mut (),
                                     )

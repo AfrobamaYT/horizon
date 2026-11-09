@@ -30,7 +30,7 @@ fn inner(r: (), a: &mut Args, next: &mut dyn FnMut((), &mut Args) -> i64) -> i64
 }
 fn listener(id: &'static str, priority: i32, injection: &'static str, f: Listener) -> SlotListener {
     // SAFETY: this test executable supplies the site's exact typed slot below; no game fires it.
-    unsafe { SlotListener::site(id, SITE, priority, injection, f as *const ()) }
+    unsafe { SlotListener::site(id, SITE.place(), priority, injection, f as *const ()) }
 }
 
 #[test]

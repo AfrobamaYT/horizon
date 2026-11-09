@@ -50,9 +50,9 @@ fn point_priority_preserves_dependency_order_and_orders_injects_within_a_mod() {
             // SAFETY: these synthetic slots inspect kind and identity; they never invoke the pointers.
             let listener = unsafe {
                 if index % 2 == 0 {
-                    SlotListener::new(owner, row.place, native as *const ())
+                    SlotListener::new(owner, row.place.place(), native as *const ())
                 } else {
-                    SlotListener::erased(owner, row.place, wasm)
+                    SlotListener::erased(owner, row.place.place(), wasm)
                 }
             };
             register(&listener.ordered(row.priorities[index], inject)).unwrap();
@@ -62,12 +62,12 @@ fn point_priority_preserves_dependency_order_and_orders_injects_within_a_mod() {
         let id = Box::leak(format!("owner_{owner}").into_boxed_str());
         // SAFETY: this fixture inspects identity without invoking the pointer.
         let listener =
-            unsafe { SlotListener::new(id, PointId::TickWorldReturn, native as *const ()) };
+            unsafe { SlotListener::new(id, PointId::TickWorldReturn.place(), native as *const ()) };
         register(&listener.ordered(owner % 3, "large")).unwrap();
     }
     seal();
     let mut owners = Vec::new();
-    fire_raw(PointId::TickWorldReturn, "fixture", &mut |_| {
+    fire_raw(PointId::TickWorldReturn, &mut |_| {
         owners.push(
             mod_api::content::crash::current_native_mod()
                 .unwrap()
@@ -88,7 +88,7 @@ fn point_priority_preserves_dependency_order_and_orders_injects_within_a_mod() {
     );
     for row in rows {
         let mut heard = Vec::new();
-        fire_raw(row.place, "fixture", &mut |kind| {
+        fire_raw(row.place, &mut |kind| {
             heard.push(if row.one_owner {
                 match kind {
                     RawKind::Typed(_) => "native",

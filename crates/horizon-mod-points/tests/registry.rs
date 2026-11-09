@@ -33,7 +33,7 @@ unsafe fn erased_listener(place: usize, receiver: *mut (), raw: *mut ()) {
 /// `raw_listener` at `place`: the test's slots never call it.
 fn raw_at(id: &'static str, place: PointId) -> SlotListener {
     // SAFETY: nothing fires a raw place here with a call into the function.
-    unsafe { SlotListener::new(id, place, raw_listener as *const ()) }
+    unsafe { SlotListener::new(id, place.place(), raw_listener as *const ()) }
 }
 
 /// Stopping from the mod's subscription callback still applies to slots registered later.
@@ -97,7 +97,7 @@ fn one_list_registered_sealed_and_stopped() {
     let place = PointId::Tick;
     assert_eq!(register(&raw_at("raw_mod", place)), Ok(()));
     // SAFETY: the callback checks its place and never dereferences the pointers.
-    let erased = unsafe { SlotListener::erased("raw_mod", place, erased_listener) };
+    let erased = unsafe { SlotListener::erased("raw_mod", place.place(), erased_listener) };
     assert_eq!(register(&erased), Ok(()));
     assert_eq!(register(&raw_at("raw_mod", place)), Ok(()));
     assert!(
@@ -115,13 +115,13 @@ fn one_list_registered_sealed_and_stopped() {
     assert!(!POINTS[raw].load(Ordering::Acquire));
     let (mut heard, mut raw_heard) = (0, 0);
     mod_points::__private::fire_api(PointId::Tick, &mut |_| heard += 1);
-    mod_points::__private::fire_raw(PointId::Tick, "tick", &mut |_| raw_heard += 1);
+    mod_points::__private::fire_raw(PointId::Tick, &mut |_| raw_heard += 1);
     assert_eq!((heard, raw_heard), (0, 0), "disabled before sealing");
     assert!(mod_api::__private::set_mod_enabled("tick_mod", true));
     assert!(mod_api::__private::set_mod_enabled("raw_mod", true));
     mod_points::__private::fire_api(PointId::Tick, &mut |_| heard += 1);
     let mut order = Vec::new();
-    mod_points::__private::fire_raw(PointId::Tick, "tick", &mut |kind| {
+    mod_points::__private::fire_raw(PointId::Tick, &mut |kind| {
         match kind {
             RawKind::Typed(function) => {
                 assert_eq!(function, raw_listener as *const ());
@@ -145,7 +145,7 @@ fn one_list_registered_sealed_and_stopped() {
     assert_eq!(mod_api::content::crash::current_native_mod(), None);
     assert!(mod_api::__private::set_mod_enabled("tick_mod", false));
     mod_points::__private::fire_api(PointId::Tick, &mut |_| heard += 1);
-    mod_points::__private::fire_raw(PointId::Tick, "tick", &mut |_| raw_heard += 1);
+    mod_points::__private::fire_raw(PointId::Tick, &mut |_| raw_heard += 1);
     assert_eq!(
         (heard, raw_heard),
         (1, 6),
@@ -153,7 +153,7 @@ fn one_list_registered_sealed_and_stopped() {
     );
     assert!(mod_api::__private::set_mod_enabled("raw_mod", false));
     mod_points::__private::fire_api(PointId::Tick, &mut |_| heard += 1);
-    mod_points::__private::fire_raw(PointId::Tick, "tick", &mut |_| raw_heard += 1);
+    mod_points::__private::fire_raw(PointId::Tick, &mut |_| raw_heard += 1);
     assert_eq!(
         (heard, raw_heard),
         (1, 6),
@@ -162,7 +162,7 @@ fn one_list_registered_sealed_and_stopped() {
     assert!(mod_api::__private::set_mod_enabled("tick_mod", true));
     assert!(mod_api::__private::set_mod_enabled("raw_mod", true));
     mod_points::__private::fire_api(PointId::Tick, &mut |_| heard += 1);
-    mod_points::__private::fire_raw(PointId::Tick, "tick", &mut |_| raw_heard += 1);
+    mod_points::__private::fire_raw(PointId::Tick, &mut |_| raw_heard += 1);
     assert_eq!(
         (heard, raw_heard),
         (2, 9),
@@ -175,7 +175,7 @@ fn one_list_registered_sealed_and_stopped() {
         assert!(mod_api::__private::set_mod_enabled(id, true));
     }
     mod_points::__private::fire_api(PointId::Tick, &mut |_| heard += 1);
-    mod_points::__private::fire_raw(PointId::Tick, "tick", &mut |_| raw_heard += 1);
+    mod_points::__private::fire_raw(PointId::Tick, &mut |_| raw_heard += 1);
     assert_eq!(
         (heard, raw_heard),
         (2, 9),

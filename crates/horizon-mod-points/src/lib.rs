@@ -72,23 +72,21 @@ pub mod guest;
 // hidden: the game's side of the points, not part of the API a mod is written against
 #[doc(hidden)]
 pub mod __private {
-    use crate::PointId;
-    pub use crate::registry::{
-        ApiKind, Forward, POINTS, PointHost, RawKind, SITES, SlotListener, seal, wrap,
-    };
+    pub use crate::registry::{POINTS, SITES, TABLE, seal};
+    use crate::{PointId, SiteId};
+    pub use mod_api::__private::points::{ApiKind, Forward, PointHost, RawKind, SlotListener};
 
     /// Whether an active `replace` listener owns `place`'s outcome. A point's head checks it
     /// around its internals listeners, which run after the API ones and may not undo it.
     #[inline]
     pub fn replaced(place: PointId) -> bool {
-        crate::registry::replaced(place)
+        TABLE.replaced(place as usize)
     }
 
     /// Runs the checked API functions and forwarding endpoints under their owner guards.
-    #[cold]
-    #[inline(never)]
+    #[inline]
     pub fn fire_api(place: PointId, call: &mut dyn FnMut(ApiKind)) {
-        crate::registry::fire_api(place, call);
+        TABLE.fire_api(place as usize, call);
     }
 
     /// Runs the raw listeners at `place`, each through `call` with its kind and function. The
@@ -100,7 +98,7 @@ pub mod __private {
     /// ```compile_fail,E0133
     /// use mod_points::{PointId, __private::{fire_raw, RawKind}};
     /// let place = PointId::Tick;
-    /// fire_raw(place, "tick", &mut |kind| {
+    /// fire_raw(place, &mut |kind| {
     ///     if let RawKind::Erased(function) = kind {
     ///         function(place as usize, std::ptr::null_mut(), std::ptr::null_mut());
     ///     }
@@ -114,7 +112,7 @@ pub mod __private {
     /// // SAFETY: the caller must supply this place's exact receiver and record pointers,
     /// // valid for the callback's duration, as required by RawKind::Erased.
     /// unsafe fn forward(place: PointId, receiver: *mut (), raw: *mut ()) {
-    ///     fire_raw(place, "slot", &mut |kind| {
+    ///     fire_raw(place, &mut |kind| {
     ///         if let RawKind::Erased(function) = kind {
     ///             // SAFETY: the caller supplies the slot's pointer guarantees.
     ///             unsafe { function(place as usize, receiver, raw) };
@@ -122,9 +120,18 @@ pub mod __private {
     ///     });
     /// }
     /// ```
-    #[cold]
-    #[inline(never)]
-    pub fn fire_raw(place: PointId, name: &'static str, call: &mut dyn FnMut(RawKind)) {
-        crate::registry::fire_raw(place, name, call);
+    #[inline]
+    pub fn fire_raw(place: PointId, call: &mut dyn FnMut(RawKind)) {
+        TABLE.fire_raw(place as usize, call);
+    }
+
+    /// Invokes the next enabled listener of call site `place` (see [`mod_api::__private::points::Table::wrap`]).
+    #[inline]
+    pub fn wrap<O>(
+        place: SiteId,
+        from: usize,
+        call: impl FnOnce(Option<(*const (), usize)>) -> O,
+    ) -> O {
+        TABLE.wrap(place as usize, from, call)
     }
 }

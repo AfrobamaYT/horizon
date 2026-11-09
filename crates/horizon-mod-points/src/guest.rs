@@ -1,22 +1,26 @@
 //! Guest listeners sharing the ordinary hook export and wire arena.
-use crate::{
-    PointId,
-    registry::{ApiKind, SlotListener},
-};
+use crate::PointId;
+use mod_api::__private::points::{ApiKind, SlotListener};
 use std::cell::RefCell;
 
 thread_local! {
     static LISTENERS: RefCell<Vec<(usize, String, *const ())>> = const { RefCell::new(Vec::new()) };
 }
 
-/// Installs a typed API listener in this guest and enables the generated export table.
-/// The host registers the subscribed places in its ordinary ordered listener list.
+/// Installs a typed API listener at a game point in this guest and enables the generated export
+/// table: the host registers the subscribed places in its ordinary ordered listener list. A
+/// listener at a mod's own point registers in that mod's table, in the group's own memory.
 pub fn register(listener: &SlotListener) -> Result<(), crate::RegisterError> {
+    if !std::ptr::eq(listener.place().table(), &crate::registry::TABLE) {
+        return mod_api::__private::points::register(listener);
+    }
     if let Some(ApiKind::Typed(function)) = listener.api_kind() {
         LISTENERS.with(|slots| {
-            slots
-                .borrow_mut()
-                .push((listener.place(), listener.injection().to_owned(), function))
+            slots.borrow_mut().push((
+                listener.place().index(),
+                listener.injection().to_owned(),
+                function,
+            ))
         });
         mod_api::wire::guest::extend(0x8000_0000, 0xC000_0000, crate::guest_dispatch);
         Ok(())

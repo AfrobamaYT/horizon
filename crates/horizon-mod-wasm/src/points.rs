@@ -126,8 +126,9 @@ fn listen_checked(manifest: &Manifest, module: &WasmMod) -> Result<(), String> {
             listener,
         }));
         let id = Box::leak(id.into_boxed_str());
-        let mut slot = SlotListener::forwarded(owner, place, endpoint, 0x8000_0000 + place as u32)
-            .ordered(priority, id);
+        let mut slot =
+            SlotListener::forwarded(owner, place.place(), endpoint, 0x8000_0000 + place as u32)
+                .ordered(priority, id);
         // The guest's listener already owns the outcome (`mod_points::replace!`); the host's
         // slot carries the mark, so a second replace at the place is refused for either target.
         if replace {

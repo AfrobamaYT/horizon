@@ -354,7 +354,25 @@ pub fn horizon_part(_attribute: TokenStream, input: TokenStream) -> TokenStream 
     expand(parse_macro_input!(input as ItemImpl), false)
 }
 
-/// `#[point(side = "server" | "client" | "both", name = "…", raw, free, mirror(…))]` on a
+/// `#[no_point]` (as `mod_api::no_point`) on a function of a mod crate: `cargo horizon-mod build`
+/// gives it no injection point, so no addon can listen at it (#2339). It changes nothing else: the
+/// function compiles as written. An addon declaring a listener there is refused at load, the
+/// function named as opted out.
+#[proc_macro_attribute]
+pub fn no_point(attribute: TokenStream, input: TokenStream) -> TokenStream {
+    if !attribute.is_empty() {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "#[no_point] takes no arguments",
+        )
+        .to_compile_error()
+        .into();
+    }
+    let function = parse_macro_input!(input as ImplItemFn);
+    quote::quote!(#function).into()
+}
+
+/// `#[point(side = "server" | "client" | "both", name = "…", table = "…", raw, free, mirror(…))]` on a
 /// function: an injection point (#589), a slot the launcher fills at load for the mods that listen
 /// there. The staging pass that builds the prebuilt game (and the launcher's source builds) puts it
 /// on every function [`point_shape::eligible`] admits; the source tree carries none. Its head checks
@@ -364,7 +382,9 @@ pub fn horizon_part(_attribute: TokenStream, input: TokenStream) -> TokenStream 
 /// record's by-value and `&T` values, and a `&mut T` parameter's place gets the record's value back.
 /// A raw listener (`raw`, native only) gets the receiver and a `&mut` to every parameter itself. Its
 /// return does the same with the value returned; a value that borrows reaches only raw listeners,
-/// as itself. `free` marks a free function, whose body moves to a sibling function. A `replace`
+/// as itself. `free` marks a free function, whose body moves to a sibling function. `table` names
+/// the slot table the point is in: the game's `mod_points` by default, or a mod crate's own
+/// generated table for a mod point (#2339). A `replace`
 /// listener (`mod_points::replace!`) owns the head's outcome: it runs after the other API
 /// listeners, and on a point with both forms the head keeps its value and cancel through the raw
 /// listeners after it.

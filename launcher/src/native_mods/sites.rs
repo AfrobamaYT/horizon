@@ -65,7 +65,7 @@ impl Site {
         }
         exports.insert(format!("    pub use {} as __{export}Args;\n", self.record));
         let listener = format!("__{export}Listener");
-        constructors.insert(format!("    /// Registers this site's exact typed wrap listener.\n    pub const fn {}(id: &'static str, priority: i32, injection: &'static str, f: {listener}) -> mod_points::__private::SlotListener {{\n        // SAFETY: the function's exact type is checked before erasure.\n        unsafe {{ mod_points::__private::SlotListener::site(id, mod_points::SiteId::{}, priority, injection, f as *const ()) }}\n    }}\n", self.constructor(), self.name));
+        constructors.insert(format!("    /// Registers this site's exact typed wrap listener.\n    pub const fn {}(id: &'static str, priority: i32, injection: &'static str, f: {listener}) -> mod_points::__private::SlotListener {{\n        // SAFETY: the function's exact type is checked before erasure.\n        unsafe {{ mod_points::__private::SlotListener::site(id, mod_points::SiteId::{}.place(), priority, injection, f as *const ()) }}\n    }}\n", self.constructor(), self.name));
     }
 }
 

@@ -13,6 +13,7 @@ use std::{
 };
 use syn::{ImplItem, Item, Type};
 
+pub mod mod_crate;
 pub mod source;
 
 /// One point, as `points.json` lists it.
@@ -52,6 +53,12 @@ pub struct GamePoint {
     /// Its raw return listeners' function type, by path: they get the value returned.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub return_listener: Option<String>,
+    /// A mod point's signature hash (#2339): what an addon's declaration pins, checked at load.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hash: Option<String>,
+    /// A mod point's signature as hashed: its path, receiver, parameters and return type.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
     #[serde(skip)]
     record_item: String,
     /// Its typed function constructors, place ids and dispatch functions
@@ -69,6 +76,68 @@ impl GamePoint {
             "result" => None,
             "cancel" if self.return_ty == "()" => None,
             _ => Some(&self.return_ty),
+        }
+    }
+}
+
+impl GamePoint {
+    /// The point of `found`'s function, whose shape is `shape`, as `points.json` lists it.
+    pub(crate) fn new(shape: point_shape::Shape, found: &Found<'_>, target: String) -> Self {
+        let api = shape.api_items(&target);
+        GamePoint {
+            record_item: if shape.api() {
+                shape.record_item(&target).to_string()
+            } else {
+                String::new()
+            },
+            api: [
+                api.listeners.to_string(),
+                api.variants.to_string(),
+                api.dispatch.to_string(),
+            ],
+            at_return: shape.api() && shape.has_return(),
+            raw: shape.raw,
+            api_refusal: shape.api_refusal.clone(),
+            raw_shape: shape
+                .raw
+                .then(|| point_shape::raw_shape(&shape, found.sig, found.owner.map(|(ty, _)| ty))),
+            listener: shape
+                .raw
+                .then(|| format!("{}::{}", found.module, shape.raw_listener())),
+            return_listener: shape
+                .raw
+                .then(|| format!("{}::{}", found.module, shape.raw_return_listener())),
+            target,
+            side: shape.side.map_or("none", point_shape::Side::name),
+            host: match (shape.receiver, shape.side) {
+                (_, None) => "none",
+                (point_shape::Receiver::Mut, Some(side)) => side.name(),
+                (_, Some(_)) => "host",
+            },
+            args: shape
+                .args
+                .iter()
+                .map(|arg| {
+                    (
+                        arg.name.to_string(),
+                        arg.ty.to_token_stream().to_string().replace("& ", "&"),
+                    )
+                })
+                .collect(),
+            record: shape.record().to_string(),
+            returns: match (&shape.returns, shape.api()) {
+                (_, false) => "none",
+                (point_shape::Returns::Unit | point_shape::Returns::UnitResult, true) => "cancel",
+                (point_shape::Returns::Value(_), true) => "result",
+                (point_shape::Returns::Opaque, true) => "none",
+            },
+            return_ty: match &found.sig.output {
+                syn::ReturnType::Default => "()".to_owned(),
+                syn::ReturnType::Type(_, ty) => point_shape::spelling(ty),
+            },
+            name: shape.name,
+            hash: None,
+            signature: None,
         }
     }
 }
@@ -683,7 +752,7 @@ impl Scanned {
             }
         };
         file_points(&self.module, &self.parsed.items, &keep, &mut out);
-        let uses = imports(&self.parsed.items);
+        let uses = imports(&self.parsed.items, "horizon_client");
         for found in &mut out {
             // Only the game's own crate has the conversions a mirror goes through.
             found.mirrors = mirrors(found.sig, &uses, wire, self.package.is_none());
@@ -703,9 +772,9 @@ pub const MIRRORS: &[(&str, &str)] = &[
     ),
 ];
 
-/// A file's top-level `use`s: each name it brings in, with the path it names (`crate::` as the
-/// game's crate). Globs and `self`/`super` paths are left out: a type they name has no mirror.
-fn imports(items: &[Item]) -> Vec<(String, String)> {
+/// A file's top-level `use`s: each name it brings in, with the path it names (`crate::` as
+/// `krate`). Globs and `self`/`super` paths are left out: a type they name has no mirror.
+pub(crate) fn imports(items: &[Item], krate: &str) -> Vec<(String, String)> {
     fn walk(prefix: &str, tree: &syn::UseTree, out: &mut Vec<(String, String)>) {
         let join = |name: &str| {
             if prefix.is_empty() {
@@ -738,7 +807,7 @@ fn imports(items: &[Item]) -> Vec<(String, String)> {
     }
     for (_, path) in &mut out {
         if let Some(rest) = path.strip_prefix("crate::") {
-            *path = format!("horizon_client::{rest}");
+            *path = format!("{krate}::{rest}");
         }
     }
     out
@@ -853,60 +922,7 @@ fn points_with(root: &Path, wire: &WireTypes) -> Result<Vec<GamePoint>, String> 
             continue;
         }
         let shape = found.shape()?;
-        let api = shape.api_items(&target);
-        points.push(GamePoint {
-            record_item: if shape.api() {
-                shape.record_item(&target).to_string()
-            } else {
-                String::new()
-            },
-            api: [
-                api.listeners.to_string(),
-                api.variants.to_string(),
-                api.dispatch.to_string(),
-            ],
-            at_return: shape.api() && shape.has_return(),
-            raw: shape.raw,
-            api_refusal: shape.api_refusal.clone(),
-            raw_shape: shape
-                .raw
-                .then(|| point_shape::raw_shape(&shape, found.sig, found.owner.map(|(ty, _)| ty))),
-            listener: shape
-                .raw
-                .then(|| format!("{}::{}", found.module, shape.raw_listener())),
-            return_listener: shape
-                .raw
-                .then(|| format!("{}::{}", found.module, shape.raw_return_listener())),
-            target,
-            side: shape.side.map_or("none", point_shape::Side::name),
-            host: match (shape.receiver, shape.side) {
-                (_, None) => "none",
-                (point_shape::Receiver::Mut, Some(side)) => side.name(),
-                (_, Some(_)) => "host",
-            },
-            args: shape
-                .args
-                .iter()
-                .map(|arg| {
-                    (
-                        arg.name.to_string(),
-                        arg.ty.to_token_stream().to_string().replace("& ", "&"),
-                    )
-                })
-                .collect(),
-            record: shape.record().to_string(),
-            returns: match (&shape.returns, shape.api()) {
-                (_, false) => "none",
-                (point_shape::Returns::Unit | point_shape::Returns::UnitResult, true) => "cancel",
-                (point_shape::Returns::Value(_), true) => "result",
-                (point_shape::Returns::Opaque, true) => "none",
-            },
-            return_ty: match &found.sig.output {
-                syn::ReturnType::Default => "()".to_owned(),
-                syn::ReturnType::Type(_, ty) => point_shape::spelling(ty),
-            },
-            name: shape.name,
-        });
+        points.push(GamePoint::new(shape, &found, target));
     }
     points.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(points)
@@ -1330,6 +1346,8 @@ mod tests {
                 raw_shape: None,
                 listener: None,
                 return_listener: None,
+                hash: None,
+                signature: None,
                 record_item: shape.record_item(name).to_string(),
                 api: [
                     api.listeners.to_string(),

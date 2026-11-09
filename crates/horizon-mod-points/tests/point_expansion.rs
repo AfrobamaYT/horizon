@@ -193,7 +193,16 @@ mod mod_points {
             REPLACED[place as usize].load(std::sync::atomic::Ordering::Relaxed)
         }
 
-        pub fn fire_raw(place: PointId, name: &'static str, call: &mut dyn FnMut(RawKind)) {
+        pub fn fire_raw(place: PointId, call: &mut dyn FnMut(RawKind)) {
+            // The place's point name, as the slot table names it: `AddReturn` is `add_return`.
+            let mut name = String::new();
+            for c in format!("{place:?}").chars() {
+                if c.is_ascii_uppercase() && !name.is_empty() {
+                    name.push('_');
+                }
+                name.push(c.to_ascii_lowercase());
+            }
+            let name: &'static str = Box::leak(name.into_boxed_str());
             let functions: Vec<_> = RAW
                 .lock()
                 .unwrap()
