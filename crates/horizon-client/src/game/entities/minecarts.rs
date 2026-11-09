@@ -2537,7 +2537,7 @@ impl Game<'_> {
         // Player.attack's full damage against the cart's entity type.
         let id = self.carts[i].id as i32;
         let kind = self.carts[i].kind.id();
-        let (damage, _, _, magic) = self.melee_damage(kind, false);
+        let (damage, _, _, magic) = self.melee_damage(kind, false, Some(id as u32));
         let sweep = self.sweep_before_hit(kind, false);
         let attacker = self.own_entity_id();
         let source = horizon_client::health::HurtSource {
