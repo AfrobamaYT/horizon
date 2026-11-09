@@ -56,6 +56,9 @@ all projectile kinds, rather than assume generic coverage from its name.
 
 ## Proposed Part and shape contract
 
+The three capability choices are provisional decisions recorded in the
+[maintainer decision comment](https://github.com/arismoko/horizon/issues/1011#issuecomment-6733587598).
+
 Declare `get_entity_inside_collision_shape` beside `entity_inside`, one Part
 method for this moment. Query synchronously before contact admission, independently
 of whether entity_inside has subscribers. Existing block ownership resolves the
@@ -65,9 +68,10 @@ owned block-local f64 AABBs. Default uses vanilla's complete shape semantics,
 including powder snow, cauldrons, end portals and tripwire. FullBlock deliberately
 selects vanilla's canonical-full-block shortcut; Boxes containing the unit cube
 uses geometric testing. Document this distinction rather than infer shape identity
-from equivalent coordinates. The fluid shape is not replaced by this method.
+from equivalent coordinates. Add oracle fixtures comparing both against vanilla
+before any code. The fluid shape is not replaced by this method.
 
-Proposed mod-output budget: at most 256 boxes, finite coordinates in [-16,16],
+Initial negotiated custom-shape capability: at most 256 boxes, finite coordinates in [-16,16],
 strict min < max on each axis. Negative coordinates are valid; negative extents,
 NaN, infinity and oversized arrays are invalid. These are provisional capability
 limits, never limits on vanilla Default shapes or vanilla traversal capacity.
@@ -92,14 +96,17 @@ cell enumeration and the current geometry sweep; it is not a spatial shape index
 
 Before implementation, review a concrete query signature with typed HostSide, an
 object-safe scoped read view, captured acting-entity facts and structured refusal
-variants. Shape selection should expose no mutation capability. Unavailable lifted
-storage must not imply entity disappearance. The three capability choices below
-remain maintainer decisions, not decisions made by the review view.
+variants. The provisional read surface is immutable loaded block and fluid reads
+plus captured facts of the acting entity, through a scoped object-safe read
+capability. No mutation during selection. Under a lifted pass, an unavailable read
+is an explicit refusal, never inferred as "the entity is gone".
 
 Bound total custom work as well as each response: 256 boxes contain 12,288
 coordinate bytes before tags and lengths per candidate. Define aggregate read/query
-accounting and exhaustion behavior before implementation, measure synchronous wasm
-crossings per tick, and preserve vanilla traversal capacity and the unused fast path.
+accounting and exhaustion behavior before implementation. Before the numbers
+freeze, the implementation adds aggregate per-tick read/query accounting and
+measures the real wasm crossing cost. If the measurement says the numbers are
+wrong, they change then. Preserve vanilla traversal capacity and the unused fast path.
 
 ## Lifecycle, transactions and failure
 
@@ -144,6 +151,9 @@ Run each on player, mob, arrow, item and every projectile adapter, native and wa
 | Empty, no fluid | visited 0; block callbacks 0; fluid effects 0 |
 | FullBlock, centered entity box [.25,.75] on all axes | visited 1; block callbacks 1 |
 | Boxes unit cube, centered box | visited 1; block callbacks 1 |
+| FullBlock versus Boxes unit cube, vanilla oracle fixtures before any code | compare both against vanilla; preserve canonical identity shortcut versus geometric testing |
+| Shape selection reads under a lifted pass | immutable loaded block/fluid reads and captured acting-entity facts only through scoped object-safe capability; unavailable read explicitly refused; no mutation |
+| Initial negotiated 256-box / [-16,16] capability | aggregate per-tick read/query accounting and real wasm crossing cost measured before numbers freeze; revise numbers if measurement requires; no vanilla ceiling |
 | Boxes [0,0,0]–[1,.5,1], entity y [.6,.9] | visited 0; block callbacks 0 |
 | Same shape, entity y [.25,.4] | visited 1; block callbacks 1 |
 | Empty block shape, intersecting fluid | visited 1; block callbacks 0; fluid effects 1 |
@@ -166,14 +176,3 @@ fluid-only contact and the full-block shortcut. Then implement the shared sweep
 with unchanged default-only behavior across every route; resolve recorded vanilla differences separately. Finally add the catalog Part query,
 generated native/wasm transport, registration refusal, docs, sample and behavioral
 fixtures together. No player-only intermediate public API should ship.
-
-## Open questions
-
-- Exact supported coordinate and box budget: recommend the proposed 256 / [-16,16]
-  capability initially, but confirm real use cases and public documentation before
-  freezing it. Preserve arbitrary vanilla defaults without truncation.
-- Restricted context read surface under lifted passes: recommend immutable loaded
-  block/fluid reads and entity facts only, with explicit unavailable outcomes;
-  inventory required special-block reads before approving the catalog signature.
-- Canonical FullBlock versus geometric unit cube: recommend explicit variants and
-  oracle tests, because vanilla's shortcut makes shape identity observable.
