@@ -1491,7 +1491,6 @@ impl Game<'_> {
         // Its steps as spans for `horizon-report` (nothing is read while spans are off).
         let mut laps = horizon_client::spans::laps();
         let level_id = self.dim.id();
-        let primable = self.sulfur_cubes_adopted_explosive();
         if let Some(pending) = self.creatures.pending.get_mut(level_id)
             && (pending.refusal_logged || pending.retained_passes >= MAX_PENDING_MOB_PASSES)
         {
@@ -1505,6 +1504,7 @@ impl Game<'_> {
             // No new producer work until the backlog drains. Unrelated projectile
             // phases still advance; mob-specific follow-up must not reuse old ticks.
             self.creatures.ticked.clear();
+            let primable = self.sulfur_cubes_adopted_explosive();
             self.deliver_pending_mob_actions(level_id)?;
             return self.finish_creature_entities(&mut laps, &primable);
         }
@@ -1563,6 +1563,7 @@ impl Game<'_> {
         let mut events = std::mem::take(&mut self.creatures.event_buf);
         events.clear();
         let mut pending = self.creatures.pending.remove(level_id).unwrap_or_default();
+        let primable = self.sulfur_cubes_adopted_explosive();
         let mut mobs = self.mobs.lift();
         #[cfg(test)]
         super::entity::taken_pass_tests::after_take(self);
