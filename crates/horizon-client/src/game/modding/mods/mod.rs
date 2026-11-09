@@ -435,6 +435,16 @@ pub(super) fn register_block_tint_sources(role: ExecutionRole) {
     Game::native_register_block_tint_sources(&RegistrationContext::new(), &mut registry);
     horizon_client::mesher::register_block_tint_sources(registry.into_layers());
 }
+/// The native mods' particle providers (`native_register_particle_providers`), kept once at
+/// start, before resources load; every particle sprite-set load resolves each type's provider.
+pub(super) fn register_particle_providers(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut registry = mod_api::ParticleProviderRegistry::default();
+    Game::native_register_particle_providers(&RegistrationContext::new(), &mut registry);
+    horizon_client::particles::register_particle_providers(registry.into_providers());
+}
 
 /// `root` with the content mods that are on layered over it
 /// (docs/modpacks.md): their blocks, items, data and assets. Read once at
