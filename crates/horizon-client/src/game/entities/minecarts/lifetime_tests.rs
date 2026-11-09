@@ -80,7 +80,7 @@ fn connecting_to_a_remote_level_clears_the_existing_cart_list() {
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn exploding_a_cart_removes_only_its_owner_and_keeps_a_bound_survivor() {
     bound_cart_case(CartKind::Rideable, |game| {
-        let doomed = Minecart::new(72, CartKind::Tnt, Vec3::new(40.5, 70.0, 0.5));
+        let mut doomed = Minecart::new(72, CartKind::Tnt, Vec3::new(40.5, 70.0, 0.5));
         game.carts.push(doomed.clone());
         let index = Arc::new(Mutex::new(AttachmentIndex::default()));
         let mut values = Attachments::default();
@@ -91,7 +91,7 @@ fn exploding_a_cart_removes_only_its_owner_and_keeps_a_bound_survivor() {
         let key = ("test".into(), "cart_lifetime".into());
         let retained = index.lock().unwrap().snapshot(&key);
         assert_eq!(retained.len(), 1);
-        game.explode_cart(&doomed, 0.0);
+        game.explode_cart(&mut doomed, 0.0);
         assert_eq!(
             game.carts.iter().map(|cart| cart.id).collect::<Vec<_>>(),
             [71]

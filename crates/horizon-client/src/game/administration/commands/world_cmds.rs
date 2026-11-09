@@ -359,6 +359,7 @@ impl Game<'_> {
                 Self::damage_kind(&self.motion.health.damage, ty),
                 cause.or(by),
             ),
+            Target::Stand(id) => self.command_damage_stand(id, ty, cause.or(by)),
             _ => false,
         }
     }
