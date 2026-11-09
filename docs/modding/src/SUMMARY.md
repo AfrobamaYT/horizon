@@ -27,6 +27,7 @@
 - [Design: mod datapack registries](concepts/mod-datapack-registries.md)
 - [Design: moving structures](concepts/moving-structures.md)
 - [Design: custom recipe-book settings](concepts/recipe-book-types.md)
+- [Design: main target configuration](concepts/main-target-config.md)
 - [Design: section meshing](concepts/section-meshing.md)
 - [Design: section geometry](concepts/section-geometry.md)
 - [Design: mesh visibility](concepts/mesh-visibility.md)
