@@ -2786,6 +2786,7 @@ mod tests {
             pois: Default::default(),
             species_placements: Default::default(),
             pathfindable_overrides: Default::default(),
+            mod_spawns: Default::default(),
         };
         let atlas = |_: &str| Some([0.0, 0.0, 1.0, 1.0]);
         let draw = |mob: &Mob| {
