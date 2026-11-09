@@ -2242,7 +2242,7 @@ impl Game<'_> {
     /// (`FishingHook.catchingFish`), 2 the reel-in of a bite, which gives the
     /// catch, 3 the reel-in with nothing on the line, 4 the reel-in of a
     /// bobber hooked to an entity or item (like Bukkit's `PlayerFishEvent`;
-    /// NeoForge's `ItemFishedEvent` is later, in `FishingHook.retrieve`). Set `cancel` on the cast and nothing
+    /// not NeoForge's `ItemFishedEvent`). Set `cancel` on the cast and nothing
     /// is thrown; on a bite the fish gets away and the wait starts over; on
     /// a reel-in (2 to 4) nothing happens, the bobber stays out and the rod
     /// takes no wear. The bobber ending by itself (too far, the rod put

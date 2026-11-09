@@ -3811,7 +3811,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// (`FishingHook.catchingFish`), 2 the reel-in of a bite, which gives the
     /// catch, 3 the reel-in with nothing on the line, 4 the reel-in of a
     /// bobber hooked to an entity or item (like Bukkit's `PlayerFishEvent`;
-    /// NeoForge's `ItemFishedEvent` is later, in `FishingHook.retrieve`). Set `cancel` on the cast and nothing
+    /// not NeoForge's `ItemFishedEvent`). Set `cancel` on the cast and nothing
     /// is thrown; on a bite the fish gets away and the wait starts over; on
     /// a reel-in (2 to 4) nothing happens, the bobber stays out and the rod
     /// takes no wear. The bobber ending by itself (too far, the rod put
@@ -3823,7 +3823,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "cancel",
         out = "cancel",
-        neoforge = "none (NeoForge's ItemFishedEvent fires after the loot roll, in FishingHook.retrieve; Bukkit's PlayerFishEvent)"
+        neoforge = "none (not NeoForge's ItemFishedEvent: this hook is told of each cast, bite and reel-in, as Bukkit's PlayerFishEvent)"
     )]
     fn player_fish();
     /// A server player put a plant into a flower pot, after the potted block state was stored and the
@@ -3997,7 +3997,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (EntityTeleportEvent.TeleportCommand fires before the move and can cancel it; this hook is told after the move)"
+        neoforge = "none (not EntityTeleportEvent.TeleportCommand: this hook is told after the move and cannot stop it)"
     )]
     fn player_teleported();
     /// A totem of undying saved the server player `player` (`name`): their
