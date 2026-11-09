@@ -1092,8 +1092,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::register_client_commands` | crosses | Wire call |
 | `Hooks::zoom` | crosses | Wire call |
 | `Hooks::minimap` | crosses | Wire call |
-| `Hooks::settings` | crosses | Wire call |
-| `Hooks::settings_click` | crosses | Wire call |
+| `Hooks::setting_changed` | crosses | Wire call |
 | `Hooks::panel_event` | crosses | Wire call |
 | `Hooks::block_entity_container` | crosses | Wire call |
 | `Hooks::register_commands` | crosses | Wire call |
