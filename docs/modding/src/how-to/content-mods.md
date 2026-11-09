@@ -443,6 +443,11 @@ lang file's `itemGroup.<mod id>.<file name>` (`creative_tab/gems.json` →
 `itemGroup.ruby.gems`) translates any title. A mod's items join the search tab
 under their names.
 
+A file only makes new tabs. To put items into a tab the mod doesn't own, such as
+vanilla's `minecraft:ingredients` or another mod's, a native mod listens to the
+client hook `build_creative_mode_tab_contents` (NeoForge's
+`BuildCreativeModeTabContentsEvent`) and pushes its stacks for that `tab`.
+
 A component type no vanilla item has is refused, so a misspelt one fails
 the load instead of doing nothing. Behaviour the game ties to a vanilla
 item's id doesn't come along yet: a copy of the trident doesn't throw
