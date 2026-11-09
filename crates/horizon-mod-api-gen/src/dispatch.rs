@@ -690,10 +690,12 @@ pub(super) fn emit<'a>(
         ));
         let build = format!("let mut {event} = {event_type} {{ {} }};", inits.join(", "));
         // A trait mod's call is marked with the mod for a panic to name.
-        let each = if answered {
-            format!("super::entered_with_id(HookId::{hook_id}, \"{name}\")")
-        } else {
-            format!("super::entered(HookId::{hook_id}, \"{name}\")")
+        let each = match &hook.owner {
+            Some(owner) => format!("super::entered_owned(HookId::{hook_id}, \"{name}\", {owner})"),
+            None if answered => {
+                format!("super::entered_with_id(HookId::{hook_id}, \"{name}\")")
+            }
+            None => format!("super::entered(HookId::{hook_id}, \"{name}\")"),
         };
         // One callee's call: a mod's, or a scoped hook's part's.
         let call = |callee: &str, exit: &str| match contract {

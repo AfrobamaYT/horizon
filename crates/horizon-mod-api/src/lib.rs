@@ -4241,6 +4241,21 @@ fn entered(
     entered_subscribers(hook_id, hook).map(|entry| &*entry.hooks)
 }
 
+/// [`entered`] for mod `owner`'s subscription only: a hook about one mod's own things.
+fn entered_owned<'a>(
+    hook_id: generated::HookId,
+    hook: &'static str,
+    owner: &'a str,
+) -> impl Iterator<Item = &'static dyn Hooks> + 'a {
+    let mut crash_guard = None;
+    listening(hook_id)
+        .filter(move |(_, entry)| entry.id == owner)
+        .map(move |(_, entry)| {
+            drop(crash_guard.take());
+            crash_guard = Some(mark_mod(entry.id, hook));
+            &*entry.hooks
+        })
+}
 /// [`entered`] with each mod's own `[mod] id`, for a hook that names the mod that answered.
 fn entered_with_id(
     hook_id: generated::HookId,
