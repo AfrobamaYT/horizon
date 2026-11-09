@@ -796,7 +796,7 @@ impl Game<'_> {
 }
 
 impl Game<'_> {
-    pub(super) fn retained_passenger_snapshot(&self, uuid: u128) -> Vec<Seen> {
+    pub(super) fn retained_passenger_snapshot(&self, uuid: Option<[i32; 4]>) -> Vec<Seen> {
         if self.persist.off_level.is_empty() {
             Vec::new()
         } else {

@@ -722,7 +722,7 @@ pub(super) struct Remote {
     /// `ClientPacketListener.levels()` hands to command suggestions.
     pub(super) levels: Vec<String>,
     /// Player entities in the level: entity id to profile UUID.
-    level_players: HashMap<i32, u128>,
+    pub(super) level_players: HashMap<i32, u128>,
     /// The profile name each player entity was created with (`RemotePlayer.getGameProfile`): it outlives the
     /// player-list entry, which servers remove to hide their NPCs from the list.
     level_player_names: HashMap<i32, String>,
