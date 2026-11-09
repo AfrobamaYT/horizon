@@ -33,5 +33,5 @@ workspace = true
 
 [[example]]
 name = "listener-fixture-catalog"
-path = "../horizon-mod-wasm/tests/fixture/catalog.rs"
+path = "../horizon-mod-wasm/tests/support/catalog.rs"
 required-features = ["listener-fixture"]

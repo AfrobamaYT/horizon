@@ -1,7 +1,7 @@
 //! The wasm fixture's shutdown listener, registered natively: the same answers as `real_member`.
 #[path = "fixture/src/matrix.rs"]
 mod matrix;
-#[path = "fixture/checks.rs"]
+#[path = "support/checks.rs"]
 mod matrix_checks;
 #[path = "fixture/src/replace.rs"]
 mod replace;

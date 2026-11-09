@@ -3,7 +3,7 @@
 #![allow(clippy::all, unused_comparisons, unreachable_patterns, dead_code)]
 #[path = "fixture/src/matrix.rs"]
 mod matrix;
-#[path = "fixture/checks.rs"]
+#[path = "support/checks.rs"]
 mod matrix_checks;
 #[path = "fixture/src/replace.rs"]
 mod replace;
