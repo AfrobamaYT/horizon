@@ -12,6 +12,7 @@ const PROFILES: [&str; 2] = ["fast", "release"];
 #[derive(Debug)]
 pub enum Error {
     Busy,
+    UnprovenExclusion,
     UnsupportedFilesystem,
     Unsafe(PathBuf),
     Io(io::Error),
@@ -123,12 +124,17 @@ impl Cache {
         self.process(None, false)
     }
     pub(crate) fn clear(&self) -> Result<u64, Error> {
+        crate::cache_cleanup::Access::UninstrumentedGame.check()?;
         self.process(None, true)
     }
     pub(crate) fn trim(&self, limit: u64) -> Result<u64, Error> {
         if limit == 0 {
             return Ok(0);
         }
+        if self.bytes()? <= limit {
+            return Ok(0);
+        }
+        crate::cache_cleanup::Access::UninstrumentedGame.check()?;
         self.process(Some(limit), true)
     }
 

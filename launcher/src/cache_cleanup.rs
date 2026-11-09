@@ -12,6 +12,20 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 const LOCKS: [&str; 3] = [".cargo-lock", ".package-cache", ".package-cache-mutate"];
 
+/// Classification belongs to the fixed-path inventory, never a process snapshot.
+pub(crate) enum Access {
+    BuildTools,
+    UninstrumentedGame,
+}
+impl Access {
+    pub(crate) fn check(self) -> Result<(), Error> {
+        match self {
+            Self::BuildTools => Ok(()),
+            Self::UninstrumentedGame => Err(Error::UnprovenExclusion),
+        }
+    }
+}
+
 /// Operational locks are neither disposable outputs nor user reports/jar-cache entries.
 pub(crate) fn reserved(name: &Path) -> bool {
     LOCKS.iter().any(|lock| name == Path::new(lock)) || name == Path::new(".build.lock")

@@ -1285,6 +1285,9 @@ pub(crate) fn install_as(
 }
 
 pub fn remove(tag: &str) -> Result<(), String> {
+    crate::cache_cleanup::Access::UninstrumentedGame
+        .check()
+        .map_err(crate::native_mods::cache_error)?;
     let dir = version_dir(tag);
     remove_in(&dir)
 }
@@ -3061,7 +3064,11 @@ pub(crate) fn in_use(_tag: &str) -> bool {
 /// is logged and the rest still go. Returns the versions deleted. They install again from GitHub.
 pub fn prune_old_versions() -> Vec<String> {
     let settings = Settings::load();
-    if !settings.auto_prune() {
+    if !settings.auto_prune()
+        || crate::cache_cleanup::Access::UninstrumentedGame
+            .check()
+            .is_err()
+    {
         return Vec::new();
     }
     let mut protected: Vec<String> = settings.selected.iter().cloned().collect();

@@ -105,7 +105,7 @@ Show disposable storage by category as JSON. Builds must be idle.
 
     horizon-launcher storage
 
-- `--clear`: Clear build-files, prebuilt-games, spare-game-builds, rust-compiler, other-caches or all implemented rows
+- `--clear`: Request cleanup of build-files, prebuilt-games, spare-game-builds, rust-compiler, other-caches or all rows; game-accessible caches refuse cleanup without enforceable lifetime exclusion
 
 MCP: `storage`.
 
