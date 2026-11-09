@@ -54,23 +54,30 @@ impl Game<'_> {
         conn: u32,
         f: impl FnOnce(&mut Self) -> R,
     ) -> Option<R> {
+        // The outer capture comes back even when `f` panics (a native callback can), so later
+        // feedback isn't trapped in this guest's capture. What the guest was already told still
+        // reaches them before the panic goes on, after `as_guest` has restored the swap.
         let (result, lines) = self.as_guest(conn, |game| {
             let outer = game.chat_capture.replace(Vec::new());
-            let result = f(game);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(game)));
             let lines = std::mem::replace(&mut game.chat_capture, outer).unwrap_or_default();
             (result, lines)
         })?;
-        let host = self.lan.as_ref()?;
-        for line in lines {
-            host.hub.send_to(
-                conn,
-                &C::SystemChat(play::SystemChat {
-                    content: horizon_client::lan::data::component_nbt(&line.component()),
-                    overlay: false,
-                }),
-            );
+        if let Some(host) = self.lan.as_ref() {
+            for line in lines {
+                host.hub.send_to(
+                    conn,
+                    &C::SystemChat(play::SystemChat {
+                        content: horizon_client::lan::data::component_nbt(&line.component()),
+                        overlay: false,
+                    }),
+                );
+            }
         }
-        Some(result)
+        match result {
+            Ok(result) => self.lan.is_some().then_some(result),
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
     }
 
     /// The first half of `as_guest`: the guest's state in place of the
