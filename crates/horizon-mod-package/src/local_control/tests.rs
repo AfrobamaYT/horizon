@@ -107,9 +107,13 @@ fn quiet_peer_times_out_and_a_second_connection_is_refused() {
     let (_root, marker) = marker();
     let mut endpoint = Endpoint::bind(&marker).unwrap();
     let client = connect(&marker, deadline()).unwrap();
+    let (finished, wait) = std::sync::mpsc::channel();
     let closer = std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(750));
+        // Remain quiet until authentication returns. This watchdog only bounds
+        // a broken timeout implementation; it is not the normal peer lifetime.
+        let completed = wait.recv_timeout(Duration::from_secs(10)).is_ok();
         drop(client);
+        completed
     });
     let stream = endpoint.accept(deadline()).unwrap();
     assert_ne!(
@@ -124,8 +128,9 @@ fn quiet_peer_times_out_and_a_second_connection_is_refused() {
         true,
         Instant::now() + Duration::from_millis(20),
     );
+    let _ = finished.send(());
+    assert!(closer.join().unwrap(), "authentication exceeded watchdog");
     assert_eq!(result.err().unwrap().kind(), io::ErrorKind::TimedOut);
-    closer.join().unwrap();
 }
 
 #[test]
