@@ -1264,6 +1264,8 @@ mod nested_vehicle_discard_tests {
         mod_api::testing::with_mods(mods, || {
             with_vehicle_tree(false, false, |game| {
                 if cross_level {
+                    // The console service requires an active server hub.
+                    super::super::native_player_death::tests::add_guest(game);
                     game.build_registries();
                     game.set_allow_commands(true);
                     assert!(game.run_command("worldborder set 1000"));
