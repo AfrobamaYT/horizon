@@ -1039,6 +1039,7 @@ impl Game<'_> {
         if self.spill.is_empty() {
             return;
         }
+        let _save_lease = horizon_client::join_seq::visibility::PassLease::enter();
         let mut spill = std::mem::take(&mut self.spill);
         let used = std::mem::take(&mut spill.used);
         let tool = self.held().cloned();
