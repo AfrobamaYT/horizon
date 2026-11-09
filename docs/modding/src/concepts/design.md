@@ -87,6 +87,7 @@ and [Parts](trait-mods.md#parts).
 | Controls bindings | `Registrar::register_key_mapping` | Startup registration, client consumer | When the client installs the bindings in Controls and restores saved bindings. |
 | Component tooltips | `Registrar::register_tooltip_appender` | Startup registration, client consumer | The item tooltip builder uses the callback for the registered component and placement. |
 | Server commands | `Hooks::register_commands` collects `NativeCommand` usages | Server, when opening a world and on explicit command refresh | After the server rebuilds the command tree. The server owns permission checks and sends the tree to players. |
+| Command argument types | `Registrar::register_command_argument` declares parsing and suggestions | Startup, on the sides that load the mod | Before command trees that use the type are built at world open or refresh; clients that do not know the type complete it from the server. |
 | Client commands | `Hooks::register_client_commands` collects `NativeCommand` usages | Client, at connection start and when the server sends its tree | After the client incorporates them into completion and local dispatch. |
 | HUD layers and F3 entries | `register_gui_layers` and `register_debug_entries` | Client startup | When the installed HUD order or debug entry list is used for drawing. |
 | World-space debug renderers | `register_debug_renderers` | Client, each refresh of the renderer list | The next debug draw uses the refreshed list. |
@@ -111,7 +112,6 @@ reload. Each builder should collect typed declarations and validate keys before 
 
 | Builder | Side and contract | Issue |
 | --- | --- | --- |
-| Command argument types | Register codecs, parsing and suggestions before building command trees that use the types. | [#810](https://github.com/arismoko/horizon/issues/810) |
 | Data pack registries | Declare the entry codec before server data loading and rebuild the registry on reload. | [#811](https://github.com/arismoko/horizon/issues/811) |
 | Attribute types | Declare a namespaced attribute and its value rules before entity defaults resolve. | [#812](https://github.com/arismoko/horizon/issues/812) |
 | World generation features | Bind named feature and placement implementations before server worldgen data resolves them. | [#815](https://github.com/arismoko/horizon/issues/815) |

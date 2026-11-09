@@ -31,9 +31,16 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   players. A usage is words, then arguments `<name:kind>`, optional ones last in brackets:
   `NativeCommand::new("pay <player:player> <amount:integer>")`, `NativeCommand::op("eco set <player:player>
   <amount:integer>", 3)` for operators of level 3. Kinds: `word`, `text` (the rest of the line, last), `integer`,
-  `number`, `boolean`, `player`, `item`, `block_pos`. The usages of one command merge into one tree, which every
-  player receives after vanilla's (filtered by their level, as vanilla's is), so their chat box completes and colours
-  it. The server also parses player and console invocations against that tree, including each usage's permission and argument types, before calling a mod.
+  `number`, `boolean`, `player`, `item`, `block_pos`, and any command argument type a mod registered
+  (`Registrar::register_command_argument`): its namespaced id is the kind, as in
+  `<machine:mymod:machine>`. A custom argument is one word (or the rest of the line when its type says
+  `Greedy`) and delivers its type's canonical value in `run_mod_command`. The usages of one command merge into
+  one tree, which every player receives after vanilla's (filtered by their level, as vanilla's is), so their
+  chat box completes and colours it. A client that does not know a custom type still parses and completes it:
+  the tree sends the argument as a Brigadier string and asks the server for its suggestions. Fabric sends
+  the registered argument type's id instead, which an unmodded client cannot read; the string keeps its
+  tree valid. The server also parses player and console invocations against that tree, including each
+  usage's permission and argument types, before calling a mod.
   Each executable usage keeps its own permission: an operator-only `foo` remains unavailable to ordinary players
   even if `foo bar` is public. Players can traverse the shared `foo` prefix to reach `bar`, but cannot execute
   `foo` itself. Optional arguments make their preceding prefixes executable at that usage's level; if several
@@ -46,7 +53,9 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   with its literal path and named `CommandArgumentValue` values, not raw command text. Integer, number and boolean
   values retain the dispatcher's types; word and greedy text are strings. Player selectors resolve to a single live
   `PlayerRef`, items become component-bearing stacks of one, and block positions resolve source-relative/local
-  coordinates without requiring loaded chunks. Missing optional arguments are absent. Parsing, permission and
+  coordinates without requiring loaded chunks. A custom argument is `CommandArgumentValue::Custom { kind, value }`,
+  where `kind` is its registered type's id and `value` what its parser returned. Missing optional arguments are
+  absent. Parsing, permission and
   resolution failures produce feedback without calling listeners. The console resolves from the Overworld spawn's
   block corner with zero rotation and no source entity (`@s` fails). Return `Flow::Cancel` when handled.
 - **`native_armor_stand_manipulate(player, name, stand_id, slot, cancel)`**: a player takes an item from an armor stand or
