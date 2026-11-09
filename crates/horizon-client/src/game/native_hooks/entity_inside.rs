@@ -305,7 +305,7 @@ mod sweep_tests {
         if game.player.is_none() {
             game.player = Some(
                 horizon_client::motion::PlayerMotion::new(
-                    &game.motion,
+                    game.motion,
                     horizon_core::geometry::Vec3::new(0.5, 100.0, 0.5),
                 )
                 .unwrap(),
@@ -411,8 +411,10 @@ mod sweep_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_killing_write_stops_the_flush() {
-        let mut part = InsidePart::default();
-        part.kill_after = Some(0);
+        let part = InsidePart {
+            kill_after: Some(0),
+            ..InsidePart::default()
+        };
         let mods = install_inside_mod("inside-kill", &part);
         mod_api::testing::with_mods(mods, || {
             crate::game::native_entity_refs::tests::with_game(|game| {
@@ -438,10 +440,12 @@ mod sweep_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_panicking_part_leaves_the_players_tick_restored() {
-        let mut part = InsidePart::default();
         // The panic lands on every contact: each one is caught in the staged fire,
         // and the mod keeps receiving the walk's contacts.
-        part.panic_after = Some(0);
+        let part = InsidePart {
+            panic_after: Some(0),
+            ..InsidePart::default()
+        };
         let mods = install_inside_mod("inside-panic", &part);
         mod_api::testing::with_mods(mods, || {
             crate::game::native_entity_refs::tests::with_game(|game| {
@@ -574,7 +578,7 @@ mod sweep_tests {
                 if game.player.is_none() {
                     game.player = Some(
                         horizon_client::motion::PlayerMotion::new(
-                            &game.motion,
+                            game.motion,
                             horizon_core::geometry::Vec3::new(0.5, 100.0, 0.5),
                         )
                         .unwrap(),
@@ -626,7 +630,7 @@ mod sweep_tests {
             if game.player.is_none() {
                 game.player = Some(
                     horizon_client::motion::PlayerMotion::new(
-                        &game.motion,
+                        game.motion,
                         horizon_core::geometry::Vec3::new(0.5, 100.0, 0.5),
                     )
                     .unwrap(),
@@ -731,8 +735,10 @@ mod sweep_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_killing_write_stops_the_items_flush() {
-        let mut part = InsidePart::default();
-        part.kill_after = Some(0);
+        let part = InsidePart {
+            kill_after: Some(0),
+            ..InsidePart::default()
+        };
         let mods = install_inside_mod("inside-item-kill", &part);
         mod_api::testing::with_mods(mods, || {
             crate::game::native_entity_refs::tests::with_game(|game| {
@@ -758,8 +764,10 @@ mod sweep_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_panicking_part_leaves_the_item_batch_restored() {
-        let mut part = InsidePart::default();
-        part.panic_after = Some(0);
+        let part = InsidePart {
+            panic_after: Some(0),
+            ..InsidePart::default()
+        };
         let mods = install_inside_mod("inside-item-panic", &part);
         mod_api::testing::with_mods(mods, || {
             crate::game::native_entity_refs::tests::with_game(|game| {
@@ -779,7 +787,7 @@ mod sweep_tests {
                     "both contacts reached the part; each panic was contained"
                 );
                 assert_eq!(game.dropped.len(), rows, "the lifted row returned");
-                let item = game.dropped.get(0).unwrap();
+                let item = game.dropped.first().unwrap();
                 assert!(
                     (item.velocity.x - before).abs() < 1e-9,
                     "the panicking callback's staged writes never applied"

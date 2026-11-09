@@ -127,8 +127,7 @@ mod inside_walk_tests {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         reset(usize::MAX, usize::MAX, true);
-        let mut ran = false;
-        ran = crate::mobs::world::with_built_test_world(
+        let ran = crate::mobs::world::with_built_test_world(
             &[],
             |world, registry| {
                 world.chunks.insert(
@@ -180,8 +179,7 @@ mod inside_walk_tests {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         reset(0, usize::MAX, true);
-        let mut ran = false;
-        ran = crate::mobs::world::with_built_test_world(
+        let ran = crate::mobs::world::with_built_test_world(
             &[],
             |world, registry| {
                 world.chunks.insert(
@@ -224,8 +222,7 @@ mod inside_walk_tests {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         reset(usize::MAX, 0, true);
-        let mut ran = false;
-        ran = crate::mobs::world::with_built_test_world(
+        let ran = crate::mobs::world::with_built_test_world(
             &[],
             |world, registry| {
                 world.chunks.insert(
@@ -275,8 +272,7 @@ mod inside_walk_tests {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         reset(usize::MAX, usize::MAX, false);
-        let mut ran = false;
-        ran = crate::mobs::world::with_built_test_world(
+        let ran = crate::mobs::world::with_built_test_world(
             &[],
             |world, registry| {
                 world.chunks.insert(
@@ -318,8 +314,7 @@ mod inside_walk_tests {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         reset(usize::MAX, usize::MAX, true);
-        let mut ran = false;
-        ran = crate::mobs::world::with_built_test_world(
+        let ran = crate::mobs::world::with_built_test_world(
             &[],
             |world, registry| {
                 world.chunks.insert(
@@ -6368,6 +6363,7 @@ mod burn_and_rose_tests {
                 assert_eq!(m.fire_ticks, 300);
             },
         );
+        assert!(ran, "the vanilla test resources must be available");
     }
 }
 
@@ -6821,7 +6817,7 @@ mod air_tests {
             }
         };
         let mut out = None;
-        let ran = crate::mobs::world::with_built_test_world(&[], build, |w, types| {
+        crate::mobs::world::with_built_test_world(&[], build, |w, types| {
             let kind = std::sync::Arc::new(types.types[kind].clone());
             let mut m = Mob::new(1, kind, Vec3::new(2.5, 3.0, 2.5), 0.0);
             m.air = air;
