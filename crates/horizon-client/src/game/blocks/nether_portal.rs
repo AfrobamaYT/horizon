@@ -1165,9 +1165,10 @@ impl Game<'_> {
                 return;
             }
             self.release_vehicle_container(id);
-            let Some(tag) = self.vehicle_tree_nbt(id) else {
+            let Some(mut tag) = self.vehicle_tree_nbt(id) else {
                 return;
             };
+            super::persist::write_attachments(&mut tag, id, &self.entity_attachments);
             let Some(state) = self.capture_vehicle_tree_state(id) else {
                 return;
             };
@@ -1201,6 +1202,7 @@ impl Game<'_> {
                     doubles([m.x.clamp(-0.4, 0.4), m.y, m.z.clamp(-0.4, 0.4)]),
                 );
             }
+            super::persist::write_attachments(&mut tag, id, &self.entity_attachments);
             let Some(state) = self.capture_vehicle_tree_state(id) else {
                 return;
             };
@@ -1487,7 +1489,13 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn portal_capture_preserves_rejected_objects_and_reverses_admission() {
         with_gate(|game, _, _| {
-            assert!(game.run_command("summon minecraft:pig 0 64 0 {UUID:[I;0,0,0,175],Tags:[portal_root],Passengers:[{id: minecraft:pig,UUID:[I;0,0,0,175],Passengers:[{id:minecraft:pig,UUID:[I;0,0,0,176]}]}]}"));
+            game.build_registries();
+            game.set_allow_commands(true);
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            assert!(game.run_command(r#"summon minecraft:pig 0 64 0 {UUID:[I;0,0,0,175],Tags:["portal_root"],Passengers:[{id:"minecraft:pig",UUID:[I;0,0,0,175],Passengers:[{id:"minecraft:pig",UUID:[I;0,0,0,176]}]}]}"#));
             let root = game
                 .mobs
                 .iter()
@@ -1502,6 +1510,7 @@ mod tests {
             let leaf = game.mob_passenger_ids(child)[0];
             assert!(!game.mobs.iter().any(|m| m.id == child));
             game.tickets.add_portal((0, 0));
+            game.update_chunk_tickets();
             assert!(game.entity_ticking_area()(0, 0));
             game.set_portal_cooldown(leaf);
             let cooldown = game.portals.entities[&leaf].cooldown;
@@ -1511,19 +1520,34 @@ mod tests {
             assert!(game.mob_object(root).is_none());
             assert!(game.mob_object(child).is_none());
             assert!(game.mob_object(leaf).is_none());
-            let arrival = game.portals.arrivals.pop().unwrap();
-            let Some(TransferredArrivalState::VehicleTree(state)) = arrival.transferred else {
-                panic!("missing tree state")
-            };
-            let restored = game.restore_vehicle_tree_state(arrival.tag, state).unwrap();
-            let new_child = restored.by_source[&child];
-            assert!(!game.mobs.iter().any(|m| m.id == restored.root));
+            // Land the queued payload through the real arrival transform/adoption path.
+            game.portals.arrivals[0].plan =
+                Plan::end_portal(Dim::End, BlockPos::new(0, 64, 0), 0.9, 0.9);
+            for z in -1..=1 {
+                for x in -1..=1 {
+                    game.streaming
+                        .insert_remote(&mut game.world, horizon_client::chunk::Chunk::empty(x, z));
+                }
+            }
+            game.resolve_arrivals();
+            assert!(game.portals.arrivals.is_empty());
+            let new_root = game
+                .mob_objects()
+                .find(|m| m.extra.mount.is_none())
+                .unwrap()
+                .id;
+            let new_child = game.mob_passenger_ids(new_root)[0];
+            let new_leaf = game.mob_passenger_ids(new_child)[0];
+            assert!(!game.mobs.iter().any(|m| m.id == new_root));
             assert!(game.mobs.iter().any(|m| m.id == new_child));
-            assert_eq!(game.mob_passenger_ids(restored.root), [new_child]);
             assert!(game.mobs_below_off_level().contains(&new_child));
+            assert!(game.mobs_below_off_level().contains(&new_leaf));
+            assert_eq!(game.portals.entities[&new_root].cooldown, ENTITY_DELAY);
             assert!(
-                game.mobs_below_off_level()
-                    .contains(&restored.by_source[&leaf])
+                game.persist_raw(new_root)
+                    .unwrap()
+                    .get("horizon:fresh_add")
+                    .is_none()
             );
         });
     }
