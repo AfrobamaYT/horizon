@@ -12,13 +12,11 @@ use horizon_launcher::native_mods;
 use horizon_launcher::other_launchers;
 use horizon_launcher::server_list;
 use horizon_launcher::storage::{Category, Storage};
-
 #[derive(Clone, Debug)]
 enum ClearStorage {
     All,
     Row(Category),
 }
-
 fn parse_storage_row(value: &str) -> Result<ClearStorage, String> {
     use clap::ValueEnum;
     if value == "all" {
@@ -34,7 +32,6 @@ fn parse_storage_row(value: &str) -> Result<ClearStorage, String> {
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-
 #[derive(Parser)]
 #[command(
     name = "horizon-launcher",
@@ -48,7 +45,6 @@ struct Cli {
     #[command(subcommand)]
     command: Option<Cmd>,
 }
-
 #[derive(Subcommand)]
 enum JavaCmd {
     /// The Java runtimes Horizon downloaded from Mojang and the ones installed on this computer
@@ -57,7 +53,6 @@ enum JavaCmd {
     /// version's JSON (java-runtime-delta)
     Install { java: String },
 }
-
 #[derive(Subcommand)]
 enum RustCmd {
     /// Whether it is installed, its version and whether this computer can link with it
@@ -67,7 +62,6 @@ enum RustCmd {
     /// Delete the toolchain and the native builds' Cargo home
     Remove,
 }
-
 #[derive(Subcommand)]
 enum ServersCmd {
     /// The servers, their folder and whether they run
@@ -122,7 +116,6 @@ enum ServersCmd {
     /// Take a server off the list (its folder stays)
     Forget { server: String },
 }
-
 #[derive(Subcommand)]
 enum AccountCmd {
     /// The signed-in accounts and which one plays
@@ -782,8 +775,8 @@ enum Cmd {
     /// removal and automatic runtime eviction retain files while any launch path lacks enforceable
     /// lifetime exclusion; an empty process scan is not authorization. Read-only reports stay available.
     /// Private launch records and raw captures are collected together only after all participating owners
-    /// exit, under the exclusive permanent namespace gate. Registry housekeeping starts at 4,096 recognized
-    /// empty lock entries; the gate and unknown entries remain.
+    /// exit, under the exclusive permanent namespace gate. Published unit keys persist until exclusive
+    /// unit removal. Registry entry counts are logged; lock entries are not age-collected.
     Storage {
         /// Request cleanup of build-files, prebuilt-games, spare-game-builds, rust-compiler, other-caches or all rows; game-accessible caches refuse cleanup without enforceable lifetime exclusion
         #[arg(long, value_parser = parse_storage_row)]
@@ -856,8 +849,8 @@ enum Cmd {
     /// system|en|fr|ru|de|zh|es|uk|pl (the window's language; system follows the computer's), accent
     /// violet|blue|teal|green|amber|red|pink|#rrggbb|DEGREES (a named accent, any colour, or any
     /// hue), background PATH (a picture behind Home; "default"
-    /// shows Horizon's landscape), native-cache-gib N (combined native compilation cache limit
-    /// in GiB, default 30; 0 disables automatic cleanup)
+    /// shows Horizon's landscape), cache-limit-gib N (managed cache limit
+    /// in GiB: 10, 25 (default), 50, 100; 0 disables automatic cleanup)
     Settings {
         #[arg(value_parser = SETTING_KEYS)]
         key: Option<String>,
@@ -1021,7 +1014,7 @@ const SETTING_KEYS: [&str; 14] = [
     "language",
     "accent",
     "background",
-    "native-cache-gib",
+    "cache-limit-gib",
 ];
 
 fn on_off(value: &str) -> Result<bool, String> {
@@ -1096,13 +1089,13 @@ fn set_setting(s: &mut backend::Settings, key: &str, value: &str) -> Result<(), 
                 })?),
             }
         }
-        "native-cache-gib" => {
-            s.native_cache_gib = match value {
+        "cache-limit-gib" => {
+            s.cache_limit_gib = match value {
                 "default" => None,
                 n => Some(
                     n.parse::<u64>()
                         .ok()
-                        .filter(|n| n.checked_mul(1 << 30).is_some())
+                        .filter(|n| matches!(n, 0 | 10 | 25 | 50 | 100))
                         .ok_or_else(|| {
                             tr("Enter a cache limit in GiB; 0 disables automatic cleanup.")
                                 .to_string()
@@ -1142,7 +1135,7 @@ fn settings_json(s: &backend::Settings) -> serde_json::Value {
         "language": s.language.map_or("system", |l| l.code()),
         "accent": s.accent.name(),
         "background": horizon_launcher::themes::background(&backend::data_dir(), s.background.as_deref()),
-        "native_cache_gib": s.native_cache_gib.unwrap_or(native_mods::DEFAULT_CACHE_GIB),
+        "cache_limit_gib": s.cache_limit_gib.unwrap_or(horizon_launcher::storage::policy::DEFAULT_LIMIT_GIB),
         "no_ai": backend::no_ai(),
     })
 }
@@ -1204,8 +1197,8 @@ fn json(value: serde_json::Value) {
 /// Runs a game process in this terminal and reports how it ended.
 fn attached(cmd: Command) -> Result<i32, String> {
     let (mut cmd, _runtime) = backend::prepare_command(cmd)?;
-    let status = cmd
-        .status()
+    let status = backend::spawn_attached(&mut cmd)
+        .and_then(|mut child| child.wait())
         .map_err(|e| format!("Could not start {:?}: {e}", cmd.get_program()))?;
     #[cfg(unix)]
     {
@@ -1307,6 +1300,11 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
             };
             let report = storage.report(row, all).map_err(native_mods::cache_error)?;
             println!("{}", serde_json::to_string_pretty(&report).unwrap());
+            if row.is_some() || all {
+                if let Some(kept) = report.rows.iter().flat_map(|row| &row.kept).next() {
+                    return Err(kept.reason.clone());
+                }
+            }
         }
         Cmd::NativeBuild {
             sync_internals,
@@ -3707,6 +3705,8 @@ fn modpack(action: ModpackCmd, as_json: bool) -> Result<i32, String> {
 }
 
 #[cfg(test)]
+mod storage_tests;
+#[cfg(test)]
 mod tests {
     use super::*;
     use clap::Parser;
@@ -4108,39 +4108,5 @@ mod tests {
             );
         }
         assert_eq!(native_mods::base_for(None, &[], false), None);
-    }
-
-    #[test]
-    fn native_cache_command_and_persisted_limit() {
-        assert!(matches!(
-            Cli::try_parse_from(["horizon-launcher", "storage"])
-                .unwrap()
-                .command,
-            Some(Cmd::Storage { clear: None })
-        ));
-        assert!(matches!(
-            Cli::try_parse_from(["horizon-launcher", "storage", "--clear", "all"])
-                .unwrap()
-                .command,
-            Some(Cmd::Storage {
-                clear: Some(ClearStorage::All)
-            })
-        ));
-        assert!(Cli::try_parse_from(["horizon-launcher", "storage", "--clear", "worlds"]).is_err());
-        assert!(Cli::try_parse_from(["horizon-launcher", "native-cache"]).is_err());
-        assert!(
-            Cli::try_parse_from(["horizon-launcher", "storage", "--clear", "other-caches"]).is_ok()
-        );
-        let mut settings = backend::Settings::default();
-        set_setting(&mut settings, "native-cache-gib", "12").unwrap();
-        let saved = serde_json::to_string(&settings).unwrap();
-        let loaded: backend::Settings = serde_json::from_str(&saved).unwrap();
-        assert_eq!(loaded.native_cache_gib, Some(12));
-        assert!(set_setting(&mut settings, "native-cache-gib", "18446744073709551615").is_err());
-        assert!(set_setting(&mut settings, "native-cache-gib", "-1").is_err());
-        set_setting(&mut settings, "native-cache-gib", "0").unwrap();
-        assert_eq!(settings.native_cache_gib, Some(0));
-        set_setting(&mut settings, "native-cache-gib", "default").unwrap();
-        assert_eq!(settings.native_cache_gib, None);
     }
 }

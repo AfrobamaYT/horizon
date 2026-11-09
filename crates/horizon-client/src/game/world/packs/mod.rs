@@ -847,6 +847,14 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn fluid_models_reload_recollects_before_baking() {
+        // Concurrent resource loads replace the process-wide fluid looks and models.
+        if super::super::native_entity_refs::tests::run_fresh_cases(
+            "game::packs::tests::fluid_models_reload_recollects_before_baking",
+            "HORIZON_FLUID_RELOAD_CHILD",
+            &["recollect"],
+        ) {
+            return;
+        }
         use mod_api::testing::with_mods;
         use mod_api::{FluidModel, Hooks, ModEntry, RegisterFluidModelsEvent, RegistrationContext};
         use std::sync::{

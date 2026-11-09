@@ -5,6 +5,8 @@
 mod matrix;
 #[path = "support/checks.rs"]
 mod matrix_checks;
+#[path = "support/no_hooks.rs"]
+mod no_hooks;
 #[path = "fixture/src/replace.rs"]
 mod replace;
 #[path = "fixture/src/shutdown.rs"]
