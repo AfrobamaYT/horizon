@@ -30,14 +30,15 @@ pub trait ModStateServerHost {
     ) -> Result<(), AttachmentRowError>;
     /// Side: server.
     /// Opens a transaction, nested in the open one if any (`Transaction.open`), and gives back
-    /// the value naming it. `host.transaction` calls it; use that instead.
+    /// the seal that ends it. `host.transaction` calls it; use that instead.
     #[access(WorldOnly)]
-    fn transaction_open(&mut self) -> Transaction;
+    fn transaction_open(&mut self) -> TransactionSeal;
     /// Side: server.
-    /// Closes the innermost open transaction, committed or aborted, when `tx` names it; refused
-    /// otherwise, so a mod ends only a transaction it opened. `host.transaction` calls it.
+    /// Closes the transaction `seal` ends, committed or aborted, aborting first any opened
+    /// inside it and left open. Refused when `seal` names no open transaction, so a mod ends
+    /// only a transaction it opened. `host.transaction` calls it.
     #[access(WorldOnly)]
-    fn transaction_close(&mut self, tx: &Transaction, commit: bool);
+    fn transaction_close(&mut self, seal: &TransactionSeal, commit: bool);
     /// Side: server.
     /// Asks for `Hooks::scheduled_task` to be called with `token` after `delay_ticks` server
     /// ticks (`MinecraftServer.tell(new TickTask(getTickCount() + delay, ..))`; 0 and 1 both

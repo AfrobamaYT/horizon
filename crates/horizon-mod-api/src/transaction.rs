@@ -6,25 +6,69 @@ use super::ServerHost;
 /// An open transaction, as NeoForge's `TransactionContext`: what every write of a handler or a
 /// place takes. `host.transaction` gets one from the game and lends it to its closure alone.
 ///
-/// The authority is the game's, not this value's: it names one transaction the game opened by an
-/// unguessable token, and the game checks it on every use. A write given a transaction that is
-/// not open changes nothing, and a close that does not name the innermost open transaction is
-/// refused, so a value decoded from bytes or kept past its closure can neither write outside
-/// the journal nor end a transaction someone else opened.
+/// It lets its holder write in the transaction, not end it: ending one takes its
+/// [`TransactionSeal`], which only whoever opened it holds. The authority is the game's, not
+/// this value's: it names one transaction the game opened by a token that cannot be guessed in
+/// practice (a randomly keyed 64-bit hash), and the game checks it on every write. A write
+/// given a transaction that is not open changes nothing, so a value decoded from bytes or kept
+/// past its closure cannot write outside the journal.
 // exhaustive: its field is private, so mods cannot build or destructure it
 #[derive(Debug, PartialEq, Eq)]
 pub struct Transaction(pub(crate) u64);
 
-/// The transaction the game opened with frame `token`, for its raw open helper.
-#[doc(hidden)]
-pub fn transaction(token: u64) -> Transaction {
-    Transaction(token)
+/// What ends a transaction:
+/// [`transaction_open`](crate::prelude::ModStateServerHost::transaction_open) gives it to whoever opened
+/// the transaction (`host.transaction`'s guard), and
+/// [`transaction_close`](crate::prelude::ModStateServerHost::transaction_close) takes it. A
+/// write handler lent only the [`Transaction`] cannot end the transaction around it, the game's
+/// own (a hopper's move) or another mod's.
+///
+/// It carries the transaction's write token and a second token, as unguessable, that only
+/// closing checks.
+///
+/// ```compile_fail
+/// use mod_api::{HostTransaction, ServerHost};
+/// fn handler(host: &mut dyn ServerHost) {
+///     let _: Result<(), ()> = host.transaction(|host, tx| {
+///         host.transaction_close(tx, true);
+///         Ok(())
+///     });
+/// }
+/// ```
+// exhaustive: its fields are private, so mods cannot build or destructure it
+#[derive(Debug, PartialEq, Eq)]
+pub struct TransactionSeal {
+    pub(crate) tx: Transaction,
+    pub(crate) close: u64,
 }
 
-/// The frame token `tx` names, for the game's checks.
+impl TransactionSeal {
+    /// The transaction this seal ends, to write in it.
+    pub fn transaction(&self) -> &Transaction {
+        &self.tx
+    }
+}
+
+/// The seal of the transaction the game opened with write token `token` and close token
+/// `close`, for its raw open helper.
+#[doc(hidden)]
+pub fn transaction_seal(token: u64, close: u64) -> TransactionSeal {
+    TransactionSeal {
+        tx: Transaction(token),
+        close,
+    }
+}
+
+/// The write token `tx` names, for the game's checks.
 #[doc(hidden)]
 pub fn transaction_token(tx: &Transaction) -> u64 {
     tx.0
+}
+
+/// The write and close tokens `seal` carries, for the game's checks.
+#[doc(hidden)]
+pub fn seal_tokens(seal: &TransactionSeal) -> (u64, u64) {
+    (seal.tx.0, seal.close)
 }
 
 /// Transactions are available only on the logical server and preserve the receiver type.
@@ -59,7 +103,11 @@ pub trait HostTransaction: ServerHost {
     /// outermost, for good, with the world told of each change once; `Err` aborts it
     /// (`close` without `commit`), putting every storage it wrote back as it was. A panic
     /// unwinding out of `f` aborts this transaction as it passes, so whoever catches it sees
-    /// nothing `f` changed, and the transaction around it stays open.
+    /// nothing `f` changed, and the transaction around it stays open. A transaction `f` opened
+    /// itself and left open is aborted first, when this one closes.
+    ///
+    /// `f` gets the [`Transaction`] to write in, never its [`TransactionSeal`]: only this
+    /// guard ends the transaction.
     ///
     /// Covered: block entities (item slots, saved compound, custom name and attachments), cauldrons,
     /// players' inventories and cursors, entities' inventories
@@ -89,21 +137,21 @@ pub fn run_transaction<H: ServerHost + ?Sized, T, E>(
     /// a panic unwinding past it.
     struct Open<'a, H: ServerHost + ?Sized> {
         host: &'a mut H,
-        tx: Transaction,
+        seal: TransactionSeal,
         commit: bool,
     }
     impl<H: ServerHost + ?Sized> Drop for Open<'_, H> {
         fn drop(&mut self) {
-            self.host.transaction_close(&self.tx, self.commit);
+            self.host.transaction_close(&self.seal, self.commit);
         }
     }
-    let tx = host.transaction_open();
+    let seal = host.transaction_open();
     let mut open = Open {
         host,
-        tx,
+        seal,
         commit: false,
     };
-    let result = f(&mut *open.host, &open.tx);
+    let result = f(&mut *open.host, open.seal.transaction());
     open.commit = result.is_ok();
     result
 }
@@ -113,20 +161,32 @@ mod tests {
     use super::*;
     use crate::testing::FakeHost;
 
+    /// A seal built from bytes: from the write token a handler is lent and any guessed close
+    /// token, outside any transaction and inside nested ones.
+    fn forged(token: u64, close: u64) -> TransactionSeal {
+        let mut bytes = token.to_le_bytes().to_vec();
+        bytes.extend(close.to_le_bytes());
+        crate::wire::Reader::decode(&bytes).unwrap()
+    }
+
     #[test]
-    fn a_transaction_decoded_from_bytes_ends_no_transaction() {
+    fn a_handler_lent_the_transaction_cannot_end_it_or_the_one_around() {
         assert!(
-            crate::wire::Reader::decode::<Transaction>(&[]).is_err(),
-            "no transaction from zero bytes"
+            crate::wire::Reader::decode::<TransactionSeal>(&7u64.to_le_bytes()).is_err(),
+            "no seal from a write token alone"
         );
-        let forged: Transaction = crate::wire::Reader::decode(&1u64.to_le_bytes()).unwrap();
         let mut fake = FakeHost::new();
         let host: &mut dyn ServerHost = &mut fake;
-        // Outside any transaction, and inside one the forged value does not name.
-        host.transaction_close(&forged, true);
-        let outer = host.transaction(|host, _| {
-            host.transaction(|host, _| {
-                host.transaction_close(&forged, true);
+        host.transaction_close(&forged(1, 1), true);
+        let outer = host.transaction(|host, outer_tx| {
+            let outer_token = transaction_token(outer_tx);
+            host.transaction(|host, tx| {
+                // The handler knows both write tokens, not the close tokens.
+                for token in [outer_token, transaction_token(tx)] {
+                    for close in [0, 1, token, !token, u64::MAX] {
+                        host.transaction_close(&forged(token, close), true);
+                    }
+                }
                 Ok::<_, ()>(())
             })?;
             Err::<(), ()>(())
@@ -135,8 +195,42 @@ mod tests {
         assert_eq!(
             fake.journal.closed(),
             [(2, true), (1, false)],
-            "only each guard closed its own"
+            "only each guard closed its own, and the caller's abort stood"
         );
+        assert_eq!(fake.journal.depth(), 0);
+    }
+
+    #[test]
+    fn a_transaction_left_open_inside_aborts_when_its_caller_closes() {
+        use std::panic::{AssertUnwindSafe, catch_unwind};
+        let mut fake = FakeHost::new();
+        let host: &mut dyn ServerHost = &mut fake;
+        // The caller aborts: the child it left open aborts first.
+        let outer = host.transaction(|host, _| {
+            let _left_open = host.transaction_open();
+            Err::<(), ()>(())
+        });
+        assert_eq!(outer, Err(()));
+        assert_eq!(fake.journal.closed(), [(2, false), (1, false)]);
+        assert_eq!(fake.journal.depth(), 0);
+        // The caller commits: the abandoned child still aborts.
+        let host: &mut dyn ServerHost = &mut fake;
+        let outer = host.transaction(|host, _| {
+            let _left_open = host.transaction_open();
+            Ok::<_, ()>(())
+        });
+        assert_eq!(outer, Ok(()));
+        assert_eq!(fake.journal.closed()[2..], [(2, false), (1, true)]);
+        // A panic: the rollback is done before whoever catches it looks.
+        let host: &mut dyn ServerHost = &mut fake;
+        let caught = catch_unwind(AssertUnwindSafe(|| {
+            host.transaction(|host, _| -> Result<(), ()> {
+                let _left_open = host.transaction_open();
+                panic!("a broken handler")
+            })
+        }));
+        assert!(caught.is_err());
+        assert_eq!(fake.journal.closed()[4..], [(2, false), (1, false)]);
         assert_eq!(fake.journal.depth(), 0);
     }
 

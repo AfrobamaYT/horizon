@@ -956,11 +956,11 @@ pub mod tests {
     mod_api::impl_server_host_areas!(Shelf, except(mod_state));
     #[cfg(test)]
     impl crate::prelude::ModStateServerHost for Shelf {
-        fn transaction_open(&mut self) -> Transaction {
+        fn transaction_open(&mut self) -> TransactionSeal {
             self.journal.open(self.slots.clone())
         }
-        fn transaction_close(&mut self, tx: &Transaction, commit: bool) {
-            if let Some(slots) = self.journal.close(tx, commit) {
+        fn transaction_close(&mut self, seal: &TransactionSeal, commit: bool) {
+            if let Some(slots) = self.journal.close(seal, commit) {
                 self.slots = slots;
             }
         }

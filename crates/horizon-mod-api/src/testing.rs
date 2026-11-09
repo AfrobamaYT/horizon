@@ -46,7 +46,7 @@ pub use registries::FakeRegistries;
 pub use services::{FakeCommands, FakeMessages};
 
 use crate::ticket_controller::{ControllerInfo, TEST_CONTROLLERS};
-use crate::transaction::Transaction;
+use crate::transaction::{Transaction, TransactionSeal};
 use crate::{
     Backend, BackendMut, BackendMutRef, BackendRef, BlockEntityRef, BlockEntityTypeKey, BlockSide,
     ClientHost, Commands, EntityRef, FluidStack, Host, Installed, ItemPlace, ItemStack, LevelRef,
@@ -235,12 +235,12 @@ impl ServerHost for FakeHost {
     }
 }
 impl crate::prelude::ModStateServerHost for FakeHost {
-    fn transaction_open(&mut self) -> Transaction {
+    fn transaction_open(&mut self) -> TransactionSeal {
         self.journal
             .open((self.players.clone(), self.level.clone()))
     }
-    fn transaction_close(&mut self, tx: &Transaction, commit: bool) {
-        if let Some((players, level)) = self.journal.close(tx, commit) {
+    fn transaction_close(&mut self, seal: &TransactionSeal, commit: bool) {
+        if let Some((players, level)) = self.journal.close(seal, commit) {
             (self.players, self.level) = (players, level);
         }
     }

@@ -38,6 +38,22 @@ impl Wire for crate::Transaction {
         Ok(Self(input.take()?))
     }
 }
+/// A seal crosses as its write and close tokens; like a transaction, decoding one builds a
+/// value, not authority: closing checks both tokens against the open transactions.
+impl Wire for crate::TransactionSeal {
+    const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(crate::TransactionSeal));
+    const MIN: usize = 16;
+    fn put(&self, out: &mut Writer) {
+        out.put(&self.tx);
+        out.put(&self.close);
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        Ok(Self {
+            tx: input.take()?,
+            close: input.take()?,
+        })
+    }
+}
 impl Wire for crate::LoadedMods {
     const LAYOUT_SEED: u64 = crate::wire::layout_seed(stringify!(crate::LoadedMods));
     const MIN: usize = 0;

@@ -24,7 +24,7 @@
 use super::{BlockEntity, BlockStateId, Game, machines::HopperState};
 use horizon_client::{items::ItemStack, world::BlockEntityExtras};
 use horizon_mod_runtime::attachments::{Attachments, Holder};
-use mod_api::Transaction;
+use mod_api::{Transaction, TransactionSeal};
 use std::collections::HashMap;
 
 type Pos = (i32, i32, i32);
@@ -32,9 +32,12 @@ type Pos = (i32, i32, i32);
 /// One open transaction.
 #[derive(Default)]
 pub(super) struct Level {
-    /// What names it to the mods that write in it and close it (`Transaction`): unguessable, so
+    /// What names it to the mods that write in it (`Transaction`): unguessable in practice, so
     /// only the value the game handed out names it.
     token: u64,
+    /// What ends it (`TransactionSeal`), drawn apart from `token`: only whoever opened it holds
+    /// it, never a handler lent the `Transaction`.
+    close_token: u64,
     dimension: Option<super::Dim>,
     /// Each block entity as it was before this transaction first wrote it.
     block_entities: HashMap<Pos, Kept>,
@@ -163,8 +166,8 @@ pub(super) enum DeferredEffect {
     },
 }
 
-/// A fresh transaction token: a process-wide count through a randomly keyed hash, so a mod
-/// cannot guess the token of a transaction it was not handed.
+/// A fresh transaction token: a process-wide count through a randomly keyed 64-bit hash, so a
+/// mod cannot guess, in practice, the token of a transaction it was not handed.
 fn frame_token() -> u64 {
     use std::hash::BuildHasher;
     use std::sync::{OnceLock, atomic::AtomicU64, atomic::Ordering};
@@ -184,28 +187,41 @@ impl Level {
 
 impl Game<'_> {
     /// Opens a transaction, nested in the open one if any (`Transaction.open`), and gives back
-    /// the value naming it.
-    pub(in crate::game) fn transaction_open(&mut self) -> Transaction {
-        mod_api::__private::transaction(self.open_storage_transaction())
+    /// the seal that ends it.
+    pub(in crate::game) fn transaction_open(&mut self) -> TransactionSeal {
+        let (token, close) = self.open_storage_transaction();
+        mod_api::__private::transaction_seal(token, close)
     }
-    /// Opens a transaction and gives back its token.
-    fn open_storage_transaction(&mut self) -> u64 {
-        let token = frame_token();
+    /// Opens a transaction and gives back its write and close tokens.
+    fn open_storage_transaction(&mut self) -> (u64, u64) {
+        let (token, close_token) = (frame_token(), frame_token());
         self.transactions.push(Level {
             token,
+            close_token,
             dimension: Some(self.dim),
             ..Level::default()
         });
-        token
+        (token, close_token)
     }
-    /// Closes the innermost open transaction when `tx` names it. Any other is refused: a mod
-    /// ends only the transaction it opened, never one around it, the game's own (a hopper's
-    /// move) or another mod's.
-    pub(in crate::game) fn transaction_close(&mut self, tx: &Transaction, commit: bool) {
-        let named = mod_api::__private::transaction_token(tx);
-        if self.transactions.last().map(|level| level.token) != Some(named) {
-            log::warn!("Horizon: refused to close a transaction that is not the innermost open one");
+    /// Closes the transaction `seal` ends, first aborting every one opened inside it and left
+    /// open, so a guard closing its own is never stranded behind a child a mod abandoned.
+    /// Refused when `seal` names no open transaction: only whoever opened one ends it, never a
+    /// handler lent its `Transaction` (a hopper's move lends the game's own).
+    pub(in crate::game) fn transaction_close(&mut self, seal: &TransactionSeal, commit: bool) {
+        let (token, close) = mod_api::__private::seal_tokens(seal);
+        let Some(at) = self
+            .transactions
+            .iter()
+            .position(|level| level.token == token && level.close_token == close)
+        else {
+            log::warn!("Horizon: refused to close a transaction the seal does not end");
             return;
+        };
+        if self.transactions.len() > at + 1 {
+            log::warn!("Horizon: aborted a transaction left open inside the one being closed");
+        }
+        while self.transactions.len() > at + 1 {
+            self.close_storage_transaction(false);
         }
         self.close_storage_transaction(commit);
     }
@@ -1370,16 +1386,44 @@ mod tests {
         let host: &mut dyn ServerHost = &mut game;
         assert!(insert(host, on([0, 64, 0], None), 0, sticks(1), &forged).is_some());
         assert_eq!(chest_items(&game), [(0, 3)]);
+        assert_eq!(chest_items(&game), [(0, 3)]);
+
+        // A capability handler is lent the game's own transaction (a hopper's move,
+        // `put_into_part`): it writes in it and tries every seal it can build from what it
+        // knows, the write token and guesses, then the move fails after it. Its writes all go
+        // back with the game's abort, which no close of the handler's got ahead of.
+        let handler = |host: &mut dyn ServerHost, tx: &Transaction| {
+            assert!(insert(host, on([0, 64, 0], None), 0, sticks(1), tx).is_none());
+            let token = mod_api::__private::transaction_token(tx);
+            for close in [0, 1, token, !token, u64::MAX] {
+                let mut bytes = token.to_le_bytes().to_vec();
+                bytes.extend(close.to_le_bytes());
+                let seal: mod_api::TransactionSeal = mod_api::wire::Reader::decode(&bytes).unwrap();
+                host.transaction_close(&seal, true);
+            }
+            assert!(insert(host, on([0, 64, 0], None), 0, sticks(1), tx).is_none());
+        };
         let host: &mut dyn ServerHost = &mut game;
-        let aborted: Result<(), ()> = host.transaction(|host, tx| {
-            assert!(insert(host, on([0, 64, 0], None), 0, sticks(1), tx).is_none());
-            host.transaction_close(&forged, true);
-            assert!(insert(host, on([0, 64, 0], None), 0, sticks(1), tx).is_none());
+        let failed: Result<(), ()> = mod_api::run_transaction(host, |host, tx| {
+            handler(host, tx);
             Err(())
         });
-        assert_eq!(aborted, Err(()));
+        assert_eq!(failed, Err(()));
         assert_eq!(chest_items(&game), [(0, 3)]);
         assert!(game.transactions.is_empty());
+
+        // A handler that opens a transaction of its own, writes in it and leaves it open does
+        // not strand the game's: the failed move aborts both at once, not at the next tick.
+        let host: &mut dyn ServerHost = &mut game;
+        let failed: Result<(), ()> = mod_api::run_transaction(host, |host, _| {
+            let left_open = host.transaction_open();
+            let inner = left_open.transaction();
+            assert!(insert(host, on([0, 64, 0], None), 0, sticks(1), inner).is_none());
+            Err(())
+        });
+        assert_eq!(failed, Err(()));
+        assert_eq!(chest_items(&game), [(0, 3)]);
+        assert!(game.transactions.is_empty(), "both closed before the next tick");
 
         // An attachment map a write made inside an aborted transaction is gone with it.
         let chest_holder = mod_api::Holder::BlockEntity([0, 64, 0]);

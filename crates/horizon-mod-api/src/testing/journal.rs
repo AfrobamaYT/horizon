@@ -7,11 +7,13 @@
 /// [`FakeHost`](super::FakeHost) keeps one over its players and level. A test host of its own
 /// keeps one over its state: it returns what [`open`](Self::open) gives from `transaction_open`,
 /// and puts back what [`close`](Self::close) returns from `transaction_close`. Like the game's,
-/// it names each transaction by a token and refuses a close that does not name the innermost.
+/// it names each transaction by a write token and a close token, refuses a close whose seal
+/// names no open transaction, and aborts the transactions left open inside the one it closes.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct FakeJournal<S> {
-    kept: Vec<(u64, S)>,
+    /// Each open transaction's write token, close token and starting state, outermost first.
+    kept: Vec<(u64, u64, S)>,
     closed: Vec<(usize, bool)>,
     next: u64,
 }
@@ -28,27 +30,40 @@ impl<S> Default for FakeJournal<S> {
 
 impl<S> FakeJournal<S> {
     /// Opens a transaction, nested in the open one if any, that began with state `now`, and
-    /// gives back the value naming it.
-    pub fn open(&mut self, now: S) -> crate::Transaction {
+    /// gives back the seal that ends it.
+    pub fn open(&mut self, now: S) -> crate::TransactionSeal {
         let token = self.next;
+        // A close token no write token equals, as the game's are drawn apart.
+        let close = token | 1 << 63;
         self.next += 1;
-        self.kept.push((token, now));
-        crate::Transaction(token)
+        self.kept.push((token, close, now));
+        crate::transaction::transaction_seal(token, close)
     }
-    /// Closes the innermost open transaction when `tx` names it: committed, or aborted, when it
-    /// gives back the state it began with for the host to put back. Nothing when none is open
-    /// or `tx` names another.
-    pub fn close(&mut self, tx: &crate::Transaction, commit: bool) -> Option<S> {
-        if self.kept.last().map(|(token, _)| *token) != Some(tx.0) {
-            return None;
+    /// Closes the transaction `seal` ends, committed or aborted, aborting first every one
+    /// opened inside it and left open. What the host puts back: the state the first transaction
+    /// aborted began with, if any. Nothing when `seal` names no open transaction.
+    pub fn close(&mut self, seal: &crate::TransactionSeal, commit: bool) -> Option<S> {
+        let (token, close) = crate::transaction::seal_tokens(seal);
+        let at = self
+            .kept
+            .iter()
+            .position(|(t, c, _)| *t == token && *c == close)?;
+        let mut back = None;
+        while self.kept.len() > at + 1 {
+            let (_, _, was) = self.kept.pop()?;
+            self.closed.push((self.kept.len() + 1, false));
+            back = Some(was);
         }
-        let (_, was) = self.kept.pop()?;
-        self.closed.push((self.kept.len() + 1, commit));
-        (!commit).then_some(was)
+        let (_, _, was) = self.kept.pop()?;
+        self.closed.push((at + 1, commit));
+        if !commit {
+            back = Some(was);
+        }
+        back
     }
     /// Whether `tx` names an open transaction, for a write to check.
     pub fn holds(&self, tx: &crate::Transaction) -> bool {
-        self.kept.iter().any(|(token, _)| *token == tx.0)
+        self.kept.iter().any(|(token, _, _)| *token == tx.0)
     }
     /// How many transactions are open.
     pub fn depth(&self) -> usize {
