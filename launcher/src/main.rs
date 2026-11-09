@@ -3166,6 +3166,22 @@ impl Launcher {
                 self.links.discord.clone(),
             ));
         }
+        if !self.links.roadmap.is_empty() {
+            foot = foot.child(link(
+                "roadmap",
+                tr("Roadmap"),
+                "map",
+                self.links.roadmap.clone(),
+            ));
+        }
+        if !self.links.docs.is_empty() {
+            foot = foot.child(link(
+                "docs",
+                tr("Documentation"),
+                "book",
+                self.links.docs.clone(),
+            ));
+        }
         if !self.links.website.is_empty() {
             foot = foot.child(link(
                 "website",

@@ -863,6 +863,10 @@ pub struct Links {
     pub discord: String,
     pub sponsor: String,
     pub website: String,
+    /// The fork project board.
+    pub roadmap: String,
+    /// The modding book.
+    pub docs: String,
     /// The official server's address, as servers.dat lists it (`server_list::add_official`).
     pub official_server: String,
     /// The addresses it had before: a list holding one moves to `official_server`. A move appends
@@ -877,6 +881,8 @@ impl Default for Links {
             discord: horizon_addresses::COMMUNITY_DISCORD.into(),
             sponsor: "https://github.com/sponsors/ludovic111".into(),
             website: "https://playhorizon.dev".into(),
+            roadmap: "https://github.com/users/arismoko/projects/1".into(),
+            docs: "https://arismoko.github.io/horizon/".into(),
             official_server: crate::server_list::OFFICIAL_ADDRESS.into(),
             official_server_previous: crate::server_list::OFFICIAL_PREVIOUS
                 .iter()
@@ -896,6 +902,8 @@ impl Links {
                 ("discord", &mut links.discord),
                 ("sponsor", &mut links.sponsor),
                 ("website", &mut links.website),
+                ("roadmap", &mut links.roadmap),
+                ("docs", &mut links.docs),
                 ("official_server", &mut links.official_server),
             ] {
                 if let Some(url) = map.get(key).and_then(|v| v.as_str()) {
@@ -6297,6 +6305,14 @@ pub fn {f}("
         assert_eq!(defaults.discord, "https://discord.gg/playhorizon");
         assert_eq!(defaults.sponsor, "https://github.com/sponsors/ludovic111");
         assert_eq!(defaults.website, "https://playhorizon.dev");
+        assert_eq!(
+            Links::parse(r#"{"roadmap":"https://example.org/tasks","docs":" "}"#),
+            Links {
+                roadmap: "https://example.org/tasks".into(),
+                docs: String::new(),
+                ..defaults.clone()
+            }
+        );
         // The file on main says the same thing as the defaults.
         assert_eq!(Links::parse(include_str!("../links.json")), defaults);
         // Unreadable or missing, offline included: the defaults.

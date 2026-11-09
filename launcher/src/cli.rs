@@ -1653,6 +1653,8 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
             } else {
                 for (name, url) in [
                     ("Website", &links.website),
+                    ("Roadmap", &links.roadmap),
+                    ("Documentation", &links.docs),
                     ("Discord", &links.discord),
                     ("Sponsor", &links.sponsor),
                 ] {

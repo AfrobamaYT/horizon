@@ -576,6 +576,22 @@ impl Launcher {
                 self.links.sponsor.clone(),
             ));
         }
+        if !self.links.roadmap.is_empty() {
+            links = links.child(link(
+                "roadmap",
+                tr("Roadmap"),
+                "map",
+                self.links.roadmap.clone(),
+            ));
+        }
+        if !self.links.docs.is_empty() {
+            links = links.child(link(
+                "docs",
+                tr("Documentation"),
+                "book",
+                self.links.docs.clone(),
+            ));
+        }
         if !self.links.website.is_empty() {
             links = links.child(link(
                 "website",
