@@ -32,6 +32,7 @@ mod crates;
 mod diagnostics;
 mod inject;
 mod inject_cache;
+mod inject_text;
 mod internals;
 mod internals_sync;
 mod isolate;
