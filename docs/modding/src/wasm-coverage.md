@@ -1479,6 +1479,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::flip_frame` | crosses | Wire call |
 | `Hooks::fluid_flow` | crosses | Wire call |
 | `Hooks::fluid_place_block` | crosses | Wire call |
+| `Hooks::fluid_tick` | crosses | Wire call |
 | `Hooks::fluid_tooltip` | crosses | Wire call |
 | `Hooks::game_rule_changed` | crosses | Wire call |
 | `Hooks::game_shutting_down` | crosses | Wire call |
