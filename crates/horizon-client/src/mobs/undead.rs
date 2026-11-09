@@ -883,6 +883,7 @@ mod use_overflow_tests {
     use std::sync::Arc;
 
     #[test]
+    #[ignore = "requires prepared entity resources in .local/horizon-client"]
     fn bow_use_counter_saturates_when_target_hidden() {
         assert!(
             with_test_world(&[], |w, types| {

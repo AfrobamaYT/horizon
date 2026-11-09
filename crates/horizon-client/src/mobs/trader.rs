@@ -462,6 +462,7 @@ mod use_overflow_tests {
     use std::sync::Arc;
 
     #[test]
+    #[ignore = "requires prepared entity resources in .local/horizon-client"]
     fn trader_drink_completes_at_max_use_counter() {
         assert!(
             with_test_world(&[], |w, types| {
