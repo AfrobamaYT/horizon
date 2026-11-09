@@ -238,6 +238,7 @@ pub fn main_with(
             game::exit_code::ERROR
         });
     }
+    horizon_hooks::engine::shutdown();
     logging::flush();
 }
 

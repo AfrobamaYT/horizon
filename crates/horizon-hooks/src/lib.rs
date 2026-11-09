@@ -140,6 +140,9 @@ mod tests {
         fn published(&self, open: bool) {
             self.0.lock().unwrap().push(format!("published {open}"));
         }
+        fn shutdown(&self) {
+            self.0.lock().unwrap().push("shutdown".into());
+        }
     }
 
     /// Implements nothing: the defaults do nothing.
@@ -160,7 +163,12 @@ mod tests {
         engine::shutdown();
         assert_eq!(
             *RECORDER.0.lock().unwrap(),
-            ["started 0.2.31", "published true", "published false"]
+            [
+                "started 0.2.31",
+                "published true",
+                "published false",
+                "shutdown"
+            ]
         );
         assert_eq!(register(&Silent), Err(TooLate));
     }
