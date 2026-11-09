@@ -106,6 +106,11 @@ def unsupported_reason(repo, run, trusted_ref):
         if original["sha"] != trusted["sha"]:
             return "original base does not contain this controller's exact fallback gate"
     comparison = api(f"repos/{repo}/compare/{base}...{run['head_sha']}")
+    # Artifact metadata is PR-controlled, not an authenticated base assertion.
+    # Require independent ancestry: the claimed trusted gate must already be in
+    # the run head. Otherwise a three-dot diff can hide old routing files at head.
+    if comparison["merge_base_commit"]["sha"] != base:
+        return "recorded base is not an ancestor of the original run head"
     files = comparison["files"]
     # GitHub truncates compare file lists at 300. An incomplete diff cannot prove
     # the PR left the trusted routing code alone.

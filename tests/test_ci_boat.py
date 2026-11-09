@@ -140,12 +140,14 @@ class BoatHealthTests(unittest.TestCase):
 
     def test_support_requires_original_trusted_gate_and_unmodified_pr(self):
         run = dict(pull_requests=[dict(base=dict(sha="base"))], head_sha="head")
-        with patch.object(controller, "api", side_effect=[dict(sha="same")] * 4 + [dict(files=[])]):
+        with patch.object(controller, "api", side_effect=[dict(sha="same")] * 4 + [dict(files=[], merge_base_commit=dict(sha="base"))]):
             self.assertEqual(controller.unsupported_reason("repo", run, "trusted"), "")
+        with patch.object(controller, "api", side_effect=[dict(sha="same")] * 4 + [dict(files=[], merge_base_commit=dict(sha="older"))]):
+            self.assertIn("not an ancestor", controller.unsupported_reason("repo", run, "trusted"))
         with patch.object(controller, "api", side_effect=[dict(sha="old"), dict(sha="new")]):
             self.assertIn("original base", controller.unsupported_reason("repo", run, "trusted"))
         for files in ([dict(filename="tools/ci/boat_health.py")], [dict(filename="renamed", previous_filename=".github/workflows/dyna-ci.yml")], [dict(filename="other")] * 300):
-            with patch.object(controller, "api", side_effect=[dict(sha="same")] * 4 + [dict(files=files)]):
+            with patch.object(controller, "api", side_effect=[dict(sha="same")] * 4 + [dict(files=files, merge_base_commit=dict(sha="base"))]):
                 self.assertTrue(controller.unsupported_reason("repo", run, "trusted"))
         with patch.object(controller, "api") as api, patch.object(controller, "recorded_base", return_value=""):
             self.assertIn("unavailable", controller.unsupported_reason("repo", dict(pull_requests=[]), "trusted"))
@@ -176,7 +178,7 @@ class BoatHealthTests(unittest.TestCase):
             artifact = dict(id=99, name="boat-base-1", expired=False, size_in_bytes=len(archive.getvalue()))
             with patch.object(controller, "api", return_value=dict(artifacts=[artifact])), patch.object(controller.subprocess, "run", return_value=SimpleNamespace(stdout=archive.getvalue())):
                 self.assertEqual(controller.recorded_base("repo", run), "" if field else "b" * 40)
-        with patch.object(controller, "recorded_base", return_value="b" * 40), patch.object(controller, "api", side_effect=[dict(sha="same")] * 4 + [dict(files=[])]):
+        with patch.object(controller, "recorded_base", return_value="b" * 40), patch.object(controller, "api", side_effect=[dict(sha="same")] * 4 + [dict(files=[], merge_base_commit=dict(sha="b" * 40))]):
             self.assertEqual(controller.unsupported_reason("repo", run, "trusted"), "")
 
     def test_metadata_artifact_is_bounded_and_never_extracted(self):
