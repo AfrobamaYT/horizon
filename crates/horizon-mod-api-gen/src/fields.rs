@@ -412,16 +412,14 @@ impl<'ast> Visit<'ast> for Rewriter<'_> {
         ]
         .iter()
         .any(|name| mac.path.is_ident(name))
-        {
-            if let Ok(args) =
+            && let Ok(args) =
                 syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated
                     .parse2(mac.tokens.clone())
-            {
-                for expr in &args {
-                    self.visit_expr(expr);
-                }
-                return;
+        {
+            for expr in &args {
+                self.visit_expr(expr);
             }
+            return;
         }
         let name = self.d.target.rsplit("::").next().unwrap();
         fn mentions(tokens: proc_macro2::TokenStream, name: &str, this: bool) -> bool {
