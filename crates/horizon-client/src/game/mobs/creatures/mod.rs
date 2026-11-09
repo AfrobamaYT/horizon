@@ -8144,7 +8144,8 @@ impl Game<'_> {
                 false
             } else if let Some(who) = who {
                 let drawn;
-                (drawn, hidden) = self.mod_player_geometry(mob, who, alpha as f32, camera, packed, out);
+                (drawn, hidden) =
+                    self.mod_player_geometry(mob, who, alpha as f32, camera, packed, out);
                 drawn
             } else {
                 !is_player && self.mod_mob_geometry(mob, alpha as f32, camera, packed, out)
