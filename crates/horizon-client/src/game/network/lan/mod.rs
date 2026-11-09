@@ -744,7 +744,7 @@ pub(super) fn mob_meta(
         meta.push((
             2,
             serializer::OPTIONAL_COMPONENT,
-            Value::OptText(Some(horizon_protocol::text::literal(name))),
+            Value::OptText(Some(super::names::name_component(m, name))),
         ));
     }
     if m.name_visible {
