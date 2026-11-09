@@ -6261,6 +6261,8 @@ mod connected_statistics_save_tests {
         let mut resources = None;
         let mut game = crate::game::game_tests::tests::server_game(&mut resources);
         game.options.execution_role = ExecutionRole::DedicatedServer;
+        // The command's dedicated-only guard also checks the launch mode.
+        game.options.dedicated = Some(Vec::new());
         let dir = std::env::current_dir().unwrap().join(if stale {
             "stats-stale"
         } else {
