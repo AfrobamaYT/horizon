@@ -232,20 +232,16 @@ impl Game<'_> {
         let index = self.resident_entities.knots.locate(location.join)?;
         Some(self.resident_entities.knots[index].fence)
     }
-    /// Resident natural knot ids without allocating.
+    /// Actual natural knot owners, without allocating or inferring membership from leashes.
     pub(super) fn natural_knot_id_iter(&self) -> impl Iterator<Item = u32> + '_ {
         self.resident_entities.knots.iter().map(|knot| knot.id)
     }
     /// The ids of the level's natural knots that a lead still holds, in the
     /// order they were made.
     pub(super) fn natural_knot_ids(&self) -> Vec<u32> {
-        let mut ids: Vec<u32> = self
-            .resident_entities
-            .knots
-            .iter()
-            .map(|knot| knot.id)
-            .collect();
+        let mut ids: Vec<u32> = self.natural_knot_id_iter().collect();
         ids.sort_unstable();
+        ids.dedup();
         ids
     }
     /// BlockAttachedEntity.tick / LeashFenceKnotEntity.survives for explicitly loaded knots.
