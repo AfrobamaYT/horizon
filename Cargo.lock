@@ -507,6 +507,7 @@ dependencies = [
  "horizon-mod-package",
  "horizon-mod-point-emit",
  "horizon-port-pack",
+ "libc",
  "rustc-demangle",
  "serde",
  "serde_json",
