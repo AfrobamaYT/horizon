@@ -54,6 +54,7 @@ impl AttachmentWriteToken {
 }
 
 impl crate::wire::Wire for AttachmentHolder {
+    const LAYOUT: u64 = crate::wire::layout_name(stringify!(AttachmentHolder));
     const MIN: usize = 4;
     fn put(&self, out: &mut crate::wire::Writer) {
         match self {
@@ -92,6 +93,7 @@ impl crate::wire::Wire for AttachmentHolder {
 }
 
 impl crate::wire::Wire for AttachmentWriteToken {
+    const LAYOUT: u64 = crate::wire::layout_name(stringify!(AttachmentWriteToken));
     const MIN: usize = 12;
     fn put(&self, out: &mut crate::wire::Writer) {
         let (holder, generation) = self.0.parts();
@@ -107,6 +109,7 @@ impl crate::wire::Wire for AttachmentWriteToken {
 }
 
 impl crate::wire::Wire for AttachmentBatch {
+    const LAYOUT: u64 = crate::wire::layout_name(stringify!(AttachmentBatch));
     const MIN: usize = 4;
     fn put(&self, out: &mut crate::wire::Writer) {
         use horizon_core::nbt::{self, Limits, Tag};
