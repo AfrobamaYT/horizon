@@ -2,7 +2,7 @@
 use super::*;
 
 impl Game<'_> {
-    fn mob_at(&self, object: MobObject) -> &Mob {
+    pub(super) fn mob_at(&self, object: MobObject) -> &Mob {
         match object {
             MobObject::Resident(index) => &self.mobs[index],
             MobObject::OffLevel(id) => self.persist.off_level[&id]
@@ -11,7 +11,7 @@ impl Game<'_> {
         }
     }
 
-    fn mob_at_mut(&mut self, object: MobObject) -> &mut Mob {
+    pub(super) fn mob_at_mut(&mut self, object: MobObject) -> &mut Mob {
         match object {
             MobObject::Resident(index) => &mut self.mobs[index],
             MobObject::OffLevel(id) => self
@@ -25,7 +25,7 @@ impl Game<'_> {
 
     /// Internal object lookup, including a passenger refused level residency.
     /// This is deliberately separate from `level_entity` and native handle queries.
-    pub(super) fn mob_object(&self, id: u32) -> Option<&Mob> {
+    pub(in crate::game) fn mob_object(&self, id: u32) -> Option<&Mob> {
         self.mobs
             .iter()
             .find(|mob| mob.id == id)
@@ -33,7 +33,7 @@ impl Game<'_> {
     }
 
     /// Mutate an extant mob object without making it resident.
-    pub(super) fn mob_object_mut(&mut self, id: u32) -> Option<&mut Mob> {
+    pub(in crate::game) fn mob_object_mut(&mut self, id: u32) -> Option<&mut Mob> {
         if let Some(index) = self.mobs.iter().position(|mob| mob.id == id) {
             return Some(&mut self.mobs[index]);
         }
@@ -45,17 +45,17 @@ impl Game<'_> {
 
     /// Internal topology only: resident objects followed by retained passengers.
     /// Callers needing level membership must continue to iterate `mobs` instead.
-    pub(super) fn mob_objects(&self) -> impl Iterator<Item = &Mob> {
+    pub(in crate::game) fn mob_objects(&self) -> impl Iterator<Item = &Mob> {
         self.mobs
             .iter()
             .chain(self.persist.off_level.values().filter_map(OffLevel::as_mob))
     }
 
-    pub(super) fn load_item_transferred(
+    pub(in crate::game) fn load_item_transferred(
         &mut self,
         tag: Tag,
         uuid: Option<[i32; 4]>,
-        transferred: Option<super::entity_initialization::TransferredEntityState>,
+        transferred: Option<crate::game::entity_initialization::TransferredEntityState>,
     ) {
         self.next_entity += 1;
         // `ItemEntity(EntityType, Level)` first: its own random draws UUID, bobOffs and yaw.
@@ -74,11 +74,11 @@ impl Game<'_> {
         }
     }
 
-    pub(super) fn load_orb_transferred(
+    pub(in crate::game) fn load_orb_transferred(
         &mut self,
         tag: Tag,
         uuid: Option<[i32; 4]>,
-        mut transferred: Option<super::entity_initialization::TransferredEntityState>,
+        mut transferred: Option<crate::game::entity_initialization::TransferredEntityState>,
     ) {
         for (i, mut orb) in entity_nbt::orbs_from_nbt(&tag).into_iter().enumerate() {
             self.next_entity += 1;
@@ -99,15 +99,15 @@ impl Game<'_> {
         }
     }
 
-    pub(super) fn load_arrow_transferred(
+    pub(in crate::game) fn load_arrow_transferred(
         &mut self,
         tag: Tag,
         uuid: Option<[i32; 4]>,
         player_uuid: Option<[i32; 4]>,
-        transferred: Option<super::entity_initialization::TransferredEntityState>,
+        transferred: Option<crate::game::entity_initialization::TransferredEntityState>,
     ) {
         if let Some((mut p, in_block)) =
-            entity_nbt::arrow_from_nbt(&tag, player_uuid, super::dispenser::tipped_effect)
+            entity_nbt::arrow_from_nbt(&tag, player_uuid, crate::game::dispenser::tipped_effect)
         {
             if let Some(a) = p.arrow.as_mut() {
                 a.last_state = in_block.and_then(|t| self.state_from_nbt(&t));
@@ -128,12 +128,12 @@ impl Game<'_> {
         }
     }
 
-    pub(super) fn load_spit_or_bullet_transferred(
+    pub(in crate::game) fn load_spit_or_bullet_transferred(
         &mut self,
         tag: Tag,
         uuid: Option<[i32; 4]>,
         player_uuid: Option<[i32; 4]>,
-        transferred: Option<super::entity_initialization::TransferredEntityState>,
+        transferred: Option<crate::game::entity_initialization::TransferredEntityState>,
     ) {
         let target = self.bullet_target(&tag);
         if let Some(mut p) = entity_nbt::spit_or_bullet_from_nbt(&tag, player_uuid, target) {
@@ -151,12 +151,12 @@ impl Game<'_> {
         }
     }
 
-    pub(super) fn load_fireball_transferred(
+    pub(in crate::game) fn load_fireball_transferred(
         &mut self,
         tag: Tag,
         uuid: Option<[i32; 4]>,
         player_uuid: Option<[i32; 4]>,
-        transferred: Option<super::entity_initialization::TransferredEntityState>,
+        transferred: Option<crate::game::entity_initialization::TransferredEntityState>,
     ) {
         if let Some(mut p) = entity_nbt::fireball_from_nbt(&tag, player_uuid) {
             self.claim_owner(&mut p);
@@ -174,12 +174,12 @@ impl Game<'_> {
         }
     }
 
-    pub(super) fn load_throwable_transferred(
+    pub(in crate::game) fn load_throwable_transferred(
         &mut self,
         tag: Tag,
         uuid: Option<[i32; 4]>,
         player_uuid: Option<[i32; 4]>,
-        transferred: Option<super::entity_initialization::TransferredEntityState>,
+        transferred: Option<crate::game::entity_initialization::TransferredEntityState>,
     ) {
         if let Some(mut p) = entity_nbt::throwable_from_nbt(&tag, player_uuid) {
             self.claim_owner(&mut p);
@@ -197,11 +197,11 @@ impl Game<'_> {
         }
     }
 
-    pub(super) fn load_falling_transferred(
+    pub(in crate::game) fn load_falling_transferred(
         &mut self,
         tag: Tag,
         uuid: Option<[i32; 4]>,
-        transferred: Option<super::entity_initialization::TransferredEntityState>,
+        transferred: Option<crate::game::entity_initialization::TransferredEntityState>,
     ) {
         if let Some((state, position, velocity, age, fall_distance)) =
             entity_nbt::falling_block_from_nbt(&tag)
@@ -247,14 +247,15 @@ impl Game<'_> {
         }
     }
 
-    pub(super) fn load_trident_transferred(
+    pub(in crate::game) fn load_trident_transferred(
         &mut self,
         tag: Tag,
         uuid: Option<[i32; 4]>,
-        transferred: Option<super::entity_initialization::TransferredEntityState>,
+        transferred: Option<crate::game::entity_initialization::TransferredEntityState>,
     ) {
         if let Some(n) = entity_nbt::trident_from_nbt(&tag) {
-            let mut t = super::trident::ThrownTrident::from_nbt(n, &tag, self.pack.assets.registry);
+            let mut t =
+                crate::game::trident::ThrownTrident::from_nbt(n, &tag, self.pack.assets.registry);
             t.id = self.take_entity_id();
             // One that came through a portal keeps its cooldown.
             let id = t.id;
@@ -266,16 +267,16 @@ impl Game<'_> {
         }
     }
 
-    pub(super) fn load_rocket_transferred(
+    pub(in crate::game) fn load_rocket_transferred(
         &mut self,
         tag: Tag,
         uuid: Option<[i32; 4]>,
         player_uuid: Option<[i32; 4]>,
-        transferred: Option<super::entity_initialization::TransferredEntityState>,
+        transferred: Option<crate::game::entity_initialization::TransferredEntityState>,
     ) {
         if let Some(r) = entity_nbt::firework_rocket_from_nbt(&tag, player_uuid) {
             let id = self.take_entity_id();
-            let mut rocket = super::fireworks::Rocket::from_nbt(r);
+            let mut rocket = crate::game::fireworks::Rocket::from_nbt(r);
             rocket.id = id;
             // One that came through a portal keeps its cooldown.
             self.restore_portal_cooldown(id, &tag);
@@ -287,11 +288,11 @@ impl Game<'_> {
         }
     }
 
-    pub(super) fn load_tnt_transferred(
+    pub(in crate::game) fn load_tnt_transferred(
         &mut self,
         tag: Tag,
         uuid: Option<[i32; 4]>,
-        transferred: Option<super::entity_initialization::TransferredEntityState>,
+        transferred: Option<crate::game::entity_initialization::TransferredEntityState>,
     ) {
         if uuid.is_some_and(|u| self.target_with_uuid(u).is_some()) {
             return;
@@ -304,7 +305,7 @@ impl Game<'_> {
             // getShortOr uses NumericTag.shortValue: floor floating values
             // to int before short narrowing; integer tags narrow directly.
             let fuse = tnt_fuse(&tag);
-            self.tnts.push(super::tnt::PrimedTnt {
+            self.tnts.push(crate::game::tnt::PrimedTnt {
                 rotation: [0.0, 0.0],
                 join: Default::default(),
                 no_gravity: entity_nbt::flag(&tag, "NoGravity"),
@@ -337,12 +338,12 @@ impl Game<'_> {
         }
     }
 
-    pub(super) fn load_boat_transferred(
+    pub(in crate::game) fn load_boat_transferred(
         &mut self,
         tag: Tag,
         uuid: Option<[i32; 4]>,
         k: &str,
-        transferred: Option<super::entity_initialization::TransferredEntityState>,
+        transferred: Option<crate::game::entity_initialization::TransferredEntityState>,
     ) -> Option<u32> {
         if uuid.is_some_and(|u| self.target_with_uuid(u).is_some()) {
             return None;
@@ -352,18 +353,21 @@ impl Game<'_> {
             let riders = self.take_mob_passengers(&mut tag);
             self.next_entity += 1;
             let id = self.next_entity;
-            let (wood, chest) = super::boats::any_boat_wood(k).unwrap_or(("oak", false));
-            let mut b = super::boats::Boat::new(id, std::sync::Arc::from(wood), position, yaw);
+            let (wood, chest) = crate::game::boats::any_boat_wood(k).unwrap_or(("oak", false));
+            let mut b =
+                crate::game::boats::Boat::new(id, std::sync::Arc::from(wood), position, yaw);
             b.no_gravity = entity_nbt::flag(&tag, "NoGravity");
             b.on_ground = entity_nbt::flag(&tag, "OnGround");
-            b.fire_ticks = super::boats::saved_fire(&tag);
+            b.fire_ticks = crate::game::boats::saved_fire(&tag);
             b.pitch = entity_nbt::rotation(&tag)[1];
             // Entity.load: OnGround and fall_distance, as saved.
             (b.on_ground, b.fall_distance) = entity_nbt::ground_from_nbt(&tag);
             if chest {
                 b = b.with_chest();
-                b.items =
-                    horizon_client::save::decode_items(tag.get("Items"), super::boats::CHEST_SLOTS);
+                b.items = horizon_client::save::decode_items(
+                    tag.get("Items"),
+                    crate::game::boats::CHEST_SLOTS,
+                );
             }
             b.velocity = velocity;
             // AbstractBoat.readAdditionalSaveData: the lead's holder.
@@ -382,22 +386,22 @@ impl Game<'_> {
         None
     }
 
-    pub(super) fn load_cart_transferred(
+    pub(in crate::game) fn load_cart_transferred(
         &mut self,
         tag: Tag,
         uuid: Option<[i32; 4]>,
         k: &str,
-        transferred: Option<super::entity_initialization::TransferredEntityState>,
+        transferred: Option<crate::game::entity_initialization::TransferredEntityState>,
     ) -> Option<u32> {
         if uuid.is_some_and(|u| self.target_with_uuid(u).is_some()) {
             return None;
         }
-        let kind = super::minecarts::CartKind::from_id(k).unwrap();
+        let kind = crate::game::minecarts::CartKind::from_id(k).unwrap();
         let mut tag = tag;
         let riders = self.take_mob_passengers(&mut tag);
         let id = self.next_entity + 1;
-        if let Some(mut c) = super::minecarts::Minecart::from_nbt(&tag, id, kind) {
-            super::minecarts::forget_unreadable_display(&mut c, |t| {
+        if let Some(mut c) = crate::game::minecarts::Minecart::from_nbt(&tag, id, kind) {
+            crate::game::minecarts::forget_unreadable_display(&mut c, |t| {
                 self.state_from_nbt(t).is_some()
             });
             self.roll_cart_loot(&mut c, &tag);
@@ -416,18 +420,18 @@ impl Game<'_> {
         None
     }
 
-    pub(super) fn mob_uuid_admission_refused(&self, uuid: Option<[i32; 4]>) -> bool {
+    pub(in crate::game) fn mob_uuid_admission_refused(&self, uuid: Option<[i32; 4]>) -> bool {
         uuid.is_some_and(|uuid| {
             self.target_with_uuid(uuid)
-                .is_some_and(|target| target != super::commands::Target::Player)
+                .is_some_and(|target| target != crate::game::commands::Target::Player)
         })
     }
 
-    pub(super) fn load_mob_transferred(
+    pub(in crate::game) fn load_mob_transferred(
         &mut self,
         tag: Tag,
         mount: Option<u32>,
-        transferred: Option<super::entity_initialization::TransferredEntityState>,
+        transferred: Option<crate::game::entity_initialization::TransferredEntityState>,
     ) -> Option<u32> {
         let uuid = entity_nbt::uuid(&tag);
         // Only disk reconstruction coalesces the player's saved copy with a
@@ -537,7 +541,7 @@ impl Game<'_> {
     /// passengers Horizon doesn't simulate stay. An entry no entity loads
     /// from goes (`EntityType.loadPassengersRecursive` mounts only a loaded
     /// one): not a compound, or no registered type (`EntityType.by`).
-    fn take_mob_passengers(&mut self, tag: &mut Tag) -> Vec<Tag> {
+    pub(super) fn take_mob_passengers(&mut self, tag: &mut Tag) -> Vec<Tag> {
         self.load_entity_types();
         // Without the registry nothing can be told apart: keep every entry.
         let registry = self.entity_types_loaded();
@@ -565,7 +569,7 @@ impl Game<'_> {
     /// `Entity.shouldBeSaved`: the mobs riding entity `id` under `tag`'s
     /// `Passengers`, after the passengers it kept from loading. Discarded
     /// passengers cannot save even before their list entry is swept.
-    fn mob_passenger_objects(&self, id: u32) -> Vec<MobObject> {
+    pub(super) fn mob_passenger_objects(&self, id: u32) -> Vec<MobObject> {
         let mut riders: Vec<(i64, u32, MobObject)> = self
             .mobs
             .iter()
@@ -597,7 +601,7 @@ impl Game<'_> {
         riders.into_iter().map(|(_, _, object)| object).collect()
     }
 
-    pub(super) fn mob_passenger_ids(&self, root: u32) -> Vec<u32> {
+    pub(in crate::game) fn mob_passenger_ids(&self, root: u32) -> Vec<u32> {
         self.mob_passenger_objects(root)
             .into_iter()
             .map(|object| self.mob_at(object).id)
@@ -606,12 +610,15 @@ impl Game<'_> {
 
     /// Capture after tree serialization and before source removal. This consumes
     /// each object's runtime ownership once, independently of duplicate UUIDs.
-    pub(super) fn capture_vehicle_tree_state(
+    pub(in crate::game) fn capture_vehicle_tree_state(
         &mut self,
         root: u32,
     ) -> Option<TransferredVehicleTree> {
         let (kind, name) = if let Some(mob) = self.mob_object(root) {
-            (VehicleTreeKind::Mob, super::native_hooks::mob_kind(mob))
+            (
+                VehicleTreeKind::Mob,
+                crate::game::native_hooks::mob_kind(mob),
+            )
         } else if let Some(boat) = self.boats.iter().find(|boat| boat.id == root) {
             (VehicleTreeKind::Boat, boat.entity_type())
         } else {
@@ -636,7 +643,7 @@ impl Game<'_> {
         })
     }
 
-    fn prepare_vehicle_transfer(
+    pub(super) fn prepare_vehicle_transfer(
         &mut self,
         mut tag: Tag,
         tree: TransferredVehicleTree,
@@ -672,7 +679,7 @@ impl Game<'_> {
     /// Reconstruct using actual object IDs, even when the copied root is refused
     /// residency. Mob roots follow passenger-first vanilla dimension admission;
     /// boat/cart roots retain their existing admission until the #2419 repair.
-    pub(super) fn restore_vehicle_tree_state(
+    pub(in crate::game) fn restore_vehicle_tree_state(
         &mut self,
         tag: Tag,
         tree: TransferredVehicleTree,
@@ -684,7 +691,7 @@ impl Game<'_> {
         Some(RestoredVehicleTree { root, by_source })
     }
 
-    fn restore_vehicle_transfer(
+    pub(super) fn restore_vehicle_transfer(
         &mut self,
         tree: PreparedVehicleTransfer,
         passenger_first: bool,
@@ -729,12 +736,12 @@ impl Game<'_> {
         Some(root)
     }
 
-    fn restore_vehicle_object(
+    pub(super) fn restore_vehicle_object(
         &mut self,
         tag: Tag,
         kind: VehicleTreeKind,
         name: &str,
-        state: super::entity_initialization::TransferredEntityState,
+        state: crate::game::entity_initialization::TransferredEntityState,
     ) -> Option<u32> {
         let uuid = entity_nbt::uuid(&tag);
         match kind {
@@ -744,7 +751,7 @@ impl Game<'_> {
         }
     }
 
-    fn mob_object_slot(&self, id: u32) -> Option<MobObject> {
+    pub(super) fn mob_object_slot(&self, id: u32) -> Option<MobObject> {
         self.mobs
             .iter()
             .position(|mob| mob.id == id)
@@ -758,7 +765,7 @@ impl Game<'_> {
             })
     }
 
-    fn mob_object_slots(&self) -> impl Iterator<Item = MobObject> + '_ {
+    pub(super) fn mob_object_slots(&self) -> impl Iterator<Item = MobObject> + '_ {
         (0..self.mobs.len()).map(MobObject::Resident).chain(
             self.persist
                 .off_level
@@ -767,14 +774,14 @@ impl Game<'_> {
         )
     }
 
-    fn mob_object_tree_nbt(&mut self, object: MobObject) -> Tag {
+    pub(super) fn mob_object_tree_nbt(&mut self, object: MobObject) -> Tag {
         let id = self.mob_at(object).id;
         let mut tag = self.mob_object_nbt(object);
         self.put_mob_passengers(&mut tag, id);
         tag
     }
 
-    fn mob_object_nbt(&mut self, object: MobObject) -> Tag {
+    pub(super) fn mob_object_nbt(&mut self, object: MobObject) -> Tag {
         let id = self.mob_at(object).id;
         let uuid = self.uuid_for(id);
         // A warden's anger names each suspect by UUID. A mob that has never been
@@ -869,7 +876,7 @@ impl Game<'_> {
     /// Trace only edges touching off-level objects. A rejected leaf is owned
     /// by its resident vehicle; an orphaned rejected ancestor can instead be
     /// owned by a resident descendant or a player riding it.
-    fn retain_off_level_objects(&mut self, retained: &mut HashSet<u32>) {
+    pub(super) fn retain_off_level_objects(&mut self, retained: &mut HashSet<u32>) {
         let mut links: HashMap<u32, Vec<u32>> = HashMap::new();
         for mob in self.mob_objects() {
             if let Some(vehicle) = mob.extra.mount

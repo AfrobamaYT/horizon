@@ -192,12 +192,7 @@ enum MobObject {
     OffLevel(u32),
 }
 
-impl Game<'_> {
-
-
-
-
-}
+impl Game<'_> {}
 
 impl EntityMemory {
     pub(super) fn force_meta(&mut self, id: u32, index: u8) {
@@ -754,12 +749,10 @@ impl Game<'_> {
         self.load_item_transferred(tag, uuid, None);
     }
 
-
     /// A saved experience orb (or the orbs it stands for).
     pub(super) fn load_orb(&mut self, tag: Tag, uuid: Option<[i32; 4]>) {
         self.load_orb_transferred(tag, uuid, None);
     }
-
 
     /// A saved arrow or spectral arrow.
     pub(super) fn load_arrow(
@@ -770,7 +763,6 @@ impl Game<'_> {
     ) {
         self.load_arrow_transferred(tag, uuid, player_uuid, None);
     }
-
 
     /// A saved llama spit or shulker bullet.
     pub(super) fn load_spit_or_bullet(
@@ -800,7 +792,6 @@ impl Game<'_> {
         self.load_fireball_transferred(tag, uuid, player_uuid, None);
     }
 
-
     /// A saved thrown item.
     pub(super) fn load_throwable(
         &mut self,
@@ -811,18 +802,15 @@ impl Game<'_> {
         self.load_throwable_transferred(tag, uuid, player_uuid, None);
     }
 
-
     /// A saved falling block.
     pub(super) fn load_falling(&mut self, tag: Tag, uuid: Option<[i32; 4]>) {
         self.load_falling_transferred(tag, uuid, None);
     }
 
-
     /// A saved thrown trident.
     pub(super) fn load_trident(&mut self, tag: Tag, uuid: Option<[i32; 4]>) {
         self.load_trident_transferred(tag, uuid, None);
     }
-
 
     /// A saved firework rocket.
     pub(super) fn load_rocket(
@@ -834,25 +822,21 @@ impl Game<'_> {
         self.load_rocket_transferred(tag, uuid, player_uuid, None);
     }
 
-
     /// `PrimedTnt.readAdditionalSaveData`: its numeric short fuse (80 when absent) and motion.
     // Its Passengers ride it (EntityType.loadEntityRecursive forces them on).
     pub(super) fn load_tnt(&mut self, tag: Tag, uuid: Option<[i32; 4]>) {
         self.load_tnt_transferred(tag, uuid, None);
     }
 
-
     /// A saved boat.
     pub(super) fn load_boat(&mut self, tag: Tag, uuid: Option<[i32; 4]>, k: &str) {
         self.load_boat_transferred(tag, uuid, k, None);
     }
 
-
     /// A saved minecart.
     pub(super) fn load_cart(&mut self, tag: Tag, uuid: Option<[i32; 4]>, k: &str) {
         self.load_cart_transferred(tag, uuid, k, None);
     }
-
 
     /// A saved armor stand.
     pub(super) fn load_armor_stand(&mut self, tag: Tag, uuid: Option<[i32; 4]>) {
@@ -1022,11 +1006,6 @@ impl Game<'_> {
         add_passengers(tag, riders);
     }
 
-
-
-
-
-
     /// Read an unsimulated entity without assigning it a new identity.
     pub(super) fn other_from_nbt(
         tag: &Tag,
@@ -1159,7 +1138,6 @@ impl Game<'_> {
         }
         object
     }
-
 
     /// `Entity.getVehicle` of entity `id`: the mob, boat or minecart a mob
     /// rides (only a mob rides another entity here).
@@ -1307,7 +1285,6 @@ impl Game<'_> {
     pub(super) fn mob_tree_nbt(&mut self, i: usize) -> Tag {
         self.mob_object_tree_nbt(MobObject::Resident(i))
     }
-
 
     /// `LivingEntity.addAdditionalSaveData`'s `last_hurt_by_mob` and
     /// `ticks_since_last_hurt_by_mob`, a PARTIAL projection at save time: both
