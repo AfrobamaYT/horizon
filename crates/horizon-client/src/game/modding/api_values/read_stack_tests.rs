@@ -53,15 +53,15 @@ fn read_consumers_forward_nonresident_stacks_and_mutants() {
             .unwrap();
         source[start + 1..end].into()
     }
-    let draw = include_str!("../host/draw.rs");
+    let draw = include_str!("../../host/draw.rs");
     let block = &draw[draw.find("impl BlockEntityDrawContext").unwrap()..];
-    let stations = include_str!("../blocks/stations.rs");
+    let stations = include_str!("../../blocks/stations.rs");
     let tooltip = &stations[stations.find("for image in &images {").unwrap()..];
     let methods = [
         (
             "may_place",
             body(
-                include_str!("api_values.rs"),
+                include_str!("../api_values.rs"),
                 "fn may_place(&self, stack: &ApiStack)",
             ),
         ),
