@@ -95,27 +95,27 @@ fn target(id: i32) -> Option<InteractTarget> {
 #[ignore = "private prepared resources; process-wide mods, run this test alone"]
 fn actual_item_interact_mob_fallback_priority_and_filters() {
     let root = PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-    let settings = Settings::default();
-    let loaded = load_resources(
-        horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
-        Vec::new(),
-        None,
-        &root,
-        &settings,
-        Instant::now(),
-        false,
-        crate::game::execution_role::ExecutionRole::IntegratedServer,
-        &Progress::new(),
-        &mut |_, _| unreachable!(),
-    )
-    .unwrap();
-    let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
-    options.resources = root.clone();
-    options.execution_role = execution_role::ExecutionRole::IntegratedServer;
     let probe = Probe::default();
     let mods: mod_api::Mods = vec![mod_api::ModEntry::new("item", Box::new(probe.clone()))].into();
     mod_api::testing::with_mods(mods.clone(), || {
         crate::game::api_values::install_parts(&mods).unwrap();
+        let settings = Settings::default();
+        let loaded = load_resources(
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
+            None,
+            &root,
+            &settings,
+            Instant::now(),
+            false,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = execution_role::ExecutionRole::IntegratedServer;
         mod_api::__private::mark_game_thread();
         let mut game = Game::new(
             &loaded.resources,
@@ -131,6 +131,7 @@ fn actual_item_interact_mob_fallback_priority_and_filters() {
         .unwrap();
         game.native_lifecycle
             .begin_open(mod_api::NativeAuthority::IntegratedServer);
+        crate::game::native_entity_refs::tests::resolve_parts(&game).unwrap();
         game.world = World::new(game.res.facts().air, 1);
         game.world
             .chunks
