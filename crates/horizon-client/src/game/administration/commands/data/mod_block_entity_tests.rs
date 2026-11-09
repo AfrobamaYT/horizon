@@ -77,6 +77,14 @@ fn actual_data_commands_preserve_same_mod_entity_runtime_state() {
         &horizon_mod_package::enabled::EnabledMods::default(),
     )
     .unwrap();
+    let (registry, _) = horizon_world::level::data::load_registry_with_flags(&root).unwrap();
+    crate::game::api_values::register_game_keys((0..registry.len()).map(|id| {
+        registry
+            .state(horizon_world::registry::BlockStateId(id as u32))
+            .unwrap()
+            .name
+            .clone()
+    }));
     let settings = Settings::default();
     let loaded = load_resources(
         horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
