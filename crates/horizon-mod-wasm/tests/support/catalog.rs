@@ -11,7 +11,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             point.name.starts_with("listener_fixture_")
                 || matches!(
                     point.name.as_str(),
-                    "tick" | "game_server_lifecycle_remember_shutdown" | "game_beacon_average"
+                    "tick"
+                        | "game_server_lifecycle_remember_shutdown"
+                        | "game_beacon_average"
+                        | "game_commands_wrap_degrees"
                 )
         })
         .collect();
