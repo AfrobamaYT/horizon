@@ -130,10 +130,16 @@ mod tests {
             assert!(!stale.set_weather(game, 0, 10, true, false));
 
             assert!(level.set_weather_levels(game, 0.5, 2.0));
+            let w = &game.world.weather;
+            assert_eq!(
+                (w.rain_level, w.thunder_level),
+                ((0.5, 0.5), (1.0, 1.0)),
+                "clamped, without fading"
+            );
             assert_eq!(
                 level.weather(game),
-                Some((0.5, 1.0)),
-                "clamped, without fading"
+                Some((0.5, 0.5)),
+                "getThunderLevel reads thunder times rain"
             );
             assert!(!level.set_weather_levels(game, f32::NAN, 0.0));
             assert!(!stale.set_weather_levels(game, 0.0, 0.0));
