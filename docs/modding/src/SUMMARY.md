@@ -25,6 +25,7 @@
 - [Design: multi-block placement](concepts/multi-block-placement.md)
 - [Design: Part instance state](concepts/part-instance-state.md)
 - [Design: general entity types](concepts/general-entity-types.md)
+- [Design: offline players and selection](concepts/offline-players-and-selection.md)
 - [Design: pending children](concepts/pending-children.md)
 - [Design: mod datapack registries](concepts/mod-datapack-registries.md)
 - [Design: worldgen features and placers](concepts/worldgen-features.md)
