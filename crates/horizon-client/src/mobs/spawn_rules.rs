@@ -646,7 +646,7 @@ impl SpawnLevel for super::MobWorld<'_> {
         self.world_seed
     }
     fn player_near(&self, x: f64, y: f64, z: f64, distance: f64) -> bool {
-        self.player.as_ref().is_some_and(|p| {
+        self.selected_player().is_some_and(|p| {
             let d = (p.position.x - x).powi(2)
                 + (p.position.y - y).powi(2)
                 + (p.position.z - z).powi(2);

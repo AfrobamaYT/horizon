@@ -274,7 +274,7 @@ mod tests {
 
         // ExperienceOrb.award: 100 is 73, 17, 7 and 3, far apart from other orbs.
         assert!(game.level_award_experience(level, 100.5, 70.0, 0.5, 100));
-        let values: Vec<u32> = game.orbs.iter().map(|o| o.value).collect();
+        let values: Vec<u32> = game.orbs.iter().map(|o| o.points()).collect();
         assert_eq!(values, [73, 17, 7, 3]);
         assert!(!game.level_award_experience(level, 100.5, 70.0, 0.5, 0));
 

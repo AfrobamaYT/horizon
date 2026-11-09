@@ -156,10 +156,16 @@ pub(super) enum BlockInteraction {
 #[derive(Clone, Copy, Default)]
 pub(super) struct ExplosionSource {
     silent: bool,
+    /// The entity that exploded and its kind (`Explosion.getDirectSourceEntity`), when known.
+    entity: Option<(u32, &'static str)>,
 }
 impl ExplosionSource {
     pub(super) fn with_silence(mut self, silent: bool) -> Self {
         self.silent = silent;
+        self
+    }
+    pub(super) fn with_entity(mut self, id: u32, kind: &'static str) -> Self {
+        self.entity = Some((id, kind));
         self
     }
 }
@@ -632,7 +638,7 @@ impl Game<'_> {
         if radius < 1.0e-5 {
             return Vec::new();
         }
-        self.explosion_hits_special(center, radius, blocks);
+        self.explosion_hits_special(center, radius, blocks, damage_type);
         let diameter = f64::from(radius * 2.0);
         let damage = |dist: f64, exposure: f32| {
             let pow = (1.0 - dist) * f64::from(exposure);
@@ -719,6 +725,22 @@ impl Game<'_> {
         let (mut items_kept, mut orbs_kept) = (0, 0);
         let (mut boats_gone, mut carts_gone) = (0, 0);
         let mut destroyed_contents = Vec::new();
+        macro_rules! blocked_damage {
+            ($id:expr, $kind:expr) => {{
+                let source = horizon_client::health::HurtSource {
+                    damage_type,
+                    causing: attacker.as_ref().map_or(0, |(id, _)| *id as i32),
+                    direct: exploding.map_or(0, |id| id as i32),
+                    position: Some(center),
+                };
+                let creative = self.creative_damage_source_id(source.causing);
+                let vanilla = self.saved_refuses_damage($id as u32, damage_type, creative);
+                crate::game::entity::damage_level_of!(self, scoped).invulnerability_check(
+                    horizon_client::health::Hurting::Entity($id, $kind, source),
+                    vanilla,
+                )
+            }};
+        }
         for handle in self.entity_handles() {
             let handle = match handle {
                 EntityHandle::Boat(i) => EntityHandle::Boat(i - boats_gone),
@@ -777,8 +799,10 @@ impl Game<'_> {
                     // a blast with a source entity under `mobGriefing` off never
                     // reaches here (`items_ignore`).
                     EntityHandle::Item(i) => {
+                        let id = self.dropped[i].id as i32;
+                        let blocked = blocked_damage!(id, "minecraft:item");
                         let item = &mut self.dropped[i];
-                        if &*item.stack.item != "minecraft:nether_star" {
+                        if !blocked && &*item.stack.item != "minecraft:nether_star" {
                             item.health = (item.health as f32 - amount) as i32;
                             destroyed = item.health <= 0;
                             if destroyed {
@@ -796,20 +820,29 @@ impl Game<'_> {
                     }
                     // `ExperienceOrb.hurtServer` takes the damage off their 5 health.
                     EntityHandle::Orb(i) => {
-                        destroyed = self.orbs[i].hurt(amount);
+                        let id = self.orbs[i].id as i32;
+                        if !blocked_damage!(id, "minecraft:experience_orb") {
+                            destroyed = self.orbs[i].hurt(amount);
+                        }
                     }
                     // `VehicleEntity.hurtServer` (explosions ignite TNT carts);
                     // a destroyed one is gone before the push.
                     EntityHandle::Cart(i) => {
-                        let len = self.carts.len();
-                        self.hurt_cart(i, amount, false, true);
-                        carts_gone += len - self.carts.len();
+                        let (id, kind) = (self.carts[i].id as i32, self.carts[i].kind.id());
+                        if !blocked_damage!(id, kind) {
+                            let len = self.carts.len();
+                            self.hurt_cart(i, amount, false, true);
+                            carts_gone += len - self.carts.len();
+                        }
                     }
                     // `VehicleEntity.hurtServer`: damage * 10, broken past 40.
                     EntityHandle::Boat(i) => {
-                        let len = self.boats.len();
-                        self.hurt_boat(i, amount, false);
-                        boats_gone += len - self.boats.len();
+                        let (id, kind) = (self.boats[i].id as i32, self.boats[i].entity_type());
+                        if !blocked_damage!(id, &kind) {
+                            let len = self.boats.len();
+                            self.hurt_boat(i, amount, false);
+                            boats_gone += len - self.boats.len();
+                        }
                     }
                     // `hurtServer` does nothing to the rest.
                     _ => {}
@@ -861,9 +894,28 @@ impl Game<'_> {
         // Frames, paintings, cushions and armour stands last: vanilla lists
         // the entities in reach before hurting any, so the items they drop
         // here are neither destroyed nor pushed by the same blast.
+        // BlockAttachedEntity.kill / ArmorStand.kill credit DamageSource.getEntity.
+        // VehicleEntity.destroy above uses Entity.kill and keeps the vehicle as source.
         self.explosion_breaks_frames(center, diameter, interaction);
         self.explosion_breaks_decorations(center, diameter, interaction);
         pushed
+    }
+    /// `ServerExplosion.getIndirectSourceEntity`: the causing living entity,
+    /// including a TNT igniter or the player who broke an end crystal.
+    pub(super) fn explosion_kill_credit(&self) -> Option<super::commands::Target> {
+        use super::commands::Target;
+        // A primed TNT's owner (a player) names the blast before any mob does.
+        if self.combat.blast_owner.is_some() {
+            return Some(
+                self.combat
+                    .blast_guest
+                    .map_or(Target::Player, Target::Guest),
+            );
+        }
+        if let Some((id, _)) = self.blast_attacker() {
+            return Some(Target::Mob(id));
+        }
+        self.crystal_blast_player()
     }
     /// `blast_spares_decorations` for the blast going off now: its causing
     /// mob (`blast_attacker`) is the source's entity.
@@ -927,6 +979,22 @@ impl Game<'_> {
             if !super::armor_stands::spared_by_blast(a)
                 && blast_reaches(center, diameter, [p.x, p.y, p.z])
             {
+                let id = a.id;
+                let source = horizon_client::health::HurtSource {
+                    damage_type,
+                    causing: causing as i32,
+                    direct: causing as i32,
+                    position: Some(center),
+                };
+                let creative = self.creative_damage_source_id(source.causing);
+                let vanilla = self.saved_refuses_damage(id, damage_type, creative);
+                if crate::game::entity::damage_level_of!(self, scoped).invulnerability_check(
+                    horizon_client::health::Hurting::ArmorStand(id as i32, source),
+                    vanilla,
+                ) {
+                    i += 1;
+                    continue;
+                }
                 self.break_armor_stand_by_anything(i, damage_type, causing);
             } else {
                 i += 1;
@@ -952,7 +1020,9 @@ impl Game<'_> {
             let (lo, hi) = self.paintings[i].bounds();
             let at = [0, 1, 2].map(|k| (lo[k] + hi[k]) / 2.0);
             // A painting a mod keeps stays at `i`.
-            if !(blast_reaches(center, diameter, at) && self.break_painting(i, false)) {
+            if !(blast_reaches(center, diameter, at)
+                && self.break_painting_by(i, false, self.explosion_kill_credit()))
+            {
                 i += 1;
             }
         }
@@ -960,7 +1030,7 @@ impl Game<'_> {
         while i < self.cushions.len() {
             let p = self.cushions[i].position;
             if blast_reaches(center, diameter, [p.x, p.y, p.z]) {
-                self.break_cushion(i, false);
+                self.break_cushion_by(i, false, self.explosion_kill_credit());
             } else {
                 i += 1;
             }
@@ -1587,7 +1657,7 @@ mod tests {
                     assert_eq!(
                         game.orbs
                             .iter()
-                            .map(|orb| orb.value * orb.count)
+                            .map(|orb| orb.points() * orb.count)
                             .sum::<u32>(),
                         5
                     );

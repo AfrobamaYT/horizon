@@ -1,6 +1,7 @@
 //! The player's `CombatTracker`: the damage taken lately, who dealt it and
 //! where the player fell from, turned into the vanilla death message.
 use super::{Game, commands::Target};
+
 use horizon_client::{
     health::{Attack, HealthEvent},
     mobs::{Mob, Species, stuck::Stuck},
@@ -163,6 +164,18 @@ impl CombatTracker {
     /// The attack lent by the enclosing [`Game::with_attack`] (`damage_level_of!(game, scoped)`).
     pub(super) fn attack(&self) -> &Attack {
         &self.attack
+    }
+
+    /// The newest damage of this fight for `events`: when it landed (game
+    /// time), its damage type, the amount and the name of what dealt it.
+    pub(super) fn last_hit(&self) -> Option<(i64, String, Option<f32>, Option<String>)> {
+        let e = self.entries.last()?;
+        let by = e
+            .attacker
+            .as_ref()
+            .map(|(_, t)| t.plain())
+            .or_else(|| e.direct.as_ref().map(Text::plain));
+        Some((self.last_damage, e.damage_type.clone(), Some(e.damage), by))
     }
     /// The last blow taken: its damage type and the causing entity's id (0
     /// for none), for `LivingDeathEvent`.
