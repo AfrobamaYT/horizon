@@ -35,6 +35,11 @@ jobs:
             ln -s "$target" "$GITHUB_WORKSPACE/target"
           fi
           echo "CARGO_TARGET_DIR=$target" >> "$GITHUB_ENV"
+          if [[ '${{ runner.environment }}' != 'github-hosted' ]]; then
+            # build-std fingerprints rust-src mtimes, including its build scripts.
+            # Keep the toolchain beside its artifacts across ephemeral runners.
+            echo "RUSTUP_HOME=$target/rustup" >> "$GITHUB_ENV"
+          fi
           cache="$target/wasm-fixtures"
           if [[ '${{ runner.environment }}' == 'github-hosted' ]]; then
             cache="$GITHUB_WORKSPACE/.wasm-fixture-targets"
