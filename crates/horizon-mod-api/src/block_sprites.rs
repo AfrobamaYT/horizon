@@ -102,6 +102,7 @@ pub struct RuntimeSprite {
 /// Horizon stitches its sprites into the GUI atlas, each under [`Self::sprite_name`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 // exhaustive: mods submit declarations by value
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct TextureAtlasRegistration {
     /// The atlas's id, in the mod's own namespace (`mymod:icons`).
     pub atlas: Identifier,
