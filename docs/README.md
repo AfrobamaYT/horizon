@@ -63,6 +63,8 @@ To play, use [the launcher](../launcher/README.md); the project site is [playhor
 - [Version ports](version-ports.md): how a new Minecraft release is detected, diffed against the pinned one and ported, and what stays manual.
 - [Reading vanilla](parity-workflow.md#reading-vanilla): the local decompiled sources and bytecode queries the harnesses build on.
 
+- [Translations](translations.md): language coverage and human review of machine-written strings.
+
 ## Design notes
 
 - [Design system](design-system.md): shared tokens and interface rules for the launcher, website and Horizon-only game overlays.
