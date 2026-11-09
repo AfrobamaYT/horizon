@@ -19,6 +19,7 @@
 - [Design: decide, fire, apply](concepts/decide-fire-apply.md)
 - [Design: client action pipeline](concepts/client-action-pipeline.md)
 - [Design: multi-block placement](concepts/multi-block-placement.md)
+- [Design: Part instance state](concepts/part-instance-state.md)
 - [Design: moving structures](concepts/moving-structures.md)
 - [Design: custom recipe-book settings](concepts/recipe-book-types.md)
 - [Design: section meshing](concepts/section-meshing.md)
