@@ -85,7 +85,7 @@ fn guest(layout: u64, body: &str) -> Vec<u8> {
 }
 fn module(body: &str) -> WasmMod {
     let engine = engine().unwrap();
-    let bytes = guest(mod_api::wire::LAYOUT, body);
+    let bytes = guest(*mod_api::wire::LAYOUT, body);
     WasmMod::instantiate(
         &engine,
         &[Member {
@@ -542,7 +542,7 @@ fn linker_heap_symbols_follow_all_members_static_data() {
 
 #[test]
 fn boundary_exports_are_per_member_but_other_horizon_symbols_are_not() {
-    let bytes = guest(mod_api::wire::LAYOUT, "i64.const 0");
+    let bytes = guest(*mod_api::wire::LAYOUT, "i64.const 0");
     let engine = engine().unwrap();
     let modules = WasmMod::instantiate(
         &engine,
@@ -593,7 +593,7 @@ fn loader_initializes_and_installs_a_wasm_entry() {
     )
     .unwrap();
     let module = guest(
-        mod_api::wire::LAYOUT,
+        *mod_api::wire::LAYOUT,
         r#"local.get 0 i32.const -256 i32.eq if (result i64)
             i32.const 4096 local.get 2 i32.store
             i32.const 2048 local.get 1 local.get 2 memory.copy
@@ -650,7 +650,7 @@ fn invalid_import_input_is_a_trap_not_a_host_panic() {
 #[test]
 fn layout_mismatch_is_a_mods_page_refusal() {
     let engine = engine().unwrap();
-    let bytes = guest(mod_api::wire::LAYOUT ^ 1, "i64.const 0");
+    let bytes = guest(*mod_api::wire::LAYOUT ^ 1, "i64.const 0");
     let refusal = WasmMod::instantiate(
         &engine,
         &[Member {
@@ -674,7 +674,7 @@ fn point_record_layout_mismatch_is_refused() {
         (func (export "horizon_layout_ext") (result i64) i64.const {})
         (func (export "horizon_in") (param i32) (result i32) i32.const 0)
         (func (export "horizon_hook") (param i32) (result i64) i64.const 0))"#,
-        mod_api::wire::LAYOUT,
+        *mod_api::wire::LAYOUT,
         mod_points::POINT_LAYOUT ^ 1
     ))
     .unwrap();

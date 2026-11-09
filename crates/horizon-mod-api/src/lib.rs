@@ -34,6 +34,7 @@ impl ModelRef {
 /// Why a standalone model could not be resolved or drawn. Errors append no geometry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum ModelError {
     /// The name is not a registered, successfully baked standalone model, or its slot is absent.
     UnknownModel,
@@ -45,6 +46,7 @@ pub enum ModelError {
 /// worldgen providers and fluid queries answer. Valid for the running game only; never save it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 // exhaustive: a state id is its number
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct BlockStateId(pub u32);
 
 /// A dimension (`minecraft:the_nether`), as the game's table numbers it: a `LevelRef`'s identity.
@@ -56,6 +58,7 @@ pub struct DimensionKey(u32);
 /// Why a game rule category declaration was refused.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum GameRuleError {
     /// The identifier is invalid.
     InvalidId,
@@ -70,6 +73,7 @@ pub enum GameRuleError {
 /// [`Registrar::modify_entity_attributes`](EntityAttributesRegistrar::modify_entity_attributes)).
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum EntityAttributeError {
     /// The entity type's id is invalid or empty, or, for a declared set, in a
     /// namespace the declaring mod does not own.
@@ -86,6 +90,7 @@ pub enum EntityAttributeError {
 /// ([`Registrar::declare_attribute`](AttributesRegistrar::declare_attribute)).
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum AttributeRegistrationError {
     /// Only both-side packages may change the attribute registry.
     WrongSide,
@@ -104,6 +109,7 @@ pub enum AttributeRegistrationError {
 /// Tooltip color semantics for an attribute change.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 // exhaustive: vanilla's `Attribute.Sentiment` has these three values, and the game matches them all
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum Sentiment {
     /// Increasing values are beneficial.
     #[default]
@@ -143,6 +149,7 @@ use std::sync::{Arc, OnceLock};
 /// The family of a client notification entering the toast queue.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum ToastKind {
     /// An advancement completed by the local player.
     Advancement,
@@ -159,6 +166,7 @@ pub enum ToastKind {
 /// Sampling parameters for `LevelRef::find_closest_biome`, in blocks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct BiomeSearch {
     /// Centre of the sampled spiral, in block coordinates.
     pub origin: [i32; 3],
@@ -190,6 +198,7 @@ impl BiomeSearch {
 /// The first matching sample in vanilla's closest-biome search order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct BiomeSearchResult {
     /// Registry id of the matching biome.
     pub biome: String,
@@ -206,6 +215,7 @@ impl BiomeSearchResult {
 /// Search parameters for `LevelRef::find_nearest_structure`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct StructureSearch {
     /// Where the search starts, in block coordinates; the distance is horizontal.
     pub origin: [i32; 3],
@@ -227,6 +237,7 @@ impl StructureSearch {
 /// The nearest structure start a search found.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct StructureSearchResult {
     /// Registry id of the structure, the tag's member that matched for a `#tag`.
     pub structure: String,
@@ -247,6 +258,7 @@ impl StructureSearchResult {
 /// Build range and sky properties of a loaded level's dimension type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct LevelDimensionShape {
     /// Lowest buildable block Y.
     pub min_y: i32,
@@ -281,6 +293,7 @@ impl LevelDimensionShape {
 /// The registry facts a recipe viewer needs for an enchantment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct EnchantmentInfo {
     /// Registry name, including namespace.
     pub id: String,
@@ -305,6 +318,7 @@ impl EnchantmentInfo {
 /// forwarded to later Parts and is never consumed by the engine.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct FluidState {
     /// Registered fluid identity.
     pub fluid: FluidKey,
@@ -337,6 +351,7 @@ impl FluidState {
     }
 }
 
+// no wire: borrowed host or registrar backend; access stays scoped to the owning call.
 /// A hook's mutable block entity payload, with a read-only type identity.
 /// The private handle cannot be constructed or taken out by a mod.
 ///
@@ -406,6 +421,7 @@ use std::time::Duration;
 /// What a key did in an `input_key` event (GLFW's `action`: release 0, press 1, repeat 2).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: a closed set the game matches without a wildcard
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum KeyAction {
     /// The key was let go.
     Release,
@@ -421,6 +437,7 @@ pub enum KeyAction {
 /// game casts it to a whole number as vanilla does).
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeArmorHurt {
     /// The equipment slot the armor piece sits in.
     pub slot: EquipmentSlot,
@@ -437,6 +454,7 @@ pub struct NativeArmorHurt {
 /// The bits use GLFW's input-event encoding: shift 1, control 2, alt 4 and super 8.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct ClientModifiers {
     /// Modifier bits in GLFW's input-event encoding.
     pub bits: u32,
@@ -468,6 +486,7 @@ impl ClientModifiers {
 /// A vanilla key mapping as the client holds it (`ClientHost::mapping`).
 #[derive(Clone, Debug)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeKeyMapping {
     /// Whether it is held (`KeyMapping.isDown`).
     pub down: bool,
@@ -481,6 +500,7 @@ pub struct NativeKeyMapping {
 /// plain mod API data, not the game's decoded protocol enum.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct ClientPacket {
     /// The protocol type, such as `minecraft:ping` or `minecraft:custom_payload`.
     /// An id outside the protocol's packet table is reported as `horizon:unknown`.
@@ -499,6 +519,7 @@ impl ClientPacket {
 /// The channel and uninterpreted bytes of a server custom payload.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct ClientPayload {
     /// The namespaced plugin channel, exactly as received.
     pub channel: String,
@@ -516,6 +537,7 @@ impl ClientPayload {
 /// Camera values from the most recently extracted world frame.
 #[derive(Clone, Debug)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeCamera {
     /// The camera position in blocks (x, y, z).
     pub position: [f64; 3],
@@ -544,6 +566,7 @@ pub struct NativeCamera {
 /// A snapshot of the client's input preferences.
 #[derive(Clone, Copy, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct ClientInputOptions {
     /// Mouse sensitivity, normally between 0 and 1.
     pub sensitivity: f32,
@@ -566,6 +589,7 @@ pub struct ClientInputOptions {
 /// A snapshot of the client's graphics preferences.
 #[derive(Clone, Copy, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct ClientGraphicsOptions {
     /// Field of view in degrees, 30 to 110.
     pub fov: f32,
@@ -596,6 +620,7 @@ pub struct ClientGraphicsOptions {
 /// A snapshot of the client's GUI and accessibility preferences.
 #[derive(Clone, Copy, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct ClientGuiOptions {
     /// Requested GUI scale; 0 means automatic.
     pub gui_scale: u32,
@@ -620,6 +645,7 @@ pub struct ClientGuiOptions {
 /// A snapshot of the client's chat preferences.
 #[derive(Clone, Copy, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct ClientChatOptions {
     /// Which chat is shown: 0 all, 1 commands only, 2 hidden.
     pub visibility: u8,
@@ -647,11 +673,13 @@ pub struct ClientChatOptions {
 /// A snapshot of the client's audio preferences.
 #[derive(Clone, Copy, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct ClientAudioOptions {
     /// Master volume, 0 to 1.
     pub master_volume: f32,
 }
 
+// no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
 /// Borrowed humanoid inputs at arm-pose extraction, shared by players and mobs.
 /// Poses are in main/off-hand order, before listeners answer; item declarations
 /// are already included. Model-specific animation may subsequently adjust the arms.
@@ -675,6 +703,7 @@ pub struct HumanoidRenderState<'a> {
     pub off_arm_pose: ArmPose,
 }
 
+// no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
 /// Context and adjustable pose for a first-person hand render.
 ///
 /// Translation is in blocks and rotation is in degrees (pitch, yaw, roll).
@@ -707,6 +736,7 @@ pub struct NativeHandRender<'a> {
     pub scale: f32,
 }
 
+// no wire: type alias inherits the Wire policy of its tuple or Result target.
 /// A dispenser hook's answer: the slot's remainder (None empties it) and the
 /// level event to play, `CLICK` (1000), `FAIL` (1001) or 0 for none.
 pub type NativeDispensed = (Option<ItemStack>, i32);
@@ -714,6 +744,7 @@ pub type NativeDispensed = (Option<ItemStack>, i32);
 /// Context for a player tuning a note block.
 #[derive(Clone, Copy, Debug)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeNoteBlockChange {
     /// The level the note block is in.
     pub dimension: LevelDimension,
@@ -725,6 +756,7 @@ pub struct NativeNoteBlockChange {
     pub old_note: i32,
 }
 
+// no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
 /// What dropped the items heard by the `loot_drops` hook.
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
@@ -767,6 +799,7 @@ pub struct NativeLootDrops<'a> {
 /// in the level (`living_drops`): what `ItemEntity`'s constructor was given.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeItemDrop {
     /// The dropped stack.
     pub stack: ItemStack,
@@ -800,6 +833,7 @@ impl NativeItemDrop {
 /// or a `minecraft:custom` stat).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeStatType {
     /// `minecraft:mined`, keyed by block.
     Mined,
@@ -842,6 +876,7 @@ impl NativeStatType {
 /// in the `instrument` property's order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeNoteInstrument {
     /// The harp, over most blocks.
     Harp,
@@ -971,6 +1006,7 @@ impl NativeNoteInstrument {
 /// `portal_spawn` (`BlockEvent.PortalSpawnEvent.getPortalSize`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativePortalShape {
     /// The portal runs along X (else along Z).
     pub x_axis: bool,
@@ -985,6 +1021,7 @@ pub struct NativePortalShape {
 /// The mixer group a sound plays on (`SoundSource`), in vanilla's order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum SoundSource {
     /// The master volume, which scales every other source.
     Master,
@@ -1034,6 +1071,7 @@ impl SoundSource {
 /// How a sound fades with distance (`SoundInstance.Attenuation`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum SoundAttenuation {
     /// Heard at full volume everywhere.
     None,
@@ -1046,6 +1084,7 @@ pub enum SoundAttenuation {
 /// `isLooping`, `getDelay`, `getAttenuation` and `isRelative`).
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct SoundPlay {
     /// The sound event (`minecraft:entity.pig.ambient`).
     pub identifier: String,
@@ -1134,6 +1173,7 @@ pub struct SoundRef {
 /// Where a mod's sound is ([`SoundRef`]'s `state`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum SoundState {
     /// Not started yet: queued for the next audio update, waiting out `play_local_sound`'s
     /// `after` ticks, or between a looping sound's repeats (`SoundPlay::looping`'s `delay`).
@@ -1149,11 +1189,13 @@ pub enum SoundState {
 /// hooks. It gives no control over the channel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct ChannelRef {
     /// The channel's id, unique among the live ones.
     pub id: u64,
 }
 
+// no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
 /// A server explosion about to happen, for `explosion_start`
 /// (`ServerLevel.explode`'s `ServerExplosion`).
 #[derive(Clone, Copy, Debug)]
@@ -1184,6 +1226,7 @@ pub struct NativeExplosionStart<'a> {
 /// What an explosion does to blocks (`Explosion.BlockInteraction`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeBlockInteraction {
     /// Blocks are left alone.
     Keep,
@@ -1195,6 +1238,7 @@ pub enum NativeBlockInteraction {
     TriggerBlock,
 }
 
+// no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
 /// A fishing catch, for `item_fished` (`ItemFishedEvent`).
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
@@ -1208,6 +1252,7 @@ pub struct NativeItemFished<'a> {
     pub drops: &'a [ItemStack],
 }
 
+// no wire: dispatch result retains a static owning-mod identity; not an owned transport record.
 /// A replace hook's answer with the mod that gave it: the dispatch fills in `mod_id` (the
 /// answering mod's `[mod] id`), so no mod can answer for another.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1223,6 +1268,7 @@ pub struct Answered<T> {
 /// that was about to open does not. The first mod to answer wins.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum ScreenOpening {
     /// `Opening.setCanceled(true)`: the current screen stays open.
     Cancel,
@@ -1236,11 +1282,13 @@ pub enum ScreenOpening {
 /// The stable identifier reported by screen hooks for an observed screen.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct ScreenId {
     /// The same identifier as [`NativeScreenView::id`], such as `inventory` or `paused`.
     pub id: String,
 }
 
+// no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
 /// The open screen, for the screen hooks (`native_screen_render_post`, the
 /// mouse ones `native_screen_mouse_button_pressed_pre`, `..._released_pre` and
 /// `native_screen_mouse_scrolled_pre`, and the key ones
@@ -1292,6 +1340,7 @@ pub struct NativeScreenView<'a> {
 /// A depth-tested outline of the client's block selection shape.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeBlockRim {
     /// The block whose outline is drawn.
     pub pos: [i32; 3],
@@ -1310,6 +1359,7 @@ impl NativeBlockRim {
 /// A camera-local visual light, with no gameplay light or shadow writes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeColoredLight {
     /// The light's position in blocks.
     pub at: [f64; 3],
@@ -1337,6 +1387,7 @@ impl NativeColoredLight {
 /// turning with the player or north up, round or square.
 #[derive(Clone, Copy, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeMinimap {
     /// The screen corner the map sits in.
     pub corner: Corner,
@@ -1358,6 +1409,7 @@ pub struct NativeMinimap {
 /// its top left.
 #[derive(Clone, Debug, Default, PartialEq)]
 // exhaustive: mods build it with a literal and the game reads every field
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeScreen {
     /// Vanilla's container screens are 176 wide.
     pub width: f32,
@@ -1382,6 +1434,7 @@ pub struct NativeScreen {
 /// the item's own, in vanilla's item syntax, or "".
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeStack {
     /// The item identity, resolved once at load.
     pub item: ItemKey,
@@ -1394,6 +1447,7 @@ pub struct NativeStack {
 /// What the player did on a native mod's panel (`native_panel_event`).
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativePanelEvent {
     /// A click on an item of the panel, by its index in
     /// `panel_items`' list.
@@ -1442,6 +1496,7 @@ pub enum NativePanelEvent {
 /// field of view like the spyglass when `smooth`, and the scale of mouse turning.
 #[derive(Clone, Copy, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeZoom {
     /// The zoom as a multiple of the normal view; 1 is no zoom.
     pub factor: f32,
@@ -1454,6 +1509,7 @@ pub struct NativeZoom {
 /// A player on the server, as a server hook sees them.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeServerPlayer {
     /// The player's UUID.
     pub uuid: u128,
@@ -1497,6 +1553,7 @@ pub struct NativeServerPlayer {
 /// their preceding prefixes, at that usage's level.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeCommand {
     /// The usage.
     pub usage: String,
@@ -1525,6 +1582,7 @@ impl NativeCommand {
 /// Which `Game` observes the phase; a mirror `Game` never fires.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeAuthority {
     /// A single-player game with no server thread; never fires today.
     LocalAuthoritative,
@@ -1630,6 +1688,7 @@ impl EntityRef {
 /// The resolved holder of a mob's or a boat's leash, or its absence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum LeashHolder {
     /// The entity is not leashed.
     Unleashed,
@@ -1676,7 +1735,7 @@ impl From<LivingRef> for EntityRef {
 /// `AddValue`, then grows by that sum times each `AddMultipliedBase`, then is
 /// multiplied by one plus each `AddMultipliedTotal`.
 #[non_exhaustive]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, horizon_mod_api_macros::Wire)]
 pub enum AttributeOperation {
     /// `add_value`: adds the amount.
     AddValue,
@@ -1689,7 +1748,7 @@ pub enum AttributeOperation {
 /// An attribute modifier (vanilla's `AttributeModifier`): its id, which is
 /// unique on one attribute of one entity, the amount and the operation.
 #[non_exhaustive]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, horizon_mod_api_macros::Wire)]
 pub struct AttributeModifier {
     /// The modifier's id (`mymod:sprint_boost`).
     pub id: Identifier,
@@ -1715,7 +1774,7 @@ impl AttributeModifier {
 /// unloads (`addTransientModifier`), as the modifiers of worn items and
 /// effects do.
 #[non_exhaustive]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, horizon_mod_api_macros::Wire)]
 pub enum ModifierLifetime {
     /// Not saved: gone when the entity is saved and loaded again.
     Transient,
@@ -1948,6 +2007,7 @@ impl ItemEnchantments {
 /// separate show-icon flag: the icon always shows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeActiveEffect {
     /// The effect's load-owned registry key; `id.id(host)` reads its canonical name.
     pub id: EffectKey,
@@ -1980,6 +2040,7 @@ impl NativeActiveEffect {
 /// does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum EffectApplicable {
     /// The effect lands, whatever the tags say.
     Allow,
@@ -2049,6 +2110,7 @@ impl UnspawnedMobRef {
 /// `minecraft:`'s, like the effects' ids.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeMobFilter {
     /// The nearest player.
     Player,
@@ -2063,6 +2125,7 @@ pub enum NativeMobFilter {
 /// stay out: they take code, not parameters.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeGoal {
     /// `FloatGoal`: swim up in water or lava. Vanilla parameters: none.
     Float,
@@ -2263,6 +2326,7 @@ impl DragonRef {
 /// An ender dragon phase (`EnderDragonPhase`), in vanilla's order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeDragonPhase {
     /// Circling the end island (`DragonPhaseHoldingPattern`).
     HoldingPattern,
@@ -2418,6 +2482,7 @@ impl MerchantRef {
 /// Which `Display` subclass an entity is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeDisplayKind {
     /// Block.
     Block,
@@ -2447,6 +2512,7 @@ impl NativeDisplayKind {
 /// `Display.BillboardConstraints`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeBillboard {
     /// Fixed.
     Fixed,
@@ -2479,6 +2545,7 @@ impl NativeBillboard {
 /// `ItemDisplayContext`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeItemDisplayContext {
     /// No transform; the model as authored.
     None,
@@ -2540,6 +2607,7 @@ impl NativeItemDisplayContext {
 /// `Display.TextDisplay.Align`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeTextAlignment {
     /// Center.
     Center,
@@ -2564,6 +2632,7 @@ impl NativeTextAlignment {
 /// right rotation. Quaternions are `[x, y, z, w]`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeTransformation {
     /// The offset in blocks.
     pub translation: [f32; 3],
@@ -2588,6 +2657,7 @@ impl NativeTransformation {
 /// `ProjectileDeflection`: how `ProjectileRef::deflect` turns a projectile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeDeflection {
     /// `REVERSE`: backwards at `-power / 2` of the speed, turned about 180
     /// degrees by a random amount.
@@ -2601,6 +2671,7 @@ pub enum NativeDeflection {
 /// `AbstractArrow.Pickup`: who may pick an arrow up.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeArrowPickup {
     /// Disallowed.
     Disallowed,
@@ -2613,6 +2684,7 @@ pub enum NativeArrowPickup {
 /// Why a projectile's pierce level is unavailable.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum PierceLevelError {
     /// The host is not a logical server.
     WrongSide,
@@ -2649,6 +2721,7 @@ impl MinecartRef {
 /// Which minecart an entity is: one per vanilla `AbstractMinecart` subclass.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeMinecartKind {
     /// `Minecart`.
     Rideable,
@@ -2705,6 +2778,7 @@ impl std::hash::Hash for GlobalPos {
 /// must still be there.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: a mod builds it with a literal; the game reads and writes the same three values
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct PlayerRespawnConfig {
     /// The dimension and block.
     pub position: GlobalPos,
@@ -2791,6 +2865,7 @@ impl RaidRef {
 /// Where a raid stands (`Raid.RaidStatus`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeRaidStatus {
     /// Waiting or fighting (`ONGOING`).
     Ongoing,
@@ -2831,6 +2906,7 @@ impl ChunkRef {
 /// The status of a loaded chunk that Horizon can expose.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum ChunkStatus {
     /// A full chunk in a level's live world.
     Full,
@@ -2842,6 +2918,7 @@ pub enum ChunkStatus {
 /// `Unloaded`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum ChunkTicketLevel {
     /// A level `ChunkLevel` knows, `FULL_CHUNK_LEVEL` (33) or lower: 31 and
     /// lower is entity ticking (`ENTITY_TICKING_LEVEL`), 32 is block ticking
@@ -2864,6 +2941,7 @@ impl ChunkTicketLevel {
 /// A kind of light (`LightLayer`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: a closed set the game matches without a wildcard
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum LightLayer {
     /// Light from emitting blocks (`BLOCK`).
     Block,
@@ -2917,6 +2995,7 @@ impl From<Vec<String>> for FeatureFlags {
 /// (`Level.ExplosionInteraction`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeExplosionInteraction {
     /// Blocks stay; entities are hurt and pushed (`NONE`).
     None,
@@ -2930,6 +3009,7 @@ pub enum NativeExplosionInteraction {
 /// The empty-context block shape requested from a level.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeBlockShapeKind {
     /// Selection outline (`BlockState.getShape`).
     Outline,
@@ -2940,6 +3020,7 @@ pub enum NativeBlockShapeKind {
 /// `ChatVisiblity`: which chat a client shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeChatVisibility {
     /// All chat.
     Full,
@@ -2953,6 +3034,7 @@ pub enum NativeChatVisibility {
 /// the operator list name it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativePermissionLevel {
     /// 0: every player.
     All,
@@ -2986,6 +3068,7 @@ impl NativePermissionLevel {
 /// `HumanoidArm`: a player's main hand.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeMainHand {
     /// The left hand.
     Left,
@@ -2996,6 +3079,7 @@ pub enum NativeMainHand {
 /// `ParticleStatus`: how many particles a client shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeParticleStatus {
     /// All particles.
     All,
@@ -3011,6 +3095,7 @@ pub enum NativeParticleStatus {
 /// unknown id as left.
 #[derive(Clone, Debug, PartialEq, Eq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeClientInfo {
     /// The client's language code, such as `en_us`.
     pub language: String,
@@ -3034,7 +3119,7 @@ pub struct NativeClientInfo {
 
 /// A block face for a level support query.
 #[non_exhaustive]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
 pub enum NativeBlockFace {
     /// Facing down (-y).
     Down,
@@ -3052,7 +3137,7 @@ pub enum NativeBlockFace {
 
 /// The support area tested on a block face.
 #[non_exhaustive]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
 pub enum NativeSupportType {
     /// Full.
     Full,
@@ -3065,6 +3150,7 @@ pub enum NativeSupportType {
 /// What made a `tags_updated` notice fire (`TagsUpdatedEvent`'s two subclasses).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum TagsUpdateCause {
     /// `TagsUpdatedEvent.ServerDataLoad`: a server built its data tables.
     ServerDataLoad {
@@ -3094,6 +3180,7 @@ impl TagsUpdateCause {
 /// What made a `data_maps_updated` notice fire (`DataMapsUpdatedEvent.UpdateCause`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum DataMapsUpdateCause {
     /// `SERVER_RELOAD`: the server merged its data maps, on a world's first open or after
     /// `/reload`.
@@ -3107,6 +3194,7 @@ pub enum DataMapsUpdateCause {
 /// game.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeRemovalReason {
     /// `KILLED`: a mob's effects that act on removal run.
     Killed,
@@ -3119,6 +3207,7 @@ pub enum NativeRemovalReason {
 /// except the ender dragon, a `Monster`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum MobCategory {
     /// `MONSTER`.
     Monster,
@@ -3149,6 +3238,7 @@ pub enum MobCategory {
 /// naturally, so it has no limit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: one field per vanilla spawning category; mods build it from `VANILLA`
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct SpawnLimits {
     /// `MONSTER`: 70 in vanilla.
     pub monster: u32,
@@ -3193,6 +3283,7 @@ impl Default for SpawnLimits {
 /// creatures and other custom spawners don't read the flags.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: one switch for monsters, one for the rest; mods build it with a literal
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct SpawnFlags {
     /// Whether `MobCategory::Monster` spawns: off acts as the `spawn_monsters`
     /// rule off does (`getFilteredSpawningCategories`' `spawnEnemies`).
@@ -3215,6 +3306,7 @@ impl Default for SpawnFlags {
 /// Why a mob spawns (`EntitySpawnReason`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeSpawnReason {
     /// `NATURAL`: the level's own spawning each tick.
     Natural,
@@ -3260,6 +3352,7 @@ pub enum NativeSpawnReason {
 /// may change before the mob is finalized.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeDifficulty {
     /// `Difficulty.getId`: 0 peaceful, 1 easy, 2 normal, 3 hard. A larger value is taken as 3.
     pub base: u8,
@@ -3278,6 +3371,7 @@ impl NativeDifficulty {
 /// What spawned a mob, where `EntitySpawnReason` alone does not say (`FinalizeSpawnEvent.getSpawner`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeSpawner {
     /// A spawner or trial spawner block at this position.
     Block(BlockPos),
@@ -3289,6 +3383,7 @@ pub enum NativeSpawner {
 /// minecart have none.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum Spawner {
     /// A monster spawner block (`SpawnerBlockEntity`).
     Block {
@@ -3306,6 +3401,7 @@ pub enum Spawner {
 /// `MobSpawnEvent.SpawnPlacementCheck.Result`, one type for both).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeSpawnCheck {
     /// `SUCCEED`: the check passes.
     Succeed,
@@ -3320,6 +3416,7 @@ pub enum NativeSpawnCheck {
 /// `SpawnPlacements.isSpawnPositionOk`'s first check.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeSpawnPlacementType {
     /// `ON_GROUND`: a block that is valid to spawn on below, free room at the feet and the head.
     OnGround,
@@ -3334,6 +3431,7 @@ pub enum NativeSpawnPlacementType {
 /// How bright a spot a mod entity type needs to spawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeSpawnLight {
     /// Any light level.
     Any,
@@ -3351,6 +3449,7 @@ pub enum NativeSpawnLight {
 /// spawner ignores `light`, as for vanilla types.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: a mod builds it with a literal; the game reads it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct SpawnPlacementRule {
     /// Where the type stands (`SpawnPlacementType`).
     pub placement: NativeSpawnPlacementType,
@@ -3368,6 +3467,7 @@ pub struct SpawnPlacementRule {
 /// ([`Registrar::declare_spawn_placement`](SpawnPlacementsRegistrar::declare_spawn_placement)).
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum SpawnPlacementError {
     /// The entity type's id is invalid, empty, or in a namespace the declaring
     /// mod does not own.
@@ -3381,6 +3481,7 @@ pub enum SpawnPlacementError {
 /// What a mod answers a despawn check (`MobDespawnEvent.Result`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeDespawn {
     /// `ALLOW`: the mob despawns now.
     Allow,
@@ -3393,7 +3494,7 @@ pub enum NativeDespawn {
 
 /// Block shape used by an empty-context level ray.
 #[non_exhaustive]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
 pub enum NativeClipBlock {
     /// Collider.
     Collider,
@@ -3403,7 +3504,7 @@ pub enum NativeClipBlock {
 
 /// Fluid mode for a level ray. More modes are a follow-up.
 #[non_exhaustive]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
 pub enum NativeClipFluid {
     /// None.
     None,
@@ -3412,6 +3513,7 @@ pub enum NativeClipFluid {
 /// Result of a block ray, including the vanilla miss result.
 #[derive(Clone, Copy, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeClipHit {
     /// Whether the ray hit nothing; the other fields are then the vanilla miss values.
     pub miss: bool,
@@ -3431,6 +3533,7 @@ pub struct NativeClipHit {
 /// their own appears, and facing which way. Horizon keeps it in the Overworld.
 #[derive(Clone, Copy, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct RespawnData {
     /// The spawn block.
     pub pos: [i32; 3],
@@ -3444,6 +3547,7 @@ pub struct RespawnData {
 /// its pixels. The markers (players, banners, frames) are not part of it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct MapState {
     /// The centre block `[x, z]`.
     pub center: [i32; 2],
@@ -3465,6 +3569,7 @@ pub struct MapState {
 /// `ProjectileUtil.getEntityHitResult` tests for each candidate.
 #[derive(Clone, Copy, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct EntityRayHit {
     /// The entity hit, a handle of the level the ray ran in.
     pub entity: EntityRef,
@@ -3479,6 +3584,7 @@ pub struct EntityRayHit {
 /// level's epoch, including dragon parts; a replacement level invalidates them.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeCrosshairTarget {
     /// The crosshair is on a block.
     Block {
@@ -3501,6 +3607,7 @@ pub enum NativeCrosshairTarget {
 /// One item cooldown a player waits on (`ItemCooldowns.cooldowns`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeItemCooldown {
     /// The cooldown group: an item id, or the group an item's
     /// `use_cooldown` component names.
@@ -3551,6 +3658,7 @@ pub struct BossBarRef {
 /// `BossEvent.BossBarColor`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum BossBarColor {
     /// A pink bar.
     Pink,
@@ -3601,6 +3709,7 @@ impl BossBarColor {
 /// `BossEvent.BossBarOverlay`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum BossBarOverlay {
     /// Progress.
     Progress,
@@ -3645,6 +3754,7 @@ impl BossBarOverlay {
 /// raid and `/bossbar` ones alike.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct ClientBossBar {
     /// The bar's UUID, as the server's boss event packets name it.
     pub uuid: u128,
@@ -3692,6 +3802,7 @@ pub struct MenuRef {
 /// A player's food data.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativePlayerFood {
     /// The food level, 0 to 20.
     pub level: i32,
@@ -3705,6 +3816,7 @@ pub struct NativePlayerFood {
 /// `totalExperience`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativePlayerExperience {
     /// The experience level.
     pub level: i32,
@@ -3719,6 +3831,7 @@ pub struct NativePlayerExperience {
 #[doc(hidden)]
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum EffectTickChange {
     Heal(f32),
     Hurt(String, f32),
@@ -3756,6 +3869,7 @@ impl ApplyEffectTickEvent<'_> {
 /// A player's server-side abilities (`Abilities`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativePlayerAbilities {
     /// Takes no damage.
     pub invulnerable: bool,
@@ -3788,6 +3902,7 @@ pub struct BlockEntityRef {
 /// Why a block-entity operation could not resolve its target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum BlockEntityError {
     /// The entity was removed, replaced, unloaded or belongs to another level epoch.
     Stale,
@@ -3823,6 +3938,7 @@ impl NativeTickId {
 /// the mixins write); keep them despite the shared prefix.
 #[allow(clippy::enum_variant_names)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum WorldPhase {
     /// The open failed; `error_text` is the engine's own error text.
     WorldOpenFailed,
@@ -3835,6 +3951,7 @@ pub enum WorldPhase {
 /// The tick phases carry whether the world runs, including frozen steps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum ServerTickPhase {
     /// The server tick is about to begin.
     ServerTickStart {
@@ -3855,6 +3972,7 @@ pub enum ServerTickPhase {
 /// `tick` counts non-paused server ticks since the world opened.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeLifecycleContext {
     /// The server role that fired the phase.
     pub authority: NativeAuthority,
@@ -3867,6 +3985,7 @@ pub struct NativeLifecycleContext {
 /// Tool action requested by a block interaction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum ToolAbility {
     /// An axe strips a log.
     AxeStrip,
@@ -3882,6 +4001,7 @@ pub enum ToolAbility {
     HoeTill,
 }
 
+// no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
 /// The player responsible for a game rule change.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: the game builds it with a literal; mods only read it
@@ -3897,6 +4017,7 @@ pub struct GameRuleActor<'a> {
 /// How a criterion's advancement progress changed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeProgressType {
     /// Grant.
     Grant,
@@ -3906,6 +4027,7 @@ pub enum NativeProgressType {
 
 /// Read-only context for a tool modification.
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct ToolUse {
     /// The acting entity ID, if present.
     pub player: Option<u32>,
@@ -3923,6 +4045,7 @@ pub struct ToolUse {
     pub simulated: bool,
 }
 
+// no wire: installed hook trait objects and shared dispatch ownership are process-local.
 /// One native mod, with its bundle's `[mod] id` and hook implementation.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ModEntry {
@@ -3946,6 +4069,7 @@ impl ModEntry {
     }
 }
 
+// no wire: installed hook trait objects and shared dispatch ownership are process-local.
 /// The ordered list of named mods shared by the client and server.
 pub type Mods = Arc<[ModEntry]>;
 
@@ -4227,6 +4351,7 @@ impl<'a> Iterator for Entered<'a> {
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum Flow {
     /// Go on to the next listener and then the game's own behaviour.
     Continue,
@@ -4238,6 +4363,7 @@ pub enum Flow {
 /// events, as `LevelRef::play_sound` names them, and the volume and pitch they play at.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct BlockSoundType {
     /// `SoundType.getVolume`.
     pub volume: f32,
@@ -4260,6 +4386,7 @@ pub struct BlockSoundType {
 /// [`ActionRefused`] when none of it ran.
 #[derive(Clone, Copy, Debug, PartialEq)]
 // exhaustive: mods build one; the game runs every kind, so a new kind must be handled there
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum PlayerAction {
     /// Use the item in `hand` on the block at `pos`, clicked at `hit`
     /// (`ServerPlayerGameMode.useItemOn`): the block's use, then the item's `useOn`, which
@@ -4309,6 +4436,7 @@ pub enum PlayerAction {
 /// body, items, look, secondary-use state and action timers are restored afterwards.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct PlayerActionSetup {
     /// The main-hand stack, or `None` for an empty hand.
     pub stack: Option<ItemStack>,
@@ -4344,6 +4472,7 @@ impl PlayerActionSetup {
 /// restored inventory. World changes and normal action hooks have already run.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct ScopedActionResult {
     /// What the existing player action path did, including a stopped fake-player effect.
     pub outcome: ActionOutcome,
@@ -4367,6 +4496,7 @@ impl ScopedActionResult {
 /// action ran.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum ActionRefused {
     /// The handle is a real player's.
     NotFake,
@@ -4406,6 +4536,7 @@ impl NoBackend for ActionRefused {
 /// What a fake player's action did once it ran.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum ActionOutcome {
     /// Vanilla's `InteractionResult` consumed (a success or a consume), and no effect was
     /// blocked.
@@ -4420,6 +4551,7 @@ pub enum ActionOutcome {
 /// An effect a fake player's action is stopped from starting. Kinds may be added.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum FakeEffect {
     /// A menu or screen: a container, a station, a sign's editor.
     Menu,
@@ -4435,6 +4567,7 @@ pub enum FakeEffect {
 /// may be added: build one with [`BlockHit::new`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct BlockHit {
     /// The point clicked, in world coordinates (`getLocation`).
     pub point: [f64; 3],
@@ -4457,6 +4590,7 @@ impl BlockHit {
 /// The result of previewing a tool's block transformation. Applying it is a separate action.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct BlockTransformPreview {
     /// The resulting block state.
     pub state: BlockState,
@@ -4491,6 +4625,7 @@ impl BlockTransformPreview {
 /// A vector of doubles, as vanilla's `Vec3`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 // exhaustive: a vector is its three components, as vanilla's `Vec3`
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct Vec3 {
     /// East (+) and west (-).
     pub x: f64,
@@ -4518,6 +4653,7 @@ impl From<Vec3> for glam::DVec3 {
     }
 }
 
+// no wire: borrowed host or registrar backend; access stays scoped to the owning call.
 /// The game's read-only native backend, as [`Host::backend`] hands it out.
 ///
 /// The backend is reached only through [`Host::backend`] and
@@ -4547,6 +4683,7 @@ pub struct BackendRef<'a> {
     inner: &'a dyn Backend,
 }
 
+// no wire: borrowed host or registrar backend; access stays scoped to the owning call.
 /// The game's mutable native backend, as `Host::backend_mut` hands it out;
 /// the same opaque rule as [`BackendRef`], and a wrapper exposes no backend
 /// method of its own:
@@ -4562,6 +4699,7 @@ pub struct BackendMutRef<'a> {
     inner: &'a mut dyn BackendMut,
 }
 
+// no wire: borrowed host or registrar backend; access stays scoped to the owning call.
 /// The opaque client-write backend, with no access to server writes.
 ///
 /// Only the API can construct or open this value.
@@ -4710,6 +4848,7 @@ pub fn client_backend_mut_of(host: &mut dyn ClientHost) -> Option<&mut dyn Clien
 /// What used bone meal on a block (`BonemealSource`), for `bonemeal`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum BonemealSource {
     /// Bone meal used through `BoneMealItem.growCrop`: by a player, a
     /// dispenser or a villager.
@@ -4721,6 +4860,7 @@ pub enum BonemealSource {
 /// One block a placement writes (`entity_place`'s `Placement::Multi`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct BlockPlacement {
     /// Where the block goes.
     pub pos: BlockPos,
@@ -4741,6 +4881,7 @@ impl BlockPlacement {
 /// placement (`EntityMultiPlaceEvent`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum Placement {
     /// The placed block alone.
     Single,
@@ -4749,6 +4890,7 @@ pub enum Placement {
     Multi(Vec<BlockPlacement>),
 }
 
+// no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
 /// A player's right click on a block, shared by the block's use behaviours
 /// and `right_click_block` (`PlayerInteractEvent.RightClickBlock`). The
 /// event hears it once per hand on the clicking client and on the server.
@@ -4776,6 +4918,7 @@ pub struct NativeBlockClick<'a> {
 /// The key of `InteractionKeyMappingTriggered`: what the player's click was about to do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum InteractionKey {
     /// `key.attack`: an attack, or a held key digging on.
     Attack,
@@ -4788,6 +4931,7 @@ pub enum InteractionKey {
 /// What caused a client interaction mapping to act on this tick.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum InteractionAttempt {
     /// A queued press of the mapping.
     Press,
@@ -4798,6 +4942,7 @@ pub enum InteractionAttempt {
 /// A proposed window-side block mining operation.
 #[derive(Clone, Copy, Debug, PartialEq)]
 // exhaustive: the game fills all fields; mods only read the snapshot
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct ClientMiningPrediction {
     /// The targeted block.
     pub pos: [i32; 3],
@@ -4812,6 +4957,7 @@ pub struct ClientMiningPrediction {
 /// The behaviour about to run in `UseItemOnBlockEvent`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum UsePhase {
     /// `IItemExtension.onItemUseFirst`, before the item's Part and the
     /// block's behaviour.
@@ -4822,6 +4968,7 @@ pub enum UsePhase {
     ItemAfterBlock,
 }
 
+// no wire: borrowed call-scoped view; transport uses owned snapshots rather than serializing references.
 /// A player's item use without a block or entity target (`RightClickItem`).
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
@@ -4845,6 +4992,7 @@ pub struct NativeItemClick<'a> {
 /// Vanilla's `InteractionResult`, as a hook answers it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeInteractionResult {
     /// `SUCCESS`: the action is used and the hand swings on the clicking
     /// client (`SwingSource.PREDICTED`).
@@ -4873,6 +5021,7 @@ impl NativeInteractionResult {
 /// to vanilla.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeTriState {
     /// Deny.
     False,
@@ -4897,6 +5046,7 @@ mod generated_host {
     include!(concat!(env!("OUT_DIR"), "/mod_api_generated_host.rs"));
 }
 
+// no wire: type alias inherits the Wire policy of its tuple or Result target.
 /// Result of accessing or decoding an attachment.
 pub type AttachmentResult<T> = std::result::Result<T, AttachmentError>;
 
@@ -6144,6 +6294,7 @@ pub(crate) mod built {
     #[allow(unused_imports)]
     use super::*;
     // exhaustive: the game builds it with a literal; mods only read it
+    #[derive(horizon_mod_api_macros::Wire)]
     pub struct ToolUse {
         pub player: Option<u32>,
         pub hand: crate::first_person::Hand,
@@ -6176,6 +6327,7 @@ pub(crate) mod built {
         }
     }
     // exhaustive: the game builds it with a literal; mods only read it
+    // no wire: borrowed game-to-hook adapter; its call fields cross separately.
     pub struct NativeLootDrops<'a> {
         pub table: &'a str,
         pub dimension: &'a str,
@@ -6214,6 +6366,7 @@ pub(crate) mod built {
         }
     }
     // exhaustive: the game builds it with a literal; mods only read it
+    // no wire: borrowed game-to-hook adapter; its call fields cross separately.
     pub struct NativeExplosionStart<'a> {
         pub dimension: &'a str,
         pub center: [f64; 3],
@@ -6249,6 +6402,7 @@ pub(crate) mod built {
         }
     }
     // exhaustive: the game builds it with a literal; mods only read it
+    // no wire: borrowed game-to-hook adapter; its call fields cross separately.
     pub struct NativeItemFished<'a> {
         pub hook: u32,
         pub position: [f64; 3],
@@ -6269,6 +6423,7 @@ pub(crate) mod built {
         }
     }
     // exhaustive: the game builds it with a literal; mods only read it
+    // no wire: borrowed game-to-hook adapter; its call fields cross separately.
     pub struct NativeScreenView<'a> {
         pub id: &'static str,
         pub menu: Option<&'a str>,
@@ -6301,6 +6456,7 @@ pub(crate) mod built {
         }
     }
     // exhaustive: the game builds it with a literal; mods only read it
+    // no wire: borrowed game-to-hook adapter; its call fields cross separately.
     pub struct NativeItemClick<'a> {
         pub side: LogicalSide,
         pub dimension: LevelDimension,
@@ -6333,6 +6489,7 @@ pub(crate) mod built {
         }
     }
     // exhaustive: the game builds it with a literal; mods only read it
+    // no wire: borrowed game-to-hook adapter; its call fields cross separately.
     pub struct NativeBlockClick<'a> {
         pub side: LogicalSide,
         pub dimension: LevelDimension,
@@ -6368,6 +6525,7 @@ pub(crate) mod built {
         }
     }
     // exhaustive: the game builds it with a literal; mods only read it
+    #[derive(horizon_mod_api_macros::Wire)]
     pub struct NativeLifecycleContext {
         pub authority: NativeAuthority,
         pub epoch: super::NativeWorldEpoch,
@@ -6388,6 +6546,7 @@ pub(crate) mod built {
         }
     }
     // exhaustive: the game builds it with a literal; mods only read it
+    #[derive(horizon_mod_api_macros::Wire)]
     pub struct NativeActiveEffect {
         pub id: super::EffectKey,
         pub duration: i32,
@@ -6414,6 +6573,7 @@ pub(crate) mod built {
         }
     }
     // exhaustive: the game builds it with a literal; mods only read it
+    #[derive(horizon_mod_api_macros::Wire)]
     pub struct NativePlayerExperience {
         pub level: i32,
         pub progress: f32,
@@ -6434,6 +6594,7 @@ pub(crate) mod built {
         }
     }
     // exhaustive: the game builds it with a literal; mods only read it
+    #[derive(horizon_mod_api_macros::Wire)]
     pub struct NativePlayerFood {
         pub level: i32,
         pub saturation: f32,
@@ -6454,6 +6615,7 @@ pub(crate) mod built {
         }
     }
     // exhaustive: the game builds it with a literal; mods only read it
+    #[derive(horizon_mod_api_macros::Wire)]
     pub struct NativePlayerAbilities {
         pub invulnerable: bool,
         pub flying: bool,
@@ -6486,6 +6648,7 @@ pub(crate) mod built {
         }
     }
     // exhaustive: the game builds it with a literal; mods only read it
+    // no wire: borrowed game-to-hook adapter; its call fields cross separately.
     pub struct NativeServerPlayer {
         pub uuid: u128,
         pub name: String,
@@ -6530,6 +6693,7 @@ pub(crate) mod built {
         }
     }
     // exhaustive: the game builds it with a literal; mods only read it
+    #[derive(horizon_mod_api_macros::Wire)]
     pub struct ChannelRef {
         pub id: u64,
     }
@@ -6540,6 +6704,7 @@ pub(crate) mod built {
         }
     }
     // exhaustive: the game builds it with a literal; mods read it and edit its fields
+    #[derive(horizon_mod_api_macros::Wire)]
     pub struct SoundPlay {
         pub identifier: String,
         pub source: super::SoundSource,
@@ -6578,6 +6743,7 @@ pub(crate) mod built {
         }
     }
     // exhaustive: the game builds it with a literal; mods only read it
+    #[derive(horizon_mod_api_macros::Wire)]
     pub struct NativePortalShape {
         pub x_axis: bool,
         pub bottom_left: [i32; 3],
