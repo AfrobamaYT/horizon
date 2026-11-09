@@ -230,6 +230,18 @@ impl Storage {
     }
 
     pub fn report(&self, clear: Option<Category>, all: bool) -> Result<Report, Error> {
+        let registry_entries = match fs::read_dir(backend::data_dir().join("run-leases")) {
+            Ok(mut entries) => entries.try_fold(0usize, |count, entry| entry.map(|_| count + 1))?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(error) => return Err(error.into()),
+        };
+        eprintln!(
+            "{}",
+            crate::i18n::trf(
+                "Runtime lease registry entries: {count}",
+                &[("count", &registry_entries.to_string())]
+            )
+        );
         // Also refuse an external Cargo holding a target lock before starting a cleanup.
         self.lease.bytes()?;
         if clear.is_some() || all {
@@ -237,7 +249,6 @@ impl Storage {
             match Cleanup::existing(&backend::data_dir()) {
                 Ok(cleanup) => {
                     cleanup.collect_records()?;
-                    cleanup.collect().map_err(Error::from)?;
                 }
                 Err(LeaseError::Busy) => {} // Other cache classes can still be reported/retained.
                 Err(LeaseError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}

@@ -15,32 +15,16 @@ pub fn acquire_entry(context: &ModSelectionContext) -> io::Result<Option<Acquire
     }
     reference.acquire(context).map(Some)
 }
-// Selection syntax belongs to the command-line boundary, not to lease acquisition.
-// Refused syntax must retain the game's usage status and never create crash reports.
-fn launch_arguments(command: &Command) -> io::Result<LaunchArguments> {
-    match LaunchArguments::for_command(command) {
-        Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
-            eprintln!("Horizon: {error}");
-            std::process::exit(2);
-        }
-        result => result,
-    }
-}
-
-/// First operation in ordinary and generated main. Private holder mode never returns.
-pub fn bootstrap() -> (Option<Capture>, Option<LaunchArguments>) {
-    enter();
+/// Acquire only after the game has validated its complete Options. Call enter() first.
+pub fn acquire(selection: &LaunchArguments) -> Option<Capture> {
     if std::env::var_os(ENTRY).is_none() {
         let result = (|| -> io::Result<()> {
             let executable = std::env::current_exe()?;
-            let mut command = Command::new(&executable);
-            command.args(std::env::args_os().skip(1));
-            let selection = launch_arguments(&command)?;
             // Help and capability replies never open game caches or load mods.
             if selection.is_information_request() {
                 return Ok(());
             }
-            if let Some(ownership) = acquire_standalone(&executable, &selection)? {
+            if let Some(ownership) = acquire_standalone(&executable, selection)? {
                 Box::leak(Box::new(ownership));
             }
             Ok(())
@@ -49,12 +33,9 @@ pub fn bootstrap() -> (Option<Capture>, Option<LaunchArguments>) {
             eprintln!("Horizon: cannot acquire launcher cache leases: {error}");
             std::process::exit(78);
         }
-        return (None, None);
+        return None;
     }
-    let result = (|| -> io::Result<(Capture, LaunchArguments)> {
-        let mut command = Command::new(std::env::current_exe()?);
-        command.args(std::env::args_os().skip(1));
-        let selection = launch_arguments(&command)?;
+    let result = (|| -> io::Result<Capture> {
         let ownership = acquire_entry(&selection.context)?.ok_or(io::ErrorKind::InvalidData)?;
         // Native exit callbacks run after main's locals drop; only kernel exit may release claims.
         let ownership = Box::leak(Box::new(ownership));
@@ -79,10 +60,10 @@ pub fn bootstrap() -> (Option<Capture>, Option<LaunchArguments>) {
             }
         }
         let capture = Capture::install(ownership._capture.as_ref().unwrap())?;
-        Ok((capture, selection))
+        Ok(capture)
     })();
     match result {
-        Ok((capture, selection)) => (Some(capture), Some(selection)),
+        Ok(capture) => Some(capture),
         Err(error) => {
             eprintln!("Horizon: {error}");
             std::process::exit(78);

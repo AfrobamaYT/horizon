@@ -24,7 +24,7 @@ fn main() {
     }
     match std::env::var("HOLDER_TEST_MODE").as_deref() {
         Ok("direct") => {
-            let _ = holder::bootstrap();
+            let _ = bootstrap();
             let ready = PathBuf::from(std::env::var_os("READY").unwrap());
             std::fs::write(&ready, b"direct ready").unwrap();
             let stop = PathBuf::from(std::env::var_os("STOP").unwrap());
@@ -57,8 +57,7 @@ fn main() {
                     }
                 }
             }
-            let (_capture, launch) = holder::bootstrap();
-            let launch = launch.unwrap();
+            let (_capture, launch) = bootstrap();
             let ready = PathBuf::from(std::env::var_os("READY").unwrap());
             let root = ready.parent().unwrap();
             std::env::set_current_dir(root).unwrap(); // Emulate a native hook changing cwd after bootstrap.
@@ -161,4 +160,15 @@ fn main() {
         let _ = std::io::stdin().read_exact(&mut [0]);
     }
     std::io::stdout().flush().unwrap();
+}
+
+fn bootstrap() -> (
+    Option<horizon_mod_package::output::Capture>,
+    horizon_mod_package::selection::LaunchArguments,
+) {
+    holder::enter();
+    let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+    command.args(std::env::args_os().skip(1));
+    let selection = horizon_mod_package::selection::LaunchArguments::for_command(&command).unwrap();
+    (holder::acquire(&selection), selection)
 }

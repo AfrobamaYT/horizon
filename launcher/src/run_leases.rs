@@ -129,7 +129,7 @@ pub(crate) fn shared(command: &Command) -> Result<Vec<Claim>, Error> {
     let registry = Registry::open()?;
     let data = crate::backend::data_dir().canonicalize()?;
     for leaf in paths.clone() {
-        if leaf.starts_with(&data) {
+        if leaf.starts_with(&data) && leaf != data {
             for parent in leaf.ancestors().skip(1).take_while(|p| *p != data) {
                 paths.push(parent.to_owned());
             }
@@ -239,6 +239,10 @@ pub(crate) fn spawn(command: &mut Command, piped: bool) -> std::io::Result<std::
                         .stdout(std::process::Stdio::piped())
                         .stderr(std::process::Stdio::piped());
                 }
+                if piped {
+                    use std::os::unix::process::CommandExt;
+                    holder_command.process_group(0);
+                }
                 return match holder::launch(
                     holder_command,
                     &marker,
@@ -246,7 +250,17 @@ pub(crate) fn spawn(command: &mut Command, piped: bool) -> std::io::Result<std::
                     std::time::Instant::now() + std::time::Duration::from_secs(10),
                 )? {
                     holder::Started::Holder { child } => Ok(child),
-                    holder::Started::Legacy(mut legacy) => legacy.spawn(),
+                    holder::Started::Legacy(mut legacy) => {
+                        if piped {
+                            legacy
+                                .stdin(std::process::Stdio::piped())
+                                .stdout(std::process::Stdio::piped())
+                                .stderr(std::process::Stdio::piped());
+                            use std::os::unix::process::CommandExt;
+                            legacy.process_group(0);
+                        }
+                        legacy.spawn()
+                    }
                 };
             }
         }

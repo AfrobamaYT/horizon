@@ -4283,7 +4283,18 @@ impl Running {
         }
     }
     pub fn kill(&self) {
-        let _ = self.child.lock().unwrap().kill();
+        let mut child = self.child.lock().unwrap();
+        #[cfg(unix)]
+        {
+            // GUI children own their group. Never signal a cached, already-reaped PID.
+            if matches!(child.try_wait(), Ok(None)) {
+                unsafe {
+                    libc::kill(-(child.id() as i32), libc::SIGKILL);
+                }
+            }
+        }
+        #[cfg(not(unix))]
+        let _ = child.kill();
     }
 }
 
@@ -4330,6 +4341,11 @@ pub fn spawn_attached(cmd: &mut Command) -> std::io::Result<std::process::Child>
 
 pub fn spawn(job: Job, cmd: Command, tx: Sender<Msg>) -> Result<Running, String> {
     let (mut cmd, runtime) = prepare_command(cmd)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
     crate::process::hide_console(&mut cmd);
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())

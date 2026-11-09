@@ -107,6 +107,15 @@ fn lease_holder_actor() {
 #[cfg(unix)]
 #[test]
 fn routed_game_keeps_its_lease_after_launcher_sigkill() {
+    routed_lifetime(false);
+}
+#[cfg(unix)]
+#[test]
+fn stop_terminates_the_routed_game_not_only_its_holder() {
+    routed_lifetime(true);
+}
+#[cfg(unix)]
+fn routed_lifetime(stop: bool) {
     let root = tempfile::tempdir().unwrap();
     let data = root.path().canonicalize().unwrap();
     let install = data.join("install");
@@ -128,6 +137,7 @@ fn routed_game_keeps_its_lease_after_launcher_sigkill() {
             .args(["--exact", "run_leases::tests::routing_actor", "--nocapture"])
             .env("ROUTING_ROOT", &data)
             .env("ROUTING_MODE", "launcher")
+            .env("ROUTING_STOP", if stop { "1" } else { "0" })
             .env("HORIZON_LAUNCHER_HOME", &data)
             .env("HORIZON_HOME", &home)
             .env("XDG_DATA_HOME", data.join("xdg-data"))
@@ -150,8 +160,10 @@ fn routed_game_keeps_its_lease_after_launcher_sigkill() {
         );
         std::thread::yield_now();
     }
-    supervisor.0.kill().unwrap();
-    supervisor.0.wait().unwrap();
+    if !stop {
+        supervisor.0.kill().unwrap();
+        supervisor.0.wait().unwrap();
+    }
     let registry = Registry::at(&data).unwrap();
     assert!(matches!(
         registry.lock(&directory(&install), LockMode::Exclusive),
@@ -164,12 +176,29 @@ fn routed_game_keeps_its_lease_after_launcher_sigkill() {
         ),
         "relative resources lost their lease after launcher death"
     );
-    fs::write(data.join("routed-stop"), b"").unwrap();
+    if stop {
+        writeln!(supervisor.0.stdin.as_mut().unwrap(), "stop").unwrap();
+        assert!(supervisor.0.wait().unwrap().success());
+    } else {
+        fs::write(data.join("routed-stop"), b"").unwrap();
+    }
     let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         match registry.lock(&directory(&resources), LockMode::Exclusive) {
             Ok(claim) => {
                 drop(claim);
+                if stop {
+                    let pid: i32 = fs::read_to_string(data.join("routed-ready"))
+                        .unwrap()
+                        .parse()
+                        .unwrap();
+                    let gone = unsafe { libc::kill(pid, 0) } != 0;
+                    #[cfg(target_os = "linux")]
+                    let gone = gone
+                        || fs::read_to_string(format!("/proc/{pid}/stat"))
+                            .is_ok_and(|stat| stat.rsplit_once(") ").unwrap().1.starts_with('Z'));
+                    assert!(gone, "Stop left the routed game running");
+                }
                 break;
             }
             Err(Error::Busy) => assert!(
@@ -207,17 +236,69 @@ fn routing_actor() {
         ]
         .into();
         game.env(super::GAME, serde_json::to_string(&words).unwrap());
-        let (mut game, _runtime) = crate::backend::prepare_command(game).unwrap();
-        let mut child = super::spawn(&mut game, false).unwrap();
-        let _ = child.wait();
+        if std::env::var("ROUTING_STOP").as_deref() == Ok("1") {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let running = crate::backend::spawn(crate::backend::Job::Client, game, tx).unwrap();
+            let mut line = String::new();
+            std::io::stdin().read_line(&mut line).unwrap();
+            running.kill();
+            loop {
+                if matches!(
+                    rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap(),
+                    crate::backend::Msg::Exit(_, _)
+                ) {
+                    break;
+                }
+            }
+        } else {
+            let (mut game, _runtime) = crate::backend::prepare_command(game).unwrap();
+            let mut child = super::spawn(&mut game, false).unwrap();
+            let _ = child.wait();
+        }
     } else {
-        let (_capture, selection) = horizon_mod_package::holder::bootstrap();
-        assert!(selection.is_some(), "game did not enter through the holder");
-        fs::write(root.join("routed-ready"), b"").unwrap();
+        horizon_mod_package::holder::enter();
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command.args(std::env::args_os().skip(1));
+        let selection =
+            horizon_mod_package::selection::LaunchArguments::for_command(&command).unwrap();
+        let _capture = horizon_mod_package::holder::acquire(&selection);
+        assert!(_capture.is_some(), "game did not enter through the holder");
+        fs::write(root.join("routed-ready"), std::process::id().to_string()).unwrap();
         let end = std::time::Instant::now() + std::time::Duration::from_secs(30);
         while !root.join("routed-stop").exists() {
             assert!(std::time::Instant::now() < end);
             std::thread::yield_now();
         }
     }
+}
+
+#[test]
+fn data_directory_leaf_never_leases_ancestors_outside_data() {
+    const ENV: &str = "LEASE_BOUNDARY_ROOT";
+    if let Some(root) = std::env::var_os(ENV) {
+        let data = std::path::PathBuf::from(root).join("data");
+        fs::create_dir_all(&data).unwrap();
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command.current_dir(&data).env("HORIZON_HOME", &data);
+        let _claims = shared(&command).unwrap();
+        let registry = horizon_mod_package::runtime_leases::Registry::existing(&data).unwrap();
+        let parent = directory(data.parent().unwrap());
+        assert!(
+            matches!(registry.lock(&parent, LockMode::Exclusive), Err(horizon_mod_package::runtime_leases::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound)
+        );
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    assert!(Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "run_leases::tests::data_directory_leaf_never_leases_ancestors_outside_data"
+        ])
+        .env(ENV, root.path())
+        .env("HORIZON_LAUNCHER_HOME", root.path().join("data"))
+        .env("HORIZON_LAUNCHER_NO_SELF_UPDATE", "1")
+        .env("HORIZON_NO_AUDIO", "1")
+        .status()
+        .unwrap()
+        .success());
 }

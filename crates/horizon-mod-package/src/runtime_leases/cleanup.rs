@@ -1,11 +1,9 @@
-//! Conservative lock-entry collection under the permanent namespace gate.
+//! Exclusive namespace ownership for bootstrap-record collection.
 use super::*;
 
 /// Exclusive namespace ownership, acquired without creating or upgrading a gate.
 pub struct Cleanup {
     pub(crate) data: Dir,
-    #[cfg(test)]
-    directory: Dir,
     _gate: Locked,
 }
 
@@ -23,19 +21,7 @@ impl Cleanup {
             Release::Close,
             false,
         )?;
-        Ok(Self {
-            data,
-            #[cfg(test)]
-            directory,
-            _gate: gate,
-        })
-    }
-
-    /// Live-unit keys are permanent until their unit is removed under its exclusive lease.
-    /// Removing keys merely because no process holds the gate would break noncreating entry.
-    /// Record collection is separate and retains its bounded trigger.
-    pub fn collect(&self) -> Result<usize, Error> {
-        Ok(0)
+        Ok(Self { data, _gate: gate })
     }
 }
 
