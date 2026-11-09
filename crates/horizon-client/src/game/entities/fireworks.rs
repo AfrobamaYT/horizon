@@ -65,6 +65,9 @@ pub(super) struct Rocket {
     pub(super) item: ItemStack,
     /// `Entity.random`: what a mod's `Projectile.deflect` draws from.
     pub(super) random: horizon_core::random::LegacyRandom,
+    /// `Entity.onGround`: whether its last move was stopped going down (or
+    /// the one it was loaded with, until it moves).
+    pub(super) on_ground: bool,
 }
 impl Rocket {
     /// A rocket a server sent (`handleAddEntity`): placed and moved by it.
@@ -90,6 +93,7 @@ impl Rocket {
             angled: false,
             item,
             random: horizon_client::projectiles::unique_random(position),
+            on_ground: false,
         }
     }
     /// `Projectile.setOwner`; the UUID is kept only for an owner `who` can't name.
@@ -125,6 +129,7 @@ impl Rocket {
                     self.owner_uuid
                 },
                 left_owner: self.left_owner,
+                on_ground: self.on_ground,
             },
             uuid,
             raw,
@@ -155,6 +160,7 @@ impl Rocket {
             angled: r.angled,
             item,
             random: horizon_client::projectiles::unique_random(r.position),
+            on_ground: r.on_ground,
         }
     }
     /// One tick of a server's client: the rocket flies on by itself between
@@ -209,6 +215,8 @@ impl Rocket {
             return;
         };
         let horizontal = (moved.x - wanted.x).abs() > 1e-7 || (moved.z - wanted.z).abs() > 1e-7;
+        // Entity.move: on the ground when a move down was stopped.
+        self.on_ground = wanted.y < 0.0 && moved.y != wanted.y;
         self.position = Vec3::new(
             self.position.x + moved.x,
             self.position.y + moved.y,
@@ -277,6 +285,7 @@ impl Game<'_> {
             angled: false,
             item: stack.clone(),
             random,
+            on_ground: false,
         }
     }
     /// `FireworkRocketItem.useOn`: launch from the clicked point.
@@ -793,8 +802,11 @@ impl Game<'_> {
                 (p.y + 0.2125).floor() as i32,
                 p.z.floor() as i32,
             );
+            // Frame generation and temporal upscaling follow its own flight.
+            self.mark_motion(out.len(), Self::MOTION_OBJECT | u64::from(r.id));
             self.submit_item_world(&state, pose, vertex_light(light), out);
         }
+        self.mark_motion(out.len(), 0);
     }
 }
 
@@ -806,6 +818,67 @@ fn use_on_passes(fall_flying: bool) -> bool {
 
 #[cfg(test)]
 mod tests {
+    /// A flying rocket's vertices carry its own id for frame generation's and a temporal
+    /// upscaler's motion vectors (`Frame::entity_motion`), so the motion matched between
+    /// two frames is its flight, not only the camera's.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_flying_rocket_opens_a_motion_run_of_its_own() {
+        use crate::game::{Audio, Options, Progress, Settings, load_resources};
+        use horizon_core::geometry::Vec3;
+
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        let res: &'static _ = Box::leak(Box::new(loaded.resources));
+        let mut game = super::Game::new(
+            res,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
+            None,
+        )
+        .unwrap();
+        let camera = glam::DVec3::new(0.5, 64.0, 0.5);
+        let start = Vec3::new(0.5, 64.0, 4.5);
+        game.rockets
+            .push(super::Rocket::remote(77, start, Vec3::ZERO));
+        let id = super::Game::MOTION_OBJECT | 77;
+        // One frame's motion runs: the rocket's vertices open a run under its own id, and
+        // a camera-only run (id 0) closes it so nothing drawn after takes its motion.
+        game.entity_motion.borrow_mut().clear();
+        let mut out = Vec::new();
+        game.rocket_geometry(camera, 1.0, &mut out);
+        let marks = game.entity_motion.borrow().clone();
+        let at = marks
+            .iter()
+            .position(|m| m.1 == id)
+            .expect("the rocket's run");
+        assert_eq!(
+            marks[at].0, 0,
+            "the run starts at the rocket's first vertex"
+        );
+        assert_eq!(marks.last(), Some(&(out.len() as u32, 0)));
+    }
+
     #[test]
     fn use_on_passes_only_while_gliding() {
         assert!(super::use_on_passes(true));
