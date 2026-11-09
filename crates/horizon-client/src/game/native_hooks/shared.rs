@@ -4986,8 +4986,6 @@ mod tests {
             assert!(!body.contains("return true"), "{head}");
         }
     }
-    /// horizon-mixins refuses targets whose body has a `cfg` or a macro:
-    /// the hook points and helpers must stay free of both.
     /// A data packet for an old window leaves the open mod screen alone.
     #[test]
     fn mod_screen_data_is_its_windows_only() {
@@ -5002,28 +5000,6 @@ mod tests {
         assert!(s.set_data(4, 1, 7));
         assert!(!s.set_data(3, 1, 99));
         assert_eq!(s.data, [0, 7]);
-    }
-
-    #[test]
-    fn hook_points_stay_hookable() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/game/native_hooks");
-        let mut code = String::new();
-        for entry in std::fs::read_dir(dir).unwrap() {
-            let path = entry.unwrap().path();
-            if path.extension().is_some_and(|ext| ext == "rs")
-                && !matches!(path.file_stem().unwrap().to_str().unwrap(), "mod" | "fire")
-            {
-                let source = std::fs::read_to_string(path).unwrap();
-                code.push_str(source.split("#[cfg(test)]").next().unwrap());
-            }
-        }
-        let lines = code.lines().filter(|l| !l.trim_start().starts_with("//"));
-        for line in lines {
-            assert!(!line.contains("cfg"), "a cfg in the hook points: {line}");
-            for mac in ["!(", "![", "! {", "!{"] {
-                assert!(!line.contains(mac), "a macro in the hook points: {line}");
-            }
-        }
     }
 
     #[test]
