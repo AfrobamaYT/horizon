@@ -1548,7 +1548,7 @@ impl Game<'_> {
             .mobs
             .iter()
             .enumerate()
-            .filter(|(_, mob)| mob.extra.mount == Some(id) && mob.alive() && !mob.removed)
+            .filter(|(_, mob)| mob.extra.mount == Some(id) && !mob.removed)
             .map(|(index, mob)| (mob.extra.vehicle_order, mob.id, MobObject::Resident(index)))
             .chain(
                 self.persist
@@ -1556,7 +1556,7 @@ impl Game<'_> {
                     .iter()
                     .filter_map(|(&object_id, object)| {
                         let mob = object.as_mob()?;
-                        (mob.extra.mount == Some(id) && mob.alive() && !mob.removed).then_some((
+                        (mob.extra.mount == Some(id) && !mob.removed).then_some((
                             mob.extra.vehicle_order,
                             mob.id,
                             MobObject::OffLevel(object_id),
@@ -1888,6 +1888,7 @@ impl Game<'_> {
             let b = self.boats.iter().find(|b| b.id == root)?;
             let mut tag = b.to_nbt(uuid, self.persist.raw.get(&root));
             self.put_mob_passengers(&mut tag, root);
+            write_attachments(&mut tag, root, &self.entity_attachments);
             return Some(tag);
         }
         if !self.carts.iter().any(|c| c.id == root) {
@@ -1897,6 +1898,7 @@ impl Game<'_> {
         let c = self.carts.iter().find(|c| c.id == root)?;
         let mut tag = c.to_nbt(uuid, self.persist.raw.get(&root));
         self.put_mob_passengers(&mut tag, root);
+        write_attachments(&mut tag, root, &self.entity_attachments);
         Some(tag)
     }
     /// `ServerPlayer.saveParentVehicle`: a player riding `vehicle` saves
@@ -1911,8 +1913,7 @@ impl Game<'_> {
     ) -> Option<(Tag, u32, [i32; 4])> {
         let vehicle = vehicle?;
         let root = parent_vehicle_root(vehicle, others, |id| self.vehicle_of(id))?;
-        let mut entity = self.vehicle_tree_nbt(root)?;
-        write_attachments(&mut entity, root, &self.entity_attachments);
+        let entity = self.vehicle_tree_nbt(root)?;
         let attach = self.uuid_for(vehicle);
         Some((root_vehicle_tag(attach, entity), root, attach))
     }
@@ -1922,7 +1923,7 @@ impl Game<'_> {
         // The mobs `put_mob_passengers` saves under each vehicle of the tree.
         let mounts: Vec<(u32, Option<u32>)> = self
             .mob_objects()
-            .filter(|m| m.alive())
+            .filter(|m| !m.removed)
             .map(|m| (m.id, m.extra.mount))
             .collect();
         let gone = vehicle_tree(root, &mounts);
@@ -1941,7 +1942,7 @@ impl Game<'_> {
     pub(super) fn vehicle_by_uuid(&self, uuid: [i32; 4]) -> Option<u32> {
         self.persist.uuids.iter().find_map(|(&id, &found)| {
             (found == uuid
-                && (self.mobs.iter().any(|mob| mob.id == id && mob.alive())
+                && (self.mobs.iter().any(|mob| mob.id == id && !mob.removed)
                     || self.boats.iter().any(|boat| boat.id == id)
                     || self.carts.iter().any(|cart| cart.id == id)))
             .then_some(id)
@@ -2726,7 +2727,6 @@ impl Game<'_> {
                 self.boats.iter().all(|b| b.id != v) && self.carts.iter().all(|c| c.id != v)
             })
             && keys.contains(&chunk_of(m.position))
-            && m.alive()
             && !m.removed;
         saves.then(|| (chunk_of(self.mobs[i].position), self.mob_tree_nbt(i)))
     }
@@ -5622,6 +5622,8 @@ mod summon_uuid_conflict_tests {
                 .keys()
                 .find(|&&id| id != parent)
                 .unwrap();
+            // Health zero is not removal: a frozen dying passenger still saves.
+            game.mob_object_mut(parent).unwrap().health = 0.0;
             game.prune_entity_memory();
             assert_eq!(
                 saved_riders(game, root),

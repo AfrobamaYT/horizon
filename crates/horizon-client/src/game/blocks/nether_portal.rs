@@ -1165,10 +1165,9 @@ impl Game<'_> {
                 return;
             }
             self.release_vehicle_container(id);
-            let Some(mut tag) = self.vehicle_tree_nbt(id) else {
+            let Some(tag) = self.vehicle_tree_nbt(id) else {
                 return;
             };
-            super::persist::write_attachments(&mut tag, id, &self.entity_attachments);
             let Some(state) = self.capture_vehicle_tree_state(id) else {
                 return;
             };
@@ -1202,7 +1201,6 @@ impl Game<'_> {
                     doubles([m.x.clamp(-0.4, 0.4), m.y, m.z.clamp(-0.4, 0.4)]),
                 );
             }
-            super::persist::write_attachments(&mut tag, id, &self.entity_attachments);
             let Some(state) = self.capture_vehicle_tree_state(id) else {
                 return;
             };
