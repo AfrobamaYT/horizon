@@ -477,6 +477,7 @@ impl Game<'_> {
                     });
                 from = to;
             }
+            let _ = w.server_stuck_in_blocks(start);
             for (moved, on_ground) in moves {
                 let movement = Vec3::new(moved[0], moved[1], moved[2]);
                 let landed = (|| -> horizon_client::Result<()> {

@@ -341,6 +341,17 @@ impl Game<'_> {
         };
         Some(climbing::on_climbable(&mut world, &self.motion.climbing).unwrap_or(false))
     }
+    /// The climbing decision for a mob currently lent out of the game's list.
+    pub(super) fn native_mob_is_climbing(&self, mob: &horizon_client::mobs::Mob) -> bool {
+        let mut world = FlagClimbing {
+            world: &self.world,
+            position: BlockPos::containing(mob.position),
+            spectator: false,
+            gliding: mob.extra.fall_flying,
+        };
+        climbing::on_climbable(&mut world, &self.motion.climbing).unwrap_or(false)
+    }
+
     /// Whether the entity is a baby (`LivingEntity.isBaby`): a mob answers
     /// from its age, negative until it grows up. A player, an armor stand
     /// and the dragon are never babies.

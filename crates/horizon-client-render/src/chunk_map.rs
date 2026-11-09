@@ -183,6 +183,25 @@ impl ChunkMap {
         Some(slice.copied())
     }
     pub fn insert(&mut self, key: Key, mut chunk: Arc<Chunk>) -> Option<Arc<Chunk>> {
+        let limits = chunk
+            .saved
+            .as_ref()
+            .map(|saved| {
+                saved
+                    .block_entity_sources
+                    .iter()
+                    .filter_map(|(pos, tag)| match tag.get("horizon:stack_limit") {
+                        Some(horizon_core::nbt::Tag::Int(n)) if (1..=99).contains(n) => {
+                            Some((*pos, *n as u32))
+                        }
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if chunk.container_stack_limits != limits {
+            Arc::make_mut(&mut chunk).container_stack_limits = limits;
+        }
         if let Some(observer) = &self.attachment_observer {
             let bound = bind_saved_attachments(&**observer, key, &mut chunk);
             if !bound && self.columns.contains_key(&key) {

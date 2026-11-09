@@ -1305,7 +1305,13 @@ impl HudAtlas {
             .filter(|&size| size != (w, h));
             let flags = mcmeta.as_deref().and_then(TextureFlags::from_mcmeta);
             let animated = frames && animation.is_some();
-            let (gw, gh) = gui_size.unwrap_or((w, h));
+            // Vanilla particle atlases accept sprites of any size.
+            let particle = name.starts_with("particle/") || name.contains(":particle/");
+            let (gw, gh) = if particle {
+                (0, 0)
+            } else {
+                gui_size.unwrap_or((w, h))
+            };
             let maps = read_maps
                 .then(|| {
                     let stem = path.strip_suffix(".png")?;
@@ -3547,6 +3553,32 @@ mod tests {
         assert_eq!(texel_at(&atlas, rect, 0, 0), [0, 0, 200, 255]);
         // Only entity textures: the mods' others reach the atlas through atlas definitions.
         assert!(!atlas.sprites.contains_key("gems:item/ruby"));
+        fs::remove_dir_all(&root).unwrap();
+    }
+    /// A pack's particle sprite of any size packs whole, as vanilla's particle atlas stitches
+    /// it (a light shaft drawn from a 1024-wide texture); the cap on GUI textures stays.
+    #[test]
+    fn large_particle_sprites_pack_and_large_gui_textures_dont() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-atlas-big-particle-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let rays = root.join("assets/mypack/textures/particle/light_rays");
+        fs::create_dir_all(&rays).unwrap();
+        write_strip(
+            &rays.join("02.png"),
+            1024,
+            1024,
+            &[[250, 240, 200, 255]],
+            None,
+        );
+        let gui = root.join("assets/minecraft/textures/gui");
+        fs::create_dir_all(&gui).unwrap();
+        write_strip(&gui.join("huge.png"), 2048, 64, &[[1, 2, 3, 255]], None);
+        let atlas = HudAtlas::build(&ResourceSource::directory(root.clone())).unwrap();
+        let rect = atlas.sprites["mypack:particle/light_rays/02"];
+        assert_eq!(rect.texels((atlas.width, atlas.height)), (1024, 1024));
+        assert_eq!(texel_at(&atlas, rect, 512, 512), [250, 240, 200, 255]);
+        assert!(!atlas.sprites.contains_key("gui/huge"));
         fs::remove_dir_all(&root).unwrap();
     }
     /// OptiFine random entity variants outside `textures/` pack under the names

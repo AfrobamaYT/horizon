@@ -187,8 +187,7 @@ impl Goal for TradeWithPlayer {
             && m.on_ground
             && cx
                 .w
-                .player
-                .as_ref()
+                .selected_player()
                 .is_some_and(|p| m.distance_sqr(p.position) <= 16.0)
     }
     fn start(&mut self, m: &mut Mob, _: &mut Cx) {
@@ -204,13 +203,13 @@ impl Goal for LookAtTradingPlayer {
         LOOK
     }
     fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        m.extra.flag2 && cx.w.player.is_some()
+        m.extra.flag2 && cx.w.selected_player().is_some()
     }
     fn every_tick(&self) -> bool {
         true
     }
     fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
-        if let Some(p) = &cx.w.player {
+        if let Some(p) = cx.w.selected_player() {
             m.look_at([p.position.x, p.eye[1], p.position.z]);
         }
     }

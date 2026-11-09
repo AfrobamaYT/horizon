@@ -253,7 +253,7 @@ impl Game<'_> {
             if called.is_none() || canceled {
                 return;
             }
-            orb.value = orb.value.clamp(1, i32::MAX as u32);
+
             orb.count = orb.count.max(1);
             self.orbs[index].value = orb.value;
             self.orbs[index].count = orb.count;
@@ -279,7 +279,7 @@ impl Game<'_> {
             0.1,
             pitch,
         );
-        let value = orb.value;
+        let value = orb.value.max(0) as u32;
         self.as_guest(conn, |game| {
             let rest = game.mending(value);
             if rest > 0 {

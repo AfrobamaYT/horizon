@@ -1759,10 +1759,10 @@ fn retry_line(info: &Info, retry: Retry, attempts: i32, successes: i32, passed: 
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::game) mod tests {
     use super::*;
 
-    pub(super) fn server_game<'a>(
+    pub(in crate::game) fn server_game<'a>(
         resources: &'a mut Option<std::sync::Arc<crate::game::Resources>>,
     ) -> Game<'a> {
         use crate::game::*;

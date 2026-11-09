@@ -343,6 +343,18 @@ impl Game<'_> {
     /// `Painting.hurtServer` -> kill and `dropItem`. False when a mod kept it
     /// (`native_hanging_break`): it stays at `index`.
     pub(super) fn break_painting(&mut self, index: usize, by_player: bool) -> bool {
+        self.break_painting_by(
+            index,
+            by_player,
+            by_player.then_some(super::commands::Target::Player),
+        )
+    }
+    pub(super) fn break_painting_by(
+        &mut self,
+        index: usize,
+        by_player: bool,
+        source: Option<super::commands::Target>,
+    ) -> bool {
         let pos = self.paintings[index].pos;
         if self.hanging_break_cancelled("minecraft:painting", pos, by_player) {
             return false;
@@ -356,7 +368,7 @@ impl Game<'_> {
         ];
         self.world.modified.insert((p.pos[0] >> 4, p.pos[2] >> 4));
         // BlockAttachedEntity.kill, before dropItem.
-        self.entity_killed_event(at, by_player);
+        self.entity_killed_event_by(at, source);
         if !self
             .ui
             .rules
