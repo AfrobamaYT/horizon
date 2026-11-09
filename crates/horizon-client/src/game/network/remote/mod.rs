@@ -4255,15 +4255,7 @@ impl Game<'_> {
             }
             C::RemoveEntities(p) => {
                 for id in p.ids {
-                    self.forget_entity_initialization(Holder::Entity(id as u32));
-                    if let Some(uuid) = self
-                        .remote
-                        .as_ref()
-                        .and_then(|r| r.level_players.get(&id))
-                        .copied()
-                    {
-                        self.forget_entity_initialization(Holder::Player(uuid));
-                    }
+                    self.forget_remote_entity_construction(id);
                     if let Some(r) = self.remote.as_mut() {
                         if let Some(uuid) = r.level_players.remove(&id) {
                             r.attachments.remove(&Holder::Player(uuid));
