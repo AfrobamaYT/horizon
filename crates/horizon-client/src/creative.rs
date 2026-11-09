@@ -475,6 +475,12 @@ impl Creative {
                 .collect(),
         )
     }
+    /// Invalidate collected contents after client resources are published, even
+    /// when permissions have not changed. The next refresh recollects mod stacks.
+    pub fn invalidate_build(&mut self) {
+        self.built = false;
+        self.forget_items();
+    }
     /// `CreativeModeTabs.buildAllTabContents` with `permissions` and the
     /// stacks mods add (`added`, by tab id, for the tabs `tabs_to_build`
     /// named). A selected tab left without stacks (the operator tab) gives
@@ -1589,6 +1595,22 @@ mod tests {
             ids(&c.items(&names)),
             ["minecraft:stone", "ae2:sky_stone_block"]
         );
+    }
+
+    #[test]
+    fn resource_reload_recollects_with_unchanged_permissions() {
+        let mut c = with_operator_tab();
+        let names = Names::default();
+        refresh_with(&mut c, false, &names, &|_, _| {
+            vec![ItemStack::new("example:old", 1)]
+        });
+        assert!(c.tabs_to_build(false).is_none());
+        c.invalidate_build();
+        refresh_with(&mut c, false, &names, &|_, _| {
+            vec![ItemStack::new("example:new", 1)]
+        });
+        assert_eq!(ids(c.search_items()), ["minecraft:stone", "example:new"]);
+        assert!(c.tabs_to_build(false).is_none());
     }
 
     #[test]
