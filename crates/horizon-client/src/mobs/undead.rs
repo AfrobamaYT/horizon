@@ -864,7 +864,7 @@ impl Goal for BowAttack {
                 }
             }
             if m.extra.using_item > 0 {
-                m.extra.using_item += 1;
+                super::spear_use::count_use_tick(m);
             }
         } else {
             self.attack_time -= 1;
@@ -877,6 +877,43 @@ impl Goal for BowAttack {
         }
     }
 }
+#[cfg(test)]
+mod use_overflow_tests {
+    use super::*;
+    use crate::mobs::world::{test_player, with_test_world};
+    use horizon_core::geometry::Vec3;
+    use std::sync::Arc;
+
+    #[test]
+    #[ignore = "requires prepared entity resources in .local/horizon-client"]
+    fn bow_use_counter_saturates_when_target_hidden() {
+        assert!(
+            with_test_world(&[], |w, types| {
+                let kind = Arc::new(types.types["minecraft:skeleton"].clone());
+                let mut m = Mob::new(1, kind, Vec3::new(0.5, 80.0, 0.5), 0.0);
+                m.extra.using_item = i32::MAX;
+                let mut world = w.clone();
+                world.player = Some(test_player(Vec3::new(2.5, 80.0, 0.5)));
+                m.ai.target = Some(Who::Player);
+                m.ai.seen_cache.push((Who::Player, false));
+                let mut goal = BowAttack::new(1.0, 20, 15.0);
+                let mut fixture = crate::health::TestLevel::new(0);
+                let mut events = Vec::new();
+                goal.tick(
+                    &mut m,
+                    &mut Cx {
+                        w: &world,
+                        level: &mut fixture.level(),
+                        events: &mut events,
+                    },
+                );
+                assert_eq!(m.extra.using_item, i32::MAX);
+            }),
+            "prepared mob resources required"
+        );
+    }
+}
+
 /// BowItem.getPowerForTime
 pub fn bow_power(ticks: i32) -> f32 {
     let t = ticks as f32 / 20.0;

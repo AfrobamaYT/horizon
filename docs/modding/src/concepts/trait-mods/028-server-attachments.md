@@ -49,8 +49,7 @@ with the last row. The same ordered mutation history is deterministic, but the
 order is neither sorted nor stable across structural changes. Retaining a batch
 can make the next live mutation copy row metadata and shared pointers once;
 retaining many batches keeps their old bindings alive. Native acquisition clones
-only the bucket Arc. The generated component boundary transfers the whole owned
-batch; it does not import one host call per row. Erased values from an incompatible
+only the bucket Arc. Erased values from an incompatible
 type domain report `TypeMismatch` rather than falling back to saved decoding.
 
 ```rust

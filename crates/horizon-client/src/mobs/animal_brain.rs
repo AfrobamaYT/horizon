@@ -113,7 +113,7 @@ impl Tracker {
         }
     }
     /// `currentPosition`.
-    fn position(&self, w: &MobWorld) -> Option<[f64; 3]> {
+    pub(super) fn position(&self, w: &MobWorld) -> Option<[f64; 3]> {
         match *self {
             Tracker::Entity { who, eye, .. } => w.target_info(who).map(|t| {
                 [
@@ -347,6 +347,7 @@ pub struct Brain {
 }
 #[derive(Clone, Debug)]
 struct Entry {
+    prio: i32,
     act: Act,
     b: B,
 }
@@ -411,6 +412,28 @@ pub fn init(m: &mut Mob, shuffle_seed: i64) {
         Kind::CopperGolem => copper_golem_package(shuffle_seed),
         Kind::Tadpole => tadpole_package(shuffle_seed),
     };
+    // The parts' behaviors join before the sort, so each lands after
+    // vanilla's of its priority (#824); the stable sort keeps vanilla's own
+    // hand-written order. Nothing joins a type no part attached to, and
+    // nothing is asked or built then.
+    let before = b.list.len();
+    attach_behaviors(&m.kind.id, &mut b.list);
+    if b.list.len() > before {
+        b.list.sort_by_key(|e| {
+            (
+                e.prio,
+                match e.act {
+                    Act::Core => 1,
+                    Act::Dig => 3,
+                    Act::Idle => 5,
+                    Act::Sniff => 6,
+                    Act::Fight => 14,
+                    Act::PlayDead => 15,
+                    Act::Panic => 15,
+                },
+            )
+        });
+    }
     if let Some(c) = cooldown {
         b.mem.transport_items_cooldown_ticks.set(c);
     }
@@ -432,14 +455,27 @@ pub fn set_transport_cooldown(m: &mut Mob, ticks: i32) {
 
 /// The happy ghast grew up (`adultGhastSetup`): every running behaviour
 /// stops (`Brain.stopAll`) and the memories are cleared; the brain no
-/// longer ticks.
-pub fn grown_up(m: &mut Mob) {
+/// longer ticks. A running mod behavior stops with its `stop` callback,
+/// as `Brain.stopAll` reaches every running behavior's (#824); the
+/// vanilla entries keep the port's own state reset.
+pub fn grown_up(m: &mut Mob, w: &MobWorld<'_>) {
     let Some(b) = m.extra.animal_brain.as_deref_mut() else {
         return;
     };
-    for e in b.list.iter_mut() {
-        e.b.reset();
+    let mut list = std::mem::take(&mut b.list);
+    for e in list.iter_mut() {
+        if let B::Mod(mod_e) = &mut e.b {
+            if mod_e.running() {
+                mod_e.do_stop(m, w);
+            }
+            mod_e.reset();
+        } else {
+            e.b.reset();
+        }
     }
+    let b = m.extra.animal_brain.as_deref_mut();
+    let Some(b) = b else { return };
+    b.list = list;
     b.mem = Memories::default();
     m.nav_stop();
 }
@@ -953,6 +989,8 @@ enum B {
         running: bool,
         player: bool,
     },
+    /// A mod's behavior (#824), wrapped by `mod_behaviors`.
+    Mod(super::mod_behaviors::ModBehavior),
     Gate(Box<Gate>),
     /// `CountDownCooldownTicks(GAZE_COOLDOWN_TICKS)` and
     /// `(TRANSPORT_ITEMS_COOLDOWN_TICKS)`.
@@ -1000,6 +1038,7 @@ impl B {
             | B::LookAtPlayer(running)
             | B::Stroll { running, .. }
             | B::FollowAdult { running, .. } => *running,
+            B::Mod(e) => e.running(),
             B::Gate(g) => g.running,
         }
     }
@@ -1034,6 +1073,7 @@ impl B {
                     k.0.reset();
                 }
             }
+            B::Mod(e) => e.reset(),
             _ => self.set_one_shot(false),
         }
     }
@@ -1075,6 +1115,7 @@ impl B {
         let now = cx.now;
         match self {
             B::Gate(g) => g.try_start(m, cx),
+            B::Mod(e) => e.try_start(m, cx.w, cx.level.random(), cx.now),
             B::PlayDead(t) => {
                 if !m.fluids.in_water
                     || !mem(m).play_dead_ticks.present()
@@ -1503,6 +1544,7 @@ impl B {
                 }
             }
             B::Gate(g) => g.tick_or_stop(m, cx),
+            B::Mod(e) => e.tick_or_stop(m, cx.w, cx.now),
             B::Swim(t) => {
                 if t.timed_out(now) || !swim_condition(m) {
                     self.do_stop(m, cx);
@@ -1753,6 +1795,7 @@ impl B {
             B::AxolotlAction { .. } => {}
             B::PlayDead(t) => t.running = false,
             B::Gate(g) => g.do_stop(m, cx),
+            B::Mod(e) => e.do_stop(m, cx.w),
             B::Swim(t) | B::DoNothing(t) => t.running = false,
             B::AnimalPanic { t, .. } => {
                 t.running = false;
@@ -2087,22 +2130,24 @@ fn dig_position(m: &mut Mob, w: &MobWorld) -> Option<[i32; 3]> {
 /// `HashMap<Activity, ...>` (core 1, dig 3, idle 5, sniff 6, panic 15),
 /// then in insertion order.
 fn sniffer_package(seed: i64) -> Vec<Entry> {
-    let e = |act: Act, b: B| Entry { act, b };
+    let e = |prio: i32, act: Act, b: B| Entry { prio, act, b };
     let mut l = vec![
         // Priority 0: core, dig, idle, sniff.
-        e(Act::Core, B::Swim(Timed::new(60, 60))),
-        e(Act::Dig, B::Digging(Timed::new(160, 180))),
-        e(Act::Dig, B::FinishedDigging(Timed::new(40, 40))),
+        e(0, Act::Core, B::Swim(Timed::new(60, 60))),
+        e(0, Act::Dig, B::Digging(Timed::new(160, 180))),
+        e(0, Act::Dig, B::FinishedDigging(Timed::new(40, 40))),
         e(
+            0,
             Act::Idle,
             B::MakeLove {
                 t: Timed::new(110, 110),
                 spawn_at: 0,
             },
         ),
-        e(Act::Sniff, B::Searching(Timed::new(600, 600))),
+        e(0, Act::Sniff, B::Searching(Timed::new(600, 600))),
         // Priority 1.
         e(
+            1,
             Act::Core,
             B::AnimalPanic {
                 t: Timed::new(100, 120),
@@ -2111,6 +2156,7 @@ fn sniffer_package(seed: i64) -> Vec<Entry> {
             },
         ),
         e(
+            1,
             Act::Idle,
             B::FollowTemptation {
                 t: Timed::new(60, 60),
@@ -2118,14 +2164,15 @@ fn sniffer_package(seed: i64) -> Vec<Entry> {
             },
         ),
         // Priority 2.
-        e(Act::Core, move_to_target_sink(500, 700)),
-        e(Act::Idle, B::LookAtTargetSink(Timed::new(45, 90))),
+        e(2, Act::Core, move_to_target_sink(500, 700)),
+        e(2, Act::Idle, B::LookAtTargetSink(Timed::new(45, 90))),
         // Priority 3.
-        e(Act::Core, B::CountDownTemptation(Timed::new(60, 60))),
-        e(Act::Idle, B::FeelingHappy(Timed::new(40, 100))),
+        e(3, Act::Core, B::CountDownTemptation(Timed::new(60, 60))),
+        e(3, Act::Idle, B::FeelingHappy(Timed::new(40, 100))),
     ];
     // Priority 4.
     l.push(e(
+        4,
         Act::Idle,
         B::Gate(Box::new(Gate::run_one(
             seed,
@@ -2161,10 +2208,11 @@ fn sniffer_package(seed: i64) -> Vec<Entry> {
 /// priorities 0 to 5 in turn (`ActivityData.create(CORE, 0, ..)`), the idle
 /// ones 0, 1 and 2.
 fn copper_golem_package(seed: i64) -> Vec<Entry> {
-    let e = |act: Act, b: B| Entry { act, b };
+    let e = |prio: i32, act: Act, b: B| Entry { prio, act, b };
     vec![
         // Priority 0.
         e(
+            0,
             Act::Core,
             B::AnimalPanic {
                 t: Timed::new(100, 120),
@@ -2172,14 +2220,15 @@ fn copper_golem_package(seed: i64) -> Vec<Entry> {
                 speed: 1.5,
             },
         ),
-        e(Act::Idle, B::Transport(Box::default())),
+        e(0, Act::Idle, B::Transport(Box::default())),
         // Priority 1.
-        e(Act::Core, B::LookAtTargetSink(Timed::new(45, 90))),
-        e(Act::Idle, B::LookAtPlayerSometimes(false, 0)),
+        e(1, Act::Core, B::LookAtTargetSink(Timed::new(45, 90))),
+        e(1, Act::Idle, B::LookAtPlayerSometimes(false, 0)),
         // Priority 2: RunOne(stroll or do nothing) while there is no walk
         // target and the transport cools down.
-        e(Act::Core, move_to_target_sink(150, 250)),
+        e(2, Act::Core, move_to_target_sink(150, 250)),
         e(
+            2,
             Act::Idle,
             B::Gate(Box::new(
                 Gate::run_one(
@@ -2204,6 +2253,7 @@ fn copper_golem_package(seed: i64) -> Vec<Entry> {
         ),
         // Priority 3.
         e(
+            3,
             Act::Core,
             B::InteractWithDoor {
                 running: false,
@@ -2212,18 +2262,19 @@ fn copper_golem_package(seed: i64) -> Vec<Entry> {
             },
         ),
         // Priorities 4 and 5.
-        e(Act::Core, B::CountDownGaze(Timed::new(60, 60))),
-        e(Act::Core, B::CountDownTransport(Timed::new(60, 60))),
+        e(4, Act::Core, B::CountDownGaze(Timed::new(60, 60))),
+        e(5, Act::Core, B::CountDownTransport(Timed::new(60, 60))),
     ]
 }
 
 fn ghastling_package(seed: i64) -> Vec<Entry> {
-    let e = |act: Act, b: B| Entry { act, b };
+    let e = |prio: i32, act: Act, b: B| Entry { prio, act, b };
     vec![
         // Priority 0.
-        e(Act::Core, B::Swim(Timed::new(60, 60))),
+        e(0, Act::Core, B::Swim(Timed::new(60, 60))),
         // Priority 1.
         e(
+            1,
             Act::Core,
             B::AnimalPanic {
                 t: Timed::new(100, 120),
@@ -2232,6 +2283,7 @@ fn ghastling_package(seed: i64) -> Vec<Entry> {
             },
         ),
         e(
+            1,
             Act::Idle,
             B::FollowTemptation {
                 t: Timed::new(60, 60),
@@ -2239,8 +2291,9 @@ fn ghastling_package(seed: i64) -> Vec<Entry> {
             },
         ),
         // Priority 2.
-        e(Act::Core, B::LookAtTargetSink(Timed::new(45, 90))),
+        e(2, Act::Core, B::LookAtTargetSink(Timed::new(45, 90))),
         e(
+            2,
             Act::Idle,
             B::FollowAdult {
                 running: false,
@@ -2248,8 +2301,9 @@ fn ghastling_package(seed: i64) -> Vec<Entry> {
             },
         ),
         // Priority 3.
-        e(Act::Core, move_to_target_sink(150, 250)),
+        e(3, Act::Core, move_to_target_sink(150, 250)),
         e(
+            3,
             Act::Idle,
             B::FollowAdult {
                 running: false,
@@ -2257,8 +2311,9 @@ fn ghastling_package(seed: i64) -> Vec<Entry> {
             },
         ),
         // Priority 4.
-        e(Act::Core, B::CountDownTemptation(Timed::new(60, 60))),
+        e(4, Act::Core, B::CountDownTemptation(Timed::new(60, 60))),
         e(
+            4,
             Act::Idle,
             B::Gate(Box::new(Gate::run_one(
                 seed,
@@ -2685,7 +2740,7 @@ fn axolotl_action(m: &mut Mob, cx: &mut Bx, action: AxolotlAction, until: &mut i
 fn tadpole_package(seed: i64) -> Vec<Entry> {
     use Act::*;
     use AxolotlAction::*;
-    let e = |act, b| Entry { act, b };
+    let e = |prio: i32, act, b| Entry { prio, act, b };
     let action = |action| B::AxolotlAction {
         action,
         running: false,
@@ -2694,6 +2749,7 @@ fn tadpole_package(seed: i64) -> Vec<Entry> {
     vec![
         // Priority 0.
         e(
+            0,
             Core,
             B::AnimalPanic {
                 t: Timed::new(100, 120),
@@ -2701,10 +2757,11 @@ fn tadpole_package(seed: i64) -> Vec<Entry> {
                 speed: 2.0,
             },
         ),
-        e(Idle, B::LookAtPlayerSometimes(false, 0)),
+        e(0, Idle, B::LookAtPlayerSometimes(false, 0)),
         // Priority 1.
-        e(Core, B::LookAtTargetSink(Timed::new(45, 90))),
+        e(1, Core, B::LookAtTargetSink(Timed::new(45, 90))),
         e(
+            1,
             Idle,
             B::FollowTemptation {
                 t: Timed::new(60, 60),
@@ -2712,8 +2769,9 @@ fn tadpole_package(seed: i64) -> Vec<Entry> {
             },
         ),
         // Priority 2.
-        e(Core, move_to_target_sink(150, 250)),
+        e(2, Core, move_to_target_sink(150, 250)),
         e(
+            2,
             Idle,
             B::Gate(Box::new(Gate {
                 running: false,
@@ -2729,13 +2787,69 @@ fn tadpole_package(seed: i64) -> Vec<Entry> {
             })),
         ),
         // Priority 3.
-        e(Core, B::CountDownTemptation(Timed::new(60, 60))),
+        e(3, Core, B::CountDownTemptation(Timed::new(60, 60))),
     ]
 }
+
+// ---- Mod behaviors ------------------------------------------------------
+
+/// The parts' behaviors for this brain (#824): each joins the list with its
+/// activity and priority, refused where this brain has no such activity.
+fn attach_behaviors(mob_id: &str, list: &mut Vec<Entry>) {
+    struct Reg<'a> {
+        list: &'a mut Vec<Entry>,
+        mob_id: &'a str,
+    }
+    impl mod_api::BehaviorRegistrarBackend for Reg<'_> {
+        fn add_behavior(
+            &mut self,
+            r: mod_api::RegisteredBehavior,
+        ) -> Result<(), mod_api::BehaviorRefusal> {
+            let act = act_of(r.activity)?;
+            self.list.push(Entry {
+                prio: r.priority,
+                act,
+                b: B::Mod(super::mod_behaviors::ModBehavior::new(r)),
+            });
+            Ok(())
+        }
+        fn mob_id(&self) -> &str {
+            self.mob_id
+        }
+    }
+    super::mod_behaviors::attach(mob_id, &mut Reg { list, mob_id });
+}
+
+/// This brain's slot for a mod-api activity.
+fn act_of(activity: mod_api::Activity) -> Result<Act, mod_api::BehaviorRefusal> {
+    use mod_api::Activity as A;
+    Ok(match activity {
+        A::Core => Act::Core,
+        A::Idle => Act::Idle,
+        A::Fight => Act::Fight,
+        A::PlayDead => Act::PlayDead,
+        A::Sniff => Act::Sniff,
+        A::Dig => Act::Dig,
+        A::Panic => Act::Panic,
+        other => return Err(mod_api::BehaviorRefusal::UnknownActivity(other)),
+    })
+}
+
+/// The list's `(prio, activity, is a mod's)` keys, in `Brain.tick`'s start
+/// order — the inspection the goal selector's `entries` gives goals' tests.
+pub fn entry_keys(m: &Mob) -> Option<Vec<(i32, Act, bool)>> {
+    brain(m).map(|b| {
+        b.list
+            .iter()
+            .map(|e| (e.prio, e.act, matches!(e.b, B::Mod(_))))
+            .collect()
+    })
+}
+
 fn axolotl_package(seed: i64) -> Vec<Entry> {
     use Act::*;
     use AxolotlAction::*;
-    let e = |act, b| Entry { act, b };
+    let e = |prio: i32, act, b| Entry { prio, act, b };
     let action = |action| B::AxolotlAction {
         action,
         running: false,
@@ -2743,22 +2857,24 @@ fn axolotl_package(seed: i64) -> Vec<Entry> {
     };
     vec![
         // Native activity slots, merged by behavior priority.
-        e(Core, B::LookAtTargetSink(Timed::new(45, 90))),
-        e(Idle, B::LookAtPlayerSometimes(false, 0)),
-        e(Fight, action(StopAttack)),
-        e(PlayDead, B::PlayDead(Timed::new(200, 200))),
-        e(Core, move_to_target_sink(150, 250)),
+        e(0, Core, B::LookAtTargetSink(Timed::new(45, 90))),
+        e(0, Idle, B::LookAtPlayerSometimes(false, 0)),
+        e(0, Fight, action(StopAttack)),
+        e(0, PlayDead, B::PlayDead(Timed::new(200, 200))),
+        e(1, Core, move_to_target_sink(150, 250)),
         e(
+            1,
             Idle,
             B::MakeLove {
                 t: Timed::new(110, 110),
                 spawn_at: 0,
             },
         ),
-        e(Fight, action(Chase)),
-        e(PlayDead, action(EraseDeadBreeding)),
-        e(Core, action(ValidateDead)),
+        e(1, Fight, action(Chase)),
+        e(1, PlayDead, action(EraseDeadBreeding)),
+        e(2, Core, action(ValidateDead)),
         e(
+            2,
             Idle,
             B::Gate(Box::new(Gate::run_one(
                 seed,
@@ -2780,12 +2896,13 @@ fn axolotl_package(seed: i64) -> Vec<Entry> {
                 ],
             ))),
         ),
-        e(Fight, action(Bite)),
-        e(Core, B::CountDownTemptation(Timed::new(60, 60))),
-        e(Idle, action(StartAttack)),
-        e(Idle, action(FindLiquid)),
-        e(Fight, action(EraseAttackBreeding)),
+        e(2, Fight, action(Bite)),
+        e(3, Core, B::CountDownTemptation(Timed::new(60, 60))),
+        e(3, Idle, action(StartAttack)),
+        e(3, Idle, action(FindLiquid)),
+        e(3, Fight, action(EraseAttackBreeding)),
         e(
+            4,
             Idle,
             B::Gate(Box::new(Gate {
                 running: false,

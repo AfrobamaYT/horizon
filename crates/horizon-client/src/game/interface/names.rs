@@ -345,11 +345,11 @@ impl Game<'_> {
             }
             // getDisplayName: the name in the team's prefix, suffix and colour.
             let member = if player {
-                Text::literal(&name)
+                Text::untrusted(&name)
             } else {
                 m.custom_name_text
                     .clone()
-                    .unwrap_or_else(|| Text::literal(&name))
+                    .unwrap_or_else(|| Text::untrusted(&name))
             };
             // StringDecomposer.iterateFormatted: `§` codes a server leaves
             // inside the team prefix or the name itself apply at draw time.
@@ -366,7 +366,7 @@ impl Game<'_> {
             }
             let shown = shown.resolve_legacy();
             let shown = text
-                .map(|text| Text::literal(text).resolve_legacy())
+                .map(|text| Text::untrusted(text).resolve_legacy())
                 .unwrap_or(shown);
             let mut lines = Vec::new();
             // EntityRenderer.extractNameTags: the score shows within the
@@ -471,7 +471,7 @@ impl Game<'_> {
             }
             .resolve_legacy();
             let shown = text
-                .map(|text| Text::literal(text).resolve_legacy())
+                .map(|text| Text::untrusted(text).resolve_legacy())
                 .unwrap_or(shown);
             let mut lines = Vec::new();
             let mut lift = 0.0;
@@ -548,7 +548,7 @@ impl Game<'_> {
                             f64::from(step[2] as f32 * 0.3),
                         ),
                     lines: vec![(
-                        Text::literal(text.or(name).unwrap_or_default()).resolve_legacy(),
+                        Text::untrusted(text.or(name).unwrap_or_default()).resolve_legacy(),
                         0.0,
                     )],
                     light: self.world.light(

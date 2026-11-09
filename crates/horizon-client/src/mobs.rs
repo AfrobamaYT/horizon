@@ -56,6 +56,7 @@ pub mod landing;
 pub mod leash;
 pub mod living;
 pub mod llama;
+pub mod mod_behaviors;
 pub mod model_layers;
 pub mod monster_brain;
 pub mod nautilus;
@@ -88,6 +89,7 @@ pub mod spawning;
 pub mod spear_use;
 pub mod species;
 pub mod strider;
+pub mod stuck;
 pub mod suffocation;
 pub mod sulfur_cube;
 pub mod sync;
@@ -1359,12 +1361,10 @@ pub struct Extra {
     pub synced_pose: u8,
     /// `LivingEntity.isAutoSpinAttack` (Riptide).
     pub auto_spin_attack: bool,
-    /// `LivingEntity.DATA_ARROW_COUNT_ID`: the arrows stuck in a player
-    /// (`ArrowLayer`).
-    pub arrow_count: i32,
-    /// `LivingEntity.DATA_STINGER_COUNT_ID`: the bee stingers stuck in a
-    /// player (`BeeStingerLayer`).
-    pub stinger_count: i32,
+    /// `LivingEntity.DATA_ARROW_COUNT_ID` and `DATA_STINGER_COUNT_ID`: the
+    /// arrows and bee stingers stuck in the body (`ArrowLayer`,
+    /// `BeeStingerLayer`), with the timers that pull them out.
+    pub stuck: stuck::Stuck,
     /// `Player.DATA_SHOULDER_PARROT_LEFT` and `_RIGHT`: the variant of the
     /// parrot on each shoulder (`ParrotOnShoulderLayer`).
     pub shoulder_parrots: [Option<i32>; 2],
@@ -3873,8 +3873,11 @@ impl Mob {
         let mut mob = Self::new_remote(id, kind, position, yaw);
         // The parts a mod attached to this entity type add their goals right
         // after the species' own (#1077): vanilla's `registerGoals` moment,
-        // which belongs to the authoritative construction.
+        // which belongs to the authoritative construction. A type with no
+        // brain is told so at the same moment (#824); a brain-driven type
+        // registers its behaviors at the brain's own construction.
         part_goals::attach(&mut mob);
+        mod_behaviors::attach_at_construction(&mob);
         mob
     }
     /// The same construction without the mod parts' goals: a client's copy of
@@ -4795,6 +4798,7 @@ impl Mob {
         // LivingEntity.tick: CombatTracker.recheckStatus.
         let alive = self.alive();
         self.combat.recheck(alive, self.age);
+        self.extra.stuck.tick();
     }
     /// The section the mob is in, noted when it changes (`EntitySection` lists).
     fn track_section(&mut self) {

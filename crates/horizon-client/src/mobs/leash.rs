@@ -743,7 +743,7 @@ mod tests {
                     );
                     if kind != "cow" {
                         mob.extra.age = if kind == "baby" { -24000 } else { 0 };
-                        super::super::happy_ghast::ensure_setup(&mut mob);
+                        super::super::happy_ghast::ensure_setup(&mut mob, None);
                     }
                     mob.on_ground = false;
                     mob.ai.nav.path = Some(Path {

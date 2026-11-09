@@ -144,7 +144,7 @@ impl Goal for DrinkItem {
         if m.extra.using_item == 0 {
             return;
         }
-        m.extra.using_item += 1;
+        super::spear_use::count_use_tick(m);
         if m.extra.using_item > DRINK_TICKS {
             // LivingEntity.completeUsingItem: the potion or the milk takes effect.
             if self.dark {
@@ -449,6 +449,46 @@ mod trade_start_tests {
             outcomes,
             vec![("trading", true), ("hurt", false), ("out of reach", false)],
             "TradeWithPlayerGoal starts only for an unhurt trader within four blocks"
+        );
+    }
+}
+
+#[cfg(test)]
+mod use_overflow_tests {
+    use super::*;
+    use crate::mobs::world::{test_player, with_test_world};
+    use horizon_core::geometry::Vec3;
+    use std::sync::Arc;
+
+    #[test]
+    #[ignore = "requires prepared entity resources in .local/horizon-client"]
+    fn trader_drink_completes_at_max_use_counter() {
+        assert!(
+            with_test_world(&[], |w, types| {
+                let kind = Arc::new(types.types["minecraft:wandering_trader"].clone());
+                let mut m = Mob::new(1, kind, Vec3::new(0.5, 80.0, 0.5), 0.0);
+                m.extra.using_item = i32::MAX;
+                let mut world = w.clone();
+                world.player = Some(test_player(Vec3::new(2.5, 80.0, 0.5)));
+                let mut goal = DrinkItem {
+                    item: "minecraft:potion",
+                    finish_sound: "entity.wandering_trader.disappeared",
+                    dark: true,
+                };
+                let mut fixture = crate::health::TestLevel::new(0);
+                let mut events = Vec::new();
+                goal.tick(
+                    &mut m,
+                    &mut Cx {
+                        w: &world,
+                        level: &mut fixture.level(),
+                        events: &mut events,
+                    },
+                );
+                assert_eq!(m.extra.using_item, 0);
+                assert!(invisible(&m));
+            }),
+            "prepared mob resources required"
         );
     }
 }

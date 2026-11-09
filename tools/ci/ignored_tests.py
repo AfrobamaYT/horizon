@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Run every library test, ignored or not, with the prepared vanilla data, against a list of known failures.
 
-Usage: ignored_tests.py PACKAGE...  (HORIZON_TEST_RESOURCES points at the prepared 26.3 data)
+Usage: ignored_tests.py SHARD...  (HORIZON_TEST_RESOURCES points at the prepared 26.3 data)
+
+A SHARD is a package, or one leg of it written `PACKAGE#NofM` (tools/ci/ignored_shards.py splits the biggest
+package so one process does not hold every test's memory). A leg runs the tests whose name hashes to its
+number, so every test runs in exactly one leg, and only judges the list's entries for those same tests.
 
 Each package's library tests run with `--include-ignored`: the #[ignore]d ones that need the data, and the
 ones that return early without it, which `verify` (no data) passes without checking anything. The packages
@@ -21,6 +25,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import zlib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -34,6 +39,8 @@ COUNT = re.compile(r"^running (\d+) tests?$")
 PANIC = re.compile(r"^thread '([^']+)'.* panicked at (\S+):$")
 # Packages whose integration tests (`tests/*.rs`) run too, beside their library tests.
 INTEGRATION_TESTS = {"horizon-client"}
+LEG = re.compile(r"^(?P<package>[^#]+)#(?P<number>\d+)of(?P<count>\d+)$")
+LISTED = re.compile(r"^(\S+): test$")
 ICD_DIRS = ("/usr/share/vulkan/icd.d", "/etc/vulkan/icd.d")
 
 
@@ -42,6 +49,22 @@ def has_vulkan():
     return bool(os.environ.get("VK_ICD_FILENAMES")) or any(
         Path(d).is_dir() and any(Path(d).glob("*.json")) for d in ICD_DIRS
     )
+
+
+def parse_shard(shard):
+    """(package, leg number or None, leg count or None) of a shard argument."""
+    found = LEG.match(shard)
+    if not found:
+        return shard, None, None
+    number, count = int(found["number"]), int(found["count"])
+    if not 1 <= number <= count:
+        sys.exit(f"{shard}: leg {number} of {count} doesn't exist")
+    return found["package"], number, count
+
+
+def in_leg(test, number, count):
+    """Whether `test` belongs to leg `number` of `count` (every test to exactly one leg; all, with no legs)."""
+    return number is None or zlib.crc32(test.encode()) % count == number - 1
 
 
 def known_failures():
@@ -57,9 +80,8 @@ def known_failures():
     return known
 
 
-def run(package, skip):
-    """Each test's result in `package`'s ignored library tests but `skip`, or None if they didn't build."""
-    skips = [arg for test in skip for arg in ("--skip", test)]
+def run(package, skip, number=None, count=None):
+    """Each test's result in `package`'s ignored library tests but `skip` (and, with a leg, the other legs'), or None if they didn't build."""
     # Resource-backed fixtures need a fresh home, not the runner user's game files.
     with tempfile.TemporaryDirectory(prefix="horizon-ignored-") as scratch:
         homes = {}
@@ -70,11 +92,27 @@ def run(package, skip):
         for key in ("HORIZON_LAUNCHER_TRASH", "HORIZON_LAUNCHER_CLIPBOARD", "HORIZON_LAUNCHER_DESKTOP"):
             homes[key] = Path(scratch) / key.lower()
         env = lab.game_env(**homes)
+        # --no-fail-fast: a target with accepted known failures must not stop the targets after it.
+        command = ["cargo", "test", "-p", package, "--lib", *(["--bins", "--tests"] if package in INTEGRATION_TESTS else []), "--no-fail-fast"]
+        expected = set()
+        if number is not None:
+            # List what exists, then skip every test another leg owns.
+            listing = subprocess.run(
+                [*command, "--", "--list", "--include-ignored"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, errors="replace", env=env,
+            )
+            names = {found[1] for line in listing.stdout.splitlines() if (found := LISTED.match(line))}
+            if listing.returncode or not names:
+                print(f"{package}: could not list the tests to split into legs (cargo exit {listing.returncode})")
+                return None
+            others = sorted(name for name in names if not in_leg(name, number, count))
+            # Every test this leg owns and does not skip must report a result.
+            expected = set(names) - set(others) - set(skip)
+            skip = [*skip, *others]
+            print(f"{package}: leg {number} of {count} runs {len(names) - len(others)} of {len(names)} listed tests")
+        skips = [arg for test in skip for arg in ("--skip", test)]
         process = subprocess.run(
-            [
-                "cargo", "test", "-p", package, "--lib", *(["--bins", "--tests"] if package in INTEGRATION_TESTS else []),
-                "--", "--include-ignored", "--exact", "--test-threads=4", *skips,
-            ],
+            [*command, "--", "--include-ignored", "--exact", "--test-threads=4", *skips],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace", env=env,
         )
     results = {}
@@ -115,6 +153,11 @@ def run(package, skip):
     if process.returncode and all(results.values()):
         print(f"{package}: cargo exited {process.returncode} without a parsed test failure")
         return None
+    if missing := sorted(expected - results.keys()):
+        print(f"{package}: {len(missing)} listed tests of this leg never reported a result:")
+        for name in missing[:50]:
+            print(f"  {name}")
+        return None
     if not summaries:
         # A build failure: the compiler's output quotes only this repository's code.
         print(process.stdout[-20000:])
@@ -122,17 +165,18 @@ def run(package, skip):
     return results
 
 
-def main(packages):
+def main(shards):
     known = known_failures()
     skipped = {"harness"} if has_vulkan() else {"harness", "gpu"}
     if "gpu" in skipped:
         print("no Vulkan driver on this runner: the tests marked `gpu` are skipped")
     problems = []
-    for package in packages:
+    for shard in shards:
+        package, number, count = parse_shard(shard)
         skip = [test for (listed, test), mark in known.items() if listed == package and mark in skipped]
-        results = run(package, skip)
+        results = run(package, skip, number, count) if number is not None else run(package, skip)
         if results is None:
-            problems.append(f"{package}: the test run did not complete")
+            problems.append(f"{shard}: the test run did not complete")
             continue
         for test, passed in sorted(results.items()):
             listed = (package, test) in known
@@ -143,7 +187,7 @@ def main(packages):
             elif passed and listed and known[(package, test)] is None:
                 problems.append(f"{package} {test}: passes now; take it off {KNOWN.name}")
         for (listed, test), mark in known.items():
-            if listed == package and mark not in skipped and test not in results:
+            if listed == package and mark not in skipped and in_leg(test, number, count) and test not in results:
                 problems.append(f"{package} {test}: listed in {KNOWN.name} but no longer runs")
     for problem in problems:
         print(f"::error::{problem}")

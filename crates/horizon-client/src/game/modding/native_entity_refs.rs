@@ -903,6 +903,20 @@ pub(super) mod tests {
         );
     }
 
+    /// Keep a key that a test mod's `register` declared. The game fixture registers the
+    /// installed mods again (`register_game_keys`), and a key's slot is stable for the process,
+    /// so the repeat must declare the same key.
+    pub(in crate::game) fn record_key<K: Copy + PartialEq + std::fmt::Debug>(
+        slot: &std::sync::OnceLock<K>,
+        key: K,
+    ) {
+        assert_eq!(
+            *slot.get_or_init(|| key),
+            key,
+            "a repeat registration declared another key"
+        );
+    }
+
     pub(in crate::game) fn with_client_game(test: impl FnOnce(&mut super::Game<'_>)) {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         with_game_role(
