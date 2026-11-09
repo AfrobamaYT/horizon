@@ -2431,9 +2431,9 @@ mod tests {
         let mut stack = ItemStack::new("minecraft:diamond_sword", 1);
         stack.data_mut().set_other(
             "!minecraft:enchantments",
-            Some(horizon_world::nbt::Tag::compound(Vec::<(
+            Some(horizon_core::nbt::Tag::compound(Vec::<(
                 &str,
-                horizon_world::nbt::Tag,
+                horizon_core::nbt::Tag,
             )>::new())),
         );
         stack.enchant("minecraft:sharpness", 1);
@@ -2441,9 +2441,9 @@ mod tests {
         let mut book = ItemStack::new("minecraft:enchanted_book", 1);
         book.data_mut().set_other(
             "!minecraft:stored_enchantments",
-            Some(horizon_world::nbt::Tag::compound(Vec::<(
+            Some(horizon_core::nbt::Tag::compound(Vec::<(
                 &str,
-                horizon_world::nbt::Tag,
+                horizon_core::nbt::Tag,
             )>::new())),
         );
         book.enchant("minecraft:sharpness", 1);

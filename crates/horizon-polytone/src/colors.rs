@@ -114,7 +114,7 @@ impl FluidFogs {
         {
             return;
         }
-        let implicit = crate::implicit_id(&relative, "fluid_modifiers");
+        let implicit = crate::implicit_id(relative, "fluid_modifiers");
         let Ok(targets) = crate::Targets::parse(json.get("targets"), implicit.as_deref()) else {
             return;
         };
