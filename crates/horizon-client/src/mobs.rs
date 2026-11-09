@@ -4576,7 +4576,7 @@ impl Mob {
             container.record_reduction(Reduction::Absorption, dealt - through);
             self.health -= through;
         }
-        // NeoForge bubbles what Pre left up to `lastHurt`: vanilla's value plus what Pre
+        // `lastHurt` takes what Pre left: vanilla's value plus what Pre
         // added, so a hit no listener changes keeps vanilla's.
         self.last_hurt = incoming + container.pre_change();
         self.invulnerable = container.post_attack_invulnerability_ticks();
