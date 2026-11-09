@@ -1081,7 +1081,7 @@ mod tests {
                 ]),
                 base: Ingredient::of(vec!["minecraft:diamond_chestplate".into()]),
                 addition: Ingredient::of(vec!["minecraft:gold_ingot".into()]),
-                pattern: "minecraft:coast".into(),
+                pattern: crate::crafting::RecipeTrimPattern::Reference("minecraft:coast".into()),
             }],
             ..Default::default()
         };
@@ -1093,7 +1093,13 @@ mod tests {
             Some(Tag::String("minecraft:copper".into())),
         );
         let out = recipes
-            .smithing_result(&e, Some(&template), Some(&base), Some(&gold))
+            .smithing_result(
+                crate::test_resources::server_loop_context(),
+                &e,
+                Some(&template),
+                Some(&base),
+                Some(&gold),
+            )
             .expect("the gold ingot provides a trim material");
         assert_eq!(
             crate::item_data::trim::named(
@@ -1111,7 +1117,13 @@ mod tests {
             ])),
         );
         let out = recipes
-            .smithing_result(&e, Some(&template), Some(&base), Some(&inline))
+            .smithing_result(
+                crate::test_resources::server_loop_context(),
+                &e,
+                Some(&template),
+                Some(&base),
+                Some(&inline),
+            )
             .expect("the inline material applies");
         assert!(matches!(
             out.data().and_then(|d| d.trim.as_ref()).map(|t| &t.0),
@@ -1244,7 +1256,12 @@ mod tests {
             r#"{"minecraft:diamond_sword":{"minecraft:max_stack_size":1,"minecraft:max_damage":1561}}"#,
         )
         .unwrap();
-        let items = Items::catalog(&root, &PackOverlay::NONE).unwrap();
+        let items = Items::catalog(
+            &root,
+            &PackOverlay::NONE,
+            &horizon_world::item_defaults::read(&root).unwrap(),
+        )
+        .unwrap();
         let e = sample();
         let mut a = ItemStack::new("minecraft:diamond_sword", 1);
         a.damage = 819;
@@ -1584,6 +1601,7 @@ mod tests {
         let out = data
             .recipes
             .smithing_result(
+                crate::test_resources::server_loop_context(),
                 e,
                 Some(&ItemStack::new(
                     "minecraft:coast_armor_trim_smithing_template",
@@ -1967,11 +1985,22 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let items = Items::tags_only(&root, &PackOverlay::NONE).unwrap();
-        let recipes = StationRecipes::load(&root, &items, &PackOverlay::NONE);
+        let items = Items::tags_only(
+            &root,
+            &PackOverlay::NONE,
+            &horizon_world::item_defaults::read(&root).unwrap(),
+        )
+        .unwrap();
+        let recipes = StationRecipes::load(
+            &root,
+            &items,
+            &PackOverlay::NONE,
+            &crate::test_resources::server_load(),
+        );
         assert_eq!(recipes.smithing.len(), 1);
         let out = recipes
             .smithing_result(
+                crate::test_resources::server_loop_context(),
                 &items.enchantments,
                 Some(&ItemStack::new(
                     "minecraft:coast_armor_trim_smithing_template",

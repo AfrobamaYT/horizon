@@ -9979,7 +9979,12 @@ mod calculated_blending_save_tests {
     fn resources() -> Option<(crate::assets::Assets, Arc<Biomes>)> {
         let root = PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES")?);
         let assets = crate::assets::Assets::load(&root).expect("assets");
-        let biomes = Arc::new(Biomes::load(&root).expect("biomes"));
+        let biomes = Arc::new(
+            Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.clone(),
+            ))
+            .expect("biomes"),
+        );
         Some((assets, biomes))
     }
     fn folder(name: &str, assets: &crate::assets::Assets) -> (PathBuf, SaveDir) {

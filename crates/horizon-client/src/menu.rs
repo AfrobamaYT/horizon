@@ -3907,9 +3907,9 @@ pub(crate) mod tests {
     fn a_removed_max_stack_size_leaves_one_per_slot() {
         with_menu(Kind::Inventory, |env, menu| {
             let removed = || {
-                Some(horizon_world::nbt::Tag::compound(Vec::<(
+                Some(horizon_core::nbt::Tag::compound(Vec::<(
                     &str,
-                    horizon_world::nbt::Tag,
+                    horizon_core::nbt::Tag,
                 )>::new()))
             };
             let mut stone = stack("stone", 1).unwrap();

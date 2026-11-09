@@ -1401,11 +1401,11 @@ mod tests {
                 b.angry_at = None;
                 b.anger_end = w.game_time + 400;
                 m.ai.goals.add(1, super::BecomeAngryTarget::new());
-                let mut random = LegacyRandom::new(1);
+                let mut random = crate::health::TestLevel::new(1);
                 let mut events = Vec::new();
                 let mut cx = Cx {
                     w: &w,
-                    lr: &mut random,
+                    level: &mut random.level(),
                     events: &mut events,
                 };
                 let mut goals = std::mem::take(&mut m.ai.goals);

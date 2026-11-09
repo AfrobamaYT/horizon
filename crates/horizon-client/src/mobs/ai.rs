@@ -6961,7 +6961,7 @@ mod hurt_teleport_contact_tests {
         let kind = Arc::new(types.types["minecraft:enderman"].clone());
         let mut m = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
         register(&mut m);
-        m.random = LegacyRandom::new(seed);
+        m.random = horizon_core::random::LegacyRandom::new(seed);
         m.on_ground = true;
         m.stuck_multiplier = Vec3::ZERO;
         m
@@ -6979,7 +6979,8 @@ mod hurt_teleport_contact_tests {
                 let mut teleported = 0;
                 for seed in 0..40 {
                     let mut m = enderman(types, seed);
-                    let mut random = LegacyRandom::new(42);
+                    let mut test_level = crate::health::TestLevel::new(42);
+                    let mut random = test_level.level();
                     let mut events = Vec::new();
                     effects_from_blocks(&mut m, w, &mut random, &mut events);
                     if m.position != Vec3::new(0.5, 64.0, 0.5) {
@@ -7021,7 +7022,12 @@ mod hurt_teleport_contact_tests {
                         1.0,
                         Damage::of(DamageKind::OnFire),
                     );
-                    base_tick(&mut m, w, &mut events);
+                    base_tick(
+                        &mut m,
+                        w,
+                        &mut crate::health::TestLevel::new(0).level(),
+                        &mut events,
+                    );
                     if first.position != Vec3::new(0.5, 64.0, 0.5) {
                         assert_eq!(m.position, first.position, "seed {seed}: the same teleport");
                         teleported += 1;

@@ -3709,7 +3709,7 @@ mod movement_predicate_tests {
         )
         .unwrap();
         game.world_root = root;
-        game.reload_datapacks(false, &[]);
+        game.reload_datapacks(false, &[]).unwrap();
         assert!(game.run_command("scoreboard objectives add motion dummy"));
         assert!(game.run_command("execute if predicate motion:always"));
         let clock = game.world.game_time;

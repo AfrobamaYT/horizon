@@ -1559,11 +1559,11 @@ mod tests {
                 }
             },
             |w, _| {
-                let mut lr = horizon_core::random::LegacyRandom::new(0);
+                let mut lr = crate::health::TestLevel::new(0);
                 let mut events = Vec::new();
                 let mut cx = Cx {
                     w,
-                    lr: &mut lr,
+                    level: &mut lr.level(),
                     events: &mut events,
                 };
                 for m in [&mut horse, &mut zombie] {

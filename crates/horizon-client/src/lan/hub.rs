@@ -6296,7 +6296,7 @@ mod tests {
             }
             sent
         };
-        hub.guests[0].sneaking = true;
+        hub.guests.update(0, |g| g.sneaking = true);
         hub.sync_player_state(0);
         assert_eq!(shared_flags_sent(&rx), [0x02]);
         let mut world = World::new(horizon_world::registry::BlockStateId(0), 0);
@@ -6320,7 +6320,7 @@ mod tests {
         };
         hub.change_level(0, [100.5, 49.0, 0.5], 0.0, None, false, 0, &ctx);
         let _ = shared_flags_sent(&rx);
-        hub.guests[0].sneaking = false;
+        hub.guests.update(0, |g| g.sneaking = false);
         hub.sync_player_state(0);
         assert_eq!(shared_flags_sent(&rx), [0]);
     }

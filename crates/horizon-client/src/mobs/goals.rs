@@ -3751,11 +3751,11 @@ mod avoid_entity_targeting_tests {
                     3,
                     Tempt::new(1.25, Arc::from(vec!["minecraft:wheat".to_string()]), false),
                 );
-                let mut lr = LegacyRandom::new(0);
+                let mut lr = crate::health::TestLevel::new(0);
                 let mut events = Vec::new();
                 let mut cx = Cx {
                     w: &world,
-                    lr: &mut lr,
+                    level: &mut lr.level(),
                     events: &mut events,
                 };
                 let mut goals = std::mem::take(&mut m.ai.goals);
@@ -3838,11 +3838,11 @@ mod peaceful_targets_tests {
         with_test_world(&seen, |w, types| {
             let kind = Arc::new(types.types["minecraft:cow"].clone());
             let mut m = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
-            let mut lr = LegacyRandom::new(0);
+            let mut lr = crate::health::TestLevel::new(0);
             let mut events = Vec::new();
             let mut cx = Cx {
                 w,
-                lr: &mut lr,
+                level: &mut lr.level(),
                 events: &mut events,
             };
             m.ai.last_hurt_by = Some(Who::Mob(2));
@@ -4341,11 +4341,11 @@ mod hurt_by_anger_tests {
                 m.ai.last_hurt_by = Some(Who::Player);
                 m.ai.last_hurt_by_time = 1;
                 m.ai.goals.add(1, HurtByTarget::new());
-                let mut lr = LegacyRandom::new(0);
+                let mut lr = crate::health::TestLevel::new(0);
                 let mut events = Vec::new();
                 let mut cx = Cx {
                     w: &world,
-                    lr: &mut lr,
+                    level: &mut lr.level(),
                     events: &mut events,
                 };
                 let mut goals = std::mem::take(&mut m.ai.goals);

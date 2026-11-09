@@ -2230,7 +2230,6 @@ mod non_tame_tests {
     use super::*;
     use crate::mobs::world::with_test_world;
     use horizon_core::geometry::Vec3;
-    use horizon_core::random::LegacyRandom;
     use std::sync::Arc;
 
     /// `NonTameRandomTargetGoal.canContinueToUse` re-tests the subclass
@@ -2258,11 +2257,11 @@ mod non_tame_tests {
             ),
         );
         let tick = |m: &mut Mob, w: &MobWorld| {
-            let mut lr = LegacyRandom::new(0);
+            let mut lr = crate::health::TestLevel::new(0);
             let mut events = Vec::new();
             let mut cx = Cx {
                 w,
-                lr: &mut lr,
+                level: &mut lr.level(),
                 events: &mut events,
             };
             let mut goals = std::mem::take(&mut m.ai.goals);
