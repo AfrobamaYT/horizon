@@ -9,7 +9,7 @@ are proposed for immediate landing; agreement and oracle fixtures precede code.
 
 Vanilla 26.3 `Entity.checkInsideBlocks(Vec3, Vec3, collector, visited, limit)`
 was inspected through `tools/rea_vanilla.py --overload-index 1 method
-net.minecraft.world.entity.Entity checkInsideBlocks` from `/workspace/horizon`.
+net.minecraft.world.entity.Entity checkInsideBlocks` using the vanilla inspection tool.
 It skips air, queries `getEntityInsideCollisionShape`, evaluates block and fluid
 intersection independently, then inserts the position into visited only if either
 intersects. A newly visited position applies block effects first (only when block
@@ -35,7 +35,7 @@ to `crates/horizon-client/src/`. These are current owners, not existing hook sit
 | Player movement | `motion.rs:1697`, `motion.rs:1806`, visitation `motion.rs:1912` | Replace local shape special cases with the shared decision; preserve built-in effects |
 | Mob AI contact | `mobs/ai.rs:904`, `mobs/ai.rs:3314` | Route both contact traversals through the same accepted contact trace; avoid duplicate effects |
 | Arrows | `arrows.rs:1253`, `arrows.rs:1287`, visitation `arrows.rs:1321` | Preserve collector step order and independent fluid processing |
-| Dropped items | `entities.rs:960` | Replace subscription-only admission with shared geometry |
+| Dropped items | `entities.rs:960`, `ItemEntity::environment_tick` and `ItemEntity::stuck_multiplier` | Replace subscription-only admission and separate block-effect scans with shared geometry |
 | Other projectiles / game entity batches | `game/mobs/creatures/mod.rs:205` | Same sweep adapter, bound to the actual entity |
 | Generic sweep | `block_contact.rs:240`, visitation `block_contact.rs:257` | Shared geometry decision before recording contacts |
 | Existing server callback | `game/native_hooks/entity_inside.rs:8`; catalog `crates/horizon-mod-api/src/hooks/entity_inside.rs:3` | Retain existing notification moment; do not use it as a shape filter |
@@ -75,14 +75,31 @@ Validate length before allocation/decoding and reject the entire invalid result,
 retaining Default and issuing a bounded diagnostic. Expose the negotiated budget
 at registration; refuse unsupported requested capabilities with named
 `UnsupportedInsideContactShapeCapability`, equally for native and wasm. Do not
-silently approximate an unsupported voxel operation. Generate Wire/native/wasm
-transport from the catalog; no engine VoxelShape or borrowed game pointer crosses it.
+silently approximate an unsupported voxel operation. Use explicit shared `#[derive(Wire)]` on API shape types; generate only native/wasm
+call tables and adapters from the catalog; no engine VoxelShape or borrowed game pointer crosses it.
 
 A per-state resolved provider bit makes unused dispatch O(1): no registry scan,
 serialization, snapshots or extra allocation when no override exists. Existing
 vanilla geometry/effect work remains. Subscription checks may skip notifications,
 not fluid processing or built-in effects. Bound custom decoding and intersection
 work by the advertised box count, without reducing vanilla's own capacity.
+
+Candidate discovery preserves vanilla traversal: only visited cells are queried.
+Out-of-cell coordinates do not expand discovery. A shape extending from (0,0,0)
+into x = [-1,0] cannot admit an entity wholly in the neighboring cell unless the
+origin cell is independently visited. This matches vanilla BlockGetter stationary
+cell enumeration and the current geometry sweep; it is not a spatial shape index.
+
+Before implementation, review a concrete query signature with typed HostSide, an
+object-safe scoped read view, captured acting-entity facts and structured refusal
+variants. Shape selection should expose no mutation capability. Unavailable lifted
+storage must not imply entity disappearance. The three capability choices below
+remain maintainer decisions, not decisions made by the review view.
+
+Bound total custom work as well as each response: 256 boxes contain 12,288
+coordinate bytes before tags and lengths per candidate. Define aggregate read/query
+accounting and exhaustion behavior before implementation, measure synchronous wasm
+crossings per tick, and preserve vanilla traversal capacity and the unused fast path.
 
 ## Lifecycle, transactions and failure
 
@@ -104,7 +121,19 @@ semantics. Existing entity_inside notification remains at its documented batch
 boundary; geometry acceptance and effect ordering are captured in the sweep trace,
 not reconstructed from a later callback against a changed block.
 
-## Acceptance matrix
+## Baseline and acceptance matrix
+
+Issue #1011 requires unchanged no-override contacts and ordering. That is the
+required baseline for this feature. Current player motion explicitly skips tripwire
+and end portals (`motion.rs`, `check_inside_blocks`); vanilla queries their shapes.
+Thus exact vanilla parity cannot simultaneously describe the existing baseline.
+Capture current per-route traces first; introduce any vanilla parity correction
+separately with maintainer agreement before rebasing those fixtures. The proposed
+complete vanilla Default semantics remain a target, not an approved baseline change.
+
+“Block then fluid” below means callback/collection order. The collector subsequently
+orders effects by kind within each step; do not equate collection order with final
+effect execution order.
 
 Implementation requirements, not runtime results obtained for this note. Shapes
 and boxes below use block-local coordinates for a stationary candidate at (0,0,0).
@@ -124,7 +153,9 @@ Run each on player, mob, arrow, item and every projectile adapter, native and wa
 | Provider traps after attachment write | attachment unchanged; Default contact; provider disabled |
 | Entity retired or state/revision changes before apply | stale decision refused; zero committed effects |
 | Root abort during lifted pass | no retirement or journal emission; save request refused while savepoint open |
-| Default / no override | exact vanilla 26.3 contact order, collector steps, precision and effects across short/long moves and special blocks |
+| Default / no override | unchanged captured Horizon contacts and order on every route; separately record vanilla oracle differences across short/long moves and special blocks |
+| Empty on dropped-item fire/cactus/lava-cauldron/cobweb/powder-snow contact | applicable block damage, ignition and slowing suppressed; independent fluid effects and existing burning timers preserved |
+| Origin block shape x [-1,0], entity wholly in neighboring cell, stationary | origin not queried; no origin block callback or effect |
 | Override with no entity_inside listeners | geometry still controls built-in block effects; fluid unaffected |
 
 ## Proposed stages
@@ -132,7 +163,7 @@ Run each on player, mob, arrow, item and every projectile adapter, native and wa
 File none for implementation at this stage. First agree representation, restricted
 context and failure semantics; obtain vanilla oracle traces for special shapes,
 fluid-only contact and the full-block shortcut. Then implement the shared sweep
-with default-only parity across every route. Finally add the catalog Part query,
+with unchanged default-only behavior across every route; resolve recorded vanilla differences separately. Finally add the catalog Part query,
 generated native/wasm transport, registration refusal, docs, sample and behavioral
 fixtures together. No player-only intermediate public API should ship.
 
