@@ -1542,7 +1542,8 @@ mod tests {
             .clone()
             .bold();
         // Styling keeps object metadata; plain text exposes its fallback.
-        assert_eq!(hover.plain(), "\u{fffc}remote");
+        assert_eq!(hover.plain(), "stoneremote");
+        assert!(hover.spans[0].style.inline_object.is_some());
         assert_eq!(origins(&hover), [Origin::Local, Origin::Remote]);
         assert!(hover.spans[0].click_event().is_some());
         assert!(hover.spans[1].click_event().is_none());
