@@ -591,7 +591,28 @@ impl Storage {
                 Err(error) => return Err(error.into()),
             }
         }
-        self.apply_retaining(self.entries()?, clear, all, true)
+        let entries = self.entries()?;
+        let mut report = self.apply_retaining(entries, clear, all, true)?;
+        if clear.is_none() && !all {
+            for entry in self.entries()? {
+                if let Err(error) = entry.access().check() {
+                    let bytes = allocated_bytes(&entry.path)?;
+                    if bytes > 0 {
+                        report
+                            .rows
+                            .iter_mut()
+                            .find(|row| row.category == entry.category)
+                            .unwrap()
+                            .kept
+                            .push(Kept {
+                                bytes,
+                                reason: native_mods::cache_error(error),
+                            });
+                    }
+                }
+            }
+        }
+        Ok(report)
     }
 
     #[cfg(test)]

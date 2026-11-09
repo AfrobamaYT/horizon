@@ -4175,6 +4175,7 @@ pub enum Job {
 }
 
 pub enum Msg {
+    Storage(Result<Box<crate::storage::Report>, String>),
     Releases(Result<Vec<Release>, String>),
     Links(Links),
     Progress(String, f32),
@@ -4497,6 +4498,12 @@ impl Settings {
                 .map_err(|error| error.to_string())?
                 .as_secs(),
         );
+        self.save()
+    }
+
+    /// Revoke consent before attempting to disable installed native packages.
+    pub fn revoke_native_mods(&mut self) -> Result<(), String> {
+        self.native_mods_allowed_at = None;
         self.save()
     }
 

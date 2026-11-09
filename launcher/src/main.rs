@@ -30,6 +30,7 @@ mod glass_instance_java;
 mod glass_palette;
 mod glass_settings;
 mod glass_shot_blur;
+mod glass_storage;
 mod glass_toast;
 mod glass_ui;
 mod glass_versions;
@@ -95,6 +96,7 @@ use horizon_launcher::i18n::{self, tr, trf};
 use horizon_launcher::instances;
 use horizon_launcher::native_mods;
 use horizon_launcher::native_status;
+use horizon_launcher::storage;
 use scrollbar::Scrollbar;
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
@@ -246,6 +248,9 @@ struct Launcher {
     /// What each installed version takes on disk, measured on a thread for the Versions page, and
     /// the installed list it was measured for.
     disk: Vec<(String, u64)>,
+    storage_report: Option<storage::Report>,
+    storage_pending: bool,
+    storage_error: Option<String>,
     disk_for: Vec<String>,
     install_error: Option<(String, String)>,
     /// Import a game build (`build_import`, on the Versions page): whether one is being copied in,
@@ -569,6 +574,9 @@ impl Launcher {
             installing: None,
             removing: Vec::new(),
             disk: Vec::new(),
+            storage_report: None,
+            storage_pending: false,
+            storage_error: None,
             disk_for: Vec::new(),
             install_error: None,
             importing_build: false,
@@ -1293,6 +1301,16 @@ impl Launcher {
                     }
                 }
                 Msg::DiskUse(disk) => self.disk = disk,
+                Msg::Storage(result) => {
+                    self.storage_pending = false;
+                    match result {
+                        Ok(report) => {
+                            self.storage_report = Some(*report);
+                            self.storage_error = None;
+                        }
+                        Err(error) => self.storage_error = Some(error),
+                    }
+                }
                 Msg::Imported(result) => {
                     self.importing_build = false;
                     self.installed = backend::installed();
