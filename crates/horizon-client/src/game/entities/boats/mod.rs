@@ -691,7 +691,6 @@ impl Game<'_> {
         if fall == 0.0 || length < 1.0 {
             return fall;
         }
-        let to = from.add_vector(moved.normalize().scale(moved.length().min(8.0)));
         let reset = &self.res.motion().fall_reset;
         let fluids = &self.res.motion().fluids;
         let hit = horizon_core::geometry::traverse_blocks(from, to, 1_000_000, |p| {

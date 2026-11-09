@@ -300,8 +300,8 @@ pub struct UiState {
     /// What this frame's HUD shows that Horizon's overlays keep clear of (`Game::hud_room`),
     /// set by `hud_layers` before anything draws.
     pub room: horizon_client::hud_kit::room::Room,
-    /// Path of an F2 screenshot waiting for its frame.
-    pub screenshot_message: Option<std::path::PathBuf>,
+    /// F2 screenshots not written yet: each reports in chat once its PNG is.
+    pub screenshot_messages: Vec<std::path::PathBuf>,
     /// The options screens.
     pub options: horizon_client::options_ui::OptionsUi,
     /// The prepared resources before resource packs are layered on.
@@ -2186,6 +2186,7 @@ impl Game<'_> {
             path: path.clone(),
             size: None,
             scaled: true,
+            background: true,
         });
         self.ui.screenshot_message = Some(path);
     }
@@ -2256,7 +2257,8 @@ impl Game<'_> {
         let Some(path) = self.ui.screenshot_message.take() else {
             return;
         };
-        let message = match result {
+        let path = self.ui.screenshot_messages.remove(at);
+        let message = match &saved.result {
             Ok(_) => {
                 log::info!("Saved screenshot to {}", path.display());
                 let name = path.file_name().unwrap_or_default().to_string_lossy();
@@ -2308,7 +2310,8 @@ pub fn screenshot_name(dir: &std::path::Path) -> String {
         } else {
             format!("{base}_{n}.png")
         };
-        if !dir.join(&name).exists() {
+        let path = dir.join(&name);
+        if !path.exists() && !pending.contains(&path) {
             return name;
         }
         n += 1;
@@ -2401,6 +2404,25 @@ mod tests {
         assert!(should_discard_draft(ChatExit::Intentional, false));
         assert!(!should_discard_draft(ChatExit::Intentional, true));
         assert!(should_discard_draft(ChatExit::Done, true));
+    }
+
+    /// `Screenshot.getFile` picks the first free name of the second; an F2
+    /// screenshot still being written on its thread has no file yet, so a
+    /// second press in the same second takes the next name, not the same one.
+    #[test]
+    fn a_screenshot_being_written_keeps_its_name() {
+        let dir = std::env::temp_dir().join(format!("horizon-shots-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let first = screenshot_name(&dir, &[]);
+        let second = screenshot_name(&dir, &[dir.join(&first)]);
+        assert_ne!(first, second);
+        // Unless the clock turned to the next second in between.
+        let same_second = second.starts_with(first.trim_end_matches(".png"));
+        assert!(
+            !same_second || second == first.replace(".png", "_2.png"),
+            "{second}"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

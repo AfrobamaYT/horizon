@@ -45,6 +45,7 @@ use {
 pub mod advancements;
 pub mod chat;
 pub mod chat_filter;
+mod spawn_info;
 use advancements::AdvancementOwners;
 
 pub mod game_event {
@@ -119,6 +120,8 @@ pub struct BodyFlags {
 
 /// Everything the hub needs from the game for one tick.
 pub struct TickCtx<'a> {
+    /// The active level's generator sea level (`CommonPlayerSpawnInfo`).
+    pub sea_level: i32,
     pub world: &'a mut World,
     pub entities: &'a [EntityState],
     pub next_entity: &'a mut u32,
@@ -1419,32 +1422,6 @@ impl Hub {
 
     // ---- joining -------------------------------------------------------
 
-    /// `CommonPlayerSpawnInfo`, with the player's `portalCooldown`.
-    fn spawn_info(&self, i: usize, portal_cooldown: i32) -> play::SpawnInfo {
-        let g = &self.guests[i];
-        play::SpawnInfo {
-            dimension_type: self.dimension_type,
-            dimension: self.config.dimension.clone(),
-            seed: horizon_core::biome::obfuscate_seed(self.config.seed),
-            game_type: g.game_mode,
-            previous_game_type: None,
-            debug: self.debug_world,
-            flat: self.flat_world,
-            // Player.getLastDeathLocation.
-            last_death: g
-                .last_death
-                .as_ref()
-                .map(|(dimension, pos)| play::GlobalPos {
-                    dimension: dimension.clone(),
-                    pos: *pos,
-                }),
-            portal_cooldown,
-            // `Level.getSeaLevel` of the guest's level, as the server sends it.
-            sea_level: horizon_core::LevelKey::parse(&self.config.dimension)
-                .map_or(63, horizon_world::level::sea_level_of),
-        }
-    }
-
     fn admit(&mut self, j: super::Joined, ctx: &mut TickCtx) -> u32 {
         // The game's ids are taken by incrementing first: the current value
         // is the last id in use (the host's own, right after opening to LAN).
@@ -1526,7 +1503,7 @@ impl Hub {
             reduced_debug_info: self.reduced_debug_info,
             show_death_screen: !self.immediate_respawn,
             limited_crafting: self.limited_crafting,
-            spawn: self.spawn_info(i, 0),
+            spawn: self.spawn_info(i, 0, ctx.sea_level),
             // MinecraftServer.usesAuthentication, enforceSecureProfile.
             online_mode: self.lan.shared.config.online.is_some(),
             enforces_secure_chat: self.enforces_secure_chat(),
@@ -4347,7 +4324,8 @@ impl Hub {
                 | S::RecipeBookSeenRecipe(_)
                 | S::ClientTickEnd(_)
                 | S::KeepAlive(_)
-                | S::Pong(_) => false,
+                | S::Pong(_)
+                | S::PingRequest(_) => false,
                 S::MovePlayerPos(p) => self.moved_far(i, [p.x, p.y, p.z]),
                 S::MovePlayerPosRot(p) => self.moved_far(i, [p.x, p.y, p.z]),
                 S::PlayerInput(_) => self.guests[i].client_loaded(),
@@ -4453,6 +4431,8 @@ impl Hub {
                     });
                 }
                 S::Pong(p) => self.anticheat_pong(i, p.id),
+                // ServerGamePacketListenerImpl.handlePingRequest: echo on this connection.
+                S::PingRequest(p) => self.send_to(conn, &C::PongResponse(p)),
                 // handleAttack is the game's too: a move queued behind an attack would move
                 // the player (or land them on the ground, losing a falling attack's critical
                 // hit) before the game checks their reach and state.
@@ -5234,7 +5214,7 @@ impl Hub {
     /// `rotation` is the facing a mod's `player_respawn_position` chose; none
     /// is the level's respawn direction.
     pub fn respawn(&mut self, i: usize, at: [f64; 3], rotation: Option<[f32; 2]>, ctx: &TickCtx) {
-        let info = self.spawn_info(i, 0);
+        let info = self.spawn_info(i, 0, ctx.sea_level);
         self.close_container_for(i);
         let id = self.guests.update(i, |g| {
             // The old player leaves its level with its chunks (ChunkMap.removeEntity).
@@ -5387,7 +5367,7 @@ impl Hub {
         portal_cooldown: i32,
         ctx: &TickCtx,
     ) {
-        let info = self.spawn_info(i, portal_cooldown);
+        let info = self.spawn_info(i, portal_cooldown, ctx.sea_level);
         self.close_container_for(i);
         self.guests.update(i, |g| {
             // Out of the old level with its chunks (ChunkMap.removeEntity).

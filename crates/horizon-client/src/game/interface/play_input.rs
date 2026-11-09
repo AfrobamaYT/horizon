@@ -101,7 +101,7 @@ impl Game<'_> {
             };
             // A controller's stick click acts as the key without setting the modifier: it is held
             // while the pad holds it (or its release waits for a tick), not when the keyboard says.
-            let pad = self.pad.holds_action(&self.settings.controller, mapping);
+            let pad = self.input_holds(mapping);
             if !held && !pad {
                 self.toggles.0[slot].set_down(false, needs_toggle);
                 self.sync_toggle(slot);
@@ -180,7 +180,7 @@ impl Game<'_> {
         raw: KeyCode,
         source: Source,
     ) -> Result<()> {
-        if self.screen == Screen::Playing && self.studio_replay.is_some() {
+        if self.screen == Screen::Playing && self.replay.playing() {
             if !pressed {
                 self.keys.release(&key, source);
                 return Ok(());
@@ -191,7 +191,7 @@ impl Game<'_> {
                 }
                 return Ok(());
             }
-            if !studio_freecam_movement_key(key) || !self.studio_freecam.active {
+            if !studio_freecam_movement_key(key) || !self.studio.flying() {
                 return Ok(());
             }
         }
@@ -350,9 +350,7 @@ impl Game<'_> {
             _ => return false,
         };
         match source {
-            Source::Keyboard | Source::Agent => {
-                self.pad.holds_action(&self.settings.controller, mapping)
-            }
+            Source::Keyboard | Source::Agent => self.input_holds(mapping),
             Source::Pad => {
                 let keys = &self.settings.keys;
                 self.physical_buttons

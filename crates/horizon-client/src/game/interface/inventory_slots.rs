@@ -3,6 +3,13 @@
 use super::*;
 
 impl Game<'_> {
+    /// A screen closed or lost its pointer: discard the unfinished click gesture.
+    pub(super) fn reset_inventory_clicks(&mut self) {
+        self.inv_clicks.cancel_drag();
+        self.inv_drag = None;
+        self.last_inv_click = None;
+    }
+
     pub(super) fn draw_item(&self, batch: &mut HudBatch, stack: &ItemStack, x: f32, y: f32) {
         // `GuiGraphics.renderItem`: the resolved item model (tints, foil and
         // special renderers included), then the decorations.
@@ -378,5 +385,4 @@ impl Game<'_> {
             self.draw_slot_item(batch, drag.as_ref(), i, &stack, ox + sx, oy + sy);
         }
     }
-
 }

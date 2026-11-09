@@ -128,7 +128,6 @@ impl Game<'_> {
         self.keys.clear();
         self.set_screen(Screen::Options);
         self.options_from_title = from_title;
-        self.options_to_game = false;
         let minecart_improvements = self.minecart_improvements();
         let ui = &mut self.ui.options;
         ui.open_at(!from_title && self.title.is_none(), page);
@@ -187,7 +186,7 @@ impl Game<'_> {
         let output = self
             .renderer
             .as_ref()
-            .map_or(Default::default(), |r| *r.output());
+            .map_or(Default::default(), |r| r.output());
         ui.draw(&self.settings, output, batch, &self.gui.atlas, self.cursor);
         self.ui.options = ui;
         self.show_calibration((batch.width, batch.height));
@@ -397,7 +396,7 @@ impl Game<'_> {
                         screen
                     } else if std::mem::take(&mut self.options_to_world_options) {
                         Screen::WorldOptions
-                    } else if self.options_from_title || to_game {
+                    } else if self.options_from_title {
                         Screen::Playing
                     } else {
                         Screen::Paused

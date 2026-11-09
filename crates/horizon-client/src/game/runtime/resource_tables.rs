@@ -258,7 +258,7 @@ impl PackResources {
             names: Arc::new(names),
             clouds: Arc::new(clouds),
             forcefield: Arc::new(forcefield),
-            custom_sky: Arc::new(custom_sky),
+            custom_sky,
             environments,
             polytone_particles,
             polytone_post,

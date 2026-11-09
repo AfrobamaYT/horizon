@@ -182,15 +182,15 @@ impl Game<'_> {
         let modifiers = horizon_client::item_attributes::attribute_modifiers(stack, self.items());
         let modifiers = &*modifiers;
         (
-            equip::attribute_with(modifiers, "minecraft:armor", f64::from(m.kind.armor), slot),
+            equip::attribute_with(&modifiers, "minecraft:armor", f64::from(m.kind.armor), slot),
             equip::attribute_with(
-                modifiers,
+                &modifiers,
                 "minecraft:armor_toughness",
                 f64::from(m.kind.armor_toughness),
                 slot,
             ),
             equip::attribute_with(
-                modifiers,
+                &modifiers,
                 "minecraft:attack_damage",
                 f64::from(m.attrs.attack_damage),
                 slot,
