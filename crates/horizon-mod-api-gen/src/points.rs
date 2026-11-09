@@ -60,6 +60,19 @@ pub struct GamePoint {
     api: [String; 3],
 }
 
+impl GamePoint {
+    /// The return type a `replace` at this point's head can't produce: none when it returns `()`
+    /// (the cancel is forced) or an API value (the listener's). The rule `horizon-mod-point-emit`
+    /// applies when a mod builds, kept for the loader of a module built elsewhere.
+    fn replace_refusal(&self) -> Option<&str> {
+        match self.returns {
+            "result" => None,
+            "cancel" if self.return_ty == "()" => None,
+            _ => Some(&self.return_ty),
+        }
+    }
+}
+
 /// A source file of the game's crates, with its module path and the `cfg`s it is compiled under.
 pub(crate) struct GameFile {
     pub(crate) module: String,
@@ -1209,7 +1222,12 @@ pub(crate) fn records_selected(
             let variant = quote::format_ident!("{}", point_shape::camel(&name));
             let target = &point.target;
             let at_return = name != point.name;
-            api_places.extend(quote! { (PointId::#variant, #target, #at_return), });
+            let replace_refusal = match point.replace_refusal().filter(|_| !at_return) {
+                Some(ty) => quote!(::std::option::Option::Some(#ty)),
+                None => quote!(::std::option::Option::None),
+            };
+            api_places
+                .extend(quote! { (PointId::#variant, #target, #at_return, #replace_refusal), });
             if selected.is_some_and(|names| !names.contains(&name)) {
                 continue;
             }
@@ -1228,9 +1246,11 @@ pub(crate) fn records_selected(
         /// The generated point export table and record layout, checked separately from the API layout.
         #[doc(hidden)]
         pub const POINT_LAYOUT: u64 = #layout;
-        /// API places as (place, target function, return phase), for manifest validation.
+        /// API places as (place, target function, return phase, the return type a `replace` there
+        /// can't produce), for manifest validation: a head whose return is neither `()` nor an
+        /// API value refuses a replacement when a module loads.
         #[doc(hidden)]
-        pub const API_PLACES: &[(PointId, &str, bool)] = &[#api_places];
+        pub const API_PLACES: &[(PointId, &str, bool, Option<&str>)] = &[#api_places];
         #[cfg(any(target_arch = "wasm32", feature = "wasm-guest"))]
         #[doc(hidden)]
         pub fn guest_dispatch(id: u32, input: &mut ::mod_api::wire::Reader<'_>, out: &mut ::mod_api::wire::Writer) -> Result<(), ::mod_api::wire::WireError> {

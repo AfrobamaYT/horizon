@@ -122,7 +122,9 @@ returning `()` it returns `()` and the cancel is forced. It runs after the point
 listeners, whatever its priority, so they may change its inputs but not its outcome; internals head
 listeners run after it and can't undo it either. A point whose return has no API form refuses it at
 load, naming the point and type, and so does one returning `Result<(), E>`, whose cancel would
-answer `Ok(())`. A second `replace` at one point is refused at registration, naming both mods.
+answer `Ok(())`; a wasm module built without `cargo horizon-mod` is held to the same check when it
+loads. A second `replace` at one point is refused at registration, naming both mods. A replacing
+mod that stops or is disabled hands the function back: it runs as written again.
 Native and wasm share it through `mod_points::replace!`.
 Native API call sites, API source injects, internals `replace`, locals and extension fields remain
 refused.
