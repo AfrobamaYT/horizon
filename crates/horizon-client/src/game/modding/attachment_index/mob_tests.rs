@@ -181,3 +181,124 @@ fn saved_mob_binding_rebinds_retained_id_with_a_new_generation() {
         );
     });
 }
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn mob_first_store_binds_and_nested_rollback_retires_authority() {
+    use mod_api::{AttachmentError, HostTransaction};
+    with_game(|game| {
+        game.options.dedicated = Some(Vec::new());
+        game.native_level_opened(Dim::Overworld);
+        let uuid = [71, 72, 73, 74];
+        let Tag::Compound(mut tag) = mob(uuid) else {
+            unreachable!()
+        };
+        tag.remove(&horizon_mod_runtime::attachments::ATTACHMENTS_KEY.into());
+        let id = game.load_mob(Tag::Compound(tag), None).unwrap();
+        let holder = Holder::Entity(id);
+        assert_eq!(VALUE.get_existing(game, holder), Ok(None));
+        assert!(!game.mobs[0].attachment_lifetime.is_bound());
+        let result: Result<(), AttachmentError> = game.transaction(|host, _| {
+            VALUE.set(host, holder, 7)?;
+            let index = host.attachment_indexes[&Dim::Overworld].clone();
+            assert_eq!(
+                index
+                    .lock()
+                    .unwrap()
+                    .snapshot(&("test".into(), "mana".into()))
+                    .len(),
+                1
+            );
+            let inner: Result<(), AttachmentError> = host.transaction(|host, _| {
+                VALUE.set(host, holder, 8)?;
+                Err(AttachmentError::MissingHolder)
+            });
+            assert!(inner.is_err());
+            assert_eq!(VALUE.get_existing(host, holder), Ok(Some(7)));
+            let committed: Result<(), AttachmentError> = host.transaction(|host, _| {
+                VALUE.set(host, holder, 9)?;
+                Ok(())
+            });
+            committed?;
+            Err(AttachmentError::MissingHolder)
+        });
+        assert!(result.is_err());
+        assert!(!game.mobs[0].attachment_lifetime.is_bound());
+        assert!(!game.entity_attachments[&uuid].has_index_binding());
+        let index = game.attachment_indexes[&Dim::Overworld].clone();
+        assert!(
+            index
+                .lock()
+                .unwrap()
+                .snapshot(&("test".into(), "mana".into()))
+                .is_empty()
+        );
+        VALUE.set(game, holder, 11).unwrap();
+        assert!(game.mobs[0].attachment_lifetime.is_bound());
+        assert_eq!(
+            game.query(&VALUE)
+                .unwrap()
+                .iter()
+                .next()
+                .unwrap()
+                .unwrap()
+                .value,
+            &11
+        );
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn mob_taken_store_refuses_without_writing_and_missing_store_refuses() {
+    use mod_api::AttachmentError;
+    with_game(|game| {
+        game.options.dedicated = Some(Vec::new());
+        game.native_level_opened(Dim::Overworld);
+        let uuid = [81, 82, 83, 84];
+        let Tag::Compound(mut tag) = mob(uuid) else {
+            unreachable!()
+        };
+        tag.remove(&horizon_mod_runtime::attachments::ATTACHMENTS_KEY.into());
+        let id = game.load_mob(Tag::Compound(tag), None).unwrap();
+        let taken = game.mobs.lift();
+        assert_eq!(
+            VALUE.set(game, Holder::Entity(id), 1),
+            Err(AttachmentError::HolderBusy)
+        );
+        assert!(
+            !game
+                .entity_attachments
+                .get(&uuid)
+                .is_some_and(|map| map.has_index_binding())
+        );
+        game.mobs.restore(
+            taken,
+            horizon_client::join_seq::RestoreOrder::SurvivorsFirst,
+        );
+        assert_eq!(VALUE.get_existing(game, Holder::Entity(id)), Ok(None));
+        for id in [0, u32::MAX] {
+            assert_eq!(
+                VALUE.set(game, Holder::Entity(id), 1),
+                Err(AttachmentError::MissingHolder)
+            );
+        }
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn unsupported_physical_family_refuses_store_with_its_name() {
+    with_game(|game| {
+        game.options.dedicated = Some(Vec::new());
+        game.native_level_opened(Dim::Overworld);
+        game.summon_with_nbt("minecraft:tnt", [0.5, 70.0, 0.5], "{}")
+            .unwrap();
+        game.lan_assign_ids();
+        let id = game.tnts[0].id;
+        assert_eq!(
+            VALUE.set(game, Holder::Entity(id), 7),
+            Err(mod_api::AttachmentError::UnsupportedHolder("tnt"))
+        );
+    });
+}

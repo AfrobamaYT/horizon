@@ -726,6 +726,35 @@ fn release(ids: Vec<Id>) {
 mod tests {
     use super::*;
 
+    #[test]
+    fn attachment_refusals_decode_in_guest_reply_without_reinterning() {
+        let mut writer = Writer::new();
+        writer.put(&crate::AttachmentError::UnsupportedHolder("dragon"));
+        let reply = Reply(writer.bytes().to_vec());
+        let crate::AttachmentError::UnsupportedHolder(first) = reply.take().unwrap() else {
+            unreachable!()
+        };
+        for _ in 0..32 {
+            let crate::AttachmentError::UnsupportedHolder(next) = reply.take().unwrap() else {
+                unreachable!()
+            };
+            assert!(std::ptr::eq(first.as_ptr(), next.as_ptr()));
+        }
+        writer.clear();
+        writer.put(&crate::AttachmentError::HolderBusy);
+        assert_eq!(
+            Reply(writer.bytes().to_vec()).take::<crate::AttachmentError>(),
+            Ok(crate::AttachmentError::HolderBusy)
+        );
+        writer.clear();
+        writer.put(&8u32);
+        writer.put(&"x".repeat(257));
+        assert_eq!(
+            Reply(writer.bytes().to_vec()).take::<crate::AttachmentError>(),
+            Err(WireError::Invalid("static string too long"))
+        );
+    }
+
     trait Probe {
         fn answer(&self) -> u32;
     }

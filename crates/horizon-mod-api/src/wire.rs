@@ -1468,6 +1468,32 @@ mod tests {
             Err(super::WireError::Invalid("static string too long"))
         );
     }
+    #[test]
+    fn attachment_refusals_use_bounded_interned_static_text() {
+        round(crate::AttachmentError::HolderBusy);
+        round(crate::AttachmentError::UnsupportedHolder("dragon"));
+        let mut out = super::Writer::new();
+        out.put(&crate::AttachmentError::UnsupportedHolder("dragon"));
+        let first = super::Reader::decode::<crate::AttachmentError>(out.bytes()).unwrap();
+        for _ in 0..32 {
+            let next = super::Reader::decode::<crate::AttachmentError>(out.bytes()).unwrap();
+            let (
+                crate::AttachmentError::UnsupportedHolder(a),
+                crate::AttachmentError::UnsupportedHolder(b),
+            ) = (first, next)
+            else {
+                unreachable!()
+            };
+            assert!(std::ptr::eq(a.as_ptr(), b.as_ptr()));
+        }
+        out.clear();
+        out.put(&8u32);
+        out.put(&"x".repeat(257));
+        assert_eq!(
+            super::Reader::decode::<crate::AttachmentError>(out.bytes()),
+            Err(super::WireError::Invalid("static string too long"))
+        );
+    }
     use super::*;
 
     fn round<T: Wire + PartialEq + std::fmt::Debug>(value: T) {

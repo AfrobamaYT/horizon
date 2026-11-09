@@ -126,6 +126,42 @@ impl Game<'_> {
     ) -> Result<&mut mod_api::Attachments, mod_api::AttachmentError> {
         use mod_api::AttachmentError;
         if let mod_api::Holder::Entity(id) = holder {
+            if access == AttachmentAccess::Store {
+                use super::entity_residency::SlotAccess;
+                use horizon_client::join_seq::residency::Kind;
+                let id = std::num::NonZeroU32::new(id).ok_or(AttachmentError::MissingHolder)?;
+                match self.with_resident_slot(&self.dim.key(), id, |_| ()) {
+                    SlotAccess::Done(()) => {}
+                    SlotAccess::Taken => return Err(AttachmentError::HolderBusy),
+                    SlotAccess::Missing => return Err(AttachmentError::MissingHolder),
+                    SlotAccess::UnsupportedKind(kind) => {
+                        let name = match kind {
+                            Kind::Mob => "mob",
+                            Kind::Item => "item",
+                            Kind::Orb => "orb",
+                            Kind::Projectile => "projectile",
+                            Kind::Stand => "armorstand",
+                            Kind::Frame => "itemframe",
+                            Kind::Painting => "painting",
+                            Kind::Boat => "boat",
+                            Kind::Cart => "minecart",
+                            Kind::Other => "other",
+                            Kind::Fangs => "fangs",
+                            Kind::Crystal => "crystal",
+                            Kind::Dragon => "dragon",
+                            Kind::Tnt => "tnt",
+                            Kind::Falling => "falling",
+                            Kind::Rocket => "rocket",
+                            Kind::Trident => "trident",
+                            Kind::Spawner => "spawner",
+                            Kind::Cloud => "cloud",
+                            Kind::Cushion => "cushion",
+                            Kind::Knot => "knot",
+                        };
+                        return Err(AttachmentError::UnsupportedHolder(name));
+                    }
+                }
+            }
             if self.entity_initialization.active != Some(holder)
                 && !self.attachment_entity_exists(id)
             {
@@ -138,36 +174,40 @@ impl Game<'_> {
                     .get(&id)
                     .and_then(|tag| tag.get(ATTACHMENTS_KEY)),
             )?;
-            let painting = if access == AttachmentAccess::Store {
-                self.paintings.iter().position(|painting| painting.id == id)
-            } else {
-                None
-            };
-            if painting.is_some()
-                && self
-                    .persist
-                    .removals
-                    .contains(&super::commands::Target::Painting(id))
+            if access == AttachmentAccess::Store
+                && self.persist.removals.contains(&super::commands::Target::Painting(id))
             {
                 return Err(AttachmentError::MissingHolder);
             }
-            let level = painting.and_then(|_| self.level(self.dim.id()));
             let uuid = self.uuid_for(id);
-            let map = self.entity_attachments.entry(uuid).or_default();
-            if let Some(i) = painting {
-                let level = level.ok_or(AttachmentError::MissingHolder)?;
-                if !self.paintings[i].attachment_lifetime.is_bound() {
-                    self.paintings[i].attachment_lifetime.bind(
-                        map,
-                        self.attachment_indexes.entry(self.dim).or_default(),
-                        mod_api::AttachmentHolder::Entity(mod_api::EntityRef::new(
-                            level.epoch(),
-                            id,
-                        )),
-                    );
+            if access == AttachmentAccess::Store {
+                let id = std::num::NonZeroU32::new(id).ok_or(AttachmentError::MissingHolder)?;
+                if matches!(
+                    self.server_resident_entity(id.get()),
+                    horizon_client::join_seq::residency::table::EntityLookup::Found {
+                        value: super::commands::Target::Mob(_)
+                            | super::commands::Target::Painting(_),
+                        ..
+                    }
+                ) {
+                    let level = self
+                        .level(self.dim.id())
+                        .ok_or(AttachmentError::MissingHolder)?;
+                    let holder = mod_api::AttachmentHolder::Entity(mod_api::EntityRef::new(
+                        level.epoch(),
+                        id.get(),
+                    ));
+                    let index = self.attachment_indexes.entry(self.dim).or_default().clone();
+                    let mut map = self.entity_attachments.remove(&uuid).unwrap_or_default();
+                    self.with_resident_slot(&self.dim.key(), id, |slot| {
+                        if !slot.is_bound() {
+                            slot.bind(&mut map, &index, holder);
+                        }
+                    });
+                    self.entity_attachments.insert(uuid, map);
                 }
             }
-            return Ok(map);
+            return Ok(self.entity_attachments.entry(uuid).or_default());
         }
         if let mod_api::Holder::Player(uuid) = holder {
             if self.entity_initialization.active != Some(holder)
