@@ -36,6 +36,7 @@
 - [Design: custom recipe-book settings](concepts/recipe-book-types.md)
 - [Design: main target configuration](concepts/main-target-config.md)
 - [Design: resource-backed special item renderers](concepts/resource-renderers.md)
+- [Design: unified fluid declaration](concepts/unified-fluid-declaration.md)
 - [Design: section meshing](concepts/section-meshing.md)
 - [Design: entity render state](concepts/entity-render-state.md)
 - [Design: section geometry](concepts/section-geometry.md)
