@@ -1132,7 +1132,6 @@ mod tests {
             step_sound: None,
             food: Default::default(),
             tempt: Default::default(),
-            tempt: Default::default(),
 passenger_attachments: Vec::new(),
         };
         Mob::new(0, Arc::new(kind), Vec3::ZERO, 0.0)
