@@ -98,7 +98,9 @@ impl Registry {
                 Err(error) => return Err(error.into()),
             }
         }
-        let directory = data.open_dir_nofollow("run-leases")?;
+        let directory = Dir::from_std_file(retained(
+            data.open_dir_nofollow("run-leases")?.into_std_file(),
+        )?);
         let gate = open_lock(&directory, "gate", LockMode::Shared, release, create)?;
         Ok(Arc::new(Self {
             directory,
@@ -182,7 +184,7 @@ fn open_lock(
     if !file.metadata()?.is_file() {
         return Err(Error::Unsafe(key.into()));
     }
-    let lock = locked(file, mode)?;
+    let lock = locked(retained(file)?, mode)?;
     Ok(match release {
         Release::Unlock => lock,
         Release::Close => lock.close_only(),
@@ -210,7 +212,25 @@ pub fn open_directory(path: &Path) -> Result<Dir, Error> {
         };
         directory = directory.open_dir_nofollow(name)?;
     }
-    Ok(directory)
+    Ok(Dir::from_std_file(retained(directory.into_std_file())?))
+}
+
+/// Fresh retained metadata and leases must never become later stdio replacement targets.
+pub(crate) fn retained(file: fs::File) -> io::Result<fs::File> {
+    #[cfg(unix)]
+    {
+        use std::os::fd::{AsRawFd, FromRawFd};
+        if file.as_raw_fd() <= 2 {
+            // SAFETY: file owns the source; fcntl returns a new exclusively owned CLOEXEC fd.
+            let fd = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 3) };
+            if fd < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            // SAFETY: successful F_DUPFD_CLOEXEC returned a fresh fd; transfer sole ownership.
+            return Ok(unsafe { fs::File::from_raw_fd(fd) });
+        }
+    }
+    Ok(file)
 }
 
 mod filesystem;

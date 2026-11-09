@@ -2,11 +2,13 @@ use super::*;
 use std::{sync::Mutex, time::Duration};
 struct Stalled {
     gate: Option<Receiver<()>>,
+    entered: mpsc::Sender<()>,
     bytes: Arc<Mutex<Vec<u8>>>,
 }
 impl Write for Stalled {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         if let Some(gate) = self.gate.take() {
+            self.entered.send(()).unwrap();
             gate.recv().map_err(|_| io::ErrorKind::BrokenPipe)?;
         }
         self.bytes.lock().unwrap().extend_from_slice(bytes);
@@ -30,12 +32,14 @@ impl Read for End {
 fn stalled_disk_retains_oldest_queued_bytes_and_never_blocks_the_game_pipe() {
     let (reader, mut writer) = os_pipe::pipe().unwrap();
     let (release, gate) = mpsc::channel();
+    let (entered, stalled) = mpsc::channel();
     let (ended, eof) = mpsc::channel();
     let bytes = Arc::new(Mutex::new(Vec::new()));
     let done = drain(
         End(reader, ended),
         Stalled {
             gate: Some(gate),
+            entered,
             bytes: bytes.clone(),
         },
         "stall-test",
@@ -46,8 +50,12 @@ fn stalled_disk_retains_oldest_queued_bytes_and_never_blocks_the_game_pipe() {
         .flat_map(|index| format!("{index:08x}").repeat(2048).into_bytes())
         .collect();
     let expected = input.clone();
+    // Establish the disk stall before filling the queue: otherwise an initially unscheduled
+    // disk worker can free a slot after overflow and legitimately retain a later frame.
+    writer.write_all(&input[..1]).unwrap();
+    stalled.recv_timeout(Duration::from_secs(2)).unwrap();
     let producer = std::thread::spawn(move || {
-        writer.write_all(&input).unwrap();
+        writer.write_all(&input[1..]).unwrap();
         produced.send(()).unwrap();
     });
     let prompt = progress.recv_timeout(Duration::from_secs(2)).is_ok()
