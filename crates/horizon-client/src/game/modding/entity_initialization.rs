@@ -26,8 +26,6 @@ pub(super) struct EntityInitialization {
     players: HashMap<u128, u32>,
     /// The holder being told now: its attachments are reachable before it is in the level.
     pub(super) active: Option<Holder>,
-    /// Physical family of a constructing entity that this infra head cannot bind.
-    pub(super) active_unsupported: Option<&'static str>,
 }
 
 impl Game<'_> {
@@ -45,45 +43,9 @@ impl Game<'_> {
         if !self.entity_initialization.initialized.insert(uuid) {
             return;
         }
-        let unsupported = if matches!(holder, Holder::Entity(_)) {
-            let path = kind.strip_prefix("minecraft:").unwrap_or(kind);
-            match path {
-                "ender_dragon" => Some("dragon"),
-                "evoker_fangs" => Some("fangs"),
-                "end_crystal" => Some("crystal"),
-                "tnt" => Some("tnt"),
-                "leash_knot" => Some("knot"),
-                "firework_rocket" => Some("rocket"),
-                "trident" => Some("trident"),
-                "ominous_item_spawner" => Some("spawner"),
-                "area_effect_cloud" => Some("cloud"),
-                "item" | "experience_orb" | "armor_stand" | "item_frame" | "glow_item_frame"
-                | "painting" | "falling_block" | "cushion" | "arrow" | "spectral_arrow"
-                | "snowball" | "egg" | "ender_pearl" | "experience_bottle" | "potion"
-                | "splash_potion" | "lingering_potion" | "fireball" | "small_fireball"
-                | "dragon_fireball" | "wither_skull" | "wind_charge" | "breeze_wind_charge"
-                | "llama_spit" | "shulker_bullet" => None,
-                path if path.ends_with("_boat")
-                    || path.ends_with("_raft")
-                    || path.ends_with("_minecart")
-                    || path == "minecart" =>
-                {
-                    None
-                }
-                _ if self.res.mob_types().contains_key(kind) => None,
-                _ => Some("other"),
-            }
-        } else {
-            None
-        };
         let previous = self.entity_initialization.active.replace(holder);
-        let previous_unsupported = std::mem::replace(
-            &mut self.entity_initialization.active_unsupported,
-            unsupported,
-        );
         self.native_entity_constructing(holder, kind);
         self.entity_initialization.active = previous;
-        self.entity_initialization.active_unsupported = previous_unsupported;
     }
 
     /// `initialize_entity` for a holder whose attachments are about to be read, its type

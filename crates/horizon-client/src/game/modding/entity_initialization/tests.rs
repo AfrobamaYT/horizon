@@ -29,16 +29,6 @@ impl Hooks for Listener {
         // Both a read and a write inside dispatch must reach the canonical map
         // without recursively constructing the same entity.
         match host {
-            HostSide::Server(host) if event.kind == "minecraft:marker" => {
-                assert_eq!(
-                    VALUE.get(host, event.holder),
-                    Err(mod_api::AttachmentError::UnsupportedHolder("other"))
-                );
-                assert_eq!(
-                    VALUE.set(host, event.holder, 41),
-                    Err(mod_api::AttachmentError::UnsupportedHolder("other"))
-                );
-            }
             HostSide::Server(host) => {
                 let _ = VALUE.get(host, event.holder).unwrap();
                 VALUE.set(host, event.holder, 41).unwrap();
@@ -123,11 +113,7 @@ fn spawn_summon_and_disk_load_initialize_before_first_attachment_read() {
                     .find(|(_, value)| **value == [uuid, 2, 3, 4])
                     .unwrap()
                     .0;
-                let expected = if kind == "minecraft:marker" {
-                    Err(mod_api::AttachmentError::UnsupportedHolder("other"))
-                } else {
-                    Ok(41)
-                };
+                let expected = Ok(41);
                 assert_eq!(VALUE.get(game, Holder::Entity(id)), expected, "{kind}");
                 assert_eq!(
                     calls
@@ -433,16 +419,13 @@ fn mob_constructor_first_store_binds_only_the_resident_lifetime() {
 
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-fn unsupported_marker_constructor_store_is_refused() {
+fn marker_constructor_store_reaches_its_real_owned_map() {
     struct Refusal;
     #[mod_api::__subscriptions]
     impl Hooks for Refusal {
         fn entity_constructing(&self, host: HostSide<'_>, event: &mut EntityConstructingEvent) {
             if let HostSide::Server(host) = host {
-                assert_eq!(
-                    VALUE.set(host, event.holder, 41),
-                    Err(mod_api::AttachmentError::UnsupportedHolder("other"))
-                );
+                assert_eq!(VALUE.set(host, event.holder, 41), Ok(()));
             }
         }
     }

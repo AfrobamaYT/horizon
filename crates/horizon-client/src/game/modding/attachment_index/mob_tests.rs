@@ -288,7 +288,7 @@ fn mob_taken_store_refuses_without_writing_and_missing_store_refuses() {
 
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-fn unsupported_physical_family_refuses_store_with_its_name() {
+fn tnt_with_real_lifetime_accepts_first_store() {
     with_game(|game| {
         game.options.dedicated = Some(Vec::new());
         game.native_level_opened(Dim::Overworld);
@@ -296,10 +296,7 @@ fn unsupported_physical_family_refuses_store_with_its_name() {
             .unwrap();
         game.lan_assign_ids();
         let id = game.tnts[0].id;
-        assert_eq!(
-            VALUE.set(game, Holder::Entity(id), 7),
-            Err(mod_api::AttachmentError::UnsupportedHolder("tnt"))
-        );
+        assert_eq!(VALUE.set(game, Holder::Entity(id), 7), Ok(()));
     });
 }
 

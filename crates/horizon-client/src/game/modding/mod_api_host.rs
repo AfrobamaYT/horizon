@@ -163,12 +163,6 @@ impl Game<'_> {
     ) -> Result<&mut mod_api::Attachments, mod_api::AttachmentError> {
         use mod_api::AttachmentError;
         if let mod_api::Holder::Entity(id) = holder {
-            if self.entity_initialization.active == Some(holder)
-                && access == AttachmentAccess::Store
-                && let Some(family) = self.entity_initialization.active_unsupported
-            {
-                return Err(AttachmentError::UnsupportedHolder(family));
-            }
             if self.entity_initialization.active != Some(holder) {
                 use super::entity_residency::SlotAccess;
                 use horizon_client::join_seq::residency::Kind;
