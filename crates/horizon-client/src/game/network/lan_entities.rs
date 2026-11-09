@@ -504,17 +504,15 @@ impl Game<'_> {
             let e = add_state(out, o.id, &o.kind, [p.x, p.y, p.z], o.yaw, false);
             e.pitch = o.pitch;
             e.head_yaw = o.yaw;
-            if let Some(tag) = self.persist.raw.get(&o.id) {
-                if let Some(item) = self.lan_display_data(tag, e) {
-                    if let Some((_, _, Value::Item(stack))) =
-                        e.meta.iter_mut().find(|(index, _, _)| *index == 23)
-                    {
-                        *stack = self
-                            .lan
-                            .as_mut()
-                            .and_then(|host| host.hub.stack(&Some(item)));
-                    }
-                }
+            if let Some(tag) = self.persist.raw.get(&o.id)
+                && let Some(item) = self.lan_display_data(tag, e)
+                && let Some((_, _, Value::Item(stack))) =
+                    e.meta.iter_mut().find(|(index, _, _)| *index == 23)
+            {
+                *stack = self
+                    .lan
+                    .as_mut()
+                    .and_then(|host| host.hub.stack(&Some(item)));
             }
         }
     }

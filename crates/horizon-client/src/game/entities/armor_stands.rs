@@ -1208,13 +1208,6 @@ impl Game<'_> {
         self.entity_killed_event(at, false);
         self.world.modified.insert((pos[0] >> 4, pos[2] >> 4));
     }
-    /// `LivingEntity.dropFromLootTable` for a stand that is not small, with
-    /// `mob_drops` on (`shouldDropLoot`): its type's table
-    /// `minecraft:entities/armor_stand` with seed 0 (`getLootTableSeed`), so
-    /// the table's random sequence or else the level's random, each stack
-    /// spawned at the stand's position. Its view is only the type and whether
-    /// it burns; no damage source, killer or player is known here.
-
     /// `ArmorStand.hurtServer` for a command's damage of `damage_type` from the
     /// causing entity `causing`, up to its sources that act and still return
     /// false: a blast breaks the stand (`brokenByAnything`, `kill`), fire that
