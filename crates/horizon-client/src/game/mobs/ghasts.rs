@@ -193,7 +193,7 @@ impl Game<'_> {
             // (`babyGhastSetup`) while the mob is still being hatched: its
             // goals, navigation and brain are a ghastling's before its first
             // tick, not an adult's until the next aiStep.
-            horizon_client::mobs::finalize::set_age(m, -24000);
+            horizon_client::mobs::finalize::set_age(m, -24000, None);
             m.yaw = yaw;
             m.body_yaw = yaw;
             m.head_yaw = yaw;

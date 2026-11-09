@@ -425,6 +425,17 @@ pub(super) fn register_dimension_transition_screens(role: ExecutionRole) {
     horizon_client_render::dimension_transition::register(screens);
 }
 
+/// The native mods' colour resolvers (`native_register_color_resolvers`), kept once at start,
+/// before the block tint sources that read them and before resources load.
+pub(super) fn register_color_resolvers(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut registry = mod_api::ColorResolverRegistry::default();
+    Game::native_register_color_resolvers(&RegistrationContext::new(), &mut registry);
+    horizon_client::mesher::register_color_resolvers(registry.into_resolvers());
+}
+
 /// The native mods' block tint sources (`native_register_block_tint_sources`), kept once at
 /// start, before resources load; every resource load applies them to its mesh tables.
 pub(super) fn register_block_tint_sources(role: ExecutionRole) {

@@ -103,8 +103,7 @@ fn one_biome_shortcut_blends_like_the_full_square() {
                                     assert_eq!(
                                         fast.get(resolver, x, y, z),
                                         full.get(resolver, x, y, z),
-                                        "{name} resolver {} r{radius} at {x} {y} {z} of y{base_y}",
-                                        resolver as usize
+                                        "{name} resolver {resolver:?} r{radius} at {x} {y} {z} of y{base_y}"
                                     );
                                 }
                             }

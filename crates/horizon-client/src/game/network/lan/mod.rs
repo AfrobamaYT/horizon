@@ -23,7 +23,7 @@ use horizon_client::{
         chunks::ChunkEncoder,
         data::{BIOME_REGISTRY, FrozenDamage, SyncData},
         entity::{EntityState, States},
-        hub::{HostEvent, Hub, HubConfig, TickCtx},
+        hub::{HostEvent, Hub, HubConfig, TickCtx, stuck_meta},
         playerdata,
     },
     mobs::{Mob, Species, Who, leash::Holder},
@@ -776,6 +776,12 @@ pub(super) fn mob_meta(
     }
     defaults.push((10, serializer::PARTICLES, Value::Particles(Vec::new())));
     defaults.push((11, serializer::BOOLEAN, Value::Bool(false)));
+    // LivingEntity.DATA_ARROW_COUNT_ID and DATA_STINGER_COUNT_ID.
+    stuck_meta(
+        meta,
+        defaults,
+        (m.extra.stuck.arrows, m.extra.stuck.stingers),
+    );
     // Mob.DATA_MOB_FLAGS_ID: no AI 1, left-handed 2, aggressive 4 (what
     // draws a vindicator's axe, a skeleton's drawn bow, a piglin's raised
     // weapon).
@@ -2529,7 +2535,7 @@ impl Game<'_> {
                     let sender = message.sender;
                     let raw = message.content.clone();
                     // `PlayerChatMessage.decoratedContent`: the text as a literal.
-                    let original = Text::literal(raw.clone());
+                    let original = Text::untrusted(raw.clone());
                     let mut text = original.clone();
                     let mut cancel = false;
                     let mut replies = Vec::new();
@@ -4011,7 +4017,7 @@ impl Game<'_> {
             // too): the host's Chat option decides, as `ChatListener` does
             // for the guests' packets. Command feedback is a system message
             // and takes the system-message permission instead.
-            HostEvent::Chat { line, .. } => self.player_message(Text::literal(line)),
+            HostEvent::Chat { line, .. } => self.player_message(Text::untrusted(line)),
             HostEvent::Warn(line) if dedicated => super::dedicated::log("WARN", &line),
             HostEvent::Warn(line) => log::warn!("{line}"),
             HostEvent::Error(line) if dedicated => super::dedicated::log("ERROR", &line),
@@ -4022,11 +4028,13 @@ impl Game<'_> {
 }
 
 /// `LivingEntity.DATA_LIVING_ENTITY_FLAGS` for an item in use: 1, and 2 when
-/// it is the off hand's. A stop is 0 here; vanilla leaves bit 1 set, so its
-/// stop of an off-hand use is 2. Both mean "not using" (bit 0 is clear), and
-/// nothing reads bit 1 without bit 0.
-pub(super) fn living_flags(using: Option<(usize, u32)>) -> i8 {
+/// it is the off hand's, and 4 for a Riptide spin (`isAutoSpinAttack`). A stop
+/// is 0 here; vanilla leaves bit 1 set, so its stop of an off-hand use is 2.
+/// Both mean "not using" (bit 0 is clear), and nothing reads bit 1 without
+/// bit 0.
+pub(super) fn living_flags(using: Option<(usize, u32)>, spinning: bool) -> i8 {
     using.map_or(0, |(slot, _)| if slot == OFFHAND_SLOT { 3 } else { 1 })
+        | if spinning { 4 } else { 0 }
 }
 
 /// The name a mod hears for an equipment slot (the armor stand hook's names, plus
@@ -4752,11 +4760,43 @@ mod tests {
         use super::{SyncCache, cached_sync_data, initialize_world_sync_data, prepare_sync_reload};
         use horizon_world::{damage_source::Catalog, loot::PackOverlay};
         use std::{path::Path, sync::Arc};
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../.local/horizon-client")
-            .join(horizon_core::VANILLA_VERSION);
-        let item_data = sync_test_items(&root);
-        let damage = Catalog::load(&root, &PackOverlay::NONE).unwrap();
+
+        fn copy_tree(source: &Path, destination: &Path) {
+            std::fs::create_dir_all(destination).unwrap();
+            for entry in std::fs::read_dir(source).unwrap() {
+                let entry = entry.unwrap();
+                let target = destination.join(entry.file_name());
+                if entry.path().is_dir() {
+                    copy_tree(&entry.path(), &target);
+                } else {
+                    std::fs::copy(entry.path(), target).unwrap();
+                }
+            }
+        }
+
+        let prepared = std::env::var_os("HORIZON_TEST_RESOURCES")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../.local/horizon-client")
+                    .join(horizon_core::VANILLA_VERSION)
+            });
+        let root = std::env::temp_dir().join(format!(
+            "horizon-lazy-wire-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        // Keep the cache's resource-root identity stable while making a reload fail.
+        // Copy only data, not prepared assets, and never mutate shared resources.
+        copy_tree(&prepared.join("data"), &root.join("data"));
+        let report = horizon_protocol::registry::Builtin::find(&prepared)
+            .expect("prepared test resources require registries.json");
+        std::fs::copy(report, root.join("registries.json")).unwrap();
+        let item_data = sync_test_items(&prepared);
+        let damage = Catalog::load(&prepared, &PackOverlay::NONE).unwrap();
         let files = vec![(
             "recipe/demo:unrelated".into(),
             vec![br#"{"type":"minecraft:crafting_special_mapcloning"}"#.to_vec()],
@@ -4773,15 +4813,11 @@ mod tests {
         assert!(cache.data.is_none());
         assert!(prepare_sync_reload(&mut cache, &PackOverlay::NONE).is_none());
         let opened = cached_sync_data(&mut cache, &root, &PackOverlay::NONE, &item_data).unwrap();
-        // An accidental uncached load would fail on the next request rather
-        // than merely reconstructing an equal registry from the same files.
-        let reused = cached_sync_data(
-            &mut cache,
-            &root.join("no-such-resources"),
-            &PackOverlay::NONE,
-            &item_data,
-        )
-        .unwrap();
+        // Changing the root invalidates the cache. Instead remove the private
+        // fixture's files: an accidental reload at the same root must now fail.
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(horizon_protocol::registry::Builtin::find(&root).is_none());
+        let reused = cached_sync_data(&mut cache, &root, &PackOverlay::NONE, &item_data).unwrap();
         assert!(Arc::ptr_eq(&opened, &reused));
     }
 
@@ -4856,6 +4892,43 @@ mod tests {
         let (meta, _) = meta_of(&pillager);
         assert!(
             meta.contains(&(16, serializer::BOOLEAN, Value::Bool(true))),
+            "{meta:?}"
+        );
+    }
+
+    /// What is stuck in a mob goes out through the tracker's metadata
+    /// (`LivingEntity.DATA_ARROW_COUNT_ID`, `DATA_STINGER_COUNT_ID`): the
+    /// counts that are set, and zero as the default so a count that falls
+    /// back to none is sent.
+    #[test]
+    fn a_mobs_stuck_counts_are_sent_by_mob_meta() {
+        let types = super::super::mods::living_mod_types();
+        let hub = meta_hub("StuckMetaTest");
+        let mut mob = Mob::new(
+            1,
+            types["minecraft:zombie"].clone(),
+            horizon_core::geometry::Vec3::ZERO,
+            0.0,
+        );
+        let meta_of = |m: &Mob| {
+            let (mut meta, mut defaults) = (Vec::new(), Vec::new());
+            super::mob_meta(m, &hub, None, 0, &mut meta, &mut defaults);
+            (meta, defaults)
+        };
+        let count = |index| (index, serializer::INT, Value::Int(0));
+
+        let (meta, defaults) = meta_of(&mob);
+        assert!(meta.iter().all(|e| e.0 != 12 && e.0 != 13), "{meta:?}");
+        assert!(defaults.contains(&count(12)) && defaults.contains(&count(13)));
+        mob.extra.stuck.arrows = 4;
+        mob.extra.stuck.stingers = 2;
+        let (meta, _) = meta_of(&mob);
+        assert!(
+            meta.contains(&(12, serializer::INT, Value::Int(4))),
+            "{meta:?}"
+        );
+        assert!(
+            meta.contains(&(13, serializer::INT, Value::Int(2))),
             "{meta:?}"
         );
     }
@@ -5016,9 +5089,19 @@ mod tests {
     /// `isUsingItem` and bit 1 as `getUsedItemHand`.
     #[test]
     fn an_off_hand_use_flags_both_the_use_and_the_hand() {
-        assert_eq!(living_flags(None), 0);
-        assert_eq!(living_flags(Some((0, 12))), 1);
-        assert_eq!(living_flags(Some((OFFHAND_SLOT, 12))), 3);
+        assert_eq!(living_flags(None, false), 0);
+        assert_eq!(living_flags(Some((0, 12)), false), 1);
+        assert_eq!(living_flags(Some((OFFHAND_SLOT, 12)), false), 3);
+    }
+
+    /// `LivingEntity.startAutoSpinAttack` sets flag 4, which a use of an item
+    /// leaves as it is (a trident is charged before it launches, and a
+    /// spinning player can use another item).
+    #[test]
+    fn a_riptide_spin_flags_bit_four() {
+        assert_eq!(living_flags(None, true), 4);
+        assert_eq!(living_flags(Some((0, 12)), true), 5);
+        assert_eq!(living_flags(Some((OFFHAND_SLOT, 12)), true), 7);
     }
 
     /// `ComposterBlock.useItemOn` calls `levelEvent(1500, pos, data)`, the
@@ -5671,7 +5754,7 @@ mod world_spawn_sync_tests {
             game.level.world_spawn = None;
             let personal = horizon_core::geometry::Vec3::new(96.5, 145.0, -31.5);
             game.spawn = Some(personal);
-            for (x, z) in [(6, -2), (-1, 0)] {
+            for (x, z) in [(0, 0), (6, -2), (-1, 0)] {
                 game.world
                     .chunks
                     .insert((x, z), Arc::new(horizon_client::chunk::Chunk::empty(x, z)));
