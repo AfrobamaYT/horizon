@@ -2245,6 +2245,7 @@ impl Game<'_> {
         )
     }
 
+    #[allow(clippy::needless_question_mark)] // TODO(#2273)
     pub(in crate::game) fn item_resource_tooltip(
         &self,
         stack: &ItemStack,
