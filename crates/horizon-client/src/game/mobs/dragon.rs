@@ -6626,5 +6626,6 @@ mod residency_tests;
 mod thorns_tests;
 
 #[cfg(test)]
-#[path = "dragon/fireball_spawn_tests.rs"]
-mod dragon_fireball_spawn_tests;
+mod dragon_fireball_spawn_tests {
+    include!("dragon/fireball_spawn_tests.rs");
+}
