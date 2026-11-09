@@ -95,14 +95,14 @@
       "ureq",
       "wgpu",
       "winit"
-    ],
-    "allowed": [
-      {
-        "edge": "horizon-mod-package -> horizon-shader-api",
-        "reason": "Optional index feature validates shader packages for launcher/registry; disabled in the portable engine dependency."
-      }
     ]
   },
+  "optional": [
+    {
+      "edge": "horizon-mod-package -> horizon-shader-api",
+      "reason": "The optional `index` feature validates shader packages in the registry index; the portable crates take horizon-mod-package without it."
+    }
+  ],
   "allowed": [
     "horizon-client -> horizon-anticheat",
     "horizon-client -> horizon-bench",
@@ -141,7 +141,6 @@
     "horizon-server -> horizon-core",
     "horizon-server -> horizon-server-files",
     "horizon-server -> horizon-world",
-    "horizon-mod-package -> horizon-shader-api",
     "horizon-client -> horizon-mod-api",
     "horizon-client -> horizon-mod-api-macros",
     "horizon-client -> horizon-mod-points",
@@ -170,7 +169,6 @@
     "horizon-mod-runtime": "Engine-independent format/storage shared by engine crates; default features need no desktop services.",
     "horizon-mod-dimension-game": "Workspace development fixtures, not a shipped runtime dependency.",
     "horizon-modding-examples": "Workspace development fixtures, not a shipped runtime dependency.",
-    "horizon-mod-package -> horizon-shader-api": "Existing fork dependency across the upstream layer split; recorded baseline, not a new dependency.",
     "horizon-client -> horizon-mod-api": "Existing fork dependency across the upstream layer split; recorded baseline, not a new dependency.",
     "horizon-client -> horizon-mod-api-macros": "Existing fork dependency across the upstream layer split; recorded baseline, not a new dependency.",
     "horizon-client -> horizon-mod-points": "Existing fork dependency across the upstream layer split; recorded baseline, not a new dependency.",
@@ -181,8 +179,14 @@
     "horizon-client-render -> horizon-mod-api": "Existing fork dependency across the upstream layer split; recorded baseline, not a new dependency.",
     "horizon-client-render -> horizon-mod-api-macros": "Existing fork dependency across the upstream layer split; recorded baseline, not a new dependency.",
     "horizon-client-render -> horizon-mod-render": "Existing fork dependency across the upstream layer split; recorded baseline, not a new dependency.",
+<<<<<<< HEAD
     "horizon-launcher -> horizon-mod-package": "Fork mod packaging: the launcher and registry read and build .hmod packages; recorded baseline, not a new dependency.",
     "horizon-launcher -> horizon-system": "Machine probes moved from the telemetry crate into horizon-system; the launcher reads them (upstream 8a9f5a1288).",
     "horizon-mod-registry -> horizon-mod-package": "Fork mod packaging: the launcher and registry read and build .hmod packages; recorded baseline, not a new dependency."
+=======
+    "horizon-launcher -> horizon-mod-package": "Separate launcher workspace: reads and installs mod packages and modpacks (features index, prebuilt, runtime-process); recorded baseline, not a new dependency.",
+    "horizon-launcher -> horizon-system": "Separate launcher workspace: bug reports use the game's machine probes and path scrubber; recorded baseline, not a new dependency.",
+    "horizon-mod-registry -> horizon-mod-package": "Separate registry workspace: reads and writes the registry index format (feature index only); recorded baseline, not a new dependency."
+>>>>>>> 8ff9070c1ab9988c846585f2db91ef0fc561f007
   }
 }
