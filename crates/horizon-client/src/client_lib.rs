@@ -130,6 +130,12 @@ pub mod recipe_book;
 pub mod recipe_book_screen;
 pub mod reconnect;
 pub mod save;
+// Slice 2 part A lands unwired: the transfers that call it are part B, so
+// nothing outside its own tests reaches it yet.
+#[allow(dead_code)]
+pub(crate) mod carrier_store;
+#[cfg(test)]
+mod carrier_store_tests;
 pub mod scoreboard_cmd;
 pub mod screen_layout;
 pub mod screen_narrator;
