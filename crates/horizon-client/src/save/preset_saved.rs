@@ -11,8 +11,7 @@ pub fn merge_saved_world_gen_dimensions(
     };
     for (id, stem) in dimensions {
         let id = id.to_string_lossy();
-        if horizon_core::level_id::valid_level_id(&id)
-            && !overrides.entries(DIMENSIONS).any(|(level, _)| level == id)
+        if valid_dimension_key(&id) && !overrides.entries(DIMENSIONS).any(|(level, _)| level == id)
         {
             overrides.set(
                 DIMENSIONS,

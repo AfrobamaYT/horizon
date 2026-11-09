@@ -1,3 +1,17 @@
+/// Identifiers may contain repeated separators, but never escape the dimension root.
+fn valid_dimension_key(id: &str) -> bool {
+    let Some((namespace, path)) = id.split_once(':') else {
+        return false;
+    };
+    horizon_core::level_id::valid_level_namespace(namespace)
+        && !path.is_empty()
+        && !path.starts_with('/')
+        && path
+            .split('/')
+            .filter(|part| !part.is_empty())
+            .all(horizon_core::level_id::valid_level_namespace)
+}
+
 /// Structural boundary checks; generator-specific codecs run on world loading.
 pub(crate) fn valid_world_gen_dimensions(dimensions: &Tag) -> bool {
     use horizon_core::identifier::Identifier;
@@ -13,7 +27,7 @@ pub(crate) fn valid_world_gen_dimensions(dimensions: &Tag) -> bool {
             else {
                 return false;
             };
-            horizon_core::level_id::valid_level_id(&id.to_string_lossy())
+            valid_dimension_key(&id.to_string_lossy())
                 && match stem.get("type") {
                     Some(Tag::String(id)) => id
                         .to_string()
@@ -185,4 +199,22 @@ pub(crate) fn new_world_gen_settings(
             ]),
         ),
     ])
+}
+
+#[cfg(test)]
+mod dimension_key_tests {
+    #[test]
+    fn normalized_dimension_keys_stay_inside_the_root() {
+        for (id, expected) in [
+            ("example:foo//bar", true),
+            ("example:../x", false),
+            ("example:a/../../b", false),
+            (":path", false),
+            ("example:", false),
+            ("example:/absolute", false),
+            ("example:a/./b", false),
+        ] {
+            assert_eq!(super::valid_dimension_key(id), expected, "{id}");
+        }
+    }
 }
