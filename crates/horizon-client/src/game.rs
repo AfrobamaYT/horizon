@@ -18478,9 +18478,8 @@ mod escape_tests {
     use horizon_core::random::RandomSource;
     use std::sync::Arc;
 
-    /// `Entity.moveTowardsClosestSpace` takes an item's escape speed from the
-    /// item's own random, the one its constructor drew from, and leaves the
-    /// level's random as it was (#13043).
+    /// `Entity.moveTowardsClosestSpace` uses the item's own random, never the
+    /// level's random. Seeded Java values pin vanilla's float arithmetic (#13043).
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn an_item_escapes_a_block_at_its_own_randoms_speed() {
@@ -18502,15 +18501,16 @@ mod escape_tests {
         game.world.set(8, 64, 8, stone).unwrap();
         let stack = ItemStack::new("minecraft:stone", 2);
         game.spawn_item(stack, [8.5, 64.4, 8.5], [0.0, 0.0, 0.0], 10);
-        let item = game.dropped.last().unwrap();
-        let expected = f64::from(item.random.clone().next_float() * 0.2 + 0.1);
+        let item = game.dropped.last_mut().unwrap();
+        item.random = horizon_core::random::LegacyRandom::new(12345);
         let mut level = game.world.random.clone();
         game.ticked_entities_through = u32::MAX;
         game.tick_items();
         let item = game.dropped.last().unwrap();
-        // Up is the nearest open side from the middle of the block.
-        // The push replaces the fall's velocity; then the 0.98 drag.
-        assert_eq!(item.velocity.y, expected * 0.98);
+        // Up is the nearest open side. Independent Java Random(12345):
+        // nextFloat()*0.2F+0.1F, widened before multiplying by widened 0.98F.
+        assert_eq!(item.velocity.y, f64::from_bits(0x3fc5_9ef4_570f_5500));
+        assert_eq!(item.random.clone().next_float().to_bits(), 0x3f03_61b3);
         assert_eq!(game.world.random.next_float(), level.next_float());
     }
 }
