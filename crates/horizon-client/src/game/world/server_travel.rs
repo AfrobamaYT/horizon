@@ -1464,7 +1464,12 @@ mod tests {
                 game.arrive_vehicle(source, base + 1, Vec3::ZERO, 0.0);
                 assert_eq!(game.portals.entities[&(base + 1)].cooldown, 10);
                 assert!(
-                    !game.levels.parked_mut(source).unwrap().portal_states.contains_key(&(base + 1))
+                    !game
+                        .levels
+                        .parked_mut(source)
+                        .unwrap()
+                        .portal_states
+                        .contains_key(&(base + 1))
                 );
                 game.native_joins_flush(false, 0);
                 game.native_joins_flush(false, 0);
