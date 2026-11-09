@@ -1157,11 +1157,12 @@ mod tests {
 
     /// A game on a scratch world folder, the way `dedicated.rs` opens one
     /// (`load_world` with an absolute folder).
-    fn open_game(
+    fn open_game<'a>(
+        resources: &'a mut Option<std::sync::Arc<crate::game::Resources>>,
         root: &std::path::Path,
         home: &std::path::Path,
         world: &std::path::Path,
-    ) -> Game<'static> {
+    ) -> Game<'a> {
         use crate::game::{Audio, Options, Progress, Settings, load_resources};
         let settings = Settings::default();
         let loaded = load_resources(
@@ -1178,7 +1179,7 @@ mod tests {
         )
         .unwrap();
         // The game keeps a reference to its resources for the whole test.
-        let resources: &'static _ = Box::leak(Box::new(loaded.resources));
+        let resources = resources.insert(loaded.resources);
         let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
         options.resources = root.to_path_buf();
         options.game_dir = Some(home.to_path_buf());
@@ -1226,14 +1227,16 @@ mod tests {
         let home = std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap()).join("h260");
         let world = home.join("saves/h260");
         {
-            let mut game = open_game(&root, &home, &world);
+            let mut resources = None;
+            let mut game = open_game(&mut resources, &root, &home, &world);
             // A server ticks before it saves.
             game.tick_world(true).unwrap();
             assert!(game.run_command("worldborder set 50"));
             assert!(game.run_command("execute in minecraft:the_nether run worldborder set 100"));
             game.save_game().unwrap();
         }
-        let mut game = open_game(&root, &home, &world);
+        let mut resources = None;
+        let mut game = open_game(&mut resources, &root, &home, &world);
         let mut failures = Vec::new();
         if game.border.size() != 50.0 {
             failures.push(format!("in place after the open: {}", game.border.size()));
@@ -1280,7 +1283,8 @@ mod tests {
         const DEFAULT: f64 = 59_999_968.0;
         let mut failures = Vec::new();
         {
-            let mut game = open_game(&root, &home, &world);
+            let mut resources = None;
+            let mut game = open_game(&mut resources, &root, &home, &world);
             // A new world: every level at the default.
             if game.border.size() != DEFAULT {
                 failures.push(format!("new world in place: {}", game.border.size()));
@@ -1295,7 +1299,8 @@ mod tests {
             game.save_game().unwrap();
         }
         {
-            let mut game = open_game(&root, &home, &world);
+            let mut resources = None;
+            let mut game = open_game(&mut resources, &root, &home, &world);
             // Before the first tick: the read, then the set.
             if game.border.size() != 50.0 {
                 failures.push(format!("first read before a tick: {}", game.border.size()));
@@ -1312,7 +1317,8 @@ mod tests {
             game.save_game().unwrap();
         }
         {
-            let mut game = open_game(&root, &home, &world);
+            let mut resources = None;
+            let mut game = open_game(&mut resources, &root, &home, &world);
             let got = sizes(&mut game);
             if got != (Some(70.0), Some(100.0), Some(DEFAULT)) {
                 failures.push(format!("after the save and another reopen: {got:?}"));

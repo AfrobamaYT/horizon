@@ -8,7 +8,7 @@ use horizon_client::chunk::Chunk;
 use horizon_core::position::ChunkPos;
 use std::sync::Arc;
 
-fn game() -> Game<'static> {
+fn game(resources: &mut Option<std::sync::Arc<Resources>>) -> Game<'_> {
     let root = std::path::PathBuf::from(
         std::env::var_os("HORIZON_TEST_RESOURCES")
             .expect("set HORIZON_TEST_RESOURCES to prepared resources"),
@@ -30,7 +30,7 @@ fn game() -> Game<'static> {
     let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
     options.resources = root.clone();
     options.execution_role = execution_role::ExecutionRole::IntegratedServer;
-    let res: &'static _ = Box::leak(Box::new(loaded.resources));
+    let res = resources.insert(loaded.resources);
     let mut game = Game::new(
         res,
         loaded.pack,
@@ -78,7 +78,8 @@ fn summon(game: &mut Game<'_>, extra: &str) {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_blast_from_damage_breaks_the_stand_though_the_command_fails() {
-    let mut game = game();
+    let mut game_resources = None;
+    let mut game = game(&mut game_resources);
     summon(
         &mut game,
         r#",equipment:{head:{id:"minecraft:diamond_helmet",count:1}}"#,
@@ -101,7 +102,8 @@ fn a_blast_from_damage_breaks_the_stand_though_the_command_fails() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn fire_from_damage_lights_or_burns_the_stand_though_the_command_fails() {
-    let mut game = game();
+    let mut game_resources = None;
+    let mut game = game(&mut game_resources);
     summon(&mut game, "");
     assert!(!game.run_command(&format!("damage {STAND} 1 minecraft:in_fire")));
     let (_, fire) = say(&mut game, &format!("data get entity {STAND} Fire"));
@@ -125,7 +127,8 @@ fn items(game: &mut Game<'_>) -> String {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn control_an_absent_or_removed_stand_is_not_broken_again() {
-    let mut game = game();
+    let mut game_resources = None;
+    let mut game = game(&mut game_resources);
     assert!(!game.run_command(&format!("damage {STAND} 1 minecraft:explosion")));
     assert_eq!(items(&mut game), "Test failed");
     summon(
@@ -141,7 +144,8 @@ fn control_an_absent_or_removed_stand_is_not_broken_again() {
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn control_invulnerable_and_marker_stands_refuse_the_blast() {
     for flag in ["Invulnerable:1b", "Marker:1b"] {
-        let mut game = game();
+        let mut game_resources = None;
+        let mut game = game(&mut game_resources);
         summon(
             &mut game,
             &format!(r#",{flag},equipment:{{head:{{id:"minecraft:diamond_helmet",count:1}}}}"#),
@@ -161,7 +165,8 @@ fn control_invulnerable_and_marker_stands_refuse_the_blast() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn control_repeated_burning_breaks_the_stand_once() {
-    let mut game = game();
+    let mut game_resources = None;
+    let mut game = game(&mut game_resources);
     summon(
         &mut game,
         r#",Fire:200s,equipment:{head:{id:"minecraft:diamond_helmet",count:1}}"#,
