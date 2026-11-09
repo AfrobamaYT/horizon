@@ -17560,7 +17560,7 @@ fn load_world_rest(
     behaviour_json: &serde_json::Value,
     gameplay_projection: &[horizon_client::blocks::GameplayProjection],
     entity_models: Option<&horizon_client::mobs::EntityModelDocument>,
-    _item_defaults: &horizon_world::item_defaults::ItemDefaults,
+    item_defaults: &horizon_world::item_defaults::ItemDefaults,
     visibility: horizon_world::block_render::FaceVisibility,
     progress: &Progress,
     started: Instant,
