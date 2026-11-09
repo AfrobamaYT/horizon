@@ -1204,17 +1204,24 @@ mod tests {
     /// mod mob on a wandering trader template may set it for its own saddle.
     #[test]
     fn only_an_abstract_horse_is_steered_by_its_saddled_player_rider() {
-        for species in [
-            Species::Horse,
-            Species::Camel,
-            Species::WanderingTrader,
-            Species::Villager,
+        for (species, expected) in [
+            (Species::Horse, true),
+            (Species::Donkey, true),
+            (Species::Mule, true),
+            (Species::SkeletonHorse, true),
+            (Species::ZombieHorse, true),
+            (Species::Camel, true),
+            (Species::CamelHusk, true),
+            (Species::Llama, true),
+            (Species::TraderLlama, true),
+            (Species::WanderingTrader, false),
+            (Species::Villager, false),
         ] {
             let mut m = horse(species);
             m.rider = Some(Rider::default());
             assert!(!controlled(&m), "{species:?} unsaddled");
             m.extra.set_saddled(true);
-            assert_eq!(controlled(&m), is_equine(species), "{species:?} saddled");
+            assert_eq!(controlled(&m), expected, "{species:?} saddled");
         }
     }
 
