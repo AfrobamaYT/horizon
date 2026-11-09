@@ -10,18 +10,22 @@ use mod_api::PlayerRef;
 
 impl Game<'_> {
     /// `Player.getAttackStrengthScale(partial)` for `player`.
+    /// Returns `None` for a non-finite partial tick; finite partials are not restricted.
     pub(in crate::game) fn player_attack_strength_scale(
         &self,
         player: PlayerRef,
         partial: f32,
     ) -> Option<f32> {
+        if !partial.is_finite() {
+            return None;
+        }
         let read = self.player_handle_read(player)?;
         // 1.8.9 had no attack cooldown.
         if self.legacy_rules() {
             return Some(1.0);
         }
         Some(match read {
-            PlayerRead::Acting { .. } => self.attack_strength_scale_at(partial),
+            PlayerRead::Acting { .. } => return self.attack_strength_scale_at(partial),
             PlayerRead::Guest(guest) => {
                 let (ticks, item) = self
                     .lan

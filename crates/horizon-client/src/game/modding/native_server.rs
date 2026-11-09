@@ -4247,6 +4247,38 @@ mod fake_action_tests {
         });
     }
 
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn attack_strength_rejects_non_finite_partial_without_restricting_finite_ticks() {
+        use super::super::native_entity_refs::tests::with_game;
+        with_game(|game| {
+            let (player, conn, _) = fake(game, None, 0);
+            game.as_guest(conn, |g| g.attack_ticks = 2).unwrap();
+            for partial in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+                assert_eq!(game.player_attack_strength_scale(player, partial), None);
+                game.as_guest(conn, |g| {
+                    assert_eq!(g.attack_strength_scale_at(partial), None);
+                    assert_eq!(g.player_attack_strength_scale(player, partial), None);
+                })
+                .unwrap();
+            }
+            for (partial, expected) in [(-1.0, 0.2), (0.5, 0.5), (2.0, 0.8)] {
+                assert_eq!(
+                    game.player_attack_strength_scale(player, partial),
+                    Some(expected)
+                );
+                game.as_guest(conn, |g| {
+                    assert_eq!(g.attack_strength_scale_at(partial), Some(expected));
+                    assert_eq!(
+                        g.player_attack_strength_scale(player, partial),
+                        Some(expected)
+                    );
+                })
+                .unwrap();
+            }
+        });
+    }
+
     /// A listener on `attack_entity` reads the attacking player's attack
     /// strength where the hook runs.
     struct ChargeWatcher(std::sync::Arc<std::sync::Mutex<Vec<Option<f32>>>>);

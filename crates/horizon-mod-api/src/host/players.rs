@@ -86,6 +86,7 @@ pub trait PlayersBackend {
     /// runs before `Player.attack` resets the ticker. 1.0 under 1.8.9 rules,
     /// which have no cooldown. None for a stale or unavailable player.
     #[access(WorldOnly)]
+    /// Non-finite partial ticks return `None`; finite partials are not restricted.
     fn player_attack_strength_scale(&self, player: PlayerRef, partial: f32) -> Option<f32>;
     /// Side: server.
     /// `Player.takeXpDelay`: the ticks before the player can take the next
