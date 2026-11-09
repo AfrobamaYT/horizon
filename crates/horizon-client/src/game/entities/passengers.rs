@@ -711,6 +711,76 @@ mod off_level_tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn dying_riding_edges_do_not_depend_on_unrelated_retained_objects() {
+        for retained in [false, true] {
+            for dying_vehicle in [false, true] {
+                crate::game::native_entity_refs::tests::with_game(|game| {
+                    let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
+                    let mut vehicle = Mob::new(161, kind.clone(), Vec3::ZERO, 0.0);
+                    let mut rider = Mob::new(162, kind.clone(), Vec3::ZERO, 0.0);
+                    rider.extra.mount = Some(161);
+                    if dying_vehicle {
+                        vehicle.health = 0.0;
+                    } else {
+                        rider.health = 0.0;
+                    }
+                    game.mobs.push(vehicle);
+                    game.mobs.push(rider);
+                    if retained {
+                        game.persist.off_level.insert(
+                            169,
+                            crate::game::persist::OffLevel::Mob(Mob::new(
+                                169,
+                                kind,
+                                Vec3::ZERO,
+                                0.0,
+                            )),
+                        );
+                    }
+                    game.sync_riders();
+                    assert_eq!(
+                        game.mob_object(162).unwrap().extra.mount,
+                        Some(161),
+                        "retained={retained}, dying_vehicle={dying_vehicle}"
+                    );
+                });
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn first_rider_order_does_not_depend_on_unrelated_retained_objects() {
+        for retained in [false, true] {
+            crate::game::native_entity_refs::tests::with_game(|game| {
+                let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
+                let mut vehicle = Mob::new(171, kind.clone(), Vec3::ZERO, 0.0);
+                vehicle.extra.rider = Some(172);
+                game.mobs.push(vehicle);
+                for (id, order) in [(172, 1), (173, 0)] {
+                    let mut rider = Mob::new(id, kind.clone(), Vec3::ZERO, 0.0);
+                    rider.extra.mount = Some(171);
+                    rider.extra.vehicle_order = order;
+                    game.mobs.push(rider);
+                }
+                if retained {
+                    game.persist.off_level.insert(
+                        179,
+                        crate::game::persist::OffLevel::Mob(Mob::new(179, kind, Vec3::ZERO, 0.0)),
+                    );
+                }
+                game.sync_riders();
+                assert_eq!(
+                    game.mob_object(171).unwrap().extra.rider,
+                    Some(173),
+                    "retained={retained}"
+                );
+            });
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn content_seat_positioning_counts_retained_passengers() {
         crate::game::native_entity_refs::tests::with_game(|game| {
             let mut kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();

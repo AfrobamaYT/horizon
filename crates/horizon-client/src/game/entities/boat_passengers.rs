@@ -700,3 +700,117 @@ mod off_level_tests {
         });
     }
 }
+
+#[cfg(test)]
+mod boat_callback_review_tests {
+    use super::*;
+    use horizon_client::mobs::Mob;
+    use std::sync::{Arc, Mutex};
+
+    struct MutateRider {
+        discard: bool,
+        heard: Arc<Mutex<Vec<(u32, bool)>>>,
+    }
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for MutateRider {
+        fn entity_mount(
+            &self,
+            host: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::EntityMountEvent<'_>,
+        ) -> mod_api::Flow {
+            self.heard
+                .lock()
+                .unwrap()
+                .push((event.entity, event.mounting));
+            if !event.mounting && event.entity == 72 {
+                if self.discard {
+                    assert!(host.entity(72).unwrap().discard(host));
+                } else {
+                    let later = host.entity(73).unwrap();
+                    let replacement = host.entity(74).unwrap();
+                    assert!(later.start_riding(host, replacement, true));
+                }
+            }
+            mod_api::Flow::Continue
+        }
+    }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn boat_ejection_preserves_a_later_passengers_callback_reparenting() {
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "mutate_rider",
+            Box::new(MutateRider {
+                discard: false,
+                heard: heard.clone(),
+            }),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
+                game.boats.push(super::super::boats::Boat::new(
+                    71,
+                    "oak".into(),
+                    Vec3::ZERO,
+                    0.0,
+                ));
+                let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+                for id in [72, 73, 74] {
+                    let mut mob = Mob::new(id, kind.clone(), Vec3::ZERO, 0.0);
+                    mob.extra.mount = (id != 74).then_some(71);
+                    mob.extra.vehicle_order = i64::from(id);
+                    game.mobs.push(mob);
+                }
+                game.eject_boat_mobs(0, true);
+                assert_eq!(game.mob_object(73).unwrap().extra.mount, Some(74));
+                assert_eq!(
+                    heard
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .filter(|&&(id, mounting)| id == 73 && !mounting)
+                        .count(),
+                    1,
+                    "only the callback's deliberate reparenting dismounts this rider"
+                );
+            });
+        });
+    }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn boat_ejection_does_not_snap_a_rider_discarded_by_its_callback() {
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "mutate_rider",
+            Box::new(MutateRider {
+                discard: true,
+                heard: Arc::default(),
+            }),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
+                game.boats.push(super::super::boats::Boat::new(
+                    71,
+                    "oak".into(),
+                    Vec3::ZERO,
+                    0.0,
+                ));
+                let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+                let original = Vec3::new(2.0, 60.0, 3.0);
+                let mut rider = Mob::new(72, kind.clone(), original, 0.0);
+                rider.extra.mount = Some(71);
+                game.mobs.push(rider);
+                let mut child = Mob::new(73, kind, original, 0.0);
+                child.extra.mount = Some(72);
+                game.mobs.push(child);
+                game.boats[0].position = Vec3::new(40.0, 70.0, 40.0);
+                game.eject_boat_mobs(0, true);
+                assert!(game.mob_object(72).unwrap().removed);
+                assert_eq!(game.mob_object(72).unwrap().position, original);
+                assert_eq!(game.mob_object(73).unwrap().position, original);
+            });
+        });
+    }
+}
