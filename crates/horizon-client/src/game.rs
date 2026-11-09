@@ -3060,6 +3060,7 @@ struct Game<'a> {
     /// The entity ids a hosted server gives the knots its mobs hang on, by
     /// block, while a lead is tied there.
     knot_ids: HashMap<[i32; 3], u32>,
+    knots: horizon_client::join_seq::JoinList<leads::Knot>,
     text_display_vertices: usize,
     /// Player skin downloads, and which skin each atlas skin slot holds
     /// (least recently shown first).
@@ -16758,7 +16759,7 @@ impl<'a> Game<'a> {
             &gui.atlas.translucent,
         );
         let resource_source = pack.source.clone();
-        let game = Game {
+        let mut game = Game {
             structure_spawns: horizon_client::mobs::spawn_selection::StructureSpawns::load(
                 &options.resources,
             ),
@@ -17113,6 +17114,7 @@ impl<'a> Game<'a> {
             interactions: Default::default(),
             remote_knots: Default::default(),
             knot_ids: Default::default(),
+            knots: Default::default(),
             text_display_vertices: 0,
             skin_downloads: RefCell::new({
                 let mut downloads = horizon_client::skins::Downloader::new(
@@ -17356,6 +17358,7 @@ impl<'a> Game<'a> {
             fangs: Default::default(),
             player_model: None,
         };
+        game.reset_entity_residency();
         Ok(game)
     }
 }
