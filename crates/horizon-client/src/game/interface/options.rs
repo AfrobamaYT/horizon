@@ -636,6 +636,9 @@ impl Game<'_> {
             self.ui.chat.rescale(&self.gui.atlas);
         }
         self.notify_window_resize();
+        // The GUI scale is part of the screen's size (`Screen.resize`): a
+        // change remakes its build before this frame draws it.
+        self.build_screen();
         // 3D skin layers: a skin's slabs are built when it is resolved, so a
         // change here rebuilds the players already on screen (the Options
         // screen keeps resolving them every frame; this covers the console
@@ -672,6 +675,7 @@ impl Game<'_> {
                 now.gui_size[0],
                 now.gui_size[1],
             );
+            self.build_screen();
         }
     }
     /// `Window.updateFullscreenState`: a fullscreen change made by the window
