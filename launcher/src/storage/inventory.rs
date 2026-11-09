@@ -884,15 +884,18 @@ mod eviction_tests {
         let storage = Storage::at(&home.0).unwrap();
         let root = Root::open(&home.0).unwrap();
         let entries = vec![Entry::fixed(&root, Path::new("game"), Category::BuildFiles).unwrap()];
-        let bytes = allocated_bytes(&file).unwrap();
+        // Reports count the entire unit, including allocated directory metadata.
+        let bytes = allocated_bytes(&entries[0].path).unwrap();
         let report = storage.apply_retaining(entries, None, true, true).unwrap();
         let row = report
             .rows
             .iter()
             .find(|row| row.category == Category::BuildFiles)
             .unwrap();
+        assert_eq!(row.bytes, bytes);
         assert_eq!(row.freed_bytes, 0);
         assert_eq!(row.remaining_bytes, bytes);
+        assert_eq!(row.kept.len(), 1);
         assert_eq!(row.kept[0].bytes, bytes);
         assert!(!row.kept[0].reason.is_empty());
         assert!(file.exists());
