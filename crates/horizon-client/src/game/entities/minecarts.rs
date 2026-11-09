@@ -2037,23 +2037,7 @@ impl Game<'_> {
             if player {
                 continue;
             }
-            let Some(mob) = self.mob_object(rider) else {
-                continue;
-            };
-            let at = self.removed_vehicle_dismount_point(
-                mob.position,
-                f64::from(mob.width()),
-                f64::from(mob.height()),
-                y,
-            );
-            self.dismount_mob(rider);
-            if let Some(mob) = self.mob_object_mut(rider)
-                && mob.extra.mount.is_none()
-            {
-                mob.position = at;
-                mob.previous = at;
-                self.snap_mob_passengers(rider);
-            }
+            self.dismount_cart_mob_at(rider, y);
         }
     }
     /// Refuse a removed target before carrying its owning slot into a tick clone.
