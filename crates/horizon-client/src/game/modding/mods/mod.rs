@@ -490,6 +490,15 @@ pub(super) fn register_entity_spectator_shaders(role: ExecutionRole) {
     horizon_client_render::spectator_shaders::register(shaders);
 }
 
+pub(super) fn register_preset_editors(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut editors = Vec::new();
+    Game::native_register_preset_editors(&RegistrationContext::new(), &mut editors);
+    horizon_client::title::preset_editors::register(editors);
+}
+
 /// The native mods' colour resolvers (`native_register_color_resolvers`), kept once at start,
 /// before the block tint sources that read them and before resources load.
 pub(super) fn register_color_resolvers(role: ExecutionRole) {
