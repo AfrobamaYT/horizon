@@ -4,12 +4,11 @@ use sha2::{Digest, Sha256};
 use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
 use std::{fs, io, path::Path, process::Command};
 
-use crate::run_leases::SOURCE;
+const SOURCE: &str = "HORIZON_WINDOWS_RUNTIME_SOURCE";
 const SLOT: &str = "HORIZON_WINDOWS_RUNTIME_SLOT";
 
-pub(crate) struct Guard {
-    _slot: fs::File,
-    _source: fs::File,
+pub(crate) fn mark(cmd: &mut Command, source: &Path) {
+    cmd.env(SOURCE, source);
 }
 
 fn value<'a>(cmd: &'a Command, key: &str) -> Option<&'a std::ffi::OsStr> {
@@ -49,11 +48,11 @@ fn redirect_in(cmd: Command, root: &Path) -> Command {
 
 /// Prepare under an exclusive lock. Never fall back to a version-specific executable:
 /// a locked or incomplete slot is an error, rather than another firewall identity.
-pub(crate) fn prepare(cmd: &Command) -> io::Result<Option<Guard>> {
+pub(crate) fn prepare(cmd: &Command) -> io::Result<Option<crate::backend::RuntimeGuard>> {
     prepare_in(cmd, &crate::backend::data_dir().join("run"))
 }
 
-fn prepare_in(cmd: &Command, root: &Path) -> io::Result<Option<Guard>> {
+fn prepare_in(cmd: &Command, root: &Path) -> io::Result<Option<crate::backend::RuntimeGuard>> {
     let (Some(source), Some(slot)) = (value(cmd, SOURCE), value(cmd, SLOT)) else {
         return Ok(None);
     };
@@ -77,7 +76,7 @@ fn plain_directory(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn stage(source: &Path, slot: &Path) -> io::Result<Guard> {
+fn stage(source: &Path, slot: &Path) -> io::Result<crate::backend::RuntimeGuard> {
     plain_directory(slot)?;
     let lock = fs::OpenOptions::new()
         .read(true)
@@ -128,7 +127,7 @@ fn stage(source: &Path, slot: &Path) -> io::Result<Guard> {
         slot.join("source.json"),
         serde_json::to_vec(&fs::canonicalize(source)?)?,
     )?;
-    Ok(Guard {
+    Ok(crate::backend::RuntimeGuard {
         _slot: lock,
         _source: source_file,
     })
@@ -239,7 +238,7 @@ mod tests {
         .unwrap();
         let mut cmd = Command::new(source.join(crate::backend::CLIENT));
         cmd.current_dir(&root).args(["/D", "/C", "set /p answer="]);
-        crate::run_leases::mark(&mut cmd, &source);
+        mark(&mut cmd, &source);
         let mut cmd = redirect_in(cmd, &root.join("run"));
         let guard = prepare_in(&cmd, &root.join("run")).unwrap().unwrap();
         crate::process::hide_console(&mut cmd);
@@ -276,7 +275,7 @@ mod tests {
             cmd.current_dir(&home)
                 .env("HORIZON_HOME", &home)
                 .arg("--offscreen");
-            crate::run_leases::mark(&mut cmd, &source);
+            mark(&mut cmd, &source);
             redirect_in(cmd, &root.join("run"))
         };
         let first = command("v1");

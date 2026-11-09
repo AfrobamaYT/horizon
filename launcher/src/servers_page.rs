@@ -64,10 +64,12 @@ pub(super) enum Field {
     DeleteServer,
     /// Settings' accent as hex (`themes_page.rs`).
     AccentHex,
+    /// The Shop's gift recipient (`wardrobe_page/shop/basket.rs`).
+    ShopGift,
 }
 
 impl Field {
-    const ALL: [Field; 24] = [
+    const ALL: [Field; 25] = [
         Field::Name,
         Field::Seed,
         Field::Players,
@@ -92,6 +94,7 @@ impl Field {
         Field::OfflineName,
         Field::DeleteServer,
         Field::AccentHex,
+        Field::ShopGift,
     ];
 }
 
@@ -408,7 +411,13 @@ fn own_name(accounts: &Accounts) -> Option<String> {
         .or_else(crate::offline_name)
 }
 
-use horizon_launcher::storage::format_bytes as bytes;
+fn bytes(n: u64) -> String {
+    match n {
+        0..1_000_000 => format!("{} kB", n.div_ceil(1000)),
+        1_000_000..1_000_000_000 => format!("{:.1} MB", n as f64 / 1e6),
+        _ => format!("{:.2} GB", n as f64 / 1e9),
+    }
+}
 
 /// A backup's date and kind from its name (`2026-10-19_11-28-57-manual.zip`, UTC), for people.
 fn backup_label(b: &Backup) -> (String, String) {
@@ -485,21 +494,9 @@ impl Launcher {
         let Some(dir) = self.servers.open.clone() else {
             return;
         };
-        let tx = self.tx.clone();
         self.server_job(label.to_string(), move |log| {
             let args: Vec<&str> = args.iter().map(String::as_str).collect();
-            let result = match args.first().copied() {
-                Some("start" | "restart") => {
-                    if args[0] == "start" {
-                        log(tr("A new world takes a minute the first time").into());
-                    }
-                    crate::jar_launch::with_consent(&tx, |permission| {
-                        servers::run_managed(&dir, &args, log, permission)
-                    })
-                }
-                _ => servers::run_streamed(&dir, &args, log),
-            };
-            result.map(|_| String::new())
+            servers::run_streamed(&dir, &args, log).map(|_| String::new())
         });
     }
 
@@ -1297,6 +1294,7 @@ impl Launcher {
             }
             Field::MemoryLimit => self.memory_enter(),
             Field::OfflineName => self.offline_name_enter(),
+            Field::ShopGift => self.shop.find_soon = true,
             Field::ServerName | Field::ServerAddress => self.add_server(),
         }
     }
@@ -1452,12 +1450,34 @@ impl Launcher {
         {
             page = page.child(self.problem_notice(p, cx));
         }
+        // The banner, with a "Hide" once it has been on screen a while: hiding it hides the
+        // sidebar's card too, for good. Nothing at all once hidden.
+        let partner = (!self.settings.partner_hidden).then(|| {
+            let mut slot = div().relative().w(px(600.)).child(super::partner::banner(
+                "partner-servers",
+                600.,
+                &t,
+            ));
+            if self.settings.partner_seen_secs >= super::partner::SEEN_BEFORE_HIDE {
+                slot = slot.child(
+                    super::partner::hide_button("partner-servers-hide", &t).on_click(cx.listener(
+                        |this, _: &ClickEvent, _, cx| {
+                            this.settings.partner_hidden = true;
+                            this.save_settings();
+                            cx.notify();
+                        },
+                    )),
+                );
+            }
+            slot
+        });
         if self.servers.list.is_empty() {
             return page
                 .child(centered(
                     tr("No server yet. Create one: it takes a few seconds, and with the defaults (tick the EULA, press Create) you get a friends-only survival world."),
                     &t,
-                ));
+                ))
+                .children(partner);
         }
         let mut list = div().flex().flex_col().border_t_1().border_color(t.rule);
         for (i, e) in self.servers.list.clone().into_iter().enumerate() {
@@ -1503,7 +1523,7 @@ impl Launcher {
                 &t,
             ));
         }
-        page.child(list)
+        page.child(list).children(partner)
     }
 
     fn add_server_folder(&mut self, cx: &mut Context<Self>) {

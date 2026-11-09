@@ -1154,7 +1154,7 @@ pub fn run() -> Option<i32> {
     let cli = Cli::from_arg_matches(&definition.get_matches()).unwrap_or_else(|e| e.exit());
     let command = cli.command?;
     let result = match command {
-        Cmd::Mcp | Cmd::AgentConfig { .. } if no_ai => Err(horizon_core::no_ai::REFUSAL.into()),
+        Cmd::Mcp | Cmd::AgentConfig { .. } if no_ai => Err(horizon_platform::no_ai::REFUSAL.into()),
         Cmd::Mcp => crate::mcp::serve().map(|()| 0),
         command => {
             let result = execute(command, cli.json);
@@ -1608,8 +1608,8 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
             } else {
                 for (name, url) in [
                     ("Website", &links.website),
-                    ("Roadmap", &links.roadmap),
-                    ("Docs", &links.docs),
+                    ("Discord", &links.discord),
+                    ("Sponsor", &links.sponsor),
                 ] {
                     println!("{name:<8} {}", if url.is_empty() { "(none)" } else { url });
                 }

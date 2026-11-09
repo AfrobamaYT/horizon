@@ -1516,7 +1516,7 @@ fn compile(
     if target == Target::Server {
         cmd.arg("--no-default-features");
     }
-    cmd.args(["-p", package, "--bin", "horizon-client"]);
+    cmd.args(["-p", package, "--bin", api::executable(package)]);
     cmd
 }
 
@@ -2206,11 +2206,7 @@ fn pipeline(
                 target,
                 &target_dir,
                 compiled,
-                if has_api {
-                    api::PACKAGE
-                } else {
-                    "horizon-client"
-                },
+                api::game_package(&stage, target, has_api),
             ),
             "Compiling the game",
             |line| {
@@ -2256,6 +2252,12 @@ fn pipeline(
             }
         })?;
         check_cancelled()?;
+        api::as_client(
+            &stage,
+            target,
+            has_api,
+            &target_dir.join(compiled.cargo().0),
+        )?;
         let binary = target_dir.join(compiled.cargo().0).join(backend::CLIENT);
         if let Some(expected) = platform.machine {
             let actual = pe_machine(&binary).map_err(|error| {
