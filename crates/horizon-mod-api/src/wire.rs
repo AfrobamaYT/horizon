@@ -20,11 +20,6 @@ mod resources;
 pub use resources::{
     ResourceCodec, ResourceScope, ScopeError, ScopeLease, ScopeToken, Unsupported, borrow_token,
 };
-#[path = "wire_patch.rs"]
-mod patch;
-pub use patch::{
-    DecodedPatchCell, PatchCell, PatchFields, PatchInput, PatchPlan, PatchSet, RecordPatch,
-};
 
 /// The guest's start-up call: its input is the package list.
 pub const INIT: u32 = 0xFFFF_FF00;
@@ -183,24 +178,7 @@ impl Writer {
     }
     /// A list of `u16`: its count, then each item, in one pass (the bytes of `Vec<u16>`'s own form).
     pub(crate) fn put_u16s(&mut self, items: &[u16]) {
-        let Some(bytes) = items.len().checked_mul(2).and_then(|n| n.checked_add(4)) else {
-            self.fail(WireError::Length);
-            return;
-        };
-        if !self.can_fit(bytes) {
-            return;
-        }
-        self.put_len(items.len());
-        let start = self.bytes.len();
-        self.bytes.resize(start + items.len() * 2, 0);
-        for (to, item) in self.bytes[start..]
-            .as_chunks_mut::<2>()
-            .0
-            .iter_mut()
-            .zip(items)
-        {
-            to.copy_from_slice(&item.to_le_bytes());
-        }
+        u16::put_list(items, self);
     }
     /// A length or count.
     pub fn put_len(&mut self, len: usize) {
@@ -268,33 +246,6 @@ pub trait Record {
     fn encode(&self, out: &mut Writer);
     /// Applies one complete reply, refusing malformed or trailing bytes atomically.
     fn apply(&mut self, bytes: &[u8]) -> Result<(), WireError>;
-}
-
-// exhaustive: wasm boundary plumbing that generated code builds field by field
-/// A record projected from caller-owned state without a second wire DTO. Both closures may
-/// borrow the same interior-mutable native state; the apply closure must validate every edit
-/// before committing it, exactly as required by `Record::apply`.
-pub struct Projected<E, A> {
-    encode: E,
-    apply: A,
-}
-impl<E, A> Projected<E, A> {
-    /// Bind an ordinary encoder and an atomic reply application to their caller-owned state.
-    pub fn new(encode: E, apply: A) -> Self {
-        Self { encode, apply }
-    }
-}
-impl<E, A> Record for Projected<E, A>
-where
-    E: Fn(&mut Writer),
-    A: FnMut(&[u8]) -> Result<(), WireError>,
-{
-    fn encode(&self, out: &mut Writer) {
-        (self.encode)(out);
-    }
-    fn apply(&mut self, bytes: &[u8]) -> Result<(), WireError> {
-        (self.apply)(bytes)
-    }
 }
 
 // exhaustive: wasm boundary plumbing that generated code builds field by field
@@ -564,6 +515,28 @@ pub trait Wire: Sized {
         self.put(out);
     }
     fn take(input: &mut Reader<'_>) -> Result<Self, WireError>;
+    // hidden: internal Vec encoding specialization, not a mod-facing API
+    /// Internal list codec; primitive numbers override this with a contiguous codec.
+    #[doc(hidden)]
+    fn put_list(items: &[Self], out: &mut Writer) {
+        out.put_len(items.len());
+        for item in items {
+            item.put(out);
+        }
+    }
+    // hidden: internal list encoding preserves per-item resource ownership transfer
+    #[doc(hidden)]
+    fn put_owned_list(items: Vec<Self>, out: &mut Writer) {
+        out.put_len(items.len());
+        for item in items {
+            out.put_owned(item);
+        }
+    }
+    // hidden: internal Vec decoding specialization for contiguous numeric payloads
+    #[doc(hidden)]
+    fn take_list(input: &mut Reader<'_>) -> Result<Vec<Self>, WireError> {
+        input.list_with(usize::MAX, Self::take)
+    }
 }
 
 macro_rules! numbers {
@@ -576,6 +549,29 @@ macro_rules! numbers {
             fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
                 let bytes = input.take_bytes(std::mem::size_of::<$ty>())?;
                 Ok(<$ty>::from_le_bytes(bytes.try_into().expect("a fixed-size slice")))
+            }
+            fn put_list(items: &[Self], out: &mut Writer) {
+                let Some(size) = items.len().checked_mul(<Self as Wire>::MIN).and_then(|n| n.checked_add(4)) else {
+                    out.fail(WireError::Length);
+                    return;
+                };
+                if !out.can_fit(size) { return; }
+                out.put_len(items.len());
+                #[cfg(target_endian = "little")]
+                out.put_bytes(bytemuck::cast_slice(items));
+                #[cfg(target_endian = "big")]
+                for item in items { out.put_bytes(&item.to_le_bytes()); }
+            }
+            fn put_owned_list(items: Vec<Self>, out: &mut Writer) {
+                Self::put_list(&items, out);
+            }
+            fn take_list(input: &mut Reader<'_>) -> Result<Vec<Self>, WireError> {
+                let len = input.take_len(<Self as Wire>::MIN)?;
+                let size = len.checked_mul(<Self as Wire>::MIN).ok_or(WireError::Length)?;
+                let bytes = input.take_bytes(size)?;
+                Ok(bytes.chunks_exact(<Self as Wire>::MIN).map(|chunk| {
+                    Self::from_le_bytes(chunk.try_into().expect("a fixed-size chunk"))
+                }).collect())
             }
         }
     )*};
@@ -786,19 +782,13 @@ impl<T: Wire> Wire for Arc<T> {
 impl<T: Wire> Wire for Vec<T> {
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
-        out.put_len(self.len());
-        for item in self {
-            item.put(out);
-        }
+        T::put_list(self, out);
     }
     fn put_owned(self, out: &mut Writer) {
-        out.put_len(self.len());
-        for item in self {
-            out.put_owned(item);
-        }
+        T::put_owned_list(self, out);
     }
     fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
-        input.list_with(usize::MAX, T::take)
+        T::take_list(input)
     }
 }
 

@@ -262,7 +262,7 @@ impl Tag {
             text: Text::empty()
                 .append(Text::translate("chat.tag.modified", &[]))
                 .append(Text::literal("\n"))
-                .append(Text::literal(original_content).with_color(text::GRAY)),
+                .append(Text::untrusted(original_content).with_color(text::GRAY)),
         }
     }
 }
@@ -1008,10 +1008,14 @@ impl Chat {
             return None;
         }
         let content = line.content.resolve_legacy();
-        for (c, style) in content.chars() {
-            x -= f64::from(font.advance(c, style));
-            if x < 0.0 {
-                return Some(style.clone());
+        for span in &content.spans {
+            for c in span.text.chars() {
+                x -= f64::from(font.advance(c, &span.style));
+                if x < 0.0 {
+                    let mut style = span.style.clone();
+                    style.click = span.click_event().cloned();
+                    return Some(style);
+                }
             }
         }
         None
