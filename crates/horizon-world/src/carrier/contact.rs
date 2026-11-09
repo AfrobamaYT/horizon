@@ -15,10 +15,13 @@
 //!   narrow phase uses the cells' real voxel boxes as oriented boxes — the
 //!   carrier's outer AABB is never a solid shape, so gaps stay traversable;
 //! - translation uses a swept separating-axis test and commits only a
-//!   collision-safe fraction;
+//!   collision-safe fraction; touching without closing — resting on a
+//!   floor, sliding along a face, pulling away — does not block;
 //! - rotation uses conservative advancement over the bounded angular
-//!   interval; an interval the iteration budget cannot resolve stops motion
-//!   conservatively by refusing the whole step;
+//!   interval, with the same non-closing-touch rule measured through the
+//!   contact corners' ω × r speeds; an interval the iteration budget
+//!   cannot resolve stops motion conservatively by refusing the whole
+//!   step;
 //! - simultaneous contacts are reported in stable `(uuid, cell)` order;
 //! - box and iteration budgets refuse the step instead of clamping it;
 //! - excess motion (more than one block or five degrees per step) is
@@ -41,6 +44,10 @@ pub const MAX_ROTATION_RADIANS: f64 = 5.0 * std::f64::consts::PI / 180.0;
 const ADVANCEMENT_SHARE: f64 = 0.5;
 /// Remaining step fraction below which a rotation interval counts as swept.
 const FRACTION_RESOLUTION: f64 = 1.0e-9;
+/// Closing-rate threshold for touching rotation contacts: a rate this small
+/// cannot spend more than a billionth of the epsilon band per unit step
+/// fraction, far inside the zero-penetration tolerance.
+const RATE_EPSILON: f64 = 1.0e-9;
 /// The world coordinate axes, the face axes of axis-aligned obstacle boxes.
 const WORLD_AXES: [Vec3; 3] = [
     Vec3::new(1.0, 0.0, 0.0),
@@ -479,28 +486,118 @@ fn projected_half(half: Vec3, axes: &[Vec3; 3], axis: Vec3) -> f64 {
         + axes[2].dot(axis).abs() * half.z
 }
 
-/// Static SAT separation between a carrier oriented box and a static world
-/// box: the maximum interval gap over the separating axes. Positive values
-/// are a lower bound on the boxes' true distance — exactly what
-/// conservative advancement needs — and nonpositive values mean touching or
-/// overlapping.
-fn static_separation(moving: &OrientedBox, obstacle: Aabb) -> f64 {
-    let center_offset = obstacle.center().subtract(moving.center);
+/// One candidate pair's state at a rotation sub-configuration.
+#[derive(Clone, Copy, Debug)]
+enum PairState {
+    /// Separation in blocks to the pair's separating plane; positive.
+    Clear(f64),
+    /// Touching and closing, or overlapping: the sweep presses this pair.
+    Blocked { overlap: bool },
+    /// Touching without closing anywhere: excluded from the sub-step
+    /// restriction. `constant_gap` marks pairs whose touching normal is
+    /// parallel to the rotation axis — the contact plane is invariant under
+    /// rotation about its own normal, so the gap cannot change and the pair
+    /// is dropped for the whole step.
+    Excluded { constant_gap: bool },
+}
+
+/// Classifies one carrier-box/obstacle pair under a rotation step by
+/// `angle_rad` about `unit_axis` through `pivot`.
+///
+/// Touching pairs (SAT separation within `COLLISION_EPSILON` of zero) block
+/// only when the contact actually closes. Closing is measured the way
+/// conservative advancement needs it: the gap along an axis is the carrier
+/// support face's position minus the obstacle's, so its rate of change is
+/// the support face's corner speeds — ω × r for each corner `r` from the
+/// pivot — projected onto the touching axis's oriented normal, maximized
+/// over the face's corners (a box's support set along an axis is exactly
+/// one face's corners). A touch with no closing axis only slides or pulls
+/// away. If additionally some touching normal is parallel to the rotation
+/// axis, that axis's gap is provably constant for any rotation about that
+/// axis — rotation about a plane's normal maps the plane to itself — so the
+/// pair can be dropped entirely. A non-closing touch with no such invariant
+/// axis still cannot slip into closing unnoticed within a sub-step: the
+/// caller caps the sub-step by the corner paths' curvature (at most
+/// `2 * angle^2 * radius` of gap change per unit fraction squared), so at
+/// most `COLLISION_EPSILON` of gap can be lost before the next
+/// classification re-checks, preserving the never-skip-a-contact guarantee.
+fn rotation_pair_state(
+    carrier: &OrientedBox,
+    obstacle: Aabb,
+    unit_axis: Vec3,
+    angle_rad: f64,
+    pivot: Vec3,
+) -> PairState {
+    let center_offset = obstacle.center().subtract(carrier.center);
     let obstacle_half = obstacle.size().scale(0.5);
-    let mut best = f64::NEG_INFINITY;
-    for_each_sat_axis(&moving.axes, |axis| {
-        let gap = center_offset.dot(axis).abs()
-            - projected_half(moving.half, &moving.axes, axis)
+    let corners = carrier.corners();
+    let mut separation = f64::NEG_INFINITY;
+    let mut closing = false;
+    let mut constant_gap = false;
+    for_each_sat_axis(&carrier.axes, |axis| {
+        let offset = center_offset.dot(axis);
+        let gap = offset.abs()
+            - projected_half(carrier.half, &carrier.axes, axis)
             - projected_half(obstacle_half, &WORLD_AXES, axis);
-        best = best.max(gap);
+        separation = separation.max(gap);
+        if gap.abs() > COLLISION_EPSILON {
+            return;
+        }
+        let normal = if offset >= 0.0 { axis } else { axis.reverse() };
+        if normal.dot(unit_axis).abs() >= 1.0 - 1.0e-9 {
+            // Rotation about the contact plane's own normal leaves this
+            // axis's gap unchanged.
+            constant_gap = true;
+            return;
+        }
+        let support = corners
+            .iter()
+            .map(|corner| corner.dot(normal))
+            .fold(f64::NEG_INFINITY, f64::max);
+        let rate = corners
+            .iter()
+            .filter(|corner| support - corner.dot(normal) <= COLLISION_EPSILON)
+            .map(|corner| {
+                unit_axis
+                    .cross(corner.subtract(pivot))
+                    .scale(angle_rad)
+                    .dot(normal)
+            })
+            .fold(f64::NEG_INFINITY, f64::max);
+        if rate > RATE_EPSILON {
+            closing = true;
+        }
     });
-    best
+    if separation < -COLLISION_EPSILON {
+        PairState::Blocked { overlap: true }
+    } else if separation <= COLLISION_EPSILON {
+        if closing && !constant_gap {
+            PairState::Blocked { overlap: false }
+        } else {
+            PairState::Excluded { constant_gap }
+        }
+    } else {
+        PairState::Clear(separation)
+    }
 }
 
 /// Time-parameterized SAT between a carrier oriented box sweeping `delta`
 /// over step fraction `0..=1` and a static world box. Returns the first
-/// contact fraction — 0.0 when the pair already touches or overlaps — or
-/// `None` when the pair provably stays apart for the whole step.
+/// contact fraction — 0.0 when the pair presses into each other at the
+/// start — or `None` when the pair provably stays apart (or merely keeps
+/// touching without closing) for the whole step.
+///
+/// A pair that only touches — at the start of the step or at the moment
+/// its windows first overlap — is not a collision by itself. Touching
+/// without closing means some touching axis keeps the pair's separation at
+/// zero without penetration: a tangential axis (no sweep speed along it)
+/// keeps its constant gap, and an opening axis only grows its gap. Resting
+/// on a floor, sliding onto the next floor block and pulling away from a
+/// wall all hold such an axis, so they take the full step. Only when every
+/// touching axis closes at the contact instant — a corner pressed
+/// diagonally into a corner — does the touch block. A penetration at the
+/// contact instant (SAT separation below `-COLLISION_EPSILON` on every
+/// axis) always blocks, preserving the zero-penetration guarantee.
 fn swept_contact_fraction(moving: &OrientedBox, delta: Vec3, obstacle: Aabb) -> Option<f64> {
     let center_offset = obstacle.center().subtract(moving.center);
     let obstacle_half = obstacle.size().scale(0.5);
@@ -514,10 +611,11 @@ fn swept_contact_fraction(moving: &OrientedBox, delta: Vec3, obstacle: Aabb) -> 
         let offset = center_offset.dot(axis);
         let reach = projected_half(moving.half, &moving.axes, axis)
             + projected_half(obstacle_half, &WORLD_AXES, axis);
+        let gap = offset.abs() - reach;
         let speed = delta.dot(axis);
         if speed.abs() < 1.0e-12 {
             // Overlapping or touching axes impose no time window.
-            if offset.abs() - reach > COLLISION_EPSILON {
+            if gap > COLLISION_EPSILON {
                 separated = true;
             }
             return;
@@ -533,7 +631,35 @@ fn swept_contact_fraction(moving: &OrientedBox, delta: Vec3, obstacle: Aabb) -> 
     if separated || enter > exit.min(1.0) {
         return None;
     }
-    Some(enter.clamp(0.0, 1.0))
+    let impact = enter.clamp(0.0, 1.0);
+    // Classify the touch at the contact instant. A tangential axis holds
+    // its constant gap and an opening axis only grows its gap, so either
+    // keeps the pair at zero separation without penetration for the rest
+    // of the step; only all-closing touches collide.
+    let mut separation_at = f64::NEG_INFINITY;
+    let mut touch_holds = false;
+    let mut touch_closes = false;
+    for_each_sat_axis(&moving.axes, |axis| {
+        let offset = center_offset.dot(axis);
+        let reach = projected_half(moving.half, &moving.axes, axis)
+            + projected_half(obstacle_half, &WORLD_AXES, axis);
+        let speed = delta.dot(axis);
+        let offset = offset - speed * impact;
+        let gap = offset.abs() - reach;
+        separation_at = separation_at.max(gap);
+        if gap.abs() <= COLLISION_EPSILON {
+            if speed.abs() < 1.0e-12 || offset * speed < 0.0 {
+                touch_holds = true;
+            } else {
+                touch_closes = true;
+            }
+        }
+    });
+    if separation_at < -COLLISION_EPSILON || (touch_closes && !touch_holds) {
+        Some(impact)
+    } else {
+        None
+    }
 }
 
 /// Broad-phase bounds inflation so end-of-step touching reaches the narrow
@@ -706,8 +832,11 @@ impl CarrierGeometry {
     /// world point: conservative advancement over the angular interval.
     /// Returns the accepted fraction of the angle and the contacts at the
     /// stopping configuration, in stable order. Rotation stops at the last
-    /// proven-safe configuration when an obstacle meets the sweep; an
-    /// interval the iteration budget cannot resolve refuses the whole step.
+    /// proven-safe configuration when an obstacle meets the sweep; touching
+    /// pairs that are not closing — resting on a floor, sliding along a
+    /// face, pulling away from a wall — do not restrict the step (see
+    /// [`rotation_pair_state`]); an interval the iteration budget cannot
+    /// resolve refuses the whole step.
     pub fn rotate_step(
         &self,
         placement: &RigidTransform,
@@ -732,22 +861,26 @@ impl CarrierGeometry {
                 contacts: Vec::new(),
             });
         }
-        // Broad phase: every swept configuration fits inside the sphere the
-        // corners' greatest distance from the rotation axis spans around the
-        // pivot, because rotation preserves that distance.
+        // Broad phase: rotation about the pivot keeps every corner at its
+        // full distance from the pivot, so the sphere over the corners'
+        // pivot distances covers every swept configuration. The radial
+        // distance to the axis alone would drop obstacles far along the
+        // axis — the top of a tall column — out of the sphere.
         let unit_axis = axis.scale(1.0 / axis.length());
         let pivot_world = placement.translation().add_vector(placement.pivot());
+        let mut pivot_radius = 0.0f64;
         let mut max_radius = 0.0f64;
         for carrier_box in &boxes {
             for corner in carrier_box.corners() {
                 let offset = corner.subtract(pivot_world);
+                pivot_radius = pivot_radius.max(offset.length());
                 let radial = offset.subtract(unit_axis.scale(offset.dot(unit_axis)));
                 max_radius = max_radius.max(radial.length());
             }
         }
         let swept = Aabb::of_size(
             pivot_world,
-            Vec3::new(2.0 * max_radius, 2.0 * max_radius, 2.0 * max_radius),
+            Vec3::new(2.0 * pivot_radius, 2.0 * pivot_radius, 2.0 * pivot_radius),
         )
         .inflate(sweep_margin());
         let candidates: Vec<&Obstacle> = obstacles
@@ -766,9 +899,19 @@ impl CarrierGeometry {
         }
         // Conservative advancement: each measured separation is a lower
         // bound on true distance, and no carrier point travels further than
-        // `angle * max_radius` per unit step fraction, so consuming half the
-        // measured separation per sub-step can never skip a contact.
+        // `angle * max_radius` per unit step fraction (the radial distance
+        // to the axis, which rotation preserves), so consuming half the
+        // measured separation per sub-step can never skip a contact. Pairs
+        // that only touch without closing are excluded from the restriction
+        // (see `rotation_pair_state`); a non-closing touch without an
+        // invariant axis additionally caps the sub-step by the corner
+        // paths' curvature, so it cannot slip into closing while unobserved.
         let travel = angle_rad.abs() * max_radius;
+        let curvature_cap = if max_radius > 0.0 {
+            (COLLISION_EPSILON / (2.0 * angle_rad * angle_rad * max_radius)).sqrt()
+        } else {
+            f64::INFINITY
+        };
         let mut advanced = 0.0f64;
         let mut last_clear = 0.0f64;
         let mut iterations = 0usize;
@@ -777,6 +920,8 @@ impl CarrierGeometry {
             let (boxes, _) = self.oriented_boxes(&current, budget.boxes)?;
             let mut separation = f64::INFINITY;
             let mut contacts: Vec<Contact> = Vec::new();
+            let mut overlap_block = false;
+            let mut touch_capped = false;
             for obstacle in &candidates {
                 for obstacle_box in obstacle.world_boxes() {
                     for carrier_box in &boxes {
@@ -784,34 +929,47 @@ impl CarrierGeometry {
                         if iterations > budget.iterations {
                             return Err(Refused::IterationBudget);
                         }
-                        let gap = static_separation(carrier_box, obstacle_box);
-                        if gap < separation - COLLISION_EPSILON {
-                            separation = gap;
-                            contacts.clear();
-                        }
-                        if gap <= separation + COLLISION_EPSILON {
-                            contacts.push(Contact {
-                                uuid: obstacle.uuid(),
-                                obstacle_cell: obstacle.cell(),
-                                local_cell: carrier_box.local_cell,
-                            });
+                        match rotation_pair_state(
+                            carrier_box,
+                            obstacle_box,
+                            unit_axis,
+                            angle_rad,
+                            pivot_world,
+                        ) {
+                            PairState::Blocked { overlap } => {
+                                overlap_block |= overlap;
+                                contacts.push(Contact {
+                                    uuid: obstacle.uuid(),
+                                    obstacle_cell: obstacle.cell(),
+                                    local_cell: carrier_box.local_cell,
+                                });
+                            }
+                            PairState::Clear(gap) => separation = separation.min(gap),
+                            PairState::Excluded { constant_gap } => {
+                                if !constant_gap {
+                                    touch_capped = true;
+                                }
+                            }
                         }
                     }
                 }
             }
-            if separation <= COLLISION_EPSILON {
-                // Touching stops here (zero penetration); an overlap, which
-                // only a start pose that already penetrated can produce,
-                // rolls back to the last proven-safe configuration.
-                let fraction = if separation < -COLLISION_EPSILON {
-                    last_clear
-                } else {
-                    advanced
-                };
+            if !contacts.is_empty() {
+                // A closing touch stops here (zero penetration); an overlap,
+                // which only a start pose that already penetrated can
+                // produce, rolls back to the last proven-safe configuration.
+                let fraction = if overlap_block { last_clear } else { advanced };
                 contacts.sort_by_key(contact_order);
                 return Ok(StepContact { fraction, contacts });
             }
-            let step = separation * ADVANCEMENT_SHARE / travel;
+            let mut step = if travel > 0.0 && separation.is_finite() {
+                separation * ADVANCEMENT_SHARE / travel
+            } else {
+                f64::INFINITY
+            };
+            if touch_capped {
+                step = step.min(curvature_cap);
+            }
             if step >= 1.0 - advanced - FRACTION_RESOLUTION {
                 return Ok(StepContact {
                     fraction: 1.0,
@@ -1286,6 +1444,158 @@ mod tests {
             geometry.world_bounds(&placement).unwrap().max(Axis::X),
             12.0
         );
+    }
+
+    #[test]
+    fn structure_resting_on_floor_slides_and_rotates() {
+        let geometry = CarrierGeometry::new(7, two_full_cells()).unwrap();
+        // Floor blocks at y=63 under both cells and one ahead of the sweep,
+        // so sliding rides onto it while resting on the rest.
+        let floor = [
+            Obstacle::world_block(BlockPos::new(10, 63, 10), VoxelShape::block()),
+            Obstacle::world_block(BlockPos::new(11, 63, 10), VoxelShape::block()),
+            Obstacle::world_block(BlockPos::new(12, 63, 10), VoxelShape::block()),
+        ];
+        let placement = scene_placement();
+        let slide = geometry
+            .translate_step(
+                &placement,
+                Vec3::new(1.0, 0.0, 0.0),
+                &floor,
+                &ContactBudget::default(),
+            )
+            .unwrap();
+        assert_eq!(slide.fraction, 1.0);
+        assert!(slide.contacts.is_empty());
+        let turn = geometry
+            .rotate_step(
+                &placement,
+                PLUS_Y,
+                FIVE_DEGREES,
+                &floor,
+                &ContactBudget::default(),
+            )
+            .unwrap();
+        assert_eq!(turn.fraction, 1.0);
+        assert!(turn.contacts.is_empty());
+    }
+
+    #[test]
+    fn pressed_against_wall_backs_off_and_turns_away() {
+        let geometry = CarrierGeometry::new(7, two_full_cells()).unwrap();
+        let wall = [Obstacle::world_block(
+            BlockPos::new(13, 64, 10),
+            VoxelShape::block(),
+        )];
+        // Cells at x 11..13: the eastern face touches the wall at x=13.
+        let placement = RigidTransform::identity_at(Vec3::new(11.0, 64.0, 10.0)).unwrap();
+        // Backing away from the touch: full step, no contact.
+        let back = geometry
+            .translate_step(
+                &placement,
+                Vec3::new(-1.0, 0.0, 0.0),
+                &wall,
+                &ContactBudget::default(),
+            )
+            .unwrap();
+        assert_eq!(back.fraction, 1.0);
+        assert!(back.contacts.is_empty());
+        // Turning the touching corner away from the wall: full step.
+        let away = geometry
+            .rotate_step(
+                &placement,
+                PLUS_Y,
+                -FIVE_DEGREES,
+                &wall,
+                &ContactBudget::default(),
+            )
+            .unwrap();
+        assert_eq!(away.fraction, 1.0);
+        assert!(away.contacts.is_empty());
+        // Turning it into the wall stays blocked.
+        let into = geometry
+            .rotate_step(
+                &placement,
+                PLUS_Y,
+                FIVE_DEGREES,
+                &wall,
+                &ContactBudget::default(),
+            )
+            .unwrap();
+        assert_eq!(into.fraction, 0.0);
+        assert!(!into.contacts.is_empty());
+    }
+
+    #[test]
+    fn tall_column_contacts_reach_obstacles_along_the_rotation_axis() {
+        // An 11-cell vertical column over the pivot's height. The literal
+        // scene cells (0,0,0)..(0,10,0) with pivot (0,0,0) lie ON the +Y
+        // rotation axis and sweep nothing, so the column stands one block
+        // east; the obstacle hangs at the top cell's sweep quadrant and
+        // nothing but that cell can reach it.
+        let cells: Vec<CarrierCell> = (0..=10)
+            .map(|y| CarrierCell::new(BlockPos::new(1, y, 0), VoxelShape::block()))
+            .collect();
+        let geometry = CarrierGeometry::new(9, cells).unwrap();
+        let obstacle = Obstacle::with_identity(
+            0,
+            BlockPos::new(1, 0, -1),
+            Vec3::ZERO,
+            VoxelShape::from_box(Aabb::new(
+                Vec3::new(1.05, 10.0, -1.55),
+                Vec3::new(1.35, 11.0, -1.25),
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        let obstacles = [obstacle];
+        let mut placement = RigidTransform::identity_at(Vec3::ZERO).unwrap();
+        assert!(!touches(&geometry, &placement, &obstacles));
+        assert!(!touches(
+            &geometry,
+            &placement.rotated(PLUS_Y, FRAC_PI_2).unwrap(),
+            &obstacles
+        ));
+        let mut stopped = false;
+        for _ in 0..18 {
+            let outcome = geometry
+                .rotate_step(
+                    &placement,
+                    PLUS_Y,
+                    FIVE_DEGREES,
+                    &obstacles,
+                    &ContactBudget::default(),
+                )
+                .unwrap();
+            placement = placement
+                .rotated(PLUS_Y, FIVE_DEGREES * outcome.fraction)
+                .unwrap();
+            if outcome.fraction < 1.0 {
+                stopped = true;
+                assert!(
+                    outcome
+                        .contacts
+                        .iter()
+                        .all(|contact| contact.local_cell == BlockPos::new(1, 10, 0)),
+                    "only the top cell contacts: {:?}",
+                    outcome.contacts
+                );
+                break;
+            }
+        }
+        assert!(stopped, "the top cell must meet the obstacle mid-sweep");
+        // Further rotation stays blocked at the touching configuration.
+        let outcome = geometry
+            .rotate_step(
+                &placement,
+                PLUS_Y,
+                FIVE_DEGREES,
+                &obstacles,
+                &ContactBudget::default(),
+            )
+            .unwrap();
+        assert_eq!(outcome.fraction, 0.0);
+        assert!(!outcome.contacts.is_empty());
     }
 
     #[test]
