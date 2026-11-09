@@ -184,7 +184,6 @@
   "Could not read the build log: {error}": "Kon nie die boulogboek lees nie: {error}",
   "Could not read the saved sign-in.": "Kon nie die gestoorde aanmelding lees nie.",
   "Could not read the saved sign-in. Sign in again.": "Kon nie die gestoorde aanmelding lees nie. Meld weer aan.",
-  "Could not read wasm mods in {path}: {error}": "Could not read wasm mods in {path}: {error}",
   "Could not read {name}: {error}": "Kon nie {name} lees nie: {error}",
   "Could not run {program}: {error}": "Kon nie {program}: {error} laat loop nie",
   "Could not save the renewed sign-in.": "Kon nie die hernude aanmelding stoor nie.",
@@ -252,6 +251,7 @@
   "E_INTERNAL_GATED: {mod} uses {path}, which exists only under a cfg; target-specific internals aren't supported.": "E_INTERNAL_GATED: {mod} uses {path}, which exists only under a cfg; target-specific internals aren't supported.",
   "E_INTERNAL_MISSING: {mod} uses {path}, which this game doesn't have; run cargo horizon-mod internals sync to discover this pin's used internals.": "E_INTERNAL_MISSING: {mod} uses {path}, which this game doesn't have; run cargo horizon-mod internals sync to discover this pin's used internals.",
   "E_INTERNAL_SOURCE_UNAVAILABLE: internals sync needs the source for {revision}. It is not cached and could not be downloaded: {error}": "E_INTERNAL_SOURCE_UNAVAILABLE: internals sync needs the source for {revision}. It is not cached and could not be downloaded: {error}",
+  "Registry native binary for {mod}: {url}": "Inheemse binêre lêer vir {mod} uit die register: {url}",
   "{path} is not a native mod project.": "{path} is not a native mod project.",
   "Internals discovery failed; the manifest was not changed. {error}": "Internals discovery failed; the manifest was not changed. {error}",
   "Game internals must be declared: run cargo horizon-mod internals sync in the mod's folder, then build again.": "Game internals must be declared: run cargo horizon-mod internals sync in the mod's folder, then build again.",
@@ -1210,5 +1210,7 @@
   "Your system keyring didn't answer within {seconds} seconds. Make sure it is running and unlocked, then restart the launcher.": "Jou stelsel se sleutelring het nie binne {seconds} sekondes geantwoord nie. Maak seker dit loop en is ontsluit, en herbegin dan die lanseerder.",
   "Can't read {name}'s sign-in: {why}": "Kan nie {name} se aanmelding lees nie: {why}",
   "Horizon runs a data pack's functions, function tags, predicates, item modifiers, recipes, loot tables, advancements, villager trades, damage types, most tags and most worldgen (biomes, features, structures, dimensions). Other files, such as world presets, are not read yet.": "Horizon runs a data pack's functions, function tags, predicates, item modifiers, recipes, loot tables, advancements, villager trades, damage types, most tags and most worldgen (biomes, features, structures, dimensions). Other files, such as world presets, are not read yet.",
-  "{title} would change nothing in Horizon yet: Horizon doesn't read its {files}.": "{title} would change nothing in Horizon yet: Horizon doesn't read its {files}."
+  "{title} would change nothing in Horizon yet: Horizon doesn't read its {files}.": "{title} would change nothing in Horizon yet: Horizon doesn't read its {files}.",
+  "Game cache leases require a supported local filesystem.": "Game cache leases require a supported local filesystem.",
+  "Game cache cleanup is unavailable because running games cannot be reliably excluded.": "Game cache cleanup is unavailable because running games cannot be reliably excluded."
 }

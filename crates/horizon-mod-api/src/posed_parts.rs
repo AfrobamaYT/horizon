@@ -143,11 +143,21 @@ mod tests {
         })
         .expect("a head and a body make a humanoid");
         let arm = parts.get(HumanoidPart::RightArm).unwrap();
-        assert_eq!((arm.pose.x, arm.pose.y_rot, arm.visible), (3.0, 0.25, false));
+        assert_eq!(
+            (arm.pose.x, arm.pose.y_rot, arm.visible),
+            (3.0, 0.25, false)
+        );
         assert_eq!(parts.get(HumanoidPart::RightSleeve), None);
         assert_eq!(parts.get(HumanoidPart::Head).unwrap().pose.x_rot, 0.5);
         let order: Vec<_> = parts.parts.iter().map(|p| p.part).collect();
-        assert_eq!(order, [HumanoidPart::Head, HumanoidPart::Body, HumanoidPart::RightArm]);
+        assert_eq!(
+            order,
+            [
+                HumanoidPart::Head,
+                HumanoidPart::Body,
+                HumanoidPart::RightArm
+            ]
+        );
         assert!(PosedParts::new(|part| (part == HumanoidPart::Head).then(|| pose(1.0))).is_none());
         let names: Vec<_> = HumanoidPart::ALL.iter().map(|p| p.model_name()).collect();
         assert_eq!(names.len(), 12);

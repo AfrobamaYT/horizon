@@ -36,20 +36,17 @@ The client hook `native_render_name_tag(entity_id, kind, vanilla_visible, visibl
 Native mods are Rust projects that implement the game's typed hook API (`impl Hooks`). Start with
 `cargo horizon-mod new my_mod --template native` ([Trait mods](../../concepts/trait-mods/000-trait-mods-draft.md#trait-mods-draft)).
 Each project has one `horizon-mod.toml`, with exact build pins in `[native]`, and ships as one `.hmod`.
-For the rare case the API does not cover, raw injections change the game's Rust source before it is compiled,
-using [horizon-mixins](https://github.com/horizon-rust/horizon-mixins) (MIT, by levzzz5154, made for Horizon).
+For the rare case the API does not cover, internals injections use compiled raw slots when available;
+unlisted supported targets use a source rebuild. See [Injections](../../injections.md).
 An injection is an escape hatch; request a typed hook for the behavior it needs.
 
 Native mods are native code with the player's rights, not sandboxed. The first install shows a trust notice,
 and every build waits behind a red warning; the registry lists one only after a review (its later releases are
 checked by machine). They play in a game of their own, built for the instance they are installed in.
 
-Options > Mods can pause a loaded code mod without rebuilding. Native and wasm mods use the same switch:
-subsequent hooks, render hooks, Parts, slot listeners and capability-provider lookups skip the disabled owner's
-registrations. Re-enabling resumes those registrations without re-registering them. This pauses dispatch, not
-unloads code or undoes earlier world changes; a trapped wasm group stays stopped even if its switch is turned
-back on. Content-mod selection stays frozen while a world is open, including on a browser project page. A browser
-install that finishes after a world opens waits until the world closes before activating its content.
+The game's Mods screen only lists code mods (it has no switch, as NeoForge's has none). A code mod's settings page,
+when it has one, opens from the Config button. The launcher decides which mods are on. A browser install that
+finishes after a world opens waits until the world closes before activating its content.
 
 Villager handles preserve the full signed integer level (at least 1), including values above the
 five vanilla trade tiers. Higher levels use the master badge and do not gain further vanilla trades.

@@ -76,6 +76,32 @@ pub fn with_mods<R>(mods: Mods, f: impl FnOnce() -> R) -> R {
     f()
 }
 
+/// Capture this thread's test installation for work sent to another thread.
+///
+/// Production installations are process-wide. Tests isolate them per thread; a worker
+/// using an owning thread's immutable resource graph must see that same installation.
+pub fn inherit_mods<A, R, F: FnOnce(&A) -> R + Send>(f: F) -> impl FnOnce(&A) -> R + Send {
+    let installed = crate::installed();
+    let parts = crate::parts::installed();
+    move |argument| {
+        struct Restore(
+            Option<&'static Installed>,
+            Option<&'static crate::parts::Installed>,
+        );
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                TEST_MODS.set(self.0);
+                crate::parts::TEST_PARTS.set(self.1);
+            }
+        }
+        let _restore = Restore(
+            TEST_MODS.replace(installed),
+            crate::parts::TEST_PARTS.replace(parts),
+        );
+        f(argument)
+    }
+}
+
 /// The ticket controller with this id that the mods of the enclosing `with_mods` registered.
 pub fn ticket_controller(id: &str) -> Option<TicketController> {
     TicketController::from_id(id)
@@ -238,8 +264,10 @@ impl crate::prelude::LevelsBackend for FakeHost {
     fn level_in_place(&self, level: LevelRef) -> bool {
         level == self.level.level()
     }
-    fn level_block(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
-        self.level.block_at(level, pos).map(str::to_owned)
+    fn level_block(&self, level: LevelRef, pos: [i32; 3]) -> Option<crate::BlockKey> {
+        self.level
+            .block_at(level, pos)
+            .and_then(crate::__private::block_key)
     }
 }
 impl crate::prelude::BlockEntitiesBackend for FakeHost {
@@ -456,12 +484,17 @@ impl crate::prelude::EntitiesBackendMut for FakeHost {
     }
 }
 impl crate::prelude::PlayersBackendMut for FakeHost {
-    fn player_action_bar(&mut self, player: PlayerRef, line: Text) -> bool {
+    fn player_action_bar(
+        &mut self,
+        player: PlayerRef,
+        line: Text,
+    ) -> Result<bool, crate::text::TextFormError> {
+        line.validate_depth()?;
         let Some(player) = self.players.get_mut(player.uuid()) else {
-            return false;
+            return Ok(false);
         };
         player.action_bar.push(line);
-        true
+        Ok(true)
     }
 }
 crate::impl_backend_mut_areas!(FakeHost, except(entities, fluids_energy, items, players));

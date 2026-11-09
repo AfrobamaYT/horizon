@@ -24,12 +24,29 @@ use horizon_core::{
     random::{LegacyRandom, RandomSource, WorldgenRandom, XoroshiroRandom},
 };
 use horizon_world::dimension_type::DimensionFacts;
-use mod_api::NativeSpawnCheck;
+use mod_api::{NativeSpawnCheck, SpawnFlags, SpawnLimits};
 use std::collections::HashMap;
 use {
     horizon_core::nbt::{Compound, Tag},
     horizon_world::registry::BlockStateId,
 };
+
+/// A level's natural spawning policy, as mods set it through its `LevelRef`
+/// (`Game::spawn_policies`): the categories' caps and which may spawn.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct SpawnPolicy {
+    pub(super) limits: SpawnLimits,
+    pub(super) flags: SpawnFlags,
+}
+
+/// `ServerLevel.canSpawnEntitiesInChunk` of `world`: the chunk is loaded.
+pub(super) fn can_spawn_entities_in_chunk(
+    world: &horizon_client::world::World,
+    cx: i32,
+    cz: i32,
+) -> bool {
+    world.chunks.contains_key(&(cx, cz))
+}
 
 /// Natural spawning's candidate chunks (`ChunkMap.collectSpawningChunks`):
 /// the union of every player's 17×17 chunk square, in player then dx/dz
@@ -336,6 +353,20 @@ pub(super) struct GameLevel<'g, 'a> {
     /// nether's few): for any other the cost is none wherever it stands, and
     /// spawning asks for one for every loaded mob each tick.
     pub(super) costed: Vec<&'g str>,
+    /// The spawner block whose tick this pass is, told to the spawn checks;
+    /// None for natural spawning and the other passes.
+    pub(super) spawner: Option<mod_api::Spawner>,
+    /// The mob a listened position check created and lent, which the spawn
+    /// that follows takes rather than creating it again ([`Checked`]).
+    checked: std::cell::RefCell<Option<Checked>>,
+}
+/// The mob a listened `mob_spawn_position_check` created for its lend, held
+/// until the spawn takes it, and the provisional count before it was
+/// created: a refused check drops the mob and gives the id back, so a refused
+/// attempt leaves the pass as an unlistened one would.
+struct Checked {
+    mob: Mob,
+    provisional: u32,
 }
 const SCANNED_QUERIES: u32 = 8;
 /// A mob not removed: its index in `Game::mobs`, box, alive, and whether
@@ -418,6 +449,18 @@ impl GameLevel<'_, '_> {
         self.provisional.set(n + 1);
         u32::MAX - n
     }
+    /// The handle of this pass's level, which the spawn checks are told.
+    fn level_ref(&self) -> mod_api::LevelRef {
+        mod_api::LevelRef::new(self.game.lend_epoch(), self.game.dim.key())
+    }
+    /// The mob the position check of this spawn created, when one did and it
+    /// is the one asked for (`entity` at `position`, facing `yaw`): the spawn
+    /// goes on with it rather than creating it again.
+    pub(super) fn take_checked(&self, entity: &str, position: [f64; 3], yaw: f32) -> Option<Mob> {
+        let Checked { mob, .. } = self.checked.take()?;
+        let at = [mob.position.x, mob.position.y, mob.position.z];
+        (mob.kind.id == entity && at == position && mob.yaw == yaw).then_some(mob)
+    }
     /// Creates a mob the spawner accepted, finalized the game's way
     /// (`finalizeSpawn` on this pass's level, its draws on the spawner's own
     /// random, between its position draws, as vanilla interleaves them); the
@@ -428,9 +471,14 @@ impl GameLevel<'_, '_> {
         pending: &mut Vec<Mob>,
         random: &mut R,
     ) -> Option<Spawned> {
-        let kind = self.game.res.mob_types().get(r.entity)?.clone();
-        let [x, y, z] = r.position;
-        let mut mob = Mob::new(self.provisional_id(), kind, Vec3::new(x, y, z), r.yaw);
+        let mut mob = match self.take_checked(r.entity, r.position, r.yaw) {
+            Some(mob) => mob,
+            None => {
+                let kind = self.game.res.mob_types().get(r.entity)?.clone();
+                let [x, y, z] = r.position;
+                Mob::new(self.provisional_id(), kind, Vec3::new(x, y, z), r.yaw)
+            }
+        };
         // No group data is threaded through the pack yet: each member starts
         // without, and finalization reads what a listener leaves.
         let mut group = None;
@@ -573,12 +621,16 @@ impl SpawnLevel for GameLevel<'_, '_> {
         }
         let mut result = NativeSpawnCheck::Default;
         self.game.native_mob_spawn_placement_check(
-            self.game.dim.id(),
-            entity,
-            reason,
-            BlockPos::new(at[0], at[1], at[2]),
-            vanilla,
-            &mut result,
+            mod_api::__private::MobSpawnPlacementCheckCall {
+                dimension: self.game.dim.id(),
+                kind: entity,
+                reason,
+                pos: BlockPos::new(at[0], at[1], at[2]),
+                default_result: vanilla,
+                level: self.level_ref(),
+                spawner: self.spawner,
+                result: &mut result,
+            },
         );
         match result {
             NativeSpawnCheck::Succeed => true,
@@ -650,18 +702,66 @@ impl NaturalLevel for GameLevel<'_, '_> {
     fn spawn_hooks(&self) -> bool {
         !mod_api::__private::mods().is_empty()
     }
-    fn position_check(&self, entity: &str, reason: Reason, at: [f64; 3]) -> NativeSpawnCheck {
+    /// Vanilla creates the mob before its position checks, so with a listener
+    /// the mob a fresh spawn is about to create is created here, the way the
+    /// spawn creates it, lent to the listeners, and handed on to the spawn
+    /// ([`GameLevel::take_checked`]); a refused check drops it
+    /// ([`NaturalLevel::position_refused`]). Creating it draws nothing from
+    /// the level's random. A site that does not create the mob fresh (a
+    /// spawner's entity data, chunk generation's packs) lends its kind and
+    /// position only. With no listener nothing is created.
+    fn position_check(
+        &self,
+        entity: &str,
+        reason: Reason,
+        at: [f64; 3],
+        pending: spawn_selection::Pending,
+    ) -> NativeSpawnCheck {
         let mut result = NativeSpawnCheck::Default;
-        if mod_api::__private::listened(mod_api::HookId::MobSpawnPositionCheck) {
-            self.game.native_mob_spawn_position_check(
-                self.game.dim.id(),
-                entity,
-                reason,
-                at,
-                &mut result,
-            );
+        if !mod_api::__private::listened(mod_api::HookId::MobSpawnPositionCheck) {
+            return result;
+        }
+        // An earlier check's mob that no spawn took is not this one.
+        self.checked.take();
+        let provisional = self.provisional.get();
+        let mut mob = pending
+            .fresh
+            .then(|| self.game.res.mob_types().get(entity))
+            .flatten()
+            .map(|kind| {
+                let [x, y, z] = at;
+                Mob::new(
+                    self.provisional_id(),
+                    kind.clone(),
+                    Vec3::new(x, y, z),
+                    pending.yaw,
+                )
+            });
+        let level = self.level_ref();
+        self.game
+            .lend_unspawned(entity, at, mob.as_mut(), |handle, _| {
+                self.game.native_mob_spawn_position_check(
+                    mod_api::__private::MobSpawnPositionCheckCall {
+                        dimension: self.game.dim.id(),
+                        kind: entity,
+                        reason,
+                        pos: at,
+                        level,
+                        spawner: self.spawner,
+                        mob: handle,
+                        result: &mut result,
+                    },
+                );
+            });
+        if let Some(mob) = mob {
+            *self.checked.borrow_mut() = Some(Checked { mob, provisional });
         }
         result
+    }
+    fn position_refused(&self) {
+        if let Some(refused) = self.checked.take() {
+            self.provisional.set(refused.provisional);
+        }
     }
     fn potential_spawns(&self, category: Category, pos: [i32; 3], entries: &mut Vec<SpawnEntry>) {
         let mut canceled = false;
@@ -729,7 +829,7 @@ impl NaturalLevel for GameLevel<'_, '_> {
             .collect()
     }
     fn structure_spawns(&self) -> &StructureSpawns {
-        StructureSpawns::shared(&self.game.options.resources)
+        &self.game.structure_spawns
     }
     fn nearest_player_positions(&self) -> &[[f64; 3]] {
         &self.nearest
@@ -859,6 +959,14 @@ fn spawn_cost_types(biomes: &horizon_client::biome::Biomes) -> Vec<&str> {
     types
 }
 impl<'a> Game<'a> {
+    /// The natural spawning policy of the level `dimension`: vanilla's until a
+    /// mod sets one.
+    pub(super) fn spawn_policy(&self, dimension: mod_api::DimensionKey) -> SpawnPolicy {
+        self.spawn_policies
+            .get(&dimension)
+            .copied()
+            .unwrap_or_default()
+    }
     pub(super) fn natural_level(&self) -> GameLevel<'_, 'a> {
         let players = self.level_players();
         let nearest = players
@@ -880,6 +988,8 @@ impl<'a> Game<'a> {
             boxes: Default::default(),
             box_queries: Default::default(),
             costed: spawn_cost_types(world_biomes!(self)),
+            spawner: None,
+            checked: Default::default(),
         }
     }
     /// Gives a spawn pass's provisional mobs (the `u32::MAX - n` ids
@@ -974,22 +1084,37 @@ impl<'a> Game<'a> {
         });
         local.into_iter().chain(guests)
     }
-    /// The UUIDs of `level_players`, in its order, for a query that only names
-    /// them: no `PlayerView`, so nothing is allocated per player.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(super) fn level_player_uuids(&self) -> impl Iterator<Item = u128> + '_ {
-        let local = (self.player.is_some() && !self.lan_acting_fake)
+    /// The UUIDs of the players in level `dimension`, for a query that only
+    /// names them: no `PlayerView`, so nothing is allocated per player. For the
+    /// level in place they are `level_players`', in its order; a parked level
+    /// has only its guests.
+    pub(super) fn level_player_uuids<'s>(
+        &'s self,
+        dimension: &'s str,
+    ) -> impl Iterator<Item = u128> + 's {
+        let local = (dimension == self.dim.id() && self.player.is_some() && !self.lan_acting_fake)
             .then(|| horizon_client::lan::playerdata::ints_uuid(self.acting_uuid()));
-        local.into_iter().chain(self.level_guests().map(|g| g.uuid))
+        local
+            .into_iter()
+            .chain(self.guests_placed_in(dimension).map(|g| g.uuid))
     }
     /// The guests in the level in place, past the acting one: `player_view`
     /// already reads that guest's live body, and its record lags behind it.
     fn level_guests(&self) -> impl Iterator<Item = &horizon_client::lan::guest::Guest> + '_ {
-        self.lan.iter().flat_map(|h| {
+        self.lan
+            .iter()
+            .flat_map(|h| self.guests_placed_in(&h.hub.config.dimension))
+    }
+    /// The guests placed in level `dimension`, past the acting one.
+    fn guests_placed_in<'s>(
+        &'s self,
+        dimension: &'s str,
+    ) -> impl Iterator<Item = &'s horizon_client::lan::guest::Guest> + 's {
+        self.lan.iter().flat_map(move |h| {
             h.hub
                 .guests
                 .iter()
-                .filter(|g| h.hub.here(g) && self.lan_acting != Some(g.conn))
+                .filter(move |g| g.placed_in(dimension) && self.lan_acting != Some(g.conn))
         })
     }
     /// `Level.hasNearbyAlivePlayer` before a level is built for the spawn
@@ -1017,6 +1142,35 @@ impl<'a> Game<'a> {
             |(cx, cz)| levels.loaded_ticking(cx, cz) && super::ticking_chunk(&self.world, cx, cz),
         )
     }
+    /// `NaturalSpawner.createState` for a pass over the level in place, under
+    /// its spawn limits (`SpawnPolicy`).
+    pub(super) fn natural_spawn_state(
+        &self,
+        level: &GameLevel<'_, '_>,
+        spawnable: i32,
+        players: Vec<SpawnPlayer>,
+        counted: &[Counted],
+    ) -> SpawnState {
+        SpawnState::new(level, spawnable, players, counted, |cx, cz| {
+            self.world.chunks.contains_key(&(cx, cz))
+        })
+        .with_limits(self.spawn_policy(self.dim.key()).limits)
+    }
+    /// The categories a pass over the level in place tries: none with the
+    /// `spawn_mobs` rule off, else `getFilteredSpawningCategories` with the
+    /// `spawn_monsters` rule, the persistent ones every 400 ticks, and the
+    /// level's spawn flags (`SpawnPolicy`) taking away.
+    pub(super) fn natural_categories(&self, state: &SpawnState) -> Vec<Category> {
+        let rules = &self.ui.rules;
+        if !rules.bool_at(horizon_client::gamerules::vanilla::SPAWN_MOBS) {
+            return Vec::new();
+        }
+        state.policy_categories(
+            self.spawn_policy(self.dim.key()).flags,
+            rules.bool_at(horizon_client::gamerules::vanilla::SPAWN_MONSTERS),
+            self.world.game_time % 400 == 0,
+        )
+    }
     /// `ServerChunkCache.tickChunks`: the spawn state over the loaded mobs,
     /// the categories under their global caps (creatures every 400 ticks),
     /// then `tickSpawningChunk` in the shuffled spawning chunks of every
@@ -1038,14 +1192,6 @@ impl<'a> Game<'a> {
             *self.world.inhabited.entry(key).or_insert(0) += 1;
         }
         laps.lap("sn_inhabited");
-        let spawn_mobs = self
-            .ui
-            .rules
-            .bool_at(horizon_client::gamerules::vanilla::SPAWN_MOBS);
-        let spawn_enemies = self
-            .ui
-            .rules
-            .bool_at(horizon_client::gamerules::vanilla::SPAWN_MONSTERS);
         let mut random = std::mem::replace(&mut self.world.random, LegacyRandom::new(0));
         let mut pending = Vec::new();
         let last_state;
@@ -1076,16 +1222,10 @@ impl<'a> Game<'a> {
                 })
                 .collect();
             laps.lap("sn_materialize");
-            let mut state = SpawnState::new(&level, spawnable, players, &counted, |cx, cz| {
-                self.world.chunks.contains_key(&(cx, cz))
-            });
+            let mut state = self.natural_spawn_state(&level, spawnable, players, &counted);
             laps.lap("sn_state");
             last_state = state.counts();
-            let categories = if spawn_mobs {
-                state.filtered_categories(spawn_enemies, self.world.game_time % 400 == 0)
-            } else {
-                Vec::new()
-            };
+            let categories = self.natural_categories(&state);
             laps.lap("sn_categories");
             // Util.shuffle.
             for i in (1..scratch.candidates.len()).rev() {
@@ -1553,6 +1693,10 @@ mod tests {
                     "minecraft:sulfur_cube",
                     Reason::Natural,
                     [8.5, 64.0, 8.5],
+                    spawn_selection::Pending {
+                        yaw: 0.0,
+                        fresh: true,
+                    },
                     || {
                         random.next_int();
                         false
@@ -1600,6 +1744,410 @@ mod tests {
             let fail = run(Some(NativeSpawnCheck::Fail));
             assert_eq!(fail.0, (false, none.0.1));
             assert_eq!(fail.1, (false, first));
+        });
+    }
+
+    /// What a spawn-check listener heard: the hook, the kind, the level and the spawner, and on
+    /// the position check what the lent mob read (kind, position, whether its head slot is
+    /// empty).
+    #[derive(Clone, Debug, PartialEq)]
+    struct Heard {
+        hook: &'static str,
+        kind: String,
+        level: mod_api::LevelRef,
+        spawner: Option<mod_api::Spawner>,
+        mob: Option<MobReads>,
+    }
+    type MobReads = (
+        Result<mod_api::Identifier, mod_api::UnspawnedMobError>,
+        Result<[f64; 3], mod_api::UnspawnedMobError>,
+        Result<bool, mod_api::UnspawnedMobError>,
+    );
+    type Log = std::sync::Arc<std::sync::Mutex<Vec<Heard>>>;
+    /// Records both spawn checks and answers the position check with `answer`, reading the lent
+    /// mob and changing nothing else.
+    struct ContextMod {
+        answer: NativeSpawnCheck,
+        log: Log,
+    }
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for ContextMod {
+        fn mob_spawn_placement_check(
+            &self,
+            _: &dyn mod_api::Host,
+            event: &mut mod_api::MobSpawnPlacementCheckEvent<'_>,
+        ) {
+            self.log.lock().unwrap().push(Heard {
+                hook: "placement",
+                kind: event.kind.to_owned(),
+                level: event.level,
+                spawner: event.spawner,
+                mob: None,
+            });
+        }
+        fn mob_spawn_position_check(
+            &self,
+            host: &dyn mod_api::Host,
+            event: &mut mod_api::MobSpawnPositionCheckEvent<'_>,
+        ) {
+            let mob = event.mob;
+            let reads = (
+                mob.kind(host),
+                mob.position(host),
+                mob.equipment(host, mod_api::EquipmentSlot::Head)
+                    .map(|e| e.is_none()),
+            );
+            self.log.lock().unwrap().push(Heard {
+                hook: "position",
+                kind: event.kind.to_owned(),
+                level: event.level,
+                spawner: event.spawner,
+                mob: Some(reads),
+            });
+            *event.result = self.answer;
+        }
+    }
+    /// Gives every natural monster position one entry: the sulfur cube, whose spawn predicate
+    /// has no conditions, in packs of four.
+    struct SulfurCubesOnly;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for SulfurCubesOnly {
+        fn potential_spawns(
+            &self,
+            _: &dyn mod_api::Host,
+            event: &mut mod_api::PotentialSpawnsEvent<'_>,
+        ) -> mod_api::Flow {
+            if event.category == "monster" {
+                *event.entries = vec![SpawnEntry {
+                    entity: SULFUR_CUBE.into(),
+                    weight: 1,
+                    min: 4,
+                    max: 4,
+                    constant: true,
+                }];
+            }
+            mod_api::Flow::Continue
+        }
+    }
+    const SULFUR_CUBE: &str = "minecraft:sulfur_cube";
+    /// A spawned mob as the draw comparisons see it: id, kind, position, yaw, persistence and
+    /// the next draw of its own random (seeded from its id).
+    type Snap = (u32, String, [f64; 3], f32, bool, i32);
+    fn snap(m: &Mob) -> Snap {
+        (
+            m.id,
+            m.kind.id.clone(),
+            [m.position.x, m.position.y, m.position.z],
+            m.yaw,
+            m.persistent,
+            m.random.clone().next_int(),
+        )
+    }
+    /// Runs `go` with no mod (`None`), or with a position-check listener answering `answer`
+    /// beside `extra` mods, and what that listener heard.
+    fn with_checks<R>(
+        answer: Option<NativeSpawnCheck>,
+        extra: impl Fn() -> Vec<mod_api::ModEntry>,
+        go: impl FnOnce() -> R,
+    ) -> (R, Vec<Heard>) {
+        let log = Log::default();
+        let mut mods = extra();
+        if let Some(answer) = answer {
+            mods.push(mod_api::ModEntry::new(
+                "spawn-context",
+                Box::new(ContextMod {
+                    answer,
+                    log: log.clone(),
+                }),
+            ));
+        }
+        let out = if mods.is_empty() {
+            go()
+        } else {
+            mod_api::testing::with_mods(mods.into(), go)
+        };
+        let heard = log.lock().unwrap().clone();
+        (out, heard)
+    }
+    /// A survival player standing at `at`, and empty lit chunks around the origin.
+    fn spawn_check_world(game: &mut Game<'_>, at: Vec3) {
+        use horizon_client::chunk::Chunk;
+        use std::sync::Arc;
+        game.player = Some(horizon_client::motion::PlayerMotion::new(game.motion, at).unwrap());
+        for cx in -2..=4 {
+            for cz in -2..=4 {
+                let mut chunk = Chunk::empty(cx, cz);
+                chunk.lit = true;
+                game.world.chunks.insert((cx, cz), Arc::new(chunk));
+            }
+        }
+    }
+    fn level_of(game: &Game<'_>) -> mod_api::LevelRef {
+        game.level(game.dim.id()).unwrap()
+    }
+
+    /// Natural spawning (`spawnCategoryForPosition`): a listener hears both checks with the
+    /// level and no spawner, and reads the pending mob; answering `Default` it leaves every draw,
+    /// id and spawned mob as with no listener, so the mob it read is the one that spawned, not
+    /// created twice. A `Fail` drops each mob: none is added and no provisional id is used.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated process for native mods"]
+    fn natural_spawn_checks_lend_the_mob_and_keep_the_draws() {
+        use super::super::native_entity_refs::tests::with_game;
+        with_game(|game| {
+            spawn_check_world(game, Vec3::new(0.5, 64.0, 0.5));
+            let stone = game.pack.assets.registry.default_state("minecraft:stone");
+            for x in 32..48 {
+                for z in 32..48 {
+                    game.world.set(x, 63, z, stone.unwrap()).unwrap();
+                }
+            }
+            let level = level_of(game);
+            let attempt = |game: &mut Game<'_>| {
+                let mut random = LegacyRandom::new(42);
+                let natural = game.natural_level();
+                let players = natural
+                    .players
+                    .iter()
+                    .map(|p| SpawnPlayer {
+                        position: [p.position.x, p.position.y, p.position.z],
+                        spectator: p.spectator,
+                    })
+                    .collect();
+                let mut state = SpawnState::new(&natural, 289, players, &[], |_, _| true);
+                let mut pending = Vec::new();
+                let mut spawn = |l: &GameLevel, r: &SpawnRequest, rng: &mut LegacyRandom| {
+                    let spawned = l.finalize_spawned(r, &mut pending, rng);
+                    if let Some(s) = &spawned {
+                        l.pending.borrow_mut().push(s.bounds);
+                    }
+                    spawned
+                };
+                spawn_selection::spawn_category_for_position(
+                    &natural,
+                    &mut random,
+                    &mut state,
+                    Category::Monster,
+                    (2, 2),
+                    [40, 64, 40],
+                    &mut spawn,
+                    &mut |_| {},
+                );
+                assert!(natural.checked.borrow().is_none(), "no created mob is left");
+                let used = natural.provisional.get();
+                drop(natural);
+                assert!(game.lent_mobs.borrow().is_empty(), "every lend ended");
+                (
+                    pending.iter().map(snap).collect::<Vec<_>>(),
+                    used,
+                    random.next_int(),
+                )
+            };
+            let spawns = || {
+                vec![mod_api::ModEntry::new(
+                    "sulfur-cubes",
+                    Box::new(SulfurCubesOnly),
+                )]
+            };
+            let (unlistened, heard) = with_checks(None, spawns, || attempt(game));
+            assert!(heard.is_empty());
+            assert!(!unlistened.0.is_empty(), "the attempt spawns");
+            assert_eq!(
+                unlistened.1 as usize,
+                unlistened.0.len(),
+                "one provisional id per spawned mob"
+            );
+            let (listened, heard) =
+                with_checks(Some(NativeSpawnCheck::Default), spawns, || attempt(game));
+            assert_eq!(listened, unlistened, "same draws, ids and mobs");
+            let positions: Vec<_> = heard.iter().filter(|h| h.hook == "position").collect();
+            assert!(positions.len() >= unlistened.0.len());
+            for h in &heard {
+                assert_eq!(
+                    (h.kind.as_str(), h.level, h.spawner),
+                    (SULFUR_CUBE, level, None)
+                );
+            }
+            assert!(heard.iter().any(|h| h.hook == "placement"));
+            // Each spawned mob was read at its own position, a full mob (its head slot answers).
+            for m in &unlistened.0 {
+                let reads = (
+                    Ok(mod_api::Identifier::parse(SULFUR_CUBE).unwrap()),
+                    Ok(m.2),
+                    Ok(true),
+                );
+                assert!(positions.iter().any(|h| h.mob.as_ref() == Some(&reads)));
+            }
+            let (refused, heard) =
+                with_checks(Some(NativeSpawnCheck::Fail), spawns, || attempt(game));
+            assert!(refused.0.is_empty(), "a failed check adds nothing");
+            assert_eq!(refused.1, 0, "and gives each provisional id back");
+            assert!(heard.iter().any(|h| h.hook == "position"));
+        });
+    }
+
+    /// A spawner block: both checks hear `Spawner::Block` at the block; a `Default` listener on
+    /// the position check leaves the draws, the real ids and the mobs that join as with none
+    /// (the lent mob is the one that joins); a `Fail` adds no mob, uses no entity id and leaves
+    /// no tracking entry. Spawn data with entity data lends the kind and position only.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated process for native mods"]
+    fn spawner_checks_tell_the_block_and_keep_the_draws() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::chunk::block_entity::Next;
+        use horizon_client::mobs::spawner::{SpawnData, SpawnDataExt};
+        with_game(|game| {
+            spawn_check_world(game, Vec3::new(0.5, 70.0, 0.5));
+            let level = level_of(game);
+            let key = (2, 70, 2);
+            let block = mod_api::Spawner::Block {
+                pos: mod_api::BlockPos::new(2, 70, 2),
+            };
+            let tick = |game: &mut Game<'_>, extra: Option<(&str, Tag)>| {
+                let (mobs, entities, tracked) =
+                    (game.mobs.len(), game.next_entity, game.persist.uuids.len());
+                game.world.random = LegacyRandom::new(7);
+                let mut entity = Compound::default();
+                entity.insert("id".into(), Tag::String(SULFUR_CUBE.into()));
+                if let Some((name, value)) = extra {
+                    entity.insert(name.into(), value);
+                }
+                let mut spawner = horizon_client::mobs::spawner::Spawner {
+                    spawn_delay: 0,
+                    next: Some(Next::Own(SpawnData::new(entity, None, None))),
+                    ..Default::default()
+                };
+                game.server_tick_spawner_of(key, &mut spawner, None)
+                    .unwrap();
+                assert!(game.lent_mobs.borrow().is_empty(), "every lend ended");
+                let added: Vec<Snap> = game.mobs[mobs..].iter().map(snap).collect();
+                let out = (
+                    added,
+                    game.next_entity - entities,
+                    game.persist.uuids.len() - tracked,
+                    game.world.random.next_int(),
+                );
+                for m in game.mobs.drain(mobs..) {
+                    game.persist.uuids.remove(&m.id);
+                }
+                game.next_entity = entities;
+                out
+            };
+            let (unlistened, _) = with_checks(None, Vec::new, || tick(game, None));
+            assert!(!unlistened.0.is_empty(), "the spawner spawns");
+            let (listened, heard) = with_checks(Some(NativeSpawnCheck::Default), Vec::new, || {
+                tick(game, None)
+            });
+            assert_eq!(listened, unlistened, "same draws, ids and mobs");
+            assert!(heard.iter().any(|h| h.hook == "placement"));
+            for h in &heard {
+                assert_eq!(
+                    (h.kind.as_str(), h.level, h.spawner),
+                    (SULFUR_CUBE, level, Some(block))
+                );
+                if let Some(reads) = &h.mob {
+                    assert_eq!(reads.2, Ok(true), "a fresh spawn lends the whole mob");
+                }
+            }
+            for m in &unlistened.0 {
+                assert!(
+                    heard
+                        .iter()
+                        .any(|h| h.mob.as_ref().is_some_and(|r| r.1 == Ok(m.2)))
+                );
+            }
+            let (refused, heard) =
+                with_checks(Some(NativeSpawnCheck::Fail), Vec::new, || tick(game, None));
+            assert!(heard.iter().any(|h| h.hook == "position"));
+            assert_eq!(
+                (refused.0.len(), refused.1, refused.2),
+                (0, 0, 0),
+                "no mob, no entity id, no tracking entry"
+            );
+            // Entity data: the mob is loaded after the tick, so the lend is its kind and position.
+            let health = || Some(("Health", Tag::Float(5.0f32.to_bits())));
+            let (_, heard) = with_checks(Some(NativeSpawnCheck::Default), Vec::new, || {
+                tick(game, health())
+            });
+            let lent: Vec<_> = heard.iter().filter_map(|h| h.mob.clone()).collect();
+            assert!(!lent.is_empty());
+            for (kind, position, head) in lent {
+                assert_eq!(kind, Ok(mod_api::Identifier::parse(SULFUR_CUBE).unwrap()));
+                assert!(position.is_ok());
+                assert_eq!(head, Err(mod_api::UnspawnedMobError::Unsupported));
+            }
+        });
+    }
+
+    /// A trial spawner: the position check (obstruction only) and the placement check hear
+    /// `Spawner::Trial` at the block; a `Default` listener leaves the draws, ids and mob as with
+    /// none; a `Fail` adds no mob and no tracking entry.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated process for native mods"]
+    fn trial_spawner_checks_tell_the_block_and_keep_the_draws() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::mobs::spawner::{SpawnData, SpawnDataExt};
+        use horizon_client::mobs::trial_spawner::{TrialSpawner, TrialState};
+        with_game(|game| {
+            spawn_check_world(game, Vec3::new(0.5, 70.0, 0.5));
+            let level = level_of(game);
+            let key = (2, 70, 2);
+            let trial = mod_api::Spawner::Trial {
+                pos: mod_api::BlockPos::new(2, 70, 2),
+            };
+            let tick = |game: &mut Game<'_>| {
+                let (mobs, entities, tracked) =
+                    (game.mobs.len(), game.next_entity, game.persist.uuids.len());
+                game.world.random = LegacyRandom::new(9);
+                let mut entity = Compound::default();
+                entity.insert("id".into(), Tag::String(SULFUR_CUBE.into()));
+                let mut spawner = TrialSpawner {
+                    next_spawn_data: Some(SpawnData::new(entity, None, None)),
+                    ..Default::default()
+                };
+                game.server_tick_trial_spawner(key, &mut spawner, TrialState::Active, false)
+                    .unwrap();
+                assert!(game.lent_mobs.borrow().is_empty(), "every lend ended");
+                let added: Vec<Snap> = game.mobs[mobs..].iter().map(snap).collect();
+                let out = (
+                    added,
+                    game.next_entity - entities,
+                    game.persist.uuids.len() - tracked,
+                    game.world.random.next_int(),
+                );
+                for m in game.mobs.drain(mobs..) {
+                    game.persist.uuids.remove(&m.id);
+                }
+                game.next_entity = entities;
+                out
+            };
+            let (unlistened, _) = with_checks(None, Vec::new, || tick(game));
+            assert_eq!(unlistened.0.len(), 1, "the trial spawner spawns one mob");
+            assert!(unlistened.0[0].4, "a trial spawner's mob is persistent");
+            let (listened, heard) =
+                with_checks(Some(NativeSpawnCheck::Default), Vec::new, || tick(game));
+            assert_eq!(listened, unlistened, "same draws, ids and mob");
+            let lent = (
+                Ok(mod_api::Identifier::parse(SULFUR_CUBE).unwrap()),
+                Ok(unlistened.0[0].2),
+                Ok(true),
+            );
+            assert!(heard.iter().any(|h| h.mob.as_ref() == Some(&lent)));
+            assert!(heard.iter().any(|h| h.hook == "placement"));
+            for h in &heard {
+                assert_eq!(
+                    (h.kind.as_str(), h.level, h.spawner),
+                    (SULFUR_CUBE, level, Some(trial))
+                );
+            }
+            let (refused, heard) =
+                with_checks(Some(NativeSpawnCheck::Fail), Vec::new, || tick(game));
+            assert!(heard.iter().any(|h| h.hook == "position"));
+            assert_eq!(
+                (refused.0.len(), refused.1, refused.2),
+                (0, 0, 0),
+                "no mob, no entity id, no tracking entry"
+            );
         });
     }
 
@@ -1967,15 +2515,22 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated process for native mods"]
     fn entity_parts_answer_the_spawn_cluster_size() {
-        use super::super::native_entity_refs::tests::with_game;
+        use super::super::native_entity_refs::tests::{run_fresh_cases, with_game};
+        if run_fresh_cases(
+            "game::natural_spawning::tests::entity_parts_answer_the_spawn_cluster_size",
+            "HORIZON_SPAWN_CLUSTER_CHILD",
+            &["valid"],
+        ) {
+            return;
+        }
+        let entries = vec![mod_api::ModEntry::new("clusters", Box::new(ClusterMod))];
+        mod_api::__private::install(entries.into());
+        crate::game::api_values::install_parts(&[mod_api::ModEntry::new(
+            "clusters",
+            Box::new(ClusterMod),
+        )])
+        .unwrap();
         with_game(|game| {
-            let entries = vec![mod_api::ModEntry::new("clusters", Box::new(ClusterMod))];
-            mod_api::__private::install(entries.into());
-            crate::game::api_values::install_parts(&[mod_api::ModEntry::new(
-                "clusters",
-                Box::new(ClusterMod),
-            )])
-            .unwrap();
             game.resolve_parts().unwrap();
             let mob = |id: &str| {
                 let kind = game.res.mob_types().get(id).unwrap().clone();

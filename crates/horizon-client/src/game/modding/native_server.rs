@@ -2933,7 +2933,9 @@ mod tests {
                     return mod_api::Flow::Continue;
                 }
                 self.0.lock().unwrap().push(event.source.clone());
-                host.commands().feedback(Text::literal("source answer"));
+                host.commands()
+                    .feedback(mod_api::Text::literal("source answer"))
+                    .unwrap();
                 mod_api::Flow::Cancel
             }
         }
@@ -3689,7 +3691,8 @@ mod fake_action_tests {
             );
             let level = game.level(game.dim.id()).unwrap();
             assert_eq!(
-                game.level_block(level, [0, 64, 0]).as_deref(),
+                game.level_block(level, [0, 64, 0])
+                    .and_then(mod_api::__private::block_key_id),
                 Some("minecraft:water")
             );
             assert_eq!(
@@ -3862,7 +3865,8 @@ mod fake_action_tests {
             );
             let level = game.level(game.dim.id()).unwrap();
             assert_eq!(
-                game.level_block(level, [2, 64, 2]).as_deref(),
+                game.level_block(level, [2, 64, 2])
+                    .and_then(mod_api::__private::block_key_id),
                 Some("minecraft:water")
             );
             place(game, [1, 64, 0], "minecraft:chest");
@@ -3890,7 +3894,8 @@ mod fake_action_tests {
                 "survival placement consumes the temporary stack"
             );
             assert_eq!(
-                game.level_block(level, [1, 65, 0]).as_deref(),
+                game.level_block(level, [1, 65, 0])
+                    .and_then(mod_api::__private::block_key_id),
                 Some("minecraft:oak_log")
             );
             assert_eq!(
@@ -4043,7 +4048,8 @@ mod fake_action_tests {
                     assert!(game.use_failed, "outer per-action flag restored");
                     let level = game.level(game.dim.id()).unwrap();
                     assert_eq!(
-                        game.level_block(level, [1, 64, 0]).as_deref(),
+                        game.level_block(level, [1, 64, 0])
+                            .and_then(mod_api::__private::block_key_id),
                         Some("minecraft:air")
                     );
                     assert_eq!(held(game, 2), Some(ItemStack::new("minecraft:diamond", 1)));
@@ -4121,6 +4127,236 @@ mod fake_action_tests {
         });
     }
 
+    /// A listener on `attack_entity` records the target's health where the hook
+    /// runs; with `cancel` set it vetoes the blow.
+    struct AttackWatcher {
+        seen: std::sync::Arc<std::sync::Mutex<Vec<f32>>>,
+        cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for AttackWatcher {
+        fn attack_entity(
+            &self,
+            host: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::AttackEntityEvent<'_>,
+        ) -> mod_api::Flow {
+            let health = u32::try_from(event.entity)
+                .ok()
+                .and_then(|id| host.entity(id))
+                .and_then(|entity| host.living(entity))
+                .and_then(|living| living.health(host))
+                .expect("the watcher's target is a live zombie");
+            self.seen.lock().unwrap().push(health);
+            if self.cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                return mod_api::Flow::Cancel;
+            }
+            mod_api::Flow::Continue
+        }
+    }
+
+    /// `attack_entity` runs at `Player.attack`'s start, before the blow and the
+    /// swing's attack-strength reset (vanilla's `getAttackStrengthScale(0.5)`
+    /// is read there too, and `onAttack` resets the ticker after it). The hook
+    /// sees the target untouched, the blow uses the charge that was there when
+    /// the hook ran, and a veto leaves both the target and the charge alone.
+    /// The charge itself is read through the damage it deals: the read a mod
+    /// gets in the hook is `PlayerRef::attack_strength_scale` (part of the same
+    /// issue, landed separately).
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn attack_entity_runs_before_the_blow_resets_the_attack_charge() {
+        use super::super::native_entity_refs::tests::with_game;
+        use std::sync::{
+            Arc, Mutex,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "attack-watcher",
+            Box::new(AttackWatcher {
+                seen: seen.clone(),
+                cancel: cancel.clone(),
+            }),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            // Half a fist's cooldown (delay 5 ticks): the charge is (2 + 0.5) / 5 = 0.5.
+            with_game(|game| {
+                let (player, fake_conn, _) = fake(game, None, 0);
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update_all(|g| g.yaw = -90.0);
+                let near = zombie(game, 5000, [2.0, 64.0, 0.5]);
+                let full = health(game, 5000);
+                game.as_guest(fake_conn, |g| g.attack_ticks = 2).unwrap();
+                assert_eq!(
+                    game.player_perform_action(player, PlayerAction::Attack { target: near }),
+                    Ok(ActionOutcome::Consumed)
+                );
+                assert_eq!(
+                    *seen.lock().unwrap(),
+                    vec![full],
+                    "the hook runs before the blow lands"
+                );
+                // The hit then uses the charge that was there for the hook: 0.5 scales a fist's
+                // 1 to 0.4, and a zombie's 2 armour takes `getDamageAfterAbsorb`'s share.
+                let dealt = 0.4f32 * (1.0 - (2.0 - 0.4 / 2.0) / 25.0);
+                assert!(
+                    (full - health(game, 5000) - dealt).abs() < 1e-4,
+                    "the blow uses the pre-reset charge"
+                );
+                assert_eq!(
+                    game.as_guest(fake_conn, |g| g.attack_ticks).unwrap(),
+                    0,
+                    "the swing resets the charge after the hit"
+                );
+            });
+            // A veto at the hook leaves the target unhurt and the charge where it was: neither
+            // the hit nor the reset has run yet.
+            with_game(|game| {
+                let (player, fake_conn, _) = fake(game, None, 0);
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update_all(|g| g.yaw = -90.0);
+                let near = zombie(game, 5001, [2.0, 64.0, 0.5]);
+                let full = health(game, 5001);
+                seen.lock().unwrap().clear();
+                cancel.store(true, Ordering::Relaxed);
+                game.as_guest(fake_conn, |g| g.attack_ticks = 2).unwrap();
+                assert_eq!(
+                    game.player_perform_action(player, PlayerAction::Attack { target: near }),
+                    Ok(ActionOutcome::Passed)
+                );
+                assert_eq!(*seen.lock().unwrap(), vec![full]);
+                assert_eq!(health(game, 5001), full, "a veto stops the blow");
+                assert_eq!(
+                    game.as_guest(fake_conn, |g| g.attack_ticks).unwrap(),
+                    2,
+                    "and the swing that would reset the charge never starts"
+                );
+            });
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn attack_strength_rejects_non_finite_partial_without_restricting_finite_ticks() {
+        use super::super::native_entity_refs::tests::with_game;
+        with_game(|game| {
+            let (player, conn, _) = fake(game, None, 0);
+            game.as_guest(conn, |g| g.attack_ticks = 2).unwrap();
+            for partial in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+                assert_eq!(game.player_attack_strength_scale(player, partial), None);
+                game.as_guest(conn, |g| {
+                    assert_eq!(g.attack_strength_scale_at(partial), None);
+                    assert_eq!(g.player_attack_strength_scale(player, partial), None);
+                })
+                .unwrap();
+            }
+            for (partial, expected) in [(-1.0, 0.2), (0.5, 0.5), (2.0, 0.8)] {
+                assert_eq!(
+                    game.player_attack_strength_scale(player, partial),
+                    Some(expected)
+                );
+                game.as_guest(conn, |g| {
+                    assert_eq!(g.attack_strength_scale_at(partial), Some(expected));
+                    assert_eq!(
+                        g.player_attack_strength_scale(player, partial),
+                        Some(expected)
+                    );
+                })
+                .unwrap();
+            }
+        });
+    }
+
+    /// A listener on `attack_entity` reads the attacking player's attack
+    /// strength where the hook runs.
+    struct ChargeWatcher(std::sync::Arc<std::sync::Mutex<Vec<Option<f32>>>>);
+
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for ChargeWatcher {
+        fn attack_entity(
+            &self,
+            host: &mut dyn mod_api::ServerHost,
+            _event: &mut mod_api::AttackEntityEvent<'_>,
+        ) -> mod_api::Flow {
+            let player = host.players().acting_player().expect("an attacking player");
+            let scale = player.attack_strength_scale(host, 0.5);
+            self.0.lock().unwrap().push(scale);
+            mod_api::Flow::Continue
+        }
+    }
+
+    /// `PlayerRef::attack_strength_scale` inside `attack_entity` reads the
+    /// charge the blow uses: `Player.attack` reads `getAttackStrengthScale`
+    /// itself at its start, and the hook runs before that read and before the
+    /// swing resets the ticker. After the blow the same read sees 0. A
+    /// resting player reads its saved ticker and body too.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn attack_strength_scale_reads_the_charge_at_the_hook_and_not_after_the_swing() {
+        use super::super::native_entity_refs::tests::with_game;
+        use std::sync::{Arc, Mutex};
+
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "charge-watcher",
+            Box::new(ChargeWatcher(seen.clone())),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                let (player, fake_conn, _) = fake(game, None, 0);
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update_all(|g| g.yaw = -90.0);
+                let near = zombie(game, 5000, [2.0, 64.0, 0.5]);
+                let full = health(game, 5000);
+                // A fist's cooldown is 5 ticks: a full ticker reads 1.0, and half of one
+                // ((2 + 0.5) / 5) reads 0.5.
+                game.as_guest(fake_conn, |g| g.attack_ticks = 5).unwrap();
+                assert_eq!(
+                    player.attack_strength_scale(game, 0.5),
+                    Some(1.0),
+                    "a full ticker is a fully charged blow"
+                );
+                game.as_guest(fake_conn, |g| g.attack_ticks = 2).unwrap();
+                assert_eq!(
+                    player.attack_strength_scale(game, 0.5),
+                    Some(0.5),
+                    "a resting fake reads its saved ticker and body"
+                );
+                assert_eq!(
+                    game.player_perform_action(player, PlayerAction::Attack { target: near }),
+                    Ok(ActionOutcome::Consumed)
+                );
+                assert_eq!(*seen.lock().unwrap(), vec![Some(0.5)]);
+                // The blow uses the charge the hook read: 0.5 scales a fist's 1 to 0.4, and a
+                // zombie's 2 armour takes `getDamageAfterAbsorb`'s share.
+                let dealt = 0.4f32 * (1.0 - (2.0 - 0.4 / 2.0) / 25.0);
+                assert!((full - health(game, 5000) - dealt).abs() < 1e-4);
+                assert_eq!(
+                    player.attack_strength_scale(game, 0.5),
+                    Some(0.1),
+                    "the swing reset the ticker to 0 after the blow: (0 + 0.5) / 5"
+                );
+            });
+        });
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_fake_breaks_blocks_at_once_by_the_game_modes_rules() {
@@ -4137,7 +4373,10 @@ mod fake_action_tests {
                 game.player_perform_action(player, PlayerAction::BreakBlock { pos }),
                 Ok(ActionOutcome::Consumed)
             );
-            assert_eq!(level_block(game, pos).as_deref(), Some("minecraft:air"));
+            assert_eq!(
+                level_block(game, pos).and_then(mod_api::__private::block_key_id),
+                Some("minecraft:air")
+            );
             // Air breaks nothing; bedrock, which no digging breaks (destroy time -1), stays;
             // ten blocks off is out of reach.
             assert_eq!(
@@ -4150,7 +4389,7 @@ mod fake_action_tests {
                 Ok(ActionOutcome::Passed)
             );
             assert_eq!(
-                level_block(game, [-1, 63, 0]).as_deref(),
+                level_block(game, [-1, 63, 0]).and_then(mod_api::__private::block_key_id),
                 Some("minecraft:bedrock")
             );
             place(game, [3, 64, 3], "minecraft:stone");
@@ -4171,7 +4410,7 @@ mod fake_action_tests {
                 Ok(ActionOutcome::Consumed)
             );
             assert_eq!(
-                level_block(game, [1, 63, 0]).as_deref(),
+                level_block(game, [1, 63, 0]).and_then(mod_api::__private::block_key_id),
                 Some("minecraft:air")
             );
         });
@@ -4186,7 +4425,10 @@ mod fake_action_tests {
                     Ok(ActionOutcome::Passed),
                     "game mode {mode}, holding {item:?}"
                 );
-                assert_eq!(level_block(game, pos).as_deref(), Some("minecraft:stone"));
+                assert_eq!(
+                    level_block(game, pos).and_then(mod_api::__private::block_key_id),
+                    Some("minecraft:stone")
+                );
             });
         }
     }
@@ -4271,7 +4513,8 @@ mod fake_action_tests {
             );
             let level = game.level(game.dim.id()).unwrap();
             assert_eq!(
-                game.level_block(level, [1, 64, 0]).as_deref(),
+                game.level_block(level, [1, 64, 0])
+                    .and_then(mod_api::__private::block_key_id),
                 Some("minecraft:oak_sign")
             );
         });

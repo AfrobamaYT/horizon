@@ -7,6 +7,7 @@ use super::{Arg, Context, Game, R, Target, err};
 use horizon_client::actions::Action;
 use horizon_client::{
     command::CommandError,
+    lan::waypoints::Icon,
     skins::{NameOrId, Resolve, ResolvedProfile},
     snbt,
     text::{self, ClickEvent, InlineObject, Style, Text},
@@ -17,21 +18,6 @@ use horizon_protocol::packets::{
     play::{self, Clientbound as C, DialogHolder},
 };
 use std::{collections::HashMap, time::Instant};
-
-/// Waypoint.Icon: the locator bar style and colour of a transmitter.
-#[derive(Clone, Debug, PartialEq)]
-pub(in crate::game) struct WaypointIcon {
-    pub style: String,
-    pub color: Option<i32>,
-}
-impl Default for WaypointIcon {
-    fn default() -> Self {
-        Self {
-            style: "minecraft:default".into(),
-            color: None,
-        }
-    }
-}
 
 /// A `/fetchprofile` lookup in flight: what it resolves, the message ids it
 /// answers with (`commands.fetchprofile.<kind>.success|failure`), the
@@ -134,7 +120,7 @@ pub(in crate::game) struct CommandExtras {
     /// The `/jfr start` recording: when it started and the tick count then.
     pub jfr: Option<(Instant, u64, String)>,
     /// Waypoint icons changed by `/waypoint modify`.
-    pub waypoint_icons: HashMap<Target, WaypointIcon>,
+    pub waypoint_icons: HashMap<Target, Icon>,
     /// `/datapack disable vanilla` took the built-in pack out of the selection.
     pub vanilla_disabled: bool,
     /// The waypoint manager's tracked transmitters (None until first used).
@@ -391,7 +377,7 @@ impl Game<'_> {
             }
         }
     }
-    fn waypoint_icon(&self, t: Target) -> WaypointIcon {
+    pub(in crate::game) fn waypoint_icon(&self, t: Target) -> Icon {
         self.cmds
             .waypoint_icons
             .get(&self.waypoint_target(t))
@@ -436,7 +422,10 @@ impl Game<'_> {
                         "/execute in {dimension} run tp @s {} {} {}",
                         pos[0], pos[1], pos[2]
                     ))),
-                    hover: Some(Box::new(Text::translate("chat.coordinates.tooltip", &[]))),
+                    hover: Some(std::sync::Arc::new(Text::translate(
+                        "chat.coordinates.tooltip",
+                        &[],
+                    ))),
                     ..Style::default()
                 };
                 // getFeedbackDisplayName().copy().withStyle(color): the
@@ -504,16 +493,19 @@ impl Game<'_> {
                 &[Text::colored(name, rgb)],
             )
         };
+        self.set_waypoint_icon(t, icon);
+        self.feedback(message);
+        Ok(0)
+    }
+    /// `WaypointCommand.mutateIcon`: untrack, change, track again.
+    pub(in crate::game) fn set_waypoint_icon(&mut self, t: Target, icon: Icon) {
         let t = self.waypoint_target(t);
         self.cmds.waypoint_icons.insert(t, icon);
-        // WaypointCommand.mutateIcon: untrack, change, track again.
         self.waypoint_transmitters();
         if let Some(tracked) = self.cmds.waypoints.as_mut() {
             tracked.retain(|x| *x != t);
             tracked.push(t);
         }
-        self.feedback(message);
-        Ok(0)
     }
 
     // ---- /dialog --------------------------------------------------------
@@ -894,12 +886,17 @@ impl Game<'_> {
         // `Component.object(new PlayerSprite(profile, true))`, encoded: `hat`
         // is left out at its default.
         let encoded_component = snbt::to_snbt(&Tag::compound([("player", profile_tag)]));
-        let mut head = Text::literal("\u{FFFC}");
-        head.spans[0].style.inline_object = Some(InlineObject::Player {
-            profile: json,
-            hat: true,
-            fallback: format!("[{} head]", profile.name),
-        });
+        let head = Text::styled(
+            "\u{FFFC}",
+            Style {
+                inline_object: Some(InlineObject::Player {
+                    profile: json.into(),
+                    hat: true,
+                    fallback: format!("[{} head]", profile.name),
+                }),
+                ..Style::default()
+            },
+        );
         let item = |key: &str, args: &[Text], click: ClickEvent| {
             let inner = Text::translate(key, args)
                 .with_color(text::GREEN)
@@ -979,7 +976,7 @@ impl Game<'_> {
         let port_text = port.to_string();
         let link = Text::literal(port_text.clone()).with_style(&Style {
             color: Some(text::GREEN),
-            hover: Some(Box::new(Text::translate("chat.copy.click", &[]))),
+            hover: Some(std::sync::Arc::new(Text::translate("chat.copy.click", &[]))),
             ..Style::default()
         });
         self.feedback(Text::translate(
@@ -1150,7 +1147,7 @@ impl Game<'_> {
             ));
         }
         let file = Text::literal(relative).underlined().with_style(&Style {
-            hover: Some(Box::new(Text::translate("chat.copy.click", &[]))),
+            hover: Some(std::sync::Arc::new(Text::translate("chat.copy.click", &[]))),
             ..Style::default()
         });
         self.feedback(Text::translate("commands.jfr.stopped", &[file]));

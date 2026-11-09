@@ -297,8 +297,27 @@ impl EyeOfEnder {
 }
 
 impl Game<'_> {
+    /// The environment attributes the frame draws: the packs' Polytone layers over the
+    /// current dimension's, when a pack has some. Gameplay keeps `dim_environment`.
+    pub(super) fn view_environment(&self) -> &Environment {
+        match (&self.pack.environments, self.dim) {
+            (Some(e), Dim::Overworld) => &e[0],
+            (Some(e), Dim::Nether) => &e[1],
+            (Some(e), Dim::End) => &e[2],
+            (None, _) | (_, Dim::Extra(_)) => self.dim_environment(),
+        }
+    }
+
     /// The environment attributes of the current dimension.
     pub(super) fn dim_environment(&self) -> &Environment {
+        // A client of a server draws a level of a mod or a pack with the type the server sent.
+        if let Some(own) = self
+            .remote
+            .as_ref()
+            .and_then(|r| r.level_environment.as_ref())
+        {
+            return own;
+        }
         match self.dim {
             Dim::Overworld => self.res.environment(),
             Dim::Extra(_) => horizon_client::environment::Environment::for_level(

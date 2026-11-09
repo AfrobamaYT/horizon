@@ -391,6 +391,14 @@ pub struct Hub {
     pub former_names: std::collections::HashMap<u128, String>,
     last_clock: i64,
     last_rate: f32,
+    /// The total and rate last told of the clock the level in place follows when it is not the
+    /// Overworld's (`level_clock`); `i64::MIN` while none is.
+    last_level_clock: (i64, f32),
+    /// The Overworld clock's total while `World.day_time` follows another clock (the level in
+    /// place has its own); None while it follows the Overworld's.
+    pub overworld_day: Option<i64>,
+    /// The clock `World.day_time` follows when it is not the Overworld's, with its rate.
+    pub level_clock: Option<(String, f32)>,
     ticking: (f32, bool),
     /// The `tick_steps` count last broadcast.
     stepping: u32,
@@ -514,13 +522,19 @@ pub fn native_player_tab_list_name_format(
 }
 
 /// `LivingEntity.DATA_ARROW_COUNT_ID` (12) and `DATA_STINGER_COUNT_ID` (13):
-/// the counts of what is stuck in a player, 0 by default.
-fn stuck_meta(state: &mut EntityState, (arrows, stingers): (i32, i32)) {
+/// the counts of what is stuck in a player or a mob, 0 by default. `meta`
+/// gets the counts that are set and `defaults` both, so one back at zero is
+/// sent as the default.
+pub fn stuck_meta(
+    meta: &mut Vec<(u8, i32, Value)>,
+    defaults: &mut Vec<(u8, i32, Value)>,
+    (arrows, stingers): (i32, i32),
+) {
     for (index, count) in [(12, arrows), (13, stingers)] {
         if count != 0 {
-            state.meta.push((index, serializer::INT, Value::Int(count)));
+            meta.push((index, serializer::INT, Value::Int(count)));
         }
-        state.defaults.push((index, serializer::INT, Value::Int(0)));
+        defaults.push((index, serializer::INT, Value::Int(0)));
     }
 }
 
@@ -633,7 +647,7 @@ fn entity_type(
 
 /// ChunkTrackingView.contains: the chunks a player at (cx, cz) with view
 /// distance `r` is sent (isWithinDistance with the neighbours' buffer).
-fn tracked(cx: i32, cz: i32, r: i32, x: i32, z: i32) -> bool {
+pub(super) fn tracked(cx: i32, cz: i32, r: i32, x: i32, z: i32) -> bool {
     let dx = i64::from(((x - cx).abs() - 2).max(0));
     let dz = i64::from(((z - cz).abs() - 2).max(0));
     dx * dx + dz * dz < i64::from(r) * i64::from(r)
@@ -719,6 +733,7 @@ impl<'w> Columns<'w> {
 struct LevelSync {
     last_clock: i64,
     last_rate: f32,
+    last_level_clock: (i64, f32),
     weather: (bool, f32, f32),
 }
 
@@ -727,6 +742,7 @@ impl Default for LevelSync {
         Self {
             last_clock: i64::MIN,
             last_rate: 0.0,
+            last_level_clock: (i64::MIN, 0.0),
             weather: (false, 0.0, 0.0),
         }
     }
@@ -776,6 +792,9 @@ impl Hub {
             riding: Default::default(),
             last_clock: i64::MIN,
             last_rate: 0.0,
+            last_level_clock: (i64::MIN, 0.0),
+            overworld_day: None,
+            level_clock: None,
             ticking: (20.0, false),
             stepping: 0,
             ops: Default::default(),
@@ -1000,7 +1019,7 @@ impl Hub {
     }
     /// Whether an online guest is placed in the level in place (`config.dimension`).
     pub fn here(&self, g: &Guest) -> bool {
-        g.participates_online() && g.placed && g.dimension == self.config.dimension
+        g.placed_in(&self.config.dimension)
     }
     /// How many passes the level in place's entity tracking has run (None
     /// before its first).
@@ -1012,7 +1031,7 @@ impl Hub {
     /// Whether a guest is sent the level in place: the players placed in it, and
     /// the held ones, which look at it without being part of it.
     pub fn watches(&self, g: &Guest) -> bool {
-        g.participates_online() && (g.placed || g.held) && g.dimension == self.config.dimension
+        g.watches_level(&self.config.dimension)
     }
     /// The chunk under each player the level in place has to keep loaded: the players placed in
     /// it and the held ones, which are sent its chunks too ([`Self::watches`]), whose `loads`
@@ -1420,7 +1439,9 @@ impl Hub {
                     pos: *pos,
                 }),
             portal_cooldown,
-            sea_level: 63,
+            // `Level.getSeaLevel` of the guest's level, as the server sends it.
+            sea_level: horizon_core::LevelKey::parse(&self.config.dimension)
+                .map_or(63, horizon_world::level::sea_level_of),
         }
     }
 
@@ -2226,6 +2247,10 @@ impl Hub {
             .sync
             .id("minecraft:world_clock", "minecraft:overworld")
             .unwrap_or(0);
+        let level_clock = self
+            .level_clock
+            .as_ref()
+            .and_then(|(name, rate)| Some((self.sync.id("minecraft:world_clock", name)?, *rate)));
         C::SetTime(play::SetTime {
             game_time: world.game_time,
             clocks: self
@@ -2235,9 +2260,18 @@ impl Hub {
                     if id == overworld {
                         play::ClockState {
                             clock: id,
-                            total_ticks: world.day_time,
+                            total_ticks: self.overworld_day.unwrap_or(world.day_time),
                             partial_tick: 0.0,
                             rate,
+                        }
+                    } else if let Some((_, level_rate)) =
+                        level_clock.filter(|(clock, _)| *clock == id)
+                    {
+                        play::ClockState {
+                            clock: id,
+                            total_ticks: world.day_time,
+                            partial_tick: 0.0,
+                            rate: level_rate,
                         }
                     } else {
                         play::ClockState {
@@ -2712,7 +2746,7 @@ impl Hub {
         }
         // ServerClockManager.modifyClock: a day that jumped (`time set`, `time
         // add`) or a new rate updates the overworld clock.
-        let (day, rate) = (world.day_time, ctx.clock_rate);
+        let (day, rate) = (self.overworld_day.unwrap_or(world.day_time), ctx.clock_rate);
         let step = i64::from(rate.ceil() as i32).max(1);
         if self.last_clock != i64::MIN
             && ((day - self.last_clock).abs() > step || rate != self.last_rate)
@@ -2733,6 +2767,31 @@ impl Hub {
         }
         self.last_clock = day;
         self.last_rate = rate;
+        // The same for the clock the level follows when it is not the Overworld's: a jump
+        // (`time set` in the level) or a new rate reaches its players at once.
+        match self.level_clock.clone() {
+            Some((name, level_rate)) => {
+                let total = world.day_time;
+                let (last_total, last_rate) = self.last_level_clock;
+                let step = i64::from(level_rate.ceil() as i32).max(1);
+                if last_total != i64::MIN
+                    && ((total - last_total).abs() > step || level_rate != last_rate)
+                    && let Some(clock) = self.sync.id("minecraft:world_clock", &name)
+                {
+                    self.broadcast_level(&C::SetTime(play::SetTime {
+                        game_time: world.game_time,
+                        clocks: vec![play::ClockState {
+                            clock,
+                            total_ticks: total,
+                            partial_tick: 0.0,
+                            rate: level_rate,
+                        }],
+                    }));
+                }
+                self.last_level_clock = (total, level_rate);
+            }
+            None => self.last_level_clock = (i64::MIN, 0.0),
+        }
         self.sync_ticking(ctx.tick_rate, ctx.tick_frozen, ctx.tick_steps);
         let w = &world.weather;
         let (raining, rain, thunder) = self.weather;
@@ -3315,7 +3374,7 @@ impl Hub {
         if let Some(name) = &options.mod_particle {
             return Some(Particle {
                 id: horizon_protocol::entity_data::MOD_PARTICLE_ID,
-                data: Some(ParticleData::Mod(name.clone())),
+                data: Some(ParticleData::Mod(name.to_string())),
             });
         }
         let name = format!("minecraft:{}", options.ty.name());
@@ -3633,7 +3692,7 @@ impl Hub {
                 state.spectator = g.spectator();
                 state.watching = g.watching;
                 state.hidden = self.hidden.get(&g.uuid).copied();
-                stuck_meta(&mut state, g.stuck);
+                stuck_meta(&mut state.meta, &mut state.defaults, g.stuck);
                 frozen_meta(&mut state, g.motion.as_ref().map_or(0, |m| m.ticks_frozen));
                 shoulder_meta(&mut state, g.shoulders);
                 state
@@ -5259,13 +5318,23 @@ impl Hub {
         let leaving = LevelSync {
             last_clock: self.last_clock,
             last_rate: self.last_rate,
+            last_level_clock: self.last_level_clock,
             weather: self.weather,
         };
         let entering = self.level_sync.remove(dimension).unwrap_or_default();
         self.level_sync
             .insert(std::mem::take(&mut self.config.dimension), leaving);
-        (self.last_clock, self.last_rate, self.weather) =
-            (entering.last_clock, entering.last_rate, entering.weather);
+        (
+            self.last_clock,
+            self.last_rate,
+            self.last_level_clock,
+            self.weather,
+        ) = (
+            entering.last_clock,
+            entering.last_rate,
+            entering.last_level_clock,
+            entering.weather,
+        );
         self.config.dimension = dimension.to_owned();
         self.dimension_type = self
             .sync
@@ -7182,12 +7251,12 @@ mod tests {
         assert_eq!((left[1].0, &left[1].2), (20, &Value::Id(0)));
     }
 
-    /// The counts of what is stuck in a player are sent when set, and a
+    /// The counts of what is stuck in a player or a mob are sent when set, and a
     /// count back at zero is sent as the default.
     #[test]
     fn stuck_counts_are_synched_as_entity_data() {
         let mut state = EntityState::default();
-        stuck_meta(&mut state, (3, 0));
+        stuck_meta(&mut state.meta, &mut state.defaults, (3, 0));
         assert_eq!(state.meta, vec![(12, serializer::INT, Value::Int(3))]);
         assert_eq!(
             state.defaults,

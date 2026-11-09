@@ -348,28 +348,64 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
                     syn::ReturnType::Type(_, ty) => boundary_value(ty),
                     syn::ReturnType::Default => false,
                 };
-                let call = if checked_write {
+                let text_output = match &entry.sig.output {
+                    syn::ReturnType::Type(_, ty) => text_value(ty),
+                    syn::ReturnType::Default => false,
+                };
+                let text_result = result_error(&entry.sig.output)
+                    .is_some_and(|error| outer_type(error, "TextFormError"));
+                let call = if text_output {
+                    if text_result {
+                        format!("{call}.try_into_api().map_err(Into::into)")
+                    } else {
+                        format!("{call}.try_into_api().unwrap_or_else(|error| Err(error.into()))")
+                    }
+                } else if text_result {
+                    // Writes with converted Text arguments call an infallible engine
+                    // body. A read returning an API-owned aggregate already converts
+                    // its fields in the backend and therefore already returns Result.
+                    let text_input =
+                        entry.sig.inputs.iter().any(
+                            |arg| matches!(arg, syn::FnArg::Typed(arg) if text_value(&arg.ty)),
+                        );
+                    if text_input {
+                        format!("Ok({call})")
+                    } else {
+                        call
+                    }
+                } else if checked_write {
                     if crosses_output {
                         format!("call_stack_write(|| {call})")
                     } else {
                         format!("call_write(|| {call})")
                     }
                 } else if crosses_output {
-                    let is_result = match &entry.sig.output {
-                        syn::ReturnType::Type(_, ty) => outer_type(ty, "Result"),
-                        _ => false,
-                    };
-                    if is_result {
-                        format!(
+                    match result_error(&entry.sig.output) {
+                        Some(error) if outer_type(error, "LevelReadError") => format!(
+                            "{call}.try_into_api().unwrap_or(Err(mod_api::LevelReadError::Unavailable))"
+                        ),
+                        Some(_) => format!(
                             "{call}.try_into_api().unwrap_or_else(|error| Err(error.into_write_error().into()))"
-                        )
-                    } else {
-                        format!("{call}.try_into_api().unwrap_or_default()")
+                        ),
+                        None => format!("{call}.try_into_api().unwrap_or_default()"),
                     }
                 } else {
                     call
                 };
-                code.push_str(&format!("{sig} {{ mod_api::__private::check_access({name:?}, mod_api::__private::LoadAccess::{level}); {setup} {call} }}\n"));
+                let typed_access_error = result_error(&entry.sig.output).filter(|error| {
+                    outer_type(error, "LevelReadError") || outer_type(error, "LevelWriteError")
+                });
+                let access = if let Some(error) = typed_access_error {
+                    let error = error.to_token_stream();
+                    format!(
+                        "if !mod_api::__private::access_allowed({name:?}, mod_api::__private::LoadAccess::{level}) {{ return Err({error}::Unavailable); }}"
+                    )
+                } else {
+                    format!(
+                        "mod_api::__private::check_access({name:?}, mod_api::__private::LoadAccess::{level});"
+                    )
+                };
+                code.push_str(&format!("{sig} {{ {access} {setup} {call} }}\n"));
             }
             code.push_str("}\n");
         }
@@ -382,42 +418,84 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
 
 /// API records whose game representation is owned by another crate. Conversions are
 /// implemented once by the game; this rule only selects the boundary, never its behaviour.
+fn text_value(ty: &Type) -> bool {
+    contains_value(ty, &["Text", "GuiDraw"])
+}
+
 fn boundary_value(ty: &Type) -> bool {
-    struct Values(bool);
-    impl<'ast> Visit<'ast> for Values {
+    contains_value(
+        ty,
+        &[
+            "ItemStack",
+            "BlockState",
+            "GameRuleValue",
+            "ItemResource",
+            "ItemCost",
+            "MerchantOffer",
+            "Ingredient",
+            "Recipe",
+            "RecipeRule",
+            "RecipeTemplate",
+            "RecipeTrimPattern",
+            "FireworkShapeIngredient",
+            "AnvilResult",
+            "AnvilCraft",
+            "AnvilUpdate",
+            "GrindstonePlace",
+            "GrindstoneTake",
+            "ParticleOptions",
+        ],
+    )
+}
+
+fn contains_value(ty: &Type, names: &[&str]) -> bool {
+    struct Values<'a>(bool, &'a [&'a str]);
+    impl<'ast> Visit<'ast> for Values<'_> {
         fn visit_type_path(&mut self, path: &'ast syn::TypePath) {
-            self.0 |= path.path.segments.last().is_some_and(|segment| {
-                matches!(
-                    segment.ident.to_string().as_str(),
-                    "ItemStack"
-                        | "ItemResource"
-                        | "ItemCost"
-                        | "MerchantOffer"
-                        | "Ingredient"
-                        | "Recipe"
-                        | "RecipeRule"
-                        | "RecipeTemplate"
-                        | "RecipeTrimPattern"
-                        | "FireworkShapeIngredient"
-                        | "AnvilResult"
-                        | "AnvilCraft"
-                        | "AnvilUpdate"
-                        | "GrindstonePlace"
-                        | "GrindstoneTake"
-                )
-            });
+            self.0 |= path
+                .path
+                .segments
+                .last()
+                .is_some_and(|segment| self.1.contains(&segment.ident.to_string().as_str()));
             syn::visit::visit_type_path(self, path);
         }
     }
-    let mut values = Values(false);
+    let mut values = Values(false, names);
     values.visit_type(ty);
     values.0
+}
+
+fn result_error(output: &syn::ReturnType) -> Option<&Type> {
+    let syn::ReturnType::Type(_, ty) = output else {
+        return None;
+    };
+    let Type::Path(path) = &**ty else { return None };
+    let segment = path.path.segments.last()?;
+    if segment.ident != "Result" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return None;
+    };
+    let syn::GenericArgument::Type(error) = args.args.last()? else {
+        return None;
+    };
+    Some(error)
+}
+
+/// A borrowed `&ItemStack`: outside a checked write, the method only reads it.
+fn read_only_stack(ty: &Type) -> bool {
+    matches!(ty, Type::Reference(reference) if outer_type(&reference.elem, "ItemStack"))
 }
 
 fn outer_type(ty: &Type, expected: &str) -> bool {
     matches!(ty, Type::Path(path) if path.path.segments.last().is_some_and(|segment| segment.ident == expected))
 }
 
+/// The conversion code for a host method's boundary arguments, the arguments to pass on, and
+/// whether it is a checked write (`&mut self`, a `Result`, a converted value). A checked write
+/// refuses an invalid value with its error; a read converts a borrowed stack without the write
+/// limits, and any other refused value makes the method return its default.
 fn boundary_arguments(
     sig: &syn::Signature,
     method: &str,
@@ -433,7 +511,11 @@ fn boundary_arguments(
             _ => None,
         })
         .collect::<Vec<_>>();
-    let checked_write = mutable && typed.iter().any(|arg| boundary_value(&arg.ty));
+    let checked_write = mutable
+        && result_error(&sig.output).is_some()
+        && typed
+            .iter()
+            .any(|arg| boundary_value(&arg.ty) && !contains_value(&arg.ty, &["ParticleOptions"]));
     let mut setup = String::new();
     let mut args = Vec::new();
     for arg in typed {
@@ -441,13 +523,30 @@ fn boundary_arguments(
             return Err(format!("{method}: unsupported argument"));
         };
         let name = pat.ident.to_string();
-        if !boundary_value(&arg.ty) {
+        let text = text_value(&arg.ty);
+        if !boundary_value(&arg.ty) && !text {
             args.push(name);
             continue;
         }
-        let conversion = format!("{name}.try_into_engine(self.items())");
-        let value = if checked_write {
+        let conversion = if text {
+            format!("{name}.try_into_engine(&())")
+        } else if !checked_write && read_only_stack(&arg.ty) {
+            // Only a write imposes resident maxima: a stack vanilla stores (damage above its
+            // maximum, say) still answers a read.
+            format!("crate::game::api_values::stack_value({name})")
+        } else {
+            format!("{name}.try_into_engine(self.items())")
+        };
+        let value = if contains_value(&arg.ty, &["ParticleOptions"]) {
+            format!(
+                "match {name}.try_into_engine(&()) {{ Ok(value) => value, Err(_) => return Default::default() }}"
+            )
+        } else if text || checked_write {
             format!("{conversion}?")
+        } else if result_error(&sig.output).is_some() {
+            format!(
+                "match {conversion} {{ Ok(value) => value, Err(_) => return Err(mod_api::NoBackend::no_backend()) }}"
+            )
         } else {
             format!(
                 "match {conversion} {{ Ok(value) => value, Err(_) => return Default::default() }}"
@@ -841,6 +940,10 @@ impl Impls {
 }
 
 #[cfg(test)]
+#[path = "host/state_write_tests.rs"]
+mod state_write_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -855,6 +958,36 @@ mod tests {
 
     fn handles(source: &str) -> BTreeMap<String, String> {
         api_types(source).unwrap().handles
+    }
+
+    #[test]
+    fn immutable_result_arguments_refuse_conversion_with_a_typed_error() {
+        let method = entry(
+            "fn read(&self, ingredient: &Ingredient) -> Result<Arc<[ItemKey]>, IngredientKeysError>;",
+        );
+        let (setup, _, checked_write) = boundary_arguments(&method.sig, "read").unwrap();
+        assert!(!checked_write);
+        assert!(setup.contains("return Err(mod_api::NoBackend::no_backend())"));
+        assert!(!setup.contains("Default::default()"));
+    }
+
+    #[test]
+    fn borrowed_stacks_are_read_without_write_validation_outside_checked_writes() {
+        let read = entry("fn item_resource_damageable(&self, stack: &ItemStack) -> bool;");
+        let (setup, args, checked_write) = boundary_arguments(&read.sig, "read").unwrap();
+        assert!(!checked_write);
+        assert!(setup.contains("crate::game::api_values::stack_value(stack)"));
+        assert!(!setup.contains("try_into_engine"));
+        assert_eq!(args, "&stack");
+        let write = entry(
+            "fn living_apply_consume_effect(&mut self, stack: &ItemStack) -> Result<bool, StackWriteError>;",
+        );
+        let (setup, _, checked_write) = boundary_arguments(&write.sig, "write").unwrap();
+        assert!(checked_write);
+        assert!(setup.contains("stack.try_into_engine(self.items())?"));
+        let owned = entry("fn drop_at(&mut self, stack: ItemStack) -> bool;");
+        let (setup, _, _) = boundary_arguments(&owned.sig, "owned").unwrap();
+        assert!(setup.contains("stack.try_into_engine(self.items())"));
     }
 
     #[test]
@@ -980,6 +1113,28 @@ mod tests {
                 .unwrap(),
             "duplicate handle receiver url",
         );
+    }
+
+    #[test]
+    fn text_arguments_refuse_before_even_checked_stack_writes() {
+        let text = entry("fn set_text(&mut self, text: &Text) -> Result<(), TextFormError>;");
+        let (setup, args, checked) = boundary_arguments(&text.sig, "set_text").unwrap();
+        assert!(!checked);
+        assert!(setup.contains("text.try_into_engine(&())?"));
+        assert_eq!(args, "&text");
+        let mixed = entry(
+            "fn update(&mut self, stack: ItemStack, text: Option<&Text>) -> Result<Text, Refused>;",
+        );
+        let (setup, args, checked) = boundary_arguments(&mixed.sig, "update").unwrap();
+        assert!(checked);
+        assert!(setup.contains("stack.try_into_engine(self.items())?"));
+        assert!(setup.contains("text.try_into_engine(&())?"));
+        assert_eq!(args, "stack, text.as_ref()");
+        let syn::ReturnType::Type(_, output) = &mixed.sig.output else {
+            panic!()
+        };
+        assert!(text_value(output));
+        assert!(!boundary_value(output));
     }
 
     #[test]

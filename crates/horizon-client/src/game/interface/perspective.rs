@@ -630,7 +630,7 @@ impl Game<'_> {
         m.extra.auto_spin_attack = spinning;
         // LivingEntity.DATA_ARROW_COUNT_ID and DATA_STINGER_COUNT_ID: as the
         // server synced them, else the local body's own.
-        (m.extra.arrow_count, m.extra.stinger_count) = match &self.remote {
+        (m.extra.stuck.arrows, m.extra.stuck.stingers) = match &self.remote {
             Some(r) => (r.own_arrows, r.own_stingers),
             None => (self.combat.stuck.arrows, self.combat.stuck.stingers),
         };
@@ -1319,13 +1319,13 @@ impl Game<'_> {
         let sprites = &self.gui.atlas.sprites;
         let layers = [
             (
-                m.extra.arrow_count,
+                m.extra.stuck.arrows,
                 false,
                 self.arrow_model.as_ref(),
                 "entity/projectiles/arrow",
             ),
             (
-                m.extra.stinger_count,
+                m.extra.stuck.stingers,
                 true,
                 self.bee_stinger_model.as_ref(),
                 "entity/bee/bee_stinger",

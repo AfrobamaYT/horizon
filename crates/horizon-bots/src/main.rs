@@ -89,6 +89,7 @@ horizon-bots: load-test bots for a Minecraft Java Edition 26.3 server (offline m
   --view-distance N      what the bots ask for; default 10
   --seed N               default 12345
   --explore-speed B      blocks a second an explore bot flies; default 22 (as fast as chunks come)
+  --explore-distance B   stop exploring after B blocks, then hold position; default unlimited
   --pvp B                fight bots also attack each other (true or false); default true
   --crits                fight bots swing at a sword's full strength (every 13 ticks) and jump into every
                          other swing, landing it while falling: a critical hit, then a sweep from the
@@ -161,6 +162,7 @@ struct Options {
     view_distance: i8,
     seed: u64,
     explore_speed: f64,
+    explore_distance: f64,
     pvp: bool,
     /// The players or entity UUIDs to attack, how long after joining to start,
     /// and how many rounds.
@@ -202,6 +204,7 @@ fn options() -> Result<Options, String> {
         view_distance: 10,
         seed: 12345,
         explore_speed: 22.0,
+        explore_distance: f64::INFINITY,
         pvp: true,
         attack: None,
         attack_after: 5.0,
@@ -264,6 +267,12 @@ fn options() -> Result<Options, String> {
             "--seed" => o.seed = value.parse().map_err(|_| number("a number"))?,
             "--explore-speed" => {
                 o.explore_speed = value.parse().map_err(|_| number("blocks a second"))?;
+            }
+            "--explore-distance" => {
+                o.explore_distance = value.parse().map_err(|_| number("positive blocks"))?;
+                if !o.explore_distance.is_finite() || o.explore_distance <= 0.0 {
+                    return Err(number("positive finite blocks"));
+                }
             }
             "--pvp" => o.pvp = value.parse().map_err(|_| number("true or false"))?,
             "--flood" => o.flood = value.parse().map_err(|_| number("packets a tick"))?,
@@ -361,6 +370,7 @@ fn options() -> Result<Options, String> {
 /// What one bot is doing, shared between its reader and its ticks.
 #[derive(Default)]
 struct Bot {
+    explore_complete: AtomicBool,
     online: AtomicBool,
     chunks: AtomicU64,
     /// Chunks received while the bot already held them (no ForgetLevelChunk in between).
@@ -1204,6 +1214,7 @@ fn run_bot(
     let mut since_attack = ATTACK_COOLDOWN_TICKS;
     let mut crits = Crits::default();
     let heading = random.unit() * std::f64::consts::TAU;
+    let mut explored = 0.0_f64;
     let mut target = pos;
     let mut next = Instant::now();
     let (joined, mut tick) = (Instant::now(), 0u64);
@@ -1312,9 +1323,12 @@ fn run_bot(
                     }
                     // Flying in creative, by default about 22 blocks a second, which keeps new
                     // chunks coming as fast as the server sends them.
-                    let step = o.explore_speed / 20.0;
+                    let step = (o.explore_speed / 20.0).min(o.explore_distance - explored);
                     pos[0] += heading.cos() * step;
                     pos[2] += heading.sin() * step;
+                    explored += step;
+                    bot.explore_complete
+                        .store(explored >= o.explore_distance, Ordering::Relaxed);
                 }
             }
         }
@@ -1548,6 +1562,7 @@ fn main() {
             "forgotten": b.forgotten.load(Ordering::Relaxed),
             "pulled_back": b.pulled_back.load(Ordering::Relaxed),
             "waited_ticks": b.waited.load(Ordering::Relaxed),
+            "explore_complete": b.explore_complete.load(Ordering::Relaxed),
             "error": *lock(&b.error),
             "attacks": b.attacks.load(Ordering::Relaxed),
             "health": *lock(&b.health),

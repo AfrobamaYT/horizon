@@ -2637,6 +2637,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 dependencies = [
  "foldhash",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -2735,6 +2737,7 @@ version = "0.1.0"
 dependencies = [
  "libm",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2775,6 +2778,7 @@ dependencies = [
  "horizon-mcp",
  "horizon-mod-api-gen",
  "horizon-mod-package",
+ "horizon-mod-point-emit",
  "horizon-mod-point-shape",
  "horizon-port-pack",
  "horizon-prepare",
@@ -2844,20 +2848,37 @@ dependencies = [
 name = "horizon-mod-package"
 version = "0.1.0"
 dependencies = [
+ "cap-fs-ext",
  "cap-std",
  "flate2",
+ "getrandom 0.4.3",
  "horizon-core",
  "horizon-shader-api",
+ "libc",
  "log",
  "minisign-verify",
+ "os_pipe",
  "png 0.18.1",
+ "rustix",
  "semver",
  "serde",
  "serde_json",
  "sha2",
+ "socket2 0.6.5",
+ "subtle",
  "tar",
  "toml 1.1.8+spec-1.1.0",
+ "wasmparser",
+ "windows-sys 0.61.2",
  "zip",
+]
+
+[[package]]
+name = "horizon-mod-point-emit"
+version = "0.1.0"
+dependencies = [
+ "horizon-mod-package",
+ "serde",
 ]
 
 [[package]]
@@ -4392,6 +4413,16 @@ checksum = "9aa2b01e1d916879f73a53d01d1d6cee68adbb31d6d9177a8cfce093cced1d50"
 dependencies = [
  "futures-core",
  "pin-project-lite",
+]
+
+[[package]]
+name = "os_pipe"
+version = "1.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
+dependencies = [
+ "libc",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -6537,8 +6568,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f20f20e44f7e8aeb6744823ea9d869ede51e51be4fdaedede2852282e54d2d8"
 dependencies = [
  "bitflags 2.13.2",
+ "hashbrown 0.17.1",
  "indexmap",
  "semver",
+ "serde",
 ]
 
 [[package]]

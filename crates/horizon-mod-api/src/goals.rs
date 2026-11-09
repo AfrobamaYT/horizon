@@ -175,7 +175,12 @@ impl<'a> GoalRegistrar<'a> {
 pub struct RegistrarMob<'a> {
     id: &'a str,
 }
-impl RegistrarMob<'_> {
+impl<'a> RegistrarMob<'a> {
+    // hidden: a game-side helper, not part of the mod surface
+    #[doc(hidden)]
+    pub fn new(id: &'a str) -> Self {
+        Self { id }
+    }
     /// The entity type's id (`minecraft:zombie`).
     pub fn id(&self) -> &str {
         self.id

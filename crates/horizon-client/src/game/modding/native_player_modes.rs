@@ -177,7 +177,7 @@ mod tests {
             assert_eq!(a.can_harm(&*game, b), Some(true), "no teams, pvp on");
 
             let board = &mut game.score.board;
-            board.add_team("red");
+            board.add_team("red").allow_friendly_fire = false;
             board.add_to_team("guest12", "red");
             board.add_to_team("guest13", "red");
             assert_eq!(
