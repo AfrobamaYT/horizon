@@ -196,6 +196,20 @@ impl InsideEffects {
         self.last_step = -1;
         std::mem::take(&mut self.planned)
     }
+    /// Commit another collector's current step into this one: a staged callback
+    /// answered, so what it queued joins this step. The staged collector must not
+    /// have flushed (its plan stays empty); a panicking callback is never absorbed.
+    pub fn absorb_step(&mut self, staged: Self) {
+        let mut staged = staged;
+        for index in 0..5 {
+            self.in_step[index] |= staged.in_step[index];
+            let before = std::mem::take(&mut staged.before[index]);
+            self.before[index].extend(before);
+            let after = std::mem::take(&mut staged.after[index]);
+            self.after[index].extend(after);
+        }
+    }
+
     /// Whether nothing is queued: the walk builds no collector work when no part listens.
     pub fn is_empty(&self) -> bool {
         self.planned.is_empty()

@@ -1279,6 +1279,7 @@ impl Game<'_> {
                 Pending::Inside(inside) => (inside.state, inside.position),
                 Pending::Landed(landed) => (landed.state, landed.position),
                 Pending::MinecartPass(pass) => (pass.state, pass.position),
+                Pending::InsideWritten(written) => (written.state, written.position),
             };
             let Some(level) = self.level(self.dim.id()) else {
                 continue;
@@ -1340,6 +1341,13 @@ impl Game<'_> {
                 Pending::Landed(landed) => {
                     for write in landed.writes {
                         self.apply_landing_write(level, pos, write);
+                    }
+                }
+                // The mid-walk contacts' own level writes, guarded on the touched
+                // state above, as a landing's are.
+                Pending::InsideWritten(written) => {
+                    for write in written.writes {
+                        self.apply_inside_write(level, pos, write);
                     }
                 }
             }
@@ -1649,6 +1657,32 @@ pub(super) const BLOCK_CONTACT_HOOKS: horizon_client::block_contact::Hooks =
         },
         bounce_listens: |state| {
             crate::game::api_values::block_state::block_listens(mod_api::HookId::BounceOn, state)
+        },
+        inside_fire: |level, dimension, entity, kind, state, pos, precise, staged, writes| {
+            // The whole callback is staged: a panic is contained and the walk
+            // keeps the caller's collector and write list as they were (#2247's
+            // rule: a mod's panic never breaks the model).
+            let fired = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                HitLevel(level.reborrow()).native_entity_inside(
+                    crate::game::native_hooks::fire::EntityInsideCall {
+                        dimension,
+                        entity,
+                        kind,
+                        state,
+                        pos,
+                        precise,
+                        effects: staged,
+                        writes,
+                    },
+                );
+            }));
+            if let Err(payload) = fired {
+                if let Some(text) = payload.downcast_ref::<&str>() {
+                    eprintln!("an entity_inside part panicked at {text:?}");
+                } else if let Some(text) = payload.downcast_ref::<String>() {
+                    eprintln!("an entity_inside part panicked at {text:?}");
+                }
+            }
         },
         fall_on: |dimension, level, c, distance, damage, writes| {
             HitLevel(level.reborrow()).native_fall_on(

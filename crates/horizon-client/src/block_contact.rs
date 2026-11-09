@@ -1,7 +1,10 @@
 //! Synchronous mod-block contacts from the server's simulation code.
 use crate::health::DamageLevel;
 use horizon_core::position::BlockPos;
-use horizon_world::{level::LandingWrite, registry::BlockStateId};
+use horizon_world::{
+    level::{InsideWrite, LandingWrite},
+    registry::BlockStateId,
+};
 use std::{
     cell::{Cell, RefCell},
     sync::OnceLock,
@@ -34,7 +37,7 @@ pub trait InsideWalk {
     /// `state.isAir()`, read as the sweep visits.
     fn is_air(&self, state: BlockStateId) -> bool;
     /// `state.getEntityInsideCollisionShape(level, pos, this)` for the walk.
-    fn inside_shape(&self, state: BlockStateId, at: BlockPos) -> InsideShape;
+    fn inside_shape(&mut self, state: BlockStateId, at: BlockPos) -> InsideShape;
     /// `collidedWithFluid(state.getFluidState(), pos, from, to)`.
     fn collided_with_fluid(
         &self,
@@ -201,6 +204,20 @@ pub struct Hooks {
     /// `Block.bounceOn`: change `movement`, the movement the bounce leaves the entity.
     pub bounce_on:
         fn(&str, &mut DamageLevel<'_>, Contact<'_>, f64, &mut horizon_core::geometry::Vec3),
+    /// `Block.entityInside` told mid-walk: the part's own contact on the level
+    /// host, its whole callback staged into the fresh collector and write list,
+    /// so only an answering callback's writes reach the walk.
+    pub inside_fire: fn(
+        &mut DamageLevel<'_>,
+        &'static str,
+        i32,
+        &'static str,
+        BlockStateId,
+        BlockPos,
+        bool,
+        &mut mod_api::InsideEffects,
+        &mut Vec<InsideWrite>,
+    ),
 }
 
 pub static HOOKS: OnceLock<Hooks> = OnceLock::new();
@@ -211,6 +228,17 @@ pub enum Pending {
     Inside(Inside),
     Landed(Landed),
     MinecartPass(MinecartPass),
+    /// Level writes a mid-walk `entity_inside` part asked for, at the block it
+    /// touched: applied at the batch end, guarded on the touched state.
+    InsideWritten(InsideWritten),
+}
+
+/// The level writes an `entity_inside` part asked for at one block.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InsideWritten {
+    pub state: BlockStateId,
+    pub position: BlockPos,
+    pub writes: Vec<InsideWrite>,
 }
 
 /// An entity that landed on a block whose Part asked for writes (`Block.fallOn`).
@@ -269,6 +297,12 @@ pub fn step_on(block: &str, contact: Contact<'_>) {
     {
         (hooks.step_on)(dimension, contact);
     }
+}
+
+/// The dimension the current thread's contacts answer in, as `inside` and the
+/// landing routes read it: the server's tick set it around the entity passes.
+pub fn current_level() -> Option<&'static str> {
+    LEVEL.get()
 }
 
 /// Whether a part of the block `state` answers `fall_on`.
@@ -369,6 +403,20 @@ pub fn inside(entity: i32, state: BlockStateId, position: BlockPos, precise: boo
                 state,
                 position,
                 precise,
+            }));
+        });
+    }
+}
+
+/// Keep the level writes a mid-walk `entity_inside` contact asked for until the
+/// entity's batch ends; nothing is kept when none were asked.
+pub fn inside_written(state: BlockStateId, position: BlockPos, writes: Vec<InsideWrite>) {
+    if !writes.is_empty() {
+        PENDING.with_borrow_mut(|pending| {
+            pending.push(Pending::InsideWritten(InsideWritten {
+                state,
+                position,
+                writes,
             }));
         });
     }
@@ -509,7 +557,7 @@ mod tests {
         fn is_air(&self, state: BlockStateId) -> bool {
             state == BlockStateId(0)
         }
-        fn inside_shape(&self, state: BlockStateId, at: BlockPos) -> InsideShape {
+        fn inside_shape(&mut self, state: BlockStateId, at: BlockPos) -> InsideShape {
             match self.blocks.get(&[at.x, at.y, at.z]) {
                 Some((block, shape, _)) if *block == state => shape.clone(),
                 _ => InsideShape::Full,
