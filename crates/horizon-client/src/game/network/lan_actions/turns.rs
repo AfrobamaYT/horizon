@@ -135,14 +135,6 @@ impl Game<'_> {
         let other_boxes =
             self.lan_building_boxes
                 .for_turn(conn, Some(outer), building_players(host));
-        host.hub.guests[i].residency.extract();
-        self.lan_guest_swaps.push(conn);
-        // `ServerPlayer.permissions()`: the guest's own command level for its
-        // turn, so game-master checks see it (not the host's).
-        let permission = std::mem::replace(
-            &mut self.ui.registries.permission,
-            host.hub.guests[i].permission,
-        );
         let fresh = host.hub.guests[i].motion.is_none();
         if fresh {
             let p = Vec3::new(
@@ -151,8 +143,12 @@ impl Game<'_> {
                 host.hub.guests[i].position[2],
             );
             {
-                let value = PlayerMotion::new(self.motion, p).ok().map(Box::new);
-                host.hub.guests.update(i, |guest| guest.motion = value);
+                let value = PlayerMotion::new(self.motion, p)
+                    .map(Box::new)
+                    .map_err(|_| TurnRefused::Gone)?;
+                host.hub
+                    .guests
+                    .update(i, |guest| guest.motion = Some(value));
             }
             // The first body after joining burns, breathes and falls on as saved.
             host.hub.guests.update(i, |g| {
@@ -188,6 +184,18 @@ impl Game<'_> {
                 }
             });
         }
+        // Refusal must leave canonical records and loan state untouched.
+        let Some(mut motion) = host.hub.guests.update(i, |g| g.motion.take()) else {
+            return Err(TurnRefused::Gone);
+        };
+        host.hub.guests[i].residency.extract();
+        self.lan_guest_swaps.push(conn);
+        // `ServerPlayer.permissions()`: the guest's own command level for its
+        // turn, so game-master checks see it (not the host's).
+        let permission = std::mem::replace(
+            &mut self.ui.registries.permission,
+            host.hub.guests[i].permission,
+        );
         let mut play = host.play.remove(&conn).unwrap_or_default();
         play.hook.begin_loan();
         if fresh {
@@ -199,12 +207,6 @@ impl Game<'_> {
             // A new ServerPlayer has everything to record again.
             play.score_recorded = Default::default();
         }
-        // The guest's body.
-        let Some(mut motion) = host.hub.guests.update(i, |g| g.motion.take()) else {
-            self.ui.registries.permission = permission;
-            host.play.insert(conn, play);
-            return Err(TurnRefused::Gone);
-        };
         let attachments = std::mem::replace(
             &mut self.player_attachments,
             std::mem::take(host.hub.guests.attachments_mut(conn).unwrap()),
