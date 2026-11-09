@@ -1300,15 +1300,18 @@ impl Game<'_> {
     /// in the entity's frame, which starts at its feet turned with the body
     /// (`mob.head_yaw`, `mob.pitch` and the walk cycle place a part, the eyes
     /// being at the entity type's eye height). `who` is set for a player.
+    /// `parts` is a humanoid model's parts as vanilla posed them this frame,
+    /// None for a model that isn't humanoid.
     /// Not asked for what a mod drew itself (`native_mob_submit`,
     /// `native_player_submit`) nor for a mob that isn't drawn at all.
     pub(in crate::game) fn native_mob_layer(
         &self,
         mob: &NativeMobRender<'_>,
         who: Option<&NativePlayerRender<'_>>,
+        parts: Option<&PosedParts>,
         draw: &mut BlockEntityDraw,
     ) {
-        self.fire_mob_layer(mob, who, draw);
+        self.fire_mob_layer(mob, who, parts, draw);
     }
     /// Icons a mod puts on map `map` each time it is drawn: held, in an
     /// item frame or on the cartography table's screen (a map's pixels are

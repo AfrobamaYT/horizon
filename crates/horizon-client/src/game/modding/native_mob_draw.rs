@@ -109,8 +109,9 @@ impl Game<'_> {
         if !listened {
             return;
         }
+        let parts = horizon_client::mobs::render::posed_parts(mob, partial, self.res.mob_data());
         self.mod_entity_draw(mob, partial, camera, light, out, |render, draw| {
-            self.native_mob_layer(render, who.as_ref(), draw);
+            self.native_mob_layer(render, who.as_ref(), parts.as_ref(), draw);
             true
         });
     }
