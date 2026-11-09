@@ -1827,6 +1827,11 @@ fn main() {{ generated::dispatch_setting_changed(&mut (), "a", "toggle"); assert
             root.join("crates/horizon-client/src/game/native_hooks/base.rs"),
         )
         .unwrap();
+        let source = source
+            + &std::fs::read_to_string(
+                root.join("crates/horizon-client/src/game/native_hooks/shared.rs"),
+            )
+            .unwrap();
         let file = syn::parse_file(&source).unwrap();
         let methods: String = file
             .items
@@ -1843,6 +1848,7 @@ fn main() {{ generated::dispatch_setting_changed(&mut (), "a", "toggle"); assert
                                     "set_setting",
                                     "store_setting",
                                     "another_mods",
+                                    "native_setting_event",
                                 ]
                                 .contains(&f.sig.ident.to_string().as_str()) =>
                             {
@@ -1875,9 +1881,9 @@ fn main() {{ generated::dispatch_setting_changed(&mut (), "a", "toggle"); assert
             r#"
 #![allow(dead_code)]
 mod mod_api {{
-    #[derive(Clone, Debug, PartialEq)] pub enum SettingValue {{ Toggle(bool) }}
+    #[derive(Clone, Debug, PartialEq)] pub enum SettingValue {{ Toggle(bool), Choice(usize), Range(f64), Color(u32) }}
     pub struct Spec;
-    impl Spec {{ pub fn read(&self, raw: Option<&str>) -> SettingValue {{ SettingValue::Toggle(raw == Some("true")) }} }}
+    impl Spec {{ pub fn store(&self, value: SettingValue) -> Option<String> {{ match value {{ SettingValue::Toggle(v) => Some(v.to_string()), _ => None }} }} pub fn read(&self, raw: Option<&str>) -> SettingValue {{ SettingValue::Toggle(raw == Some("true")) }} }}
     pub mod crash {{ pub fn current_native_mod() -> Option<&'static str> {{ Some("a") }} }}
     pub mod __private {{ pub fn setting(owner: &str, key: &str) -> Option<super::Spec> {{ (owner == "a" && key == "toggle").then_some(super::Spec) }} }}
 }}
@@ -1893,19 +1899,28 @@ pub(super) fn typed(dir: &Path, key: &str) -> Option<mod_api::SettingValue> {{ r
 use std::{{fs, path::PathBuf, cell::RefCell, collections::BTreeMap}};
 struct Context;
 impl Context {{ fn setting(&self, _: &str, _: &str) -> Option<String> {{ Some("loaded".into()) }} }}
-struct Game {{ loop_context: Context, setting_overrides: RefCell<BTreeMap<(String, String), String>>, root: PathBuf }}
+enum NativeSettingValue {{ Toggle(bool), Choice {{ index: usize }}, Range {{ value: f64 }}, Color(u32) }}
+struct Setting {{ key: String, value: NativeSettingValue }}
+struct Page {{ settings: Vec<Setting> }}
+struct Row {{ id: String, native: Option<Page> }}
+struct Mods {{ installed: Vec<Row> }}
+struct Settings {{ mods: Mods }}
+struct Game {{ settings: Settings, notifications: usize, loop_context: Context, setting_overrides: RefCell<BTreeMap<(String, String), String>>, root: PathBuf }}
 impl Game {{
+    fn native_setting_changed(&mut self, _: &str, _: &str) {{ self.notifications += 1; }}
     fn native_data_dir(&self, id: &str) -> PathBuf {{ self.root.join(id) }}
     {methods}
 }}
 pub fn run(root: PathBuf) {{
-    let game = Game {{ loop_context: Context, setting_overrides: RefCell::new(BTreeMap::new()), root }};
+    let mut game = Game {{ settings: Settings {{ mods: Mods {{ installed: vec![Row {{ id: "a".into(), native: Some(Page {{ settings: vec![Setting {{ key: "toggle".into(), value: NativeSettingValue::Toggle(true) }}] }}) }}] }} }}, notifications: 0, loop_context: Context, setting_overrides: RefCell::new(BTreeMap::new()), root }};
     assert_eq!(game.setting("a", "toggle"), None);
     assert_eq!(game.setting("b", "toggle"), None);
     game.set_setting("b", "toggle", "stolen");
     assert!(!game.native_data_dir("b").exists());
     game.set_setting("a", "toggle", "edited");
     assert_eq!(game.setting("a", "toggle").as_deref(), Some("edited"));
+    game.native_setting_event(0, 0);
+    assert_eq!(game.notifications, 1);
     game.set_setting("a", "toggle", "true");
     assert_eq!(mod_settings::typed(&game.native_data_dir("a"), "toggle"), Some(mod_api::SettingValue::Toggle(true)));
     fs::write(game.native_data_dir("a").join("toggle"), "false").unwrap();
@@ -1916,9 +1931,13 @@ pub fn run(root: PathBuf) {{
     fs::remove_file(game.native_data_dir("a").join("toggle")).unwrap();
     fs::create_dir(game.native_data_dir("a").join("toggle")).unwrap();
     assert!(!game.store_setting("a", "toggle", "true"));
-    game.set_setting("a", "../escape", "bad");
-    assert!(!game.root.join("escape").exists());
-    assert_eq!(game.setting("a", "../escape"), None);
+    game.native_setting_event(0, 0);
+    assert_eq!(game.notifications, 1, "failed persistence must not notify");
+    fs::create_dir_all(game.root.join("b")).unwrap();
+    fs::write(game.root.join("b/secret"), "secret").unwrap();
+    game.set_setting("a", "../b/secret", "bad");
+    assert_eq!(fs::read_to_string(game.root.join("b/secret")).unwrap(), "secret");
+    assert_eq!(game.setting("a", "../b/secret"), None);
 }}
 }}
 fn main() {{ game::run(std::env::args_os().nth(1).unwrap().into()); }}
