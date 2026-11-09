@@ -1377,7 +1377,7 @@ pub(crate) fn encode_operation(operation: &Operation) -> Result<Vec<u8>, OpError
     // The limit is the model's own constant, the same one Cell::new
     // enforces for the carrier codec.
     use horizon_world::carrier::model::MAX_NBT_STRING_BYTES as NBT_STRING_LIMIT;
-    let mut string = |text: &str| -> Result<(), OpError> {
+    let string = |text: &str| -> Result<(), OpError> {
         if text.len() > NBT_STRING_LIMIT {
             return Err(OpError::StringTooLong { len: text.len() });
         }
