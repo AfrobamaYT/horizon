@@ -239,7 +239,7 @@ pub fn route<'a>(
         return Err(Refusal::Inject(InjectError::NoSlot {
             id,
             reason: if api {
-                NoSlotReason::ApiSitesPending
+                NoSlotReason::ApiSitesUnsupported
             } else {
                 NoSlotReason::NotListed
             },
