@@ -2599,6 +2599,12 @@ impl Game<'_> {
                 } else {
                     &horizon_client::item_tooltip::NoAttributeListener
                 };
+            let catalog = &self.motion.attributes;
+            let sentiment = |attribute: &str| {
+                catalog
+                    .id(attribute)
+                    .map(|id| catalog.attribute(id).sentiment)
+            };
             let (modifier_lines, added) = horizon_client::item_tooltip::attribute_tooltip(
                 stack,
                 &modifiers,
@@ -2606,6 +2612,7 @@ impl Game<'_> {
                 shown_modifiers,
                 listener,
                 &translate,
+                &sentiment,
             );
             for (text, c) in modifier_lines {
                 push(&mut lines, text, c);

@@ -13,11 +13,13 @@
 
 - [Trait mods, Parts and attachments](concepts/trait-mods.md)
 - [Mod render colour](concepts/mod-render-colour.md)
+- [Create and Mekanism capabilities](concepts/create-mekanism-capabilities.md)
 - [Where the mod API is going](concepts/design.md)
 - [Design: transactional block-entity removal](concepts/block-entity-removal.md)
 - [Design: client action pipeline](concepts/client-action-pipeline.md)
 - [Design: moving structures](concepts/moving-structures.md)
 - [Design: custom recipe-book settings](concepts/recipe-book-types.md)
+- [Design: section meshing](concepts/section-meshing.md)
 - [Design: travel and move hooks](concepts/travel-and-move.md)
 
 # How-to
