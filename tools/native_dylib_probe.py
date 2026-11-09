@@ -208,6 +208,7 @@ def main():
         # 3. At run time, which heap each allocator draws from (classified, never freed across).
         heap_exe = shipped / "route_heap.exe"
         run([*route, "--crate-name=route_heap", *extern("horizon_client"), *extern("mod_api"),
+             *(flag for arg in identity["link_args"] for flag in ("-C", f"link-arg={arg}")),
              str(FIXTURES / "route_heap.rs"), "-o", str(heap_exe)])
         heap = subprocess.run([str(heap_exe), game.name, std_runtime[0].name, names["alloc"], names["dealloc"]],
                               env=runtime_env(shipped), capture_output=True, text=True)

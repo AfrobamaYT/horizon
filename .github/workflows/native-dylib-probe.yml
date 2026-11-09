@@ -69,3 +69,6 @@ jobs:
         run: python tools/prebuilt_game.py exports prebuilt
       - name: Two mod libraries share the game's exact Rust state
         run: python tools/native_dylib_probe.py --sdk prebuilt --output target/native-dylib-probe
+      - name: Probe command log
+        if: failure()
+        run: tail -n 120 target/native-dylib-probe/commands.log

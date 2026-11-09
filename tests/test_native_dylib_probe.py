@@ -8,7 +8,7 @@ import tempfile
 import unittest
 
 TOOLS = Path(__file__).resolve().parents[1] / "tools"
-sys.path.insert(0, str(TOOLS))
+sys.path.append(str(TOOLS))
 spec = importlib.util.spec_from_file_location("native_dylib_probe", TOOLS / "native_dylib_probe.py")
 probe = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(probe)
