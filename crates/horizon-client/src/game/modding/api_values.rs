@@ -1994,7 +1994,7 @@ impl super::Game<'_> {
                 .map(Some)
                 .map_err(|_| BlockEntitySnapshotError::InvalidStack)
         };
-        if let Ok(cursor) = finish_block_entity_writeback(
+        if let Ok(Some(cursor)) = finish_block_entity_writeback(
             entity,
             &api,
             revision,
@@ -2002,9 +2002,7 @@ impl super::Game<'_> {
             "menu_button",
             cursor,
         ) {
-            if let Some(cursor) = cursor {
-                *carried = cursor;
-            }
+            *carried = cursor;
         }
     }
     pub(in crate::game) fn api_menu_quick_move(
