@@ -515,6 +515,36 @@ impl World {
     pub fn is_loaded_at(&self, x: i32, y: i32, z: i32) -> bool {
         self.shape.contains_y(y) && self.loaded(x, z)
     }
+    /// Persisted container capacity override; absence preserves vanilla capacity.
+    pub fn container_stack_limit(&self, key: (i32, i32, i32)) -> Option<u32> {
+        self.chunks
+            .get(&(key.0 >> 4, key.2 >> 4))
+            .and_then(|c| c.saved.as_ref())
+            .and_then(|s| s.block_entity_sources.iter().find(|(p, _)| *p == key))
+            .and_then(|(_, tag)| tag.get("horizon:stack_limit"))
+            .and_then(|tag| match tag {
+                horizon_core::nbt::Tag::Int(n) if (1..=99).contains(n) => Some(*n as u32),
+                _ => None,
+            })
+    }
+    /// Store with the authoritative saved block entity fields.
+    pub fn set_container_stack_limit(&mut self, key: (i32, i32, i32), limit: u32) {
+        use horizon_core::nbt::{Compound, Tag};
+        self.with_chunk_extras(key, |extras| {
+            if !extras.block_entity_sources.iter().any(|(p, _)| *p == key) {
+                extras
+                    .block_entity_sources
+                    .push((key, Tag::Compound(Compound::new())));
+            }
+            if let Some((_, Tag::Compound(tag))) = extras
+                .block_entity_sources
+                .iter_mut()
+                .find(|(p, _)| *p == key)
+            {
+                tag.insert("horizon:stack_limit".into(), Tag::Int(limit as i32));
+            }
+        });
+    }
     /// `LockCode`: the `lock` a container block entity refuses to open
     /// without, as the tag it was loaded or set with carries it (Horizon's
     /// model holds no field for it).
