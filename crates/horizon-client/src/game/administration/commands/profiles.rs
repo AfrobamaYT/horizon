@@ -39,6 +39,7 @@ impl Game<'_> {
     pub(super) fn cmd_save_all(&mut self) -> R<i32> {
         self.dedicated_lists()?;
         self.feedback(Text::translate("commands.save.saving", &[]));
+        Self::admit_entity_save().map_err(|_| err("commands.save.failed", &[]))?;
         if self.lan_acting.is_some() {
             // The acting guest's record holds the game's state until their
             // turn ends: saving now would write it to their file.
@@ -46,8 +47,11 @@ impl Game<'_> {
             self.save_after_guest_turn = true;
             return Ok(1);
         }
-        let reply = self.save_all_reply();
-        self.feedback(reply);
+        self.save_game().map_err(|e| {
+            log::error!("Horizon: /save-all: {e}");
+            err("commands.save.failed", &[])
+        })?;
+        self.feedback(Text::translate("commands.save.success", &[]));
         Ok(1)
     }
 
