@@ -122,7 +122,14 @@ pub fn lease_paths(
     selection: &LaunchArguments,
     data: &Path,
 ) -> io::Result<Vec<(PathBuf, bool)>> {
-    let install = executable.parent().ok_or(io::ErrorKind::InvalidInput)?;
+    // Normalize both sides, including Windows' extended-path prefix and macOS /tmp aliases.
+    let data = data.canonicalize()?;
+    let data = data.as_path();
+    let install = executable
+        .parent()
+        .ok_or(io::ErrorKind::InvalidInput)?
+        .canonicalize()?;
+    let install = install.as_path();
     if install.ancestors().any(|path| {
         path.file_name()
             .is_some_and(|name| name.to_string_lossy().starts_with(".trash-"))
@@ -216,6 +223,7 @@ mod tests {
         std::fs::remove_file(install.join(".installed")).unwrap();
         drop(cleanup);
         assert!(acquire_standalone(&executable, &selection).is_err());
+        drop(directory);
         std::fs::remove_dir(&install).unwrap();
         assert!(acquire_standalone(&executable, &selection).is_err());
     }
@@ -306,10 +314,19 @@ mod tests {
         std::fs::write(install.join(".installed"), b"").unwrap();
         assert!(acquire_snapshots(&registry, &[snapshot]).is_err());
         let snapshot = Snapshot::capture(&install, true).unwrap();
-        std::fs::rename(&install, root.path().join("old-install")).unwrap();
-        std::fs::create_dir(&install).unwrap();
-        std::fs::write(install.join(".installed"), b"").unwrap();
-        assert!(acquire_snapshots(&registry, &[snapshot]).is_err());
+        #[cfg(windows)]
+        {
+            // Retained Windows directory handles exclude replacement itself.
+            assert!(std::fs::rename(&install, root.path().join("old-install")).is_err());
+            assert!(acquire_snapshots(&registry, &[snapshot]).is_ok());
+        }
+        #[cfg(unix)]
+        {
+            std::fs::rename(&install, root.path().join("old-install")).unwrap();
+            std::fs::create_dir(&install).unwrap();
+            std::fs::write(install.join(".installed"), b"").unwrap();
+            assert!(acquire_snapshots(&registry, &[snapshot]).is_err());
+        }
     }
 
     #[test]
