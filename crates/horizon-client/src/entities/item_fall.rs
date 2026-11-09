@@ -74,7 +74,7 @@ impl ItemEntity {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use horizon_core::geometry::BlockPos;
+    use horizon_core::position::BlockPos;
 
     #[test]
     fn clipping_a_reset_block_resets_before_the_move_and_landing_notice() {

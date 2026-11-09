@@ -1233,7 +1233,7 @@ impl Game<'_> {
             "minecraft:silverfish",
             at,
             false,
-            creatures::SpawnSite::Plain,
+            crate::game::creatures::SpawnSite::Plain,
         ) {
             self.mob_poof(id);
         }
