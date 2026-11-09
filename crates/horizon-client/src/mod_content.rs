@@ -999,8 +999,7 @@ fn read_json(path: &Path) -> Result<J> {
 
 impl Plan<'_> {
     /// `entity-types.json` with a row for each mod type: its template's, so its
-    /// size, eyes and category are the template's (`execute anchored eyes`,
-    /// spawner checks and the commands' entity type list, `reg.entity_types`),
+    /// size, eyes and category remain the template's (eyes, spawners and `reg.entity_types`),
     /// with `template`, passenger attachments and a living type's attribute bases (`MobTypes`
     /// makes the mob from it). Template values stay raw text: parsing and rewriting a float
     /// such as a zombie's `movement_speed` can come back one ulp off.
