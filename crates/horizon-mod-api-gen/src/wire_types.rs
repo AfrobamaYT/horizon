@@ -9,7 +9,7 @@ use syn::{Item, Visibility};
 type Exports = BTreeMap<String, Vec<(String, String)>>;
 
 /// Lists concrete wire types by a public path from the crate root, following re-exports.
-/// Conditional declarations and uninstantiated generic types are excluded.
+/// Conditional public declarations are refused; uninstantiated generic types are excluded.
 /// Uses the point scanner's module traversal, including explicit module paths.
 pub fn public_types(krate: &str, lib: &Path) -> Result<Vec<String>, String> {
     let dir = lib.parent().ok_or("library has no source directory")?;
@@ -19,11 +19,39 @@ pub fn public_types(krate: &str, lib: &Path) -> Result<Vec<String>, String> {
     for file in files {
         let source = fs::read_to_string(file.path).map_err(|e| e.to_string())?;
         let parsed = syn::parse_file(&source).map_err(|e| e.to_string())?;
+        reject_conditions(&file.module, &parsed.items)?;
         items(krate, &file.module, &parsed.items, &mut exports, &mut types);
     }
     let mut found = BTreeSet::new();
     visit(krate, krate, &exports, &types, &mut Vec::new(), &mut found);
     Ok(found.into_iter().collect())
+}
+
+fn reject_conditions(module: &str, items: &[Item]) -> Result<(), String> {
+    for item in items {
+        let (name, vis, attrs) = match item {
+            Item::Struct(i) => (i.ident.to_string(), &i.vis, &i.attrs),
+            Item::Enum(i) => (i.ident.to_string(), &i.vis, &i.attrs),
+            Item::Mod(i) => (i.ident.to_string(), &i.vis, &i.attrs),
+            Item::Use(i) => ("public re-export".into(), &i.vis, &i.attrs),
+            _ => continue,
+        };
+        if matches!(vis, Visibility::Public(_))
+            && attrs
+                .iter()
+                .any(|a| a.path().is_ident("cfg") || a.path().is_ident("cfg_attr"))
+        {
+            return Err(format!(
+                "layouts: {module}::{name} is declared under #[cfg] or #[cfg_attr]; public declarations used for Wire discovery must be unconditional"
+            ));
+        }
+        if let Item::Mod(i) = item
+            && let Some((_, children)) = &i.content
+        {
+            reject_conditions(&format!("{module}::{}", i.ident), children)?;
+        }
+    }
+    Ok(())
 }
 
 fn visit(
@@ -194,6 +222,24 @@ mod tests {
         fs::write(root.join("lib.rs"), "#[derive(mod_api::Wire)] pub struct Root; #[derive(Wire)] struct Private; pub mod visible; mod hidden; pub use hidden::Hidden as Reexported; pub mod inline { #[derive(Wire)] pub enum Value { A } } pub struct Manual; impl wire::Wire for Manual {} #[cfg(test)] mod tests; ").unwrap();
         fs::write(root.join("visible.rs"), "#[derive(Wire)] pub struct Child; #[cfg(unix)] #[derive(Wire)] pub struct Conditional;").unwrap();
         fs::write(root.join("hidden.rs"), "#[derive(Wire)] pub struct Hidden;").unwrap();
+        assert!(
+            public_types("library", &root.join("lib.rs"))
+                .unwrap_err()
+                .contains("library::visible::Conditional")
+        );
+        for declaration in [
+            "#[cfg_attr(unix, derive(Wire))] pub struct Conditional;",
+            "#[cfg(unix)] pub mod Conditional { #[derive(Wire)] pub struct T; }",
+            "#[cfg_attr(unix, cfg(unix))] pub use super::Root as Conditional;",
+        ] {
+            fs::write(root.join("visible.rs"), declaration).unwrap();
+            assert!(
+                public_types("library", &root.join("lib.rs"))
+                    .unwrap_err()
+                    .contains("library::visible::")
+            );
+        }
+        fs::write(root.join("visible.rs"), "#[derive(Wire)] pub struct Child;").unwrap();
         assert_eq!(
             public_types("library", &root.join("lib.rs")).unwrap(),
             vec![

@@ -59,3 +59,7 @@ The derive handles this bookkeeping automatically and is preferred.
 A hand decoder owns tag validation and must use `Reader::nested` for recursive
 values. `Reader` checks byte bounds and UTF-8, but cannot enforce invariants that
 an implementation neglects. Keep validation at the checked constructor boundary.
+
+Public declarations used in layout discovery must be unconditional. The layout probe refuses
+`#[cfg]` and `#[cfg_attr]` on public types, modules, and re-exports, naming the declaration.
+Keep target-specific implementation details private; publish an unconditional Wire representation.
