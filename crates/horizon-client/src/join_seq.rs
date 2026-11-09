@@ -592,18 +592,21 @@ impl<T, const DIRECT: bool> JoinList<T, DIRECT> {
     /// Extract selected owners eagerly in list order, compacting survivors in place.
     /// The predicate cannot replace an entity or change its identity.
     pub fn extract_if(&mut self, mut take: impl FnMut(&T) -> bool) -> std::vec::IntoIter<T> {
-        self.written();
-        let binding = &self.1;
-        self.0
-            .extract_if(.., |entity| {
-                let removed = take(entity);
-                if removed && let Some(binding) = binding {
-                    binding.entity(entity, residency::Change::Remove);
-                }
-                removed
-            })
+        self.extract_where(|entity| take(entity))
             .collect::<Vec<_>>()
             .into_iter()
+    }
+    fn extract_where(&mut self, mut take: impl FnMut(&mut T) -> bool) -> impl Iterator<Item = T> {
+        self.written();
+        let binding = &self.1;
+        self.0.extract_if(.., move |entity| {
+            let before = binding.as_ref().map(|binding| binding.read(entity));
+            let removed = take(entity);
+            if removed && let (Some(binding), Some((id, join))) = (binding, before) {
+                binding.identity(id, join, residency::Change::Remove);
+            }
+            removed
+        })
     }
     pub fn swap_remove(&mut self, index: usize) -> T {
         self.written();
@@ -705,6 +708,14 @@ impl<T> JoinList<T> {
         })
     }
 
+    /// Lazily yield selected owners in list order, compacting survivors in place.
+    /// Unlike `extract_if`, dropping this iterator leaves unvisited rows untouched.
+    /// A panicking predicate retains its current row and edits, without emitting
+    /// its removal. Only yielded rows retire, using their pre-predicate identity.
+    /// No journal lock is held while the predicate runs.
+    pub fn extract_if_mut(&mut self, take: impl FnMut(&mut T) -> bool) -> impl Iterator<Item = T> {
+        self.extract_where(take)
+    }
     pub fn retain_mut(&mut self, keep: impl FnMut(&mut T) -> bool) {
         self.written();
         self.retain_where(keep);
@@ -1561,6 +1572,56 @@ mod tests {
             });
             assert_eq!(changes(&journal), expected);
         }
+    }
+
+    #[test]
+    fn lazy_mutable_extraction_keeps_unvisited_rows_and_original_identity() {
+        let (mut list, journal) = journal_list();
+        let keys: Vec<_> = list.iter().map(key).collect();
+        changes(&journal);
+        let mut visited = Vec::new();
+        {
+            let mut extracted = list.extract_if_mut(|row| {
+                visited.push(row.value);
+                row.value += 10;
+                row.join = JoinSeq::next();
+                true
+            });
+            assert_eq!(extracted.next().unwrap().value, 11);
+        }
+        assert_eq!(visited, [1]);
+        assert_eq!(changes(&journal), [residency::Change::Remove(keys[0])]);
+        assert_eq!(list.iter().map(key).collect::<Vec<_>>(), keys[1..]);
+    }
+
+    #[test]
+    fn lazy_mutable_extraction_panics_without_retiring_current_edits() {
+        let (mut list, journal) = journal_list();
+        let keys: Vec<_> = list.iter().map(key).collect();
+        changes(&journal);
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut iter = list.extract_if_mut(|row| {
+                let value = row.value;
+                row.value += 10;
+                // Binding access during a predicate must not hold a journal lock.
+                assert!(changes(&journal).is_empty());
+                assert_ne!(value, 2, "predicate panic");
+                true
+            });
+            assert_eq!(iter.next().unwrap().value, 11);
+            assert_eq!(changes(&journal), [residency::Change::Remove(keys[0])]);
+            iter.next();
+        }));
+        assert!(panic.is_err());
+        assert!(changes(&journal).is_empty());
+        assert_eq!(
+            list.iter().map(|row| row.join).collect::<Vec<_>>(),
+            keys[1..].iter().map(|key| key.join).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            list.iter().map(|row| row.value).collect::<Vec<_>>(),
+            [12, 3]
+        );
     }
 
     #[test]
