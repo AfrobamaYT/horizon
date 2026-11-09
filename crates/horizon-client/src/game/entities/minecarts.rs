@@ -1564,7 +1564,7 @@ impl Game<'_> {
                 }
                 for (_, rider, player) in self.seated_passengers(c.id) {
                     if !player {
-                        self.dismount_mob(rider);
+                        self.dismount_mob_from_cart(rider, c);
                     }
                 }
                 if c.hurt_time == 0 {
@@ -4217,8 +4217,18 @@ mod rejected_passenger_tests {
             assert_eq!(game.seated_passengers(camel).len(), 3);
             assert!(!game.start_riding_target(Target::Mob(candidate), Target::Mob(camel), false));
             let mut active = game.carts[0].clone();
+            active.position = Vec3::new(40.0, 70.0, 40.0);
+            active.yaw = 90.0;
+            active.flipped = true;
             game.activate_cart(&mut active, true);
-            assert_eq!(game.mob_object(ghost).unwrap().extra.mount, None);
+            let rider = game.mob_object(ghost).unwrap();
+            assert_eq!(rider.extra.mount, None);
+            assert_eq!(rider.position, Vec3::new(40.0, 70.0 + HEIGHT, 40.0));
+            assert_eq!(rider.previous, rider.position);
+            let leaf = game.mob_passenger_ids(ghost)[0];
+            assert_eq!(game.mob_object(leaf).unwrap().position.x, 40.0);
+            assert!(game.mob_object(leaf).unwrap().position.y >= 70.0);
+            assert_eq!(game.carts[0].position, Vec3::new(8.0, 64.0, 8.0));
         });
     }
 

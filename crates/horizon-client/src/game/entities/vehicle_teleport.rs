@@ -79,8 +79,16 @@ fn vehicle_id(t: Target) -> Option<u32> {
 impl Game<'_> {
     /// `AbstractMinecart.getDismountLocationForPassenger` for a standing mob.
     pub(super) fn cart_dismount_point(&self, vehicle: u32, rider: u32) -> Option<Vec3> {
+        self.cart_dismount_point_from(self.carts.iter().find(|c| c.id == vehicle)?, rider)
+    }
+
+    /// The live tick snapshot may have moved beyond the cart's owning slot.
+    pub(super) fn cart_dismount_point_from(
+        &self,
+        cart: &super::minecarts::Minecart,
+        rider: u32,
+    ) -> Option<Vec3> {
         use horizon_core::geometry::Aabb;
-        let cart = self.carts.iter().find(|c| c.id == vehicle)?;
         let rider = self.mob_object(rider)?;
         let direction =
             (f64::from(cart.yaw) / 90.0 + 0.5).floor() as i32 + if cart.flipped { 3 } else { 1 };

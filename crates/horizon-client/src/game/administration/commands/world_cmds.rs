@@ -1759,10 +1759,33 @@ impl Game<'_> {
     /// (Entity.removePassenger), then to where the vehicle lets it out
     /// (LivingEntity.dismountVehicle).
     pub(in crate::game) fn dismount_mob(&mut self, rider: u32) {
+        self.dismount_mob_with_cart(rider, None);
+    }
+
+    pub(in crate::game) fn dismount_mob_from_cart(
+        &mut self,
+        rider: u32,
+        cart: &super::super::minecarts::Minecart,
+    ) {
+        self.dismount_mob_with_cart(rider, Some(cart));
+    }
+
+    fn dismount_mob_with_cart(
+        &mut self,
+        rider: u32,
+        cart: Option<&super::super::minecarts::Minecart>,
+    ) {
         let Some(v) = self.mob_object(rider).and_then(|mob| mob.extra.mount) else {
             return;
         };
         if !self.native_mob_may_ride(rider, v, false) {
+            return;
+        }
+        // A callback can remove or remount the rider. Do not overwrite its decision.
+        if self
+            .mob_object(rider)
+            .is_none_or(|mob| mob.extra.mount != Some(v))
+        {
             return;
         }
         if let Some(mob) = self.mob_object_mut(rider) {
@@ -1776,7 +1799,10 @@ impl Game<'_> {
         if let Some(vehicle) = self.mob_object_mut(v) {
             vehicle.extra.rider = remaining;
         }
-        let at = self.mob_dismount_point(v, rider);
+        let at = match cart.filter(|cart| cart.id == v) {
+            Some(cart) => self.cart_dismount_point_from(cart, rider),
+            None => self.mob_dismount_point(v, rider),
+        };
         let Some(m) = self.mob_object_mut(rider) else {
             return;
         };
