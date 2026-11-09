@@ -72,12 +72,13 @@ pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProbl
 use mod_api::{
     self, Answered, BlockPlacement, BlockTintSources, CameraDrawContext, ClientAudioOptions,
     ClientChatOptions, ClientGraphicsOptions, ClientGuiOptions, ClientInputOptions,
-    ClientMiningPrediction, ClientModifiers, ClientReloadListeners, CommandInvocation,
-    EnchantmentInfo, EntityRef, GameRuleActor, InsideEffects, InteractionAttempt, InteractionKey,
-    LayerDefinition, LivingRef, NativeCamera, NativeCommand, NativeDispensed, NativeHandRender,
-    NativeKeyMapping, NativeLifecycleContext, NativeNoteBlockChange, PathComputationType,
-    Placement, PlayerRef, RecipeBookCategory, ScreenId, ScreenOpening, ScreenshotImage,
-    ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
+    ClientMiningPrediction, ClientModifiers, ClientReloadListeners, ColorResolvers,
+    CommandInvocation, EnchantmentDamageEffects, EnchantmentInfo, EntityRef, GameRuleActor,
+    InsideEffects, InteractionAttempt, InteractionKey, LayerDefinition, LivingRef, NativeCamera,
+    NativeCommand, NativeDispensed, NativeHandRender, NativeKeyMapping, NativeLifecycleContext,
+    NativeNoteBlockChange, ParticleProviders, PathComputationType, Placement, PlayerRef,
+    RecipeBookCategory, ScreenId, ScreenOpening, ScreenshotImage, ServerReloadListeners,
+    ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
     AttachmentStore, BonemealSource, ChunkRef, FluidStack, LevelRef, LogicalSide,
@@ -119,6 +120,7 @@ use {
 include!(concat!(env!("OUT_DIR"), "/native_hook_modules.rs"));
 pub(in crate::game) use add_attribute_tooltips::HookedAttributeTooltips;
 pub(in crate::game) use fishing_medium::NativeFishingMedium;
+pub(in crate::game) use living_change_target::NativeHookHost;
 include!("shared.rs");
 
 use mod_api::ModBlockEntity;

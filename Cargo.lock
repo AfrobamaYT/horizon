@@ -507,6 +507,7 @@ dependencies = [
  "horizon-mod-package",
  "horizon-mod-point-emit",
  "horizon-port-pack",
+ "libc",
  "rustc-demangle",
  "serde",
  "serde_json",
@@ -1730,6 +1731,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-addresses"
+version = "0.1.0"
+
+[[package]]
 name = "horizon-anticheat"
 version = "0.1.0"
 dependencies = [
@@ -1943,7 +1948,6 @@ dependencies = [
  "glam",
  "half",
  "horizon-assets",
- "horizon-bench",
  "horizon-client-core",
  "horizon-client-input",
  "horizon-command",
@@ -2023,6 +2027,7 @@ dependencies = [
  "chacha20poly1305",
  "getrandom 0.3.4",
  "hkdf",
+ "horizon-addresses",
  "if-addrs",
  "serde",
  "serde_json",
@@ -2078,7 +2083,6 @@ dependencies = [
  "horizon-mod-api-macros",
  "horizon-mod-package",
  "horizon-mod-runtime",
- "horizon-world",
  "log",
  "serde",
  "serde_json",
@@ -2152,21 +2156,30 @@ dependencies = [
 name = "horizon-mod-package"
 version = "0.1.0"
 dependencies = [
+ "cap-fs-ext",
  "cap-std",
  "flate2",
+ "getrandom 0.4.3",
  "horizon-core",
  "horizon-shader-api",
+ "libc",
  "log",
  "minisign-verify",
+ "os_pipe",
  "png",
+ "rustix 1.1.5",
  "semver",
  "serde",
  "serde_json",
  "sha2",
+ "socket2 0.6.5",
+ "subtle",
  "tar",
+ "tempfile",
  "toml",
  "wasmparser 0.261.0",
  "wat",
+ "windows-sys 0.61.2",
  "zip",
 ]
 
@@ -2228,6 +2241,7 @@ dependencies = [
  "horizon-core",
  "horizon-mod-api",
  "horizon-mod-api-gen",
+ "horizon-mod-api-macros",
  "horizon-mod-package",
  "horizon-mod-point-emit",
  "horizon-mod-points",
@@ -2268,6 +2282,13 @@ dependencies = [
  "log",
  "regex",
  "zip",
+]
+
+[[package]]
+name = "horizon-platform"
+version = "0.1.0"
+dependencies = [
+ "horizon-system",
 ]
 
 [[package]]

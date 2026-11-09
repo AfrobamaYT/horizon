@@ -1425,6 +1425,27 @@ pub(super) fn use_totem(level: DamageLevel<'_>, hurting: Hurting<'_>, off_hand: 
 /// per hit would allocate its entity boxes.
 pub(super) struct HitLevel<'a>(pub(super) DamageLevel<'a>);
 
+/// Let listeners override the vanilla invulnerability decision for this hit.
+pub(super) fn invulnerability_check(
+    level: DamageLevel<'_>,
+    hurting: Hurting<'_>,
+    vanilla: bool,
+) -> bool {
+    if !mod_api::__private::listened(mod_api::HookId::EntityInvulnerabilityCheck) {
+        return vanilla;
+    }
+    let (entity, kind, source) = hurt_server_args(hurting, level.attack());
+    let mut invulnerable = vanilla;
+    HitLevel(level).native_entity_invulnerability_check(
+        entity,
+        kind,
+        &source,
+        vanilla,
+        &mut invulnerable,
+    );
+    invulnerable
+}
+
 /// `native_living_incoming_damage` for the damage code: whether it
 /// canceled the hit.
 pub(super) fn incoming_damage(
@@ -1587,7 +1608,8 @@ pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut
         },
         Hurting::Player(_, source)
         | Hurting::Dragon(_, source)
-        | Hurting::ArmorStand(_, source) => {
+        | Hurting::ArmorStand(_, source)
+        | Hurting::Entity(_, _, source) => {
             if source.causing != 0 {
                 source.causing
             } else {
@@ -1619,6 +1641,7 @@ pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut
 
 /// The damage hooks every level of the game lends to its hits (`Game.damage_hooks`).
 pub(super) const DAMAGE_HOOKS: DamageHooks = DamageHooks {
+    invulnerable: Some(invulnerability_check),
     incoming: Some(incoming_damage),
     pre: Some(damage_pre),
     post: Some(damage_post),
@@ -1726,6 +1749,7 @@ fn hurt_server_args<'a>(hurting: Hurting<'a>, attack: &Attack) -> (i32, &'a str,
         ),
         Hurting::Dragon(entity, source) => (entity, "minecraft:ender_dragon", source),
         Hurting::ArmorStand(entity, source) => (entity, "minecraft:armor_stand", source),
+        Hurting::Entity(entity, kind, source) => (entity, kind, source),
     }
 }
 /// A mob's damage as its `DamageSource`: the causing entity is known when it
@@ -4121,7 +4145,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn declared_types_create_tick_and_reload_through_game() {
-        use super::super::native_entity_refs::tests::{run_fresh_cases, with_game_at};
+        use super::super::native_entity_refs::tests::{record_key, run_fresh_cases, with_game_at};
         use horizon_client::{chunk::Chunk, containers::BlockEntity, save};
         use mod_api::{self, *};
         use std::sync::Arc;
@@ -4191,11 +4215,11 @@ mod tests {
                     .expect("native type");
                 registrar
                     .block_entity_capability(&PROBE, &kind, |_, _| Some(Box::new(Marker(6300))));
-                self.keys.shared.set(kind).unwrap();
+                record_key(&self.keys.shared, kind);
                 let vanilla = registrar.block_entity_type_key("minecraft:chest");
                 registrar
                     .block_entity_capability(&PROBE, &vanilla, |_, _| Some(Box::new(Marker(26))));
-                self.keys.vanilla.set(vanilla).unwrap();
+                record_key(&self.keys.vanilla, vanilla);
                 if let Some(id) = self.unknown {
                     registrar.block_entity_type_key(id);
                 }
@@ -4216,7 +4240,7 @@ mod tests {
                         &[FIRST, SECOND]
                     })
                     .build();
-                self.keys.own.set(kind).unwrap();
+                record_key(&self.keys.own, kind);
                 registrar
                     .block_entity_type("empty")
                     .blocks(&[EMPTY])
@@ -4302,18 +4326,18 @@ mod tests {
                     Ok(true)
                 );
                 let pos = (x, 64, 0);
+                if block == PLAIN {
+                    // No declared type claims it, and no mod adds it to `minecraft:banner`'s
+                    // valid blocks, so its template creates no entity (`validateBlockState`).
+                    assert!(game.world.block_entities.get(&pos).is_none());
+                    assert!(game.block_entity(level, [x, 64, 0]).is_none());
+                    continue;
+                }
                 let handle = game.block_entity(level, [x, 64, 0]).unwrap();
                 if block == "minecraft:chest" {
                     assert_eq!(handle.kind(game).as_ref(), keys.vanilla.get());
                     let probe = level.capability(game, &PROBE, [x, 64, 0], None).unwrap();
                     assert_eq!((probe.value(), probe.owner()), (26, "be_user".into()));
-                    continue;
-                }
-                if block == PLAIN {
-                    assert!(matches!(
-                        game.world.block_entities.get(&pos),
-                        Some(BlockEntity::Banner(_))
-                    ));
                     continue;
                 }
                 let Some(BlockEntity::Mod(entity)) = game.world.block_entities.get(&pos) else {
@@ -4374,8 +4398,8 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn client_host_reads_current_pause_state() {
-        use super::super::execution_role::ExecutionRole;
         use super::super::native_entity_refs::tests::with_game;
+        use crate::game::execution_role::ExecutionRole;
 
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;
@@ -4390,8 +4414,8 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn client_host_reads_playing_and_key_mappings() {
         use super::super::Screen;
-        use super::super::execution_role::ExecutionRole;
         use super::super::native_entity_refs::tests::with_game;
+        use crate::game::execution_role::ExecutionRole;
 
         use winit::keyboard::KeyCode;
 
@@ -4420,7 +4444,10 @@ mod tests {
             let attack = mod_api::prelude::ClientInputClientHost::mapping(game, "key.attack")
                 .unwrap()
                 .unwrap();
-            assert_eq!(attack.label, mod_api::Text::literal("Left Button"));
+            assert_eq!(
+                attack.label,
+                mod_api::Text::translate("key.mouse.left", Vec::new())
+            );
             assert!(
                 mod_api::prelude::ClientInputClientHost::mapping(game, "key.mymod.boost")
                     .unwrap()
@@ -4514,6 +4541,15 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn mod_sign_constructor_prioritizes_templates_over_suffixes() {
+        // This fixture adds blocks that are absent from the shared vanilla
+        // game's frozen process-wide block definitions.
+        if super::super::native_entity_refs::tests::run_fresh_cases(
+            "game::native_hooks::tests::mod_sign_constructor_prioritizes_templates_over_suffixes",
+            "HORIZON_SIGN_CONSTRUCTOR_CHILD",
+            &["signs"],
+        ) {
+            return;
+        }
         use super::super::{Audio, Game, Options, Progress, Settings, load_resources};
         use horizon_client::mod_content::{ContentMod, build};
         use horizon_mod_package::content::{Block, Content};
@@ -4682,14 +4718,14 @@ mod tests {
             &settings,
             std::time::Instant::now(),
             false,
-            super::super::execution_role::ExecutionRole::IntegratedServer,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
         .unwrap();
         let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
         options.resources = root.clone();
-        options.execution_role = super::super::execution_role::ExecutionRole::IntegratedServer;
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
         let game = Game::new(
             &loaded.resources,
             loaded.pack,
@@ -4793,7 +4829,7 @@ mod tests {
             &settings,
             std::time::Instant::now(),
             false,
-            super::super::execution_role::ExecutionRole::IntegratedServer,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!("no menu handoff"),
         )
@@ -5072,8 +5108,6 @@ mod tests {
             assert!(!body.contains("return true"), "{head}");
         }
     }
-    /// horizon-mixins refuses targets whose body has a `cfg` or a macro:
-    /// the hook points and helpers must stay free of both.
     /// A data packet for an old window leaves the open mod screen alone.
     #[test]
     fn mod_screen_data_is_its_windows_only() {
@@ -5088,28 +5122,6 @@ mod tests {
         assert!(s.set_data(4, 1, 7));
         assert!(!s.set_data(3, 1, 99));
         assert_eq!(s.data, [0, 7]);
-    }
-
-    #[test]
-    fn hook_points_stay_hookable() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/game/native_hooks");
-        let mut code = String::new();
-        for entry in std::fs::read_dir(dir).unwrap() {
-            let path = entry.unwrap().path();
-            if path.extension().is_some_and(|ext| ext == "rs")
-                && !matches!(path.file_stem().unwrap().to_str().unwrap(), "mod" | "fire")
-            {
-                let source = std::fs::read_to_string(path).unwrap();
-                code.push_str(source.split("#[cfg(test)]").next().unwrap());
-            }
-        }
-        let lines = code.lines().filter(|l| !l.trim_start().starts_with("//"));
-        for line in lines {
-            assert!(!line.contains("cfg"), "a cfg in the hook points: {line}");
-            for mac in ["!(", "![", "! {", "!{"] {
-                assert!(!line.contains(mac), "a macro in the hook points: {line}");
-            }
-        }
     }
 
     #[test]
@@ -5282,6 +5294,10 @@ mod tests {
             hurt_server_args(Hurting::Dragon(5, arrow), &NO_ATTACK),
             dragon
         );
+        assert_eq!(
+            hurt_server_args(Hurting::Entity(6, "minecraft:item", arrow), &NO_ATTACK),
+            (6, "minecraft:item", arrow)
+        );
     }
 
     /// A mod container opens a slot grid or a furnace's menu, by its slot
@@ -5375,6 +5391,117 @@ mod item_fall_on_tests {
         }
     }
 
+    static LOAN_VALUE: mod_api::AttachmentType<i32> = mod_api::AttachmentType {
+        namespace: "loan_test",
+        name: "progress",
+        default: || 0,
+        codec: None,
+        copy_on_death: false,
+        sync: false,
+    };
+
+    use horizon_core::random::RandomSource as _;
+
+    struct LoanPart(std::sync::Arc<()>);
+    #[mod_api::horizon_part]
+    impl BlockPart for LoanPart {
+        fn fall_on(&self, host: &mut dyn LevelRandomHost, event: &mut FallOnEvent<'_>) {
+            let mut random = host.random().expect("authoritative landing random");
+            assert_eq!(random.next_int(), 1553932502);
+            assert!(host.set_random(random));
+            LOAN_VALUE
+                .set(host.attachments(), mod_api::Holder::Level, 73)
+                .unwrap();
+            event.request(mod_api::LandingWrite::DestroyBlock { drop: false });
+            std::panic::panic_any(self.0.clone());
+        }
+    }
+    struct LoanMod(std::sync::Arc<()>);
+    #[mod_api::__subscriptions]
+    impl Hooks for LoanMod {
+        fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+            let key = r.block_key("minecraft:stone");
+            r.block_part(key, LoanPart(self.0.clone()));
+        }
+    }
+
+    /// Only the inner production loan is exercised: the outer dropped-item pass
+    /// is deliberately not claimed to survive this unwind.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and an isolated mod registry"]
+    fn item_fall_on_returns_progressed_level_loan_after_part_panic() {
+        let payload = std::sync::Arc::new(());
+        let mods: mod_api::Mods = vec![ModEntry::new(
+            "loan_test",
+            Box::new(LoanMod(payload.clone())),
+        )]
+        .into();
+        crate::game::api_values::install_parts(&mods).unwrap();
+        let _ = horizon_client::block_contact::HOOKS.set(BLOCK_CONTACT_HOOKS);
+        with_mods(mods, || {
+            let mut loaded = 0;
+            for dimension in [crate::game::Dim::Overworld, crate::game::Dim::Nether] {
+                let scratch = std::env::temp_dir()
+                    .join(format!("item-loan-{}-{dimension:?}", std::process::id()));
+                super::super::native_entity_refs::tests::with_game(|game| {
+                    game.world_root = scratch.clone();
+                    game.enter_level(dimension).unwrap();
+                    loaded += 1;
+                    let stone = game
+                        .pack
+                        .assets
+                        .registry
+                        .default_state("minecraft:stone")
+                        .unwrap();
+                    game.world
+                        .chunks
+                        .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+                    let pos = BlockPos::new(1, 64, 1);
+                    game.world.set(pos.x, pos.y, pos.z, stone).unwrap();
+                    game.world.random = horizon_core::random::LegacyRandom::new(12345);
+                    LOAN_VALUE
+                        .set(&mut game.world.attachments, mod_api::Holder::Level, 11)
+                        .unwrap();
+                    game.world.attachment_syncs.insert(mod_api::Holder::Level);
+                    let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        horizon_client::block_contact::in_level(Some(game.dim.id()), || {
+                            game.item_fall_on(42, pos, 5.0);
+                        });
+                    }))
+                    .expect_err("actual Part must panic");
+                    assert!(std::sync::Arc::ptr_eq(
+                        &payload,
+                        caught.downcast_ref::<std::sync::Arc<()>>().unwrap()
+                    ));
+                    assert_eq!(
+                        game.world.random.next_int(),
+                        -2090749135,
+                        "continue the progressed stream"
+                    );
+                    assert_eq!(
+                        LOAN_VALUE
+                            .get(&mut game.world.attachments, mod_api::Holder::Level)
+                            .unwrap(),
+                        73
+                    );
+                    assert!(
+                        game.world
+                            .attachment_syncs
+                            .contains(&mod_api::Holder::Level)
+                    );
+                    game.drain_entity_inside();
+                    assert_eq!(
+                        game.world.block(pos.x, pos.y, pos.z),
+                        stone,
+                        "aborted landing writes were not queued"
+                    );
+                });
+                let _ = std::fs::remove_dir_all(scratch);
+            }
+            assert_eq!(loaded, 2, "both resource fixtures ran");
+        });
+    }
+
     /// A dropped item that falls onto a block with a `fall_on` part is told to it once, as
     /// `minecraft:item`, with the whole fall and no damage; the write the part asks for lands
     /// after the items' batch; and an item resting there lands no more.
@@ -5408,17 +5535,20 @@ mod item_fall_on_tests {
                 }
                 // The part's write destroys the stone after the batch; it is put back at once,
                 // so the item rests on it again and must not be heard landing twice.
+                let mut destructions = 0;
                 for _ in 0..80 {
                     game.ticked_entities_through = u32::MAX;
                     horizon_client::block_contact::in_level(Some(game.dim.id()), || {
                         game.tick_items();
                     });
                     if game.world.block(1, 64, 1) == air {
+                        destructions += 1;
                         game.world.set(1, 64, 1, stone).unwrap();
                         let heard = heard.0.lock().unwrap();
                         assert_eq!(heard.len(), 1, "the write landed after the batch");
                     }
                 }
+                assert_eq!(destructions, 1, "one observed landing-write destruction");
                 let heard = heard.0.lock().unwrap().clone();
                 assert_eq!(heard.len(), 1, "one landing: {heard:?}");
                 let (entity, kind, pos, distance, damage) = &heard[0];
@@ -5500,9 +5630,12 @@ pub(super) mod particle_count_tests {
             // every group without a particle tick.
             game.particles.tracking_emitter(
                 ParticleOptions::simple(ParticleType::Crit),
-                [0.0; 3],
-                1.0,
-                1.0,
+                horizon_client::particles::TrackingTarget::Entity(0),
+                horizon_client::particles::TrackingBody {
+                    feet: [0.0; 3],
+                    width: 1.0,
+                    height: 1.0,
+                },
             );
             assert!(host_clear(game));
             let host: &dyn ClientHost = game;

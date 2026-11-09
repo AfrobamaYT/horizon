@@ -55,7 +55,10 @@ pub(super) const IMPORTS: &[&str] = &[
     "GameTests",
     "ClientReloadListeners",
     "PackFinders",
+    "ColorResolvers",
     "BlockTintSources",
+    "ParticleProviders",
+    "EnchantmentDamageEffects",
     "BlockAndTintGetter",
     "GroundLevel",
     "BlockMetadata",
@@ -127,13 +130,14 @@ const EXPORTS: &[&str] = &[
     "ServerReloadListener",
     "GameTestFunction",
     "ClientReloadListener",
+    "BiomeColorResolver",
     "BlockTintSource",
+    "ParticleProvider",
+    "EnchantmentDamageEffect",
     "GroundStateProvider",
     "PlaceProvider",
     "TooltipAppender",
     "CriterionTest",
-    "RowPages",
-    "RowFunction",
 ];
 
 /// Every exported trait: [`EXPORTS`], then the handler traits `mod_api`'s capability keys name
@@ -147,8 +151,7 @@ pub(super) fn exports() -> &'static [&'static str] {
 /// another mod's provider): the mod calls one through the `held-<interface>` imports, by the
 /// index the game keeps it under.
 pub(super) fn held(owner: &str) -> bool {
-    ["PlaceProvider", "RowPages", "RowFunction"].contains(&owner)
-        || (exports().contains(&owner) && !EXPORTS.contains(&owner))
+    owner == "PlaceProvider" || (exports().contains(&owner) && !EXPORTS.contains(&owner))
 }
 
 /// The contexts of the load phase: the catalog's registration and data-load contexts and a
@@ -162,9 +165,14 @@ const LOAD_CONTEXTS: &[&str] = &[
 ];
 
 /// The traits the game calls on its worker threads: a mod's structure types and their pieces on
-/// the worldgen workers, its block tint sources on the meshing workers. They keep no mutable
-/// state and get no `Host`.
-const WORKERS: &[&str] = &["StructureType", "StructurePiece", "BlockTintSource"];
+/// the worldgen workers, its block tint sources and colour resolvers on the meshing workers. They
+/// keep no mutable state and get no `Host`.
+const WORKERS: &[&str] = &[
+    "StructureType",
+    "StructurePiece",
+    "BlockTintSource",
+    "BiomeColorResolver",
+];
 
 /// What a call of `method` is to the runtime, for its limits and its wait.
 pub(super) fn call_class(types: &ty::Types<'_>, method: &Method) -> &'static str {
@@ -570,8 +578,9 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Generated, Str
     guest.push_str(&calls::dispatch(&surface.types, &surface.methods).0);
     let _ = writeln!(
         wire,
-        "#[doc(hidden)]\npub const WIRE_LAYOUT: u64 = {:#x};",
-        layout(&surface)
+        "#[doc(hidden)]\npub static WIRE_LAYOUT: ::std::sync::LazyLock<u64> = ::std::sync::LazyLock::new(|| {{ let mut hash = {:#x}; {layouts} hash }});",
+        layout(&surface),
+        layouts = surface.types.defs.iter().filter(|def| def.lifetimes == 0).map(|def| format!("hash = crate::wire::layout_mix(hash, <{} as crate::wire::Wire>::layout(&mut vec![]));", def.rust.replace("mod_api::", "crate::"))).collect::<String>()
     );
     let sources = surface.types.index.read.take();
     Ok(Generated {
@@ -579,6 +588,27 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Generated, Str
         guest,
         sources,
     })
+}
+
+/// Every `mod_api` type the boundary lays out, by the path the generated impls name it with
+/// (`mod_api::EntityRef`): each has a `Wire` impl, generated or checked beside it. A point record
+/// may hold exactly these and the std types, when they are `Clone`: the record holds a copy, and a
+/// capability the game only lends (`Transaction`) is never copied.
+pub(crate) fn owned_types(
+    root: &Path,
+    included: &[(&str, &str)],
+) -> Result<std::collections::BTreeSet<String>, String> {
+    let providers = crate::capability_providers::generate(root, included)?.0;
+    let mut with_providers = included.to_vec();
+    with_providers.push(("capability_providers_generated.rs", providers.as_str()));
+    let surface = surface(root, &with_providers)?;
+    Ok(surface
+        .types
+        .defs
+        .iter()
+        .filter(|def| def.lifetimes == 0 && def.clone)
+        .map(|def| def.rust.replace(' ', ""))
+        .collect())
 }
 
 /// A hash of everything the two sides must agree on: every method's id and signature, and
@@ -600,6 +630,7 @@ fn layout(surface: &Surface<'_>) -> u64 {
         "group state: 32 words in the std member's horizon_group_state; 0 handler table, 1 cache budget, 2 eviction guard, 3.. eviction callbacks; members allocate through an evicting global allocator",
     );
     feed("static replies: bounded acknowledged ids or uncached text");
+    feed("Hooks::subscribed: Vec<(hook name, i32 priority, bool receive_cancelled)>");
     for method in &surface.methods {
         feed(&format!("{method:?}"));
     }
@@ -607,6 +638,14 @@ fn layout(surface: &Surface<'_>) -> u64 {
         // Private borrowed descriptors also define bytes and checked writeback policy.
         // Hash the complete definition so a new transport shape cannot hide behind Opaque.
         feed(&format!("{def:?}"));
+        if let ty::Kind::Variant(cases) = &def.kind {
+            for case in cases {
+                if let ty::Payload::Record(fields) = &case.payload {
+                    // Named payload fields also define the transport's structural schema.
+                    feed(&format!("{fields:?}"));
+                }
+            }
+        }
     }
     feed(&format!("{:?}", surface.hooks));
     hash
@@ -616,6 +655,43 @@ fn layout(surface: &Surface<'_>) -> u64 {
 mod tests {
     /// The generated impls depend on the hand-written `Wire` impls the generator skips, so an
     /// edit to that file must rerun the build script.
+    #[test]
+    fn enchantment_damage_registrar_and_callback_cross_to_wire() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| {
+                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+                let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
+                let included = [
+                    ("mod_api_generated.rs", generated.hooks.as_str()),
+                    ("mod_api_generated_host.rs", generated.host.as_str()),
+                    ("mod_api_host_areas.rs", generated.areas.as_str()),
+                ];
+                let providers = crate::capability_providers::generate(&root, &included)
+                    .unwrap()
+                    .0;
+                let mut surface_included = included.to_vec();
+                surface_included.push(("capability_providers_generated.rs", providers.as_str()));
+                let surface = super::surface(&root, &surface_included).unwrap();
+                for (owner, name) in [
+                    ("EnchantmentDamageEffects", "register"),
+                    ("EnchantmentDamageEffect", "apply"),
+                    ("Hooks", "register_enchantment_damage_effects"),
+                ] {
+                    assert!(
+                        surface
+                            .methods
+                            .iter()
+                            .any(|method| method.owner == owner && method.name == name)
+                    );
+                }
+                super::generate(&root, &included).unwrap();
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
     #[test]
     fn the_hand_written_wire_impls_are_tracked_sources() {
         std::thread::Builder::new()
@@ -675,6 +751,23 @@ mod tests {
             assert!(matches!(projection.kind, super::ty::Kind::Opaque));
             projection.projection.as_mut().unwrap()[0].ty = super::ty::Ty::Unit;
             assert_ne!(baseline, super::layout(&surface));
+            let before_borrowed = super::layout(&surface);
+            let borrowed = surface
+                .types
+                .defs
+                .iter_mut()
+                .find_map(|def| {
+                    if def.lifetimes == 0 {
+                        return None;
+                    }
+                    match &mut def.kind {
+                        super::ty::Kind::Record(fields) => fields.first_mut(),
+                        _ => None,
+                    }
+                })
+                .expect("a borrowed call record");
+            borrowed.ty = super::ty::Ty::Unit;
+            assert_ne!(before_borrowed, super::layout(&surface));
         };
         std::thread::Builder::new()
             .stack_size(64 << 20)

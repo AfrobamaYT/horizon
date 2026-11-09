@@ -713,7 +713,7 @@ mod item_resource_property_tests {
         fs::create_dir(&root).unwrap();
         for entry in fs::read_dir(&resources).unwrap() {
             let entry = entry.unwrap();
-            if entry.file_name() != "items.json" {
+            if entry.file_name() != "items.json" && entry.file_name() != "command-registries.json" {
                 link_fixture_source(&entry.path(), &root.join(entry.file_name()));
             }
         }
@@ -722,6 +722,19 @@ mod item_resource_property_tests {
         defaults["minecraft:iron_sword"]["minecraft:damage"] = json!(75);
         defaults["minecraft:iron_sword"]["minecraft:enchantment_glint_override"] = json!(false);
         defaults["horizon:consumable_fixture"] = defaults["minecraft:stick"].clone();
+        // A mod item belongs to the registry as well as the component report.
+        let mut registries: Value =
+            serde_json::from_slice(&fs::read(resources.join("command-registries.json")).unwrap())
+                .unwrap();
+        registries["items"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!("horizon:consumable_fixture"));
+        fs::write(
+            root.join("command-registries.json"),
+            serde_json::to_vec(&registries).unwrap(),
+        )
+        .unwrap();
         defaults["minecraft:wooden_sword"]["minecraft:repairable"] = json!({"items":"#planks"});
         fs::write(
             root.join("items.json"),
@@ -973,7 +986,7 @@ mod combat_query_tests {
                 enchanted
                     .attack_damage_bonus(game, attacker, target, 7.0)
                     .unwrap(),
-                game.enchanted_damage("minecraft:player", 7.0) - 7.0
+                game.enchanted_damage("minecraft:player", 7.0, Some(target.id())) - 7.0
             );
             patch(
                 &mut weapon,
@@ -1178,7 +1191,10 @@ mod combat_query_tests {
                 "minecraft:magic"
             );
             game.inventory[game.selected] = Some(sword.clone());
-            assert_eq!(game.enchanted_damage("minecraft:player", 7.0), 9.0);
+            assert_eq!(
+                game.enchanted_damage("minecraft:player", 7.0, Some(target.id())),
+                9.0
+            );
             assert_eq!(
                 super::super::creatures::source_damage_type(game.attack_source([0.0; 3])),
                 "minecraft:magic"
@@ -1199,7 +1215,10 @@ mod combat_query_tests {
                 "minecraft:player_attack"
             );
             game.inventory[game.selected] = Some(sword);
-            assert_eq!(game.enchanted_damage("minecraft:player", 7.0), 7.0);
+            assert_eq!(
+                game.enchanted_damage("minecraft:player", 7.0, Some(target.id())),
+                7.0
+            );
             assert_eq!(
                 super::super::creatures::source_damage_type(game.attack_source([0.0; 3])),
                 "minecraft:player_attack"

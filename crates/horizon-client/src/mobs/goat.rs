@@ -76,7 +76,7 @@ fn tempted(m: &Mob, w: &MobWorld) -> bool {
         item.as_deref()
             .is_some_and(|i| m.kind.food.iter().any(|f| f.as_str() == i))
     };
-    w.player.as_ref().is_some_and(|p| {
+    w.selected_player().is_some_and(|p| {
         p.alive
             && !p.spectator
             && m.distance_sqr(p.position) <= 100.0
@@ -247,7 +247,7 @@ fn choose(m: &mut Mob, w: &MobWorld, target: Who) {
 /// allow: not a goat, a player who is not creative or a spectator.
 fn nearest_target(m: &mut Mob, w: &MobWorld) -> Option<Who> {
     let mut best: Option<(Who, f64)> = None;
-    if let Some(p) = &w.player
+    if let Some(p) = w.selected_player()
         && p.alive
         && !p.creative
         && !p.spectator
@@ -414,11 +414,13 @@ fn ram_tick(m: &mut Mob, cx: &mut Cx) {
         // hurtServer by `noAggroMobAttack`, then the knockback.
         let amount = m.attrs.attack_damage;
         match target {
-            Who::Player => cx.events.push(MobEvent::DamagePlayer {
-                amount,
-                from,
-                kind: "minecraft:mob_attack_no_aggro",
-            }),
+            Who::Player => cx
+                .events
+                .push(cx.w.route_player_event(MobEvent::DamagePlayer {
+                    amount,
+                    from,
+                    kind: "minecraft:mob_attack_no_aggro",
+                })),
             Who::Mob(id) => cx.events.push(MobEvent::AttackMob {
                 target: id,
                 amount,
@@ -437,12 +439,17 @@ fn ram_tick(m: &mut Mob, cx: &mut Cx) {
         let force = if m.is_baby() { 1.0 } else { 2.5 };
         let d = m.extra.goat.ram_direction;
         // The knockback's source is `mobAttack`, not the hurt's `noAggroMobAttack`.
-        cx.events.push(MobEvent::Knockback {
+        let event = MobEvent::Knockback {
             target,
             power: f64::from(factor * force),
             x: d.x,
             z: d.z,
             source: Damage::mob(m.id, from),
+        };
+        cx.events.push(if target == Who::Player {
+            cx.w.route_player_event(event)
+        } else {
+            event
         });
         finish_ram(m, cx.events);
         play(m, cx.events, impact, 1.0);
@@ -461,7 +468,7 @@ fn ram_tick(m: &mut Mob, cx: &mut Cx) {
 /// allow.
 fn rammed(m: &Mob, w: &MobWorld) -> Option<Who> {
     let bounds = m.bounds();
-    if let Some(p) = &w.player
+    if let Some(p) = w.selected_player()
         && p.alive
         && !p.creative
         && !p.spectator

@@ -1065,6 +1065,18 @@ impl PlayerMotion {
     }
 }
 
+/// Which `Entity.applyEffectsFromBlocks` a sweep of the moves stands for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BlockPass {
+    /// The window's own player, which moves itself.
+    Client,
+    /// A server's player: the damage and the freezing its client's moves cause.
+    ServerDamage,
+    /// A server's player, before its landing is checked: only the fall reset
+    /// of `makeStuckInBlock`.
+    ServerStuck,
+}
+
 pub struct MotionWorld<'p, 'w, 'r> {
     /// Entity boxes selected by the host for this player's collision queries.
     pub entities: &'w [Aabb],
@@ -1606,7 +1618,18 @@ impl MotionWorld<'_, '_, '_> {
     /// (`stepOn`). Pressure plates, tripwires and rails are the world tick's
     /// scan.
     pub fn apply_effects_from_blocks(&mut self) -> Result<()> {
-        self.effects_from_blocks(false)
+        self.effects_from_blocks(BlockPass::Client)
+    }
+    /// The part of `applyEffectsFromBlocks` a server's player must see before
+    /// its landing is checked: `ServerGamePacketListenerImpl.handleMovePlayer`
+    /// runs `move` (whose `checkInsideBlocks` lets a cobweb or a sweet berry
+    /// bush call `makeStuckInBlock`, forgetting the fall) before
+    /// `doCheckFallDamage`. Only the fall and the impulse are applied; the
+    /// slowing is the client's, and `server_block_damage` does the rest. The
+    /// moves stay in the history for it.
+    pub fn server_stuck_in_blocks(&mut self, from: Vec3) -> Result<()> {
+        self.player.old_position = from;
+        self.effects_from_blocks(BlockPass::ServerStuck)
     }
     /// What `applyEffectsFromBlocks` does to a server's player along the
     /// moves its client sent since `from` (in its history): the damage of
@@ -1618,7 +1641,7 @@ impl MotionWorld<'_, '_, '_> {
         // Entity.baseTick
         self.player.was_in_powder_snow = self.player.in_powder_snow;
         self.player.in_powder_snow = false;
-        self.effects_from_blocks(true)?;
+        self.effects_from_blocks(BlockPass::ServerDamage)?;
         // LivingEntity.aiStep "freezing" (server).
         if !self.player.in_powder_snow || !self.player.can_freeze() {
             self.player.ticks_frozen = (self.player.ticks_frozen - 2).max(0);
@@ -1631,11 +1654,14 @@ impl MotionWorld<'_, '_, '_> {
         }
         Ok(())
     }
-    fn effects_from_blocks(&mut self, damage_only: bool) -> Result<()> {
+    fn effects_from_blocks(&mut self, pass: BlockPass) -> Result<()> {
         use horizon_world::entity_move::MovementRecord;
+        let damage_only = pass != BlockPass::Client;
         let mut movements: Vec<MovementRecord> =
             self.player.history.records().iter().copied().collect();
-        self.player.history.clear();
+        if pass != BlockPass::ServerStuck {
+            self.player.history.clear();
+        }
         let position = self.player.position;
         match movements.last() {
             None => movements.push(MovementRecord {
@@ -1658,7 +1684,7 @@ impl MotionWorld<'_, '_, '_> {
         }
         // Block.stepOn for the block under an entity on the ground:
         // MagmaBlock's hot floor hurts unless it steps carefully (sneaks).
-        if self.player.ground.on_ground {
+        if self.player.ground.on_ground && pass != BlockPass::ServerStuck {
             let on = self.legacy_on_position()?;
             let under = self.assets.registry.state(self.block(on));
             if let Some(block) = under {
@@ -1705,7 +1731,7 @@ impl MotionWorld<'_, '_, '_> {
         let mut effects = mod_api::InsideEffects::default();
         let mut inside = PlayerInside {
             m: self,
-            damage_only,
+            pass,
             melt_step: None,
         };
         crate::block_contact::sweep_movements(&mut inside, &movements, &mut visited, &mut effects)?;
@@ -1889,6 +1915,15 @@ impl MotionWorld<'_, '_, '_> {
         }
         Ok(())
     }
+    /// `Player.makeStuckInBlock` as a server's player sees it: its client
+    /// moves it and applies the slowing, but the fall is forgotten and the
+    /// impulse context ends here too.
+    fn server_stuck_in_block(&mut self) {
+        if !self.player.flying {
+            self.player.fall_distance = 0.0;
+        }
+        self.player.impulse.try_reset();
+    }
     /// `Player.makeStuckInBlock`: the next move is scaled by `multiplier`
     /// (and the fall forgotten) unless flying; the impulse context resets
     /// either way.
@@ -2049,44 +2084,9 @@ impl MotionWorld<'_, '_, '_> {
     /// LivingEntity.travelFallFlying with updateFallFlyingMovement.
     fn travel_fall_flying(&mut self) -> Result<()> {
         let v = self.player.velocity;
-        // getLookAngle and the lean use Mth's sine table and float degrees,
-        // the lift Math.cos of the widened lean.
-        let look = horizon_world::view_direction::view_vector(self.player.pitch, self.player.yaw);
-        let lean = self.player.pitch * trig::DEG_TO_RAD;
-        let look_h = (look.x * look.x + look.z * look.z).sqrt();
         let move_h = (v.x * v.x + v.z * v.z).sqrt();
         let gravity = living_motion::effective_gravity(self)?;
-        let lift = horizon_core::jmath::cos(f64::from(lean)).powi(2);
-        let mut m = Vec3::new(v.x, v.y + gravity * (-1.0 + lift * 0.75), v.z);
-        if m.y < 0.0 && look_h > 0.0 {
-            let convert = m.y * -0.1 * lift;
-            m = Vec3::new(
-                m.x + look.x * convert / look_h,
-                m.y + convert,
-                m.z + look.z * convert / look_h,
-            );
-        }
-        if lean < 0.0 && look_h > 0.0 {
-            let convert = move_h * f64::from(-trig::sin(f64::from(lean))) * 0.04;
-            m = Vec3::new(
-                m.x - look.x * convert / look_h,
-                m.y + convert * 3.2,
-                m.z - look.z * convert / look_h,
-            );
-        }
-        if look_h > 0.0 {
-            m = Vec3::new(
-                m.x + (look.x / look_h * move_h - m.x) * 0.1,
-                m.y,
-                m.z + (look.z / look_h * move_h - m.z) * 0.1,
-            );
-        }
-        // multiply(0.99F, 0.98F, 0.99F): the float factors widened.
-        self.player.velocity = Vec3::new(
-            m.x * f64::from(0.99_f32),
-            m.y * f64::from(0.98_f32),
-            m.z * f64::from(0.99_f32),
-        );
+        self.player.velocity = fall_flying_movement(v, self.player.pitch, self.player.yaw, gravity);
         let movement = self.player.velocity;
         let before = self.player.position;
         self.move_self(movement)?;
@@ -3033,6 +3033,48 @@ fn horizontal_collision_minor(yaw: f32, input: [f32; 2], movement: Vec3) -> bool
     horizon_core::jmath::acos(dot / (a_len * m_len).sqrt()) < f64::from(0.13962634_f32)
 }
 
+/// `LivingEntity.updateFallFlyingMovement`: pure glide velocity shared by
+/// player travel and authoritative Mob travel. No collision, state or RNG work.
+pub(crate) fn fall_flying_movement(v: Vec3, pitch: f32, yaw: f32, gravity: f64) -> Vec3 {
+    // getLookAngle and the lean use Mth's sine table and float degrees,
+    // the lift Math.cos of the widened lean.
+    let look = horizon_world::view_direction::view_vector(pitch, yaw);
+    let lean = pitch * trig::DEG_TO_RAD;
+    let look_h = (look.x * look.x + look.z * look.z).sqrt();
+    let move_h = (v.x * v.x + v.z * v.z).sqrt();
+    let lift = horizon_core::jmath::cos(f64::from(lean)).powi(2);
+    let mut m = Vec3::new(v.x, v.y + gravity * (-1.0 + lift * 0.75), v.z);
+    if m.y < 0.0 && look_h > 0.0 {
+        let convert = m.y * -0.1 * lift;
+        m = Vec3::new(
+            m.x + look.x * convert / look_h,
+            m.y + convert,
+            m.z + look.z * convert / look_h,
+        );
+    }
+    if lean < 0.0 && look_h > 0.0 {
+        let convert = move_h * f64::from(-trig::sin(f64::from(lean))) * 0.04;
+        m = Vec3::new(
+            m.x - look.x * convert / look_h,
+            m.y + convert * 3.2,
+            m.z - look.z * convert / look_h,
+        );
+    }
+    if look_h > 0.0 {
+        m = Vec3::new(
+            m.x + (look.x / look_h * move_h - m.x) * 0.1,
+            m.y,
+            m.z + (look.z / look_h * move_h - m.z) * 0.1,
+        );
+    }
+    // multiply(0.99F, 0.98F, 0.99F): the float factors widened.
+    Vec3::new(
+        m.x * f64::from(0.99_f32),
+        m.y * f64::from(0.98_f32),
+        m.z * f64::from(0.99_f32),
+    )
+}
+
 /// `LivingEntity.handleFallFlyingCollisions`: a glide a block stopped takes
 /// `(before - after) * 10 - 3`, and nothing when that is not positive.
 fn fly_into_wall_damage(before: f64, after: f64) -> f32 {
@@ -3149,11 +3191,19 @@ pub(crate) fn legacy_block_support_at(
 /// the part's contact fires mid-walk with its writes staged.
 struct PlayerInside<'a, 'p, 'w, 'r> {
     m: &'a mut MotionWorld<'p, 'w, 'r>,
-    damage_only: bool,
+    pass: BlockPass,
     /// The sweep step that first reached powder snow: its blocks are the melt
     /// group, the ones a burning player melts (`PowderSnowBlock.entityInside`
     /// destroys them while the entity is on fire, per contact).
     melt_step: Option<i32>,
+}
+
+impl PlayerInside<'_, '_, '_, '_> {
+    /// The client's own player moves itself: the passes a server walks for it
+    /// apply the damage and the freezing only.
+    fn damage_only(&self) -> bool {
+        self.pass != BlockPass::Client
+    }
 }
 
 impl crate::block_contact::InsideWalk for PlayerInside<'_, '_, '_, '_> {
@@ -3253,6 +3303,14 @@ impl crate::block_contact::InsideWalk for PlayerInside<'_, '_, '_, '_> {
         // The part's contact, mid-walk, where vanilla runs the block's own
         // `entityInside`; its writes join this step only when it answered.
         self.m.mod_block_inside(state, p, precise, effects);
+        // The server's early pass: only what `makeStuckInBlock` does there,
+        // before the landing is checked.
+        if self.pass == BlockPass::ServerStuck {
+            if matches!(name, "minecraft:cobweb" | "minecraft:sweet_berry_bush") {
+                self.m.server_stuck_in_block();
+            }
+            return Ok(());
+        }
         // CactusBlock, CampfireBlock and the cauldrons' entityInside
         // (`entity.hurt`, the fire and the fill level), and WitherRoseBlock's
         // server-side effect.
@@ -3282,7 +3340,7 @@ impl crate::block_contact::InsideWalk for PlayerInside<'_, '_, '_, '_> {
                     self.m.environment_hurt("minecraft:campfire", damage)?;
                 }
             }
-            "minecraft:sweet_berry_bush" if self.damage_only => {
+            "minecraft:sweet_berry_bush" if self.damage_only() => {
                 self.m.sweet_berry_bush_damage(state)?;
             }
             // HoneyBlock.entityInside: a server's player slides too, so its
@@ -3293,7 +3351,7 @@ impl crate::block_contact::InsideWalk for PlayerInside<'_, '_, '_, '_> {
             // own burn-out does. The slowing is the client's
             // (`makeStuckInBlock`).
             "minecraft:powder_snow" => {
-                if self.damage_only {
+                if self.damage_only() {
                     self.m.powder_snow_snowflake(p);
                 } else {
                     self.m.powder_snow_inside(p)?;
@@ -3316,7 +3374,7 @@ impl crate::block_contact::InsideWalk for PlayerInside<'_, '_, '_, '_> {
         // ServerPlayer.onInsideBlock: the server's pass reports it too, as the
         // enter_block trigger is the server's to fire.
         self.m.player.events.push(MotionEvent::EnterBlock { state });
-        if self.damage_only {
+        if self.damage_only() {
             return Ok(());
         }
         match name {
@@ -3974,6 +4032,83 @@ mod tests {
                 .iter()
                 .any(|e| matches!(e, MotionEvent::PowderSnowMelt { .. }))
         );
+    }
+
+    /// A server's player lands in a cobweb or a sweet berry bush after a long
+    /// fall (#12382): `handleMovePlayer` moves it first, and the block's
+    /// `makeStuckInBlock` forgets the fall before `doCheckFallDamage`, so it
+    /// is not hurt. The same fall onto a block with nothing in it is hurt for
+    /// floor(10 + 1.5 + 1e-6 - 3) = 8 (`LivingEntity.calculateFallDamage`); a
+    /// flying player (whose own client never lands) is still hurt by a fall it
+    /// carries, as `Player.makeStuckInBlock` ignores it.
+    #[test]
+    fn a_server_player_landing_in_a_web_or_bush_takes_no_fall_damage() {
+        let root = std::env::var_os("HORIZON_TEST_RESOURCES")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../.local/horizon-client")
+                    .join(horizon_core::VANILLA_VERSION)
+            });
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = Assets::load(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.clone(),
+            ))
+            .unwrap();
+        let binding = crate::collisions::load(&root, assets.registry).unwrap();
+        let resources = MotionResources::load(&root, &assets).unwrap();
+        let mut scene = World::test_scene(&assets, &render, 1).unwrap();
+        let web = assets.registry.default_state("minecraft:cobweb").unwrap();
+        let bush = assets
+            .registry
+            .default_state("minecraft:sweet_berry_bush")
+            .unwrap();
+        scene.set(20, 4, 20, web).unwrap();
+        scene.set(24, 4, 20, bush).unwrap();
+        let land = |scene: &mut World, x: f64, flying: bool| {
+            let at = Vec3::new(x, 4.0, 20.5);
+            let mut player = PlayerMotion::new(&resources, at).unwrap();
+            player.fall_distance = 10.0;
+            player.flying = flying;
+            let from = at.add_vector(Vec3::new(0.0, 1.5, 0.0));
+            let delta = at.subtract(from);
+            player
+                .history
+                .add(horizon_world::entity_move::MovementRecord {
+                    from,
+                    to: at,
+                    original: Some(delta),
+                });
+            let mut w = MotionWorld {
+                tag_items: None,
+                block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
+                damage_hooks: &crate::health::DamageHooks::NONE,
+                entities: &[],
+                player: &mut player,
+                scene,
+                assets: &assets,
+                collision_binding: &binding,
+                resources: &resources,
+                health: &resources.health,
+            };
+            // The order of the server's tick: the early pass, then the landing.
+            w.server_stuck_in_blocks(from).unwrap();
+            let pos = BlockPos::new(x.floor() as i32, 3, 20);
+            let state = w.block(pos);
+            w.check_fall_damage(delta.y, true, state, pos).unwrap();
+            // The moves are still there for server_block_damage.
+            assert_eq!(w.player.history.records().len(), 1);
+            player
+        };
+        assert_eq!(land(&mut scene, 20.5, false).health.health(), 20.0);
+        assert_eq!(land(&mut scene, 24.5, false).health.health(), 20.0);
+        assert_eq!(land(&mut scene, 22.5, false).health.health(), 12.0);
+        assert_eq!(land(&mut scene, 20.5, true).health.health(), 12.0);
     }
 
     #[test]

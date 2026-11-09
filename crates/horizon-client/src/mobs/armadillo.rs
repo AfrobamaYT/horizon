@@ -338,7 +338,7 @@ fn scared_by_someone(m: &Mob, w: &MobWorld) -> bool {
     let attacker =
         m.ai.last_hurt_by
             .filter(|_| m.age as i32 - m.ai.last_hurt_by_time <= 100);
-    if let Some(p) = &w.player
+    if let Some(p) = w.selected_player()
         && p.alive
         && !p.spectator
         && p.bounds.intersects(area)

@@ -68,8 +68,9 @@ fn main() {
             vec![mod_api::ModEntry::new("machine_sample", hooks())],
             &[],
             BUILT,
+            None,
         );
     } else {
-        horizon_client::entry::main();
+        horizon_client::entry::main(None);
     }
 }

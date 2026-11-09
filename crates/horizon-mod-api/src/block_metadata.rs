@@ -7,6 +7,7 @@ use crate::{BlockKey, StateConstraint};
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct BlockStateRecord {
     /// Process-local block key, not a saved block name.
     pub block: BlockKey,
@@ -23,6 +24,7 @@ impl BlockStateRecord {
 /// A refused metadata read or state operation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum BlockStateError {
     /// Metadata is unavailable in this context.
     Unavailable,
@@ -85,6 +87,57 @@ pub trait BlockMetadata {
         properties: &[StateConstraint],
     ) -> Result<BlockStateRecord, BlockStateError>;
 }
+
+impl BlockMetadata for horizon_mod_runtime::block_definitions::Blocks {
+    fn name(&self, block: BlockKey) -> Result<&str, BlockStateError> {
+        self.names
+            .entries
+            .get(block.0 as usize)
+            .map(|entry| entry.id.as_str())
+            .ok_or(BlockStateError::UnknownBlock)
+    }
+    fn property(
+        &self,
+        state: BlockStateRecord,
+        name: &str,
+    ) -> Result<Option<&str>, BlockStateError> {
+        self.definitions
+            .get(state.block.0 as usize)
+            .ok_or(BlockStateError::UnknownBlock)?
+            .property(state.state, name)
+            .map_err(Into::into)
+    }
+    fn with(
+        &self,
+        state: BlockStateRecord,
+        name: &str,
+        value: &str,
+    ) -> Result<BlockStateRecord, BlockStateError> {
+        let ordinal = self
+            .definitions
+            .get(state.block.0 as usize)
+            .ok_or(BlockStateError::UnknownBlock)?
+            .with(state.state, name, value)?;
+        Ok(BlockStateRecord::new(state.block, ordinal))
+    }
+    fn of(
+        &self,
+        block: BlockKey,
+        properties: &[StateConstraint],
+    ) -> Result<BlockStateRecord, BlockStateError> {
+        let definition = self
+            .definitions
+            .get(block.0 as usize)
+            .ok_or(BlockStateError::UnknownBlock)?;
+        let constraints: Vec<_> = properties
+            .iter()
+            .map(|p| (p.name.as_str(), p.value.as_str()))
+            .collect();
+        let ordinal = definition.of(&constraints)?;
+        Ok(BlockStateRecord::new(block, ordinal))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,55 +263,5 @@ mod tests {
             Empty.block_states().property(off, "lit"),
             Err(BlockStateError::Unavailable)
         );
-    }
-}
-
-impl BlockMetadata for horizon_mod_runtime::block_definitions::Blocks {
-    fn name(&self, block: BlockKey) -> Result<&str, BlockStateError> {
-        self.names
-            .entries
-            .get(block.0 as usize)
-            .map(|entry| entry.id.as_str())
-            .ok_or(BlockStateError::UnknownBlock)
-    }
-    fn property(
-        &self,
-        state: BlockStateRecord,
-        name: &str,
-    ) -> Result<Option<&str>, BlockStateError> {
-        self.definitions
-            .get(state.block.0 as usize)
-            .ok_or(BlockStateError::UnknownBlock)?
-            .property(state.state, name)
-            .map_err(Into::into)
-    }
-    fn with(
-        &self,
-        state: BlockStateRecord,
-        name: &str,
-        value: &str,
-    ) -> Result<BlockStateRecord, BlockStateError> {
-        let ordinal = self
-            .definitions
-            .get(state.block.0 as usize)
-            .ok_or(BlockStateError::UnknownBlock)?
-            .with(state.state, name, value)?;
-        Ok(BlockStateRecord::new(state.block, ordinal))
-    }
-    fn of(
-        &self,
-        block: BlockKey,
-        properties: &[StateConstraint],
-    ) -> Result<BlockStateRecord, BlockStateError> {
-        let definition = self
-            .definitions
-            .get(block.0 as usize)
-            .ok_or(BlockStateError::UnknownBlock)?;
-        let constraints: Vec<_> = properties
-            .iter()
-            .map(|p| (p.name.as_str(), p.value.as_str()))
-            .collect();
-        let ordinal = definition.of(&constraints)?;
-        Ok(BlockStateRecord::new(block, ordinal))
     }
 }

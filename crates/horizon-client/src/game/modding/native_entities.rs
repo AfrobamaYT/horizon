@@ -53,7 +53,8 @@ pub(super) fn target_id(t: Target) -> Option<u32> {
         | Target::Trident(id)
         | Target::Spawner(id)
         | Target::Cloud(id)
-        | Target::Hook(id) => Some(id),
+        | Target::Hook(id)
+        | Target::Knot(id) => Some(id),
         Target::Player | Target::Guest(_) => None,
     }
 }
@@ -505,18 +506,29 @@ mod tests {
                 };
                 assert_eq!(waiting, 0);
                 if kind == "minecraft:falling_block" {
-                    let (Tag::Compound(invalid), _) = horizon_core::nbt::parse_snbt(
+                    let (Tag::Compound(unknown_state), _) = horizon_core::nbt::parse_snbt(
                         "{BlockState:{Name:\"test:missing\"},Time:1}",
                     )
                     .unwrap() else {
                         unreachable!()
                     };
-                    assert!(
-                        game.summon(game.dim.id(), kind, [1.0, 70.0, 1.0], invalid)
-                            .is_none()
+                    let fallback = game
+                        .summon(game.dim.id(), kind, [1.0, 70.0, 1.0], unknown_state)
+                        .unwrap();
+                    assert_eq!(fallback, base + 2);
+                    assert_eq!(game.next_entity, base + 2);
+                    assert_eq!(game.falling.len(), 3);
+                    assert_eq!(game.falling[0].id, 0);
+                    assert_eq!(game.falling[1].id, id);
+                    assert_eq!(game.falling[2].id, fallback);
+                    assert_eq!(
+                        game.falling[2].state,
+                        game.pack
+                            .assets
+                            .registry
+                            .default_state("minecraft:sand")
+                            .unwrap()
                     );
-                    assert_eq!(game.next_entity, base + 1);
-                    assert_eq!(game.falling.len(), 2);
                 }
             });
         }
@@ -744,6 +756,7 @@ mod tests {
                     fixed: false,
                     invisible: false,
                     custom_name: None,
+                    random: horizon_core::random::LegacyRandom::new(0),
                     check_interval: 0,
                 });
                 let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);

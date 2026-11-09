@@ -372,6 +372,8 @@ pub struct Guest {
     /// The shared flags (Entity.DATA_SHARED_FLAGS_ID) the player's client was
     /// last sent about itself.
     pub sent_shared: i8,
+    /// Pose last delivered to this player's own entity data, initially Standing.
+    pub sent_pose: Pose,
     /// The shoulder parrots (Player.DATA_SHOULDER_PARROT_LEFT and _RIGHT) the
     /// player's client was last sent about itself.
     pub sent_shoulders: [Option<i32>; 2],
@@ -564,6 +566,26 @@ impl Guest {
     pub fn is_fake(&self) -> bool {
         self.kind == GuestKind::Fake
     }
+    /// Whether the guest is online and placed in level `dimension`: one of the
+    /// level's players (`ServerLevel.players`).
+    pub fn placed_in(&self, dimension: &str) -> bool {
+        self.participates_online() && self.placed && self.dimension == dimension
+    }
+    /// Whether the guest is sent level `dimension`: placed in it, or held, which
+    /// looks at it without being part of it.
+    pub fn watches_level(&self, dimension: &str) -> bool {
+        self.participates_online() && (self.placed || self.held) && self.dimension == dimension
+    }
+    /// `ChunkMap.isChunkTracked`: whether the guest watches chunk `(x, z)` of
+    /// level `dimension`, inside its view (`ChunkTrackingView.contains`) and
+    /// sent rather than pending. A far-ring column past the view is not tracked.
+    pub fn tracks_chunk(&self, dimension: &str, (x, z): (i32, i32)) -> bool {
+        self.watches_level(dimension)
+            && self.sent_chunks.contains(&(x, z))
+            && self
+                .center
+                .is_some_and(|(cx, cz)| super::hub::tracked(cx, cz, self.view_distance, x, z))
+    }
 
     fn with_defaults(
         kind: GuestKind,
@@ -690,6 +712,7 @@ impl Guest {
             sent_air: (300, 0.0),
             sent_frozen: 0,
             sent_shared: 0,
+            sent_pose: Pose::Standing,
             sent_shoulders: [None; 2],
             sent_stuck: (0, 0),
             last_death: None,
@@ -1530,19 +1553,28 @@ fn network_stack(
                 .push((horizon_protocol::item::component::TRIM, component));
         }
         // BannerPatternLayers: each pattern a reference into the synced registry;
-        // a layer that has none leaves the stack without the component.
-        let layers: Option<Vec<(i32, i32)>> = d
-            .banner_patterns
+        // a layer that has none leaves the stack without the component. An
+        // ominous banner made by the raid keeps only its flag, so its layers
+        // are the ones the NBT encoder synthesises from it.
+        let patterns: Vec<(&str, &str)> = if d.ominous_banner && d.banner_patterns.is_empty() {
+            crate::item_data::OMINOUS_LAYERS.to_vec()
+        } else {
+            d.banner_patterns
+                .iter()
+                .map(|layer| (&*layer.pattern, &*layer.color))
+                .collect()
+        };
+        let layers: Option<Vec<(i32, i32)>> = patterns
             .iter()
-            .map(|layer| {
-                let name = if layer.pattern.contains(':') {
-                    layer.pattern.to_string()
+            .map(|(pattern, color)| {
+                let name = if pattern.contains(':') {
+                    pattern.to_string()
                 } else {
-                    format!("minecraft:{}", layer.pattern)
+                    format!("minecraft:{pattern}")
                 };
                 Some((
                     synced_id("minecraft:banner_pattern", &name)?,
-                    dye_id(&layer.color)?,
+                    dye_id(color)?,
                 ))
             })
             .collect();
@@ -1550,6 +1582,29 @@ fn network_stack(
             stack.added.push((
                 horizon_protocol::item::component::BANNER_PATTERNS,
                 horizon_protocol::item::Component::BannerPatterns(layers),
+            ));
+        }
+        // The raid captain's banner: `Raid.getBannerComponentPatch` gives it
+        // the ominous name, rarity and hidden layers, which `StackData` keeps
+        // as `ominous_banner` rather than in `other` (#12530).
+        if d.ominous_banner {
+            stack.added.push((
+                horizon_protocol::item::component::ITEM_NAME,
+                horizon_protocol::item::Component::Text(horizon_core::nbt::Tag::compound([(
+                    "translate",
+                    horizon_core::nbt::Tag::String("block.minecraft.ominous_banner".into()),
+                )])),
+            ));
+            stack.added.push((
+                horizon_protocol::item::component::RARITY,
+                horizon_protocol::item::Component::Int(1),
+            ));
+            stack.added.push((
+                horizon_protocol::item::component::TOOLTIP_DISPLAY,
+                horizon_protocol::item::Component::TooltipDisplay {
+                    hide: false,
+                    hidden: vec![horizon_protocol::item::component::BANNER_PATTERNS],
+                },
             ));
         }
         // `painting/variant`: a reference into the synced registry.

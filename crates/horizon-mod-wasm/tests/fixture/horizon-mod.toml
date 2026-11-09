@@ -13,3 +13,11 @@ kind = "head"
 with = "on_tick"
 access = "api"
 hash = "fixture"
+
+[[inject]]
+id = "shutdown"
+at = "horizon_client::game::server_lifecycle::remember_shutdown"
+kind = "head"
+with = "on_shutdown"
+access = "api"
+hash = "fixture"

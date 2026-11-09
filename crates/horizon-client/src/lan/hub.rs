@@ -522,13 +522,19 @@ pub fn native_player_tab_list_name_format(
 }
 
 /// `LivingEntity.DATA_ARROW_COUNT_ID` (12) and `DATA_STINGER_COUNT_ID` (13):
-/// the counts of what is stuck in a player, 0 by default.
-fn stuck_meta(state: &mut EntityState, (arrows, stingers): (i32, i32)) {
+/// the counts of what is stuck in a player or a mob, 0 by default. `meta`
+/// gets the counts that are set and `defaults` both, so one back at zero is
+/// sent as the default.
+pub fn stuck_meta(
+    meta: &mut Vec<(u8, i32, Value)>,
+    defaults: &mut Vec<(u8, i32, Value)>,
+    (arrows, stingers): (i32, i32),
+) {
     for (index, count) in [(12, arrows), (13, stingers)] {
         if count != 0 {
-            state.meta.push((index, serializer::INT, Value::Int(count)));
+            meta.push((index, serializer::INT, Value::Int(count)));
         }
-        state.defaults.push((index, serializer::INT, Value::Int(0)));
+        defaults.push((index, serializer::INT, Value::Int(0)));
     }
 }
 
@@ -641,7 +647,7 @@ fn entity_type(
 
 /// ChunkTrackingView.contains: the chunks a player at (cx, cz) with view
 /// distance `r` is sent (isWithinDistance with the neighbours' buffer).
-fn tracked(cx: i32, cz: i32, r: i32, x: i32, z: i32) -> bool {
+pub(super) fn tracked(cx: i32, cz: i32, r: i32, x: i32, z: i32) -> bool {
     let dx = i64::from(((x - cx).abs() - 2).max(0));
     let dz = i64::from(((z - cz).abs() - 2).max(0));
     dx * dx + dz * dz < i64::from(r) * i64::from(r)
@@ -1013,7 +1019,7 @@ impl Hub {
     }
     /// Whether an online guest is placed in the level in place (`config.dimension`).
     pub fn here(&self, g: &Guest) -> bool {
-        g.participates_online() && g.placed && g.dimension == self.config.dimension
+        g.placed_in(&self.config.dimension)
     }
     /// How many passes the level in place's entity tracking has run (None
     /// before its first).
@@ -1025,7 +1031,7 @@ impl Hub {
     /// Whether a guest is sent the level in place: the players placed in it, and
     /// the held ones, which look at it without being part of it.
     pub fn watches(&self, g: &Guest) -> bool {
-        g.participates_online() && (g.placed || g.held) && g.dimension == self.config.dimension
+        g.watches_level(&self.config.dimension)
     }
     /// The chunk under each player the level in place has to keep loaded: the players placed in
     /// it and the held ones, which are sent its chunks too ([`Self::watches`]), whose `loads`
@@ -2270,7 +2276,7 @@ impl Hub {
                     } else {
                         play::ClockState {
                             clock: id,
-                            total_ticks: world.game_time,
+                            total_ticks: world.end_clock,
                             partial_tick: 0.0,
                             rate: if rate > 0.0 { 1.0 } else { 0.0 },
                         }
@@ -3686,7 +3692,7 @@ impl Hub {
                 state.spectator = g.spectator();
                 state.watching = g.watching;
                 state.hidden = self.hidden.get(&g.uuid).copied();
-                stuck_meta(&mut state, g.stuck);
+                stuck_meta(&mut state.meta, &mut state.defaults, g.stuck);
                 frozen_meta(&mut state, g.motion.as_ref().map_or(0, |m| m.ticks_frozen));
                 shoulder_meta(&mut state, g.shoulders);
                 state
@@ -3774,6 +3780,7 @@ impl Hub {
             g.sleeping = false;
             g.sleep_timer = 100;
             if g.sent_bed.take().is_some() {
+                g.sent_pose = crate::pose::Pose::Standing;
                 g.send(&C::SetEntityData(play::SetEntityData {
                     id: g.entity_id,
                     values: vec![
@@ -3805,6 +3812,11 @@ impl Hub {
             if g.bed != g.sent_bed {
                 g.sent_bed = g.bed;
                 let pose = if g.bed.is_some() { 2 } else { 0 };
+                g.sent_pose = if g.bed.is_some() {
+                    crate::pose::Pose::Sleeping
+                } else {
+                    crate::pose::Pose::Standing
+                };
                 g.send(&C::SetEntityData(play::SetEntityData {
                     id: g.entity_id,
                     values: vec![
@@ -3918,6 +3930,18 @@ impl Hub {
                 g.send(&C::SetEntityData(play::SetEntityData {
                     id: g.entity_id,
                     values: vec![(0, serializer::BYTE, Value::Byte(shared))],
+                }));
+            }
+            let pose = g.pose();
+            if matches!(
+                pose,
+                crate::pose::Pose::Standing | crate::pose::Pose::Crouching
+            ) && pose != g.sent_pose
+            {
+                g.sent_pose = pose;
+                g.send(&C::SetEntityData(play::SetEntityData {
+                    id: g.entity_id,
+                    values: vec![(6, serializer::POSE, Value::Id(pose.id()))],
                 }));
             }
             // ServerEntity.sendDirtyEntityData: the parrots on the player's
@@ -5240,6 +5264,7 @@ impl Hub {
         });
         self.respawned(id);
         self.guests.update(i, |g| {
+            g.sent_pose = crate::pose::Pose::Standing;
             // ServerPlayer.restoreFrom: the game mode again (onUpdateAbilities).
             g.send(&g.abilities_packet());
             // The new player faces the level's respawn direction (snapTo), or
@@ -5423,7 +5448,9 @@ impl Hub {
             g.sent_xp = None;
             g.sent_air = (300, 0.0);
             g.sent_frozen = 0;
-            g.sent_shared = 0;
+            // Respawn KEEP_ALL_DATA copies the old player's tracked values,
+            // including shared flags. Preserve the publication baseline so a
+            // flag cleared after the level change is still sent to that client.
             g.sent_shoulders = [None; 2];
             g.sent_stuck = (0, 0);
             let (cx, cz) = g.chunk();
@@ -6269,6 +6296,60 @@ mod tests {
                 flags,
             }),
         );
+    }
+
+    /// `ClientboundRespawnPacket.KEEP_ALL_DATA`: a level change keeps the client's copy of the
+    /// player's shared flags, so one that clears afterwards still reaches it. (A creative player
+    /// who leaves lava through a dimension change kept the fire on its screen.)
+    #[test]
+    fn a_shared_flag_cleared_after_a_level_change_reaches_the_player() {
+        let (mut hub, rx) = hub_with_a_guest();
+        let shared_flags_sent = |rx: &std::sync::mpsc::Receiver<crate::lan::Out>| {
+            let mut sent = Vec::new();
+            while let Ok(out) = rx.try_recv() {
+                let crate::lan::Out::Packet(body) = out else {
+                    continue;
+                };
+                let mut r = horizon_protocol::buf::Reader::new(&body);
+                let id = r.varint().unwrap();
+                if let Ok(C::SetEntityData(packet)) = C::decode(id, r.rest()) {
+                    sent.extend(packet.values.iter().filter_map(|(index, _, value)| {
+                        match (index, value) {
+                            (0, Value::Byte(flags)) => Some(*flags),
+                            _ => None,
+                        }
+                    }));
+                }
+            }
+            sent
+        };
+        hub.guests.update(0, |g| g.sneaking = true);
+        hub.sync_player_state(0);
+        assert_eq!(shared_flags_sent(&rx), [0x02]);
+        let mut world = World::new(horizon_world::registry::BlockStateId(0), 0);
+        let mut next_entity = 2;
+        let border = crate::worldborder::WorldBorder::default();
+        let ctx = TickCtx {
+            world: &mut world,
+            entities: &[],
+            next_entity: &mut next_entity,
+            spawn: [0.5, 64.0, 0.5],
+            spawn_angle: [0.0; 2],
+            difficulty: 2,
+            difficulty_locked: false,
+            clock_rate: 1.0,
+            tick_rate: 20.0,
+            tick_frozen: false,
+            tick_steps: Default::default(),
+            collision: None,
+            border: &border,
+            streaming: None,
+        };
+        hub.change_level(0, [100.5, 49.0, 0.5], 0.0, None, false, 0, &ctx);
+        let _ = shared_flags_sent(&rx);
+        hub.guests.update(0, |g| g.sneaking = false);
+        hub.sync_player_state(0);
+        assert_eq!(shared_flags_sent(&rx), [0]);
     }
 
     /// `ServerGamePacketListenerImpl.forceSendPlayerSupportBlocks`: a client that says it stands
@@ -7245,12 +7326,12 @@ mod tests {
         assert_eq!((left[1].0, &left[1].2), (20, &Value::Id(0)));
     }
 
-    /// The counts of what is stuck in a player are sent when set, and a
+    /// The counts of what is stuck in a player or a mob are sent when set, and a
     /// count back at zero is sent as the default.
     #[test]
     fn stuck_counts_are_synched_as_entity_data() {
         let mut state = EntityState::default();
-        stuck_meta(&mut state, (3, 0));
+        stuck_meta(&mut state.meta, &mut state.defaults, (3, 0));
         assert_eq!(state.meta, vec![(12, serializer::INT, Value::Int(3))]);
         assert_eq!(
             state.defaults,

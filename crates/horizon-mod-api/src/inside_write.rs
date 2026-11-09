@@ -123,7 +123,7 @@ pub enum HurtSourceError {
 /// requested batch is checked before queuing, and an invalid state refuses all writes
 /// and sibling outputs from that callback.
 // exhaustive: the closed serialized write vocabulary and case order are a link contract.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
 pub enum InsideWrite {
     /// `Level.setBlockAndUpdate(pos, state)`, notifying neighbors and clients.
     SetBlock(BlockState),

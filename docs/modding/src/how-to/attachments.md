@@ -14,16 +14,35 @@ Copy `holder` and a borrowed `value: &T`. Match `AttachmentHolder` to work with 
 existing `EntityRef`, `PlayerRef`, `BlockEntityRef`, `ChunkRef` or `LevelRef`.
 Copying that identity does not keep its holder loaded.
 
-This compiled fixture defines a serialized counter and sums its captured values:
+This example defines a serialized counter and sums its captured values:
 
-```rust
-{{#include ../../../../crates/horizon-mod-wasm/tests/attachments/mod/src/lib.rs:2}}
-{{#include ../../../../crates/horizon-mod-wasm/tests/attachments/mod/src/lib.rs:4:17}}
+```rust,ignore
+use mod_api::*;
+static VALUE: AttachmentType<u32> = AttachmentType {
+    namespace: "query_fixture",
+    name: "value",
+    default: || panic!("no defaults"),
+    codec: Some(AttachmentCodec {
+        encode: |value| Ok([("n".into(), Tag::Int(*value as i32))].into()),
+        decode: |saved| match saved.get(&"n".into()) {
+            Some(Tag::Int(n)) => Ok(*n as u32),
+            _ => Err(AttachmentError::Decode),
+        },
+    }),
+    copy_on_death: false,
+    sync: false,
+};
 
-{{#include ../../../../crates/horizon-mod-wasm/tests/attachments/mod/src/lib.rs:21:27}}
+fn total(host: &dyn Host) -> u32 {
+    host.query(&VALUE)
+        .unwrap()
+        .iter()
+        .map(|row| *row.unwrap().value)
+        .sum()
+}
 ```
 
-The fixture deliberately panics if a default is inserted: queries never call the
+The example deliberately panics if a default is inserted: queries never call the
 key's default, dirty the holder, or queue synchronization. It uses `unwrap` to
 check test assumptions; real mods should handle key and row errors according to
 their own policy. A saved entry decodes lazily when visited. A malformed saved
@@ -42,11 +61,18 @@ Use `host.query_mut(&TYPE)` on `&mut dyn ServerHost` (`T: Clone + Send + Sync +
 'static`). This does not return `&mut T`. A mutable query row exposes `holder()`,
 `value()`, `set(host, replacement)` and `remove(host)`.
 
-The same compiled fixture starts with 41, replaces it with 42, checks that a fresh
+The same example starts with 41, replaces it with 42, checks that a fresh
 query sees 42 while the original row still reads 41, then removes the live value:
 
-```rust
-{{#include ../../../../crates/horizon-mod-wasm/tests/attachments/mod/src/lib.rs:37:44}}
+```rust,ignore
+                let batch = host.query_mut(&VALUE).unwrap();
+                let row = batch.iter().next().unwrap().unwrap();
+                assert_eq!(*row.value(), 41);
+                row.set(host, 42).unwrap();
+                assert_eq!(total(host), 42);
+                assert_eq!(*row.value(), 41);
+                assert_eq!(row.remove(host).unwrap(), Some(42));
+                assert_eq!(total(host), 0);
 ```
 
 Every set/remove validates the captured residency against the supplied host's
@@ -94,10 +120,9 @@ clone each typed value. Repeated snapshots interleaved with writes can therefore
 cost more, and keeping many batches retains their old values. There is no idle
 index sweep when no attachment or residency change occurs.
 
-At the generated component boundary the whole owned batch transfers once, not
-one host call per row. Borrowed traversal still uses that owned batch. An erased
+An erased
 decoded value can only be read where its Rust type identity matches. A different
-native type or another component group's type produces `TypeMismatch`; a failed
+native or wasm type produces `TypeMismatch`; a failed
 decoded downcast does not fall back to saved decoding. Share attachment type
 identity through the normal dependency model rather than redeclaring a different
 type with the same key.

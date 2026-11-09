@@ -547,12 +547,15 @@ impl Game<'_> {
         {
             Some(("minecraft:player".to_owned(), g.position))
         } else {
-            self.level_entity(id).map(|t| {
-                (
-                    self.target_type(t),
-                    self.target_position(t).unwrap_or_default(),
-                )
-            })
+            // The mod hooks hear no natural fence knot (#13036).
+            self.level_entity(id)
+                .filter(|t| !matches!(t, crate::game::commands::Target::Knot(_)))
+                .map(|t| {
+                    (
+                        self.target_type(t),
+                        self.target_position(t).unwrap_or_default(),
+                    )
+                })
         };
         if let Some((kind, at)) = aimed
             && self.as_guest_at(gi, conn, |g| {
@@ -564,7 +567,7 @@ impl Game<'_> {
             return Ok(false);
         }
         if let Some(victim) = self.pvp_victim(conn, id) {
-            if let Ok(Some(strike)) = self.as_guest_at(gi, conn, |g| g.pvp_strike())
+            if let Ok(Some(strike)) = self.as_guest_at(gi, conn, |g| g.pvp_strike(id as u32))
                 && self.pvp_land(victim, &strike)
             {
                 let on_ground = self.pvp_victim_on_ground(victim);

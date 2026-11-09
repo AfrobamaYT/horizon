@@ -56,7 +56,7 @@ pub(super) enum Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let message = match self {
-            Self::Inject(error) => return error.fmt(f),
+            Self::Inject(error) => super::inject_text::inject_error(error),
             Self::Missing { mod_id, path } => trf(
                 "E_INTERNAL_MISSING: {mod} uses {path}, which this game doesn't have; run cargo horizon-mod internals sync to discover this pin's used internals.",
                 &[("mod", mod_id), ("path", path)],
@@ -126,6 +126,7 @@ impl Catalog {
                 target: point.target,
                 raw: true,
                 at_return: true,
+                api_refusal: Some("a private source point has no API record".into()),
                 listener: Some(format!("{}::__{name}Listener", point.module)),
                 return_listener: Some(format!("{}::__{name}ReturnListener", point.module)),
                 private: true,

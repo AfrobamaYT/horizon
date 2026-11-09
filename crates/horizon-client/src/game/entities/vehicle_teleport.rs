@@ -79,9 +79,17 @@ fn vehicle_id(t: Target) -> Option<u32> {
 impl Game<'_> {
     /// `AbstractMinecart.getDismountLocationForPassenger` for a standing mob.
     pub(super) fn cart_dismount_point(&self, vehicle: u32, rider: usize) -> Option<Vec3> {
+        self.cart_dismount_mob(vehicle, &self.mobs[rider])
+    }
+
+    /// The same cart search for a rider currently lent out of the mob list.
+    pub(super) fn cart_dismount_mob(
+        &self,
+        vehicle: u32,
+        rider: &horizon_client::mobs::Mob,
+    ) -> Option<Vec3> {
         use horizon_core::geometry::Aabb;
         let cart = self.carts.iter().find(|c| c.id == vehicle)?;
-        let rider = &self.mobs[rider];
         let direction =
             (f64::from(cart.yaw) / 90.0 + 0.5).floor() as i32 + if cart.flipped { 3 } else { 1 };
         let (fx, fz) = [(0, 1), (-1, 0), (0, -1), (1, 0)][(direction & 3) as usize];
@@ -131,12 +139,23 @@ impl Game<'_> {
     /// `AbstractHorse.getDismountLocationForPassenger`: try either side
     /// through the mount's height, then fall back to its feet.
     pub(super) fn horse_dismount_point(&self, vehicle: u32, rider: usize) -> Option<Vec3> {
-        use horizon_core::geometry::{Aabb, trig};
         let mount = self
             .mobs
             .iter()
             .find(|m| m.id == vehicle && is_horse(m.species()))?;
-        let rider = &self.mobs[rider];
+        self.horse_dismount_mobs(mount, &self.mobs[rider])
+    }
+
+    /// The horse search for a mount and rider currently lent out of the mob list.
+    pub(super) fn horse_dismount_mobs(
+        &self,
+        mount: &horizon_client::mobs::Mob,
+        rider: &horizon_client::mobs::Mob,
+    ) -> Option<Vec3> {
+        use horizon_core::geometry::{Aabb, trig};
+        if !is_horse(mount.species()) {
+            return None;
+        }
         let turn = if rider.main_arm_left() { -90.0 } else { 90.0 };
         let reach =
             (f64::from(mount.width()) + f64::from(rider.width()) + f64::from(1e-5_f32)) / 2.0;
@@ -244,8 +263,7 @@ impl Game<'_> {
             if source == destination {
                 return Ok(false);
             }
-            // The vehicle and the server players riding it are asked before
-            // anything moves; one cancel keeps them all where they are.
+            // Refused passengers are dismounted and remain in the source level.
             if !game.tree_may_travel(root, destination) {
                 return Ok(true);
             }
@@ -262,6 +280,7 @@ impl Game<'_> {
             }
             game.prepare_vehicle_transition(root);
             game.teleport_to_in_level(target, at, rotation, [false; 3], turn_riders);
+            game.teleport_stops(target);
             let mounts: Vec<_> = game.mobs.iter().map(|m| (m.id, m.extra.mount)).collect();
             let tree = super::persist::vehicle_tree(root, &mounts);
             let tag = game.vehicle_tree_nbt(root).ok_or("missing vehicle tree")?;
@@ -357,29 +376,11 @@ impl Game<'_> {
     /// carries) may all travel to `destination` by a teleport
     /// (`entity_travel_to_dimension`).
     fn tree_may_travel(&mut self, root: u32, destination: super::Dim) -> bool {
-        let mounts: Vec<_> = self.mobs.iter().map(|m| (m.id, m.extra.mount)).collect();
-        let tree = super::persist::vehicle_tree(root, &mounts);
-        let mut asked = vec![root];
-        if self.riding.is_some_and(|id| tree.contains(&id))
-            && let Some(id) = self.network_entity_id(Target::Player)
-        {
-            asked.push(id as u32);
-        }
-        if let Some(host) = self.lan.as_ref() {
-            asked.extend(
-                host.hub
-                    .guests
-                    .iter()
-                    .filter(|g| {
-                        Some(g.conn) != self.lan_acting
-                            && g.vehicle.is_some_and(|id| tree.contains(&id))
-                    })
-                    .map(|g| g.entity_id as u32),
-            );
-        }
-        asked.into_iter().all(|id| {
-            self.entity_may_travel(id, destination, super::server_travel::TravelCause::Teleport)
-        })
+        self.entity_may_travel(
+            root,
+            destination,
+            super::server_travel::TravelCause::Teleport,
+        )
     }
 
     /// `Entity.teleportSameDimension`: after `t` moved from `from` to `to`, its

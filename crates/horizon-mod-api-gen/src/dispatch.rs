@@ -9,6 +9,9 @@ pub(super) struct HookSources {
     pub fire: String,
     pub hook_ids: String,
     pub hook_constants: String,
+    /// A `()` constant named after each hook a mod may cancel, which `#[listener(receive_cancelled)]`
+    /// names so that the option on any other hook fails to compile.
+    pub cancel_hooks: String,
     pub hook_count: usize,
 }
 
@@ -48,6 +51,7 @@ pub(super) fn emit<'a>(
 ) -> Result<HookSources, String> {
     let mut hook_ids = String::new();
     let mut hook_constants = String::new();
+    let mut cancel_hooks = String::new();
     let mut hook_count = 0;
     let mut traits = String::new();
     let mut dispatch = String::new();
@@ -206,6 +210,9 @@ pub(super) fn emit<'a>(
         let part_item = fresh_name("part", &mut used);
         let part_table = fresh_name("part_table", &mut used);
         let replacement = fresh_name("replacement", &mut used);
+        let receives = fresh_name("receives_cancelled", &mut used);
+        let mod_entry = fresh_name("mod_entry", &mut used);
+        let entered = fresh_name("_entered", &mut used);
         let contract = hook.contract;
         let out = hook.out.as_deref();
         let answered = hook.answered_by_mod;
@@ -307,6 +314,12 @@ pub(super) fn emit<'a>(
             ));
             hook_count += 1;
         }
+        // A mod listener may still be told of a cancelled event, and see and clear its cancel; a
+        // part never is.
+        let mod_cancel = contract == Contract::Cancel && scoped.is_none();
+        if mod_cancel && !is_render {
+            cancel_hooks.push_str(&format!("pub const {name}: () = ();\n"));
+        }
         let mut trait_params = vec!["&self".to_owned()];
         let mut dispatch_params = Vec::new();
         let mut call_args = Vec::new();
@@ -397,6 +410,15 @@ pub(super) fn emit<'a>(
                 inits.push(name.clone());
             }
         }
+        if mod_cancel {
+            if args.iter().any(|(arg, _)| arg == "cancelled") {
+                return Err(format!(
+                    "{name}: a cancel hook's event has its own `cancelled` field"
+                ));
+            }
+            fields.push_str("/// Whether the event is cancelled: by the game or an earlier listener, or by this one\n/// setting it. Only a listener that receives cancelled events (`#[listener(receive_cancelled)]`)\n/// sees `true`, and setting it back to `false` lets the game's behaviour run.\npub cancelled: bool,\n");
+            inits.push(format!("cancelled: *{}", out.unwrap()));
+        }
         if let Some((name, ty)) = output.as_ref().filter(|_| contract != Contract::Collect) {
             dispatch_params.push(format!("{name}: {}", ty.to_token_stream()));
         }
@@ -408,7 +430,7 @@ pub(super) fn emit<'a>(
                 if generics.is_empty() { "" } else { "<'_>" }
             ));
             calls.push_str(&format!(
-                "/// What the game passes `dispatch_{name}`: the hook's declared parameters.\n#[doc(hidden)]\n#[allow(missing_docs)]\npub struct {carrier}{generics} {{\n{fields}}}\n"
+                "/// What the game passes `dispatch_{name}`: the hook's declared parameters.\n#[doc(hidden)]\n#[allow(missing_docs)]\n// no wire: internal call carrier, not an owned boundary value.\npub struct {carrier}{generics} {{\n{fields}}}\n"
             ));
         }
         let (generics, elided) = match (lifetimes.a, lifetimes.b) {
@@ -416,9 +438,14 @@ pub(super) fn emit<'a>(
             (true, false) => ("<'a>", "<'_>"),
             (false, false) => ("", ""),
         };
+        let wire_form = if generics.is_empty() {
+            "#[derive(horizon_mod_api_macros::Wire)]"
+        } else {
+            "// no wire: borrowed event crosses as call arguments."
+        };
         if is_render {
             render_dispatch.push_str(&format!(
-                "#[allow(missing_docs)]\npub struct {event_type}{generics} {{\n{fields}}}\n"
+                "#[allow(missing_docs)]\n{wire_form}\npub struct {event_type}{generics} {{\n{fields}}}\n"
             ));
             continue;
         }
@@ -435,10 +462,22 @@ pub(super) fn emit<'a>(
         };
         // Reuse the exact host and drawing conversions for generated game-side calls.
         if in_game {
+            // A scoped read hook can run against either the game or a borrowed
+            // tick view. Its native receiver carries the selected host.
+            let scoped_read_host = target.contains("::NativeHookHost<");
+            if scoped_read_host
+                && (hook.host != Some(HostAccess::Read) || receiver_mut != Some(false))
+            {
+                return Err(format!(
+                    "{name}: NativeHookHost requires a read-only host and receiver"
+                ));
+            }
             let passed = host
                 .as_ref()
                 .map(|(_, param)| {
-                    if param.call == "&*self" && receiver_mut == Some(false) {
+                    if scoped_read_host {
+                        "self.host".to_owned()
+                    } else if param.call == "&*self" && receiver_mut == Some(false) {
                         "self".to_owned()
                     } else {
                         param.call.to_owned()
@@ -505,16 +544,14 @@ pub(super) fn emit<'a>(
                     "pub(in crate::game) struct {carrier}{generics} {{ {fields} }}\n"
                 ));
                 for arg in &mut signature.inputs {
-                    if let FnArg::Typed(arg) = arg {
-                        if arg.pat.to_token_stream().to_string() == "call" {
-                            arg.ty = Box::new(
-                                syn::parse_str(&format!(
-                                    "{carrier}{}",
-                                    if generics.is_empty() { "" } else { "<'_>" }
-                                ))
-                                .unwrap(),
-                            );
-                        }
+                    if let FnArg::Typed(arg) = arg
+                        && arg.pat.to_token_stream().to_string() == "call"
+                    {
+                        *arg.ty = syn::parse_str(&format!(
+                            "{carrier}{}",
+                            if generics.is_empty() { "" } else { "<'_>" }
+                        ))
+                        .unwrap();
                     }
                 }
             }
@@ -537,7 +574,9 @@ pub(super) fn emit<'a>(
                 let passed = host
                     .as_ref()
                     .map(|(_, param)| {
-                        if param.call == "&*self" && receiver_mut == Some(false) {
+                        if scoped_read_host {
+                            "self.host".to_owned()
+                        } else if param.call == "&*self" && receiver_mut == Some(false) {
                             "self".to_owned()
                         } else {
                             param.call.to_owned()
@@ -622,6 +661,9 @@ pub(super) fn emit<'a>(
         // A scoped hook is its part's method alone: a global moment beside it is its own hook.
         let callee = if scoped.is_some() { "part" } else { "mod" };
         match (contract, out) {
+            (Contract::Cancel, Some(out)) if mod_cancel => method_source.push_str(&format!(
+                "///\n/// Return `Flow::Cancel` to take it: this sets `{out}`, and later mods are skipped unless they\n/// listen with `#[listener(receive_cancelled)]`; those see `{event}.cancelled` and may set it back to\n/// `false`.\n"
+            )),
             (Contract::Cancel, Some(out)) => method_source.push_str(&format!(
                 "///\n/// Return `Flow::Cancel` to take it: this sets `{out}`, and later {callee}s are skipped.\n"
             )),
@@ -647,7 +689,7 @@ pub(super) fn emit<'a>(
             .as_ref()
             .map_or(trait_name, |(part_trait, _)| part_trait);
         dispatch.push_str(&format!(
-            "/// What [`{trait_name}::{name}`] is told. Each field is that hook's argument of the same name, described in the hook's doc.\n#[allow(missing_docs)]\npub struct {event_type}{generics} {{\n{fields}}}\n"
+            "/// What [`{trait_name}::{name}`] is told. Each field is that hook's argument of the same name, described in the hook's doc.\n#[allow(missing_docs)]\n{wire_form}\npub struct {event_type}{generics} {{\n{fields}}}\n"
         ));
         let build = format!("let mut {event} = {event_type} {{ {} }};", inits.join(", "));
         // A trait mod's call is marked with the mod for a panic to name.
@@ -678,6 +720,13 @@ pub(super) fn emit<'a>(
             mod_item.clone()
         };
         let (lookup, calls) = match &scoped {
+            None if mod_cancel => (
+                String::new(),
+                format!(
+                    "for ({receives}, {mod_entry}) in super::listening(HookId::{hook_id}) {{ if {event}.cancelled && !{receives} {{ continue; }} let ({entered}, {mod_item}) = super::enter_listener({mod_entry}, \"{name}\"); if matches!({mod_item}.{name}({invoke}), Flow::Cancel) {{ {event}.cancelled = true; }} }} *{o} = {event}.cancelled;",
+                    o = out.unwrap()
+                ),
+            ),
             None => (
                 String::new(),
                 format!("for {binding} in {each} {{ {} }}", call(&mod_item, "break")),
@@ -694,6 +743,10 @@ pub(super) fn emit<'a>(
             ),
         };
         let body = match contract {
+            Contract::Cancel if mod_cancel => format!(
+                "if *{o} && !super::receives_cancelled(HookId::{hook_id}) {{ return; }} {build} {calls} {write_back}",
+                o = out.unwrap()
+            ),
             Contract::Cancel => format!(
                 "if *{o} {{ return; }} {lookup} {build} {calls} {write_back}",
                 o = out.unwrap()
@@ -733,6 +786,7 @@ pub(super) fn emit<'a>(
         fire,
         hook_ids,
         hook_constants,
+        cancel_hooks,
         hook_count,
     })
 }
@@ -849,9 +903,7 @@ fn stack_crossing_routed(
             continue;
         }
         let local = format!("__api_{name}");
-        let value = if infallible {
-            format!("match {name}.try_into_api() {{ Ok(value) => value, Err(_) => return }}")
-        } else if stack || block {
+        let value = if infallible || stack || block {
             format!("match {name}.try_into_api() {{ Ok(value) => value, Err(_) => return }}")
         } else {
             format!("(*{name}).to_owned()")
@@ -870,6 +922,13 @@ fn stack_crossing_routed(
             _ => local.clone(),
         });
         if mutable {
+            // Owned stack records have value equality. Other boundary records retain
+            // their existing validation path until they provide comparable snapshots.
+            let comparable = contains_boundary(ty, &["ItemStack"]);
+            if comparable {
+                before.push_str(&format!("let __original_{name} = {local}.clone(); "));
+                validations.push_str(&format!("let __changed_{name} = {local} != __original_{name}; let __candidate_{name} = if __changed_{name} {{ "));
+            }
             let converted = format!("__engine_{name}");
             let value = if infallible {
                 format!(
@@ -890,8 +949,15 @@ fn stack_crossing_routed(
             } else {
                 local
             };
-            validations.push_str(&format!("let {converted} = {value}; "));
-            writes.push_str(&format!("*{name} = {converted}; "));
+            if comparable {
+                validations.push_str(&format!("Some({value}) }} else {{ None }}; "));
+                writes.push_str(&format!(
+                    "if let Some({converted}) = __candidate_{name} {{ *{name} = {converted}; }} "
+                ));
+            } else {
+                validations.push_str(&format!("let {converted} = {value}; "));
+                writes.push_str(&format!("*{name} = {converted}; "));
+            }
         }
     }
     Some(StackCrossing {
@@ -900,6 +966,10 @@ fn stack_crossing_routed(
         after: format!("{validations}{writes}"),
     })
 }
+
+#[cfg(test)]
+#[path = "writeback_tests.rs"]
+mod writeback_tests;
 
 #[cfg(test)]
 mod stack_crossing_tests {
@@ -1677,5 +1747,18 @@ mod tests {
         assert!(target_parameters("new_hook", "native_new_hook", 7, "NewHookCall").is_ok());
         let refused = target_parameters("new_hook", "native_new_hook", 8, "NewHookCall");
         assert!(refused.unwrap_err().contains("one NewHookCall"));
+    }
+
+    #[test]
+    fn scoped_native_hook_uses_selected_host_and_game_hooks_keep_their_receiver() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let fire = super::super::sources(&root, super::super::FillMode::Require)
+            .unwrap()
+            .fire;
+        let compact: String = fire.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(compact.contains("mod_api::dispatch_living_change_target(self.host,call)"));
+        assert!(
+            compact.contains("mod_api::dispatch_living_visibility(self,entity,looking,visibility)")
+        );
     }
 }

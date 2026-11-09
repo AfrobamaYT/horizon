@@ -425,6 +425,17 @@ pub(super) fn register_dimension_transition_screens(role: ExecutionRole) {
     horizon_client_render::dimension_transition::register(screens);
 }
 
+/// The native mods' colour resolvers (`native_register_color_resolvers`), kept once at start,
+/// before the block tint sources that read them and before resources load.
+pub(super) fn register_color_resolvers(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut registry = mod_api::ColorResolverRegistry::default();
+    Game::native_register_color_resolvers(&RegistrationContext::new(), &mut registry);
+    horizon_client::mesher::register_color_resolvers(registry.into_resolvers());
+}
+
 /// The native mods' block tint sources (`native_register_block_tint_sources`), kept once at
 /// start, before resources load; every resource load applies them to its mesh tables.
 pub(super) fn register_block_tint_sources(role: ExecutionRole) {
@@ -434,6 +445,16 @@ pub(super) fn register_block_tint_sources(role: ExecutionRole) {
     let mut registry = mod_api::BlockTintRegistry::default();
     Game::native_register_block_tint_sources(&RegistrationContext::new(), &mut registry);
     horizon_client::mesher::register_block_tint_sources(registry.into_layers());
+}
+/// The native mods' particle providers (`native_register_particle_providers`), kept once at
+/// start, before resources load; every particle sprite-set load resolves each type's provider.
+pub(super) fn register_particle_providers(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut registry = mod_api::ParticleProviderRegistry::default();
+    Game::native_register_particle_providers(&RegistrationContext::new(), &mut registry);
+    horizon_client::particles::register_particle_providers(registry.into_providers());
 }
 
 /// `root` with the content mods that are on layered over it
@@ -564,6 +585,10 @@ pub(super) fn content_overlay(
                 continue;
             }
         };
+        // Read as `Content::read` reads it: `start_mods` need not read it again.
+        if declared.is_empty() {
+            remember_verdict(source.path, &content);
+        }
         let known = match &mut known {
             Some(types) => types,
             None => match mod_content::known_components(root) {
@@ -732,8 +757,12 @@ pub(super) fn content_root(
     root: &std::path::Path,
     sources: &ModsState,
 ) -> horizon_client::Result<horizon_assets::resource_source::ResourceRoot> {
+    let _step = horizon_client::spans::startup::step("mods.content_root");
     let jar_store = horizon_client::logging::game_home().join("jars");
-    let overlay = content_overlay(root, sources, &jar_store)?;
+    let overlay = {
+        let _step = horizon_client::spans::startup::step("mods.overlay");
+        content_overlay(root, sources, &jar_store)?
+    };
     let world_fluids = horizon_client::mod_content::register_world_fluids(&overlay.mods)?;
     register_block_entity_types(overlay.root.prepared(), &overlay.mods)?;
     if overlay.announce {
@@ -1023,11 +1052,61 @@ fn native_mods_detail(built: &[horizon_mod_package::runtime::BuiltMod]) -> Optio
     (!list.is_empty()).then_some(list)
 }
 
+/// Whether a content mod's files can switch with a world open (`mod_content::live_switch`);
+/// `None` when its content can't be read.
+type Verdict = Option<std::result::Result<(), &'static str>>;
+
+/// Each mod's [`Verdict`] by its path and modification time. Reading a mod's content walks and
+/// checks every file (seconds for a large pack), and a start read each mod three times: the
+/// content root, then the window's and the server thread's `start_mods`.
+/// shortcut: a file edited inside an unpacked mod folder keeps the folder's time; `--dev-mod`
+/// folders are never remembered, a player's are replaced whole by the launcher.
+static VERDICTS: std::sync::Mutex<
+    std::collections::BTreeMap<(PathBuf, std::time::SystemTime), Verdict>,
+> = std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+fn verdict_key(path: &std::path::Path) -> Option<(PathBuf, std::time::SystemTime)> {
+    let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok()?;
+    Some((path.to_owned(), modified))
+}
+
+/// Remembers the verdict of `content`, read from `path` as [`horizon_mod_package::Content::read`] does.
+fn remember_verdict(path: &std::path::Path, content: &horizon_mod_package::Content) {
+    if let Some(key) = verdict_key(path) {
+        let verdict = Some(horizon_client::mod_content::live_switch(content));
+        VERDICTS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key, verdict);
+    }
+}
+
+/// The mod at `path`'s [`Verdict`], read once per version of it (never remembered for `dev`).
+fn verdict(path: &std::path::Path, manifest: &horizon_mod_package::Manifest, dev: bool) -> Verdict {
+    let key = if dev { None } else { verdict_key(path) };
+    if let Some(key) = &key
+        && let Some(verdict) = VERDICTS.lock().unwrap_or_else(|e| e.into_inner()).get(key)
+    {
+        return *verdict;
+    }
+    let verdict = horizon_mod_package::Content::read(path, manifest)
+        .ok()
+        .map(|content| horizon_client::mod_content::live_switch(&content));
+    if let Some(key) = key {
+        VERDICTS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key, verdict);
+    }
+    verdict
+}
+
 /// Notes a content mod's id, and whether its files can switch with a world
 /// open (`mod_content::live_switch`).
 fn live_switch_of(
     path: &std::path::Path,
     package: &horizon_mod_package::Package,
+    dev: bool,
     content_ids: &mut std::collections::BTreeSet<String>,
     live_ids: &mut std::collections::BTreeSet<String>,
 ) {
@@ -1036,16 +1115,12 @@ fn live_switch_of(
     }
     let id = &package.manifest.id;
     content_ids.insert(id.clone());
-    let content = horizon_mod_package::Content::read(path, &package.manifest);
-    match content
-        .as_ref()
-        .map(horizon_client::mod_content::live_switch)
-    {
+    match verdict(path, &package.manifest, dev) {
         // Jar layers can declare worldgen that Content.files does not list.
-        Ok(Ok(())) if package.manifest.jar.is_empty() => {
+        Some(Ok(())) if package.manifest.jar.is_empty() => {
             live_ids.insert(id.clone());
         }
-        Ok(Err(why)) => log::debug!("Horizon: mod {id} switches on a restart: {why}"),
+        Some(Err(why)) => log::debug!("Horizon: mod {id} switches on a restart: {why}"),
         _ => {}
     }
 }
@@ -1192,7 +1267,13 @@ impl Game<'_> {
                 };
                 let m = &package.manifest;
                 let refused = horizon_mod_wasm::refusal(&m.id);
-                live_switch_of(path, &package, &mut content_ids, &mut live_ids);
+                live_switch_of(
+                    path,
+                    &package,
+                    self.mods.dev.contains(path),
+                    &mut content_ids,
+                    &mut live_ids,
+                );
                 info.insert(
                     m.id.clone(),
                     mod_list::ModInfo::of(m, package.icon.as_ref()),
@@ -1382,8 +1463,64 @@ pub(super) fn living_mod_types()
         .collect()
 }
 
+/// Registered callbacks indexed directly by the slots resolved in enchantment content.
+pub(in crate::game) static ENCHANTMENT_DAMAGE_EFFECTS: std::sync::OnceLock<
+    Vec<std::sync::Arc<dyn mod_api::EnchantmentDamageEffect>>,
+> = std::sync::OnceLock::new();
+
+pub(super) fn register_enchantment_damage_effects() {
+    let mut effects = mod_api::EnchantmentDamageRegistry::default();
+    Game::native_register_enchantment_damage_effects(
+        &mod_api::RegistrationContext::new(),
+        &mut effects,
+    );
+    let (ids, callbacks): (Vec<_>, Vec<_>) = effects
+        .into_entries()
+        .into_iter()
+        .map(|(id, effect)| (id.to_string(), effect))
+        .unzip();
+    horizon_items::enchant::register_damage_effects(ids);
+    assert!(
+        ENCHANTMENT_DAMAGE_EFFECTS.set(callbacks).is_ok(),
+        "damage effects already registered"
+    );
+}
+
 #[cfg(test)]
 mod tests {
+    /// A mod's live-switch verdict is read once per version of the mod: a later look finds
+    /// it without reading the files again, a `--dev-mod` is always read, and the mod
+    /// replaced (a new modification time) is read again.
+    #[test]
+    fn a_mods_live_switch_verdict_is_read_once_per_version_of_it() {
+        let dir = std::env::temp_dir().join(format!("horizon-verdict-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let ruby = dir.join("ruby");
+        std::fs::create_dir_all(ruby.join("assets/ruby/lang")).unwrap();
+        std::fs::create_dir_all(ruby.join("data/ruby")).unwrap();
+        std::fs::write(ruby.join("assets/ruby/lang/en_us.json"), "{}").unwrap();
+        let manifest = horizon_mod_package::Manifest::parse(
+            "id = \"ruby\"\nname = \"Ruby\"\nversion = \"0.1.0\"\napi = \"0.2\"\n\
+             side = \"both\"\ncapabilities = [\"registries\"]\n",
+        )
+        .unwrap();
+        assert_eq!(verdict(&ruby, &manifest, false), Some(Ok(())));
+        // Worldgen added below `data/ruby`: the mod folder's own time stays.
+        let worldgen = ruby.join("data/ruby/worldgen/configured_feature");
+        std::fs::create_dir_all(&worldgen).unwrap();
+        std::fs::write(worldgen.join("ore.json"), "{}").unwrap();
+        let switches_on_restart = Some(Err("horizon.mods.switch.worldgen"));
+        assert_eq!(verdict(&ruby, &manifest, true), switches_on_restart);
+        assert_eq!(verdict(&ruby, &manifest, false), Some(Ok(())));
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
+        std::fs::File::open(&ruby)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+        assert_eq!(verdict(&ruby, &manifest, false), switches_on_restart);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     use super::*;
     use horizon_mod_package::runtime::{BuiltMod, Runtime};
 
@@ -1589,6 +1726,151 @@ mod tests {
             Some(&55.0),
             "the finalize defaults read the declared value"
         );
+    }
+
+    /// #812: a mod's declared attribute type joins the catalog before the
+    /// rows resolve (a mod entity's set names its own new attribute), and
+    /// the live map, an item's modifier, the saves and the sync set carry it
+    /// by string id — a guest's catalog built from the same mods decodes the
+    /// same network id.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mods_declared_attribute_reaches_rows_the_live_map_saves_and_sync() {
+        use horizon_client::lan;
+        use horizon_client::living_attributes::{self, LivingAttributes};
+        use horizon_core::nbt::Tag;
+        use horizon_world::attribute_map::ValueKind;
+        use horizon_world::attributes::{
+            Definition, Sentiment,
+            entity::{AddedAttribute, Catalog},
+        };
+
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let catalog = Catalog::from_json(
+            &horizon_world::json_file::read(&root.join("attributes.json")).unwrap(),
+        )
+        .unwrap();
+        let vanilla = catalog.attributes().count();
+        // Two mods' attributes, declared in an order that is not the sorted
+        // one; one syncable, one not.
+        let declared = |mod_id: &str, id: &str, default, syncable, sentiment| AddedAttribute {
+            mod_id: mod_id.into(),
+            id: id.into(),
+            definition: Definition::ranged(default, 0.0, 100.0).unwrap(),
+            syncable,
+            sentiment,
+        };
+        let grown = catalog
+            .with_attributes(&[
+                declared("zeta", "zeta:fury", 15.0, false, Sentiment::default()),
+                declared("ruby", "ruby:mana", 10.0, true, Sentiment::Negative),
+            ])
+            .unwrap();
+        // After every vanilla attribute, sorted by mod id: ruby's first
+        // though zeta's declared first, and vanilla ids never shift.
+        let (mana, fury) = (
+            grown.id("ruby:mana").unwrap(),
+            grown.id("zeta:fury").unwrap(),
+        );
+        assert_eq!(mana.registry_id() as usize, vanilla);
+        assert_eq!(fury.registry_id() as usize, vanilla + 1);
+        assert_eq!(
+            grown.id("minecraft:max_health"),
+            catalog.id("minecraft:max_health")
+        );
+        // A mod entity's row names its own new attribute (#845's rows
+        // resolve after the attributes join).
+        let merged = grown
+            .with_entity_row(
+                "ruby:ghoul",
+                "minecraft:zombie",
+                &[("ruby:mana".into(), 42.0), ("zeta:fury".into(), 7.0)],
+            )
+            .unwrap();
+        let live = LivingAttributes::default();
+        assert_eq!(
+            live.read(
+                &std::sync::Arc::new(merged.clone()),
+                "ruby:ghoul",
+                "ruby:mana",
+                ValueKind::Computed,
+                Vec::new
+            ),
+            Some(42.0)
+        );
+        // An item's `attribute_modifiers` entry naming the mod attribute
+        // reaches the live map (the worn-stack path's own write).
+        let mut map =
+            living_attributes::new_live(&std::sync::Arc::new(merged.clone()), "ruby:ghoul")
+                .unwrap();
+        assert_eq!(map_value(&mut map, mana), 42.0);
+        living_attributes::set_modifier(&mut map, "ruby:mana", "ruby:ring", 8.0, "add_value", true)
+            .unwrap();
+        assert_eq!(map_value(&mut map, mana), 50.0);
+        // The sync set: a syncable attribute joins it, a non-syncable one
+        // never does (`AttributeMap.getSyncableAttributes`).
+        living_attributes::set_modifier(&mut map, "zeta:fury", "zeta:mark", 1.0, "add_value", true)
+            .unwrap();
+        let synced: std::collections::HashSet<i32> = lan::attributes::syncable(&map)
+            .iter()
+            .map(|s| s.attribute)
+            .collect();
+        assert!(synced.contains(&mana.registry_id()));
+        assert!(!synced.contains(&fury.registry_id()));
+        // Save → load round trip by string id.
+        let saved = Tag::List(living_attributes::pack(&map, true));
+        let mut again =
+            living_attributes::new_live(&std::sync::Arc::new(merged.clone()), "ruby:ghoul")
+                .unwrap();
+        living_attributes::apply_saved(&mut again, Some(&saved)).unwrap();
+        // The saved base; the ring's transient modifier is equipment, not
+        // saved — as vanilla's `AttributeInstance.Packed` keeps permanent
+        // modifiers only.
+        assert_eq!(map_value(&mut again, mana), 42.0);
+        // A save whose attribute the loaded catalog does not know is
+        // skipped, as vanilla warns and skips: no panic, the map whole.
+        let mut vanilla_map =
+            living_attributes::new_live(&std::sync::Arc::new(catalog.clone()), "minecraft:zombie")
+                .unwrap();
+        living_attributes::apply_saved(&mut vanilla_map, Some(&saved)).unwrap();
+        assert!(lan::attributes::syncable(&vanilla_map).is_empty());
+        // The network id decodes on a guest's catalog built from the same
+        // mods declaring in another order: the snapshot's numbers find the
+        // same attributes.
+        let guest_catalog = catalog
+            .with_attributes(&[
+                declared("ruby", "ruby:mana", 10.0, true, Sentiment::Negative),
+                declared("zeta", "zeta:fury", 15.0, false, Sentiment::default()),
+            ])
+            .unwrap()
+            .with_entity_row(
+                "ruby:ghoul",
+                "minecraft:zombie",
+                &[("ruby:mana".into(), 42.0), ("zeta:fury".into(), 7.0)],
+            )
+            .unwrap();
+        let snapshots = lan::attributes::syncable(&map);
+        let mut guest =
+            living_attributes::new_live(&std::sync::Arc::new(guest_catalog), "ruby:ghoul").unwrap();
+        lan::attributes::apply(&mut guest, &snapshots);
+        assert_eq!(map_value(&mut guest, mana), 50.0);
+
+        fn map_value(
+            map: &mut horizon_client::living_attributes::Live,
+            id: horizon_world::attributes::entity::AttributeId,
+        ) -> f64 {
+            // The first read creates the instance, as `getInstance` does.
+            let key = map
+                .keys()
+                .iter()
+                .find(|key| key.attribute() == id)
+                .cloned()
+                .unwrap();
+            let Ok(Some(handle)) = map.get_instance(Some(key)) else {
+                panic!("the type has the attribute")
+            };
+            map.instance(&handle).unwrap().value()
+        }
     }
 
     /// A declared set's merged row — the template's with the declared set on

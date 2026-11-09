@@ -225,6 +225,8 @@ impl Entry {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct EntryVersion {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub native_binaries: Vec<super::NativeBinary>,
     pub version: String,
     /// `YYYY-MM-DD`.
     pub published: String,
@@ -406,7 +408,9 @@ pub fn project(entry: &Entry, src: &Sources) -> Result<Project, Vec<String>> {
 
 /// An icon (`folder` = `icons/`) or a screenshot (`screenshots/<id>/`) as the index lists it: an
 /// `https://` address as it is, or a file in the registry repository checked and served from the
-/// registry's site.
+/// registry's site. An icon's address ends in `?v=` and the start of its SHA-256, so a new icon
+/// is a new address: the launcher keeps images by address for a week, and would go on showing
+/// the old one.
 fn image(
     src: &Sources,
     id: &str,
@@ -439,13 +443,14 @@ fn image(
             let bytes =
                 std::fs::read(src.registry.join(path)).map_err(|e| format!("{path}: {e}"))?;
             if icon {
-                rules::check_icon(&bytes).map_err(|e| format!("{path}: {e}"))
+                rules::check_icon(&bytes).map_err(|e| format!("{path}: {e}"))?;
+                Ok(format!("?v={}", &super::sha256(&bytes)[..12]))
             } else {
-                rules::check_screenshot(name, &bytes)
+                rules::check_screenshot(name, &bytes).map(|()| String::new())
             }
         });
     match checked {
-        Ok(()) => Some(format!("{}{path}", src.site)),
+        Ok(version) => Some(format!("{}{path}{version}", src.site)),
         Err(e) => {
             errors.push(format!("{id}: {e}"));
             None
@@ -507,6 +512,7 @@ fn version_at(
         ));
     }
     Ok(Version {
+        native_binaries: v.native_binaries.clone(),
         version: v.version.clone(),
         published: v.published.clone(),
         changelog: v.changelog.clone(),
@@ -580,6 +586,7 @@ pub fn release_version(entry: &Entry, r: &Release, path: &Path) -> Result<Versio
         notes.push_str("\n\n(Cut: the full notes are on the release.)");
     }
     let v = EntryVersion {
+        native_binaries: Vec::new(),
         game: facts.game.clone().unwrap_or_else(|| r.game.to_owned()),
         file: r.asset.to_owned(),
         sha256: super::sha256_file(path)?,

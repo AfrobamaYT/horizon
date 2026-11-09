@@ -76,6 +76,32 @@ pub fn with_mods<R>(mods: Mods, f: impl FnOnce() -> R) -> R {
     f()
 }
 
+/// Capture this thread's test installation for work sent to another thread.
+///
+/// Production installations are process-wide. Tests isolate them per thread; a worker
+/// using an owning thread's immutable resource graph must see that same installation.
+pub fn inherit_mods<A, R, F: FnOnce(&A) -> R + Send>(f: F) -> impl FnOnce(&A) -> R + Send {
+    let installed = crate::installed();
+    let parts = crate::parts::installed();
+    move |argument| {
+        struct Restore(
+            Option<&'static Installed>,
+            Option<&'static crate::parts::Installed>,
+        );
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                TEST_MODS.set(self.0);
+                crate::parts::TEST_PARTS.set(self.1);
+            }
+        }
+        let _restore = Restore(
+            TEST_MODS.replace(installed),
+            crate::parts::TEST_PARTS.replace(parts),
+        );
+        f(argument)
+    }
+}
+
 /// The ticket controller with this id that the mods of the enclosing `with_mods` registered.
 pub fn ticket_controller(id: &str) -> Option<TicketController> {
     TicketController::from_id(id)
@@ -88,6 +114,7 @@ impl Drop for RestoreControllers {
     }
 }
 
+// no wire: in-process testing harness state, not a mod boundary payload.
 /// A server and client host for tests, composed of one fake per service: the registries, the
 /// players, one level, the commands and messages services, and the transaction journal, which
 /// keeps the players and the level on each transaction and puts them back when it aborts.

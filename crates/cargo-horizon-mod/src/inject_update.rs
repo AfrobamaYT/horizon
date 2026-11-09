@@ -11,7 +11,7 @@ pub(super) fn run(dir: &Path, args: &[String]) -> Result<(), String> {
         }
     }
     let path = dir.join(MANIFEST);
-    let original = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let original = crate::bounded::read(&path, crate::bounded::MAX_MANIFEST)?;
     let manifest = Manifest::parse(&original)?;
     let native = manifest
         .native
@@ -21,7 +21,7 @@ pub(super) fn run(dir: &Path, args: &[String]) -> Result<(), String> {
     let cache = dir.join("target/horizon-mod/prebuilt");
     let points = cache.join(&native.horizon).join("points.json");
     let catalog: Catalog =
-        serde_json::from_str(&fs::read_to_string(points).map_err(|e| e.to_string())?)
+        serde_json::from_str(&crate::bounded::read(&points, crate::bounded::MAX_CATALOG)?)
             .map_err(|e| e.to_string())?;
     // Older cached snapshots provide the signature behind a declaration's old hash.
     let mut old = Vec::new();
@@ -30,7 +30,12 @@ pub(super) fn run(dir: &Path, args: &[String]) -> Result<(), String> {
             .map_err(|e| e.to_string())?
             .path()
             .join("internals.json");
-        if let Ok(text) = fs::read_to_string(path)
+        let text = match crate::bounded::read(&path, crate::bounded::MAX_CATALOG) {
+            Ok(text) => Some(text),
+            Err(e) if e.is_not_found() => None,
+            Err(e) => return Err(e.into()),
+        };
+        if let Some(text) = text
             && let Ok(snapshot) = serde_json::from_str::<Vec<ListedInternal>>(&text)
         {
             old.extend(snapshot);
@@ -314,6 +319,28 @@ mod tests {
         assert!(run(&dir, &[]).is_err());
         assert_eq!(fs::read_to_string(dir.join(MANIFEST)).unwrap(), text);
         fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn inject_update_changed_report_shows_old_and_new_signatures() {
+        let text = pinned();
+        let (mut items, catalog) = fixture();
+        let mut old = items.clone();
+        old[0].signature = "fn tick(&self, value: bool)".into();
+        items[0].hash = "new-signature".into();
+        let (_, reports, refused) = plan(
+            &text,
+            &Manifest::parse(&text).unwrap(),
+            &items,
+            &catalog,
+            &old,
+            &[],
+        )
+        .unwrap();
+        assert!(refused);
+        let expected = "game::tick signature-fixture (fn tick(&self, value: bool)) -> \
+                        new-signature (fn tick(&mut self)); run inject update";
+        assert!(reports[0].starts_with("E_INJECT_CHANGED: "));
+        assert!(reports[0].ends_with(expected), "{}", reports[0]);
     }
     #[test]
     fn inject_update_noop_leaves_inode_and_mtime() {

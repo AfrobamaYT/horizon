@@ -35,8 +35,6 @@ pub enum RawKind {
     /// associated function, and at a borrowed-return place. A shared receiver must not be written
     /// to; its mutable pointer only erases the type, not its mutability.
     Erased(unsafe fn(usize, *mut (), *mut ())),
-    /// A checked hook endpoint receiving an owned read-only row snapshot and declared outputs.
-    Snapshot(&'static dyn RawForward, u32),
 }
 
 // Function pointers: no data behind them, so they move between threads.
@@ -61,17 +59,6 @@ pub enum PointHost<'a> {
 pub trait Forward: Send + Sync {
     /// Dispatches one generated listener id with its mutable wire record.
     fn forward(&self, id: u32, host: PointHost<'_>, record: &mut dyn mod_api::wire::Record);
-}
-
-/// A raw hook endpoint; the record projects owned views during the ordinary marked call.
-pub trait RawForward: Send + Sync {
-    /// Returns the module-owned exposure plan for a point's head call layout, when registered.
-    fn plan(&self, _head_call: usize) -> Option<std::sync::Arc<crate::exposure::Plan>> {
-        None
-    }
-
-    /// Dispatches the listener through the ordinary hook transport. Record writeback is atomic.
-    fn forward(&self, id: u32, record: &mut dyn mod_api::wire::Record);
 }
 
 /// A typed API function.
@@ -163,6 +150,7 @@ fn lock() -> std::sync::MutexGuard<'static, Open> {
 }
 
 /// The open list, while listeners may still register.
+#[cfg(not(target_arch = "wasm32"))]
 fn open() -> Result<std::sync::MutexGuard<'static, Open>, RegisterError> {
     let open = lock();
     if open.sealing {
@@ -172,6 +160,7 @@ fn open() -> Result<std::sync::MutexGuard<'static, Open>, RegisterError> {
 }
 
 /// Mod `id`'s entry in the open list, added on its first registration.
+#[cfg(not(target_arch = "wasm32"))]
 fn listener(open: &mut Open, id: &'static str) -> usize {
     match open.listeners.iter().position(|listener| listener.id == id) {
         Some(index) => index,
@@ -294,25 +283,6 @@ impl SlotListener {
         }
     }
 
-    /// A raw hook endpoint at a place with a generated snapshot reader.
-    pub fn snapshot(
-        id: &'static str,
-        place: PointId,
-        endpoint: &'static dyn RawForward,
-        export: u32,
-    ) -> Result<Self, RegisterError> {
-        if !crate::RAW_PLACES.iter().any(|(at, _, _)| *at == place) {
-            return Err(RegisterError::Unsupported);
-        }
-        Ok(Self {
-            id,
-            place: place as usize,
-            kind: Kind::Raw(RawKind::Snapshot(endpoint, export)),
-            priority: 0,
-            injection: "",
-        })
-    }
-
     /// Orders a point by priority, then dependency order, then inject id within its mod.
     pub const fn ordered(mut self, priority: i32, injection: &'static str) -> Self {
         self.priority = priority;
@@ -345,6 +315,7 @@ impl SlotListener {
 }
 
 /// Registers a function or checked endpoint, in the same order for native and wasm owners.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn register(slot: &SlotListener) -> Result<(), RegisterError> {
     let mut open = open()?;
     let listener = listener(&mut open, slot.id) as u32;

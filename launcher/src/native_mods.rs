@@ -32,6 +32,7 @@ mod crates;
 mod diagnostics;
 mod inject;
 mod inject_cache;
+mod inject_text;
 mod internals;
 mod internals_sync;
 mod isolate;
@@ -528,8 +529,8 @@ fn logged<T>(
             let _ = append_log(&format!("The build failed: {error}"));
         }
     }
-    // The installed binary and post-build programs have left target/ before trimming. Keep
-    // this lease through installation/export, including failed builds, and never wait on Cargo.
+    // Keep this build lease through installation/export, including failed builds. It does not
+    // exclude independent game starts; automatic trimming can conservatively retain the cache.
     let Ok(cache) = cache else {
         return result;
     };
@@ -543,6 +544,7 @@ fn logged<T>(
                 &[("bytes", &bytes.to_string())],
             ));
         }
+        Err(crate::native_cache::Error::UnprovenExclusion) => {} // Quietly defer automatic eviction.
         Err(error) => log_warning(&cache_error(error)),
         _ => {}
     }
@@ -568,6 +570,13 @@ pub fn cache_error(error: crate::storage::Error) -> String {
     match error {
         crate::native_cache::Error::Busy => {
             tr("A native build or cache cleanup is running. Try again when it finishes.").into()
+        }
+        crate::native_cache::Error::UnprovenExclusion => tr(
+            "Game cache cleanup is unavailable because running games cannot be reliably excluded.",
+        )
+        .into(),
+        crate::native_cache::Error::UnsupportedFilesystem => {
+            tr("Game cache leases require a supported local filesystem.").into()
         }
         crate::native_cache::Error::Unsafe(path) => trf(
             "Refusing native cache cleanup at an unexpected file or link: {path}",
@@ -2014,6 +2023,31 @@ fn pipeline(
         let rust = rust_toolchain::install(|f| progress(Step::Rust(f)))?;
         check_cancelled()?;
         let needs_mixins = mods.iter().any(Bundle::needs_mixins);
+        // Resolve distribution metadata before source preparation. Execution still passes
+        // through the binary verifier; finding metadata alone never authorizes loading it.
+        if let Ok(index) = crate::browser::horizon::index() {
+            if let Some(triple) = platform
+                .target
+                .or_else(|| rust_toolchain::host().map(|h| h.target))
+            {
+                for bundle in &mods {
+                    if let Some(record) = index
+                        .project(&bundle.manifest.id)
+                        .and_then(|p| {
+                            p.versions
+                                .iter()
+                                .find(|v| v.version == bundle.manifest.version)
+                        })
+                        .and_then(|v| v.native_binary(&revision, triple).ok())
+                    {
+                        append_log(&trf(
+                            "Registry native binary for {mod}: {url}",
+                            &[("mod", &bundle.manifest.id), ("url", &record.file.url)],
+                        ))?;
+                    }
+                }
+            }
+        }
         progress(Step::Source(revision.clone()));
         let source = source(&revision)?;
         // `root()` is already the form horizon-mixins and MinGW take: resolved (no link, which
@@ -2450,22 +2484,7 @@ pub fn build_server(
         .map_err(String::from)?;
         export(&Target::Server.directory(&built.version), &output)?;
         // Exports are independent; keep only the newest cached server builds.
-        let cached = root().join("server-builds");
-        let builds = fs::read_dir(&cached)
-            .into_iter()
-            .flatten()
-            .flatten()
-            .filter(|e| e.path().join(".installed").is_file())
-            .map(|e| {
-                let at = fs::metadata(e.path().join(".installed"))
-                    .and_then(|m| m.modified())
-                    .unwrap_or(std::time::UNIX_EPOCH);
-                (e.file_name().to_string_lossy().into_owned(), at)
-            })
-            .collect();
-        for old in stale(builds, &built.version, &[]) {
-            let _ = fs::remove_dir_all(cached.join(old));
-        }
+        prune_server_cache(&root().join("server-builds"), &built.version);
         if built.plan != Plan::UpToDate {
             progress(Step::Done {
                 secs: built.secs,
@@ -2631,6 +2650,35 @@ fn carried_over(name: &std::ffi::OsStr, target: Target) -> bool {
 /// How many native builds no instance plays stay installed, the newest first: switching a mod
 /// off and on again plays the kept build again, without compiling.
 const SPARE_BUILDS: usize = 3;
+
+// Cached server exports remain directly executable, independently of the exported copy.
+fn prune_server_cache(cached: &Path, keep: &str) {
+    if crate::cache_cleanup::Access::UninstrumentedGame
+        .check()
+        .is_err()
+    {
+        return;
+    }
+    let builds = fs::read_dir(cached)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| entry.path().join(".installed").is_file())
+        .map(|entry| {
+            let at = fs::metadata(entry.path().join(".installed"))
+                .and_then(|meta| meta.modified())
+                .unwrap_or(std::time::UNIX_EPOCH);
+            (entry.file_name().to_string_lossy().into_owned(), at)
+        })
+        .collect();
+    for old in stale(builds, keep, &[]) {
+        let _ = fs::remove_dir_all(cached.join(old));
+    }
+}
+
+#[cfg(test)]
+#[path = "native_mods/tests/runtime_eviction.rs"]
+mod runtime_eviction_tests;
 
 /// Removes the native builds no instance plays, but `keep` and the [`SPARE_BUILDS`] newest. The
 /// compiled crates (`native/target`) stay, so the next build only compiles what changed.
@@ -4451,5 +4499,40 @@ mod tests {
         ]);
         let e = run(cmd, "Compiling the game", |_| {}).unwrap_err();
         assert!(!e.contains("Smart App Control"), "{e}");
+    }
+}
+
+#[cfg(test)]
+mod registry_binary_tests {
+    #[test]
+    fn source_preparation_lookup_requires_exact_build_and_target() {
+        let index = horizon_mod_package::index::Index::parse(include_str!(
+            "../../crates/horizon-mod-package/tests/index/index-v1.json"
+        ))
+        .unwrap();
+        let mut version = index.project("coords_hud").unwrap().versions[0].clone();
+        version.native_binaries = vec![horizon_mod_package::index::NativeBinary {
+            build: "exact-build".into(),
+            target: "aarch64-apple-darwin".into(),
+            file: version.file.clone(),
+        }];
+        assert_eq!(
+            version
+                .native_binary("exact-build", "aarch64-apple-darwin")
+                .unwrap()
+                .file
+                .name,
+            "coords_hud-0.1.0.hmod"
+        );
+        assert!(version
+            .native_binary("other-build", "aarch64-apple-darwin")
+            .is_err());
+        assert!(version
+            .native_binary("exact-build", "x86_64-apple-darwin")
+            .is_err());
+        version.native_binaries.clear();
+        assert!(version
+            .native_binary("exact-build", "aarch64-apple-darwin")
+            .is_err());
     }
 }

@@ -860,6 +860,15 @@ fn capture(root: Source<'_>) -> Result<Text, Error> {
 pub(super) fn captured_text(value: &Value) -> Result<Text, Error> {
     capture(Source::Json(value))
 }
+/// A span's hover as a mod reads it (`GuiGraphicsExtractor.componentHoverEffect`'s style): the
+/// same capture as the span's own, from the style's text, item or entity hover.
+pub(in crate::game) fn style_hover(style: &engine::Style) -> Option<TextHover> {
+    if style.hover.is_none() && style.hover_item.is_none() && style.hover_entity.is_none() {
+        return None;
+    }
+    let span = engine::Span::new(String::new(), style.clone());
+    capture(Source::Span(&span)).ok()?.style.hover.take()
+}
 impl TryIntoApi for engine::Text {
     type Api = Text;
     type Error = Error;
@@ -905,6 +914,7 @@ fn discard_api_text(root: Text) {
             }) => nbt::discard_tag(tag),
             _ => {}
         }
+        #[allow(clippy::single_match)] // TODO(#2273): rewrite as `if let`.
         match text.style.click {
             Some(
                 TextClick::ShowDialog(tag)
@@ -958,6 +968,7 @@ impl<'a> Payloads<'a> {
                     keep(&p.metadata)?;
                 }
             }
+            #[allow(clippy::single_match)] // TODO(#2273): rewrite as `if let`.
             match &text.style.click {
                 Some(
                     TextClick::ShowDialog(tag)
@@ -1375,6 +1386,37 @@ mod text_capture_tests {
     use horizon_client_core::text::Text as EngineText;
     use mod_api::text::{TextContent as C, TextHover};
     use serde_json::json;
+
+    #[test]
+    fn item_and_entity_hovers_survive_a_round_trip() {
+        for hover in [
+            json!({"action":"show_item", "id":"minecraft:stick", "count":3, "components":{"minecraft:rarity":"epic"}}),
+            json!({"action":"show_entity", "id":"minecraft:pig", "uuid":[0,1,0,2], "name":{"translate":"test.name"}}),
+        ] {
+            let source = json!({"text":"x", "hover_event":hover});
+            let api = EngineText::from(source).try_into_api().unwrap();
+            let engine = api.try_into_engine(&()).unwrap();
+            assert_eq!(engine.component()["hover_event"], hover);
+        }
+    }
+
+    #[test]
+    fn a_span_style_hover_matches_the_component_capture() {
+        for hover in [
+            json!({"action":"show_text", "value":{"text":"hi", "bold":true}}),
+            json!({"action":"show_item", "id":"minecraft:stick", "count":3, "components":{"minecraft:rarity":"epic"}}),
+            json!({"action":"show_entity", "id":"minecraft:pig", "uuid":[0,1,0,2], "name":"Babe"}),
+            json!({"action":"show_entity", "id":"minecraft:pig", "uuid":"11223344-5566-7788-99aa-bbccddeeff00"}),
+        ] {
+            let source = json!({"text":"x", "hover_event":hover});
+            let engine = EngineText::from(source);
+            let expected = engine.try_into_api().unwrap().style.hover;
+            assert!(expected.is_some());
+            assert_eq!(super::style_hover(&engine.spans[0].style), expected);
+        }
+        let plain = EngineText::from(json!({"text":"x"}));
+        assert_eq!(super::style_hover(&plain.spans[0].style), None);
+    }
 
     #[test]
     fn untrusted_file_action_cannot_become_local_after_a_noop_value_round_trip() {
@@ -1801,21 +1843,15 @@ mod iterative_tests {
             .spawn(|| {
                 use horizon_client_core::text::{Span, Style, Text as Engine};
                 for depth in [512, 513] {
-                    let mut text = Engine::empty();
-                    text.spans.push(Span {
-                        text: "leaf".into(),
-                        style: Style::default(),
-                    });
+                    let mut text = Engine::from_spans(vec![Span::new("leaf", Style::default())]);
                     for _ in 1..depth {
-                        let mut parent = Engine::empty();
-                        parent.spans.push(Span {
-                            text: "parent".into(),
-                            style: Style {
+                        text = Engine::from_spans(vec![Span::new(
+                            "parent",
+                            Style {
                                 hover: Some(std::sync::Arc::new(text)),
                                 ..Style::default()
                             },
-                        });
-                        text = parent;
+                        )]);
                     }
                     let api = text.try_into_api();
                     if depth == 513 {

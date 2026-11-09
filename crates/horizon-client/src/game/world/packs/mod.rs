@@ -52,8 +52,11 @@ pub fn open_uri(uri: &str) {
     #[cfg(not(windows))]
     open_folder(Path::new(uri));
 }
-/// The resource root to load from, given the vanilla root, the selection and
-/// a server's packs, which go on top (`Pack.Position.TOP`, fixed).
+/// The resource root to load from: the selection and a server's packs, which go on top
+/// (`Pack.Position.TOP`, fixed), laid over `base`. `base` is the mods' content root
+/// ([`super::mods::content_root`] of `vanilla`), so mod resources sit below the player's packs
+/// as in vanilla, and a pack change leaves the content root's cache alone (#12403). Built-in
+/// packs are found in `vanilla`.
 pub fn startup_root(
     vanilla: &Path,
     selected: &[String],
@@ -153,6 +156,29 @@ pub(super) fn pack_infos(vanilla: &Path, server: &[Pack], additional: &[Pack]) -
     infos.push(vanilla_info(vanilla));
     infos
 }
+/// The folder packs' Polytone config entries (#11486), by pack id, for those that have some:
+/// what the Pack Options page edits.
+pub(super) fn pack_configs(vanilla: &Path) -> std::collections::BTreeMap<String, packs::Configs> {
+    packs::discover(vanilla, &packs_dir())
+        .into_iter()
+        .filter(|p| !p.polytone_configs.entries().is_empty())
+        .map(|p| (p.id, p.polytone_configs))
+        .collect()
+}
+/// The player changed Pack Options: `chosen` replaces their choices for `entries`, kept in
+/// `polytone-configs.json`.
+pub(super) fn save_pack_options(
+    entries: &[String],
+    chosen: std::collections::BTreeMap<String, packs::ConfigValue>,
+) {
+    let mut all = packs::polytone_choices();
+    all.retain(|id, _| !entries.contains(id));
+    all.extend(chosen);
+    if let Err(e) = packs::save_polytone_choices(&packs::polytone_choices_file(), &all) {
+        log::warn!("could not save the pack options: {e}");
+    }
+    packs::set_polytone_choices(all);
+}
 impl Game<'_> {
     pub(super) fn resource_pack_infos(&mut self) -> Vec<PackInfo> {
         let additional = self.discover_mod_packs(mod_api::PackType::ClientResources);
@@ -186,10 +212,12 @@ impl Game<'_> {
     /// (`PackSelectionScreen` makes its `PackSelectionModel` from them).
     pub(super) fn refresh_pack_lists(&mut self) {
         let infos = self.resource_pack_infos();
+        let configs = pack_configs(&self.vanilla_root());
         let browsing = self.settings.extras.pack_browser;
         let o = &mut self.ui.options;
         o.pack_browser = browsing;
         o.pack_infos = infos;
+        o.pack_configs = configs;
         o.pack_selection = self.settings.resource_packs.clone();
         o.pack_screen = None;
     }
@@ -233,6 +261,7 @@ impl Game<'_> {
             let selection = self.settings.resource_packs.clone();
             let infos = self.resource_pack_infos();
             self.ui.options.pack_infos = infos;
+            self.ui.options.pack_configs = pack_configs(&self.vanilla_root());
             self.ui.options.pack_selection = selection;
             self.ui.options.pack_screen = None;
         }
@@ -346,7 +375,7 @@ impl Game<'_> {
         let client_listeners = self.register_client_reload_listeners();
         let runtime_sprites = super::client_reload::collect_runtime_sprites();
         super::mods::register_fluid_models(self.options.execution_role);
-        self.pack_reload = Some(PackReload::spawn(kind, move |progress| {
+        let stage = move |progress: &crate::game::Progress| {
             stage_pack(
                 &vanilla,
                 &selected,
@@ -362,7 +391,10 @@ impl Game<'_> {
                 progress,
             )
             .map_err(|e| e.to_string())
-        })?);
+        };
+        #[cfg(test)]
+        let stage = mod_api::testing::inherit_mods(stage);
+        self.pack_reload = Some(PackReload::spawn(kind, stage)?);
         Ok(())
     }
     /// `LoadingOverlay.tick` once the reload is done: the staged pack is
@@ -823,6 +855,9 @@ mod tests {
                 _: &RegistrationContext,
                 event: &mut RegisterFluidModelsEvent<'_>,
             ) {
+                if self.0.load(Ordering::SeqCst) == 2 {
+                    return;
+                }
                 let mut model = FluidModel::default();
                 model.fluid = "reload_boundary:oil".into();
                 model.still = Some(format!(
@@ -845,46 +880,48 @@ mod tests {
         };
         let enabled = ["reload_boundary".to_owned()].into();
         sources.select(&std::env::current_dir().unwrap(), &enabled);
-        let root = super::super::mods::content_root(&vanilla, &sources).unwrap();
-        super::super::native_entity_refs::tests::with_game_at(
-            root.prepared().to_path_buf(),
-            |game| {
-                game.options.execution_role = super::super::execution_role::ExecutionRole::Client;
-                game.ui.vanilla_root = vanilla;
-                game.mods = sources;
-                game.settings.mods.enabled = enabled;
-                let generation = Arc::new(AtomicUsize::new(0));
-                // Drive the real entry point and join its CPU staging worker, without
-                // applying the staged textures (which would need a window/GPU).
-                let mut reload = |expected: Option<&str>| {
-                    game.spawn_pack_reload(ReloadKind::Selection).unwrap();
-                    let mut pending = game.pack_reload.take().unwrap();
-                    let staged = pending.handle.take().unwrap().join().unwrap().unwrap();
-                    let layers = &staged.pack.render.sprite_layers;
-                    for id in ["reload_boundary:block/oil_0", "reload_boundary:block/oil_1"] {
-                        assert_eq!(layers.contains_key(id), expected == Some(id), "{id}");
-                    }
-                };
-                with_mods(
-                    vec![ModEntry::new(
-                        "reload_boundary",
-                        Box::new(Models(generation.clone())),
-                    )]
-                    .into(),
-                    || {
+        let generation = Arc::new(AtomicUsize::new(0));
+        with_mods(
+            vec![ModEntry::new(
+                "reload_boundary",
+                Box::new(Models(generation.clone())),
+            )]
+            .into(),
+            || {
+                let root = super::super::mods::content_root(&vanilla, &sources).unwrap();
+                super::super::native_entity_refs::tests::with_game_at(
+                    root.prepared().to_path_buf(),
+                    |game| {
+                        game.options.execution_role =
+                            super::super::execution_role::ExecutionRole::Client;
+                        game.ui.vanilla_root = vanilla;
+                        game.mods = sources;
+                        game.settings.mods.enabled = enabled;
+                        // Drive the real entry point and join its CPU staging worker, without
+                        // applying the staged textures (which would need a window/GPU).
+                        let mut reload = |expected: Option<&str>| {
+                            game.spawn_pack_reload(ReloadKind::Selection).unwrap();
+                            let mut pending = game.pack_reload.take().unwrap();
+                            let staged = pending.handle.take().unwrap().join().unwrap().unwrap();
+                            let layers = &staged.pack.render.sprite_layers;
+                            for id in ["reload_boundary:block/oil_0", "reload_boundary:block/oil_1"]
+                            {
+                                assert_eq!(layers.contains_key(id), expected == Some(id), "{id}");
+                            }
+                        };
                         mod_api::__private::with_test_packages(&["reload_boundary"], || {
                             reload(Some("reload_boundary:block/oil_0"));
                             generation.store(1, Ordering::SeqCst);
                             reload(Some("reload_boundary:block/oil_1"));
+                            // A provider that stops contributing must clear its old models.
+                            generation.store(2, Ordering::SeqCst);
+                            reload(None);
                         });
+                        horizon_client::fluid_models::register(vec![]);
+                        horizon_client::fluid_models::set_world_looks([]);
+                        std::fs::remove_dir_all(dir).unwrap();
                     },
                 );
-                // Removing the provider must replace the stored registration with
-                // an empty vector, not leave the last model in the baked atlas.
-                with_mods(Vec::new().into(), || reload(None));
-                horizon_client::fluid_models::register(vec![]);
-                horizon_client::fluid_models::set_world_looks([]);
-                std::fs::remove_dir_all(dir).unwrap();
             },
         );
     }

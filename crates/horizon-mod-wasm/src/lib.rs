@@ -4,7 +4,6 @@
 //! Mods page.
 pub mod link;
 mod points;
-pub use points::InternalsCatalog;
 mod runtime;
 #[allow(
     dead_code,
@@ -35,7 +34,7 @@ pub(crate) fn call_refused<E: From<(mod_api::Identifier, String)>>() -> E {
 }
 
 use horizon_mod_package::dependencies;
-use horizon_mod_package::manifest::Manifest;
+use horizon_mod_package::manifest::{Manifest, inject::Access};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -59,8 +58,8 @@ pub enum Refusal {
     Toolchain { found: String, group: String },
     /// A dependency of this mod was refused, so its group can't link.
     DependencyRefused { dependency: String },
-    /// The mod's declared game internals do not resolve against this game's catalog.
-    Internals(mod_points::endpoint_policy::InternalsRefusal),
+    /// The mod declares game internals or an `access = "internals"` injection: native mods only.
+    Internals,
     /// The package's `mod.wasm` failed its checks.
     Package(String),
     /// The group could not instantiate, initialize or run.
@@ -96,7 +95,7 @@ impl std::fmt::Display for Refusal {
             Self::DependencyRefused { dependency } => {
                 write!(f, "its dependency {dependency} didn't load")
             }
-            Self::Internals(why) => write!(f, "{why}"),
+            Self::Internals => write!(f, "internals access is native-only"),
             Self::Package(why) => write!(f, "{why}"),
             Self::Runtime(why) => write!(f, "{why}"),
             Self::Layout { .. } => write!(f, "built for another version of the mod API"),
@@ -127,6 +126,19 @@ fn groups(packages: &[WasmPackage]) -> (Vec<Vec<usize>>, Vec<(String, Refusal)>)
         .iter()
         .map(|p| dependencies::from_manifest(&p.manifest.dependencies))
         .collect();
+    // Internals access is the native-only tier: such a mod, and every mod needing it, is refused.
+    for (i, package) in packages.iter().enumerate() {
+        if !package.manifest.internals.is_empty()
+            || package
+                .manifest
+                .inject
+                .iter()
+                .any(|inject| inject.access == Access::Internals)
+        {
+            refused.insert(i, Refusal::Internals);
+        }
+    }
+    propagate_refusals(packages, &by_id, &mut refused);
     // Refuse exactly the resolver's owners, then their dependents, preserving
     // unrelated libraries. There is no second semver or topological rule here.
     let order = loop {
@@ -357,7 +369,6 @@ pub fn load_installed(game_dir: &Path, dev: &[PathBuf]) -> Loaded {
                 .into_iter()
                 .map(|p| (p.manifest.id, Refusal::NoStd))
                 .collect(),
-            catalog: None,
         },
     };
     refused.append(&mut loaded.refused);
@@ -384,41 +395,22 @@ pub struct Loaded {
     pub manifests: Vec<Manifest>,
     pub refused: Vec<(String, Refusal)>,
     modules: Vec<WasmMod>,
-    catalog: Option<InternalsCatalog>,
 }
 
 impl Loaded {
-    /// Supplies the game's internals catalog for `initialize`, which resolves each mod's
-    /// declared internals against it. Without one, a mod declaring internals is refused.
-    pub fn with_catalog(mut self, catalog: InternalsCatalog) -> Self {
-        self.catalog = Some(catalog);
-        self
-    }
-
     /// Initializes programmatically loaded mods with the final inventory, then installs
     /// their point listeners. Call once, before sealing the point registry.
     pub fn initialize(
         &self,
         inventory: &[mod_api::PackageInfo],
     ) -> Result<(), Vec<(String, Refusal)>> {
-        let refused = initialize_selected(
-            self.manifests.iter().zip(&self.modules),
-            inventory,
-            self.catalog.as_ref(),
-        );
+        let refused = initialize_selected(self.manifests.iter().zip(&self.modules), inventory);
         if refused.is_empty() {
             Ok(())
         } else {
             Err(refused)
         }
     }
-}
-
-static CATALOG: OnceLock<InternalsCatalog> = OnceLock::new();
-
-/// Installs the game's internals catalog for the process-wide `initialize`, once, before it.
-pub fn install_catalog(catalog: InternalsCatalog) {
-    let _ = CATALOG.set(catalog);
 }
 
 static MODULES: OnceLock<Vec<(Manifest, WasmMod)>> = OnceLock::new();
@@ -431,19 +423,17 @@ pub fn initialize(inventory: &[mod_api::PackageInfo]) {
     refused.extend(initialize_selected(
         modules.iter().map(|(manifest, module)| (manifest, module)),
         inventory,
-        CATALOG.get(),
     ));
     let _ = INITIALIZED_REFUSALS.set(refused);
 }
 fn initialize_selected<'a>(
     modules: impl Iterator<Item = (&'a Manifest, &'a WasmMod)>,
     inventory: &[mod_api::PackageInfo],
-    catalog: Option<&InternalsCatalog>,
 ) -> Vec<(String, Refusal)> {
     let mut refused = Vec::new();
     for (manifest, module) in modules {
         let result = if initialize_modules(std::slice::from_ref(module), inventory) {
-            points::listen(manifest, module, catalog)
+            points::listen(manifest, module)
         } else {
             Err(Refusal::Runtime("initialization failed".into()))
         };
@@ -508,7 +498,7 @@ pub fn load(std_member: &[u8], packages: Vec<WasmPackage>) -> Loaded {
             }
             let mut checked = Vec::new();
             for mut module in mods {
-                let names: Vec<String> = module
+                let subscriptions: Vec<(String, i32, bool)> = module
                     .call(
                         CallClass::Load,
                         boundary::Frame::default(),
@@ -518,6 +508,21 @@ pub fn load(std_member: &[u8], packages: Vec<WasmPackage>) -> Loaded {
                         |r| r.take(),
                     )
                     .ok_or_else(|| Refusal::Runtime("subscriptions failed".into()))?;
+                let names: Vec<String> = subscriptions
+                    .iter()
+                    .map(|(name, _, _)| name.clone())
+                    .collect();
+                module.listeners = subscriptions
+                    .into_iter()
+                    .filter_map(|(name, priority, receive_cancelled)| {
+                        boundary::hook_id(&name).map(|hook| mod_api::Listener {
+                            hook: Some(hook),
+                            priority,
+                            receive_cancelled,
+                        })
+                    })
+                    .collect::<Vec<_>>()
+                    .leak();
                 // The ground provider runs on the worldgen workers, a contract wasm lacks yet.
                 if names.iter().any(|name| name == "alter_ground") {
                     return Err(Refusal::Runtime(
@@ -670,6 +675,48 @@ mod tests {
                     }
                 ),
             ]
+        );
+    }
+
+    #[test]
+    fn internals_access_refuses_the_mod_and_its_dependents_but_api_access_loads() {
+        let inject = |access: &str| {
+            format!(
+                "[[inject]]\nid = \"stop\"\nat = \"horizon_client::game::server_lifecycle::remember_shutdown\"\nkind = \"head\"\nwith = \"on_stop\"\naccess = \"{access}\"\nhash = \"h\"\n"
+            )
+        };
+        let packages = vec![
+            package(
+                "deep",
+                "1.0.0",
+                "",
+                'a',
+                "t",
+                &format!(
+                    "[[internals]]\npath = \"Game::world\"\nkind = \"field\"\nhash = \"h\"\n{}",
+                    inject("internals")
+                ),
+            ),
+            package("user", "1.0.0", "deep = \"^1\"", 'b', "t", ""),
+            package("typed", "1.0.0", "", 'c', "t", &inject("api")),
+        ];
+        let (groups, refused) = groups(&packages);
+        assert_eq!(ids(&packages, &groups), [vec!["typed"]]);
+        assert_eq!(
+            refused,
+            [
+                ("deep".to_string(), Refusal::Internals),
+                (
+                    "user".to_string(),
+                    Refusal::DependencyRefused {
+                        dependency: "deep".into()
+                    }
+                ),
+            ]
+        );
+        assert_eq!(
+            Refusal::Internals.to_string(),
+            "internals access is native-only"
         );
     }
 

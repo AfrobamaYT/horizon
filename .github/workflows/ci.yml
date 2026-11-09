@@ -16,8 +16,10 @@ on:
 permissions:
   contents: read
 concurrency:
-  # A new push to a pull request replaces its running checks; main's runs all finish (releases follow them).
-  group: checks-${{ github.event.pull_request.number || github.sha }}
+  # A new push to a pull request replaces its running checks. On main, the running check finishes and only the
+  # newest push waits behind it: GitHub cancels a waiting run when a newer one joins the group. A burst of merges
+  # queued ~100 main runs on 2026-11-09; the release follows the newest finished main run (docs/release-flow.md).
+  group: checks-${{ github.event.pull_request.number || (github.event_name == 'push' && 'main') || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   # One job, not one per check: each job takes a runner from the organisation's shared pool, and with every pull request
@@ -110,6 +112,9 @@ jobs:
       # type-checks and the parity job builds and runs (they were most of this step's build and link time).
       # cargo test, not nextest: nextest's process per test reloads each binary's shared tables for every test, and on
       # these 4-core runners it was no faster (#4978).
+      - name: Build the runtime holder test actor
+        if: steps.rust.outputs.required != 'false'
+        run: cargo +stable build -p horizon-mod-package --features runtime-process --example holder_actor
       - name: Test Rust core and voxel kernel correctness
         if: steps.rust.outputs.required != 'false'
         run: |

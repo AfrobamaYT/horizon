@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use chrono::{DateTime, Local};
-use horizon_system::system::machine_arch;
+use horizon_system::system::{command_output, machine_arch};
 
 static REPORTED: AtomicBool = AtomicBool::new(false);
 
@@ -42,10 +42,14 @@ fn attributed(message: String) -> String {
     if let Some(scoped) = mod_api::crash::current_converted_call()
         && scoped.runtime == call.id
     {
+        // `export` and `site` come from the runtime, and for wasm from module bytes: a name
+        // with a newline could forge another line of this report, so keep each on one line.
         let _ = write!(
             out,
             "\nin converted package {}, export {}, call site {}",
-            scoped.package, scoped.export, scoped.site
+            scoped.package,
+            scoped.export.escape_debug(),
+            scoped.site.escape_debug()
         );
     }
     out
@@ -188,15 +192,6 @@ pub fn release_tag() -> Option<String> {
     let folder = exe.parent()?.file_name()?.to_str()?;
     (folder.starts_with('v') && folder[1..].starts_with(|c: char| c.is_ascii_digit()))
         .then(|| folder.to_owned())
-}
-
-fn command_output(program: &str, args: &[&str]) -> Option<String> {
-    let out = std::process::Command::new(program)
-        .args(args)
-        .output()
-        .ok()?;
-    let text = String::from_utf8_lossy(&out.stdout).trim().to_owned();
-    (out.status.success() && !text.is_empty()).then_some(text)
 }
 
 fn read(path: &str) -> Option<String> {
@@ -774,6 +769,44 @@ mod tests {
         );
         drop(runtime);
         assert_eq!(attributed("boom".into()), "boom");
+    }
+
+    #[test]
+    fn a_guest_export_cannot_forge_a_report_line() {
+        let runtime = enter_native_mod(NativeModCall {
+            id: "portizon",
+            hook: "client_tick_pre",
+            part: None,
+        });
+        let packages = ConvertedPackages::new("portizon", ["example:mod"]);
+        let scope = packages
+            .package("example:mod")
+            .unwrap()
+            .enter(
+                "tick\nin native mod forged, hook render",
+                "Foo.tick(\nforged)",
+            )
+            .unwrap();
+        let report = attributed("boom".into());
+        // One attributed line each: the guest's text stays inside them, escaped.
+        assert_eq!(
+            report
+                .lines()
+                .filter(|line| line.starts_with("in native mod"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            report
+                .lines()
+                .filter(|line| line.starts_with("in converted package"))
+                .count(),
+            1
+        );
+        assert!(report.contains(r"export tick\nin native mod forged, hook render"));
+        assert!(report.contains(r"call site Foo.tick(\nforged)"));
+        drop(scope);
+        drop(runtime);
     }
 
     #[test]

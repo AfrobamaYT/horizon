@@ -832,14 +832,14 @@ fn canonical_permissions_preserve_owner_and_fake_player_reads() {
 
 /// The UUIDs of the players in the level, checked against the full reader.
 fn level_uuids(game: &super::Game<'_>) -> Vec<u128> {
-    let uuids: Vec<u128> = game.level_player_uuids().collect();
+    let uuids: Vec<u128> = game.level_player_uuids(game.dim.id()).collect();
     let players: Vec<u128> = game.level_players().iter().map(|p| p.uuid).collect();
     assert_eq!(uuids, players, "both enumerations select the same players");
     uuids
 }
 
 /// The host in place, with a body and UUID 99.
-fn place_host(game: &mut super::Game<'_>) {
+pub(in crate::game) fn place_host(game: &mut super::Game<'_>) {
     let mut body =
         horizon_client::motion::PlayerMotion::new(game.motion, Vec3::new(0.0, 64.0, 0.0)).unwrap();
     body.entity_id = 99;
@@ -1065,6 +1065,244 @@ fn a_vetoed_drop_gives_the_stack_back() {
                 game.player_drop_stack(player, empty.clone(), false),
                 Some(empty)
             );
+        });
+    });
+}
+
+struct PanicOnce(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+#[mod_api::__subscriptions]
+impl mod_api::Hooks for PanicOnce {
+    fn living_incoming_damage(
+        &self,
+        _: &mut dyn mod_api::LevelRandomHost,
+        _: &mut mod_api::LivingIncomingDamageEvent<'_>,
+    ) -> mod_api::Flow {
+        if self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+            std::panic::panic_any(73129_u32);
+        }
+        mod_api::Flow::Continue
+    }
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn guest_damage_unwind_restores_and_next_same_connection_hit_lands() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "panic_once",
+        Box::new(PanicOnce(calls.clone())),
+    )]
+    .into();
+    mod_api::testing::with_mods(mods, || {
+        with_guests(|game| {
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(13, |guest| {
+                    guest.loaded = true;
+                    guest.load_timeout = 0;
+                })
+                .unwrap();
+            game.as_guest(13, |g| {
+                use horizon_client::command::args::GameMode;
+                g.set_game_mode(GameMode::Creative);
+                g.set_game_mode(GameMode::Survival);
+            })
+            .unwrap();
+            let outer = game.lan_acting;
+            let position = game.player.as_ref().map(|p| p.position);
+            let health = game
+                .lan
+                .as_ref()
+                .unwrap()
+                .hub
+                .guest(13)
+                .unwrap()
+                .motion
+                .as_ref()
+                .unwrap()
+                .health
+                .health();
+            let hit = |g: &mut super::Game<'_>| {
+                g.pvp_land(
+                    super::lan_pvp::Victim::Guest(13),
+                    &super::lan_pvp::Strike::test_blow(12),
+                )
+            };
+            let panic =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| hit(game))).unwrap_err();
+            assert_eq!(panic.downcast_ref::<u32>(), Some(&73129));
+            assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+            assert!(game.lan_guest_swaps.is_empty());
+            assert_eq!(game.lan_acting, outer);
+            assert_eq!(game.player.as_ref().map(|p| p.position), position);
+            assert!(hit(game));
+            assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+            assert!(
+                game.lan
+                    .as_ref()
+                    .unwrap()
+                    .hub
+                    .guest(13)
+                    .unwrap()
+                    .motion
+                    .as_ref()
+                    .unwrap()
+                    .health
+                    .health()
+                    < health
+            );
+            assert!(game.lan_guest_swaps.is_empty());
+            assert_eq!(game.lan_acting, outer);
+            assert_eq!(game.player.as_ref().map(|p| p.position), position);
+            assert_eq!(
+                game.as_guest(13, |g| {
+                    assert!(g.as_guest(13, |_| ()).is_none());
+                    42
+                }),
+                Some(42)
+            );
+            assert_eq!(game.as_guest(u32::MAX, |_| 0), None);
+        })
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+/// A real native panic inside `as_guest_messaged` puts the outer message capture back, and the
+/// same connection's next messaged turn runs and captures nothing outside it (#2244).
+fn guest_message_capture_is_restored_after_a_real_native_panic() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "capture_repro",
+        Box::new(PanicOnce(calls.clone())),
+    )]
+    .into();
+    mod_api::testing::with_mods(mods, || {
+        with_guests(|game| {
+            for conn in [12, 13] {
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .update_guest(conn, |guest| {
+                        guest.loaded = true;
+                        guest.load_timeout = 0;
+                    })
+                    .unwrap();
+                game.as_guest(conn, |g| {
+                    use horizon_client::command::args::GameMode;
+                    g.set_game_mode(GameMode::Creative);
+                    g.set_game_mode(GameMode::Survival);
+                })
+                .unwrap();
+            }
+            assert!(game.chat_capture.is_none());
+            let outer = game.lan_acting;
+            let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                game.as_guest_messaged(13, |g| {
+                    g.pvp_land(
+                        super::lan_pvp::Victim::Guest(12),
+                        &super::lan_pvp::Strike::test_blow(13),
+                    )
+                })
+            }))
+            .unwrap_err();
+            assert_eq!(panic.downcast_ref::<u32>(), Some(&73129));
+            assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+            assert!(
+                game.lan_guest_swaps.is_empty(),
+                "guest swap fix must have run"
+            );
+            assert_eq!(game.lan_acting, outer);
+            assert!(
+                game.chat_capture.is_none(),
+                "real native panic leaked the guest message capture"
+            );
+            assert!(
+                game.as_guest_messaged(13, |g| g.pvp_land(
+                    super::lan_pvp::Victim::Guest(12),
+                    &super::lan_pvp::Strike::test_blow(13),
+                ))
+                .is_some(),
+                "the same connection's next messaged turn runs"
+            );
+            assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+            assert!(game.chat_capture.is_none() && game.lan_guest_swaps.is_empty());
+        });
+    });
+}
+
+struct PanicOnFood(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+#[mod_api::__subscriptions]
+impl mod_api::Hooks for PanicOnFood {
+    fn food_level_changed(
+        &self,
+        _: &mut dyn mod_api::ServerHost,
+        _: &mut mod_api::FoodLevelChangedEvent<'_>,
+    ) -> mod_api::Flow {
+        if self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+            std::panic::panic_any(52417_u32);
+        }
+        mod_api::Flow::Continue
+    }
+}
+
+/// A native `food_level_changed` listener that panics while `leave_guest` reports the turn's
+/// food change still lets the guest swap be restored and the turn's progress be written back,
+/// and the same connection's next turn runs and is heard (#2240).
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_panic_in_a_turn_end_callback_still_restores_the_guest() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+        "turn_end_panic",
+        Box::new(PanicOnFood(calls.clone())),
+    )]
+    .into();
+    mod_api::testing::with_mods(mods, || {
+        with_guests(|game| {
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(13, |guest| {
+                    guest.loaded = true;
+                    guest.load_timeout = 0;
+                })
+                .unwrap();
+            let food =
+                |game: &super::Game<'_>| game.lan.as_ref().unwrap().hub.guest(13).unwrap().food;
+            let before = food(game);
+            let outer = game.lan_acting;
+            let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                game.as_guest(13, |g| g.player.as_mut().unwrap().health.food.food -= 3)
+            }))
+            .unwrap_err();
+            assert_eq!(panic.downcast_ref::<u32>(), Some(&52417));
+            assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+            assert!(
+                game.lan_guest_swaps.is_empty(),
+                "the guest swap was restored"
+            );
+            assert_eq!(game.lan_acting, outer);
+            assert_eq!(
+                food(game),
+                before - 3,
+                "the turn's food change is written back"
+            );
+
+            let next = game.as_guest(13, |g| {
+                g.player.as_mut().unwrap().health.food.food -= 1;
+                7
+            });
+            assert_eq!(next, Some(7), "the same connection's next turn runs");
+            assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+            assert_eq!(food(game), before - 4);
+            assert!(game.lan_guest_swaps.is_empty());
         });
     });
 }

@@ -650,10 +650,12 @@ pub trait Hooks {
     /// A player attacks the entity `entity` (`Entity.getId`) of type `kind`
     /// (`minecraft:item_frame`, `minecraft:cow`, `minecraft:player`) standing
     /// at `pos`: `ServerGamePacketListenerImpl.handleInteract`'s attack, once
-    /// in reach, where `Player.attack` starts. Set `canceled` and the blow
-    /// does nothing (no damage, no knockback, the frame keeps its item).
-    /// Server-side, for every player of the world (`host.players().acting_player()`
-    /// says who).
+    /// in reach, where `Player.attack` starts. The swing has not begun, so the
+    /// attacking player's attack strength is still the charge the blow uses
+    /// (vanilla reads it at the start of `Player.attack`; the swing resets it
+    /// afterwards). Set `canceled` and the blow does nothing (no damage, no
+    /// knockback, the frame keeps its item). Server-side, for every player of
+    /// the world (`host.players().acting_player()` says who).
     #[hook(
         side = "server",
         contract = "cancel",
@@ -1131,7 +1133,9 @@ pub trait Hooks {
     fn component_types();
     /// `DispenserBlock.getDispenseMethod`: choose a behaviour for any item,
     /// including vanilla items, on the authoritative server (not droppers).
-    /// Leave answer None for vanilla. Otherwise answer `(remainder, event)`:
+    /// The block the dispenser faces is asked first (`dispense_method`), and
+    /// its answer keeps this part from being asked. Leave answer None for
+    /// vanilla. Otherwise answer `(remainder, event)`:
     /// a remainder of None empties the slot, `Some(stack)` replaces it (the hook
     /// owns consumption: no extra item is removed afterwards). `event` is the
     /// level event the dispenser plays with its smoke: 1000 the click, 1001 the
@@ -3001,7 +3005,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         reason: &str,
         cancel: &mut bool,
     );
-    /// A server player who ate chorus fruit (or another item with the
+    /// A server player or fox that ate chorus fruit (or another item with the
     /// `teleport_randomly` consume effect) is about to try a random spot
     /// (NeoForge's `EntityTeleportEvent.ItemConsumption`, vanilla's
     /// `TeleportRandomlyConsumeEffect.apply`): once per attempt (up to 16),
@@ -3009,12 +3013,20 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// drawn; a mod may move it (its y kept inside the level's height, a
     /// value that is not a number ignored), and the game still looks down
     /// from it for ground it may land on. Canceling ends the effect: no teleport and no
-    /// more attempts. The player's state is swapped in
-    /// (`host.players().acting_player()`). Foxes are not heard. Diverges from upstream: renamed from
+    /// more attempts. `consumer` names the living actor through its handle.
+    /// `consumed` is the stack captured before consumption, including
+    /// its count and components; it is not reread from the hand after listener writes.
+    /// A player's state is swapped in (`host.players().acting_player()`). A fox's
+    /// callback has the full server host before its living AI/movement step and
+    /// before the next mob ticks. Listener writes survive; changing the consumer's
+    /// item, position or eligibility refuses the captured effect instead of
+    /// overwriting that write. Cancellation still finishes consumption.
+    /// Diverges from upstream: renamed from
     /// `chorus_fruit_teleport`.
     #[hook(
         side = "server",
         contract = "cancel",
+        version = 2,
         out = "cancel",
         neoforge = "EntityTeleportEvent.ItemConsumption",
         cancellable = true
@@ -3096,27 +3108,27 @@ requires a farmer at work and `mob_griefing` enabled."#]
         neoforge = "none (NeoForge has no such event)"
     )]
     fn enchant_item();
-    /// A server player's ender pearl landed and is about to teleport them
-    /// (NeoForge's `EntityTeleportEvent.EnderPearl`, vanilla's
-    /// `ThrownEnderpearl.onHit` for a player owner): `pearl` is the pearl's
-    /// entity id, `from` their feet now, `target` where the pearl started
-    /// its last tick and `damage` the fall damage they then take (5). A mod
-    /// may move `target` (a value that is not a number is ignored) or change
-    /// `damage` (0 or less: none). Canceling
-    /// keeps the player where they are: no endermite roll, no teleport, no
-    /// damage and no sound; the pearl is used up either way. The player's
-    /// state is swapped in (`host.players().acting_player()`). The hit itself is
-    /// heard by `native_projectile_impact`.
+    /// A server player's or mob's ender pearl is about to teleport its `owner`
+    /// (`EntityTeleportEvent.EnderPearl`, `ThrownEnderpearl.onHit`). `owner` is
+    /// the live entity handle, `pearl` its projectile id, `from` the owner's feet
+    /// and `target` the pearl's previous position. A mod may move the target;
+    /// non-finite changes keep the original spot. Canceling leaves the owner
+    /// in place with no teleport sound, damage or endermite roll; the pearl is
+    /// used up. Player owners keep their acting-player context and mutable fall
+    /// `damage` (5; nonpositive is none). Mob owners take no fall damage and
+    /// make no endermite draw; their `damage` starts at zero and is player-only.
+    /// An owner moved, removed, killed or put to sleep by a listener is not moved
+    /// again using the old decision. The impact hook still hears the hit.
     #[hook(
         side = "server",
         contract = "cancel",
+        version = 2,
         out = "cancel",
         neoforge = "EntityTeleportEvent.EnderPearl",
         cancellable = true
     )]
     fn ender_pearl_teleport(
-        player: u128,
-        name: &str,
+        owner: EntityRef,
         pearl: u32,
         from: [f64; 3],
         target: &mut [f64; 3],

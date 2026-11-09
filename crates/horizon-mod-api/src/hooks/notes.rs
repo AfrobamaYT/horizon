@@ -110,8 +110,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   the level `dimension`, before it moves (NeoForge's `EntityTravelToDimensionEvent`); `cause` is `nether_portal`,
   `end_portal`, `end_gateway` or `teleport` (a `/tp` or spectator teleport into another level). Set `cancel` to
   keep it where it is. Players and every other entity that crosses a portal or a command's teleport are asked;
-  a ridden vehicle and its server players are asked together and one cancel keeps them all. The player's state
-  is not swapped in.
+  passengers are asked recursively, and a refused passenger stays behind, dismounted, with its own subtree.
+  Discarding an entity in the callback prevents its travel. The player's state is not swapped in.
 - **`native_block_damage_abort(player, name, pos)`**: a server player stopped digging `pos` before it broke. It is
   heard after the server clears the dig and sends the block state back to the client. The player's state is not
   swapped in.
@@ -160,18 +160,20 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   (NeoForge's `EntityTeleportEvent`). The player's state is swapped in, so `PlayerRef::tell` and the acting-player helpers
   work. Ender pearls and chorus fruit have their own hooks below; not heard yet: a spectator's teleport menu; portals
   and respawns are not teleports here.
-- **`native_ender_pearl_teleport(player, name, pearl, from, target, damage, cancel)`**: a server player's ender pearl
-  landed and is about to teleport them (NeoForge's `EntityTeleportEvent.EnderPearl`, `ThrownEnderpearl.onHit`).
-  `pearl` is the pearl's entity id, `from` their feet, `target` where the pearl started its last tick and `damage` the
-  fall damage they then take (5). A mod may move `target` or change `damage` (0 or less: none). Canceling keeps the
-  player where they are: no endermite roll, no teleport, no damage, no sound; the pearl is used up either way. Mobs'
-  pearls are not heard.
-- **`native_item_consumption_teleport(player, name, from, target, cancel)`**: a server player whose `teleport_randomly`
+- **`native_ender_pearl_teleport(owner, pearl, from, target, damage, cancel)` (version 2)**: a server player's or mob's
+  pearl landed and is about to teleport its live `EntityRef` owner. `target` may be moved; cancellation spends
+  the pearl without teleport, sound, damage or endermite roll. Players retain acting-player context and
+  mutable fall damage (5). Mobs preserve rotation, reset fall distance, take no player fall damage and
+  make no endermite draw. The pending move refuses an owner changed by the listener.
+- **`native_item_consumption_teleport(consumer, consumed, from, target, cancel)` (version 2)**: a server player or fox whose `teleport_randomly`
   consume effect (chorus fruit) is about to try a spot (NeoForge's `EntityTeleportEvent.ItemConsumption`,
   `TeleportRandomlyConsumeEffect.apply`): once per attempt, up to 16, after they stopped riding. A mod may move
   `target` (its y is kept inside the level's height); the game still looks down from it for ground to land on, inside
   the border. Canceling ends the effect: no
-  teleport and no more attempts. Foxes eating chorus fruit are not heard.
+  teleport and no more attempts, but the food is consumed. `consumer` is a `LivingRef` and `consumed` is the
+  captured stack before consumption (count and components included). A fox's listener receives the full server
+  host before its living movement and before the next mob ticks; writes to actors or the level survive the
+  continuation. Changing the consumer's mouth item, position or eligibility refuses the captured effect.
 - **`native_player_clone(player, name, was_death)`**: a player's data was copied to their new player (NeoForge's
   `PlayerEvent.Clone`, from `ServerPlayer.restoreFrom`): after a death respawn (`was_death` true) and when a player
   leaves the End after the credits (`was_death` false, vanilla's `keepAllPlayerData`). It is heard after the copy and
@@ -760,13 +762,23 @@ handle, an entity the client doesn't track and a level it doesn't show:
   players work; armor stands and the dragon return false, and so does a player other than the acting one while another
   player acts.
 - `living.arrow_count(host)` / `set_arrow_count` and `stinger_count` / `set_stinger_count` (`DATA_ARROW_COUNT_ID`,
-  `DATA_STINGER_COUNT_ID`) read and set what is stuck in a player; the player and those around see it. Horizon keeps no
-  such count for mobs (None, false). `set_arrow_removal_ticks` and `set_stinger_removal_ticks` set the ticks until the
-  next one falls out (`removeArrowTime`, `removeStingerTime`; at 0 or less the timer restarts at `20 * (30 - count)`).
+  `DATA_STINGER_COUNT_ID`) read and set what is stuck in a player or a mob; the entity data carries it to the players
+  around, so they see it. Armor stands and the dragon keep no such count (None, false). `set_arrow_removal_ticks` and
+  `set_stinger_removal_ticks` set the ticks until the next one falls out (`removeArrowTime`, `removeStingerTime`; at 0 or
+  less the timer restarts at `20 * (30 - count)`); a mob's timers run in its tick as a player's do.
 - `living.item_use_remaining(host)` / `set_item_use_remaining(host, ticks)` (`useItemRemaining`) read and move the end of
   the item a player uses: at 1 the use completes on the next tick, at 0 or less it lasts until the player lets go, as in
   vanilla. It moves the deadline the use-item Tick hook moves, so shield, bow, trident, spear, instrument and bundle uses,
-  which don't count it, ignore it, and a call inside that Tick hook is overwritten by the hook's result. Nothing in use reads 0 and refuses a write. A mob's item use is a counter of its goal, so mobs read None.
+  which don't count it, ignore it, and a call inside that Tick hook is overwritten by the hook's result. Nothing in use reads 0 and refuses a write. A mob's use never runs out: its read is the item's use duration less the ticks its use counter has run, and a write moves that counter to where `ticks` are left, which the stabs of a spear and the draw of a bow follow. A piglin admiring gold and a drinking witch use no item, so they read 0 and refuse a write.
+- `living.set_riptiding(host, ticks, damage)` (`startAutoSpinAttack`) starts a player's Riptide spin: for `ticks` ticks
+  the player turns, the first mob its box touches takes `damage` and ends the spin, and the players around see it
+  (living flag 4). It adds no velocity (a Riptide launch does that itself), and a `ticks` of 0 or less ends the spin.
+  Mobs, armor stands and the dragon return false: Horizon runs no spin for them.
+- `living.set_waypoint_style(host, &style)` and `set_waypoint_color(host, rgb)` (`Waypoint.Icon.style`, `.color`) change
+  the locator bar icon of a living entity as `/waypoint modify` does, untracking and tracking its waypoint again, so the
+  players it transmits to get the new icon. A colour of `None` shows a player in their team's colour. Only a player's
+  waypoint reaches other players (`waypoint_transmit_range` is 0 for every other entity); a mob's or an armor stand's
+  icon is kept for its waypoint and `/waypoint list`. The dragon returns false.
 - `living.used_item_hand(host)` (`getUsedItemHand` while `isUsingItem`) reads the hand of the item a player or a mob uses,
   None when it uses none; on a client only the local player answers. `living.start_using_item(host, hand)` is
   `LivingEntity.startUsingItem`: the item's use timer and the use-item Start hook, not the item's own `use` (no ammo check,
@@ -1724,7 +1736,7 @@ still go on each event or registrar.
 - [explosions](#explosions) for server mods: `native_explode(dimension, center, radius, fire, blast)` sets one off as
   `Level.explode` does, with `NativeBlast::Keep`, `Block` or `Tnt` for what it does to blocks.
 
-- Dispenser item behaviours (`native_dispense_item`): a server hook receives the dimension, dispenser position, facing and selected stack, before any vanilla behaviour, for mod or vanilla items. Leave its answer `None` for vanilla, or answer `Some((remainder, event))`: a `None` remainder empties the slot, `Some(stack)` writes that remainder without consuming again, and `event` is the level event played with the smoke (1000 click, 1001 fail, 0 nothing, as `NOOP`). Answer `Some((native_dispense_default(dimension, pos, facing, stack.clone()), 1000))` to drop one item normally, including items with a special vanilla behaviour. Droppers are unaffected.
+- Dispenser behaviours are chosen at `DispenserBlock.getDispenseMethod`, before any vanilla behaviour, for mod or vanilla items, on the authoritative server only (droppers are unaffected). The block the dispenser faces is asked first: `native_dispense_method` gives its part the dimension, dispenser position, facing, the selected stack and `state`, the block at `pos` moved by `facing` (air included), and the part is asked only for that block. Then, unless that part answered, the item's own part is asked by `native_dispense_item` with the same dimension, position, facing and stack. Either answer is `Some((remainder, event))`: a `None` remainder empties the slot, `Some(stack)` writes that remainder without consuming again, and `event` is the level event played with the smoke (1000 click, 1001 fail, 0 nothing, as `NOOP`). The first answer wins: the other part is not asked and vanilla's behaviour doesn't run. `host.dispense_default(dimension, pos, facing, stack)` drops one item normally, including items with a special vanilla behaviour: answer its remainder with 1000. Leave the answer `None` to let vanilla decide, as before.
 
 - Image tooltip components: `native_tooltip_component(stack, size)` answers finite positive width/height in GUI pixels, and `native_tooltip_component_draw(stack, batch, origin, size)` draws that component with `native_sprite`, `native_fill` and `native_text`. The stack supplies its data. Space and background are reserved after the text and any vanilla bundle component; the component width participates in tooltip positioning. Neither hook changes ordinary tooltips without an answer. Client-side.
 
@@ -1733,6 +1745,8 @@ still go on each event or registrar.
 - `Hooks::render_tooltip_gather_components` (NeoForge's `RenderTooltipEvent.GatherComponents`, client-side, cancellable): an item's tooltip as one list of `TooltipElement`s, a `Text` line with its colour or an `Image` (a `TooltipImage`: the stack whose item's `tooltip_component_draw` part draws it, and its size in GUI pixels), after `item_tooltip` and before anything is wrapped or measured. Add, change, reorder or remove elements. `max_width` starts at -1, no limit, which leaves the lines as vanilla draws them; a mod that sets it wraps every line wider than that. Cancel and nothing is drawn. An image with a non-finite or non-positive size is dropped.
 
 - `Hooks::render_tooltip_pre` (NeoForge's `RenderTooltipEvent.Pre`) is asked for each tooltip about to be placed and drawn, after `render_tooltip_gather_components`: item tooltips and text tooltips (a button's, a book's, the creative tab names), not the selected-item name a bundle draws beside its grid. `place` is the point the tooltip hangs from (the cursor, or the point its screen gives), before the positioner adds its offset and keeps the box on screen; set its `x` and `y` to move it. `screen_width` and `screen_height` are the screen's size. `elements` are the tooltip's lines then its images, read-only (change them in `render_tooltip_gather_components`), and `stack` is the item it describes, `None` for a text tooltip. Set `cancel` and nothing is drawn and no `render_tooltip_texture` is asked. It runs each frame a tooltip shows, only while a mod listens. Diverges from upstream: new hook.
+
+- `Hooks::component_hover` (vanilla's `GuiGraphicsExtractor.componentHoverEffect`; NeoForge has no event for it) is asked for the hover of the text component under the cursor in the chat, a book or a dialog, before the game draws it. `hover` is the typed hover action (`TextHover`: its text, an item or an entity), `x` and `y` the cursor. Set `cancel` and the game draws nothing for it, and a mod can draw its own with `draw`. Left alone, a text hover is split at half the screen's width (at least 200), an item hover draws its stack's tooltip, which asks `item_tooltip` and the `render_tooltip_*` hooks as any item tooltip does, and an entity hover shows its name, type and UUID while advanced tooltips are on. It runs each frame a hovered component shows, only while a mod listens. Diverges from upstream: new hook.
 
 - [advancement triggers](#advancement-triggers) of a mod's own: `player.trigger_criterion(host, trigger, test)` fires a trigger
   an advancement of a content mod or a data pack names (`mymod:pipe_connected`) for one player, as a NeoForge mod's
@@ -1954,8 +1968,9 @@ whole behaviour object with a log warning, falling back to the existing particle
 the sprite set still loads. Vanilla particle JSONs are unaffected. Resource reloads apply new
 declarations to newly spawned particles; live particles keep their spawn-time values.
 The engine copies fixed-size numeric data at spawn and performs no new allocations per particle
-tick. This first slice supports only linear size/opacity curves and constant gravity/friction;
-there is no per-particle code hook.
+tick. Declarations support linear size/opacity curves and constant gravity/friction; for per-particle
+code, register a provider with `register_particle_providers` ("Particle providers"). A provider replaces the
+declared motion (its tick moves the particle) but the declared spawn values still seed it.
 
 
 - the open screen hears of a key press (`native_screen_key_pressed_pre`) and of each character it types (`native_screen_char_typed_pre`), as vanilla's `ScreenEvent.KeyPressed.Pre` and `.CharacterTyped.Pre`: the screen, vanilla's key name (`key.keyboard.e`; a key with no name fires nothing), whether the press is an auto-repeat, the character, GLFW's modifier bits (shift 1, control 2, alt 4, super 8), and `screen.mouse` for the pointer. A cancelled press goes no further — no focus move, no Escape-close, no inventory or hotbar key, no typing by the key itself — while its release still arrives and the characters no mod cancelled still reach the text box, as vanilla's separate `charTyped` comes for a cancelled `keyPressed` too. A cancelled character drops only that character and never reaches a text box, and the character hook's `field` is a copy of the focused box whose edits the box takes through its own filter, length limit and responders; control characters (Enter, Backspace, Tab, Delete, Escape, a Control letter) are keys and fire nothing. A key's characters fire after the key has acted, as GLFW's char callback comes after its key callback, so a key that closes the screen (the inventory key) reports no character (the closed screen hears none) and one that moves the focus types into the box it moved to. The input method's committed text fires the character hook too. They fire for the window and the control socket's `key` and `type` (not its `\b` backspace), after the fullscreen, screenshot, debug and narrator keys, never on the connect and loading screens, the prompts, books and sign editors drawn over gameplay, or while a world loads or saves.
@@ -2249,7 +2264,7 @@ registration path.
 
 - Column reads for server mods, in the level being ticked: `native_surface_heights(dimension, columns, heightmap)` and `native_read_columns(dimension, columns, heightmap, (below, above))`, the blocks round each column's height as a palette and indexes with the biome's grass, foliage and water tints.
 
-- `native_experience_orb_can_merge(dimension, into, from, into_value, from_value, can_merge)` is asked for each pair of orbs whose boxes meet, when an orb spawns (`ExperienceOrb.tryMergeToExisting`; `from` is 0, the new orb is no entity yet) and every 20 ticks as an orb scans (`scanForMerges`); `can_merge` holds vanilla's `canMerge` answer, which a mod may flip either way. `native_experience_orb_merge(dimension, into, from, from_value, canceled)` follows a yes and may cancel it: both orbs stay, and a spawning orb tries the next orb in reach, then spawns on its own. A merged orb counts as `count` orbs of the keeper's value. `native_set_experience_orb(dimension, id, value, count, age)` writes an orb's `value`, `count` and `age` (each optional; false for a `value` or `count` of 0 or an orb that isn't there).
+- `native_experience_orb_can_merge(dimension, into, from, into_value, from_value, can_merge)` is asked for each pair of orbs whose boxes meet, when an orb spawns (`ExperienceOrb.tryMergeToExisting`; `from` is 0, the new orb is no entity yet) and every 20 ticks as an orb scans (`scanForMerges`); `can_merge` holds vanilla's `canMerge` answer, which a mod may flip either way. `native_experience_orb_merge(dimension, into, from, from_value, canceled)` follows a yes and may cancel it: both orbs stay, and a spawning orb tries the next orb in reach, then spawns on its own. A merged orb counts as `count` orbs of the keeper's value. `native_set_experience_orb(dimension, id, value, count, age)` writes an orb's `value`, `count` and `age` (each optional; false for a `count` of 0 or an orb that isn't there; signed `value` is preserved, including zero and negative values).
 
 - `native_block_entity` gives a block a block entity whatever its template: a mod's stone casing or thin part can use any template. The engine removes it when its block is broken or replaced, no piston moves it, and a mod that draws it (`native_block_entity_submit`) is asked for it.
 
@@ -2314,7 +2329,7 @@ registration path.
 
 - a player changing dimension: `native_player_changed_dimension(player, name, from, to)` is heard once per move of a server's player into another level, when the move has ended (a portal's exit found and the player standing there, a command's teleport landed, a respawn in another level placed for good), with `from` and `to` as dimension ids (`minecraft:overworld`, `minecraft:the_nether`, `minecraft:the_end`) and the player's state swapped in so that `PlayerRef::tell` and the other helpers reach them. A move within a level is not heard.
 
-- `native_pickup_xp(player, dimension, orb, value, count, canceled)` runs before a server player takes an orb; with no listener the server skips swapping a guest in for it (the shared `listened` probe). Canceling leaves the orb and the pickup delay unchanged; otherwise the value is clamped to 1..=2,147,483,647 and the count to at least one, then one count is taken. `native_mending_repair(player, stack, experience, repair)` sees the damaged Mending item picked at random and can change the durability repair proposed for it, which is capped at its current damage. Turning a positive proposal into zero leaves the experience unspent (a zero vanilla proposal keeps vanilla's behaviour); if the picked stack is removed, changed except for its damage, or no longer eligible, the repair is skipped and the experience remains. The repair also decides how much experience is left for further repairs. It runs for `PlayerRef::give_experience_points` too. Both run on the integrated and the dedicated server, guests included.
+- `native_pickup_xp(player, dimension, orb, value, count, canceled)` runs before a server player takes an orb; with no listener the server skips swapping a guest in for it (the shared `listened` probe). Canceling leaves the orb and the pickup delay unchanged; otherwise the signed value is preserved, including zero and negative values, and the count is clamped to at least one, then one count is taken. `native_mending_repair(player, stack, experience, repair)` sees the damaged Mending item picked at random and can change the durability repair proposed for it, which is capped at its current damage. Turning a positive proposal into zero leaves the experience unspent (a zero vanilla proposal keeps vanilla's behaviour); if the picked stack is removed, changed except for its damage, or no longer eligible, the repair is skipped and the experience remains. The repair also decides how much experience is left for further repairs. It runs for `PlayerRef::give_experience_points` too. Both run on the integrated and the dedicated server, guests included.
 
 - Whom an experience orb follows (`XpOrbTargetingEvent`): `native_xp_orb_targeting(orb, scan_distance, following)`, on a server, for each orb as it ticks. `following` starts as the nearest living player within `scan_distance` (8) blocks who isn't a spectator, or `None`; set another player, or `None` to follow no one. The orb goes only for a living player who isn't a spectator and is in its level, and moves only once they are within 8 blocks. An orb that follows no one gets vanilla's push out of a block it is stuck in. Horizon looks for the nearest player on every orb tick, where vanilla keeps the player it follows while they stay within 8 blocks, so the hook is asked every tick for each orb (NeoForge asks only when the orb has no player in range). Clients still predict the orb's flight towards the nearest player; the server's position wins.
 
@@ -2642,9 +2657,9 @@ registration path.
 
 - A server player's trade with a villager or a wandering trader, as NeoForge's `TradeWithVillagerEvent`: `native_trade_with_villager(merchant, kind, offer)` is heard once per trade made, after its statistic and `villager_trade` trigger, with the trader's entity id and type and the `MerchantOffer` as it is after the trade. Listen only; the player's state is swapped in.
 
-- A server player's `teleport_randomly` consume effect (chorus fruit) is about to try a spot: `native_item_consumption_teleport(player, name, from, target, cancel)`, once per attempt (up to 16). A mod may move `target`; the game still looks down from it for ground to land on. `cancel` ends the effect with no teleport and no more attempts. Foxes are not heard.
+- A server player's or fox's `teleport_randomly` consume effect (chorus fruit) is about to try a spot: version 2 of `native_item_consumption_teleport(consumer, consumed, from, target, cancel)`, once per attempt (up to 16). `consumer` is the living actor's handle and `consumed` is the public API stack captured before the use, with its count, damage and component patch, rather than the current contents of the hand. The living handle replaces version 1's player-only UUID/name fields; players retain their acting-player context. A mod may move `target`; the game still looks down from it for ground to land on. `cancel` ends the effect with no teleport and no more attempts, not consumption. A fox's callback runs with the full server host before its living AI/movement and before the next mob ticks; listener changes to its mouth item, position or eligibility invalidate the captured decision rather than being overwritten.
 
-- A server player's ender pearl landed: `native_ender_pearl_teleport(player, name, pearl, from, target, damage, cancel)` runs before the endermite roll and the teleport. A mod may move `target` or change the fall `damage` (5; 0 or less is none); `cancel` keeps the player where they are, without the endermite roll, damage or sound, and the pearl is used up either way.
+- A server player's or mob's ender pearl landed: version 2 of `native_ender_pearl_teleport(owner, pearl, from, target, damage, cancel)` runs before teleporting the live `EntityRef` owner. A mod may move `target`; cancellation spends the pearl without a teleport, sound, player damage or endermite roll. A player retains acting-player context and mutable fall damage (5). A mob preserves rotation, resets fall distance, takes no player fall damage and makes no endermite draw. A listener's move or an owner that is no longer eligible invalidates the pending move; it is refused rather than overwriting that write. `owner` replaces version 1's player-only UUID/name fields; use its handle and the host services. Named injections must request `hook_version = 2`; no compatibility fields or version-1 alias are retained.
 
 - Drawing an item stack on a screen: `native_item_stack(batch, stack, at, size)` draws its model, glint, damage bar, cooldown and mod decorations, but not its count. It draws nothing and returns false for an unknown item or an empty stack (air, or a count of 0).
 

@@ -5,6 +5,7 @@ use horizon_core::nbt::Tag;
 /// Inputs to selecting a block's placement state.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct PlacementContext {
     /// Resolved destination of the block being placed.
     pub pos: BlockPos,
@@ -52,6 +53,7 @@ impl PlacementContext {
 /// is a roll's intermediate data and does not represent an occupied inventory slot.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct LootStack {
     /// Resolved candidate item.
     pub item: ItemKey,
@@ -80,6 +82,7 @@ pub struct LootStack {
 /// A deferred exploration-map search requested by a loot function.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct ExplorationMap {
     /// Destination structure tag, without `#`.
     pub destination: String,
@@ -97,6 +100,7 @@ pub struct ExplorationMap {
 /// The game fills it only when that kind has subscribed listeners.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeLootContext {
     /// Entity named by the table, if any.
     pub entity: Option<LootEntity>,
@@ -121,6 +125,7 @@ pub struct NativeLootContext {
 /// Tool facts supplied by the item engine to a loot roll.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeLootTool {
     /// Resolved tool item.
     pub item: ItemKey,
@@ -131,6 +136,7 @@ pub struct NativeLootTool {
 /// Entity predicate facts captured for a loot roll, not a live entity handle.
 #[derive(Clone, Debug, Default, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct LootEntity {
     /// Entity type identifier.
     pub kind: String,
@@ -161,6 +167,7 @@ pub struct LootEntity {
 /// Damage-source facts captured for a loot roll.
 #[derive(Clone, Debug, Default, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct LootDamage {
     /// Damage type identifier.
     pub kind: String,
@@ -173,6 +180,7 @@ pub struct LootDamage {
 /// Place facts captured around a loot roll.
 #[derive(Clone, Debug, Default, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeLootPlace {
     /// World-space origin.
     pub origin: Option<[f64; 3]>,
@@ -185,6 +193,7 @@ pub struct NativeLootPlace {
 /// Level facts captured around a loot roll.
 #[derive(Clone, Debug, Default, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeLootLevel {
     /// Dimension identifier, including custom dimensions.
     pub dimension: String,
@@ -196,42 +205,6 @@ pub struct NativeLootLevel {
     pub raining: bool,
     /// Whether it is thundering.
     pub thundering: bool,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn loot_snapshot_retains_unknown_patch_removal_and_order() {
-        let patches = vec![
-            ("test:unknown".to_owned(), Some(Tag::Int(42))),
-            ("minecraft:damage".to_owned(), None),
-            ("test:unknown".to_owned(), Some(Tag::String("later".into()))),
-        ];
-        let stack = LootStack {
-            item: ItemKey(0),
-            count: -1,
-            damage: 0,
-            enchantments: vec![],
-            potion: None,
-            map: false,
-            exploration: None,
-            ominous_amplifier: None,
-            stew_effects: vec![],
-            names: vec![],
-            components: patches,
-        };
-        assert_eq!(
-            stack.components[0],
-            ("test:unknown".into(), Some(Tag::Int(42)))
-        );
-        assert_eq!(stack.components[1], ("minecraft:damage".into(), None));
-        assert_eq!(
-            stack.components[2],
-            ("test:unknown".into(), Some(Tag::String("later".into())))
-        );
-    }
 }
 
 impl LootStack {
@@ -290,5 +263,41 @@ impl ExplorationMap {
             search_radius,
             skip_existing_chunks,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loot_snapshot_retains_unknown_patch_removal_and_order() {
+        let patches = vec![
+            ("test:unknown".to_owned(), Some(Tag::Int(42))),
+            ("minecraft:damage".to_owned(), None),
+            ("test:unknown".to_owned(), Some(Tag::String("later".into()))),
+        ];
+        let stack = LootStack {
+            item: ItemKey(0),
+            count: -1,
+            damage: 0,
+            enchantments: vec![],
+            potion: None,
+            map: false,
+            exploration: None,
+            ominous_amplifier: None,
+            stew_effects: vec![],
+            names: vec![],
+            components: patches,
+        };
+        assert_eq!(
+            stack.components[0],
+            ("test:unknown".into(), Some(Tag::Int(42)))
+        );
+        assert_eq!(stack.components[1], ("minecraft:damage".into(), None));
+        assert_eq!(
+            stack.components[2],
+            ("test:unknown".into(), Some(Tag::String("later".into())))
+        );
     }
 }

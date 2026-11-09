@@ -148,11 +148,11 @@ impl Game<'_> {
 
     /// The level's dimension type with its gameplay attributes, from the facts the game uses.
     pub(super) fn level_dimension_type(&self, level: LevelRef) -> Option<LevelDimensionType> {
-        use horizon_world::dimension_type::{CardinalLight, DimensionFacts, Skybox};
+        use horizon_world::dimension_type::{CardinalLight, Skybox};
         use horizon_world::worldgen::value_provider::IntProvider;
         self.native_level_read_world(level)?;
         let key = horizon_core::LevelKey::parse(level.dimension_id()).ok()?;
-        let facts = DimensionFacts::of_level(key);
+        let facts = self.dimension_facts_for(key);
         Some(LevelDimensionType {
             id: facts.id.clone(),
             min_y: facts.height.min_y,
@@ -217,6 +217,17 @@ impl Game<'_> {
     pub(super) fn level_difficulty(&self, level: LevelRef) -> Option<&'static str> {
         self.native_level_world(level)?;
         DIFFICULTIES.get(usize::from(self.ui.difficulty)).copied()
+    }
+    /// `ServerLevel.getCurrentDifficultyAt(pos)` in the level the handle names, in place or
+    /// parked.
+    pub(super) fn level_local_difficulty(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+    ) -> Option<mod_api::NativeDifficulty> {
+        let world = self.native_level_world(level)?;
+        let at = pos.map(f64::from);
+        Some(super::creatures::local_difficulty_in(world, at).into())
     }
     /// Read a registered boolean game rule.
     pub(super) fn level_game_rule_bool(

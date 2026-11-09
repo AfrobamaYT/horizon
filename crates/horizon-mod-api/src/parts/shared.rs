@@ -1,5 +1,6 @@
 //! Shared table state, cross-kind registration and common test fixtures only.
 use super::*;
+// no wire: process-local registration and dispatch storage contains trait objects and owning-mod identities.
 /// A part, with the mod that attached it.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct Attached<P: ?Sized> {
@@ -66,11 +67,14 @@ pub(crate) fn insert_part<P: ?Sized>(
     true
 }
 
+// no wire: process-local registration and dispatch storage contains trait objects and owning-mod identities.
 /// Every mod's parts, by the id of the thing they are attached to, in dispatch order.
 #[derive(Clone, Default)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct Parts {
     pub(crate) key_mappings: Vec<(&'static str, crate::NativeKeyRegistration)>,
+    /// Settings by owner, in registration order (`Registrar::register_setting`).
+    pub(crate) settings: Vec<(&'static str, crate::SettingSpec)>,
     /// Block parts, and block entity parts as the block parts they also are.
     pub(crate) blocks: HashMap<Box<str>, Vec<Attached<dyn BlockPart>>>,
     /// Block entity parts by block, for the hooks asked by block (`block_entity`, `screen`).
@@ -101,6 +105,7 @@ pub struct Parts {
     pub(crate) hooks: Vec<Option<HookParts>>,
 }
 
+// no wire: process-local registration and dispatch storage contains trait objects and owning-mod identities.
 #[derive(Clone, Default)]
 /// The Parts attached to blocks for one hook, with which hooks have a subscriber.
 // exhaustive: its fields are private, so mods cannot build or destructure it
@@ -118,7 +123,7 @@ pub struct HookParts {
 // hidden: a lookup's view of the registrar's table, not part of the mod surface
 // exhaustive: the three kinds of thing a capability is asked of
 #[doc(hidden)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, horizon_mod_api_macros::Wire)]
 pub enum ProvidedBy {
     BlockEntity,
     Item,
@@ -144,6 +149,7 @@ pub(crate) struct Installed {
     pub(crate) entity_attributes: Vec<EntityAttributeDeclaration>,
     pub(crate) world_fluids: Vec<(String, crate::WorldFluid)>,
     pub(crate) entity_attribute_modifications: Vec<EntityAttributeModification>,
+    pub(crate) attributes: Vec<super::attributes::AttributeDeclaration>,
     pub(crate) spawn_placements: Vec<SpawnPlacementDeclaration>,
     pub(crate) registry_keys: horizon_mod_runtime::registry_keys::Requests,
     pub(crate) effects: OnceLock<horizon_mod_runtime::registry_keys::Effects>,
@@ -218,6 +224,7 @@ pub fn has_scoped_hook(hook: HookId) -> bool {
     !crate::mods().is_empty() && has_part_hook(hook)
 }
 
+// no wire: process-local registration and dispatch storage contains trait objects and owning-mod identities.
 /// The parts table a dispatch reads: the process-wide one, or this game thread's.
 #[non_exhaustive]
 pub enum PartsRef {
@@ -243,6 +250,7 @@ pub fn parts(hook: HookId, name: &'static str) -> PartsRef {
     try_parts(hook, name).unwrap_or_else(|error| panic!("{error}"))
 }
 
+// no wire: process-local registration diagnostic retains a static hook or mod identity.
 /// The engine asked for tag Parts on a thread without that world's table.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -299,6 +307,7 @@ pub fn mark_game_thread() {
     clear_game_parts();
 }
 
+// no wire: registration diagnostic contains ItemKeyError with static owning-mod identity.
 /// Refusals at the Parts load boundary.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -309,6 +318,7 @@ pub enum ResolvePartsError {
     Parts(Vec<String>),
 }
 
+// no wire: borrowed parser or registration callbacks execute only in their owning process.
 /// The ids a game knows, which a part's key must name.
 // exhaustive: the game builds it with a literal; mods only read it
 pub struct KnownIds<'a> {
@@ -513,6 +523,7 @@ pub(crate) fn attached<'a, 'k, P: ?Sized>(
     id().and_then(|id| table.get(id)).map_or(&[], Vec::as_slice)
 }
 
+// no wire: process-local registration and dispatch storage contains trait objects and owning-mod identities.
 /// The game's [`Registrar`]: every mod's registrations, checked as they come.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct PartRegistrar {
@@ -528,6 +539,7 @@ pub struct PartRegistrar {
     pub(crate) entity_attributes: Vec<EntityAttributeDeclaration>,
     pub(crate) world_fluids: Vec<(String, crate::WorldFluid)>,
     pub(crate) entity_attribute_modifications: Vec<EntityAttributeModification>,
+    pub(crate) attributes: Vec<super::attributes::AttributeDeclaration>,
     pub(crate) spawn_placements: Vec<SpawnPlacementDeclaration>,
     pub(crate) registry_keys: Rc<RefCell<horizon_mod_runtime::registry_keys::Requests>>,
     pub(crate) effects: OnceLock<horizon_mod_runtime::registry_keys::Effects>,
@@ -553,6 +565,7 @@ impl PartRegistrar {
             entity_attributes: Vec::new(),
             world_fluids: Vec::new(),
             entity_attribute_modifications: Vec::new(),
+            attributes: Vec::new(),
             spawn_placements: Vec::new(),
             registry_keys: Default::default(),
             effects: OnceLock::new(),
@@ -692,6 +705,7 @@ pub(crate) fn install_registrar(
         block_entity_types: registrar.block_entity_types,
         entity_attributes: registrar.entity_attributes,
         world_fluids: registrar.world_fluids,
+        attributes: registrar.attributes,
         entity_attribute_modifications: registrar.entity_attribute_modifications,
         spawn_placements: registrar.spawn_placements,
         resolved_block_entity_types: OnceLock::new(),

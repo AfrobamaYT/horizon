@@ -1,4 +1,6 @@
 //! Real wasm capability providers within and across dependency groups.
+// Generated fixtures exercise every shape; TODO(#2273): make the generator emit clippy-clean code.
+#![allow(clippy::all, unused_comparisons, unreachable_patterns, dead_code)]
 use mod_api::__private::game::{BackendRefOf, Fields};
 use mod_api::{
     Backend, BackendRef, BlockEntityRef, BlockEntityTypeKey, BoolGameRuleKey, Host, LevelRef,
@@ -52,6 +54,20 @@ mod_api::impl_server_host_areas!(World);
 
 #[test]
 fn capability_is_answered_only_within_its_group() {
+    // A stopped group has no reply; expose the runtime's refusal/trap diagnostic in CI.
+    struct Logger;
+    impl log::Log for Logger {
+        fn enabled(&self, _: &log::Metadata<'_>) -> bool {
+            true
+        }
+        fn log(&self, record: &log::Record<'_>) {
+            eprintln!("{}", record.args());
+        }
+        fn flush(&self) {}
+    }
+    static LOGGER: Logger = Logger;
+    log::set_logger(&LOGGER).unwrap();
+    log::set_max_level(log::LevelFilter::Warn);
     let (Ok(folder), Ok(std)) = (
         std::env::var("HORIZON_WASM_GROUPS"),
         std::env::var("HORIZON_WASM_STD"),
@@ -99,6 +115,7 @@ fn capability_is_answered_only_within_its_group() {
                 let mut message = Text::literal("");
                 let mut replies = Vec::new();
                 let mut event = ServerChatEvent {
+                    cancelled: false,
                     player_id: 1,
                     player: 1,
                     username: "tester",
@@ -150,6 +167,7 @@ fn capability_is_answered_only_within_its_group() {
                 let mut message = Text::literal("");
                 let mut replies = Vec::new();
                 let mut event = ServerChatEvent {
+                    cancelled: false,
                     player_id: 1,
                     player: 1,
                     username: "tester",

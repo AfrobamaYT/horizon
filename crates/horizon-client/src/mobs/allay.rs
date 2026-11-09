@@ -249,7 +249,7 @@ fn deposit(m: &mut Mob, cx: &Cx) -> Option<[f64; 3]> {
     if !m.extra.tame {
         return None;
     }
-    let p = cx.w.player.as_ref().filter(|p| p.alive && !p.spectator)?;
+    let p = cx.w.selected_player().filter(|p| p.alive && !p.spectator)?;
     (p.position.distance_squared(m.position) <= 64.0 * 64.0).then_some([
         p.position.x,
         p.position.y,
@@ -374,6 +374,8 @@ pub fn listen(
                 pos,
                 source: ctx.source,
                 owner: ctx.owner,
+                source_uuid: ctx.source_uuid,
+                owner_uuid: ctx.owner_uuid,
             },
             now,
         );

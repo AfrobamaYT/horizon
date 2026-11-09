@@ -1,4 +1,8 @@
 //! The build-tool fixture is a real shared module, not a component.
+// Generated fixtures exercise every shape; TODO(#2273): make the generator emit clippy-clean code.
+#![allow(clippy::all, unused_comparisons, unreachable_patterns, dead_code)]
+#[path = "fixture/src/shutdown.rs"]
+mod shutdown;
 use horizon_mod_package::manifest::Package;
 use horizon_mod_wasm::{WasmPackage, load};
 
@@ -9,13 +13,15 @@ impl mod_api::ServerHost for Quiet {}
 mod_api::impl_server_host_areas!(Quiet);
 
 #[test]
+#[ignore = "needs HORIZON_WASM_STD or HORIZON_WASM_FIXTURE_RAW; prints a member's sections"]
 fn dump_members() {
     for (name, path) in [
         ("std", "HORIZON_WASM_STD"),
         ("fixture", "HORIZON_WASM_FIXTURE_RAW"),
     ] {
         let Ok(path) = std::env::var(path) else {
-            return;
+            println!("=== {name} === skipped: {path} is not set");
+            continue;
         };
         let bytes = std::fs::read(path).unwrap();
         println!("=== {name} ===");
@@ -41,13 +47,15 @@ fn dump_members() {
 }
 
 #[test]
+#[ignore = "needs HORIZON_WASM_FIXTURE and HORIZON_WASM_STD, which the wasm-mods workflow builds"]
 fn real_member() {
     let (Ok(fixture), Ok(std)) = (
         std::env::var("HORIZON_WASM_FIXTURE"),
         std::env::var("HORIZON_WASM_STD"),
     ) else {
-        eprintln!("skipping: HORIZON_WASM_FIXTURE and HORIZON_WASM_STD are not set");
-        return;
+        panic!(
+            "HORIZON_WASM_FIXTURE and HORIZON_WASM_STD must be set: run with the wasm-mods workflow's environment"
+        );
     };
     let path = std::path::Path::new(&fixture);
     let manifest = Package::read(path).unwrap().manifest;
@@ -99,4 +107,22 @@ fn real_member() {
         args.cancel,
         "real wasm listener must modify the point record"
     );
+    // The real point's expansion: its `&mut` place copied in and out of the wasm listener's
+    // record, its by-value message changed, and its cancel skipping the body.
+    // The guest built `shutdown::on_shutdown`, the source `native_listener` registers natively.
+    let _: mod_points::listeners::GameServerLifecycleRememberShutdownListener =
+        shutdown::on_shutdown;
+    for (before, message, after) in shutdown::CASES {
+        let mut failure = before.map(String::from);
+        remember_shutdown(&mut failure, message.into());
+        assert_eq!(failure.as_deref(), after, "{message}");
+    }
+}
+
+/// `horizon_client::game::server_lifecycle::remember_shutdown`, as the staging pass marks it.
+#[horizon_mod_api_macros::point(name = "game_server_lifecycle_remember_shutdown", free)]
+fn remember_shutdown(failure: &mut Option<String>, message: String) {
+    if failure.is_none() {
+        *failure = Some(message);
+    }
 }
