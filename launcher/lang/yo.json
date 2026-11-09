@@ -1261,5 +1261,7 @@
   "Native mods are off.": "Àwọn mod abínibí ti pa.",
   "A game is running. Files it may use are kept.": "Ere kan ń ṣiṣẹ́. A pa àwọn fáìlì tí ó lè lò mọ́.",
   "Clear all launcher caches? Up to {size} can be freed. Files a game or build uses are kept.": "Nu gbogbo ibi ìpamọ́ ìgbà díẹ̀ ìfilọ́lẹ̀ rẹ́? A lè tú tó {size} sílẹ̀. A pa àwọn fáìlì tí ere tàbí ìkọ́ ń lò mọ́.",
-  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "Nu {category} rẹ́? A lè tú tó {size} sílẹ̀. A pa àwọn fáìlì tí ere tàbí ìkọ́ ń lò mọ́."
+  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "Nu {category} rẹ́? A lè tú tó {size} sílẹ̀. A pa àwọn fáìlì tí ere tàbí ìkọ́ ń lò mọ́.",
+  "{mod}: layout mismatch in library {library} for type {type}": "{mod}: layout mismatch in library {library} for type {type}",
+  "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet": "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet"
 }

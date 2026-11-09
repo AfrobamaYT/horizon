@@ -1261,5 +1261,7 @@
   "Native mods are off.": "الإضافات الأصلية معطّلة.",
   "A game is running. Files it may use are kept.": "هناك لعبة قيد التشغيل. يُحتفظ بالملفات التي قد تستخدمها.",
   "Clear all launcher caches? Up to {size} can be freed. Files a game or build uses are kept.": "مسح كل ذاكرات التخزين المؤقت للمشغّل؟ يمكن تحرير ما يصل إلى {size}. يُحتفظ بالملفات التي تستخدمها لعبة أو عملية بناء.",
-  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "مسح {category}؟ يمكن تحرير ما يصل إلى {size}. يُحتفظ بالملفات التي تستخدمها لعبة أو عملية بناء."
+  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "مسح {category}؟ يمكن تحرير ما يصل إلى {size}. يُحتفظ بالملفات التي تستخدمها لعبة أو عملية بناء.",
+  "{mod}: layout mismatch in library {library} for type {type}": "{mod}: layout mismatch in library {library} for type {type}",
+  "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet": "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet"
 }

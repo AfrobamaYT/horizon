@@ -1261,5 +1261,7 @@
   "Native mods are off.": "Mahalliy modlar o‘chirilgan.",
   "A game is running. Files it may use are kept.": "O‘yin ishlayapti. U ishlatishi mumkin bo‘lgan fayllar saqlanadi.",
   "Clear all launcher caches? Up to {size} can be freed. Files a game or build uses are kept.": "Ishga tushirgichning barcha keshlari tozalansinmi? {size} gacha joy bo‘shatilishi mumkin. O‘yin yoki qurilish ishlatayotgan fayllar saqlanadi.",
-  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "{category} tozalansinmi? {size} gacha joy bo‘shatilishi mumkin. O‘yin yoki qurilish ishlatayotgan fayllar saqlanadi."
+  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "{category} tozalansinmi? {size} gacha joy bo‘shatilishi mumkin. O‘yin yoki qurilish ishlatayotgan fayllar saqlanadi.",
+  "{mod}: layout mismatch in library {library} for type {type}": "{mod}: layout mismatch in library {library} for type {type}",
+  "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet": "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet"
 }

@@ -1261,5 +1261,7 @@
   "Native mods are off.": "Denaskaj modoj estas malŝaltitaj.",
   "A game is running. Files it may use are kept.": "Ludo ruliĝas. Dosieroj, kiujn ĝi eble uzas, estas konservataj.",
   "Clear all launcher caches? Up to {size} can be freed. Files a game or build uses are kept.": "Ĉu malplenigi ĉiujn kaŝmemorojn de la lanĉilo? Ĝis {size} povas esti liberigitaj. Dosieroj uzataj de ludo aŭ konstruado estas konservataj.",
-  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "Ĉu malplenigi {category}? Ĝis {size} povas esti liberigitaj. Dosieroj uzataj de ludo aŭ konstruado estas konservataj."
+  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "Ĉu malplenigi {category}? Ĝis {size} povas esti liberigitaj. Dosieroj uzataj de ludo aŭ konstruado estas konservataj.",
+  "{mod}: layout mismatch in library {library} for type {type}": "{mod}: layout mismatch in library {library} for type {type}",
+  "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet": "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet"
 }

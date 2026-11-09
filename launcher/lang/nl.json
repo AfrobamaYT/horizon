@@ -1261,5 +1261,7 @@
   "Native mods are off.": "Native mods zijn uitgeschakeld.",
   "A game is running. Files it may use are kept.": "Er draait een spel. Bestanden die het mogelijk gebruikt, blijven behouden.",
   "Clear all launcher caches? Up to {size} can be freed. Files a game or build uses are kept.": "Alle launchercaches wissen? Er kan maximaal {size} worden vrijgemaakt. Bestanden die een spel of build gebruikt, blijven behouden.",
-  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "{category} wissen? Er kan maximaal {size} worden vrijgemaakt. Bestanden die een spel of build gebruikt, blijven behouden."
+  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "{category} wissen? Er kan maximaal {size} worden vrijgemaakt. Bestanden die een spel of build gebruikt, blijven behouden.",
+  "{mod}: layout mismatch in library {library} for type {type}": "{mod}: layout mismatch in library {library} for type {type}",
+  "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet": "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet"
 }

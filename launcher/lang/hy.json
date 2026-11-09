@@ -1261,5 +1261,7 @@
   "Native mods are off.": "Նատիվ մոդերն անջատված են։",
   "A game is running. Files it may use are kept.": "Խաղ է աշխատում։ Դրա կողմից հնարավոր օգտագործվող ֆայլերը պահպանվում են։",
   "Clear all launcher caches? Up to {size} can be freed. Files a game or build uses are kept.": "Մաքրե՞լ գործարկիչի բոլոր քեշերը։ Կարող է ազատվել մինչև {size}։ Խաղի կամ կառուցման կողմից օգտագործվող ֆայլերը պահպանվում են։",
-  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "Մաքրե՞լ {category}։ Կարող է ազատվել մինչև {size}։ Խաղի կամ կառուցման կողմից օգտագործվող ֆայլերը պահպանվում են։"
+  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "Մաքրե՞լ {category}։ Կարող է ազատվել մինչև {size}։ Խաղի կամ կառուցման կողմից օգտագործվող ֆայլերը պահպանվում են։",
+  "{mod}: layout mismatch in library {library} for type {type}": "{mod}: layout mismatch in library {library} for type {type}",
+  "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet": "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet"
 }

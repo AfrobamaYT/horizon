@@ -1261,5 +1261,7 @@
   "Native mods are off.": "Жергиликтүү моддор өчүрүлгөн.",
   "A game is running. Files it may use are kept.": "Оюн иштеп жатат. Ал колдонушу мүмкүн болгон файлдар сакталат.",
   "Clear all launcher caches? Up to {size} can be freed. Files a game or build uses are kept.": "Ишке киргизгичтин бардык кэштери тазалансынбы? {size} чейин бошотууга болот. Оюн же куруу колдонгон файлдар сакталат.",
-  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "{category} тазалансынбы? {size} чейин бошотууга болот. Оюн же куруу колдонгон файлдар сакталат."
+  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "{category} тазалансынбы? {size} чейин бошотууга болот. Оюн же куруу колдонгон файлдар сакталат.",
+  "{mod}: layout mismatch in library {library} for type {type}": "{mod}: layout mismatch in library {library} for type {type}",
+  "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet": "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet"
 }

@@ -354,6 +354,7 @@ impl Game<'_> {
                 package: horizon_mod_package::Package {
                     manifest: p.package.manifest.clone(),
                     icon: p.package.icon.clone(),
+                    layouts: p.package.layouts.clone(),
                 },
             });
         self.mods.selected = content.chain(code).collect();

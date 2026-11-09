@@ -1261,5 +1261,7 @@
   "Native mods are off.": "நேட்டிவ் மோட்கள் முடக்கப்பட்டுள்ளன.",
   "A game is running. Files it may use are kept.": "விளையாட்டு இயங்குகிறது. அது பயன்படுத்தக்கூடிய கோப்புகள் வைக்கப்படும்.",
   "Clear all launcher caches? Up to {size} can be freed. Files a game or build uses are kept.": "துவக்கியின் அனைத்துத் தற்காலிக சேமிப்புகளையும் அழிக்கவா? {size} வரை விடுவிக்கலாம். விளையாட்டு அல்லது கட்டமைப்பு பயன்படுத்தும் கோப்புகள் வைக்கப்படும்.",
-  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "{category} ஐ அழிக்கவா? {size} வரை விடுவிக்கலாம். விளையாட்டு அல்லது கட்டமைப்பு பயன்படுத்தும் கோப்புகள் வைக்கப்படும்."
+  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "{category} ஐ அழிக்கவா? {size} வரை விடுவிக்கலாம். விளையாட்டு அல்லது கட்டமைப்பு பயன்படுத்தும் கோப்புகள் வைக்கப்படும்.",
+  "{mod}: layout mismatch in library {library} for type {type}": "{mod}: layout mismatch in library {library} for type {type}",
+  "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet": "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet"
 }

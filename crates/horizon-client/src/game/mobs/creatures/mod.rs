@@ -8,6 +8,7 @@ mod borrowed_tick;
 #[cfg(test)]
 mod mob_dispatch_panic_tests;
 mod pufferfish_player;
+mod residency;
 #[cfg(test)]
 mod retained_limits_tests;
 use super::api_values::{TryIntoApi, TryIntoEngine};
@@ -508,10 +509,6 @@ enum OrbOrder {
 }
 
 impl Game<'_> {
-    pub(super) fn clear_pending_mob_actions(&mut self) {
-        self.creatures.pending.clear();
-    }
-
     /// The game's own player's uuid and entity id — the identity behind
     /// [`Self::player_view`], so a tick that lends no guest's view names its
     /// player (#1077). None where the view stands for nobody: no player of
@@ -741,7 +738,7 @@ impl Game<'_> {
         match site {
             SpawnSite::Raw => return Some(mob),
             SpawnSite::Finalizing(reason) => match self.finalize_with(&mut mob, reason, None) {
-                Finalized::Cancelled => return None,
+                Finalized::Cancelled => return self.discard_unjoined_mob(mob.id),
                 Finalized::Skipped => return Some(mob),
                 Finalized::Done => {}
             },

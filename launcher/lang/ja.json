@@ -1261,5 +1261,7 @@
   "Native mods are off.": "ネイティブ Mod は無効です。",
   "A game is running. Files it may use are kept.": "ゲームが実行中です。使用する可能性のあるファイルは保持されます。",
   "Clear all launcher caches? Up to {size} can be freed. Files a game or build uses are kept.": "ランチャーのキャッシュをすべて削除しますか？最大 {size} を解放できます。ゲームまたはビルドが使用するファイルは保持されます。",
-  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "{category} を削除しますか？最大 {size} を解放できます。ゲームまたはビルドが使用するファイルは保持されます。"
+  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "{category} を削除しますか？最大 {size} を解放できます。ゲームまたはビルドが使用するファイルは保持されます。",
+  "{mod}: layout mismatch in library {library} for type {type}": "{mod}: layout mismatch in library {library} for type {type}",
+  "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet": "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet"
 }

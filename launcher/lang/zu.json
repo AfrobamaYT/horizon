@@ -1261,5 +1261,7 @@
   "Native mods are off.": "Ama-mod ekhodi yomshini avaliwe.",
   "A game is running. Files it may use are kept.": "Umdlalo uyasebenza. Amafayela ongawasebenzisa ayagcinwa.",
   "Clear all launcher caches? Up to {size} can be freed. Files a game or build uses are kept.": "Sula zonke izinqolobane zesiqalisi? Kungakhululwa kufika ku-{size}. Amafayela asetshenziswa umdlalo noma ukwakha ayagcinwa.",
-  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "Sula okuthi {category}? Kungakhululwa kufika ku-{size}. Amafayela asetshenziswa umdlalo noma ukwakha ayagcinwa."
+  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "Sula okuthi {category}? Kungakhululwa kufika ku-{size}. Amafayela asetshenziswa umdlalo noma ukwakha ayagcinwa.",
+  "{mod}: layout mismatch in library {library} for type {type}": "{mod}: layout mismatch in library {library} for type {type}",
+  "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet": "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet"
 }

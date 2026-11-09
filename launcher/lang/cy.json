@@ -1261,5 +1261,7 @@
   "Native mods are off.": "Mae mods brodorol wedi'u diffodd.",
   "A game is running. Files it may use are kept.": "Mae gêm yn rhedeg. Cedwir ffeiliau y gall eu defnyddio.",
   "Clear all launcher caches? Up to {size} can be freed. Files a game or build uses are kept.": "Clirio holl storfeydd y lansiwr? Gellir rhyddhau hyd at {size}. Cedwir ffeiliau a ddefnyddir gan gêm neu adeilad.",
-  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "Clirio {category}? Gellir rhyddhau hyd at {size}. Cedwir ffeiliau a ddefnyddir gan gêm neu adeilad."
+  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "Clirio {category}? Gellir rhyddhau hyd at {size}. Cedwir ffeiliau a ddefnyddir gan gêm neu adeilad.",
+  "{mod}: layout mismatch in library {library} for type {type}": "{mod}: layout mismatch in library {library} for type {type}",
+  "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet": "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet"
 }
