@@ -24,6 +24,7 @@ code too, so Rust source quoted in a string is no module.
 """
 
 import argparse
+import json
 import os
 from pathlib import Path
 import re
@@ -233,6 +234,27 @@ def problems(entries, limit=LIMIT, baseline=None):
                        f"New tests go into a sibling {tests} (`#[path = \"{tests}\"] mod tests;`); code moves out "
                        f"to a new module in a pure-move PR first, not inside a fix ({DOC})")
     return out
+
+
+def verified_sync_config(base, config_path):
+    """Read an upstream inventory only after verifying a changed sync declaration."""
+    baseline = ROOT / "tools/file_size_baseline.txt"
+    marker, _ = parse_baseline(baseline.read_text() if baseline.exists() else "")
+    previous = subprocess.run(["git", "show", f"{base}:tools/file_size_baseline.txt"],
+                              cwd=ROOT, capture_output=True, text=True)
+    old_marker, _ = parse_baseline(previous.stdout if previous.returncode == 0 else "")
+    if marker is None or marker == old_marker:
+        return None, []
+    merge_base = git("merge-base", base, "HEAD").strip()
+    errors = sync_provenance(marker, merge_base)
+    if errors:
+        return None, errors
+    source = subprocess.run(["git", "show", f"{marker}:{config_path}"], cwd=ROOT,
+                            capture_output=True, text=True)
+    if source.returncode != 0:
+        return None, [f"verified upstream commit has no {config_path} inventory"]
+    config = json.loads(source.stdout)
+    return config, []
 
 
 def main(argv=None):
