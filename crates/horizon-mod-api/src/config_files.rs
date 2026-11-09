@@ -199,7 +199,7 @@ pub(crate) mod built {
     use super::*;
     // exhaustive: the game builds it with a literal; mods only read it
     #[derive(horizon_mod_api_macros::Wire)]
-pub struct ConfigStat {
+    pub struct ConfigStat {
         pub kind: ConfigEntryKind,
         pub len: u64,
         pub modified_millis: u64,
@@ -220,7 +220,7 @@ pub struct ConfigStat {
     }
     // exhaustive: the game builds it with a literal; mods only read it
     #[derive(horizon_mod_api_macros::Wire)]
-pub struct ConfigEntry {
+    pub struct ConfigEntry {
         pub name: String,
         pub stat: super::ConfigStat,
     }

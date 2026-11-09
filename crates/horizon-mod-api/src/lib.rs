@@ -6286,7 +6286,7 @@ pub(crate) mod built {
     use super::*;
     // exhaustive: the game builds it with a literal; mods only read it
     #[derive(horizon_mod_api_macros::Wire)]
-pub struct ToolUse {
+    pub struct ToolUse {
         pub player: Option<u32>,
         pub hand: crate::first_person::Hand,
         pub pos: [i32; 3],
@@ -6511,7 +6511,7 @@ pub struct ToolUse {
     }
     // exhaustive: the game builds it with a literal; mods only read it
     #[derive(horizon_mod_api_macros::Wire)]
-pub struct NativeLifecycleContext {
+    pub struct NativeLifecycleContext {
         pub authority: NativeAuthority,
         pub epoch: super::NativeWorldEpoch,
         pub tick: super::NativeTickId,
@@ -6532,7 +6532,7 @@ pub struct NativeLifecycleContext {
     }
     // exhaustive: the game builds it with a literal; mods only read it
     #[derive(horizon_mod_api_macros::Wire)]
-pub struct NativeActiveEffect {
+    pub struct NativeActiveEffect {
         pub id: super::EffectKey,
         pub duration: i32,
         pub amplifier: i32,
@@ -6559,7 +6559,7 @@ pub struct NativeActiveEffect {
     }
     // exhaustive: the game builds it with a literal; mods only read it
     #[derive(horizon_mod_api_macros::Wire)]
-pub struct NativePlayerExperience {
+    pub struct NativePlayerExperience {
         pub level: i32,
         pub progress: f32,
         pub total: i32,
@@ -6580,7 +6580,7 @@ pub struct NativePlayerExperience {
     }
     // exhaustive: the game builds it with a literal; mods only read it
     #[derive(horizon_mod_api_macros::Wire)]
-pub struct NativePlayerFood {
+    pub struct NativePlayerFood {
         pub level: i32,
         pub saturation: f32,
         pub exhaustion: f32,
@@ -6601,7 +6601,7 @@ pub struct NativePlayerFood {
     }
     // exhaustive: the game builds it with a literal; mods only read it
     #[derive(horizon_mod_api_macros::Wire)]
-pub struct NativePlayerAbilities {
+    pub struct NativePlayerAbilities {
         pub invulnerable: bool,
         pub flying: bool,
         pub may_fly: bool,
@@ -6678,7 +6678,7 @@ pub struct NativePlayerAbilities {
     }
     // exhaustive: the game builds it with a literal; mods only read it
     #[derive(horizon_mod_api_macros::Wire)]
-pub struct ChannelRef {
+    pub struct ChannelRef {
         pub id: u64,
     }
     impl From<ChannelRef> for super::ChannelRef {
@@ -6689,7 +6689,7 @@ pub struct ChannelRef {
     }
     // exhaustive: the game builds it with a literal; mods read it and edit its fields
     #[derive(horizon_mod_api_macros::Wire)]
-pub struct SoundPlay {
+    pub struct SoundPlay {
         pub identifier: String,
         pub source: super::SoundSource,
         pub volume: f32,
@@ -6728,7 +6728,7 @@ pub struct SoundPlay {
     }
     // exhaustive: the game builds it with a literal; mods only read it
     #[derive(horizon_mod_api_macros::Wire)]
-pub struct NativePortalShape {
+    pub struct NativePortalShape {
         pub x_axis: bool,
         pub bottom_left: [i32; 3],
         pub width: i32,

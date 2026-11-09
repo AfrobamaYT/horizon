@@ -358,7 +358,7 @@ pub(crate) mod built {
     use super::*;
     // exhaustive: the game builds it with a literal; mods only read it
     #[derive(horizon_mod_api_macros::Wire)]
-pub struct NativeConfigFile {
+    pub struct NativeConfigFile {
         pub mod_id: String,
         pub kind: NativeConfigKind,
         pub file: String,
