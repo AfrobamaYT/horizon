@@ -1,6 +1,7 @@
 //! A texture-to-texture copy keeps a depth texture's depth, on one layer and on each layer of an
 //! array: the copies the pack's depth snapshots (`depthtex1`, `depthtex2`) and `shadowtex1` are
-//! made with. On OpenGL the copy read nothing until #2400. Original fixture, no pack files.
+//! made with, here right after a multisampled pass with two colour targets. On OpenGL the copy
+//! read nothing until #2400. Original fixture, no pack files.
 use super::depth_test::Gpu;
 use wgpu::{TextureFormat as T, util::DeviceExt};
 
@@ -187,8 +188,50 @@ fn read_layers(gpu: &Gpu, texture: &wgpu::Texture) -> Vec<u8> {
     (0..layers as usize).map(|i| bytes[i * 4]).collect()
 }
 
+/// A pass that clears and stores two 4x-multisampled `Rgba8Unorm` targets, with no resolve.
+fn multisampled_targets_pass(device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder) {
+    let views: Vec<_> = (0..2)
+        .map(|_| {
+            device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: None,
+                    size: wgpu::Extent3d {
+                        width: SIDE,
+                        height: SIDE,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 4,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: T::Rgba8Unorm,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    view_formats: &[],
+                })
+                .create_view(&Default::default())
+        })
+        .collect();
+    let attachments: Vec<_> = views
+        .iter()
+        .map(|view| {
+            Some(wgpu::RenderPassColorAttachment {
+                view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+                    store: wgpu::StoreOp::Store,
+                },
+            })
+        })
+        .collect();
+    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        color_attachments: &attachments,
+        ..Default::default()
+    });
+}
+
 /// Each layer of a `Depth32Float` texture cleared to its own depth, then copied whole into
-/// another: the copy reads the same depths as the source.
+/// another after a multisampled two-target pass: the copy reads the same depths as the source.
 #[test]
 fn a_copied_depth_texture_keeps_its_depth() {
     let Some(gpu) = Gpu::new() else { return };
@@ -234,6 +277,9 @@ fn a_copied_depth_texture_keeps_its_depth() {
                 ..Default::default()
             });
         }
+        // A multisampled pass with two colour targets just before: on OpenGL its images stay
+        // on the framebuffer the copy borrows until the next pass resets it.
+        multisampled_targets_pass(device, &mut encoder);
         encoder.copy_texture_to_texture(
             source.as_image_copy(),
             copy.as_image_copy(),

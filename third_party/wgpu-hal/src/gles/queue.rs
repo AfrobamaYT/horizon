@@ -86,8 +86,11 @@ impl super::Queue {
 
     /// `CopyTextureToTexture` for depth and stencil: `glBlitFramebuffer` from `copy_fbo`
     /// (read) to `draw_fbo` (draw), with the textures on their depth or stencil attachments.
-    /// Copies run outside render passes, and each pass starts with `ResetFramebuffer`, so
-    /// borrowing `draw_fbo` here leaves no pass's attachments behind; both are detached after.
+    /// A render pass leaves its attachments on `draw_fbo` until the next pass's
+    /// `ResetFramebuffer`, so every attachment of both framebuffers is taken off first: a
+    /// stale image (say a multisampled colour target of an earlier multi-target pass) would
+    /// make the blit's framebuffer incomplete and the blit write nothing. The copy's own
+    /// images are detached after.
     unsafe fn blit_depth_stencil(
         &self,
         gl: &glow::Context,
@@ -126,17 +129,7 @@ impl super::Queue {
         ];
         for &(fbo_target, fbo, texture, target, base) in &fbos {
             unsafe { gl.bind_framebuffer(fbo_target, Some(fbo)) };
-            // A colour image left from an earlier copy or pass would join the blit's
-            // framebuffer: take it off so only the depth or stencil image is there.
-            unsafe {
-                gl.framebuffer_texture_2d(
-                    fbo_target,
-                    glow::COLOR_ATTACHMENT0,
-                    glow::TEXTURE_2D,
-                    None,
-                    0,
-                )
-            };
+            unsafe { self.detach_all(gl, fbo_target) };
             unsafe {
                 Self::attach_copy_level(gl, fbo_target, attachment, Some(texture), target, base)
             };
@@ -162,6 +155,17 @@ impl super::Queue {
         }
         unsafe { gl.bind_framebuffer(glow::READ_FRAMEBUFFER, None) };
         unsafe { gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(self.draw_fbo)) };
+    }
+
+    /// Takes every image off the framebuffer bound at `fbo_target`: its depth and stencil
+    /// attachments and each colour slot, as `ResetFramebuffer` does for `draw_fbo`. A null
+    /// texture detaches whatever is attached there, a renderbuffer included.
+    unsafe fn detach_all(&self, gl: &glow::Context, fbo_target: u32) {
+        let colours =
+            (0..self.shared.limits.max_color_attachments).map(|i| glow::COLOR_ATTACHMENT0 + i);
+        for attachment in [glow::DEPTH_STENCIL_ATTACHMENT].into_iter().chain(colours) {
+            unsafe { gl.framebuffer_texture_2d(fbo_target, attachment, glow::TEXTURE_2D, None, 0) };
+        }
     }
 
     /// Performs a manual shader clear, used as a workaround for a clearing bug on mesa
