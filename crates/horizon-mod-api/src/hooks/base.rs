@@ -2648,10 +2648,12 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// window's player is drawn only in third person (and F5 front view); an
     /// invisible player is not asked. `draw` is the frame of `native_mob_submit`:
     /// at the player's feet, turned with the body. The name tag, shadow,
-    /// flames and glowing outline draw as before. Push parts to `hidden` to
-    /// leave only those parts out of the vanilla model this frame (after Skin
-    /// Customization; its armour, held items and other layers keep theirs),
-    /// as a mod drawing its own outer skin layer does.
+    /// flames and glowing outline draw as before. `hidden.hide(part)` leaves
+    /// only that part out of the vanilla model this frame (after Skin
+    /// Customization), as a mod drawing its own outer skin layer does: a
+    /// hidden part takes its children with it (the hat goes with the head),
+    /// while its armour, held items and other layers, the cape among them,
+    /// keep every part.
     #[hook(
         side = "client",
         contract = "cancel",

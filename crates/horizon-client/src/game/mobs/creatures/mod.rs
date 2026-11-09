@@ -8551,7 +8551,7 @@ impl Game<'_> {
                 .then(|| self.remote_player_name(mob.id))
                 .flatten()
                 .map(|name| NativePlayerRender { name, local: false });
-            let mut hidden = Vec::new();
+            let mut hidden = mod_api::HiddenParts::default();
             let modded = if layers_only {
                 false
             } else if let Some(who) = who {
@@ -8643,7 +8643,7 @@ impl Game<'_> {
                         packed,
                         self.res.mob_data(),
                         &armor,
-                        &hidden,
+                        hidden,
                         out,
                     );
                 }

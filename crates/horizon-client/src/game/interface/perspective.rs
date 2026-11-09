@@ -793,7 +793,7 @@ impl Game<'_> {
         };
         let (drawn, hidden) = match body {
             true => self.mod_player_geometry(m, who, alpha as f32, camera, packed, out),
-            false => (false, Vec::new()),
+            false => (false, mod_api::HiddenParts::default()),
         };
         if drawn {
             return;
@@ -811,7 +811,7 @@ impl Game<'_> {
                 packed,
                 self.res.mob_data(),
                 &self.player_armor_layers(),
-                &hidden,
+                hidden,
                 out,
             );
         } else {

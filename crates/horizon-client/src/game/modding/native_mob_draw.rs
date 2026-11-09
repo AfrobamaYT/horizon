@@ -79,14 +79,14 @@ impl Game<'_> {
         camera: DVec3,
         light: u32,
         out: &mut Vec<Vertex>,
-    ) -> (bool, Vec<mod_api::HumanoidPart>) {
+    ) -> (bool, mod_api::HiddenParts) {
         // Posing a player for the mods costs, each frame: only when one listens.
         let mut listened = false;
         self.native_player_render_listened(&mut listened);
         if !listened {
-            return (false, Vec::new());
+            return (false, mod_api::HiddenParts::default());
         }
-        let mut hidden = Vec::new();
+        let mut hidden = mod_api::HiddenParts::default();
         let drawn = self.mod_entity_draw(mob, partial, camera, light, out, |render, draw| {
             let mut drawn = false;
             self.native_player_submit(render, &who, draw, &mut hidden, &mut drawn);

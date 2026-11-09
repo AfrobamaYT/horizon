@@ -1509,7 +1509,17 @@ pub fn render_with(
     extra: &[(&Part, [f32; 4], u32, u32, bool)],
     out: &mut Vec<Vertex>,
 ) {
-    render_with_hidden(m, alpha, camera, atlas, light, data, extra, &[], out);
+    render_with_hidden(
+        m,
+        alpha,
+        camera,
+        atlas,
+        light,
+        data,
+        extra,
+        Default::default(),
+        out,
+    );
 }
 /// [`render_with`], with the parts a mod's `player_submit` hid left out of the body (after Skin
 /// Customization); the armour in `extra` and the other layers keep every part.
@@ -1522,7 +1532,7 @@ pub fn render_with_hidden(
     light: u32,
     data: &MobData,
     extra: &[(&Part, [f32; 4], u32, u32, bool)],
-    hidden: &[mod_api::HumanoidPart],
+    hidden: mod_api::HiddenParts,
     out: &mut Vec<Vertex>,
 ) {
     // The invisibility effect hides the model (a drinking wandering trader);
@@ -1582,7 +1592,7 @@ pub fn render_skinned(
         data,
         &[],
         true,
-        &[],
+        Default::default(),
         out,
         Some(skin),
     );
@@ -1851,7 +1861,7 @@ pub fn render_layers(
         data,
         extra,
         false,
-        &[],
+        Default::default(),
         out,
         None,
     );
@@ -1877,7 +1887,7 @@ pub fn render_posed(
         data,
         &[],
         true,
-        &[],
+        Default::default(),
         out,
         None,
     );
@@ -2027,7 +2037,7 @@ fn render_visible(
     data: &MobData,
     extra: &[(&Part, [f32; 4], u32, u32, bool)],
     body_visible: bool,
-    hidden: &[mod_api::HumanoidPart],
+    hidden: mod_api::HiddenParts,
     out: &mut Vec<Vertex>,
     skin: Option<&mut super::skin::Skin>,
 ) {
@@ -2155,7 +2165,7 @@ fn render_visible(
         &poses
     } else {
         hidden_poses.copy_from(&poses);
-        for part in hidden {
+        for part in hidden.iter() {
             hidden_poses.visible(part.model_name(), false);
         }
         &hidden_poses
@@ -2946,8 +2956,12 @@ mod tests {
         let atlas = |_: &str| Some([0.0, 0.0, 1.0, 1.0]);
         let armour = mob.kind.model.clone();
         let extra = [(&*armour, [0.0, 0.0, 1.0, 1.0], 0xFFFF_FFFF, 0, false)];
-        let draw = |hidden: &[mod_api::HumanoidPart],
-                    extra: &[(&Part, [f32; 4], u32, u32, bool)]| {
+        let hide = |parts: &[mod_api::HumanoidPart]| {
+            let mut hidden = mod_api::HiddenParts::default();
+            parts.iter().for_each(|part| hidden.hide(*part));
+            hidden
+        };
+        let draw = |hidden: mod_api::HiddenParts, extra: &[(&Part, [f32; 4], u32, u32, bool)]| {
             let mut out = Vec::new();
             render_with_hidden(
                 &mob,
@@ -2962,24 +2976,24 @@ mod tests {
             );
             out.len()
         };
-        let whole = draw(&[], &[]);
+        let whole = draw(hide(&[]), &[]);
         let one_face = 4;
         assert_eq!(
-            draw(&[mod_api::HumanoidPart::RightArm], &[]),
+            draw(hide(&[mod_api::HumanoidPart::RightArm]), &[]),
             whole - one_face
         );
         assert_eq!(
-            draw(&[mod_api::HumanoidPart::Head], &[]),
+            draw(hide(&[mod_api::HumanoidPart::Head]), &[]),
             whole - 2 * one_face,
             "the head's child, the hat, goes with it"
         );
         assert_eq!(
-            draw(&[], &extra),
+            draw(hide(&[]), &extra),
             2 * whole,
             "the armour layer copies every part"
         );
         assert_eq!(
-            draw(&[mod_api::HumanoidPart::RightArm], &extra),
+            draw(hide(&[mod_api::HumanoidPart::RightArm]), &extra),
             2 * whole - one_face,
             "only the body loses the arm"
         );

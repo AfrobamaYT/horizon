@@ -86,7 +86,7 @@ use mod_api::{
     NativeItemClick, NativeItemDrop, NativeTriState, NeighbourUpdate, TooltipElement, UsePhase,
 };
 use mod_api::{
-    BlockKey, DebugEntry, DebugRenderer, EffectKey, GuiLayer, HumanoidPart, MapDecorationType,
+    BlockKey, DebugEntry, DebugRenderer, EffectKey, GuiLayer, HiddenParts, MapDecorationType,
     PosedParts, RuntimeSprite, TaskId,
 };
 use mod_api::{
