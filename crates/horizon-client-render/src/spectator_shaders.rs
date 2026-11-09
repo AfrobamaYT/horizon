@@ -171,3 +171,8 @@ mod tests {
         );
     }
 }
+
+/// Entities whose registration requires this chain, for load diagnostics only.
+pub(crate) fn entities_for_chain(id: &str) -> Vec<&'static str> {
+    table().by_entity.iter().filter_map(|(entity, chain)| (chain == id).then_some(entity.as_str())).collect()
+}

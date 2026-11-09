@@ -1,2 +1,1 @@
-mod spectator_shader;
-pub use spectator_shader::EntitySpectatorShader;
+pub use crate::client::spectator_shader::EntitySpectatorShader;

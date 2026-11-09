@@ -596,6 +596,14 @@ fn resource_path(id: &str) -> String {
     format!("assets/{ns}/post_effect/{path}.json")
 }
 
+fn read_chain(root: &ResourceSource, id: &str) -> Result<String, String> {
+    let resource = resource_path(id);
+    root.read_to_string(&resource).map_err(|error| {
+        let entities = crate::spectator_shaders::entities_for_chain(id);
+        format!("Spectator entities {entities:?}, shader {id}, resource {resource}: {error}")
+    })
+}
+
 impl PostEffects {
     pub fn new(device: &wgpu::Device) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -814,7 +822,7 @@ impl PostEffects {
             })
     }
 
-    /// `PostChain.load` for the file of `id`: `Ok(None)` when it does not exist.
+    /// `PostChain.load` for the file of `id`: missing resources are diagnosed.
     fn load(
         root: &ResourceSource,
         device: &wgpu::Device,
@@ -822,9 +830,7 @@ impl PostEffects {
         id: &str,
         extras: &Extras,
     ) -> Result<Option<Chain>, String> {
-        let Ok(text) = root.read_to_string(&resource_path(id)) else {
-            return Ok(None);
-        };
+        let text = read_chain(root, id)?;
         let mut config = Config::parse(&text)?;
         for (target, t) in &extras.targets {
             config
@@ -2509,5 +2515,16 @@ mod tests {
             )
             .is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod missing_resource_test {
+    #[test]
+    fn missing_registered_resource_is_diagnosed() {
+        let source = super::ResourceSource::indexed(Default::default());
+        let error = super::read_chain(&source, "example:cow_vison").unwrap_err();
+        assert!(error.contains("example:cow_vison"));
+        assert!(error.contains("assets/example/post_effect/cow_vison.json"));
     }
 }
