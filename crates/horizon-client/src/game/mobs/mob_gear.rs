@@ -4,7 +4,7 @@
 use super::Game;
 
 #[cfg(test)]
-#[path = "drowned_spawn_tests.rs"]
+#[path = "tests/drowned_spawn_tests.rs"]
 mod drowned_spawn_tests;
 use horizon_client::{
     mobs::{
