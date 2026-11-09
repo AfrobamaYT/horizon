@@ -13,11 +13,13 @@ pub trait ConfigHost {
     fn on(&self, mod_id: &str) -> bool;
     /// Side: both.
     /// A mod's setting `key` (one file per key in `native_data_dir`). A mod reads only its own:
-    /// another mod's id gives None.
+    /// another mod's id or a key not registered by that owner gives None.
     #[access(WorldOnly)]
     fn setting(&self, mod_id: &str, key: &str) -> Option<String>;
     /// Side: both.
-    /// Keeps a mod's setting `key`. A mod keeps only its own: another mod's id keeps nothing.
+    /// Keeps a mod's registered setting `key`. Another mod's id or an unregistered key keeps
+    /// nothing. A successful write invalidates the typed read cache for this data folder and key;
+    /// a failed write leaves it unchanged. This raw write does not fire `setting_changed`.
     #[access(WorldOnly)]
     fn set_setting(&self, mod_id: &str, key: &str, value: &str);
     /// Side: both.
