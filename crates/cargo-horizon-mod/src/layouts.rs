@@ -82,7 +82,7 @@ pub fn build(root: &Path) -> Result<(), String> {
         return Ok(());
     }
     let metadata: Metadata = serde_json::from_slice(&output(
-        Command::new("cargo")
+        crate::wasm::pinned("cargo")
             .args(["metadata", "--format-version", "1"])
             .current_dir(&root),
     )?)
@@ -211,14 +211,14 @@ pub fn build(root: &Path) -> Result<(), String> {
             &fs::read(lock).map_err(|e| e.to_string())?,
         )?;
     }
-    let rustc = output(Command::new("rustc").arg("-vV"))?;
+    let rustc = output(crate::wasm::pinned("rustc").arg("-vV"))?;
     let rustc = String::from_utf8(rustc).map_err(|e| e.to_string())?;
     let host = rustc
         .lines()
         .find_map(|line| line.strip_prefix("host: "))
         .ok_or("rustc did not report its host target")?;
     let bytes = output(
-        Command::new("cargo")
+        crate::wasm::pinned("cargo")
             .args(["run", "--quiet", "--target", host, "--manifest-path"])
             .arg(stage.join("Cargo.toml"))
             .arg("--target-dir")
