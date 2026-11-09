@@ -27,7 +27,6 @@
 - [Design: general entity types](concepts/general-entity-types.md)
 - [Design: pending children](concepts/pending-children.md)
 - [Design: mod datapack registries](concepts/mod-datapack-registries.md)
-- [Design: worldgen features and placers](concepts/worldgen-features.md)
 - [Design: moving structures](concepts/moving-structures.md)
 - [Design: custom recipe-book settings](concepts/recipe-book-types.md)
 - [Design: main target configuration](concepts/main-target-config.md)
