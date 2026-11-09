@@ -587,7 +587,7 @@ pub(super) fn content_overlay(
         };
         // Read as `Content::read` reads it: `start_mods` need not read it again.
         if declared.is_empty() {
-            remember_verdict(path, &content);
+            remember_verdict(source.path, &content);
         }
         let known = match &mut known {
             Some(types) => types,

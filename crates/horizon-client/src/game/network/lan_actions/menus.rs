@@ -469,7 +469,7 @@ impl Game<'_> {
             if self.lan_acting == Some(conn) {
                 post(self);
             } else {
-                self.as_guest(host, conn, post);
+                self.as_guest(conn, post);
             }
         }
     }

@@ -549,7 +549,7 @@ impl Game<'_> {
         } else {
             // The mod hooks hear no natural fence knot (#13036).
             self.level_entity(id)
-                .filter(|t| !matches!(t, super::commands::Target::Knot(_)))
+                .filter(|t| !matches!(t, crate::game::commands::Target::Knot(_)))
                 .map(|t| {
                     (
                         self.target_type(t),

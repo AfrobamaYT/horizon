@@ -2054,6 +2054,14 @@ impl LevelAccess for GameLevel<'_> {
         }
     }
 }
+/// A landing's block game event, emitted after its world write is applied.
+struct LandingVibration {
+    event: &'static str,
+    position: BlockPos,
+    state: BlockStateId,
+    from_entity: bool,
+}
+
 /// FallingBlockEntity carrying a block state.
 #[derive(Clone, Debug)]
 struct FallingBlock {

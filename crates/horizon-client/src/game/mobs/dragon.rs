@@ -13,6 +13,7 @@ use super::{
     creatures::{Finalized, SpawnSite},
     potions::{Victim, mob_can_be_affected},
 };
+use horizon_client::nbt_value;
 use horizon_client::{
     health::{DamageContainer, DamageLevel, HurtSource, Reduction},
     hud::HudBatch,

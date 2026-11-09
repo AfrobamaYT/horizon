@@ -1,3 +1,4 @@
+#![cfg(test)]
 //! The server tick's cost per player: `tick_lan` with N players standing on a
 //! stone floor, timed over many ticks, so a change to the guests' tick can be
 //! measured before and after. Run alone, in an optimized profile:

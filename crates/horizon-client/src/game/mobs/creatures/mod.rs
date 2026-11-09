@@ -589,7 +589,7 @@ impl Game<'_> {
         persistent: bool,
         site: SpawnSite,
     ) -> Option<u32> {
-        let mob = self.create_mob_reason(kind, at, persistent, site)?;
+        let mob = self.create_mob_reason(kind, at, persistent, site, None)?;
         self.insert_spawned_mob(mob)
     }
     /// Create a mob of `kind` at a position without `finalizeSpawn`'s rolls,
@@ -631,6 +631,7 @@ impl Game<'_> {
         at: [f64; 3],
         persistent: bool,
         site: SpawnSite,
+        fixed_yaw: Option<f32>,
     ) -> Option<Mob> {
         let kind = if kind.contains(':') {
             kind.to_owned()
@@ -639,8 +640,27 @@ impl Game<'_> {
         };
         let t = self.res.mob_types().get(&kind).cloned()?;
         self.next_entity += 1;
-        let yaw = self.world.random.next_float() * 360.0;
-        let mut mob = Mob::new(self.next_entity, t, Vec3::new(at[0], at[1], at[2]), yaw);
+        // Yaw belongs to the vanilla creation path, independently of whether
+        // the fork's SpawnSite allows finalizeSpawn (and its hook).
+        let yaw = match (fixed_yaw, site) {
+            (Some(yaw), _) => yaw,
+            (None, SpawnSite::Finalizing(SpawnReason::Command)) => 0.0,
+            (None, SpawnSite::Finalizing(SpawnReason::SpawnItemUse | SpawnReason::Dispenser)) => {
+                horizon_client::camera::wrap_degrees(self.world.random.next_float() * 360.0)
+            }
+            _ => self.world.random.next_float() * 360.0,
+        };
+        // Entity.random first supplies the UUID, then LivingEntity's initial
+        // yaw; species constructor draws continue from that same stream.
+        let (own, uuid) = horizon_client::mobs::living_random();
+        self.persist.uuids.insert(self.next_entity, uuid);
+        let mut mob = Mob::with_random(
+            self.next_entity,
+            t,
+            Vec3::new(at[0], at[1], at[2]),
+            yaw,
+            own,
+        );
         // `EntityType.create`: the mob is constructed before `finalizeSpawn`.
         self.initialize_entity(mod_api::Holder::Entity(mob.id), &kind);
         mob.persistent = persistent;
@@ -3490,7 +3510,7 @@ impl Game<'_> {
                         {
                             let from = self.world.block(pos[0], pos[1], pos[2]);
                             self.native_entity_change_block_pre(
-                                native_hooks::EntityChangeBlockPreCall {
+                                crate::game::native_hooks::EntityChangeBlockPreCall {
                                     player: None,
                                     entity: Some(mob),
                                     kind: &kind,
@@ -4231,6 +4251,7 @@ impl Game<'_> {
             [p.position.x, p.position.y, p.position.z],
             true,
             SpawnSite::Raw,
+            None,
         )?;
         'offspring: {
             let child = &mut child;
@@ -7880,9 +7901,11 @@ impl Game<'_> {
         // SpawnEggItem.spawnOffspringFromSpawnEgg: `type.create(level, SPAWN_ITEM_USE)`
         // creates the baby without finalizeSpawn, and `snapTo(pos, 0, 0)` faces
         // it south without a level-random draw.
-        let Some(id) =
-            self.spawn_mob_internal(&kind, at, false, false, false, false, SpawnYaw::Fixed(0.0))
+        let Some(child) = self.create_mob_reason(&kind, at, false, SpawnSite::Raw, Some(0.0))
         else {
+            return false;
+        };
+        let Some(id) = self.insert_spawned_mob(child) else {
             return false;
         };
         if let Some(child) = self.mobs.iter_mut().find(|m| m.id == id) {
