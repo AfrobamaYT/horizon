@@ -223,6 +223,34 @@ impl Game<'_> {
         }
     }
 
+    /// `Entity.teleportPassengers` on a mob dismounted during a transition.
+    pub(super) fn snap_mob_passengers(&mut self, root: u32) {
+        use horizon_client::mobs::riders;
+        let Some(vehicle) = self.mob_object(root) else {
+            return;
+        };
+        let (position, yaw, width, attachment, vehicle_box) = (
+            vehicle.position,
+            vehicle.yaw,
+            vehicle.width(),
+            riders::passenger_attachment(vehicle),
+            vehicle.bounds(),
+        );
+        let children = self.mob_passenger_ids(root);
+        for &id in &children {
+            let Some(m) = self.mob_object_mut(id) else {
+                continue;
+            };
+            let offset = riders::vehicle_attachment(m, width);
+            m.seated(root, offset, vehicle_box);
+            m.position = riders::seat(attachment, offset, position, yaw);
+            m.previous = m.position;
+        }
+        for child in children {
+            self.snap_mob_passengers(child);
+        }
+    }
+
     /// `Entity.teleportCrossDimension`: carry a command's entire vehicle tree
     /// into the destination level, retaining UUIDs and the passengers' mounts.
     pub(super) fn teleport_vehicle_across(

@@ -335,6 +335,24 @@ impl Game<'_> {
         }
         laps.lap("creature_loop");
         if dispatch_panic.is_none() {
+            if !self.persist.off_level.is_empty() {
+                // Removal dismounts retained passengers before the departing
+                // vehicle's last position and dimensions can be forgotten.
+                for (mob, kept) in mobs.iter().zip(&keep) {
+                    if !kept
+                        && mobs
+                            .iter()
+                            .chain(self.mob_objects())
+                            .any(|passenger| passenger.extra.mount == Some(mob.id))
+                    {
+                        let mut removed = mob.clone();
+                        removed.removed = true;
+                        self.persist
+                            .off_level
+                            .insert(mob.id, crate::game::persist::OffLevel::Mob(removed));
+                    }
+                }
+            }
             let mut flags = keep.into_iter();
             mobs.retain(|_| flags.next().unwrap_or(true));
             for m in mobs {

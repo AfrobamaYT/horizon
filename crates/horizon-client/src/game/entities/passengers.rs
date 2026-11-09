@@ -65,6 +65,13 @@ impl Game<'_> {
         if !self.persist.off_level.is_empty() {
             self.sync_retained_riders();
             self.position_riders();
+            if self.persist.off_level.values().any(
+                |object| matches!(object, crate::game::persist::OffLevel::Mob(mob) if mob.removed),
+            ) {
+                // Keep a removed vehicle only while cancellation leaves actual
+                // references to it; completed dismounts release its ownership.
+                self.prune_entity_memory();
+            }
             return;
         }
         // Entity.baseTick.
@@ -737,7 +744,7 @@ mod off_level_tests {
                             rider.extra.boarding_cooldown,
                             super::super::boat_passengers::BOARDING_COOLDOWN
                         );
-                        assert!(rider.position.y > 200.0);
+                        assert_eq!(rider.position.y, 200.0);
                         assert_eq!(game.mob_object(71).unwrap().extra.rider, None);
                         assert!(game.mob_object(73).unwrap().position.y > 200.0);
                     }

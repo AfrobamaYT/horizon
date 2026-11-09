@@ -1785,6 +1785,7 @@ impl Game<'_> {
         m.extra.boarding_cooldown = super::super::boat_passengers::BOARDING_COOLDOWN;
         m.position = at;
         m.previous = at;
+        self.snap_mob_passengers(rider);
     }
     /// Where `dismount_mob` sets object `rider` down off the vehicle `v`: None when
     /// `v` is no boat, cart or mob.
@@ -1794,6 +1795,14 @@ impl Game<'_> {
         rider: u32,
     ) -> Option<horizon_core::geometry::Vec3> {
         let mob = self.mob_object(rider)?;
+        if let Some(vehicle) = self.mob_object(v).filter(|vehicle| vehicle.removed) {
+            return Some(self.removed_vehicle_dismount_point(
+                mob.position,
+                f64::from(mob.width()),
+                f64::from(mob.height()),
+                vehicle.position.y,
+            ));
+        }
         let (width, yaw) = (f64::from(mob.width()), mob.yaw);
         if let Some(b) = self.boats.iter().position(|b| b.id == v) {
             return Some(self.boat_dismount_target(b, width, yaw));
