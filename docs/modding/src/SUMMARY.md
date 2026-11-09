@@ -12,10 +12,29 @@
 <!-- Per-concept child chapters are discovered at build time; keep these aggregate links for published anchors. -->
 
 - [Trait mods, Parts and attachments](concepts/trait-mods.md)
+- [Mod render colour](concepts/mod-render-colour.md)
+- [Create and Mekanism capabilities](concepts/create-mekanism-capabilities.md)
 - [Where the mod API is going](concepts/design.md)
+- [Design: chunk attachment disk hooks](concepts/chunk-attachment-disk.md)
 - [Design: transactional block-entity removal](concepts/block-entity-removal.md)
+- [Design: decide, fire, apply](concepts/decide-fire-apply.md)
 - [Design: client action pipeline](concepts/client-action-pipeline.md)
+- [Design: effect added](concepts/effect-added.md)
+- [Design: typed payloads](concepts/typed-payloads.md)
+- [Design: mods extending the mod API](concepts/mod-extensions.md)
+- [Design: multi-block placement](concepts/multi-block-placement.md)
+- [Design: Part instance state](concepts/part-instance-state.md)
+- [Design: general entity types](concepts/general-entity-types.md)
+- [Design: pending children](concepts/pending-children.md)
+- [Design: mod datapack registries](concepts/mod-datapack-registries.md)
+- [Design: worldgen features and placers](concepts/worldgen-features.md)
+- [Design: moving structures](concepts/moving-structures.md)
 - [Design: custom recipe-book settings](concepts/recipe-book-types.md)
+- [Design: section meshing](concepts/section-meshing.md)
+- [Design: section geometry](concepts/section-geometry.md)
+- [Design: mesh visibility](concepts/mesh-visibility.md)
+- [Design: baked models and ModelData](concepts/baked-models.md)
+- [Design: travel and move hooks](concepts/travel-and-move.md)
 
 # How-to
 

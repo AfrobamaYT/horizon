@@ -12,6 +12,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Host::block_state_default` | crosses | Wire call |
 | `Host::item_crafting_remainder` | crosses | Wire call |
 | `Host::block_item` | crosses | Wire call |
+| `Host::item_block` | crosses | Wire call |
 | `Host::block_collision` | crosses | Wire call |
 | `Host::on` | crosses | Wire call |
 | `Host::setting` | crosses | Wire call |
@@ -142,6 +143,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `ClientHost::local_player` | crosses | Wire call |
 | `ClientHost::open_chat` | crosses | Wire call |
 | `ClientHost::net_send_to_server` | crosses | Wire call |
+| `ClientHost::chat_line` | crosses | Wire call |
 | `ClientHost::send_chat` | crosses | Wire call |
 | `ClientHost::send_packet` | crosses | Wire call |
 | `ClientHost::push_player` | crosses | Wire call |
@@ -325,6 +327,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Backend::effect_key` | crosses | Wire call |
 | `Backend::block_entity_type_key_id` | crosses | Wire call |
 | `Backend::level_find_closest_biome` | crosses | Wire call |
+| `Backend::level_find_nearest_structure` | crosses | Wire call |
 | `Backend::level_get_sky_darken` | crosses | Wire call |
 | `Backend::level_block_floor_height` | crosses | Wire call |
 | `Backend::level_biome_at` | crosses | Wire call |
@@ -338,8 +341,10 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Backend::level_mod_forced_chunks` | crosses | Wire call |
 | `Backend::chunk_loaded` | crosses | Wire call |
 | `Backend::chunk_status` | crosses | Wire call |
+| `Backend::chunk_watchers` | crosses | Wire call |
 | `Backend::level_recipe_for` | crosses | Wire call |
 | `Backend::level_entities_in` | crosses | Wire call |
+| `Backend::level_online_players` | crosses | Wire call |
 | `Backend::level_block_state` | crosses | Wire call |
 | `Backend::level_block_transform` | crosses | Wire call |
 | `Backend::level_block` | crosses | Wire call |
@@ -393,6 +398,9 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Backend::level_fluid_height_for_camera` | crosses | Wire call |
 | `Backend::level_fluid_can_be_replaced_with` | crosses | Wire call |
 | `Backend::level_ray_trace_entities` | crosses | Wire call |
+| `Backend::level_spawn_limits` | crosses | Wire call |
+| `Backend::level_spawn_flags` | crosses | Wire call |
+| `Backend::level_can_spawn_entities_in_chunk` | crosses | Wire call |
 | `Backend::living_effect` | crosses | Wire call |
 | `Backend::living_effects` | crosses | Wire call |
 | `Backend::living_potion_affected` | crosses | Wire call |
@@ -490,6 +498,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Backend::player_item_cooldowns` | crosses | Wire call |
 | `Backend::player_has_item_cooldown` | crosses | Wire call |
 | `Backend::player_item_cooldown_percent` | crosses | Wire call |
+| `Backend::player_attack_strength_scale` | crosses | Wire call |
 | `Backend::player_exp_cooldown` | crosses | Wire call |
 | `Backend::player_last_death_location` | crosses | Wire call |
 | `Backend::player_needs_food` | crosses | Wire call |
@@ -646,6 +655,9 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `BackendMut::game_insert` | crosses | Wire call |
 | `BackendMut::game_extract` | crosses | Wire call |
 | `BackendMut::drop_at` | crosses | Wire call |
+| `BackendMut::level_spawn_mob` | crosses | Wire call |
+| `BackendMut::level_set_spawn_limits` | crosses | Wire call |
+| `BackendMut::level_set_spawn_flags` | crosses | Wire call |
 | `BackendMut::chunk_set_forced` | crosses | Wire call |
 | `BackendMut::chunk_set_mod_forced` | crosses | Wire call |
 | `BackendMut::level_set_block` | crosses | Wire call |
@@ -664,6 +676,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `BackendMut::level_send_particles` | crosses | Wire call |
 | `BackendMut::level_level_event` | crosses | Wire call |
 | `BackendMut::level_game_event` | crosses | Wire call |
+| `BackendMut::level_block_event` | crosses | Wire call |
 | `BackendMut::level_explode` | crosses | Wire call |
 | `BackendMut::level_strike_lightning` | crosses | Wire call |
 | `BackendMut::level_pop_resource` | crosses | Wire call |
@@ -706,6 +719,9 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `BackendMut::living_set_item_use_remaining` | crosses | Wire call |
 | `BackendMut::living_start_using_item` | crosses | Wire call |
 | `BackendMut::living_release_using_item` | crosses | Wire call |
+| `BackendMut::living_set_waypoint_style` | crosses | Wire call |
+| `BackendMut::living_set_waypoint_color` | crosses | Wire call |
+| `BackendMut::living_set_riptiding` | crosses | Wire call |
 | `BackendMut::menu_close_container` | crosses | Wire call |
 | `BackendMut::merchant_set_offer` | crosses | Wire call |
 | `BackendMut::merchant_add_offer` | crosses | Wire call |
@@ -907,6 +923,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `menu::SlotView::allow_modification` | crosses | Wire call |
 | `menu::SlotView::safe_insert` | crosses | Wire call |
 | `menu::SlotView::safe_take` | crosses | Wire call |
+| `Registrar::declare_attribute` | crosses | Wire call |
 | `Registrar::block_entity_type_key` | crosses | Wire call |
 | `Registrar::declare_block_entity_type` | crosses | Wire call |
 | `Registrar::attach_block_entity_part` | crosses | Wire call |
@@ -1013,7 +1030,10 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `ClientReloadListeners::get_last_vanilla_listener` | crosses | Wire call |
 | `PackFinders::pack_type` | crosses | Wire call |
 | `PackFinders::add_pack_finders` | crosses | Wire call |
+| `ColorResolvers::register` | crosses | Wire call |
 | `BlockTintSources::register` | crosses | Wire call |
+| `ParticleProviders::register` | crosses | Wire call |
+| `EnchantmentDamageEffects::register` | crosses | Wire call |
 | `BlockAndTintGetter::block_state` | crosses | Wire call |
 | `BlockAndTintGetter::fluid_state` | crosses | Wire call |
 | `BlockAndTintGetter::brightness` | crosses | Wire call |
@@ -1404,6 +1424,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::client_stopping` | crosses | Wire call |
 | `Hooks::client_tick_post` | crosses | Wire call |
 | `Hooks::client_tick_pre` | crosses | Wire call |
+| `Hooks::component_hover` | crosses | Wire call |
 | `Hooks::compute_fov_modifier` | crosses | Wire call |
 | `Hooks::create_fluid_source` | crosses | Wire call |
 | `Hooks::create_spawn_position` | crosses | Wire call |
@@ -1526,13 +1547,16 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::recipe_book_categories` | crosses | Wire call |
 | `Hooks::recipe_property_sets` | crosses | Wire call |
 | `Hooks::register_block_tint_sources` | crosses | Wire call |
+| `Hooks::register_color_resolvers` | crosses | Wire call |
 | `Hooks::register_debug_entries` | crosses | Wire call |
 | `Hooks::register_debug_renderers` | crosses | Wire call |
 | `Hooks::register_dimension_transition_screen` | crosses | Wire call |
+| `Hooks::register_enchantment_damage_effects` | crosses | Wire call |
 | `Hooks::register_fluid_models` | crosses | Wire call |
 | `Hooks::register_game_tests` | crosses | Wire call |
 | `Hooks::register_gui_layers` | crosses | Wire call |
 | `Hooks::register_item_tint_sources` | crosses | Wire call |
+| `Hooks::register_particle_providers` | crosses | Wire call |
 | `Hooks::register_range_select_item_model_property` | crosses | Wire call |
 | `Hooks::register_runtime_sprites` | crosses | Wire call |
 | `Hooks::register_select_item_model_property` | crosses | Wire call |
@@ -1670,18 +1694,19 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `ServerReloadListener::prepare` | crosses | Wire call |
 | `GameTestFunction::run` | crosses | Wire call |
 | `ClientReloadListener::prepare` | crosses | Wire call |
+| `BiomeColorResolver::color` | crosses | Wire call |
 | `BlockTintSource::color` | crosses | Wire call |
 | `BlockTintSource::color_in_world` | crosses | Wire call |
 | `BlockTintSource::color_as_terrain_particle` | crosses | Wire call |
 | `BlockTintSource::relevant_properties` | crosses | Wire call |
+| `ParticleProvider::tick` | crosses | Wire call |
+| `EnchantmentDamageEffect::apply` | crosses | Wire call |
 | `GroundStateProvider::state_at` | crosses | Wire call |
 | `PlaceProvider::stack` | crosses | Wire call |
 | `PlaceProvider::insert` | crosses | Wire call |
 | `PlaceProvider::extract` | crosses | Wire call |
 | `TooltipAppender::append` | crosses | Wire call |
 | `CriterionTest::test` | crosses | Wire call |
-| `RowPages::window` | crosses | Wire call |
-| `RowFunction::invoke` | crosses | Wire call |
 | `ResourceHandler<ItemResource>::size` | crosses | Wire call |
 | `ResourceHandler<ItemResource>::resource` | crosses | Wire call |
 | `ResourceHandler<ItemResource>::amount` | crosses | Wire call |

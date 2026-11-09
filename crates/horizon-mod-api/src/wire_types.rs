@@ -763,6 +763,15 @@ impl Wire for crate::BiomeId {
         Ok(crate::__private::biome_id(input.take()?))
     }
 }
+impl Wire for crate::ModColorResolver {
+    const MIN: usize = 4;
+    fn put(&self, out: &mut Writer) {
+        out.put(&self.0);
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        Ok(crate::__private::mod_color_resolver(input.take()?))
+    }
+}
 impl Wire for crate::StatePredicate {
     const MIN: usize = 12;
     fn put(&self, out: &mut Writer) {

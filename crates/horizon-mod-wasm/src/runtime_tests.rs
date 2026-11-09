@@ -327,7 +327,7 @@ fn guest_input_pool_stays_flat_for_100k_no_import_calls() {
     .unwrap()
     .pop()
     .unwrap();
-    let subscriptions: Vec<String> = module
+    let subscriptions: Vec<(String, i32, bool)> = module
         .call(
             CallClass::Load,
             Frame::default(),
@@ -337,7 +337,11 @@ fn guest_input_pool_stays_flat_for_100k_no_import_calls() {
             |r| r.take(),
         )
         .unwrap();
-    assert!(subscriptions.iter().any(|hook| hook == "server_stopped"));
+    assert!(
+        subscriptions
+            .iter()
+            .any(|(hook, _, _)| hook == "server_stopped")
+    );
     let id = crate::boundary::export_id("Hooks", "server_stopped").unwrap();
     let mut group = module.running.group.lock().unwrap();
     group.store.set_epoch_deadline(30_000);
@@ -396,7 +400,7 @@ fn real_members_link_when_built() {
     );
     let modules = modules.unwrap_or_else(|why| panic!("real shared members did not load: {why}"));
     assert_eq!(modules.len(), 1);
-    let subscriptions: Vec<String> = modules[0]
+    let subscriptions: Vec<(String, i32, bool)> = modules[0]
         .call(
             CallClass::Load,
             Frame::default(),
@@ -409,8 +413,28 @@ fn real_members_link_when_built() {
     assert!(
         subscriptions
             .iter()
-            .all(|name| crate::boundary::hook_id(name).is_some())
+            .all(|(name, _, _)| crate::boundary::hook_id(name).is_some())
     );
+    assert!(subscriptions.contains(&("server_stopped".into(), 37, false)));
+    assert!(subscriptions.contains(&("render_gui_pre".into(), -12, true)));
+    // A cancelled event enters the real guest; its receive-cancelled listener clears it.
+    let cancelled: mod_api::RenderGuiPreEvent = Reader::new(&[1]).take().unwrap();
+    assert!(cancelled.cancelled);
+    let pre = crate::boundary::export_id("Hooks", "render_gui_pre").unwrap();
+    let cleared = modules[0]
+        .call(
+            CallClass::Hook,
+            Frame::default(),
+            pre,
+            None,
+            |w| w.put(&cancelled),
+            |r| {
+                assert_eq!(r.take::<mod_api::Flow>()?, mod_api::Flow::Continue);
+                r.take::<mod_api::RenderGuiPreEvent>()
+            },
+        )
+        .expect("real guest cancellation writeback failed");
+    assert!(!cleared.cancelled);
     let event: mod_api::ClientTickPostEvent = Reader::new(&[]).take().unwrap();
     let tick = crate::boundary::export_id("Hooks", "client_tick_post").unwrap();
     assert_eq!(
@@ -1122,180 +1146,6 @@ fn returned_builtin_proxy_does_not_keep_its_group_alive() {
 }
 
 #[test]
-fn ordinary_callable_loopback_invokes_native_and_refuses_expired_value() {
-    use mod_api::wire::{Reader, WireError, Writer};
-    use mod_points::{callable::FunctionSource, snapshot::with_root};
-    use std::cell::{Cell, RefCell};
-    fn decode(input: &mut Reader<'_>) -> Result<u32, WireError> {
-        input.take()
-    }
-    fn encode(value: &u32, out: &mut Writer) {
-        out.put(value);
-    }
-    let invoke = crate::boundary::import_id("RowFunction", "invoke").unwrap();
-    let module = module(&format!(
-        r#"
-        local.get 0 i32.eqz if
-          i32.const 0 local.get 1 i64.load i64.store
-        end
-        i32.const 8 i32.const 4 i32.store
-        i32.const 12 i32.const 41 i32.store
-        i64.const 8796093022208
-        i32.const {invoke} i32.const 0 i32.const 16 i32.const 2048 i32.const 512 call $host
-        i64.extend_i32_u i64.or
-    "#
-    ));
-    let count = Cell::new(0);
-    let callback = RefCell::new(|x: u32| {
-        count.set(count.get() + 1);
-        x + 1
-    });
-    let result = with_root(&callback, |root| {
-        module
-            .call(
-                CallClass::Hook,
-                Frame::default(),
-                0,
-                None,
-                |out| {
-                    let source = unsafe { FunctionSource::new(&root, decode, encode) }.unwrap();
-                    out.put(&source);
-                },
-                |input| input.take::<Result<Vec<u8>, mod_api::RowError>>(),
-            )
-            .unwrap()
-            .unwrap()
-    });
-    assert_eq!(result, 42u32.to_le_bytes());
-    assert_eq!(count.get(), 1);
-    let refused = module
-        .call(
-            CallClass::Hook,
-            Frame::default(),
-            1,
-            None,
-            |_| {},
-            |input| input.take::<Result<Vec<u8>, mod_api::RowError>>(),
-        )
-        .unwrap();
-    assert!(matches!(refused, Err(mod_api::RowError::Stale)));
-    assert_eq!(count.get(), 1);
-}
-
-fn row_window_guest() -> WasmMod {
-    let window = crate::boundary::import_id("RowPages", "window").unwrap();
-    module(&format!(
-        r#"
-        local.get 0 i32.eqz if
-          i32.const 0 local.get 1 i64.load i64.store
-        end
-        i32.const 8 i32.const 0 i32.store
-        i32.const 12 i64.const 0 i64.store
-        i32.const 20 i32.const 1 i32.store
-        i32.const 24 i32.const 0 i32.store16
-        i64.const 8796093022208
-        i32.const {window} i32.const 0 i32.const 26 i32.const 2048 i32.const 512 call $host
-        i64.extend_i32_u i64.or
-    "#
-    ))
-}
-
-#[test]
-fn ordinary_row_pages_import_checks_its_native_root_and_returns_owned_rows() {
-    use mod_points::snapshot::{PageSource, Snapshot, Window, key, with_root};
-    fn read(root: &u32, window: Window) -> Result<Vec<mod_api::Row>, mod_api::RowError> {
-        let mut rows = window.builder();
-        rows.value(None, 0, const { key("u32") }, root)?;
-        Ok(window.finish(rows))
-    }
-    let module = row_window_guest();
-    let root = Box::new(42u32);
-    let owned = with_root(&*root, |value| {
-        module
-            .call(
-                CallClass::Hook,
-                Frame::default(),
-                0,
-                None,
-                |out| {
-                    // SAFETY: the box's address stays valid throughout this marked call. Constructing
-                    // during encoding captures its root, not an earlier call or import's lexical scope.
-                    let pages = unsafe { PageSource::new(&value, read) }.unwrap();
-                    out.put(&pages);
-                },
-                |input| input.take::<Result<Vec<mod_api::Row>, mod_api::RowError>>(),
-            )
-            .unwrap()
-            .unwrap()
-    });
-    drop(root);
-    assert_eq!(Snapshot::new(&owned).read::<u32>(0), Ok(42));
-    // The guest retained the ordinary resource id, but it cannot retain the native borrow.
-    let refused = module
-        .call(
-            CallClass::Hook,
-            Frame::default(),
-            1,
-            None,
-            |_| {},
-            |input| input.take::<Result<Vec<mod_api::Row>, mod_api::RowError>>(),
-        )
-        .unwrap();
-    assert!(matches!(refused, Err(mod_api::RowError::Stale)));
-    assert!(!module.is_stopped());
-}
-
-#[test]
-fn row_pages_refuses_an_encoded_temporary_dropped_before_the_first_window_fetch() {
-    use mod_points::snapshot::{PageSource, Window, key, with_root};
-    struct Encoded<'a> {
-        root: Box<u32>,
-        dropped: &'a std::cell::Cell<bool>,
-    }
-    impl Drop for Encoded<'_> {
-        fn drop(&mut self) {
-            self.dropped.set(true);
-        }
-    }
-    impl mod_api::wire::Put for Encoded<'_> {
-        fn put_to(&self, out: &mut mod_api::wire::Writer) {
-            // SAFETY: this reader is a pure projection, with no guard destruction or host
-            // mutation. The value guard, not the call marker, bounds this temporary's borrow.
-            with_root(&*self.root, |value| {
-                let pages = unsafe {
-                    PageSource::new(&value, |root, window: Window| {
-                        let mut rows = window.builder();
-                        rows.value(None, 0, const { key("u32") }, root)?;
-                        Ok(window.finish(rows))
-                    })
-                }
-                .unwrap();
-                out.put(&pages);
-            });
-        }
-    }
-    let module = row_window_guest();
-    let dropped = std::cell::Cell::new(false);
-    let temporary = Encoded {
-        root: Box::new(17u32),
-        dropped: &dropped,
-    };
-    let refused = module
-        .call(
-            CallClass::Hook,
-            Frame::default(),
-            0,
-            None,
-            move |out| out.put(&temporary),
-            |input| input.take::<Result<Vec<mod_api::Row>, mod_api::RowError>>(),
-        )
-        .unwrap();
-    assert!(dropped.get());
-    assert!(matches!(refused, Err(mod_api::RowError::Stale)));
-    assert!(!module.is_stopped());
-}
-
-#[test]
 fn memory_growth_limit_traps_and_poison_is_shared_by_proxies() {
     let module = module("i32.const 4096 memory.grow drop i64.const 0");
     let other = module.clone();
@@ -1306,237 +1156,4 @@ fn memory_growth_limit_traps_and_poison_is_shared_by_proxies() {
         super::runtime_tests::module("ref.null func i32.const 1048576 table.grow drop i64.const 0");
     assert_eq!(call(&module), None);
     assert!(module.running.poisoned.load(Ordering::Relaxed));
-}
-
-mod internals {
-    use super::module;
-    use crate::points::{InternalsCatalog, Listen, install_policy};
-    use horizon_mod_package::manifest::Manifest;
-    use mod_points::endpoint_policy::{InternalField, InternalsRefusal, PointSpec, SchemaCatalog};
-    use mod_points::exposure::{Field, Layout};
-
-    fn layout(name: &str, fields: Vec<Field>, opaque: bool) -> Layout {
-        Layout {
-            name: name.into(),
-            signature: name.into(),
-            fields,
-            children: vec![],
-            opaque: opaque.then(|| "opaque".into()),
-        }
-    }
-    fn field(name: &str, ordinal: u32, target: usize) -> Field {
-        Field {
-            case: None,
-            ordinal,
-            name: name.into(),
-            target,
-        }
-    }
-    fn entry(path: &str, hash: &str, name: &str) -> InternalField {
-        InternalField {
-            path: path.into(),
-            kind: "field".into(),
-            hash: hash.into(),
-            receiver: 0,
-            field: name.into(),
-        }
-    }
-    const POINT: usize = 0;
-    fn catalog() -> InternalsCatalog {
-        InternalsCatalog {
-            schema: SchemaCatalog {
-                layouts: vec![
-                    layout(
-                        "receiver",
-                        vec![field("a", 0, 1), field("b", 1, 1), field("secret", 2, 2)],
-                        false,
-                    ),
-                    layout("scalar", vec![], false),
-                    layout("opaque", vec![], true),
-                    layout("call", vec![field("root0", 0, 0)], false),
-                ],
-                points: vec![PointSpec {
-                    head_call: 3,
-                    tail_call: None,
-                    receiver: Some(0),
-                }],
-                fields: vec![
-                    entry("Game::a", "ha", "a"),
-                    entry("Game::b", "hb", "b"),
-                    entry("Game::secret", "hs", "secret"),
-                ],
-            },
-            head_calls: vec![(mod_points::RAW_PLACES[POINT].0, 3)],
-        }
-    }
-    fn manifest(internals: &[(&str, &str)]) -> Manifest {
-        Manifest::parse(&manifest_text(internals)).unwrap()
-    }
-    fn manifest_text(internals: &[(&str, &str)]) -> String {
-        let list: Vec<_> = internals
-            .iter()
-            .map(|(path, hash)| format!("{{path='{path}',kind='field',hash='{hash}'}}"))
-            .collect();
-        format!(
-            "id = 'p'\nname = 'P'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = ['registries']\ninternals = [{}]\n[wasm]\nsha512 = '{}'\ntoolchain = 'test'\nbuilt_with = 'test'\n",
-            list.join(","),
-            "a".repeat(128)
-        )
-    }
-    fn place() -> [mod_points::PointId; 1] {
-        [mod_points::RAW_PLACES[POINT].0]
-    }
-    fn refusal(internals: &[(&str, &str)], places: &[mod_points::PointId]) -> InternalsRefusal {
-        let module = module("i64.const 0");
-        match install_policy(&manifest(internals), &module, places, Some(&catalog())) {
-            Err(Listen::Internals(why)) => why,
-            _ => panic!("declaration was accepted or refused untyped"),
-        }
-    }
-
-    #[test]
-    fn declarations_select_a_per_module_plan_freed_on_unload() {
-        let (one, two) = (module("i64.const 0"), module("i64.const 0"));
-        let catalog = catalog();
-        install_policy(
-            &manifest(&[("Game::a", "ha")]),
-            &one,
-            &place(),
-            Some(&catalog),
-        )
-        .unwrap();
-        install_policy(
-            &manifest(&[("Game::b", "hb")]),
-            &two,
-            &place(),
-            Some(&catalog),
-        )
-        .unwrap();
-        let (weak_one, weak_two) = (one.downgrade(), two.downgrade());
-        let (a, b) = (weak_one.plan(3).unwrap(), weak_two.plan(3).unwrap());
-        assert!(a.field(0, None, 0) && !a.field(0, None, 1));
-        assert!(b.field(0, None, 1) && !b.field(0, None, 0));
-        assert_ne!(a.key(0), b.key(0));
-        // A point nobody listened to at this module has no plan.
-        assert!(weak_one.plan(4).is_none());
-        let (owned_a, owned_b) = (std::sync::Arc::downgrade(&a), std::sync::Arc::downgrade(&b));
-        drop((a, b));
-        assert!(owned_a.upgrade().is_some());
-        drop(one);
-        assert!(owned_a.upgrade().is_none(), "unloading frees the plan");
-        assert!(weak_one.plan(3).is_none());
-        assert!(owned_b.upgrade().is_some(), "another module keeps its plan");
-        drop(two);
-        assert!(owned_b.upgrade().is_none());
-    }
-
-    #[test]
-    fn invalid_declarations_refuse_with_typed_reasons() {
-        let path = |p: &str| p.to_string();
-        assert_eq!(
-            refusal(&[("Game::nope", "h")], &place()),
-            InternalsRefusal::UnknownPath(path("Game::nope"))
-        );
-        assert_eq!(
-            refusal(&[("Game::a", "wrong")], &place()),
-            InternalsRefusal::HashMismatch(path("Game::a"))
-        );
-        assert_eq!(
-            refusal(&[("Game::secret", "hs")], &place()),
-            InternalsRefusal::OpaqueReceiverMember(path("Game::secret"))
-        );
-        assert_eq!(
-            refusal(&[("Game::a", "ha")], &[]),
-            InternalsRefusal::NoListener(path("Game::a"))
-        );
-    }
-
-    #[test]
-    fn declarations_without_a_catalog_are_refused_as_such() {
-        let module = module("i64.const 0");
-        assert!(matches!(
-            install_policy(&manifest(&[("Game::a", "ha")]), &module, &place(), None),
-            Err(Listen::Internals(InternalsRefusal::NoCatalog))
-        ));
-        assert!(install_policy(&manifest(&[]), &module, &place(), None).is_ok());
-    }
-
-    /// A manifest listening at the catalog's raw point, declaring `internals`.
-    fn listening(internals: &[(&str, &str)]) -> Manifest {
-        let (_, target, _) = mod_points::RAW_PLACES[POINT];
-        let text = manifest_text(internals);
-        Manifest::parse(&format!(
-            "{text}\n[[inject]]\nid = 'l'\nat = '''{target}'''\nkind = 'head'\nwith = 'listener'\naccess = 'internals'\nhash = 'x'\n"
-        ))
-        .unwrap()
-    }
-    /// A guest whose subscription list answers: one raw listener at the catalog's point.
-    fn subscribing() -> crate::WasmMod {
-        let mut out = mod_api::wire::Writer::new();
-        let place = mod_points::RAW_PLACES[POINT].0 as u32 | 0x4000_0000;
-        out.put(&vec![(place, String::from("l"))]);
-        let bytes = out.into_bytes();
-        let stores: String = bytes
-            .iter()
-            .enumerate()
-            .map(|(at, byte)| format!("i32.const {} i32.const {byte} i32.store8 ", 1024 + at))
-            .collect();
-        module(&format!(
-            "local.get 0 i32.const -1073741825 i32.eq if (result i64) {stores} i64.const {} else i64.const {} end",
-            (1024u64 << 32) | bytes.len() as u64,
-            512u64 << 32
-        ))
-    }
-    fn load(manifest: Manifest) -> (crate::WasmMod, Result<(), Vec<(String, crate::Refusal)>>) {
-        let module = subscribing();
-        let loaded = crate::Loaded {
-            manifests: vec![manifest],
-            modules: vec![module.clone()],
-            ..Default::default()
-        }
-        .with_catalog(catalog());
-        let result = loaded.initialize(&[]);
-        (module, result)
-    }
-
-    #[test]
-    fn loader_installs_only_the_granted_receiver_fields_for_a_listener() {
-        let (module, result) = load(listening(&[("Game::a", "ha"), ("Game::b", "hb")]));
-        result.unwrap();
-        let plan = module
-            .downgrade()
-            .plan(3)
-            .expect("the listener's point has a plan");
-        assert!(plan.field(0, None, 0) && plan.field(0, None, 1));
-        assert!(
-            !plan.field(0, None, 2),
-            "the undeclared member stays hidden"
-        );
-    }
-
-    #[test]
-    fn loader_refuses_invalid_declarations_with_the_typed_reason() {
-        for (declared, expected) in [
-            (
-                ("Game::nope", "h"),
-                InternalsRefusal::UnknownPath("Game::nope".into()),
-            ),
-            (
-                ("Game::a", "wrong"),
-                InternalsRefusal::HashMismatch("Game::a".into()),
-            ),
-            (
-                ("Game::secret", "hs"),
-                InternalsRefusal::OpaqueReceiverMember("Game::secret".into()),
-            ),
-        ] {
-            let (module, result) = load(listening(&[declared]));
-            let refused = result.unwrap_err();
-            assert!(
-                matches!(&refused[..], [(id, crate::Refusal::Internals(why))] if id == "p" && *why == expected),
-                "{declared:?}: {refused:?}"
-            );
-            assert!(module.downgrade().plan(3).is_none());
-        }
-    }
 }

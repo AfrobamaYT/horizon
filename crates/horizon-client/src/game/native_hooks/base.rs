@@ -3745,10 +3745,12 @@ impl Game<'_> {
     /// A player attacks the entity `entity` (`Entity.getId`) of type `kind`
     /// (`minecraft:item_frame`, `minecraft:cow`, `minecraft:player`) standing
     /// at `pos`: `ServerGamePacketListenerImpl.handleInteract`'s attack, once
-    /// in reach, where `Player.attack` starts. Set `canceled` and the blow
-    /// does nothing (no damage, no knockback, the frame keeps its item).
-    /// Server-side, for every player of the world (`native_acting_player`
-    /// says who).
+    /// in reach, where `Player.attack` starts. The swing has not begun, so the
+    /// attacking player's attack strength is still the charge the blow uses
+    /// (vanilla reads it at the start of `Player.attack`; the swing resets it
+    /// afterwards). Set `canceled` and the blow does nothing (no damage, no
+    /// knockback, the frame keeps its item). Server-side, for every player of
+    /// the world (`native_acting_player` says who).
     pub(in crate::game) fn native_attack_entity(
         &mut self,
         entity: i32,
@@ -5693,6 +5695,14 @@ mod screen_open_tests {
     #[test]
     #[ignore = "needs prepared resources and an X11 display"]
     fn client_gui_state_matches_screen_init_hook() {
+        // Winit permits only one event loop per process, even after it is dropped.
+        if crate::game::native_entity_refs::tests::run_fresh_cases(
+            "game::native_hooks::base::screen_open_tests::client_gui_state_matches_screen_init_hook",
+            "HORIZON_SCREEN_STATE_CHILD",
+            &["window"],
+        ) {
+            return;
+        }
         use mod_api::ScreenInitPostEvent;
         struct Observe(Arc<Mutex<Vec<(String, Option<String>)>>>);
         #[mod_api::__subscriptions]

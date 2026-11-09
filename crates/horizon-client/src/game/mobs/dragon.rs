@@ -1880,7 +1880,11 @@ impl Game<'_> {
             return false;
         }
         // A dragon part is no LivingEntity: `canCriticalAttack` is false.
-        let (amount, _, _, _) = self.melee_damage("minecraft:ender_dragon", false);
+        let (amount, _, _, _) = self.melee_damage(
+            "minecraft:ender_dragon",
+            false,
+            self.dragon.as_ref().map(|dragon| dragon.id),
+        );
         self.swing_arm();
         // The part's box.
         let area = self
@@ -5357,11 +5361,8 @@ mod tests {
                     }
                     // Command construction consumes no placement yaw. Mob.finalizeSpawn
                     // draws follow range and handedness unless skipped. The NBT
-                    // loader instead draws the dragon seed from the level RNG.
+                    // loader seeds the dragon's own random without drawing from the level RNG.
                     let mut expected = LegacyRandom::new(42);
-                    if nbt.is_some() {
-                        expected.next_long();
-                    }
                     if nbt.is_none() && matches!(answer, Answer::Keep | Answer::RefuseJoin) {
                         expected.triangle(0.0, 0.114_850_000_000_000_01);
                         expected.next_float();

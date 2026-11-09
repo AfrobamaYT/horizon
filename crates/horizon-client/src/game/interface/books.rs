@@ -86,7 +86,7 @@ impl BookScreen {
 fn view_pages(data: Option<&StackData>) -> Vec<Text> {
     let Some(data) = data else { return Vec::new() };
     let Some(w) = &data.written else {
-        return data.writable_pages.iter().map(Text::literal).collect();
+        return data.writable_pages.iter().map(Text::untrusted).collect();
     };
     let tagged = w.page_tags.len() == w.pages.len();
     w.pages
@@ -98,13 +98,13 @@ fn view_pages(data: Option<&StackData>) -> Vec<Text> {
             Some(tag @ (horizon_core::nbt::Tag::Compound(_) | horizon_core::nbt::Tag::List(_))) => {
                 horizon_client::entity_nbt::name_text(tag)
             }
-            _ => Text::literal(page),
+            _ => Text::untrusted(page),
         })
         .collect()
 }
 impl Game<'_> {
     fn book_lines(&self, page: &str) -> Vec<Text> {
-        self.page_lines(&Text::literal(page))
+        self.page_lines(&Text::untrusted(page))
     }
     fn page_lines(&self, page: &Text) -> Vec<Text> {
         self.gui.atlas.font.split(page, 114.0)
@@ -1221,7 +1221,8 @@ impl Game<'_> {
             None => {}
         }
     }
-    pub(super) fn draw_book(&self, batch: &mut HudBatch) {
+    pub(super) fn draw_book(&mut self, batch: &mut HudBatch) {
+        let mut hovered = None;
         let Some(book) = &self.book else { return };
         let atlas = &self.gui.atlas;
         let w = batch.width;
@@ -1569,17 +1570,13 @@ impl Game<'_> {
                         &tr("gui.done", "Done"),
                     );
                 }
-                // HoveredTextEffects.TOOLTIP_AND_CURSOR: the hovered words'
-                // show_text hover event, as the chat shows it.
-                if let Some(hover) = pages
-                    .get(*page)
-                    .and_then(|t| self.book_style_at(t, left))
-                    .and_then(|s| s.hover)
-                {
-                    let lines = self.wrapped_rows(&hover, (w as i32 / 2).max(200));
-                    self.draw_tooltip_lines(batch, &lines, mx, my);
-                }
+                // HoveredTextEffects.TOOLTIP_AND_CURSOR: the hovered words' hover
+                // event, drawn as the chat draws it (componentHoverEffect).
+                hovered = pages.get(*page).and_then(|t| self.book_style_at(t, left));
             }
+        }
+        if let Some(style) = hovered {
+            self.component_hover_effect(batch, &style, (mx, my));
         }
     }
 }

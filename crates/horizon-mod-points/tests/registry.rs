@@ -1,5 +1,7 @@
 //! The registry's lifecycle, registering, sealing and stopping, on the real points: an integration
 //! test, so the generated points compile once for the tests.
+// Generated fixtures exercise every shape; TODO(#2273): make the generator emit clippy-clean code.
+#![allow(clippy::all, unused_comparisons, unreachable_patterns, dead_code)]
 use mod_points::__private::{POINTS, RawKind, SlotListener, seal};
 use mod_points::{PointId, RegisterError, register, stop};
 use std::sync::atomic::Ordering;
@@ -122,7 +124,6 @@ fn one_list_registered_sealed_and_stopped() {
                 assert_eq!(function, raw_listener as *const ());
                 order.push("typed");
             }
-            RawKind::Snapshot(..) => unreachable!(),
             RawKind::Erased(function) => {
                 assert_eq!(function as usize, erased_listener as *const () as usize);
                 order.push("erased");

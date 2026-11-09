@@ -30,7 +30,8 @@ const RESERVED_NAMESPACES: [&str; 3] = ["minecraft", "c", "horizon"];
 /// A mod's saved settings, shared by native mods and modpack overrides.
 pub const STORAGE_DIR: &str = ".horizon-mod-data";
 /// The largest manifest this build reads.
-const MAX_MANIFEST: u64 = 32 << 20;
+/// Maximum manifest bytes accepted by package readers and developer tools.
+pub const MAX_MANIFEST: u64 = 32 << 20;
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]

@@ -399,6 +399,10 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
         out.push("--export-all".to_owned());
     }
     if role != "std" {
+        // A member's own code takes its functions' addresses as table offsets, not through
+        // `GOT.func`; with `--export-all` those functions are exported, and without local
+        // binding the linker resolves such an address to slot 0, another function.
+        out.push("-Bsymbolic".to_owned());
         for name in GUEST_EXPORTS {
             out.push(format!("--export={name}"));
         }
