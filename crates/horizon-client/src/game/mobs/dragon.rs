@@ -5225,29 +5225,7 @@ impl Game<'_> {
 
 #[path = "dragon/death_render.rs"]
 mod death_render;
-use death_render::{dissolve_color, dissolve_mask, dragon_rays};
-
-/// `Entity.push` on the server's copy of a player, then `hurt`. A player's
-/// own client hears of its velocity only when a hurt marks it
-/// (`LivingEntity.hurtServer`'s `markHurt`, sent by
-/// `ServerEntity.sendChanges`); `push` alone only sets `needsSync`, which
-/// reaches the players tracking them, not them. So the push moves the player
-/// only together with a hurt that lands outside the hurt cooldown, and is
-/// dropped otherwise.
-fn push_seen_with_hurt(
-    p: &mut horizon_client::motion::PlayerMotion,
-    push: Vec3,
-    hurt: impl FnOnce(&mut horizon_client::motion::PlayerMotion),
-) {
-    let before = p.velocity;
-    let marked_before = std::mem::take(&mut p.health.sync_velocity);
-    p.velocity = before.add_vector(push);
-    hurt(p);
-    if !p.health.sync_velocity {
-        p.velocity = before;
-    }
-    p.health.sync_velocity |= marked_before;
-}
+use death_render::{dissolve_color, dissolve_mask};
 
 #[cfg(test)]
 mod tests {

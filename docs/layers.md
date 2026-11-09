@@ -338,8 +338,8 @@ or `<name>_tests.rs` do not exempt a file; other `#[cfg(test)]` items count.
 
 ## The check
 
-`python3 tools/check_layers.py` reads the `cargo metadata` of the three workspaces `tools/layers.json` lists (the
-game, `launcher/` and `crates/horizon-mod-registry/`; no build, about a second) and
+`python3 tools/check_layers.py` reads the `cargo metadata` of the four workspaces `tools/layers.json` lists (the
+game, `launcher/`, `crates/horizon-mod-registry/` and `crates/horizon-telemetry-server/`; no build, about a second) and
 [`tools/layers.json`](../tools/layers.json), which gives every crate its layer. It fails when:
 
 - a crate has no layer;
@@ -357,8 +357,7 @@ left.
 ### Today's exceptions
 
 The current dependency inventory is in `tools/layers.json`, with fork-specific classifications and reasons in
-`_fork_baselines`. It excludes removed services and records existing upward dependencies rather than reintroducing
-them. The separate launcher and registry workspaces take two engine crates: `horizon-mod-package` (the launcher's
+`_fork_baselines`. It records existing fork dependencies and the restored upstream Horizon layer dependencies. The separate launcher and registry workspaces take two engine crates: `horizon-mod-package` (the launcher's
 package, modpack and index reads; the registry's index format) and `horizon-system` (the launcher's bug reports).
 Those three edges are `allowed` rows like the launcher's other engine dependencies.
 
