@@ -328,6 +328,8 @@
   "Game architecture": "Αρχιτεκτονική παιχνιδιού",
   "Game arguments": "Επιχειρήματα παιχνιδιού",
   "Game builds, servers made in the launcher, settings, skins.": "Κατασκευές παιχνιδιών, διακομιστές που έγιναν στο πρόγραμμα εκκίνησης, ρυθμίσεις, skins.",
+  "Game cache cleanup is unavailable because running games cannot be reliably excluded.": "Game cache cleanup is unavailable because running games cannot be reliably excluded.",
+  "Game cache leases require a supported local filesystem.": "Game cache leases require a supported local filesystem.",
   "Game files": "Αρχεία παιχνιδιών",
   "Game files from {base}": "Αρχεία παιχνιδιού από {base}",
   "Game internals must be declared: run cargo horizon-mod internals sync in the mod's folder, then build again.": "Game internals must be declared: run cargo horizon-mod internals sync in the mod's folder, then build again.",

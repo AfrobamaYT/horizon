@@ -328,6 +328,8 @@
   "Game architecture": "Arquitetura do jogo",
   "Game arguments": "Argumentos do jogo",
   "Game builds, servers made in the launcher, settings, skins.": "Compilações do jogo, servidores criados no launcher, configurações, skins.",
+  "Game cache cleanup is unavailable because running games cannot be reliably excluded.": "Game cache cleanup is unavailable because running games cannot be reliably excluded.",
+  "Game cache leases require a supported local filesystem.": "Game cache leases require a supported local filesystem.",
   "Game files": "Arquivos do jogo",
   "Game files from {base}": "Arquivos do jogo de {base}",
   "Game internals must be declared: run cargo horizon-mod internals sync in the mod's folder, then build again.": "Game internals must be declared: run cargo horizon-mod internals sync in the mod's folder, then build again.",

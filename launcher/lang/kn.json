@@ -328,6 +328,8 @@
   "Game architecture": "Game architecture",
   "Game arguments": "ಆಟದ ವಾದಗಳು",
   "Game builds, servers made in the launcher, settings, skins.": "ಗೇಮ್ ಬಿಲ್ಡ್‌ಗಳು, ಲಾಂಚರ್‌ನಲ್ಲಿ ಮಾಡಿದ ಸರ್ವರ್‌ಗಳು, ಸೆಟ್ಟಿಂಗ್‌ಗಳು, ಸ್ಕಿನ್‌ಗಳು.",
+  "Game cache cleanup is unavailable because running games cannot be reliably excluded.": "Game cache cleanup is unavailable because running games cannot be reliably excluded.",
+  "Game cache leases require a supported local filesystem.": "Game cache leases require a supported local filesystem.",
   "Game files": "ಆಟದ ಫೈಲ್‌ಗಳು",
   "Game files from {base}": "{base} ನಿಂದ ಆಟದ ಫೈಲ್‌ಗಳು",
   "Game internals must be declared: run cargo horizon-mod internals sync in the mod's folder, then build again.": "Game internals must be declared: run cargo horizon-mod internals sync in the mod's folder, then build again.",

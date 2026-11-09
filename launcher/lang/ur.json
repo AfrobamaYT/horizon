@@ -328,6 +328,8 @@
   "Game architecture": "گیم کا آرکیٹیکچر",
   "Game arguments": "کھیل کے دلائل",
   "Game builds, servers made in the launcher, settings, skins.": "گیم کی تعمیرات، لانچر میں بنائے گئے سرورز، ترتیبات، کھالیں۔",
+  "Game cache cleanup is unavailable because running games cannot be reliably excluded.": "Game cache cleanup is unavailable because running games cannot be reliably excluded.",
+  "Game cache leases require a supported local filesystem.": "Game cache leases require a supported local filesystem.",
   "Game files": "گیم فائلز",
   "Game files from {base}": "{base} سے گیم فائلیں",
   "Game internals must be declared: run cargo horizon-mod internals sync in the mod's folder, then build again.": "Game internals must be declared: run cargo horizon-mod internals sync in the mod's folder, then build again.",

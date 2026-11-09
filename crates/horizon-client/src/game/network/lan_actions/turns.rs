@@ -22,17 +22,24 @@ impl Game<'_> {
         f: impl FnOnce(&mut Self) -> R,
     ) -> Result<R, TurnRefused> {
         let swap = self.enter_guest_at(gi, conn, self.dim)?;
-        crate::game::dedicated::crash_fixture("guest", || {
-            self.lan
-                .as_ref()
-                .is_some_and(|host| host.hub.guest(conn).is_some_and(|g| g.placed))
-        });
-        let dimension =
-            (self.serving.is_some() || self.options.dedicated.is_some()).then_some(self.dim.id());
-        let result = horizon_client::block_contact::in_level(dimension, || f(self));
-        self.drain_entity_inside();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            crate::game::dedicated::crash_fixture("guest", || {
+                self.lan
+                    .as_ref()
+                    .is_some_and(|host| host.hub.guest(conn).is_some_and(|g| g.placed))
+            });
+            let dimension = (self.serving.is_some() || self.options.dedicated.is_some())
+                .then_some(self.dim.id());
+            let result = horizon_client::block_contact::in_level(dimension, || f(self));
+            self.drain_entity_inside();
+            result
+        }));
+        // Commit the guest's progress and restore the outer player before propagating a panic.
         self.leave_guest(swap);
-        Ok(result)
+        match result {
+            Ok(result) => Ok(result),
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
     }
 
     /// Where guest `conn` is in the hub's list.

@@ -5558,6 +5558,17 @@ mod tests {
             ]
             .into();
             mod_api::testing::with_mods(mods, || {
+                // The game fixture bypasses content_root, which normally resolves
+                // the particle registry before any hook converts particle values.
+                let particles: Vec<_> = ParticleType::ALL
+                    .iter()
+                    .map(|ty| format!("minecraft:{}", ty.name()))
+                    .collect();
+                mod_api::__private::resolve_particles(particles.iter().map(String::as_str), |id| {
+                    ParticleType::from_name(id)
+                        .map(|ty| mod_api::__private::ParticleKind::Vanilla(ty as u32))
+                })
+                .unwrap();
                 // The zombie's speed is replaced, its hidden strength shown,
                 // its omen back at the default and its regeneration hidden,
                 // and the strength it shows keeps the flag off. The guest's

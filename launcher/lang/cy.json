@@ -328,6 +328,8 @@
   "Game architecture": "Game architecture",
   "Game arguments": "Dadleuon gêm",
   "Game builds, servers made in the launcher, settings, skins.": "Adeiladau gêm, gweinyddwyr a wnaed yn y lansiwr, gosodiadau, crwyn.",
+  "Game cache cleanup is unavailable because running games cannot be reliably excluded.": "Game cache cleanup is unavailable because running games cannot be reliably excluded.",
+  "Game cache leases require a supported local filesystem.": "Game cache leases require a supported local filesystem.",
   "Game files": "Ffeiliau gêm",
   "Game files from {base}": "Ffeiliau gêm o {base}",
   "Game internals must be declared: run cargo horizon-mod internals sync in the mod's folder, then build again.": "Game internals must be declared: run cargo horizon-mod internals sync in the mod's folder, then build again.",

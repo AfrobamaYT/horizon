@@ -328,6 +328,8 @@
   "Game architecture": "Game architecture",
   "Game arguments": "Spillets argumenter",
   "Game builds, servers made in the launcher, settings, skins.": "Spilbyggeri, servere lavet i launcheren, indstillinger, skins.",
+  "Game cache cleanup is unavailable because running games cannot be reliably excluded.": "Game cache cleanup is unavailable because running games cannot be reliably excluded.",
+  "Game cache leases require a supported local filesystem.": "Game cache leases require a supported local filesystem.",
   "Game files": "Spil filer",
   "Game files from {base}": "Spilfiler fra {base}",
   "Game internals must be declared: run cargo horizon-mod internals sync in the mod's folder, then build again.": "Game internals must be declared: run cargo horizon-mod internals sync in the mod's folder, then build again.",

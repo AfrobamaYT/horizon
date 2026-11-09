@@ -328,6 +328,8 @@
   "Game architecture": "Kiến trúc trò chơi",
   "Game arguments": "Lập luận trò chơi",
   "Game builds, servers made in the launcher, settings, skins.": "Bản dựng trò chơi, máy chủ được tạo trong trình khởi chạy, cài đặt, giao diện.",
+  "Game cache cleanup is unavailable because running games cannot be reliably excluded.": "Game cache cleanup is unavailable because running games cannot be reliably excluded.",
+  "Game cache leases require a supported local filesystem.": "Game cache leases require a supported local filesystem.",
   "Game files": "Tệp trò chơi",
   "Game files from {base}": "Tệp trò chơi từ {base}",
   "Game internals must be declared: run cargo horizon-mod internals sync in the mod's folder, then build again.": "Game internals must be declared: run cargo horizon-mod internals sync in the mod's folder, then build again.",

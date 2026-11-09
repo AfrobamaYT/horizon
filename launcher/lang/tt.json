@@ -328,6 +328,8 @@
   "Game architecture": "Уен архитектурасы",
   "Game arguments": "Уен аргументлары",
   "Game builds, servers made in the launcher, settings, skins.": "Уен төзү, эшләтеп җибәрүдә ясалган серверлар, көйләүләр, тиреләр.",
+  "Game cache cleanup is unavailable because running games cannot be reliably excluded.": "Game cache cleanup is unavailable because running games cannot be reliably excluded.",
+  "Game cache leases require a supported local filesystem.": "Game cache leases require a supported local filesystem.",
   "Game files": "Уен файллары",
   "Game files from {base}": "Уен файллары {base}",
   "Game internals must be declared: run cargo horizon-mod internals sync in the mod's folder, then build again.": "Game internals must be declared: run cargo horizon-mod internals sync in the mod's folder, then build again.",
