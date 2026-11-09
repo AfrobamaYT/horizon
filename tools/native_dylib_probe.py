@@ -198,7 +198,8 @@ def main():
         exported, _ = pe_symbols(std_runtime[0])
         names = {kind: next(n for n in exported if n.endswith(f"___rust_{kind}")) for kind in ("alloc", "dealloc")}
         try:
-            windows_allocator([shipped_exe, game, *std_runtime], game, shipped / "allocator-imports.json")
+            # Every image of the route, the wasm runtime DLL included: none may export or import a second allocator.
+            windows_allocator([shipped_exe, *deps.glob("*.dll"), *std_runtime], game, shipped / "allocator-imports.json")
         except ValueError as error:
             failures.append(f"shipped route: {error}")
         print("shipped route allocator imports and exports:\n" + (shipped / "allocator-imports.json").read_text())
