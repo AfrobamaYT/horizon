@@ -22,6 +22,7 @@
 - [Design: typed payloads](concepts/typed-payloads.md)
 - [Design: multi-block placement](concepts/multi-block-placement.md)
 - [Design: Part instance state](concepts/part-instance-state.md)
+- [Design: general entity types](concepts/general-entity-types.md)
 - [Design: moving structures](concepts/moving-structures.md)
 - [Design: custom recipe-book settings](concepts/recipe-book-types.md)
 - [Design: section meshing](concepts/section-meshing.md)
