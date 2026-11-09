@@ -633,13 +633,21 @@ impl ParsedStationRecipe {
                 template: ingredient(&v["template"], items),
                 base: ingredient(&v["base"], items),
                 addition: ingredient(&v["addition"], items),
-                pattern: if let Some(id) = v["pattern"].as_str() {
-                    crate::crafting::RecipeTrimPattern::Reference(id.to_owned())
-                } else {
-                    crate::crafting::RecipeTrimPattern::Inline {
-                        asset_id: v["pattern"]["asset_id"].as_str()?.to_owned(),
-                        description: crate::crafting::json_tag(v["pattern"].get("description")?),
-                        decal: v["pattern"]["decal"].as_bool().unwrap_or(false),
+                // Use the same holder codec as item components, collapsing
+                // unstyled literal text once at the recipe boundary before
+                // publishing the typed snapshot.
+                pattern: match crate::item_data::trim::pattern_from_nbt(
+                    &crate::crafting::json_tag(v.get("pattern")?),
+                )? {
+                    crate::item_data::trim::Holder::Named(id) => {
+                        crate::crafting::RecipeTrimPattern::Reference(id.to_string())
+                    }
+                    crate::item_data::trim::Holder::Direct(pattern) => {
+                        crate::crafting::RecipeTrimPattern::Inline {
+                            asset_id: pattern.asset_id.to_string(),
+                            description: pattern.description,
+                            decal: pattern.decal,
+                        }
                     }
                 },
             })),
