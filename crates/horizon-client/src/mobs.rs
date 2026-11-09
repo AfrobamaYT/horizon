@@ -3875,7 +3875,7 @@ impl MobWorld<'_> {
         self.mob_griefing || self.mob_hooks.is_some_and(|hooks| hooks.grief_hooked())
     }
     /// `EventHooks.canEntityGrief(level, mob)`: the `mob_griefing` rule, or
-    /// what a mod answers for this mob. Asked where NeoForge asks it; the
+    /// what a mod answers for this mob (`native_entity_mob_griefing`); the
     /// places vanilla reads the rule with no entity still read `mob_griefing`.
     pub fn can_grief(&self, mob: u32) -> bool {
         match self.mob_hooks {

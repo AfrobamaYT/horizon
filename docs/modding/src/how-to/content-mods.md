@@ -436,7 +436,7 @@ doesn't have are left out):
 { "title": "Ruby", "icon": "ruby:ruby", "items": ["ruby:ruby", "ruby:ruby_block"] }
 ```
 
-They come after vanilla's tabs, ten to a page as NeoForge pages them; the
+They come after vanilla's tabs, ten to a page; the
 buttons above the inventory turn the pages. The title is a lang key or English
 text: `"title": "itemGroup.ruby"` uses that key from the mod's lang files, and a
 lang file's `itemGroup.<mod id>.<file name>` (`creative_tab/gems.json` →

@@ -159,7 +159,7 @@ mod tests {
             layer("compass:shadow", Below("compass:bar".into())),
             layer("compass:first", BelowAll),
             layer("compass:last", AboveAll),
-            // A second `BelowAll` goes under the first, as NeoForge inserts at 0.
+            // A second `BelowAll` goes under the first.
             layer("compass:very_first", BelowAll),
             layer("compass:over_chat", Above("minecraft:chat".into())),
         ]);
@@ -206,7 +206,7 @@ mod tests {
             layer("no_namespace", AboveAll),
             layer("compass:bar", AboveAll),
             layer("compass:bar", BelowAll),
-            // Against a layer pushed later: not in the list yet, as NeoForge requires.
+            // Against a layer pushed later: not in the list yet.
             layer("compass:early", Below("compass:late".into())),
             layer("compass:late", AboveAll),
             layer("compass:lost", Above("minecraft:no_such_layer".into())),

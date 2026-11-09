@@ -654,8 +654,8 @@ impl Game<'_> {
     pub(super) fn tick_server(&mut self, paused: bool) -> Result<()> {
         // `tickRateManager.tick()` once per server tick, before any level
         // (each `ServerLevel.tick` only reads `runsNormally`), and the native
-        // `ServerTickStart` before that level work, where NeoForge fires
-        // `ServerTickEvent.Pre`. A paused pass and a held server tick nothing.
+        // `ServerTickStart` before that level work (NeoForge's
+        // `ServerTickEvent.Pre`). A paused pass and a held server tick nothing.
         let running = if !paused && !self.agent.hold_server {
             self.clock.check_sprint_completion();
             if let Some(report) = self.clock.take_sprint_report() {

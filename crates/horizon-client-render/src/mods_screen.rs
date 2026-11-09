@@ -534,7 +534,7 @@ impl ModsScreen {
             y,
             kind: Kind::Subtitle(pieces),
         });
-        // The room NeoForge keeps for an update notice, and its spacer.
+        // Room for an update notice, and its spacer.
         y += 9 + 10;
         if let Some(note) = &e.note {
             let note = lines(note.clone());

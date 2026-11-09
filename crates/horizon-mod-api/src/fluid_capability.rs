@@ -196,7 +196,7 @@ pub struct SizedFluidIngredient {
 }
 
 impl SizedFluidIngredient {
-    /// The sized ingredient of `v`, as NeoForge's codec reads it:
+    /// The sized ingredient of `v`, from its JSON form:
     /// `{"ingredient": <fluid ingredient>, "amount": n}` — `amount`
     /// defaults to a bucket (1000 mB) and must be positive.
     pub fn from_json(v: &serde_json::Value, context: &dyn DataLoadContext) -> Option<Self> {
