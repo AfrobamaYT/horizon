@@ -4290,10 +4290,6 @@ impl OptionsUi {
             match action {
                 Do::None => {}
                 Do::OpenFolder => events.push(Event::OpenModFolder),
-                Do::Browse => {
-                    events.push(Event::BrowseMods);
-                    self.push(Page::ModBrowser);
-                }
                 Do::Back => events.extend(self.back(s)),
                 Do::Config(i) => {
                     self.push(Page::NativeMod(i));
@@ -6105,7 +6101,7 @@ mod tests {
     /// 150 px buttons 4 px apart, centred 27 px above the bottom; the sidebar at x 41 with its
     /// list at y 32 and 28 px rows; the panel at x 188 with its buttons at y 182, 84 px apart.
     #[test]
-    fn the_mods_page_opens_folders_the_browser_and_a_native_mods_settings() {
+    fn the_mods_page_opens_the_folder_and_a_native_mods_settings() {
         let atlas = atlas();
         let mut s = Settings::default();
         let mut ui = OptionsUi::default();
@@ -6141,18 +6137,9 @@ mod tests {
         };
         ui.show(Page::Mods);
         assert_eq!(
-            click(&mut ui, &mut s, 86.0, 223.0),
+            click(&mut ui, &mut s, 160.0, 223.0),
             vec![Event::ButtonClick, Event::OpenModFolder]
         );
-        // Browse Mods opens the registry's list; coming back makes the list again.
-        assert_eq!(
-            click(&mut ui, &mut s, 240.0, 223.0),
-            vec![Event::ButtonClick, Event::BrowseMods]
-        );
-        assert_eq!(ui.page(), Page::ModBrowser);
-        ui.back(&mut s);
-        assert_eq!(ui.page(), Page::Mods);
-        assert!(ui.mods_screen.is_none());
         // Config does nothing until a native mod with settings is picked from the list
         // (Horizon, Minecraft, then Native).
         assert!(click(&mut ui, &mut s, 397.0, 192.0).is_empty());
@@ -6164,7 +6151,7 @@ mod tests {
         ui.back(&mut s);
         assert_eq!(ui.page(), Page::Mods);
         // Back leaves the page.
-        let events = click(&mut ui, &mut s, 394.0, 223.0);
+        let events = click(&mut ui, &mut s, 320.0, 223.0);
         assert_eq!(events.first(), Some(&Event::ButtonClick));
         assert_eq!(ui.page(), Page::Main);
     }
