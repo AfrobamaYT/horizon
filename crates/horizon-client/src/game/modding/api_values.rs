@@ -253,7 +253,7 @@ fn block_values_keep_frozen_ordinals_when_world_state_ids_reorder() {
 pub(in crate::game) fn mod_tint_values(
     _registry: &horizon_world::registry::BlockRegistry,
 ) -> Result<Option<crate::mesher::ModTintValues>, String> {
-    if !crate::mesher::has_custom_block_tint_sources() {
+    if !crate::mesher::has_custom_block_tint_sources() && !crate::mesher::has_section_geometry() {
         return Ok(None);
     }
     let metadata =

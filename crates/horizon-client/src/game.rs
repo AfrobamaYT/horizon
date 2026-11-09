@@ -17782,6 +17782,7 @@ pub fn run_with(
     mods::register_dimension_transition_screens(options.execution_role);
     mods::register_color_resolvers(options.execution_role);
     mods::register_block_tint_sources(options.execution_role);
+    mods::add_section_geometry(options.execution_role);
     mods::register_particle_providers(options.execution_role);
     mods::freeze_declarations();
     mod_phase.advance(mod_api::__private::ModPhase::Setup)?;

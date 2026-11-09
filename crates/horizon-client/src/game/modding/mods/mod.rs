@@ -446,6 +446,16 @@ pub(super) fn register_block_tint_sources(role: ExecutionRole) {
     Game::native_register_block_tint_sources(&RegistrationContext::new(), &mut registry);
     horizon_client::mesher::register_block_tint_sources(registry.into_layers());
 }
+/// The native mods' section geometry renderers (`native_add_section_geometry`), kept once at
+/// start, before resources load; every mesh of a section asks them for their quads.
+pub(super) fn add_section_geometry(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut registry = mod_api::SectionGeometryRegistry::default();
+    Game::native_add_section_geometry(&RegistrationContext::new(), &mut registry);
+    horizon_client::mesher::register_section_geometry(registry.into_renderers());
+}
 /// The native mods' particle providers (`native_register_particle_providers`), kept once at
 /// start, before resources load; every particle sprite-set load resolves each type's provider.
 pub(super) fn register_particle_providers(role: ExecutionRole) {

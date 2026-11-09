@@ -574,6 +574,7 @@ mod tests {
             mod_fluids: vec![None; fluid.index() + 1],
             animated_layers: vec![],
             mod_tints: ModTints::default(),
+            section_geometry: std::sync::Arc::new([]),
         };
         let mut pad = Padded {
             blocks: vec![0; super::super::P.pow(3)],

@@ -1,0 +1,66 @@
+//! Extra geometry in chunk section meshes, as a client mod registers it in `add_section_geometry`
+//! (NeoForge's `AddSectionGeometryEvent` and its `AdditionalSectionGeometryRenderer`).
+//!
+//! A mod's renderer is held by the game and asked on the meshing workers each time a section
+//! meshes, like a block tint source: it gets no `Host` and keeps no mutable state, since two
+//! workers can mesh neighbouring sections at once. The quads it adds are part of the section's
+//! mesh, so they are rebuilt with it, never added twice, and gone when the section unloads.
+use super::BlockAndTintGetter;
+use std::sync::Arc;
+
+/// A mod's extra section geometry: NeoForge's `AdditionalSectionGeometryRenderer`.
+pub trait SectionGeometry: Send + Sync + 'static {
+    /// `render(context)`: the quads of the section whose lowest corner is block `origin` (a
+    /// multiple of 16 on each axis). `level` reads the section's chunk and its eight neighbours.
+    /// Asked on a meshing worker every time that section meshes, also when it holds only air; a
+    /// section the renderer has nothing for gets an empty list.
+    fn add(&self, origin: [i32; 3], level: &dyn BlockAndTintGetter) -> Vec<SectionQuad>;
+}
+
+/// One quad a [`SectionGeometry`] adds. Its corners go counter-clockwise seen from the side it
+/// faces; a solid quad is culled from behind, as a block's faces are, so a quad seen from both
+/// sides is two quads.
+#[derive(Clone, Debug, PartialEq)]
+// exhaustive: mods build quads with struct literals
+pub struct SectionQuad {
+    /// The corners, in blocks from the section's lowest corner (0 to 16 inside the section).
+    pub positions: [[f32; 3]; 4],
+    /// Each corner's texture coordinate within the sprite, 0 to 1.
+    pub uvs: [[f32; 2]; 4],
+    /// The block atlas sprite the quad draws, `minecraft:block/stone` or a mod's
+    /// `mymod:block/glow`. A sprite the atlas lacks is logged once and the quad is left out.
+    pub sprite: String,
+    /// ARGB the sprite's texels are multiplied by; `0xFFFFFFFF` leaves them as they are.
+    pub color: u32,
+    /// Sky and block light, 0 to 15 each (`BlockAndTintGetter::brightness` reads the world's).
+    pub light: [u8; 2],
+    /// Drawn in the translucent pass (sorted, blended) rather than the solid one (alpha cutout).
+    pub translucent: bool,
+}
+
+/// The renderer registry `add_section_geometry` hands out.
+pub trait SectionGeometryRenderers {
+    /// `addRenderer(renderer)`: `renderer` adds its quads to every section the client meshes, in
+    /// registration order after the section's own blocks.
+    fn register(&mut self, renderer: Arc<dyn SectionGeometry>);
+}
+
+/// The game's [`SectionGeometryRenderers`]: the renderers in registration order.
+#[derive(Default)]
+// exhaustive: its field is private; the game builds it
+pub struct SectionGeometryRegistry {
+    renderers: Vec<Arc<dyn SectionGeometry>>,
+}
+
+impl SectionGeometryRenderers for SectionGeometryRegistry {
+    fn register(&mut self, renderer: Arc<dyn SectionGeometry>) {
+        self.renderers.push(renderer);
+    }
+}
+
+impl SectionGeometryRegistry {
+    /// The renderers, in registration order.
+    pub fn into_renderers(self) -> Vec<Arc<dyn SectionGeometry>> {
+        self.renderers
+    }
+}

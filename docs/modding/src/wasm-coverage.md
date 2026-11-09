@@ -1032,6 +1032,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `PackFinders::add_pack_finders` | crosses | Wire call |
 | `ColorResolvers::register` | crosses | Wire call |
 | `BlockTintSources::register` | crosses | Wire call |
+| `SectionGeometryRenderers::register` | crosses | Wire call |
 | `ParticleProviders::register` | crosses | Wire call |
 | `EnchantmentDamageEffects::register` | crosses | Wire call |
 | `BlockAndTintGetter::block_state` | crosses | Wire call |
@@ -1382,6 +1383,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::add_attribute_tooltips` | crosses | Wire call |
 | `Hooks::add_client_reload_listeners` | crosses | Wire call |
 | `Hooks::add_pack_finders` | crosses | Wire call |
+| `Hooks::add_section_geometry` | crosses | Wire call |
 | `Hooks::add_server_reload_listeners` | crosses | Wire call |
 | `Hooks::alter_ground` | crosses | Wire call |
 | `Hooks::animal_tame` | crosses | Wire call |
@@ -1699,6 +1701,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `BlockTintSource::color_in_world` | crosses | Wire call |
 | `BlockTintSource::color_as_terrain_particle` | crosses | Wire call |
 | `BlockTintSource::relevant_properties` | crosses | Wire call |
+| `SectionGeometry::add` | crosses | Wire call |
 | `ParticleProvider::tick` | crosses | Wire call |
 | `EnchantmentDamageEffect::apply` | crosses | Wire call |
 | `GroundStateProvider::state_at` | crosses | Wire call |
