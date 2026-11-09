@@ -805,7 +805,9 @@ mod boat_callback_review_tests {
                 let mut child = Mob::new(73, kind, original, 0.0);
                 child.extra.mount = Some(72);
                 game.mobs.push(child);
-                game.boats[0].position = Vec3::new(40.0, 70.0, 40.0);
+                let mut boat = game.boats[0].clone();
+                boat.position = Vec3::new(40.0, 70.0, 40.0);
+                game.boats.store_back(0, boat);
                 game.eject_boat_mobs(0, true);
                 assert!(game.mob_object(72).unwrap().removed);
                 assert_eq!(game.mob_object(72).unwrap().position, original);
