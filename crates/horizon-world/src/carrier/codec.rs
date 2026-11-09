@@ -31,19 +31,19 @@ use std::fmt;
 pub const SCHEMA_VERSION: i32 = 1;
 /// The file root's name.
 const ROOT_NAME: &str = "horizon_carrier";
-/// Input envelope: the largest legal carrier encodes to a full 16 MiB
-/// payload budget plus 4,096 cells of states — block names and property
-/// names and values together at most
-/// [`super::model::MAX_STATE_BYTES`] each, so 4 MiB of content and about
-/// 2 MiB of NBT framing — under 22.3 MiB, so anything past 24 MiB is
-/// refused before the tree is parsed.
+/// Input envelope: this bounds the wire bytes on the way in, not the
+/// decoded heap — a full-size carrier decodes to noticeably more than
+/// this once the tree exists. It stays the only bound on state names and
+/// properties, which the registry does not length-limit: a carrier whose
+/// encoded form passes it refuses at the door, before the tree is
+/// parsed.
 const MAX_INPUT_BYTES: usize = 24 * 1024 * 1024;
-/// Node ceiling for the exact schema shape: a cell compound carries up to
-/// 68 nodes (position, name, a properties compound of at most
-/// [`super::model::MAX_PROPERTIES`] strings, payload), which is 278,549
-/// nodes at 4,096 cells; seventy per cell leaves headroom while still
-/// refusing junk forests outright.
-const MAX_NODES: usize = 70 * MAX_CELLS;
+/// Node ceiling: the smallest possible node is five wire bytes (a tag
+/// byte, a u16 name length and a u16 string payload), so 24 MiB of input
+/// can hold at most about five million nodes; the ceiling matches that
+/// derivation, refusing junk forests whose node count outruns their
+/// bytes.
+const MAX_NODES: usize = 5 * 1024 * 1024;
 /// The schema nests three deep under the root; eight refuses anything
 /// deeper before it is parsed.
 const MAX_DEPTH: usize = 8;
@@ -214,8 +214,11 @@ pub fn decode(bytes: &[u8]) -> Result<Carrier, CodecError> {
     let Tag::Compound(mut map) = root.tag else {
         return Err(malformed("root is not a compound"));
     };
-    // The version gate comes first: a file from another schema reports
-    // its version whatever the rest of the tree holds.
+    // The version gate is the first carrier field checked: the NBT
+    // reader has already built the whole tree by now, but among the
+    // carrier's own fields the version is read before the key set or any
+    // value, so a file from another schema reports its version whatever
+    // the rest of the tree holds.
     let version = int_field(&map, "version")?;
     if version != SCHEMA_VERSION {
         return Err(CodecError::UnknownSchemaVersion { found: version });
@@ -579,16 +582,16 @@ mod tests {
             0,
             0,
             RigidTransform::identity_at(Vec3::new(1.0, 1.0, 1.0)).unwrap(),
-            positions(MAX_CELLS)
+            positions(4096)
                 .into_iter()
                 .map(|pos| Cell::new(pos, "minecraft:stone", Vec::new(), None).unwrap())
                 .collect(),
         )
         .unwrap();
-        assert_eq!(at_limit.cells().len(), MAX_CELLS);
+        assert_eq!(at_limit.cells().len(), 4096);
         assert_eq!(decode(&encode(&at_limit).unwrap()).unwrap(), at_limit);
 
-        let over = positions(MAX_CELLS + 1)
+        let over = positions(4097)
             .into_iter()
             .map(|pos| {
                 cell_tag(
@@ -605,9 +608,7 @@ mod tests {
         });
         assert_eq!(
             decode(&bytes),
-            Err(CodecError::Invalid(Invalid::CellCount {
-                count: MAX_CELLS + 1
-            }))
+            Err(CodecError::Invalid(Invalid::CellCount { count: 4097 }))
         );
     }
 
@@ -704,7 +705,7 @@ mod tests {
         let decoded = decode(&at_limit).unwrap();
         assert_eq!(
             decoded.cells().iter().map(Cell::data_len).sum::<usize>(),
-            MAX_CARRIER_DATA_BYTES
+            16777216
         );
         let over = rewrite(&at_limit, |map| {
             let Tag::List(mut items) = map.get(&JavaString::from("cells")).unwrap().clone() else {
@@ -715,9 +716,7 @@ mod tests {
         });
         assert_eq!(
             decode(&over).unwrap_err(),
-            CodecError::Invalid(Invalid::CarrierData {
-                total: MAX_CARRIER_DATA_BYTES + 1
-            })
+            CodecError::Invalid(Invalid::CarrierData { total: 16777217 })
         );
     }
 
@@ -892,6 +891,58 @@ mod tests {
             }
             other => panic!("expected the list length refusal, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn long_legal_property_names_round_trip() {
+        // The declaration boundary sets no token length, so a property
+        // name past every vanilla maximum (65 letters against the vanilla
+        // 20) and a long value are ordinary legal state data.
+        let carrier = Carrier::new(
+            9,
+            0,
+            0,
+            RigidTransform::identity_at(Vec3::ZERO).unwrap(),
+            vec![
+                Cell::new(
+                    LocalPos::new(0, 0, 0),
+                    "minecraft:stone",
+                    vec![
+                        ("a".repeat(65), "b".repeat(66)),
+                        ("facing".to_string(), "north".to_string()),
+                    ],
+                    None,
+                )
+                .unwrap(),
+            ],
+        )
+        .unwrap();
+        let decoded = decode(&encode(&carrier).unwrap()).unwrap();
+        assert_eq!(decoded, carrier);
+        assert_eq!(
+            decoded.cells()[0].properties()[0].0.as_ref(),
+            "a".repeat(65)
+        );
+    }
+
+    #[test]
+    fn an_unknown_version_beats_broken_keys_and_values() {
+        // The version is the first carrier field checked: a file from
+        // another schema reports its version even when its keys or other
+        // fields are also wrong. (The NBT reader has still built the
+        // whole tree first — the gate is first among the carrier's
+        // fields, not before parsing.)
+        let bytes = rewrite(&encode(&sample_carrier()).unwrap(), |map| {
+            map.insert("version".into(), Tag::Int(SCHEMA_VERSION + 7));
+            map.insert("surprise".into(), Tag::Int(0));
+            map.insert("uuid_msb".into(), Tag::Int(1));
+        });
+        assert_eq!(
+            decode(&bytes),
+            Err(CodecError::UnknownSchemaVersion {
+                found: SCHEMA_VERSION + 7
+            })
+        );
     }
 
     #[test]
