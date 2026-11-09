@@ -18,9 +18,12 @@ enum Family {
     Movement,
     Breathing,
     Goal,
+    MountedGoal,
     Knockback,
     Landing,
 }
+#[derive(Debug)]
+struct PanicToken(u64);
 struct Probe {
     family: Family,
     calls: AtomicUsize,
@@ -28,6 +31,8 @@ struct Probe {
     guest_hits: AtomicUsize,
     ordered: bool,
     armed: AtomicBool,
+    payload: std::sync::Mutex<Option<Box<PanicToken>>>,
+    payload_address: usize,
 }
 impl Probe {
     fn hear(&self, family: Family, target: bool) {
@@ -35,9 +40,26 @@ impl Probe {
             self.calls.fetch_add(1, Ordering::SeqCst);
             if self.armed.swap(false, Ordering::SeqCst) {
                 eprintln!("BORROWED_NATIVE_REACHED:{family:?}");
-                panic!("actual borrowed mob callback panicked");
+                let payload = self.payload.lock().unwrap().take().unwrap();
+                std::panic::resume_unwind(payload);
             }
         }
+    }
+}
+impl Probe {
+    fn progress(&self, family: Family, target: bool, host: &mut dyn mod_api::LevelRandomHost) {
+        if self.family == family && target && self.armed.load(Ordering::SeqCst) {
+            // Seed at the actual callback boundary, independent of earlier vanilla draws.
+            assert!(host.set_random(mod_api::LegacyRandom::new(0x5eed)));
+            let mut expected = LegacyRandom::new(0x5eed);
+            assert_eq!(
+                host.with_random(|random| random.next_long()),
+                Some(expected.next_long())
+            );
+            VALUE.set(host.attachments(), Holder::Level, 314).unwrap();
+            eprintln!("BORROWED_NATIVE_PROGRESS:{family:?}");
+        }
+        self.hear(family, target);
     }
 }
 struct NativeGoal {
@@ -63,6 +85,15 @@ impl mod_api::Goal for NativeGoal {
         true
     }
     fn tick(&mut self, cx: &mut mod_api::GoalContext<'_>) {
+        if self.probe.family == Family::MountedGoal {
+            if !self.target {
+                assert!(cx.move_to([3.0, 80.0, 0.5], 1.25));
+                eprintln!("BORROWED_MOUNTED_MOVE_SUCCEEDED");
+                self.probe
+                    .hear(Family::MountedGoal, cx.mob().entity().id() == 72);
+            }
+            return;
+        }
         assert_eq!(
             cx.mob().entity().position(cx.host()),
             Some([2.0, 80.0, 0.5])
@@ -75,8 +106,12 @@ impl mod_api::Goal for NativeGoal {
 struct GoalPart(Arc<Probe>);
 #[mod_api::horizon_part]
 impl mod_api::BlockPart for GoalPart {
-    fn fall_on(&self, _: &mut dyn mod_api::LevelRandomHost, event: &mut mod_api::FallOnEvent<'_>) {
-        self.0.hear(Family::Landing, event.entity == 72);
+    fn fall_on(
+        &self,
+        host: &mut dyn mod_api::LevelRandomHost,
+        event: &mut mod_api::FallOnEvent<'_>,
+    ) {
+        self.0.progress(Family::Landing, event.entity == 72, host);
     }
 }
 #[mod_api::horizon_part]
@@ -130,7 +165,7 @@ impl mod_api::Hooks for Hooks {
         self.0.posts.fetch_add(1, Ordering::SeqCst);
     }
     fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
-        if self.0.family == Family::Goal {
+        if matches!(self.0.family, Family::Goal | Family::MountedGoal) {
             r.entity_part("minecraft:zombie", GoalPart(self.0.clone()));
         }
         if self.0.family == Family::Landing {
@@ -159,29 +194,29 @@ impl mod_api::Hooks for Hooks {
     }
     fn living_knockback(
         &self,
-        _: &mut dyn mod_api::LevelRandomHost,
+        host: &mut dyn mod_api::LevelRandomHost,
         event: &mut mod_api::LivingKnockbackEvent<'_>,
     ) -> mod_api::Flow {
-        self.0.hear(Family::Knockback, event.entity == 72);
+        self.0.progress(Family::Knockback, event.entity == 72, host);
         mod_api::Flow::Continue
     }
     fn living_incoming_damage(
         &self,
-        _: &mut dyn mod_api::LevelRandomHost,
+        host: &mut dyn mod_api::LevelRandomHost,
         event: &mut mod_api::LivingIncomingDamageEvent<'_>,
     ) -> mod_api::Flow {
         if event.kind == "minecraft:player" {
             self.0.guest_hits.fetch_add(1, Ordering::SeqCst);
         }
-        self.0.hear(Family::Damage, event.entity == 72);
+        self.0.progress(Family::Damage, event.entity == 72, host);
         mod_api::Flow::Continue
     }
     fn living_shield_block(
         &self,
-        _: &mut dyn mod_api::LevelRandomHost,
+        host: &mut dyn mod_api::LevelRandomHost,
         event: &mut mod_api::LivingShieldBlockEvent<'_>,
     ) {
-        self.0.hear(Family::Shield, event.entity == 72);
+        self.0.progress(Family::Shield, event.entity == 72, host);
     }
     fn living_speed(
         &self,
@@ -199,10 +234,10 @@ impl mod_api::Hooks for Hooks {
     }
     fn living_use_totem(
         &self,
-        _: &mut dyn mod_api::LevelRandomHost,
+        host: &mut dyn mod_api::LevelRandomHost,
         event: &mut mod_api::LivingUseTotemEvent<'_>,
     ) -> mod_api::Flow {
-        self.0.hear(Family::Totem, event.entity == 72);
+        self.0.progress(Family::Totem, event.entity == 72, host);
         mod_api::Flow::Continue
     }
 }
@@ -266,6 +301,8 @@ fn run_output(family: Family, output: Output) {
             std::process::id(),
             std::thread::current().id()
         )));
+        let payload = Box::new(PanicToken(0xdecaf));
+        let payload_address = (&*payload as *const PanicToken) as usize;
         let probe = Arc::new(Probe {
             family,
             calls: AtomicUsize::new(0),
@@ -273,6 +310,8 @@ fn run_output(family: Family, output: Output) {
             guest_hits: AtomicUsize::new(0),
             ordered: output == Output::Mixed,
             armed: AtomicBool::new(true),
+            payload: std::sync::Mutex::new(Some(payload)),
+            payload_address,
         });
         mod_api::testing::with_mods(
             vec![mod_api::ModEntry::new(
@@ -346,6 +385,18 @@ fn run_output(family: Family, output: Output) {
                         if output == Output::Push && id == 70 {
                             mob.position.x = 1.2;
                         }
+                        if family == Family::MountedGoal {
+                            mob.no_ai = false;
+                            mob.on_ground = true;
+                            // Collision on the vehicle's first tick must keep it grounded.
+                            mob.velocity.y = -0.08;
+                            mob.ai.nav.speed_modifier = if id == 72 { 3.75 } else { 9.25 };
+                            if id == 72 {
+                                mob.extra.mount = Some(71);
+                            } else {
+                                mob.extra.rider = Some(72);
+                            }
+                        }
                         if id == 71 {
                             mob.ai.last_hurt_by_player = 5;
                             if output != Output::Quiet {
@@ -380,7 +431,7 @@ fn run_output(family: Family, output: Output) {
                             if matches!(family, Family::Damage | Family::Shield | Family::Totem) {
                                 mob.fire_ticks = 20;
                             }
-                            if family == Family::Goal {
+                            if matches!(family, Family::Goal | Family::MountedGoal) {
                                 mob.no_ai = false;
                                 assert!(mob.ai.goals.has("BorrowedProbe"));
                             }
@@ -428,9 +479,15 @@ fn run_output(family: Family, output: Output) {
                     if matches!(family, Family::Movement | Family::Landing) {
                         game.world.set(2, 79, 0, stone).unwrap();
                     }
+                    if family == Family::MountedGoal {
+                        for x in 0..=4 {
+                            for z in 0..=2 {
+                                game.world.set(x, 79, z, stone).unwrap();
+                            }
+                        }
+                    }
                     let writes = game.world.path_writes.clone();
                     game.world.random = LegacyRandom::new(0x5eed);
-                    let draw = game.world.random.clone().next_long();
                     let guest_health = if matches!(output, Output::Guest | Output::Mixed) {
                         game.lan.as_ref().unwrap().hub.guests[0].health
                     } else {
@@ -452,10 +509,29 @@ fn run_output(family: Family, output: Output) {
                         "aborted pass fired post callbacks"
                     );
                     let payload = result.expect_err("native callback panic was swallowed");
+                    let token = payload
+                        .downcast_ref::<PanicToken>()
+                        .expect("original typed payload");
                     assert_eq!(
-                        payload.downcast_ref::<&str>().copied(),
-                        Some("actual borrowed mob callback panicked")
+                        (token as *const PanicToken) as usize,
+                        probe.payload_address,
+                        "original payload object was replaced"
                     );
+                    assert_eq!(token.0, 0xdecaf);
+                    let progressed = matches!(
+                        family,
+                        Family::Damage
+                            | Family::Shield
+                            | Family::Totem
+                            | Family::Knockback
+                            | Family::Landing
+                    );
+                    let expected_value = if progressed { 314 } else { 42 };
+                    let mut expected_random = LegacyRandom::new(0x5eed);
+                    if progressed {
+                        expected_random.next_long();
+                    }
+                    let expected_draw = expected_random.next_long();
                     if output == Output::Reset {
                         assert_eq!(eggs(game), 0);
                         let variant = game.mobs[0].extra.variant;
@@ -525,12 +601,12 @@ fn run_output(family: Family, output: Output) {
                         VALUE
                             .get_existing(&mut game.world.attachments, Holder::Level)
                             .unwrap(),
-                        Some(42)
+                        Some(expected_value)
                     );
                     assert_eq!(game.last_hurt_by_player.get(&71).map(|c| c.0), Some(99));
                     assert_eq!(game.world.attachment_syncs, syncs);
                     assert_eq!(game.world.path_writes, writes);
-                    assert_eq!(game.world.random.clone().next_long(), draw);
+                    assert_eq!(game.world.random.clone().next_long(), expected_draw);
                     let mut table = EntityTable::new(journal);
                     for &(id, join) in &rows {
                         let found = table.entity_lookup(&owner.dimension, id, |at| {
@@ -545,7 +621,7 @@ fn run_output(family: Family, output: Output) {
                         );
                     }
                     table.end_tick().unwrap();
-                    if family == Family::Goal {
+                    if matches!(family, Family::Goal | Family::MountedGoal) {
                         assert!(
                             game.mobs[1].ai.targets.is_running("BorrowedTarget"),
                             "actual native target selector was lost"
@@ -573,6 +649,23 @@ fn run_output(family: Family, output: Output) {
                     if output == Output::Push {
                         game.mobs[1].no_ai = true;
                         game.mobs[1].position.x = 8.0;
+                    }
+                    if family == Family::MountedGoal {
+                        assert_eq!(
+                            game.mobs[1].ai.nav.speed_modifier, 3.75,
+                            "private rider navigation not restored"
+                        );
+                        assert_eq!(
+                            game.mobs[0].ai.nav.speed_modifier, 1.25,
+                            "vehicle navigation lost requested progress (or routing never loaned)"
+                        );
+                        assert!(
+                            game.mobs[0].ai.nav.path.is_some(),
+                            "vehicle lost successful native path"
+                        );
+                        eprintln!(
+                            "BORROWED_MOUNTED_RESTORED:{dim:?}:rider=3.75:vehicle=1.25:path=Some"
+                        );
                     }
                     game.tick_creature_entities().unwrap();
                     assert!(
@@ -624,6 +717,22 @@ fn run_output(family: Family, output: Output) {
                             assert_eq!(eggs(game), 1);
                         }
                     }
+                    if family == Family::MountedGoal {
+                        assert_eq!(probe.calls.load(Ordering::SeqCst), 2);
+                        eprintln!("BORROWED_MOUNTED_RETRY_OK:{dim:?}");
+                    }
+                    assert_eq!(
+                        VALUE
+                            .get_existing(&mut game.world.attachments, Holder::Level)
+                            .unwrap(),
+                        Some(expected_value),
+                        "callback attachment lost on retry"
+                    );
+                    assert_eq!(
+                        (payload.downcast_ref::<PanicToken>().unwrap() as *const PanicToken)
+                            as usize,
+                        probe.payload_address
+                    );
                 })
             },
         );
@@ -636,7 +745,7 @@ macro_rules! cases {
         fn $name() { run(Family::$family); }
     )*};
 }
-cases!(damage => Damage, shield => Shield, totem => Totem, movement => Movement, breathing => Breathing, goal => Goal, knockback => Knockback, landing => Landing);
+cases!(damage => Damage, shield => Shield, totem => Totem, movement => Movement, breathing => Breathing, goal => Goal, mounted_goal => MountedGoal, knockback => Knockback, landing => Landing);
 
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
