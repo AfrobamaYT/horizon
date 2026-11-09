@@ -44,12 +44,12 @@ impl TryIntoEngine<()> for mod_api::BlockShapes {
     type Engine = engine::BlockShapes;
     type Error = String;
     fn try_into_engine(&self, _: &()) -> Result<Self::Engine, Self::Error> {
-        Ok(engine::BlockShapes {
+        Ok(engine::BlockShapes(engine::StateValues {
             property: String::new(),
             properties: self.properties.clone(),
             values: self.values.clone(),
             default: self.default.clone(),
-        })
+        }))
     }
 }
 impl TryIntoEngine<()> for mod_api::ShapeEntityKind {
