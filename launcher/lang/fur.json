@@ -1212,5 +1212,21 @@
   "{title} would change nothing in Horizon yet: Horizon doesn't read its {files}.": "{title} would change nothing in Horizon yet: Horizon doesn't read its {files}.",
   "Game cache leases require a supported local filesystem.": "Game cache leases require a supported local filesystem.",
   "Game cache cleanup is unavailable because running games cannot be reliably excluded.": "Game cache cleanup is unavailable because running games cannot be reliably excluded.",
-  "Use recommended (kept at {version})": "Dopre chê conseade (tignude a {version})"
+  "Use recommended (kept at {version})": "Dopre chê conseade (tignude a {version})",
+  "E_INJECT_INVALID: {id}: invalid {field}; {fix}": "E_INJECT_INVALID: {id}: invalid {field}; {fix}",
+  "E_INJECT_MISSING: {id}: {at} gone; rerun inject add": "E_INJECT_MISSING: {id}: {at} gone; rerun inject add",
+  "E_INJECT_CHANGED: {id}: {at} {old} -> {new}; run inject update": "E_INJECT_CHANGED: {id}: {at} {old} -> {new}; run inject update",
+  "E_INJECT_MOVED: {id} now at nth={nth}; run inject update": "E_INJECT_MOVED: {id} now at nth={nth}; run inject update",
+  "E_INJECT_LOST: {id}: {at} lost or ambiguous; rerun inject add": "E_INJECT_LOST: {id}: {at} lost or ambiguous; rerun inject add",
+  "E_INJECT_NO_SLOT: {id}: {reason}; slot declaration {declaration}; use a native mod or a game build supporting this slot": "E_INJECT_NO_SLOT: {id}: {reason}; slot declaration {declaration}; use a native mod or a game build supporting this slot",
+  "not listed": "not listed",
+  "kind has no slot": "kind has no slot",
+  "native-only place": "native-only place",
+  "wasm sites pending": "wasm sites pending",
+  "local slots pending (I5)": "local slots pending (I5)",
+  "extension slots pending (I6)": "extension slots pending (I6)",
+  "API site listeners pending (U4c)": "API site listeners pending (U4c)",
+  "source injects pending (U5)": "source injects pending (U5)",
+  "replace listeners pending (U9)": "replace listeners pending (U9)",
+  "no API record: a parameter has no API type yet": "no API record: a parameter has no API type yet"
 }
