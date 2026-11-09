@@ -119,6 +119,11 @@ pub(super) struct ScreenBuildState {
 }
 
 impl ScreenBuildState {
+    /// A fresh overlay instance must build even when its kind is unchanged.
+    pub(super) fn reopened(&mut self) {
+        self.current = None;
+    }
+
     /// Reconciles the build with what shows now: a different screen or a
     /// different GUI size makes it, the same one keeps it, and nothing shown
     /// drops it. A call that changes nothing allocates nothing, so the frame
@@ -247,6 +252,9 @@ mod tests {
         assert_eq!(state.builds, 4);
         state.sync(Screen::Playing, true, Some("book_view"), size);
         assert_eq!(state.builds, 4);
+        state.reopened();
+        state.sync(Screen::Playing, true, Some("book_view"), size);
+        assert_eq!(state.builds, 5);
     }
 
     #[test]

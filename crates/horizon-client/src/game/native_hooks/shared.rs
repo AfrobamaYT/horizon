@@ -239,6 +239,7 @@ impl Game<'_> {
     ) -> bool {
         if !self.screen_hooks_heard() {
             open(self);
+            self.screen_state.build.reopened();
             self.build_screen();
             return true;
         }
@@ -266,6 +267,7 @@ impl Game<'_> {
             ScreenDecision::Open => {}
         }
         open(self);
+        self.screen_state.build.reopened();
         self.build_screen();
         // Told here, so the frame's `observe_screen` sees no change to announce.
         self.screen_state.observed = self.observed_now();
