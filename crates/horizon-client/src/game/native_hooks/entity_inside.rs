@@ -667,3 +667,258 @@ fn the_server_passes_without_a_part_keep_vanilla_behavior() {
         assert!(horizon_client::block_contact::take_pending().is_empty());
     });
 }
+
+/// The item's batch sweep tests: the same part, the same assertions as the
+/// player's, over `Game::sweep_item_inside`.
+fn item_at_blocks(game: &mut Game<'_>) -> horizon_client::entities::ItemEntity {
+    let stone = game
+        .pack
+        .assets
+        .registry
+        .default_state("minecraft:stone")
+        .unwrap();
+    game.world.chunks.insert(
+        (0, 0),
+        std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+    );
+    for x in [1, 2] {
+        game.world.set(x, 100, 0, stone).unwrap();
+    }
+    let mut item = horizon_client::entities::ItemEntity::new(
+        7,
+        horizon_client::items::ItemStack::new("minecraft:stone", 1),
+        horizon_core::geometry::Vec3::new(2.5, 100.0, 0.5),
+        horizon_core::geometry::Vec3::ZERO,
+        0.0,
+    );
+    item.previous = horizon_core::geometry::Vec3::new(0.5, 100.0, 0.5);
+    item
+}
+
+/// A part's pushes reach the item in its own tick, one contact a block.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_part_pushes_an_item_once_a_block() {
+    let part = InsidePart::default();
+    let mods = install_inside_mod("inside-item", &part);
+    mod_api::testing::with_mods(mods, || {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            let _ = horizon_client::block_contact::HOOKS.set(BLOCK_CONTACT_HOOKS);
+            let mut item = item_at_blocks(game);
+            let before = item.velocity.x;
+            horizon_client::block_contact::in_level(Some("minecraft:overworld"), || {
+                game.sweep_item_inside(&mut item);
+            });
+            assert_eq!(
+                *part.contacts.lock().unwrap(),
+                vec![[1, 100, 0], [2, 100, 0]],
+                "one contact a block, in walk order"
+            );
+            assert!(
+                (item.velocity.x - before - 1.0).abs() < 1e-9,
+                "both pushes reached the item"
+            );
+            assert!(horizon_client::block_contact::take_pending().is_empty());
+        });
+    });
+}
+
+/// A killing write stops the item's flush: the walk still reaches both blocks,
+/// the writes after the destruction never apply.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_killing_write_stops_the_items_flush() {
+    let mut part = InsidePart::default();
+    part.kill_after = Some(0);
+    let mods = install_inside_mod("inside-item-kill", &part);
+    mod_api::testing::with_mods(mods, || {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            let _ = horizon_client::block_contact::HOOKS.set(BLOCK_CONTACT_HOOKS);
+            let mut item = item_at_blocks(game);
+            let before = item.velocity.x;
+            horizon_client::block_contact::in_level(Some("minecraft:overworld"), || {
+                game.sweep_item_inside(&mut item);
+            });
+            assert_eq!(part.contacts.lock().unwrap().len(), 2);
+            assert!(item.health <= 0, "the killing write applied");
+            assert!(
+                (item.velocity.x - before).abs() < 1e-9,
+                "the writes after the destruction never apply"
+            );
+        });
+    });
+}
+
+/// A panicking part inside the item batch: the staged fire contains it, the
+/// lent level goes back, and the lifted row the batch holds returns to the
+/// level's list (#2194's and #2213's carrier discipline).
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_panicking_part_leaves_the_item_batch_restored() {
+    let mut part = InsidePart::default();
+    part.panic_after = Some(0);
+    let mods = install_inside_mod("inside-item-panic", &part);
+    mod_api::testing::with_mods(mods, || {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            let _ = horizon_client::block_contact::HOOKS.set(BLOCK_CONTACT_HOOKS);
+            let item = item_at_blocks(game);
+            game.dropped.push(item);
+            let rows = game.dropped.len();
+            let mut items = game.dropped.lift();
+            let before = items[0].velocity.x;
+            horizon_client::block_contact::in_level(Some("minecraft:overworld"), || {
+                game.sweep_item_inside(&mut items[0]);
+            });
+            game.put_back_dropped(items);
+            assert_eq!(
+                part.contacts.lock().unwrap().len(),
+                2,
+                "both contacts reached the part; each panic was contained"
+            );
+            assert_eq!(game.dropped.len(), rows, "the lifted row returned");
+            let item = game.dropped.get(0).unwrap();
+            assert!(
+                (item.velocity.x - before).abs() < 1e-9,
+                "the panicking callback's staged writes never applied"
+            );
+            // The level went back: its blocks read as they were.
+            assert!(
+                game.world.block(1, 100, 0).0 != 0,
+                "the level reads as it was"
+            );
+            assert!(horizon_client::block_contact::take_pending().is_empty());
+        });
+    });
+}
+
+/// Without a part the item's sweep costs one gate test: nothing is written,
+/// nothing queued, exactly what main's recorded route did with no listener.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn an_item_without_a_part_is_left_alone() {
+    crate::game::native_entity_refs::tests::with_game(|game| {
+        let _ = horizon_client::block_contact::HOOKS.set(BLOCK_CONTACT_HOOKS);
+        let mut item = item_at_blocks(game);
+        let before = (item.velocity.x, item.health, item.fire_ticks);
+        horizon_client::block_contact::in_level(Some("minecraft:overworld"), || {
+            game.sweep_item_inside(&mut item);
+        });
+        assert_eq!(
+            (item.velocity.x, item.health, item.fire_ticks),
+            before,
+            "no writes without a part"
+        );
+        assert!(horizon_client::block_contact::take_pending().is_empty());
+    });
+}
+
+/// The projectile's batch sweep: a part's push reaches it, one contact a
+/// block, and a removed projectile's flush stops.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_part_pushes_a_projectile_and_removal_stops_the_flush() {
+    let part = InsidePart::default();
+    let mods = install_inside_mod("inside-shot", &part);
+    mod_api::testing::with_mods(mods, || {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            let _ = horizon_client::block_contact::HOOKS.set(BLOCK_CONTACT_HOOKS);
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            for x in [1, 2] {
+                game.world.set(x, 100, 0, stone).unwrap();
+            }
+            let mut shot = horizon_client::projectiles::Projectile::new(
+                horizon_client::projectiles::ProjectileKind::Snowball,
+                horizon_core::geometry::Vec3::new(2.5, 100.0, 0.5),
+                None,
+            );
+            shot.id = 9;
+            shot.previous = horizon_core::geometry::Vec3::new(0.5, 100.0, 0.5);
+            let before = shot.velocity.x;
+            horizon_client::block_contact::in_level(Some("minecraft:overworld"), || {
+                game.sweep_projectile_inside(&mut shot);
+            });
+            assert_eq!(
+                *part.contacts.lock().unwrap(),
+                vec![[1, 100, 0], [2, 100, 0]],
+                "one contact a block, in walk order"
+            );
+            assert!(
+                (shot.velocity.x - before - 1.0).abs() < 1e-9,
+                "both pushes reached the projectile"
+            );
+            // A removed arrow's flush stops: nothing applies past its death.
+            part.contacts.lock().unwrap().clear();
+            let mut arrow = horizon_client::projectiles::Projectile::new(
+                horizon_client::projectiles::ProjectileKind::Arrow {
+                    base_damage: 1.0,
+                    critical: false,
+                    effect: None,
+                },
+                horizon_core::geometry::Vec3::new(2.5, 100.0, 0.5),
+                None,
+            );
+            arrow.id = 10;
+            arrow.previous = horizon_core::geometry::Vec3::new(0.5, 100.0, 0.5);
+            arrow.velocity = horizon_core::geometry::Vec3::ZERO;
+            let arrow_state = &mut arrow.arrow;
+            if let Some(a) = arrow_state.as_mut() {
+                a.removed = true;
+            }
+            let before = arrow.velocity.x;
+            horizon_client::block_contact::in_level(Some("minecraft:overworld"), || {
+                game.sweep_projectile_inside(&mut arrow);
+            });
+            assert!(
+                part.contacts.lock().unwrap().is_empty(),
+                "a removed projectile is not walked"
+            );
+            assert!((arrow.velocity.x - before).abs() < 1e-9);
+        });
+    });
+}
+
+/// Without a part the projectile's sweep costs one gate test and nothing else,
+/// exactly what main's recorded route did with no listener.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_projectile_without_a_part_is_left_alone() {
+    crate::game::native_entity_refs::tests::with_game(|game| {
+        let _ = horizon_client::block_contact::HOOKS.set(BLOCK_CONTACT_HOOKS);
+        let stone = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:stone")
+            .unwrap();
+        game.world.chunks.insert(
+            (0, 0),
+            std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+        );
+        game.world.set(1, 100, 0, stone).unwrap();
+        let mut shot = horizon_client::projectiles::Projectile::new(
+            horizon_client::projectiles::ProjectileKind::Snowball,
+            horizon_core::geometry::Vec3::new(1.5, 100.0, 0.5),
+            None,
+        );
+        shot.previous = horizon_core::geometry::Vec3::new(0.5, 100.0, 0.5);
+        let before = (shot.velocity.x, shot.fire_ticks, shot.fall_distance);
+        horizon_client::block_contact::in_level(Some("minecraft:overworld"), || {
+            game.sweep_projectile_inside(&mut shot);
+        });
+        assert_eq!(
+            (shot.velocity.x, shot.fire_ticks, shot.fall_distance),
+            before,
+            "no writes without a part"
+        );
+        assert!(horizon_client::block_contact::take_pending().is_empty());
+    });
+}

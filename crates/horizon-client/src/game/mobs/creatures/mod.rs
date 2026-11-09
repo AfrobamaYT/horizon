@@ -271,11 +271,6 @@ pub(super) struct ProjWorld<'a, 'w> {
     pub border: Option<[f64; 4]>,
 }
 impl ProjectileWorld for ProjWorld<'_, '_> {
-    fn block_contacts(&self, entity: i32, from: Vec3, to: Vec3, bounds: Aabb) {
-        horizon_client::block_contact::swept_inside(entity, from, to, bounds, |p| {
-            self.w.world.block(p.x, p.y, p.z)
-        });
-    }
     fn clip(&self, from: Vec3, to: Vec3) -> Option<(Vec3, [i32; 3], [i32; 3])> {
         let mut scene = SceneCollisions {
             world: self.w.world,
@@ -5365,6 +5360,21 @@ impl Game<'_> {
         }
         for (at, event) in arrow_events {
             self.arrow_event(at, event);
+        }
+        // `Entity.applyEffectsFromBlocks`' checkInsideBlocks for every
+        // projectile that ticked, at the batch: the borrow block above held the
+        // world read-only, and a part's contact needs the lent level, so the
+        // sweeps run here, each still inside this batch and its own tick.
+        for i in 0..projectiles.len() {
+            if !keep_flags[i] {
+                continue;
+            }
+            let mut swept = None;
+            projectiles.update(i, |p| {
+                swept = Some((p.previous, p.position));
+            });
+            let _ = swept;
+            projectiles.update(i, |p| self.sweep_projectile_inside(p));
         }
         self.creatures.projectiles.restore(
             projectiles,
