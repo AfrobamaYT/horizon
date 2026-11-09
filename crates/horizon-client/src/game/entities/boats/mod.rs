@@ -1718,11 +1718,15 @@ impl Game<'_> {
         mut damage: f32,
         creative: bool,
     ) -> Option<bool> {
+        let id = self.boats[i].id;
         let mut cancel = false;
         self.native_vehicle_damage("boat", &mut damage, &mut cancel);
         if cancel {
             return None;
         }
+        let Some(i) = self.boats.iter().position(|b| b.id == id) else {
+            return Some(true);
+        };
         let (destroyed, at) = self.boats.update(i, |b| {
             b.hurt_dir = -b.hurt_dir;
             b.hurt_time = 10;
@@ -1734,8 +1738,14 @@ impl Game<'_> {
         });
         if destroyed {
             self.native_vehicle_destroy("boat", at);
+            let Some(i) = self.boats.iter().position(|b| b.id == id) else {
+                return Some(true);
+            };
             self.eject_boat_mobs(i, true);
-            let id = self.boats[i].id;
+            let Some(i) = self.boats.iter().position(|b| b.id == id) else {
+                return Some(true);
+            };
+            self.finish_destroyed_vehicle_riders(id, self.boats[i].position.y);
             self.release_vehicle_container(id);
             let b = self.boats.remove(i);
             // `AbstractChestBoat.remove` spills the chest through

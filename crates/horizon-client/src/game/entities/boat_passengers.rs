@@ -494,6 +494,30 @@ impl Game<'_> {
             }
         }
     }
+    /// Safe destruction interim (#2446): after the cancellable ejection was
+    /// observed, a destroyed vehicle cannot leave a dangling Mob edge. Live
+    /// underwater/activator ejections never take this forced completion path.
+    pub(super) fn finish_destroyed_vehicle_riders(&mut self, vehicle: u32, y: f64) {
+        for rider in self.mob_passenger_ids(vehicle) {
+            let Some(m) = self.mob_object(rider) else {
+                continue;
+            };
+            let at = self.removed_vehicle_dismount_point(
+                m.position,
+                f64::from(m.width()),
+                f64::from(m.height()),
+                y,
+            );
+            let m = self.mob_object_mut(rider).unwrap();
+            m.extra.mount = None;
+            m.extra.passenger = false;
+            m.extra.boarding_cooldown = BOARDING_COOLDOWN;
+            m.position = at;
+            m.previous = at;
+            self.snap_mob_passengers(rider);
+        }
+    }
+
     /// `ejectPassengers` for the mobs in boat `i`: each gets out where
     /// `getDismountLocationForPassenger` puts it (beside the boat when it
     /// broke: `LivingEntity.dismountVehicle`) and can't board for a while.

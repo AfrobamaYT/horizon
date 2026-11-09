@@ -1634,6 +1634,7 @@ impl Game<'_> {
         if let Some(i) = self.carts.iter().position(|x| x.id == c.id) {
             self.eject_cart_mobs(i);
         }
+        self.finish_destroyed_vehicle_riders(c.id, c.position.y);
         self.release_vehicle_container(c.id);
         self.carts.retain(|x| x.id != c.id);
         // ExplosionInteraction.TNT: the tnt_explosion_drop_decay rule.
@@ -2559,8 +2560,12 @@ impl Game<'_> {
             return;
         }
         if burning && self.carts[i].kind == CartKind::Tnt {
-            self.eject_cart_mobs(i);
             let id = self.carts[i].id;
+            self.eject_cart_mobs(i);
+            let Some(i) = self.carts.iter().position(|c| c.id == id) else {
+                return;
+            };
+            self.finish_destroyed_vehicle_riders(id, self.carts[i].position.y);
             self.release_vehicle_container(id);
             let mut c = self.carts.remove(i);
             self.explode_cart(&mut c, arrow_velocity.length_squared());
@@ -2608,12 +2613,16 @@ impl Game<'_> {
         creative: bool,
         fire: bool,
     ) -> bool {
+        let id = self.carts[i].id;
         let kind = self.carts[i].kind.id();
         let mut cancel = false;
         self.native_vehicle_damage(kind, &mut damage, &mut cancel);
         if cancel {
             return false;
         }
+        let Some(i) = self.carts.iter().position(|c| c.id == id) else {
+            return true;
+        };
         let destroyed = self.carts.update(i, |c| {
             c.hurt_dir = -c.hurt_dir;
             c.hurt_time = 10;
@@ -2630,7 +2639,9 @@ impl Game<'_> {
             if !tnt_prime {
                 self.eject_cart_mobs(i);
             }
-            let id = self.carts[i].id;
+            let Some(i) = self.carts.iter().position(|c| c.id == id) else {
+                return true;
+            };
             if !tnt_prime {
                 self.release_vehicle_container(id);
             }
@@ -2641,6 +2652,12 @@ impl Game<'_> {
                     self.carts[i].position.z,
                 ];
                 self.native_vehicle_destroy(self.carts[i].kind.id(), at);
+            }
+            let Some(i) = self.carts.iter().position(|c| c.id == id) else {
+                return true;
+            };
+            if !tnt_prime {
+                self.finish_destroyed_vehicle_riders(id, self.carts[i].position.y);
             }
             let mut c = if tnt_prime {
                 self.carts.extract(self.carts[i].join).unwrap()

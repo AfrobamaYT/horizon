@@ -774,6 +774,81 @@ mod off_level_tests {
         }
     }
 
+    struct CountCanceledDismount(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for CountCanceledDismount {
+        fn entity_mount(
+            &self,
+            _: &mut dyn mod_api::ServerHost,
+            _: &mut mod_api::EntityMountEvent<'_>,
+        ) -> mod_api::Flow {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            mod_api::Flow::Cancel
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn destroyed_resident_vehicles_notify_cancellation_once_then_safely_unlink() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        for cart in [false, true] {
+            let cancel = Arc::new(AtomicUsize::new(0));
+            let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+                "toggle_dismount",
+                Box::new(CountCanceledDismount(cancel.clone())),
+            )]
+            .into();
+            mod_api::testing::with_mods(mods, || {
+                crate::game::native_entity_refs::tests::with_game(|game| {
+                    game.options.dedicated = Some(Vec::new());
+                    let at = Vec3::new(10.0, 200.0, 20.0);
+                    if cart {
+                        game.carts.push(super::super::minecarts::Minecart::new(
+                            71,
+                            super::super::minecarts::CartKind::Rideable,
+                            at,
+                        ));
+                    } else {
+                        game.boats
+                            .push(super::super::boats::Boat::new(71, "oak".into(), at, 0.0));
+                    }
+                    let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+                    let mut rider = Mob::new(72, pig.clone(), Vec3::new(5.0, 190.0, 6.0), 0.0);
+                    rider.extra.mount = Some(71);
+                    game.persist
+                        .off_level
+                        .insert(72, super::super::persist::OffLevel::Mob(rider));
+                    let mut child = Mob::new(73, pig, Vec3::ZERO, 0.0);
+                    child.extra.mount = Some(72);
+                    child.age = 19;
+                    game.mobs.push(child);
+                    if cart {
+                        game.hurt_cart(0, 5.0, true, false);
+                    } else {
+                        assert!(game.hurt_boat(0, 5.0, true));
+                    }
+                    assert_eq!(cancel.load(Ordering::Relaxed), 1);
+                    game.sync_riders();
+                    let rider = game.mob_object(72).unwrap();
+                    assert_eq!(rider.extra.mount, None);
+                    assert_eq!(rider.position, Vec3::new(5.0, 200.0, 6.0));
+                    let child = game.mob_object(73).unwrap();
+                    assert!((child.position.y - 200.86875).abs() < 1e-6);
+                    assert_eq!(child.age, 19);
+                    game.prune_entity_memory();
+                    assert!(!game.persist.off_level.contains_key(&71));
+                    assert!(game.persist.off_level.contains_key(&72));
+                    assert!(game.mobs.iter().any(|m| m.id == 73));
+                    assert!(!game.mobs.iter().any(|m| m.id == 72));
+                    assert_eq!(cancel.load(Ordering::Relaxed), 1);
+                });
+            });
+        }
+    }
+
     struct CancelDismount;
     #[mod_api::__subscriptions]
     impl mod_api::Hooks for CancelDismount {
