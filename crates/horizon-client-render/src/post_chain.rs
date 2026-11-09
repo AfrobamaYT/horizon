@@ -600,12 +600,20 @@ fn read_chain(
     root: &ResourceSource,
     id: &str,
     shaders: &crate::spectator_shaders::SpectatorShaders,
-) -> Result<String, String> {
+) -> Result<Option<String>, String> {
     let resource = resource_path(id);
-    root.read_to_string(&resource).map_err(|error| {
-        let entities = shaders.entities_for_chain(id);
-        format!("Spectator entities {entities:?}, shader {id}, resource {resource}: {error}")
-    })
+    match root.read_to_string(&resource) {
+        Ok(text) => Ok(Some(text)),
+        Err(error) => {
+            let entities = shaders.entities_for_chain(id);
+            if entities.is_empty() {
+                return Ok(None);
+            }
+            Err(format!(
+                "Spectator entities {entities:?}, shader {id}, resource {resource}: {error}"
+            ))
+        }
+    }
 }
 
 impl PostEffects {
@@ -826,7 +834,8 @@ impl PostEffects {
             })
     }
 
-    /// `PostChain.load` for the file of `id`: missing resources are diagnosed.
+    /// `PostChain.load` for the file of `id`: `Ok(None)` when it does not exist,
+    /// except registered spectator chains, whose missing resources are diagnosed.
     fn load(
         root: &ResourceSource,
         device: &wgpu::Device,
@@ -834,7 +843,9 @@ impl PostEffects {
         id: &str,
         extras: &Extras,
     ) -> Result<Option<Chain>, String> {
-        let text = read_chain(root, id, crate::spectator_shaders::table())?;
+        let Some(text) = read_chain(root, id, crate::spectator_shaders::table())? else {
+            return Ok(None);
+        };
         let mut config = Config::parse(&text)?;
         for (target, t) in &extras.targets {
             config
@@ -2524,6 +2535,17 @@ mod tests {
 
 #[cfg(test)]
 mod missing_resource_test {
+    #[test]
+    fn an_unregistered_missing_chain_stays_optional() {
+        let source = super::ResourceSource::indexed(Default::default());
+        let shaders = crate::spectator_shaders::SpectatorShaders::default();
+        assert_eq!(
+            super::read_chain(&source, "example:optional", &shaders),
+            Ok(None)
+        );
+        assert!(super::read_chain(&source, "minecraft:creeper", &shaders).is_err());
+    }
+
     #[test]
     fn missing_registered_resource_is_diagnosed() {
         let source = super::ResourceSource::indexed(Default::default());
