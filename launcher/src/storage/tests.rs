@@ -278,6 +278,7 @@ fn allocated_total_includes_directory_metadata() {
     fs::create_dir_all(&root).unwrap();
     let path = root.join(format!("directory-{}", std::process::id()));
     fs::create_dir(&path).unwrap();
+    // Home removes the fixture on drop, including when an assertion unwinds.
     let home = Home(path);
     for index in 0..300 {
         fs::write(home.0.join(format!("{index:04}-{}", "x".repeat(180))), []).unwrap();
