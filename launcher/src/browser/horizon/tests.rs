@@ -121,6 +121,7 @@ fn searches_by_kind_and_words() {
     let mut dated = counted.clone();
     let base = dated.projects[0].versions[0].clone();
     let version_on = |day: &str| index::Version {
+        native_binaries: Vec::new(),
         published: day.into(),
         ..base.clone()
     };
@@ -559,7 +560,7 @@ fn refuses_a_changed_file_a_taken_id_and_local_files_from_the_real_registry() {
 
 #[test]
 fn registry_versions_run_when_made_for_this_game() {
-    use super::super::{Support, pick, support};
+    use super::super::{pick, support, Support};
     let v = |game: &str| vec![game.to_owned()];
     let horizon = vec![LOADER.to_owned()];
     assert_eq!(support(Kind::Mod, &v(GAME), &horizon), Support::Works);
