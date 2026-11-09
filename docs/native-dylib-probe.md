@@ -48,8 +48,11 @@ process exit. Assertions check:
   so the definitions present prove nothing. On Linux the dynamic linker's actual
   bindings (`LD_DEBUG=bindings`) must send every allocator call, std's own
   included, to the game. Windows binds each import to the DLL it names, with no
-  interposition: the game DLL must be the only image exporting the allocator
-  (std's DLL included), and every image calling it must import it from the game.
+  interposition: exactly one image may export the allocator, and every image
+  calling it must import it from that one (#2394). The shipped route's
+  executable is checked the same way, and at run time every allocator in it must
+  draw from one heap. The counting-allocator experiment records on Windows why:
+  a `#[global_allocator]` in a dylib beside std's DLL splits from it.
 
 `commands.log` records compiler commands, checks, Clippy, dynamic dependency
 inspection and runtime assertions. Other evidence includes full `rustc.txt`, the

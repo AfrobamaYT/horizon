@@ -20,7 +20,7 @@ fn process_heap(pointer: *const u8) -> bool {
     unsafe { HeapValidate(GetProcessHeap(), 0, pointer.cast()) != 0 }
 }
 
-fn export(module: &str, name: &str) -> *mut c_void {
+fn export(module: &str, name: &str) -> Option<*mut c_void> {
     let module = CString::new(module).unwrap();
     let name = CString::new(name).unwrap();
     // SAFETY: both modules are already loaded by this executable's imports.
@@ -30,8 +30,7 @@ fn export(module: &str, name: &str) -> *mut c_void {
             name.as_ptr().cast(),
         )
     };
-    assert!(!address.is_null(), "{module:?} exports no {name:?}");
-    address
+    (!address.is_null()).then_some(address)
 }
 
 fn main() {
@@ -39,10 +38,15 @@ fn main() {
     let [game, std_dll, alloc, dealloc] = <[String; 4]>::try_from(args).unwrap();
     let mut rows = Vec::new();
     for module in [&game, &std_dll] {
+        // A game without its own allocator exports none: only the images that do are classified.
+        let (Some(allocate), Some(free)) = (export(module, &alloc), export(module, &dealloc))
+        else {
+            continue;
+        };
         // SAFETY: the Rust allocator ABI of this exact compiler: (size, align) and (pointer, size, align).
         unsafe {
-            let allocate: Alloc = std::mem::transmute(export(module, &alloc));
-            let free: Dealloc = std::mem::transmute(export(module, &dealloc));
+            let allocate: Alloc = std::mem::transmute(allocate);
+            let free: Dealloc = std::mem::transmute(free);
             let pointer = allocate(64, 8);
             rows.push((format!("{module} allocator"), process_heap(pointer)));
             free(pointer, 64, 8);
@@ -61,13 +65,13 @@ fn main() {
         .map(|(name, heap)| format!(r#"{{"allocation":"{name}","process_heap":{heap}}}"#))
         .collect();
     println!("[{}]", json.join(","));
-    let split = rows[0].1 != rows[2].1;
+    let split = rows.iter().any(|row| row.1 != rows[0].1);
     println!(
         "{}",
         if split {
-            "TWO ALLOCATORS: the executable's allocations and the game's come from different heaps"
+            "TWO ALLOCATORS: the route's allocations come from different heaps"
         } else {
-            "ONE ALLOCATOR: the executable allocates with the game's allocator"
+            "ONE ALLOCATOR: every allocator in the route draws from one heap"
         }
     );
     // Freeing the game's copy here would cross allocators when they differ.
