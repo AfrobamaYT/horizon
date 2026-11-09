@@ -197,3 +197,354 @@ mod entity_inside_tests {
         });
     }
 }
+
+/// The `entity_inside` part the player's sweep tests install: it draws the
+/// level's random once a contact (vanilla's order), queues a push and a wither
+/// effect around the freeze, and can kill or panic on later contacts.
+#[derive(Clone, Default)]
+struct InsidePart {
+    contacts: std::sync::Arc<std::sync::Mutex<Vec<[i32; 3]>>>,
+    wither: std::sync::Arc<std::sync::Mutex<Option<mod_api::EffectKey>>>,
+    speed: std::sync::Arc<std::sync::Mutex<Option<mod_api::EffectKey>>>,
+    kill_after: Option<usize>,
+    panic_after: Option<usize>,
+}
+#[mod_api::horizon_part]
+impl mod_api::BlockPart for InsidePart {
+    fn entity_inside(
+        &self,
+        host: &mut dyn mod_api::LevelRandomHost,
+        event: &mut mod_api::EntityInsideEvent<'_>,
+    ) {
+        let mut contacts = self.contacts.lock().unwrap();
+        contacts.push([event.pos.x, event.pos.y, event.pos.z]);
+        let seen = contacts.len();
+        drop(contacts);
+        // A level draw, in vanilla's order: between the vanilla contacts.
+        let _ = host.with_random(horizon_core::random::RandomSource::next_long);
+        if self.panic_after.is_some_and(|after| seen > after) {
+            panic!("an entity_inside part panics");
+        }
+        if self.kill_after.is_some_and(|after| seen > after) {
+            event.run_after(
+                mod_api::InsideEffect::Freeze,
+                mod_api::EntityWrite::Hurt {
+                    source: None,
+                    amount: 1000.0,
+                },
+            );
+        }
+        event.run_after(
+            mod_api::InsideEffect::Freeze,
+            mod_api::EntityWrite::Push([0.5, 0.0, 0.0]),
+        );
+        if let Some(wither) = *self.wither.lock().unwrap() {
+            event.run_after(
+                mod_api::InsideEffect::Freeze,
+                mod_api::EntityWrite::AddEffect {
+                    effect: wither,
+                    duration: 40,
+                    amplifier: 0,
+                },
+            );
+        }
+        if let Some(speed) = *self.speed.lock().unwrap() {
+            event.run_after(
+                mod_api::InsideEffect::Extinguish,
+                mod_api::EntityWrite::AddEffect {
+                    effect: speed,
+                    duration: 20,
+                    amplifier: 0,
+                },
+            );
+        }
+    }
+}
+struct InsideMod(InsidePart);
+#[mod_api::__subscriptions]
+impl mod_api::Hooks for InsideMod {
+    fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+        *self.0.wither.lock().unwrap() = Some(r.effect_key("minecraft:wither"));
+        *self.0.speed.lock().unwrap() = Some(r.effect_key("minecraft:speed"));
+        let stone = r.block_key("minecraft:stone");
+        r.block_part(stone, self.0.clone());
+    }
+}
+
+/// One sweep test at a time: they share the process's parts table and hook
+/// bindings, and the harness runs them on separate threads.
+static SWEEP_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// The part's mods, installed with their parts as a game's open does, before
+/// `with_game`: the game that opens then publishes the block index itself (the
+/// #824 parts-resolution order).
+fn install_inside_mod(name: &'static str, part: &InsidePart) -> mod_api::Mods {
+    let entry = |part: &InsidePart| mod_api::ModEntry::new(name, Box::new(InsideMod(part.clone())));
+    crate::game::api_values::install_parts(&[entry(part)]).unwrap();
+    vec![entry(part)].into()
+}
+
+/// The game's player sweeps its move through two stone blocks, over the game's
+/// own world and assets, through the production `BLOCK_CONTACT_HOOKS` fire.
+/// Returns the player's velocity x before and after, and whether it died.
+fn sweep_game_player(game: &mut Game<'_>) -> (f64, f64, bool) {
+    use horizon_client::motion::MotionWorld;
+    let stone = game
+        .pack
+        .assets
+        .registry
+        .default_state("minecraft:stone")
+        .unwrap();
+    game.world.chunks.insert(
+        (0, 0),
+        std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+    );
+    for x in [1, 2] {
+        game.world.set(x, 100, 0, stone).unwrap();
+    }
+    if game.player.is_none() {
+        game.player = Some(
+            horizon_client::motion::PlayerMotion::new(
+                &game.motion,
+                horizon_core::geometry::Vec3::new(0.5, 100.0, 0.5),
+            )
+            .unwrap(),
+        );
+    }
+    game.player
+        .as_mut()
+        .unwrap()
+        .history
+        .add(horizon_world::entity_move::MovementRecord {
+            from: horizon_core::geometry::Vec3::new(0.5, 100.0, 0.5),
+            to: horizon_core::geometry::Vec3::new(2.5, 100.0, 0.5),
+            original: None,
+        });
+    let before = game.player.as_ref().unwrap().velocity.x;
+    let crate::game::Game {
+        world,
+        pack,
+        motion,
+        health_resources,
+        damage_hooks,
+        loop_context,
+        collision,
+        player,
+        ..
+    } = game;
+    let entities: [horizon_core::geometry::Aabb; 0] = [];
+    horizon_client::block_contact::in_level(Some("minecraft:overworld"), || {
+        MotionWorld {
+            tag_items: None,
+            block_registries: Some(&pack.block_registries),
+            loop_context,
+            damage_hooks,
+            entities: &entities,
+            player: player.as_mut().unwrap(),
+            scene: world,
+            assets: &pack.assets,
+            collision_binding: collision,
+            resources: motion,
+            health: health_resources,
+        }
+        .apply_effects_from_blocks()
+        .unwrap();
+    });
+    let player = game.player.as_ref().unwrap();
+    (before, player.velocity.x, player.health.dead_or_dying())
+}
+
+/// A listening part is told mid-walk, in walk order, and its typed writes reach
+/// the player in this tick: both pushes add, and the wither effect event lands
+/// for the server's `give_player_effect`, which runs before this tick's effect
+/// tick.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_part_pushes_the_player_and_its_effect_lands() {
+    let _sweep = SWEEP_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let part = InsidePart::default();
+    let mods = install_inside_mod("inside-push", &part);
+    mod_api::testing::with_mods(mods, || {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            let _ = horizon_client::block_contact::HOOKS.set(BLOCK_CONTACT_HOOKS);
+            let (before, after, dead) = sweep_game_player(game);
+            assert!(!dead);
+            assert_eq!(
+                *part.contacts.lock().unwrap(),
+                vec![[1, 100, 0], [2, 100, 0]],
+                "both contacts, in walk order"
+            );
+            assert!(
+                (after - before - 1.0).abs() < 1e-9,
+                "both pushes reached the player: {after}"
+            );
+            let effect = game
+                .player
+                .as_ref()
+                .unwrap()
+                .events
+                .iter()
+                .find_map(|event| match event {
+                    horizon_client::motion::MotionEvent::InsideEffect { id, duration, .. } => {
+                        Some((*id, *duration))
+                    }
+                    _ => None,
+                })
+                .expect("the wither effect crossed to the server");
+            assert_eq!(effect, ("minecraft:wither", 40));
+            assert!(horizon_client::block_contact::take_pending().is_empty());
+        });
+    });
+}
+
+/// A part that kills the player with its first write: the walk's later contacts
+/// still happen, but the flush stops at the death, so the later writes and
+/// effects never apply.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_killing_write_stops_the_flush() {
+    let _sweep = SWEEP_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let mut part = InsidePart::default();
+    part.kill_after = Some(0);
+    let mods = install_inside_mod("inside-kill", &part);
+    mod_api::testing::with_mods(mods, || {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            let _ = horizon_client::block_contact::HOOKS.set(BLOCK_CONTACT_HOOKS);
+            let (before, after, dead) = sweep_game_player(game);
+            assert_eq!(
+                part.contacts.lock().unwrap().len(),
+                2,
+                "the walk itself reaches both contacts"
+            );
+            assert!(dead, "the killing write applied");
+            assert!(
+                (after - before).abs() < 1e-9,
+                "the writes after the death never apply"
+            );
+        });
+    });
+}
+
+/// A part that panics on its second contact: the panic is contained, the walk
+/// and the player's tick go on, and the panicking callback's writes are refused
+/// with it.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_panicking_part_leaves_the_players_tick_restored() {
+    let _sweep = SWEEP_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let mut part = InsidePart::default();
+    // The panic lands on the first contact; the runtime quarantines the mod
+    // after it, as it does for every hook a part panics in.
+    part.panic_after = Some(0);
+    let mods = install_inside_mod("inside-panic", &part);
+    mod_api::testing::with_mods(mods, || {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            let _ = horizon_client::block_contact::HOOKS.set(BLOCK_CONTACT_HOOKS);
+            let (before, after, dead) = sweep_game_player(game);
+            assert!(!dead);
+            assert_eq!(
+                part.contacts.lock().unwrap().len(),
+                2,
+                "both contacts reached the part; each panic was contained"
+            );
+            assert!(
+                (after - before).abs() < 1e-9,
+                "the panicking callback's staged writes never applied"
+            );
+            assert!(
+                game.player
+                    .as_ref()
+                    .unwrap()
+                    .events
+                    .iter()
+                    .any(|event| matches!(
+                        event,
+                        horizon_client::motion::MotionEvent::EnterBlock { .. }
+                    )),
+                "the vanilla moments still ran"
+            );
+        });
+    });
+}
+
+/// Without a listening part the walk runs its vanilla moments and leaves the
+/// player's writes and the pending queue alone: the fire's gate answers false
+/// and its DamageLevel is never built.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn without_a_part_the_walk_costs_no_mod_work() {
+    let _sweep = SWEEP_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let _ = horizon_client::block_contact::HOOKS.set(horizon_client::block_contact::Hooks {
+        step_on: |_, _| {},
+        any_inside: || false,
+        inside_listens: |_| false,
+        pass_listens: |_| false,
+        fall_listens: |_| false,
+        bounce_listens: |_| false,
+        fall_on: |_, _, _, _, _, _| {},
+        bounce_on: |_, _, _, _, _| {},
+        inside_fire: |_, _, _, _, _, _, _, _, _| {
+            panic!("no part listens: the fire is never built");
+        },
+    });
+    crate::game::native_entity_refs::tests::with_game(|game| {
+        let (before, after, dead) = sweep_game_player(game);
+        assert!(!dead);
+        assert!((after - before).abs() < 1e-9, "no writes without a part");
+        assert!(
+            game.player
+                .as_ref()
+                .unwrap()
+                .events
+                .iter()
+                .any(|event| matches!(
+                    event,
+                    horizon_client::motion::MotionEvent::EnterBlock { .. }
+                )),
+            "the vanilla moments still ran"
+        );
+        assert!(horizon_client::block_contact::take_pending().is_empty());
+    });
+}
+
+/// A part's `AddEffect` keeps its collector position across the event channel:
+/// one write asked after FREEZE and one after EXTINGUISH land in that order,
+/// `applyAndClear`'s own, ready for the server's `give_player_effect` before
+/// this tick's effect tick.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn an_added_effect_keeps_its_collector_position() {
+    let _sweep = SWEEP_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let part = InsidePart::default();
+    let mods = install_inside_mod("inside-order", &part);
+    mod_api::testing::with_mods(mods, || {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            let _ = horizon_client::block_contact::HOOKS.set(BLOCK_CONTACT_HOOKS);
+            let (_, _, dead) = sweep_game_player(game);
+            assert!(!dead);
+            let effects: Vec<_> = game
+                .player
+                .as_ref()
+                .unwrap()
+                .events
+                .iter()
+                .filter_map(|event| match event {
+                    horizon_client::motion::MotionEvent::InsideEffect { id, duration, .. } => {
+                        Some((*id, *duration))
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                effects,
+                vec![
+                    ("minecraft:wither", 40),
+                    ("minecraft:speed", 20),
+                    ("minecraft:wither", 40),
+                    ("minecraft:speed", 20),
+                ],
+                "each contact's writes flush in InsideEffect order: the FREEZE slot before the EXTINGUISH slot"
+            );
+        });
+    });
+}
