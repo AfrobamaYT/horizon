@@ -34,6 +34,7 @@
 - [Design: section geometry](concepts/section-geometry.md)
 - [Design: mesh visibility](concepts/mesh-visibility.md)
 - [Design: baked models and ModelData](concepts/baked-models.md)
+- [Design: inside-block contact shapes](concepts/inside-block-contact.md)
 - [Design: travel and move hooks](concepts/travel-and-move.md)
 
 # How-to
