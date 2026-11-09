@@ -1146,7 +1146,7 @@ pub(crate) fn records_selected(
         quote!(#file)
     });
     let listeners = points.iter().map(|point| parse(&point.api[0]));
-    let variants = points.iter().map(|point| parse(&point.api[1]));
+    let variants: Vec<_> = points.iter().map(|point| parse(&point.api[1])).collect();
     let dispatch = points.iter().map(|point| parse(&point.api[2]));
     let mut guest_functions = proc_macro2::TokenStream::new();
     let mut guest_entries = proc_macro2::TokenStream::new();
@@ -1211,11 +1211,19 @@ pub(crate) fn records_selected(
             });
         }
     }
-    let private_variants = sources.iter().map(|point| {
-        let head = quote::format_ident!("{}", point_shape::camel(&point.name));
-        let back = quote::format_ident!("{}Return", point_shape::camel(&point.name));
-        quote!(#head, #back,)
-    });
+    let private_variants: Vec<_> = sources
+        .iter()
+        .map(|point| {
+            let head = quote::format_ident!("{}", point_shape::camel(&point.name));
+            let back = quote::format_ident!("{}Return", point_shape::camel(&point.name));
+            quote!(#head, #back,)
+        })
+        .collect();
+    let ids: syn::ItemEnum = syn::parse2(quote! {
+        enum PointId { #(#variants)* #(#private_variants)* __Count }
+    })
+    .expect("point variants");
+    let debug_names = ids.variants.iter().map(|variant| variant.ident.to_string());
     quote! {
         #(#records)*
         /// The generated point export table and record layout, checked separately from the API layout.
@@ -1247,9 +1255,17 @@ pub(crate) fn records_selected(
         /// A point's place: its head and return in catalog order.
         #[doc(hidden)]
         #[repr(usize)]
-        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        #[derive(Clone, Copy, PartialEq, Eq)]
         #[non_exhaustive]
         pub enum PointId { #(#variants)* #(#private_variants)* __Count }
+        // Deriving Debug creates an enormous match for this enum. Keep the exact
+        // unit-variant names without its compiler-memory cost.
+        impl ::std::fmt::Debug for PointId {
+            fn fmt(&self, formatter: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                static NAMES: [&str; PointId::__Count as usize + 1] = [#(#debug_names),*];
+                formatter.write_str(NAMES[*self as usize])
+            }
+        }
         /// The number of places, the length of the game's slot table.
         #[doc(hidden)]
         pub const POINT_COUNT: usize = PointId::__Count as usize;
@@ -1319,6 +1335,93 @@ mod tests {
         assert!(!selected.contains("fn point_second"));
         assert!(selected.contains("table [PointId :: FirstReturn as usize]"));
         assert!(!selected.contains("table [PointId :: First as usize]"));
+    }
+
+    #[test]
+    fn point_id_debug_preserves_every_declared_variant() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let source = records(
+            &game_points(&root).unwrap(),
+            &source::build_input(&root).unwrap(),
+        );
+        let file = syn::parse_file(&source).unwrap();
+        let ids = file
+            .items
+            .iter()
+            .find_map(|item| match item {
+                syn::Item::Enum(ids) if ids.ident == "PointId" => Some(ids),
+                _ => None,
+            })
+            .unwrap();
+        let debug = file
+            .items
+            .iter()
+            .find_map(|item| match item {
+                syn::Item::Impl(item)
+                    if item.trait_.as_ref().is_some_and(|(_, path, _)| {
+                        path.segments.last().unwrap().ident == "Debug"
+                    }) =>
+                {
+                    Some(item)
+                }
+                _ => None,
+            })
+            .unwrap();
+        // Expected names and discriminant order come from the enum declarations,
+        // independently of the implementation's name table.
+        let variants: Vec<_> = ids.variants.iter().map(|variant| &variant.ident).collect();
+        let names: Vec<_> = variants.iter().map(|variant| variant.to_string()).collect();
+        let samples: Vec<_> = [
+            0,
+            variants.len() / 4,
+            variants.len() / 2,
+            variants.len() - 2,
+            variants.len() - 1,
+        ]
+        .into_iter()
+        .map(|index| variants[index])
+        .collect();
+        let program = quote! {
+            #ids
+            #debug
+            #[derive(Debug)]
+            enum Reference { #(#samples),* }
+            fn main() {
+                let cases = [#((PointId::#variants, #names)),*];
+                assert_eq!(cases.len(), PointId::__Count as usize + 1);
+                for (index, (place, expected)) in cases.into_iter().enumerate() {
+                    assert_eq!(place as usize, index);
+                    assert_eq!(format!("{place:?}"), expected);
+                    assert_eq!(format!("{place:#?}"), expected);
+                }
+                #(assert_eq!(format!("{:?}", PointId::#samples), format!("{:?}", Reference::#samples));)*
+            }
+        };
+        let directory = root
+            .join("target")
+            .join(format!("point-debug-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("main.rs");
+        let binary = directory.join("point-debug");
+        fs::write(&source, program.to_string()).unwrap();
+        let output = std::process::Command::new("rustc")
+            .args(["--edition=2024", "-o"])
+            .arg(&binary)
+            .arg(&source)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            std::process::Command::new(&binary)
+                .status()
+                .unwrap()
+                .success()
+        );
+        fs::remove_dir_all(directory).unwrap();
     }
 
     /// The census: how many points have an API record, and why the others refuse.
