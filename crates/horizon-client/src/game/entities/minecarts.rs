@@ -2620,7 +2620,13 @@ impl Game<'_> {
         if cancel {
             return false;
         }
-        let Some(i) = self.carts.iter().position(|c| c.id == id) else {
+        let Some(i) = self.carts.iter().position(|c| {
+            c.id == id
+                && !self
+                    .persist
+                    .removals
+                    .contains(&crate::game::commands::Target::Cart(id))
+        }) else {
             return true;
         };
         let destroyed = self.carts.update(i, |c| {
@@ -2639,7 +2645,13 @@ impl Game<'_> {
             if !tnt_prime {
                 self.eject_cart_mobs(i);
             }
-            let Some(i) = self.carts.iter().position(|c| c.id == id) else {
+            let Some(i) = self.carts.iter().position(|c| {
+                c.id == id
+                    && !self
+                        .persist
+                        .removals
+                        .contains(&crate::game::commands::Target::Cart(id))
+            }) else {
                 return true;
             };
             if !tnt_prime {
@@ -2653,7 +2665,13 @@ impl Game<'_> {
                 ];
                 self.native_vehicle_destroy(self.carts[i].kind.id(), at);
             }
-            let Some(i) = self.carts.iter().position(|c| c.id == id) else {
+            let Some(i) = self.carts.iter().position(|c| {
+                c.id == id
+                    && !self
+                        .persist
+                        .removals
+                        .contains(&crate::game::commands::Target::Cart(id))
+            }) else {
                 return true;
             };
             if !tnt_prime {

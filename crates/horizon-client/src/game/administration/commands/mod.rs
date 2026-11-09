@@ -2574,6 +2574,9 @@ impl Game<'_> {
             Target::Painting(id) => self.paintings.retain(|p| p.id != id),
             Target::Boat(id) => {
                 // AbstractBoat.remove: a killed boat drops its lead.
+                if let Some(y) = self.boats.iter().find(|b| b.id == id).map(|b| b.position.y) {
+                    self.dismount_destroyed_vehicle_mobs(id, y);
+                }
                 if let Some(i) = self.boats.iter().position(|b| b.id == id) {
                     self.release_vehicle_container(id);
                     let b = self.boats.remove(i);
@@ -2584,6 +2587,9 @@ impl Game<'_> {
                 }
             }
             Target::Cart(id) => {
+                if let Some(y) = self.carts.iter().find(|c| c.id == id).map(|c| c.position.y) {
+                    self.dismount_destroyed_vehicle_mobs(id, y);
+                }
                 self.release_vehicle_container(id);
                 if let Some(i) = self.carts.iter().position(|c| c.id == id) {
                     let c = self.carts.remove(i);

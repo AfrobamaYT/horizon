@@ -1775,16 +1775,23 @@ impl Game<'_> {
         rider: u32,
         cart: Option<&super::super::minecarts::Minecart>,
     ) {
-        let Some(v) = self.mob_object(rider).and_then(|mob| mob.extra.mount) else {
+        let Some(v) = self
+            .mob_object(rider)
+            .filter(|mob| !mob.removed)
+            .and_then(|mob| mob.extra.mount)
+        else {
             return;
         };
+        if cart.is_some_and(|cart| cart.id != v) {
+            return;
+        }
         if !self.native_mob_may_ride(rider, v, false) {
             return;
         }
         // A callback can remove or remount the rider. Do not overwrite its decision.
         if self
             .mob_object(rider)
-            .is_none_or(|mob| mob.extra.mount != Some(v))
+            .is_none_or(|mob| mob.removed || mob.extra.mount != Some(v))
         {
             return;
         }

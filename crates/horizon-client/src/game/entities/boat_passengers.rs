@@ -497,6 +497,13 @@ impl Game<'_> {
     /// Safe destruction interim (#2446): after the cancellable ejection was
     /// observed, a destroyed vehicle cannot leave a dangling Mob edge. Live
     /// underwater/activator ejections never take this forced completion path.
+    pub(super) fn dismount_destroyed_vehicle_mobs(&mut self, vehicle: u32, y: f64) {
+        for rider in self.mob_passenger_ids(vehicle) {
+            self.dismount_mob(rider);
+        }
+        self.finish_destroyed_vehicle_riders(vehicle, y);
+    }
+
     pub(super) fn finish_destroyed_vehicle_riders(&mut self, vehicle: u32, y: f64) {
         for rider in self.mob_passenger_ids(vehicle) {
             let Some(m) = self.mob_object(rider) else {

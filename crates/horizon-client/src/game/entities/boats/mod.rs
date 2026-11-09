@@ -1724,7 +1724,13 @@ impl Game<'_> {
         if cancel {
             return None;
         }
-        let Some(i) = self.boats.iter().position(|b| b.id == id) else {
+        let Some(i) = self.boats.iter().position(|b| {
+            b.id == id
+                && !self
+                    .persist
+                    .removals
+                    .contains(&crate::game::commands::Target::Boat(id))
+        }) else {
             return Some(true);
         };
         let (destroyed, at) = self.boats.update(i, |b| {
@@ -1738,11 +1744,23 @@ impl Game<'_> {
         });
         if destroyed {
             self.native_vehicle_destroy("boat", at);
-            let Some(i) = self.boats.iter().position(|b| b.id == id) else {
+            let Some(i) = self.boats.iter().position(|b| {
+                b.id == id
+                    && !self
+                        .persist
+                        .removals
+                        .contains(&crate::game::commands::Target::Boat(id))
+            }) else {
                 return Some(true);
             };
             self.eject_boat_mobs(i, true);
-            let Some(i) = self.boats.iter().position(|b| b.id == id) else {
+            let Some(i) = self.boats.iter().position(|b| {
+                b.id == id
+                    && !self
+                        .persist
+                        .removals
+                        .contains(&crate::game::commands::Target::Boat(id))
+            }) else {
                 return Some(true);
             };
             self.finish_destroyed_vehicle_riders(id, self.boats[i].position.y);
