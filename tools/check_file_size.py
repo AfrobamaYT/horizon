@@ -168,10 +168,11 @@ def parse_baseline(text):
                 raise ValueError("baseline needs one full upstream SHA in its sync-baseline header")
             marker = value
         elif line.strip() and not line.startswith("#"):
-            path, size = line.split()
-            if path in sizes or not path.endswith(".rs") or int(size) <= 0:
+            path, raw_size = line.split()
+            size = int(raw_size)
+            if path in sizes or not path.endswith(".rs") or size <= 0:
                 raise ValueError(f"invalid file-size baseline entry: {line}")
-            sizes[path] = int(size)
+            sizes[path] = size
     return marker, sizes
 
 
