@@ -216,9 +216,15 @@ mod mixed_tests {
         fs::write(
             library.join(manifest::MANIFEST),
             format!(
-                "{}[wasm]\nsha512='{}'\ntoolchain='t'\nbuilt_with='t'\n",
+                "{}[wasm]\nsha512='{}'\ntoolchain='t'\nbuilt_with='t'\n{}",
                 header("lib"),
-                horizon_mod_package::manifest::sha512_of(module)
+                horizon_mod_package::manifest::sha512_of(module),
+                points
+                    .map(|points| format!(
+                        "points='{}'\n",
+                        horizon_mod_package::manifest::sha512_of(points.as_bytes())
+                    ))
+                    .unwrap_or_default()
             ),
         )
         .unwrap();
@@ -233,7 +239,7 @@ mod mixed_tests {
         )
         .unwrap();
         if let Some(points) = points {
-            fs::write(library.join("points.json"), points).unwrap();
+            fs::write(library.join(manifest::inject::mod_points::FILE), points).unwrap();
         }
         if hash == "malformed" {
             fs::write(library.join("layouts.json"), b"{").unwrap();

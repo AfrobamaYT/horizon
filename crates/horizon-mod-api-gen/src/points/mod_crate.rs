@@ -3,7 +3,7 @@
 //! [`super::file_functions`]), the same `#[point]`, records and raw forms, in a slot table of the
 //! mod's own. `#[mod_api::no_point]` opts a function out. [`stage_mod`] writes them into a staged
 //! copy of the crate, the copy `cargo horizon-mod build` and the launcher compile, and lists them
-//! as the mod's `points.json`, each with the signature hash an addon's declaration pins.
+//! as the mod's `mod-points.json`, each with the signature hash an addon's declaration pins.
 //!
 //! A parameter crosses an `api` record when its type has a `Wire` form: scalars, text and std
 //! containers, `mod_api`'s types, and the mod's own publicly reachable types that carry
@@ -267,7 +267,7 @@ fn opted_out(files: &[File]) -> Vec<String> {
     paths
 }
 
-/// `points` as the mod's `points.json` lists them.
+/// `points` as the mod's `mod-points.json` lists them.
 fn catalog(krate: String, files: &[File], mut points: Vec<GamePoint>) -> Catalog {
     points.sort_by(|a, b| a.name.cmp(&b.name));
     Catalog {
@@ -296,7 +296,7 @@ fn catalog(krate: String, files: &[File], mut points: Vec<GamePoint>) -> Catalog
     }
 }
 
-/// The mod crate at `dir`'s points, as its `points.json` lists them, sorted by name. `wire` is
+/// The mod crate at `dir`'s points, as its `mod-points.json` lists them, sorted by name. `wire` is
 /// the `mod_api` types with a `Wire` layout (the game's `points.json` lists them).
 pub fn mod_points(dir: &Path, wire: &WireTypes) -> Result<Catalog, String> {
     let (krate, _, files) = files(dir)?;
