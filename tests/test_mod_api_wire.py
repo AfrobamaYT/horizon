@@ -1,10 +1,7 @@
 """Fixture checks for the source-only Wire boundary policy."""
-from pathlib import Path
-import sys
 import unittest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-from check_mod_api_wire import violations, wire_impls, template_violations
+from tools.check_mod_api_wire import violations, wire_impls, template_violations
 
 
 class WireGuardFixtures(unittest.TestCase):

@@ -43,9 +43,7 @@ def preceding(lines, i):
 
 class ModApiBoundaryTests(unittest.TestCase):
     def test_every_public_type_has_an_explicit_wire_policy(self):
-        import sys
-        sys.path.insert(0, str(ROOT / "tools"))
-        from check_mod_api_wire import repository_violations
+        from tools.check_mod_api_wire import repository_violations
         self.assertEqual(repository_violations(), [],
                          "derive Wire, implement Wire explicitly, or attach // no wire: <reason>")
 
