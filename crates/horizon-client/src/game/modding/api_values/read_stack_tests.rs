@@ -91,8 +91,8 @@ impl Engine {
 struct Context<'a> { game: &'a Engine, engine: &'a Engine, surface: &'a mut Vec<Stack> }
 impl Context<'_> {
     fn fire(&mut self, stack: &Stack) -> bool {
-        let at = [0.; 2]; let size = 16.; let text = None;
-        let display = Display; let owner_yaw = None; let seed = 0;
+        let at = [0.; 2]; let size = 16.; let text: Option<&str> = None;
+        let display = Display; let owner_yaw: Option<f32> = None; let seed = 0;
         BODY
     }
 }
