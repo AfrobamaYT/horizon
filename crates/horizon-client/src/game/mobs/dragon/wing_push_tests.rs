@@ -51,6 +51,11 @@ fn wing_contacts_restore_motion_and_sync_only_when_hurt_is_refused() {
         assert!(p.health.sync_velocity);
         assert_eq!(g.armor[1].as_ref().unwrap().damage, 2);
 
+        // Creative refusal must stand alone, not be masked by hit cooldown.
+        for _ in 0..10 {
+            g.player.as_mut().unwrap().health.advance_clock();
+            g.world.game_time += 1;
+        }
         g.creative = true;
         g.player.as_mut().unwrap().health.sync_velocity = false;
         g.dragon_wing_knock_back(push, false);
