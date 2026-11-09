@@ -6,7 +6,6 @@ use horizon_client::camera::NearPlane;
 use horizon_client::fog::{
     FogData, FogInputs, FogType, fog_type, settle_rain_fog, update_rain_fog,
 };
-use horizon_client::motion::PlayerMotion;
 use horizon_client::{
     animate_tick::{AnimateContext, animate_tick, campfire_particles, marker_particle_target},
     biome::Biomes,
@@ -934,7 +933,6 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_mod_cancels_the_screen_effect_of_one_block() {
-        use horizon_client::motion::PlayerMotion;
         use horizon_core::{geometry::Vec3, position::BlockPos};
         use mod_api::{
             BlockScreenEffect, ClientHost, ExtractBlockScreenEffectEvent, Flow, Hooks, ModEntry,

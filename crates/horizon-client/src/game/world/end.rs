@@ -275,8 +275,8 @@ pub(in crate::game) struct SummonedEye {
 impl SummonedEye {
     /// `Entity.load`'s motion and `EyeOfEnder.readAdditionalSaveData`'s
     /// `setItem`, which keeps one of the saved item, or an eye of ender.
-    pub(super) fn load(tag: &mut horizon_world::nbt::Tag) -> Self {
-        use horizon_world::nbt::Tag;
+    pub(super) fn load(tag: &mut horizon_core::nbt::Tag) -> Self {
+        use horizon_core::nbt::Tag;
         let motion = horizon_client::entity_nbt::loaded_motion(tag);
         if let Tag::Compound(c) = tag {
             let mut item = match c.remove(&"Item".into()) {
@@ -1813,7 +1813,7 @@ fn eye_quad(
 }
 
 #[cfg(test)]
-#[path = "end_gateway_ticking_tests.rs"]
+#[path = "end/end_gateway_ticking_tests.rs"]
 mod ticking_tests;
 
 #[cfg(test)]

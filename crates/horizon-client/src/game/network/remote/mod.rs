@@ -4832,9 +4832,9 @@ impl Game<'_> {
                             .name("minecraft:damage_type", p.source_type)
                             .map(str::to_owned)
                     });
-                    let by = attacker.and_then(|id| {
+                    let by = p.cause.and_then(|id| {
                         self.mob_index
-                            .get(&self.mobs, id)
+                            .get(&self.mobs, id as u32)
                             .map(|m| m.kind.id.to_string())
                     });
                     self.events

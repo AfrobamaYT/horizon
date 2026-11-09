@@ -3652,7 +3652,7 @@ mod custom_data_equipment_tests {
 
 #[cfg(test)]
 mod movement_predicate_tests {
-    use super::super::native_machines::tests::server_game;
+    use super::super::game_tests::tests::server_game;
     use horizon_core::geometry::Vec3;
     use horizon_core::position::BlockPos;
     use serde_json::json;

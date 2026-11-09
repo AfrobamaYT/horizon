@@ -45,6 +45,7 @@ impl TryIntoEngine<()> for mod_api::BlockShapes {
     type Error = String;
     fn try_into_engine(&self, _: &()) -> Result<Self::Engine, Self::Error> {
         Ok(engine::BlockShapes {
+            property: String::new(),
             properties: self.properties.clone(),
             values: self.values.clone(),
             default: self.default.clone(),
@@ -68,6 +69,7 @@ impl TryIntoEngine<()> for mod_api::Block {
     type Error = String;
     fn try_into_engine(&self, _: &()) -> Result<Self::Engine, Self::Error> {
         Ok(engine::Block {
+            state_light: None,
             id: self.id.clone(),
             template: self.template.clone(),
             pick_item: self.pick_item.clone(),

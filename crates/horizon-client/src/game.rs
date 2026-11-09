@@ -6617,7 +6617,7 @@ impl Game<'_> {
                 self.resolve_container_maps(key, centre);
             });
             self.container = Some(key);
-            self.open_container_slots = Some((key, self.container_size()));
+            self.open_container_slots = Some((key, self.open_container_size()));
             let first = self.container_opener_event(key, true);
             if first {
                 self.post_block_game_event(
@@ -13323,7 +13323,7 @@ impl Game<'_> {
                 }
                 let vanilla = o.can_merge(merge_id as u32, value as i32);
                 let (id, orb_value) = (o.id, o.points());
-                if self.orb_merges(id, orb_value, 0, value, vanilla) {
+                if self.orb_merges(id, orb_value as i32, 0, value as i32, vanilla) {
                     target = Some(i);
                     break;
                 }
@@ -13342,9 +13342,9 @@ impl Game<'_> {
     fn orb_merges(
         &mut self,
         into: u32,
-        into_value: u32,
+        into_value: i32,
         from: u32,
-        from_value: u32,
+        from_value: i32,
         vanilla: bool,
     ) -> bool {
         let dimension = self.dim.id();
@@ -14950,7 +14950,7 @@ impl Game<'_> {
             .save_later(&chunks, self.pack.assets.registry, world_biomes!(self))?;
         // Prepare entities while the chunk writer runs, then use one barrier.
         if !wait {
-            self.world.modified.autosaved(&keys, now);
+            self.world.modified.autosaved(&keys, Instant::now());
         }
         self.save_entities(false)?;
         self.save_raids();
@@ -16302,12 +16302,6 @@ impl Game<'_> {
         for chunk in &unloaded {
             self.world.modified.unloaded(&(chunk.x, chunk.z));
         }
-        let dirty: Vec<_> = unloaded
-            .iter()
-            .filter(|c| self.world.modified.remove(&(c.x, c.z)))
-            .cloned()
-            .collect();
-        let modified = horizon_client::spans::time("with_entities", || self.with_entities(&dirty));
         horizon_client::spans::time("unload_entities", || self.unload_entities(&unloaded));
         if !unloaded.is_empty() {
             let gone: horizon_client::fast_hash::FxHashSet<(i32, i32)> =
@@ -17664,12 +17658,22 @@ fn load_world_rest(
             });
             let nether_environment = named_scope(scope, "nether_environment", || {
                 startup::time("rest.nether_environment", || {
-                    text(Environment::load_dimension(root, "the_nether"))
+                    text(Environment::load_dimension(
+                        &horizon_assets::resource_source::ResourceSource::directory(
+                            root.to_path_buf(),
+                        ),
+                        "the_nether",
+                    ))
                 })
             });
             let end_environment = named_scope(scope, "end_environment", || {
                 startup::time("rest.end_environment", || {
-                    text(Environment::load_dimension(root, "the_end"))
+                    text(Environment::load_dimension(
+                        &horizon_assets::resource_source::ResourceSource::directory(
+                            root.to_path_buf(),
+                        ),
+                        "the_end",
+                    ))
                 })
             });
             (
@@ -17702,10 +17706,16 @@ fn load_world_rest(
                 horizon_client::ambience::AmbientTables::load(root)
             }),
             startup::time("rest.nether_environment", || {
-                text(Environment::load_dimension(root, "the_nether"))
+                text(Environment::load_dimension(
+                    &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+                    "the_nether",
+                ))
             }),
             startup::time("rest.end_environment", || {
-                text(Environment::load_dimension(root, "the_end"))
+                text(Environment::load_dimension(
+                    &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+                    "the_end",
+                ))
             }),
         )
     };
@@ -17988,6 +17998,7 @@ pub fn run_with(
     }
     let mut pack_error = None;
     let selected_root = packs::startup_root(
+        &vanilla_root,
         &vanilla_root,
         &early_settings.resource_packs,
         &[],

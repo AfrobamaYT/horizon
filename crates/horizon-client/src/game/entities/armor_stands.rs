@@ -900,18 +900,21 @@ impl Game<'_> {
             a.speed_instance = true;
             // LivingEntity.aiStep -> EntityEquipment.tick, before movement.
             // Inspect in slot order, then mutate only each actual owned compass.
-            let clear = self.armor_stands[i].equipment.each_ref().map(|stack| {
-                stack.as_ref().is_some_and(|stack| {
-                    stack.item.as_ref() == "minecraft:compass"
-                        && super::maps::lodestone_target_gone(self, stack, self.dim.id())
-                })
-            });
-            for (stack, clear) in self.armor_stands[i].equipment.iter_mut().zip(clear) {
-                if clear && let Some(stack) = stack {
+            for slot in 0..horizon_items::equipment::SLOT_NAMES.len() {
+                let clear = self.armor_stands[i]
+                    .equipment
+                    .get(slot)
+                    .is_some_and(|stack| {
+                        stack.item.as_ref() == "minecraft:compass"
+                            && super::maps::lodestone_target_gone(self, stack, self.dim.id())
+                    });
+                if clear {
+                    let mut stack = self.armor_stands[i].equipment.get(slot).cloned().unwrap();
                     stack.data_mut().set_other(
                         "minecraft:lodestone_tracker",
-                        Some(horizon_world::nbt::Tag::Compound(Default::default())),
+                        Some(horizon_core::nbt::Tag::Compound(Default::default())),
                     );
+                    self.armor_stands[i].equipment.set(slot, Some(stack));
                 }
             }
             let a = &mut self.armor_stands[i];
@@ -1222,6 +1225,7 @@ impl Game<'_> {
         let Some(loot) = horizon_client::structure_blocks::loot_data(
             &self.options.resources,
             &self.pack_files(),
+            self.res.item_defaults(),
         ) else {
             return;
         };
@@ -2411,7 +2415,7 @@ mod stand_lodestone_inventory_tick_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
     fn actual_stand_equipment_compasses_tick_after_loaded_lodestone_removal() {
-        let mut game = crate::game::native_machines::tests::server_game();
+        let mut game = crate::game::game_tests::tests::server_game();
         game.build_registries();
         game.set_allow_commands(true);
         game.level.health = 20.0;
@@ -2512,7 +2516,7 @@ mod stand_lodestone_inventory_tick_tests {
                 let data = stack.data().unwrap();
                 assert_eq!(
                     data.other("minecraft:custom_data").unwrap().get("marker"),
-                    Some(&horizon_world::nbt::Tag::Int(n))
+                    Some(&horizon_core::nbt::Tag::Int(n))
                 );
                 let present = data
                     .other("minecraft:lodestone_tracker")
@@ -2598,7 +2602,7 @@ mod postbaseline_lodestone_controls {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
     fn postbaseline_six_slots_noncompass_guard_and_dimension_preservation() {
-        let mut game = crate::game::native_machines::tests::server_game();
+        let mut game = crate::game::game_tests::tests::server_game();
         game.build_registries();
         game.set_allow_commands(true);
         game.block_ticks
@@ -2709,7 +2713,7 @@ mod postbaseline_lodestone_controls {
                     .other("minecraft:custom_data")
                     .unwrap()
                     .get("marker"),
-                Some(&horizon_world::nbt::Tag::Int(slot as i32))
+                Some(&horizon_core::nbt::Tag::Int(slot as i32))
             );
         }
         let after: Vec<_> = (0..6)

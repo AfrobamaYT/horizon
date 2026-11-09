@@ -1,9 +1,9 @@
 //! Run alone with private prepared resources.
-use super::super::*;
 use super::{MAX_CLIENT_FIREWORK_EXPLOSIONS, client_fireworks_ok};
-use crate::mod_api::{FireworkExplosion, FireworkShape, Host};
+use crate::game::*;
 use horizon_client::chunk::Chunk;
 use horizon_client::particles::ParticleLevel;
+use horizon_items::firework::{FireworkExplosion, FireworkShape};
 
 fn star(colors: &[u32]) -> FireworkExplosion {
     FireworkExplosion {
@@ -40,13 +40,14 @@ fn a_mods_fireworks_burst_and_bang_on_the_client_only() {
     let root = PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
     let settings = Settings::default();
     let loaded = load_resources(
-        root.clone(),
+        horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+        Vec::new(),
         None,
         &root,
         &settings,
         Instant::now(),
         false,
-        true,
+        execution_role::ExecutionRole::IntegratedServer,
         &Progress::new(),
         &mut |_, _| unreachable!(),
     )
@@ -60,7 +61,9 @@ fn a_mods_fireworks_burst_and_bang_on_the_client_only() {
         loaded.gui.unwrap(),
         options,
         settings,
-        Audio::silent(&root),
+        Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            root.clone(),
+        )),
         None,
     )
     .unwrap();
@@ -73,13 +76,13 @@ fn a_mods_fireworks_burst_and_bang_on_the_client_only() {
 
     // No client player yet: nothing.
     game.player = None;
-    assert!(!(&mut game as &mut dyn Host).client_fireworks(at, [0.0; 3], &show));
+    assert!(!game.native_client_fireworks(at, [0.0; 3], &show));
 
     game.player = Some(PlayerMotion::new(game.motion, Vec3::new(0.5, 64.0, 0.5)).unwrap());
     let entities = game.rockets.len();
-    assert!((&mut game as &mut dyn Host).client_fireworks(at, [0.0, 0.05, 0.0], &show));
+    assert!(game.native_client_fireworks(at, [0.0, 0.05, 0.0], &show));
     assert!(
-        !(&mut game as &mut dyn Host).client_fireworks(at, [f64::NAN, 0.0, 0.0], &show),
+        !game.native_client_fireworks(at, [f64::NAN, 0.0, 0.0], &show),
         "non-finite input"
     );
     // No rocket: only the picture and the sound.
@@ -110,5 +113,5 @@ fn a_mods_fireworks_burst_and_bang_on_the_client_only() {
 
     // A server's game draws nothing.
     game.options.execution_role = execution_role::ExecutionRole::IntegratedServer;
-    assert!(!(&mut game as &mut dyn Host).client_fireworks(at, [0.0; 3], &show));
+    assert!(!game.native_client_fireworks(at, [0.0; 3], &show));
 }

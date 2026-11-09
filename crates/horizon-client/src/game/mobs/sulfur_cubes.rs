@@ -239,7 +239,11 @@ impl Game<'_> {
     /// `primeWhenOnPoweredPosition` for the cubes `primable` names (an
     /// adopted explosive body when the tick started).
     pub(super) fn sulfur_cube_power_priming(&mut self, primable: &[u32]) {
-        if !self.ui.rules.bool("tnt_explodes") {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES)
+        {
             return;
         }
         for i in 0..self.mobs.len() {

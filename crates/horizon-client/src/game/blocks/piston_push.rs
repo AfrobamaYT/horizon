@@ -110,7 +110,9 @@ impl Game<'_> {
             }
         }
         if let Some(stuck) = stuck {
-            self.creatures.projectiles[i].stuck_speed = stuck;
+            self.creatures
+                .projectiles
+                .update(i, |p| p.stuck_speed = stuck);
         }
     }
 
@@ -584,12 +586,13 @@ impl Game<'_> {
         // (`setDeltaMovement(Vec3.ZERO)`); a piston's push is not scaled.
         let projectile_from = match target {
             Target::Entity(EntityHandle::Projectile(i)) => {
-                let p = &mut self.creatures.projectiles[i];
-                if p.stuck_speed.length_squared() > 1.0e-7 {
-                    p.stuck_speed = Vec3::ZERO;
-                    p.velocity = Vec3::ZERO;
-                }
-                Some((i, p.position))
+                self.creatures.projectiles.update(i, |p| {
+                    if p.stuck_speed.length_squared() > 1.0e-7 {
+                        p.stuck_speed = Vec3::ZERO;
+                        p.velocity = Vec3::ZERO;
+                    }
+                    Some((i, p.position))
+                })
             }
             _ => None,
         };

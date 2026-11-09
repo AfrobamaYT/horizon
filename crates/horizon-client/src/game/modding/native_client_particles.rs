@@ -91,7 +91,7 @@ impl Game<'_> {
 }
 
 #[cfg(test)]
-#[path = "client_fireworks_tests.rs"]
+#[path = "native_client_particles/client_fireworks_tests.rs"]
 mod client_fireworks_tests;
 
 #[cfg(test)]

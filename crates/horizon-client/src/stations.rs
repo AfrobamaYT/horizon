@@ -457,16 +457,7 @@ pub fn anvil_result(
 /// `ItemStack.getMaxStackSize`: the stack's `MAX_STACK_SIZE` component (a
 /// removed one is vanilla's default of 1), else the item's default.
 fn max_stack_size(items: &Items, stack: &ItemStack) -> u32 {
-    let data = stack.data();
-    if data.is_some_and(|d| d.other("!minecraft:max_stack_size").is_some()) {
-        return 1;
-    }
-    if let Some(tag) = data.and_then(|d| d.other("minecraft:max_stack_size")) {
-        return component_int(tag)
-            .filter(|v| *v >= 1)
-            .map_or(1, |v| v as u32);
-    }
-    items.get(&stack.item).map_or(64, |i| i.max_stack)
+    crate::menu::item_max_stack(items, stack)
 }
 /// `GrindstoneMenu` slot filter: damageable or enchanted.
 pub fn grindstone_accepts(items: &Items, stack: &ItemStack) -> bool {

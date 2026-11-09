@@ -295,14 +295,7 @@ pub fn interact(
     match action {
         Action::EmptyLava => {
             if under_water {
-                Interaction {
-                    outcome: Outcome::Consume,
-                    block: None,
-                    sound: None,
-                    stat: None,
-                    fluid_event: None,
-                    lower_fill_level: false,
-                }
+                consume()
             } else {
                 empty_bucket(
                     player,
@@ -318,14 +311,7 @@ pub fn interact(
         ),
         Action::EmptySnow => {
             if under_water {
-                Interaction {
-                    outcome: Outcome::Consume,
-                    block: None,
-                    sound: None,
-                    stat: None,
-                    fluid_event: None,
-                    lower_fill_level: false,
-                }
+                consume()
             } else {
                 empty_bucket(
                     player,

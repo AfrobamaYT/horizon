@@ -820,6 +820,9 @@ fn terrain_state_ids(
                 FluidKind::Water | FluidKind::FlowingWater => "minecraft:water",
                 FluidKind::Lava | FluidKind::FlowingLava => "minecraft:lava",
                 FluidKind::Empty => return [material(state), -1],
+                FluidKind::Mod(_) | FluidKind::ModFlowing(_) => {
+                    return [material(state), material(state)];
+                }
             };
             let fluid = if state.name == name {
                 Some(state)

@@ -89,6 +89,18 @@ pub(super) enum Target {
     /// player who cast it. Only a mod's handle names one.
     Hook(u32),
 }
+macro_rules! target_entity_mut {
+    ($game:expr, $target:expr, $e:ident => $body:expr) => {{
+        use super::entity::Entity as _;
+        let handle = $game.entity_handles().find(|h| {
+            super::entity::with_entity!($game, *h, entity => entity.selector_target() == Some($target))
+        });
+        if let Some(handle) = handle {
+            super::entity::with_entity_mut!($game, handle, $e => $body);
+        }
+    }};
+}
+
 /// `Entity.setXRot`: wrap before clamping the pitch.
 pub(super) fn entity_pitch(pitch: f32) -> f32 {
     (pitch % 360.0).clamp(-90.0, 90.0)

@@ -5,7 +5,6 @@ use super::Game;
 use super::level_sounds::LevelSound;
 use horizon_client::actions::Action;
 use horizon_client::{
-    entities::ObstacleGrid,
     items::ItemStack,
     mobs::{Mob, MobEvent, Species, happy_ghast},
 };
@@ -68,7 +67,7 @@ impl Game<'_> {
     /// (`/ride`): each mob's box comes with the vehicle at the bottom of what it rides,
     /// so the stand leaves its own riders out (`isPassengerOfSameVehicle`, through the
     /// grid's `near_except`).
-    pub(super) fn stand_entity_collisions(&self) -> ObstacleGrid {
+    pub(super) fn stand_entity_collisions(&self) -> horizon_client::entities::ObstacleGrid {
         let mut boxes = Vec::new();
         let mut roots = Vec::new();
         for (j, m) in self.mobs.iter().enumerate() {
@@ -81,7 +80,7 @@ impl Game<'_> {
             boxes.push(b.bounds());
             roots.push(None);
         }
-        ObstacleGrid::with_roots(boxes, roots)
+        horizon_client::entities::ObstacleGrid::with_roots(boxes, roots)
     }
     /// `HappyGhast.mobInteract`. Returns whether the click was used.
     pub(super) fn interact_happy_ghast(&mut self, index: usize, item: &str) -> bool {

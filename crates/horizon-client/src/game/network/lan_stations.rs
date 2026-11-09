@@ -623,7 +623,7 @@ impl Game<'_> {
                 seed,
                 button,
                 gs.menu.data[button],
-                &item.item,
+                &item,
             )
         });
         // Player.onEnchantmentPerformed, and EnchantmentMenu's awardStat(ENCHANT_ITEM).

@@ -1029,13 +1029,13 @@ impl Game<'_> {
         };
         // The stored cart is the one a plate counts: it takes the moved cart
         // for the walk and hands back what the walk left.
-        std::mem::swap(&mut self.carts[i], c);
+        self.carts.update(i, |stored| std::mem::swap(stored, c));
         self.with_level(|b, level, ticks| {
             for p in hits {
                 b.entity_inside(level, ticks, p);
             }
         });
-        std::mem::swap(&mut self.carts[i], c);
+        self.carts.update(i, |stored| std::mem::swap(stored, c));
         let _ = self.process_level_events();
     }
     /// `AbstractMinecart`: `minecart_improvements` picks the smoother
@@ -4094,7 +4094,7 @@ mod tnt_impact_tests {
         // OldMinecartBehavior.moveAlongTrack places the cart at the rail's top
         // height, moves it horizontally (Entity.move records the step) and settles
         // it on the slope; the tick's applyEffectsFromBlocks still sweeps the step.
-        let mut game = server_game();
+        let mut game = crate::game::game_tests::tests::server_game();
         let registry = game.pack.assets.registry;
         let stone = registry.default_state("minecraft:stone").unwrap();
         let plate = registry

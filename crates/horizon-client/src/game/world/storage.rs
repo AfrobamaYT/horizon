@@ -73,7 +73,7 @@ impl Game<'_> {
         };
         self.world.block_entities.get_or_insert_with(key, || entity);
         self.container = Some(key);
-        self.open_container_slots = Some((key, self.container_size()));
+        self.open_container_slots = Some((key, self.open_container_size()));
         self.set_screen(super::Screen::Inventory);
         self.capture(false);
         self.right = false;
@@ -394,7 +394,7 @@ impl Game<'_> {
         // it. A double chest whose other half broke would otherwise show a
         // shorter container.
         if self.open_container_slots.is_some_and(|(open, slots)| {
-            self.container == Some(open) && self.container_size() < slots
+            self.container == Some(open) && self.open_container_size() < slots
         }) {
             self.close_container();
             self.screen = super::Screen::Playing;
@@ -644,7 +644,7 @@ mod tests {
 
 #[cfg(test)]
 mod reach_tests {
-    use super::super::native_machines::tests::server_game;
+    use super::super::game_tests::tests::server_game;
     use horizon_client::{containers::BlockEntity, motion::PlayerMotion};
     use horizon_core::geometry::Vec3;
 
@@ -696,9 +696,9 @@ mod reach_tests {
 
 #[cfg(test)]
 mod lock_tests {
-    use super::super::native_machines::tests::server_game;
+    use super::super::game_tests::tests::server_game;
     use horizon_client::{containers::BlockEntity, items::ItemStack};
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
 
     /// `BaseContainerBlockEntity.canOpen` (`LockCode`): a `lock` whose item
     /// predicate the opener's main hand does not match refuses the menu at

@@ -55,7 +55,6 @@ fn state(id: u32, kind: &str, position: [f64; 3], yaw: f32, on_ground: bool) -> 
 /// `VehicleEntity`'s DATA_ID_HURT, DATA_ID_HURTDIR and DATA_ID_DAMAGE
 /// (entries 8 to 10) when they differ from their defaults (0, 1, 0).
 fn vehicle_meta(e: &mut EntityState, hurt_time: i32, hurt_dir: i32, damage: f32) {
-    let meta = &mut e.meta;
     if hurt_time != 0 {
         e.meta.push((8, serializer::INT, Value::Int(hurt_time)));
     }
@@ -175,8 +174,9 @@ impl Game<'_> {
                 continue;
             }
             if let Some(driver) = self
-                .mob_index
-                .get(&self.mobs, vehicle as u32)
+                .mobs
+                .iter()
+                .find(|m| m.id == vehicle as u32)
                 .and_then(|m| m.extra.rider)
                 && let Some(pos) = pass.iter().position(|&p| p == driver as i32)
                 && pos != 0
@@ -506,7 +506,18 @@ impl Game<'_> {
             e.pitch = o.pitch;
             e.head_yaw = o.yaw;
             if let Some(tag) = self.persist.raw.get(&o.id) {
-                self.lan_display_data(tag, hub, e);
+                if let Some(stack) = self.lan_display_data(tag, e) {
+                    e.meta.retain(|(index, _, _)| *index != 23);
+                    e.meta.push((
+                        23,
+                        serializer::ITEM_STACK,
+                        Value::Item(
+                            self.lan
+                                .as_mut()
+                                .and_then(|host| host.hub.stack(&Some(stack))),
+                        ),
+                    ));
+                }
             }
         }
     }
@@ -1035,12 +1046,6 @@ mod tests {
                 Default::default(),
             );
             game.end.add_remote_eye(0, [1.0, 70.0, 1.0], [0.0; 3]);
-            game.dragon_fireballs
-                .push(crate::game::dragon::DragonFireball::remote(
-                    0,
-                    Default::default(),
-                    Default::default(),
-                ));
             let base = game.next_entity;
             let joined = game.persist.joined_seq;
             let announced = game.persist.live.clone();
@@ -1059,13 +1064,12 @@ mod tests {
                     *game.potions.thrown_ids().next().unwrap(),
                     *game.end.eye_ids().next().unwrap(),
                     game.breath_clouds[0].id,
-                    game.dragon_fireballs[0].id,
                 ];
                 assert_eq!(
                     ids,
-                    std::array::from_fn::<_, 12, _>(|i| base + i as u32 + 1)
+                    std::array::from_fn::<_, 11, _>(|i| base + i as u32 + 1)
                 );
-                assert_eq!(game.next_entity, base + 12);
+                assert_eq!(game.next_entity, base + 11);
                 assert_eq!(game.persist.joined_seq, joined);
                 assert_eq!(game.persist.live, announced);
                 let epoch = game.native_lifecycle.epoch().unwrap();

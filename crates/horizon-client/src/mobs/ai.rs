@@ -1434,6 +1434,14 @@ fn base_tick(
     // lava ignites to the full 160 / 300 ticks and its hit lands after the
     // invulnerable time of that tick has already dropped.
     let was_on_fire = m.fire_ticks > 0;
+    let (fire, lava) = if m.position == contact_at {
+        (fire, lava)
+    } else {
+        (
+            crate::motion::environment::fire_contact(w.world, w.registry, m.bounds()),
+            touches_lava(m, w),
+        )
+    };
     block_contact_damage(m, w, level, fire, lava);
     // Enderman.hurtServer and Shulker.hurtServer teleport inside the hurt
     // (fire, lava, a block, an effect).
@@ -1913,8 +1921,13 @@ fn hurt_by_water(
 /// block's touch, cramming), with the teleport `Enderman.hurtServer` or
 /// `Shulker.hurtServer` makes inside it: a second hurt of the same tick draws
 /// after the first one's teleport and sees where it landed.
+#[cfg(test)]
 fn hurt(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>, amount: f32, source: Damage) {
-    m.damage(amount, source);
+    m.damage(
+        &mut crate::health::TestLevel::new(0).level(),
+        amount,
+        source,
+    );
     hurt_teleports(m, w, events);
 }
 /// The teleport `Enderman.hurtServer` or `Shulker.hurtServer` makes inside a
@@ -3474,8 +3487,6 @@ pub(crate) fn tick_effects(
                     amp,
                     1.0,
                 );
-                // A harming tick's hurt teleports inside it too.
-                hurt_teleports(m);
             }
             "minecraft:regeneration"
                 if count % interval(50) == 0 && !m.kind.flags.undead && m.alive() =>

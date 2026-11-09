@@ -4494,7 +4494,6 @@ impl Game<'_> {
         // The hit's own push, held back until after the shield's (`hurtServer`
         // runs `applyItemBlocking` before `dealDefaultKnockback`).
         let mut default_push: Option<([f64; 2], HurtSource<'_>)> = None;
-        let rules = self.world.health_rules;
         let events_before = self.player.as_ref().map_or(0, |p| p.events.len());
         let damage_outcome = if let Some(id) = self.health_resources.damage.id(damage_type) {
             self.hurt_player_equipment(
@@ -4832,7 +4831,7 @@ impl Game<'_> {
                 // advance projectile flags or motion while its chunk unloads.
                 let at = projectiles[i].position;
                 if !ticking(at.x.floor() as i32, at.z.floor() as i32) {
-                    projectiles[i].previous = at;
+                    projectiles.update(i, |p| p.previous = at);
                     continue;
                 }
                 // A ghast's fireball or a wind charge is pickable, so a pearl, an
@@ -13383,7 +13382,7 @@ mod h169_glide_travel_tests {
             assert!(!game.mobs[main].no_ai && !game.mobs[main].on_ground);
             let stack = horizon_client::mobs::finalize::equipment_stack(
                 &game.mobs[main],
-                horizon_world::player_inventory::EquipmentSlot::Chest,
+                horizon_core::equipment_slot::EquipmentSlot::Chest,
             )
             .unwrap();
             assert!(horizon_client::item_sync::can_glide_using(

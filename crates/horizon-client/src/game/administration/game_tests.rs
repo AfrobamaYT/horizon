@@ -1759,10 +1759,10 @@ fn retry_line(info: &Info, retry: Retry, attempts: i32, successes: i32, passed: 
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::game) mod tests {
     use super::*;
 
-    pub(super) fn server_game() -> Game<'static> {
+    pub(in crate::game) fn server_game() -> Game<'static> {
         use crate::game::*;
         let root = std::path::PathBuf::from(
             std::env::var_os("HORIZON_TEST_RESOURCES")

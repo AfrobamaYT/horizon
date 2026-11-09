@@ -1240,7 +1240,7 @@ fn eager_saves_keep_dirty_order_cooldowns_and_writer_budget() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn eager_saves_wait_for_an_open_world_and_for_light() {
-    let mut game = super::native_machines::tests::server_game();
+    let mut game = super::game_tests::tests::server_game();
     let dir = std::env::temp_dir().join(format!("horizon-eager-game-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();

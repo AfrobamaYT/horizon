@@ -2494,17 +2494,14 @@ impl Game<'_> {
                 self.post_game_event("minecraft:entity_die", at, ctx);
                 return;
             }
-            if let Some(mut host) = self.lan.take() {
-                let posted = self
-                    .as_guest(&mut host, conn, |g| {
-                        let ctx = g.player_context(None);
-                        g.post_game_event("minecraft:entity_die", at, ctx);
-                    })
-                    .is_some();
-                self.lan = Some(host);
-                if posted {
-                    return;
-                }
+            let posted = self
+                .as_guest(conn, |g| {
+                    let ctx = g.player_context(None);
+                    g.post_game_event("minecraft:entity_die", at, ctx);
+                })
+                .is_some();
+            if posted {
+                return;
             }
         }
         let who = match source {

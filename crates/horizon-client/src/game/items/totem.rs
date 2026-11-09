@@ -367,7 +367,7 @@ mod death_protection_tests {
             .expect("the apple carries the server's component")
             .into_owned();
         assert_eq!(
-            horizon_client::items::death_effects(&component),
+            horizon_client::items::parse_death_effects(&component).unwrap(),
             [
                 ConsumeEffect::ClearAllEffects,
                 ConsumeEffect::ApplyEffects {

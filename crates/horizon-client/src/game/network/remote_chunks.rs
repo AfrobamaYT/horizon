@@ -16,13 +16,12 @@ use horizon_protocol::{
     packets::play::{self, Clientbound as C},
     registry::DimensionType,
 };
-use horizon_world::attachments::Holder;
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::{
         Arc, Condvar, Mutex,
         atomic::{AtomicUsize, Ordering},
-        mpsc::{self, TryRecvError},
+        mpsc,
     },
 };
 

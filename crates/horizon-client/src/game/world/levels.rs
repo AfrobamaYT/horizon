@@ -1331,7 +1331,7 @@ mod tests {
     #[test]
     #[ignore = "needs HORIZON_TEST_RESOURCES, a scratch HORIZON_HOME and the constructed H077_OLD_WORLD"]
     fn an_old_chunk_saves_the_heights_its_new_neighbour_calculated() {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let home = std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap()).join("h077");
         let world = home.join("saves/h077");

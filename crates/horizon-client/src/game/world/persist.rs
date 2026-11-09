@@ -1,6 +1,7 @@
 //! Saving and loading the game state that lives outside chunk blocks:
 //! entities (`entities/*.mca`, per chunk like vanilla's `EntityStorage`) and
 //! scheduled block/fluid ticks (chunk `block_ticks`/`fluid_ticks`).
+#[path = "persist/display.rs"]
 mod display;
 
 use super::{FallingBlock, Game};
@@ -1228,10 +1229,6 @@ impl Game<'_> {
         self.remember(id, uuid, tag);
         self.bind_saved_entity_attachments(id, &mut m.attachment_lifetime);
         self.mobs.push(m);
-        if finalize {
-            self.enchant_spawn_equipment(id);
-            self.halloween_spawn_head(id);
-        }
         if let Some(passengers) = passengers {
             self.load_passengers(id, passengers);
         }
@@ -1330,7 +1327,7 @@ impl Game<'_> {
                     && !live_seen.contains(&self.mobs[j].id)
             })
             .collect();
-        riders.sort_by_key(|&j| self.mobs[j].extra.vehicle_order);
+        extra_riders.sort_by_key(|&j| self.mobs[j].extra.vehicle_order);
         if let Some(driver) = self
             .mobs
             .iter()
@@ -1745,8 +1742,8 @@ impl Game<'_> {
                 );
             }
             None => {
-                c.remove(&horizon_world::nbt::JavaString::from("last_hurt_by_mob"));
-                c.remove(&horizon_world::nbt::JavaString::from(
+                c.remove(&horizon_core::nbt::JavaString::from("last_hurt_by_mob"));
+                c.remove(&horizon_core::nbt::JavaString::from(
                     "ticks_since_last_hurt_by_mob",
                 ));
             }

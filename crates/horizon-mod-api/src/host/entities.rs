@@ -42,7 +42,7 @@ pub trait EntitiesServerHost {
         &mut self,
         dimension: &str,
         id: u32,
-        value: Option<u32>,
+        value: Option<i32>,
         count: Option<u32>,
         age: Option<u32>,
     ) -> bool;

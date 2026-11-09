@@ -1613,7 +1613,7 @@ pub(super) fn lectern_signal(world: &horizon_client::world::World, pos: BlockPos
 
 #[cfg(test)]
 mod lectern_books_tag_tests {
-    use super::super::native_machines::tests::server_game;
+    use super::super::game_tests::tests::server_game;
     use horizon_client::{containers::BlockEntity, items::ItemStack};
 
     /// `LecternBlock.useItemOn` checks `ItemTags.LECTERN_BOOKS`; a world's
@@ -1674,7 +1674,7 @@ mod lectern_books_tag_tests {
 
 #[cfg(test)]
 mod lectern_signal_tests {
-    use super::super::native_machines::tests::server_game;
+    use super::super::game_tests::tests::server_game;
     use super::lectern_signal;
     use horizon_client::{
         containers::{BlockEntity, Lectern},

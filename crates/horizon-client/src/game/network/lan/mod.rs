@@ -1632,7 +1632,7 @@ impl Game<'_> {
                 &self.options.resources,
                 &self.pack_files(),
                 packed.as_deref(),
-                Some(&sync),
+                &sync,
                 self.res.item_defaults(),
                 server_sources(
                     &self.options.resources,
@@ -2104,14 +2104,10 @@ impl Game<'_> {
         let vehicle = self
             .parent_vehicle_in(&dim, riding, &others, false)
             .map(|(tag, _)| tag);
-        let mut host = self.lan.take()?;
+        let host = self.lan.take()?;
         let mut stored = None;
         if let Some(g) = host.hub.online_players().find(|g| g.uuid == uuid) {
             playerdata::store(g, &mut self.level, vehicle);
-            if let Some(held) = held {
-                g.attachments = held;
-            }
-            let g = &host.hub.guests[i];
             self.save_guest_records(&host, g);
             stored = Some(g.name.clone());
         } else if let Some(saved) = host.owner.as_ref().and_then(|o| o.saved.as_ref()) {
@@ -5906,7 +5902,7 @@ mod mob_pickup_sync_tests {
     #[test]
     #[ignore = "needs prepared resources and scratch homes/cwd"]
     fn a_mob_pickup_reaches_guests_as_a_take() {
-        let mut game = super::super::native_machines::tests::server_game();
+        let mut game = super::super::game_tests::tests::server_game();
         game.build_registries();
         game.set_allow_commands(true);
         assert!(game.run_command("summon piglin 8.5 80 8.5 {NoAI:1b,PersistenceRequired:1b}"));
@@ -6010,7 +6006,7 @@ mod mob_swing_sync_tests {
     #[test]
     #[ignore = "needs prepared resources and scratch homes/cwd"]
     fn an_off_hand_mob_swing_reaches_guests_as_the_off_hand() {
-        let mut game = super::super::native_machines::tests::server_game();
+        let mut game = super::super::game_tests::tests::server_game();
         game.build_registries();
         game.set_allow_commands(true);
         let piglin = "{NoAI:1b,PersistenceRequired:1b}";
@@ -6037,10 +6033,10 @@ mod mob_swing_sync_tests {
 #[cfg(test)]
 mod owner_attachment_save_tests {
     use super::*;
-    use horizon_world::attachments::{
+    use horizon_core::nbt::Tag;
+    use horizon_mod_runtime::attachments::{
         AttachmentCodec, AttachmentError, AttachmentType, Attachments,
     };
-    use horizon_world::nbt::Tag;
 
     static PROGRESS: AttachmentType<i32> = AttachmentType {
         namespace: "test",
@@ -6062,8 +6058,8 @@ mod owner_attachment_save_tests {
         let Some(Tag::Compound(map)) = game.level.player_extra.as_ref() else {
             return None;
         };
-        let data = horizon_world::attachments::attachment_compound(
-            map.get(&horizon_world::attachments::ATTACHMENTS_KEY.into()),
+        let data = horizon_mod_runtime::attachments::attachment_compound(
+            map.get(&horizon_mod_runtime::attachments::ATTACHMENTS_KEY.into()),
         )
         .ok()
         .flatten()?;
@@ -6076,7 +6072,7 @@ mod owner_attachment_save_tests {
     #[test]
     #[ignore = "needs prepared resources and scratch homes/cwd"]
     fn an_autosave_writes_the_owners_live_attachments_to_the_file_it_loads() {
-        let mut game = super::super::native_machines::tests::server_game();
+        let mut game = super::super::game_tests::tests::server_game();
         let _rx = super::world_spawn_sync_tests::host_for(&mut game);
         let uuid = 1;
         game.lan.as_mut().unwrap().owner = Some(Owner { uuid, saved: None });

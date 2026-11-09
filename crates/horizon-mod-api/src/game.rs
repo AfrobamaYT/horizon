@@ -167,7 +167,7 @@ pub struct NativeExperienceOrb {
     pub id: u32,
     pub position: [f64; 3],
     /// `ExperienceOrb.value`: the points one pickup gives.
-    pub value: u32,
+    pub value: i32,
     /// `ExperienceOrb.count`: orbs merged into this one, each worth `value`.
     pub count: u32,
 }

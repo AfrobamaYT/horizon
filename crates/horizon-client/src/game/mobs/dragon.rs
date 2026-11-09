@@ -1033,7 +1033,6 @@ fn hurt_source(kind: DamageKind, by: Option<i32>, direct: Option<i32>) -> HurtSo
     let causing = by.unwrap_or(0);
     let damage_type = super::creatures::damage_type(kind, by.is_some());
     let projectile = direct.filter(|_| horizon_client::health::names_its_projectile(damage_type));
-    let melee = direct.is_none() && (super::creatures::melee(kind) || kind == DamageKind::Thorns);
     HurtSource {
         damage_type,
         causing,
@@ -1727,10 +1726,6 @@ impl Game<'_> {
         kind: DamageKind,
         direct: Option<&Projectile>,
     ) -> Hurt {
-        // `dealDefaultKnockback` for a player's melee: away from the attacker's
-        // feet. The scope names that player to the knockback hook.
-        let _attacker = (matches!(kind, DamageKind::PlayerAttack | DamageKind::Thorns))
-            .then(|| self.knockback_scope(self.player.as_ref().map_or(0, |p| p.entity_id)));
         let from = (matches!(kind, DamageKind::PlayerAttack | DamageKind::Thorns))
             .then(|| self.player.as_ref().map(|p| p.position))
             .flatten();
@@ -6303,7 +6298,8 @@ mod tests {
 #[cfg(test)]
 #[path = "dragon/residency_tests.rs"]
 mod residency_tests;
-#[path = "thorns_tests.rs"]
+#[cfg(test)]
+#[path = "dragon/thorns_tests.rs"]
 mod thorns_tests;
 
 #[cfg(test)]

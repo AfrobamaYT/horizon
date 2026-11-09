@@ -1,5 +1,6 @@
 //! Entity.kill, BlockAttachedEntity.kill, ArmorStand.kill and ItemEntity.dampensVibrations.
 use super::{Audio, Game, Options, Progress, Settings, load_resources};
+use crate::game::execution_role;
 use horizon_client::{
     chunk::Chunk,
     containers::BlockEntity,
