@@ -40,13 +40,19 @@ jobs:
             cache="$GITHUB_WORKSPACE/.wasm-fixture-targets"
           fi
           # Keep generated workspaces real: Cargo cannot discover their members
-          # through a target symlink. Only independent compiler artifacts persist.
+          # through a target symlink. Each member still has its own workspace and
+          # link invocation. PRs reuse dependency artifacts; main also exercises
+          # independent dependency compilation in the original per-member targets.
           for member in fixture library-fixture/{library,observer,dependent} groups/{counter_lib,alpha,beta,gamma,hog}; do
             root="$GITHUB_WORKSPACE/crates/horizon-mod-wasm/tests/$member/target/horizon-mod"
             mkdir -p "$root"
+            artifacts="$cache/shared"
+            if [[ "$GITHUB_REF" == refs/heads/main ]]; then
+              artifacts="$cache/$member"
+            fi
             for artifact in horizon-wasm wasm32-unknown-unknown std-artifacts; do
-              mkdir -p "$cache/$member/$artifact"
-              ln -s "$cache/$member/$artifact" "$root/$artifact"
+              mkdir -p "$artifacts/$artifact"
+              ln -s "$artifacts/$artifact" "$root/$artifact"
             done
           done
       - uses: dtolnay/rust-toolchain@master
