@@ -32,6 +32,7 @@
 - [Design: moving structures](concepts/moving-structures.md)
 - [Design: custom recipe-book settings](concepts/recipe-book-types.md)
 - [Design: main target configuration](concepts/main-target-config.md)
+- [Design: resource-backed special item renderers](concepts/resource-renderers.md)
 - [Design: section meshing](concepts/section-meshing.md)
 - [Design: section geometry](concepts/section-geometry.md)
 - [Design: level extracted state](concepts/level-extracted-state.md)
