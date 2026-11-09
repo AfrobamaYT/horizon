@@ -1355,7 +1355,8 @@ mod tests {
         }
         copy(&source, &world);
         {
-            let mut game = open_game(&root, &home, &world);
+            let mut resources = None;
+            let mut game = open_game(&mut resources, &root, &home, &world);
             // The world's level.dat has cheats off: the open read it after open_game's setting.
             game.set_allow_commands(true);
             assert!(game.run_command("forceload add 208 0 239 15"));
@@ -1453,7 +1454,8 @@ mod tests {
             }
         }
         copy(&source, &world);
-        let mut game = open_game(&root, &home, &world);
+        let mut resources = None;
+        let mut game = open_game(&mut resources, &root, &home, &world);
         game.set_allow_commands(true);
         assert!(game.run_command("forceload add 208 0 239 15"));
         let mut loaded = false;
