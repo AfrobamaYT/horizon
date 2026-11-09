@@ -2606,42 +2606,7 @@ fn join_saved_team(board: &mut Scoreboard, name: &str, tag: &Tag) -> bool {
 mod tests {
     use super::*;
 
-    #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn neutral_mob_load_notifies_target_even_without_saved_anger() {
-        use std::sync::{Arc, Mutex};
-
-        struct Observe(Arc<Mutex<Vec<(u32, bool)>>>);
-        #[mod_api::__subscriptions]
-        impl mod_api::Hooks for Observe {
-            fn living_change_target(
-                &self,
-                host: &dyn mod_api::Host,
-                event: &mut mod_api::LivingChangeTargetEvent<'_>,
-            ) -> mod_api::Flow {
-                assert!(event.mob.living().health(host).is_some());
-                self.0
-                    .lock()
-                    .unwrap()
-                    .push((event.mob.entity().id(), event.original_target.is_none()));
-                mod_api::Flow::Continue
-            }
-        }
-        let observed = Arc::new(Mutex::new(Vec::new()));
-        let mods = vec![mod_api::ModEntry::new(
-            "observe",
-            Box::new(Observe(observed.clone())),
-        )]
-        .into();
-        mod_api::testing::with_mods(mods, || {
-            super::super::native_entity_refs::tests::with_game(|game| {
-                let wolf = game.load_mob(entity("minecraft:wolf"), None).unwrap();
-                let golem = game.load_mob(entity("minecraft:iron_golem"), None).unwrap();
-                game.load_mob(entity("minecraft:pig"), None).unwrap();
-                assert_eq!(*observed.lock().unwrap(), [(wolf, true), (golem, true)]);
-            });
-        });
-    }
+    include!("persist/position_load_tests.rs");
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]

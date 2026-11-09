@@ -28,6 +28,25 @@ impl Game<'_> {
                 self.native_joins_flush(false, 0);
                 let kind = entity_nbt::kind(&tag).unwrap_or_default();
                 let is_mob = self.res.mob_types().contains_key(kind.as_str());
+                if from_disk
+                    && is_mob
+                    && entity_nbt::position(&tag).is_none()
+                    && !self.world.chunks.contains_key(&(0, 0))
+                {
+                    // The decoder defaults Pos to zero, but that destination has
+                    // not been read. Keep the source record rather than admitting
+                    // an entity no resident chunk can save (or overwriting origin).
+                    // Admission is irreversible: a duplicate is rejected now,
+                    // not retried after its current owner has left the level.
+                    let duplicate = entity_nbt::uuid(&tag).is_some_and(|uuid| {
+                        self.restored_vehicle(uuid).is_some()
+                            || self.target_with_uuid(uuid).is_some()
+                    });
+                    if !duplicate {
+                        self.persist.unknown.entry(key).or_default().push(tag);
+                    }
+                    continue;
+                }
                 drop_unleashable_leash(&mut tag, &kind, is_mob);
                 let uuid = entity_nbt::uuid(&tag);
                 if uuid.is_some_and(|u| self.restored_vehicle(u).is_some()) {
