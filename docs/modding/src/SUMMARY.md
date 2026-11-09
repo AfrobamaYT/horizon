@@ -15,6 +15,7 @@
 - [Mod render colour](concepts/mod-render-colour.md)
 - [Create and Mekanism capabilities](concepts/create-mekanism-capabilities.md)
 - [Where the mod API is going](concepts/design.md)
+- [Design: chunk attachment disk hooks](concepts/chunk-attachment-disk.md)
 - [Design: transactional block-entity removal](concepts/block-entity-removal.md)
 - [Design: client action pipeline](concepts/client-action-pipeline.md)
 - [Design: multi-block placement](concepts/multi-block-placement.md)
