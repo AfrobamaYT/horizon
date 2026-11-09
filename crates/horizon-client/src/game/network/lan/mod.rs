@@ -3,6 +3,7 @@
 //! tick and turns what the guests do into gameplay. A world that is not open
 //! costs one `Option` check per tick.
 mod event_timings;
+mod residency;
 
 use super::{
     Game,
@@ -1686,6 +1687,7 @@ impl Game<'_> {
             .then(|| horizon_client::lod_net::Service::new(net.lod_distance, biome_names.clone()));
         let lan = Lan::start_with(sync.clone(), net)?;
         let mut hub = Hub::new(lan, sync, encoder, config, self.loop_context.clone());
+        self.bind_guest_residency(&mut hub);
         hub.rule_registry = self.level.rule_registry.clone();
         hub.sync_attachments = !mod_api::__private::mods().is_empty();
         hub.flat_world = self.world_flat;
@@ -3010,13 +3012,6 @@ impl Game<'_> {
         {
             host.hub.synced = vec![(i32::MIN, next)];
         }
-    }
-
-    /// The start of a phase vanilla runs before ChunkMap.tick and Horizon
-    /// among the entities' ticks (ServerChunkCache.tickChunks' spawning and
-    /// thunder, the raids): the counter to give `lan_synced_since`.
-    pub(super) fn lan_synced_from(&mut self) -> Option<i32> {
-        self.lan_ids_so_far()
     }
 
     /// The end of such a phase: what joined during it is first updated in
