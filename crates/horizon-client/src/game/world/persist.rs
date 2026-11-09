@@ -645,6 +645,25 @@ impl Game<'_> {
                 self.native_joins_flush(false, 0);
                 let kind = entity_nbt::kind(&tag).unwrap_or_default();
                 let is_mob = self.res.mob_types().contains_key(kind.as_str());
+                if from_disk
+                    && is_mob
+                    && entity_nbt::position(&tag).is_none()
+                    && !self.world.chunks.contains_key(&(0, 0))
+                {
+                    // The decoder defaults Pos to zero, but that destination has
+                    // not been read. Keep the source record rather than admitting
+                    // an entity no resident chunk can save (or overwriting origin).
+                    // Admission is irreversible: a duplicate is rejected now,
+                    // not retried after its current owner has left the level.
+                    let duplicate = entity_nbt::uuid(&tag).is_some_and(|uuid| {
+                        self.restored_vehicle(uuid).is_some()
+                            || self.target_with_uuid(uuid).is_some()
+                    });
+                    if !duplicate {
+                        self.persist.unknown.entry(key).or_default().push(tag);
+                    }
+                    continue;
+                }
                 drop_unleashable_leash(&mut tag, &kind, is_mob);
                 let uuid = entity_nbt::uuid(&tag);
                 if uuid.is_some_and(|u| self.restored_vehicle(u).is_some()) {
@@ -2687,61 +2706,7 @@ fn join_saved_team(board: &mut Scoreboard, name: &str, tag: &Tag) -> bool {
 mod tests {
     use super::*;
 
-    #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn neutral_mob_load_notifies_target_even_without_saved_anger() {
-        use std::sync::{Arc, Mutex};
-
-        struct Observe(Arc<Mutex<Vec<(u32, bool)>>>);
-        #[mod_api::__subscriptions]
-        impl mod_api::Hooks for Observe {
-            fn living_change_target(
-                &self,
-                host: &dyn mod_api::Host,
-                event: &mut mod_api::LivingChangeTargetEvent<'_>,
-            ) -> mod_api::Flow {
-                assert!(event.mob.living().health(host).is_some());
-                self.0
-                    .lock()
-                    .unwrap()
-                    .push((event.mob.entity().id(), event.original_target.is_none()));
-                mod_api::Flow::Continue
-            }
-        }
-        let observed = Arc::new(Mutex::new(Vec::new()));
-        let mods = vec![mod_api::ModEntry::new(
-            "observe",
-            Box::new(Observe(observed.clone())),
-        )]
-        .into();
-        mod_api::testing::with_mods(mods, || {
-            super::super::native_entity_refs::tests::with_game(|game| {
-                let wolf = game.load_mob(entity("minecraft:wolf"), None).unwrap();
-                let golem = game.load_mob(entity("minecraft:iron_golem"), None).unwrap();
-                let pig = game.load_mob(entity("minecraft:pig"), None).unwrap();
-                for id in [wolf, golem, pig] {
-                    assert_eq!(
-                        game.mobs.iter().find(|mob| mob.id == id).unwrap().position,
-                        Vec3::ZERO
-                    );
-                }
-                assert_eq!(*observed.lock().unwrap(), [(wolf, true), (golem, true)]);
-                // The same codec default applies when Pos cannot decode.
-                for pos in [
-                    Tag::String("invalid".into()),
-                    Tag::List(vec![Tag::Double(1.0f64.to_bits())]),
-                ] {
-                    let raw =
-                        Tag::compound([("id", Tag::String("minecraft:pig".into())), ("Pos", pos)]);
-                    let id = game.load_mob(raw, None).unwrap();
-                    assert_eq!(
-                        game.mobs.iter().find(|mob| mob.id == id).unwrap().position,
-                        Vec3::ZERO
-                    );
-                }
-            });
-        });
-    }
+    include!("persist/position_load_tests.rs");
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]

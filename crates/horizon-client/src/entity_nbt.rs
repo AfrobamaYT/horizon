@@ -1828,30 +1828,18 @@ fn home_block_pos(tag: Option<&Tag>) -> Option<[i32; 3]> {
         _ => None,
     }
 }
-/// The mob a saved compound describes. `registry` is what reads a field holding
-/// a block state (an enderman's `carriedBlockState`); without one, such a field
-/// is left out, as it was before it was modelled.
-pub fn mob_from_nbt(
-    tag: &Tag,
-    types: &HashMap<String, Arc<MobType>>,
-    id: u32,
-    registry: Option<&BlockRegistry>,
-) -> Option<Mob> {
-    let position = position(tag)?;
-    let random = crate::mobs::entity_random(id, position);
-    mob_from_nbt_with_random(tag, types, id, registry, random)
-}
-/// `mob_from_nbt` for a mob with its own random given (`Mob::with_random`).
-pub fn mob_from_nbt_with_random(
+mod mob_load;
+pub use mob_load::{mob_from_nbt, mob_from_nbt_with_random};
+
+fn mob_from_nbt_at(
     tag: &Tag,
     types: &HashMap<String, Arc<MobType>>,
     id: u32,
     registry: Option<&BlockRegistry>,
     random: horizon_core::random::LegacyRandom,
+    position: Vec3,
 ) -> Option<Mob> {
     let kind = types.get(&self::kind(tag)?)?.clone();
-    // Entity.load: an absent or undecodable Pos uses Vec3.ZERO.
-    let position = position(tag).unwrap_or(Vec3::ZERO);
     let [yaw, pitch] = rotation(tag);
     let mut m = Mob::with_random(id, kind, position, yaw, random);
     m.velocity = motion(tag);
