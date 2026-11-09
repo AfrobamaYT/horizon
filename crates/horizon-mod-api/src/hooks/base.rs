@@ -2339,16 +2339,13 @@ pub trait Hooks {
     /// `vehicle` of type `vehicle_kind` (`minecraft:oak_boat`, `minecraft:minecart`,
     /// `minecraft:horse`, `minecraft:cushion`). Set `canceled` and it does not: a player stays
     /// where they were, a mob does not board, a `/ride` fails, and a rider whose dismount is
-    /// canceled keeps riding. Told for a player boarding a boat, minecart, cushion or a mount (pig,
-    /// strider, horse and its kin, llama, nautilus, happy ghast) and getting off one by their
-    /// own input, `/ride`, a stab, a buck, a teleport or spectator mode; and for the mobs
-    /// Horizon seats on a vehicle (jockeys, raiders on a ravager, `/ride`) and lets off one
-    /// (`/ride`, a stab), including Mob dismounts during removal cleanup. While a
-    /// boat or cart is actually destroyed, remaining Mob edges are currently unlinked
-    /// after notification even if canceled, rather than retaining a dangling vehicle.
-    /// Preserving those canceled relationships is deferred (#2446); cancellation on a
-    /// live vehicle remains effective. Loading a save does not notify. The acting player
-    /// is the one whose action runs, a guest on a server. Server-side.
+    /// canceled keeps riding. Players hear boarding and dismounts by input, `/ride`, hits,
+    /// bucking, teleport or spectator mode; mobs hear boarding and dismounts (jockeys,
+    /// ravager raiders, `/ride`, hits), including removal cleanup. Live cancellation keeps
+    /// the relationship. Actual boat/cart destruction currently unlinks remaining Mob
+    /// edges after notification even if canceled, avoiding dangling vehicles; preserving
+    /// canceled relationships is deferred (#2446). Loading a save does not notify. The
+    /// acting player is the one whose action runs, a guest on a server. Server-side.
     #[hook(
         side = "server",
         contract = "cancel",
