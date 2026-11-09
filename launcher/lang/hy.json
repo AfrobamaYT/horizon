@@ -1228,5 +1228,7 @@
   "{version} is not installed": "{version}-ը տեղադրված չէ",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (կամ .mcp.json նախագծում)",
   "← All servers": "← Բոլոր սերվերները",
-  "← Newer": "← Ավելի նոր"
+  "← Newer": "← Ավելի նոր",
+  "This version supplies resources to native build {build}. Remove that build first.": "This version supplies resources to native build {build}. Remove that build first.",
+  "This native build needs its base version {base}; reinstall it.": "This native build needs its base version {base}; reinstall it."
 }

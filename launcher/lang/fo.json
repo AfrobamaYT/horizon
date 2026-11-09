@@ -1228,5 +1228,7 @@
   "{version} is not installed": "{version} er ikki sett upp",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ella .mcp.json í verkætlan)",
   "← All servers": "← Allir ambætarar",
-  "← Newer": "← Nýggjari"
+  "← Newer": "← Nýggjari",
+  "This version supplies resources to native build {build}. Remove that build first.": "This version supplies resources to native build {build}. Remove that build first.",
+  "This native build needs its base version {base}; reinstall it.": "This native build needs its base version {base}; reinstall it."
 }

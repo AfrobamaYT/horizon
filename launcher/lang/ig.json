@@ -1228,5 +1228,7 @@
   "{version} is not installed": "Awụnyeghị {version}",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ma ọ bụ .mcp.json na oru ngo)",
   "← All servers": "← Sava niile",
-  "← Newer": "← Ọhụrụ"
+  "← Newer": "← Ọhụrụ",
+  "This version supplies resources to native build {build}. Remove that build first.": "This version supplies resources to native build {build}. Remove that build first.",
+  "This native build needs its base version {base}; reinstall it.": "This native build needs its base version {base}; reinstall it."
 }

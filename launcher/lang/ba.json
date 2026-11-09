@@ -1228,5 +1228,7 @@
   "{version} is not installed": "{version} ҡуйылмаған",
   "~/.claude.json (or .mcp.json in a project)": "~/.клод.json (йәки проектта .mcp.json)",
   "← All servers": "← Бөтә серверҙар",
-  "← Newer": "← Яңыраҡ"
+  "← Newer": "← Яңыраҡ",
+  "This version supplies resources to native build {build}. Remove that build first.": "This version supplies resources to native build {build}. Remove that build first.",
+  "This native build needs its base version {base}; reinstall it.": "This native build needs its base version {base}; reinstall it."
 }
