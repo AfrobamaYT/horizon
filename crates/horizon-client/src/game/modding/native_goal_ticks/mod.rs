@@ -479,13 +479,14 @@ impl BehaviorCxBackend for GoalCx<'_, '_> {
 
     fn set_brain_target(&mut self, target: Option<LivingRef>) -> bool {
         // The write handle's own setter rules, over the tick's view: the mob
-        // itself, the player it sees, or a snapshot mob.
+        // itself, the player it sees, or another live/snapshot mob.
         let who = match target {
             None => None,
             Some(living) => match self.resolve(living.entity()) {
                 Some(Resolved::Own) => Some(Who::Mob(self.m.id)),
                 Some(Resolved::Player) => Some(Who::Player),
                 Some(Resolved::Seen(seen)) => Some(Who::Mob(seen.id)),
+                Some(Resolved::Live(mob)) => Some(Who::Mob(mob.id)),
                 Some(Resolved::Dragon(_)) | None => return false,
             },
         };
