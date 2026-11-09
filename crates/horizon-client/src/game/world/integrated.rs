@@ -1375,10 +1375,18 @@ pub(super) mod tests {
     fn the_server_thread_stack_is_the_larger_of_8_mb_and_rust_min_stack() {
         let eight = 8 * 1024 * 1024;
         assert_eq!(super::stack_for(None), eight);
-        assert_eq!(super::stack_for(Some("1048576")), eight, "smaller asks keep 8 MB");
+        assert_eq!(
+            super::stack_for(Some("1048576")),
+            eight,
+            "smaller asks keep 8 MB"
+        );
         assert_eq!(super::stack_for(Some("67108864")), 64 * 1024 * 1024);
         assert_eq!(super::stack_for(Some("16777216")), 16 * 1024 * 1024);
-        assert_eq!(super::stack_for(Some("lots")), eight, "an unparsed value is ignored");
+        assert_eq!(
+            super::stack_for(Some("lots")),
+            eight,
+            "an unparsed value is ignored"
+        );
     }
 
     /// Observe both teardownPublishedState and the dropped server task queue.
