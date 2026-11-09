@@ -69,11 +69,16 @@ def recorded_base(repo, run):
         return ""
     archive = subprocess.run(["gh", "api", f"repos/{repo}/actions/artifacts/{matches[0]['id']}/zip"],
                              check=True, capture_output=True).stdout
-    with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
-        entries = zipped.infolist()
-        if len(entries) != 1 or entries[0].filename != "boat-base.json" or entries[0].file_size > 4096:
-            return ""
-        metadata = json.loads(zipped.read(entries[0]))
+    try:
+        with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
+            entries = zipped.infolist()
+            if len(entries) != 1 or entries[0].filename != "boat-base.json" or entries[0].file_size > 4096:
+                return ""
+            metadata = json.loads(zipped.read(entries[0]))
+    except Exception:
+        # PR-controlled codecs can raise zlib, bz2, lzma and JSON parser errors.
+        # No malformed metadata is allowed to stop inspection of other runs.
+        return ""
     if (not isinstance(metadata, dict) or metadata.get("run_id") != str(run["id"])
             or metadata.get("attempt") != "1" or metadata.get("head") != run["head_sha"]):
         return ""
@@ -130,7 +135,10 @@ def candidates(repo, workflow):
             if status == "failure":
                 query["created"] = ">=" + (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
             runs = api(f"repos/{repo}/actions/workflows/{workflow}/runs?{urlencode(query)}")["workflow_runs"]
-            yield from runs
+            for run in runs:
+                if status == "failure" and datetime.fromisoformat(run["updated_at"].replace("Z", "+00:00")) < datetime.now(timezone.utc) - timedelta(hours=1):
+                    continue
+                yield run
             if len(runs) < 100:
                 break
             page += 1
@@ -165,7 +173,9 @@ def main():
         for run in candidates(repo, workflow):
             try:
                 consider(repo, run, workflow, os.environ["GITHUB_WORKFLOW_SHA"])
-            except (subprocess.CalledProcessError, RuntimeError, KeyError, ValueError, zipfile.BadZipFile) as failure:
+            except Exception as failure:
+                # A candidate contains untrusted data; its failure cannot starve
+                # every later candidate, regardless of the parser/API exception.
                 log(f"Run {run['id']}: recovery inspection failed ({type(failure).__name__}); continuing sweep.")
 
 

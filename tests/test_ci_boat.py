@@ -9,6 +9,7 @@ import tempfile
 import io
 import json
 import zipfile
+import zlib
 import subprocess
 from types import SimpleNamespace
 from datetime import datetime, timezone
@@ -199,7 +200,7 @@ class BoatHealthTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             event = Path(directory) / "event.json"
             event.write_text("{}")
-            with patch.dict(os.environ, dict(GITHUB_REPOSITORY="repo", GITHUB_EVENT_NAME="schedule", GITHUB_EVENT_PATH=str(event), GITHUB_WORKFLOW_SHA="trusted")), patch.object(controller, "api", return_value=dict(id=123)), patch.object(controller, "candidates", return_value=[dict(id=1), dict(id=2)]), patch.object(controller, "consider", side_effect=[RuntimeError("refused"), None]) as consider, patch.object(controller, "log") as log:
+            with patch.dict(os.environ, dict(GITHUB_REPOSITORY="repo", GITHUB_EVENT_NAME="schedule", GITHUB_EVENT_PATH=str(event), GITHUB_WORKFLOW_SHA="trusted")), patch.object(controller, "api", return_value=dict(id=123)), patch.object(controller, "candidates", return_value=[dict(id=1), dict(id=2)]), patch.object(controller, "consider", side_effect=[zlib.error("corrupt PR data"), None]) as consider, patch.object(controller, "log") as log:
                 controller.main()
             self.assertEqual([call.args[1]["id"] for call in consider.call_args_list], [1, 2])
             self.assertIn("Run 1", log.call_args.args[0])
@@ -213,6 +214,36 @@ class BoatHealthTests(unittest.TestCase):
                 self.assertIn("forced_github=true", output.read_text())
                 self.assertIn("label=ubuntu-latest", output.read_text())
                 self.assertIn("history is unavailable", summary.read_text())
+
+    def test_corrupt_deflate_artifact_fails_closed(self):
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zipped:
+            zipped.writestr("boat-base.json", "{}")
+        corrupted = bytearray(archive.getvalue())
+        corrupted[30 + len("boat-base.json")] = 0xff  # Reserved deflate block type.
+        with zipfile.ZipFile(io.BytesIO(corrupted)) as zipped:
+            with self.assertRaises(zlib.error):
+                zipped.read("boat-base.json")
+        artifact = dict(id=99, name="boat-base-1", expired=False, size_in_bytes=len(corrupted))
+        with patch.object(controller, "api", return_value=dict(artifacts=[artifact])), patch.object(controller.subprocess, "run", return_value=SimpleNamespace(stdout=bytes(corrupted))):
+            self.assertEqual(controller.recorded_base("repo", dict(id=123, head_sha="a" * 40)), "")
+
+    def test_failure_sweep_only_inspects_recently_updated_runs(self):
+        old = dict(id=1, updated_at="2026-11-10T10:59:59Z")
+        recent = dict(id=2, updated_at="2026-11-10T11:30:00Z")
+        with patch.object(controller, "api", side_effect=[dict(workflow_runs=[]), dict(workflow_runs=[]), dict(workflow_runs=[old, recent])]), patch.object(controller, "datetime", wraps=datetime) as clock:
+            clock.now.return_value = NOW
+            result = list(controller.candidates("repo", 123))
+        self.assertEqual(result, [recent])
+
+    def test_cancel_timeout_never_requests_rerun(self):
+        sample = job()
+        sample["name"] = "lint"
+        with patch.object(controller, "api", side_effect=[dict(jobs=[sample])] + [dict(status="in_progress")] * 20), patch.object(controller, "post") as post, patch.object(controller, "log"), patch.object(controller.time, "sleep"), patch.object(controller, "datetime") as clock:
+            clock.now.return_value = NOW
+            with self.assertRaises(RuntimeError):
+                controller.recover("repo", dict(id=123, status="in_progress"))
+        post.assert_called_once_with("repos/repo/actions/runs/123/cancel")
 
     def test_allowlist_and_switch(self):
         for enabled, author, actor in [("off", "alice", "alice"), ("on", "bob", "alice"), ("on", "alice", "bob")]:

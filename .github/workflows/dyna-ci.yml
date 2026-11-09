@@ -69,7 +69,7 @@ jobs:
       - name: Record the original PR base for boat recovery
         if: github.event_name == 'pull_request' && github.run_attempt == 1
         run: |
-          python3 - <<'PY'
+          python3 -I - <<'PY'
           import json, os
           from pathlib import Path
           event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())

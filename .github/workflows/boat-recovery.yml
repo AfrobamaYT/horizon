@@ -2,7 +2,7 @@ name: boat-recovery
 on:
   workflow_run:
     workflows: [dyna-checks]
-    types: [requested, in_progress, completed]
+    types: [completed]
   # A queued runner does not emit a new event when it crosses the ten-minute limit.
   schedule:
     - cron: '*/5 * * * *'
