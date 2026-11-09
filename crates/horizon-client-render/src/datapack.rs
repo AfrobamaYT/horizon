@@ -813,14 +813,6 @@ impl DataStore {
                     && let Ok(v) = serde_json::from_slice(&bytes)
                 {
                     s.slot_sources.insert(id, v);
-                } else if !builtin
-                    && let Some(id) = content_id(&f)
-                    && let Some(bytes) = pack.read(&f)
-                {
-                    // The built-in pack's content files are the resource
-                    // root's own, which the tables read from disk; only the
-                    // world's packs come through here.
-                    s.files.entry(id).or_default().push(bytes);
                 }
             }
         }
