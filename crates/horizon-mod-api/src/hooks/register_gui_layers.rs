@@ -20,7 +20,7 @@ logged and left out.
 
 Each frame the HUD shows, every layer is drawn in that order. A mod's layer fires
 `Hooks::gui_layer_pre` with its id (a cancel hides it), then `Hooks::gui_layer_draw`, then
-`Hooks::gui_layer_post`, as NeoForge's `GuiLayerManager` does for every layer. So another mod
+`Hooks::gui_layer_post`, as every layer does. So another mod
 hides or wraps a mod's layer the way it hides or wraps a vanilla one, and replacing a layer
 (`replaceLayer`, `wrapLayer`) is a cancel in `gui_layer_pre` and a draw of its own. Every mod
 is asked about every id in `gui_layer_draw`, so a mod ignores ids it does not own.
