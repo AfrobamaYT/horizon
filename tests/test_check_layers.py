@@ -110,6 +110,19 @@ class CheckLayersTests(unittest.TestCase):
         self.assertIn("core -> game: a portable crate depends only on the other portable crates", problems[0])
         self.assertIn("core -> wgpu: a portable crate takes no window, GPU", problems[1])
 
+    def test_portable_baseline_only_exempts_the_recorded_optional_edge(self):
+        config = dict(CONFIG, portable={
+            "crates": ["core"], "forbidden": [],
+            "allowed": [{"edge": "core -> mod-api", "reason": "Nonportable optional feature"}],
+        })
+        dep = {"name": "mod-api", "kind": None, "path": "/x/mod-api", "optional": True}
+        pkg = {"name": "core", "dependencies": [dep]}
+        self.assertEqual(check_layers.portable(config, [pkg]), [])
+        dep["optional"] = False
+        self.assertEqual(len(check_layers.portable(config, [pkg])), 1)
+        dep.update(name="game", optional=True)
+        self.assertEqual(len(check_layers.portable(config, [pkg])), 1)
+
     def test_a_portable_crate_is_an_engine_crate(self):
         config = dict(CONFIG, portable={"crates": ["mod-api", "gone"], "forbidden": []})
         self.assertEqual(check_layers.portable(config, []), [

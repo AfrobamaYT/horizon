@@ -15,18 +15,6 @@ pub const OFFICIAL_SERVER: &str = "play.playhorizon.dev";
 /// `official_server_previous` in `launcher/links.json`).
 pub const OFFICIAL_SERVER_PREVIOUS: &[&str] = &["horizon.bunchy7s.dev"];
 
-/// [`OFFICIAL_SERVER`] with the port its SRV record gives, for askers that don't look SRV up
-/// (the telemetry server's status checks).
-pub const OFFICIAL_SERVER_STATUS: &str = "play.playhorizon.dev:24454";
-
-/// The cosmetics service: cosmetics, emotes, "Show me as a Horizon player"
-/// (`HORIZON_COSMETICS_API` overrides it).
-pub const COSMETICS_API: &str = "https://cosmetics.playhorizon.dev";
-
-/// The telemetry ingest server (`crates/horizon-telemetry-server`): opt-in telemetry, the
-/// "I'm playing" ping, benchmark uploads (`HORIZON_TELEMETRY_URL` overrides it).
-pub const TELEMETRY: &str = "https://telemetry.playhorizon.dev";
-
 /// Public STUN servers for Play with Friends' NAT discovery: two independent operators, so one
 /// outage doesn't break discovery (`HORIZON_STUN_SERVERS` overrides them).
 pub const STUN_SERVERS: &[&str] = &["stun.cloudflare.com:3478", "stun.l.google.com:19302"];

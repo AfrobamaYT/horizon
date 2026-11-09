@@ -62,3 +62,13 @@ launcher/src/partner.rs
 launcher/src/telemetry.rs
 tools/discord_presence_e2e.py
 crates/horizon-mods/**
+
+# Whole removed features, including future upstream files in these crates.
+crates/horizon-cosmetics/**
+crates/horizon-telemetry/**
+crates/horizon-telemetry-server/**
+launcher/src/wardrobe.rs
+launcher/src/partner.rs
+launcher/src/shop.rs
+# Removed address symbols: COSMETICS_API, TELEMETRY, OFFICIAL_SERVER_STATUS.
+# Layer/address inventories must not re-add these services or their deleted paths.

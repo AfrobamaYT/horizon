@@ -10,8 +10,9 @@ This page says what belongs to each layer, which crate may depend on which, and 
 Contributors fixing vanilla behaviour should never have to touch cosmetics, the shop or a server address. A fork
 should be able to take the engine and the platform without Horizon's product.
 
-CI checks the rules, so review doesn't have to. Everything stays in one repository: crates are checked now, and
-the modules of the mixed crates follow as code moves.
+The upstream checkers remain diagnostic on this fork while their baselines are adapted to the split mod crates
+and separate workspaces. They are not readiness gates yet. The explicit fork baseline rows and reasons live in
+`tools/layers.json` and `tools/addresses.json`; no engine/API refactor is implied by importing these tools.
 
 Credits: the three layers, the dependency rule, the address rule and the plan come from duckybertduck's proposal
 ("3-layer split: engine / platform / Horizon", #contributors, 2026-11-08). The rule that the mod API owns its types
@@ -68,12 +69,11 @@ What makes vanilla nicer to change and run, with no Horizon branding and no addr
 
 Horizon's product, and every built-in address of an outside service vanilla doesn't contact.
 
-- **Belongs:** cosmetics, emotes, the wardrobe and the shop, the official and partner servers in the list,
-  Play with Friends and its relay, Discord, the "I'm playing" ping, telemetry and benchmark uploads, releases and
-  updates, hosting, the launcher, and the assembled game.
-- **Examples:** `horizon-addresses`, `horizon-cosmetics`, `horizon-friends`, `horizon-relay`, `horizon-telemetry`, `horizon-bench`,
-  `horizon-release-sign`, `horizon-server`, `launcher/`. Still in engine crates today: `game/cosmetics.rs`,
-  `game/emotes.rs`, `game/discord.rs`, `heartbeat.rs`, `multiplayer.rs` (`add_official_server`).
+- **Belongs:** Play with Friends and its relay, local benchmark reports, releases and updates,
+  hosting, the launcher, and the assembled game. Cosmetics, emotes, wardrobe, shop and partner advertisements,
+  Discord presence, telemetry and report uploads are deliberately absent on this fork.
+- **Examples:** `horizon-addresses`, `horizon-friends`, `horizon-relay`, `horizon-bench`,
+  `horizon-release-sign`, `horizon-server`, `launcher/`.
 - **Rules:** in the game, every Horizon feature sits behind the `horizon-extras` feature ([forking.md](forking.md)),
   so [horizon-plain](https://github.com/horizon-rust/horizon-plain) builds without it.
 - **May depend on:** anything but tools.
@@ -91,12 +91,12 @@ Developer tools that no player runs: `xtask`, `horizon-bots`, `horizon-mod-api-g
 | A speed-up that keeps vanilla's results | engine | next to the code it speeds up |
 | A call to a Mojang or Microsoft service vanilla makes | engine | `auth.rs`, `realms/`, `skins.rs`, `horizon-server-files` |
 | A place mods or packs can hook into | engine | an extension point (trait, callback, event) in the engine crate, naming no platform type |
-| A mod hook, host method or mod format | platform | `horizon-mods`, the mod API (today: `game/mod_api_host.rs`, `game/native_*.rs`) |
+| A mod hook or host method | platform | `horizon-mod-api`, with game owners under `game/modding/` and `game/native_hooks/` |
 | A shader or resource pack format vanilla doesn't read | platform | `horizon-shaders`, `horizon-optifine`, `horizon-polytone`, or a new platform crate |
 | A setting or screen vanilla doesn't have, off by default | platform | its own module, reached from Horizon Settings |
 | A dedicated server option (anticheat, chat filter) | platform | `horizon-anticheat`, `horizon-chat-filter` |
 | Anything that talks to playhorizon.dev, a partner or a third-party service by itself | Horizon | a Horizon crate, with its address in the address list below |
-| Cosmetics, emotes, the shop, Discord, telemetry, official servers | Horizon | `horizon-cosmetics`, `horizon-telemetry`..., behind `horizon-extras` |
+| Local benchmark reports and optional network services retained by the fork | Horizon | `horizon-bench`, `horizon-friends`, `horizon-relay` |
 | A launcher page | Horizon | `launcher/src/` |
 | A harness, script or dev tool | tool | `tools/`, `xtask/` |
 | A new crate | its layer | add it to [`tools/layers.json`](../tools/layers.json) in the same PR |
@@ -122,18 +122,10 @@ reported: take it out when you like. `--list` prints every crate's layer and the
 
 ### Today's exceptions
 
-Today `allowed` has 40 entries, all from the three mixed engine crates (main at d5504cd328, 2026-11-08):
-
-| Crate | Depends upward on |
-|---|---|
-| `horizon-client` | platform: `horizon-anticheat`, `-chat-filter`, `-dualsense`, `-hdr`, `-mod-api-gen`, `-mods`, `-optifine`, `-shader-api`, `-shaders`, `-theme`; Horizon: `horizon-bench`, `-cosmetics`, `-friends`, `-telemetry` |
-| `horizon-client-lib` | the same, plus `horizon-mcp`, minus `horizon-mod-api-gen` |
-| `horizon-client-render` | platform: `horizon-hdr`, `-mod-api-gen`, `-optifine`, `-polytone`, `-shader-api`, `-shaders`, `-theme`; Horizon: `horizon-bench`, `-cosmetics`, `-telemetry` |
-| `horizon-client-input` | platform: `horizon-dualsense`, `horizon-theme` |
-
-No platform crate depends on Horizon. `horizon-client` is the gameplay library and the executable at once. It
-splits in two: the engine's gameplay library, and a thin executable at the Horizon layer that wires in the
-platform and Horizon crates.
+The current dependency inventory is in `tools/layers.json`, with fork-specific classifications and reasons.
+It excludes removed services and records existing upward dependencies rather than reintroducing them.
+The portable mod-package subset excludes its optional registry index's shader validator; that exception is
+recorded explicitly and does not exempt mandatory dependencies.
 
 ## Built-in addresses
 
@@ -141,7 +133,7 @@ An address is built in when the code contacts it without the player typing it. E
 endpoints. Every other built-in address belongs to the Horizon layer, in one file: `crates/horizon-addresses/src/lib.rs`,
 which the game's Horizon crates and the launcher both read. Platform code gets its addresses passed in from there.
 
-`python3 tools/check_addresses.py` (CI's verify job, and pr_ready's "Addresses" step) reads the string literals of
+`python3 tools/check_addresses.py` (currently a manual diagnostic on this fork) reads the string literals of
 shipped Rust and finds every host: a URL's host, or a whole string that is a host name. Tests are skipped, and so are
 placeholders (`example.com`, `*.test`) and local IPs. [`tools/addresses.json`](../tools/addresses.json) says where
 each host may be:
@@ -173,16 +165,14 @@ Horizon's own and third-party addresses (Horizon layer):
 |---|---|---|
 | `play.playhorizon.dev` (status `:24454`), previously `horizon.bunchy7s.dev` | the official server in the list, its status | `horizon-addresses`, `launcher/links.json` |
 | `afri-network.co.za` | the withdrawn partner server, so the game can remove the entry it added | `multiplayer.rs` (`WITHDRAWN_PARTNER`) |
-| `cosmetics.playhorizon.dev` | cosmetics, emotes, presence | `horizon-addresses` |
-| `telemetry.playhorizon.dev` | opt-in telemetry, the "I'm playing" ping, benchmark uploads | `horizon-addresses` |
 | `stun.cloudflare.com`, `stun.l.google.com` | Play with Friends NAT discovery | `horizon-addresses` |
-| `horizon-rust.github.io/horizon-mods`, `github.com/horizon-rust/horizon-mods` | the mod registry index and files | `mod_registry.rs`, `horizon-mods/src/index*.rs`, `cargo-horizon-mod` |
+| `horizon-rust.github.io/horizon-mods`, `github.com/horizon-rust/horizon-mods` | the mod registry index and files | `mod_registry.rs`, `horizon-mod-package/src/index*.rs`, `cargo-horizon-mod` |
 | `api.modrinth.com`, `cdn.modrinth.com` | the in-game resource pack browser, modpack porting | `pack_browser.rs`, `horizon-port-pack` |
 | `github.com`, `raw.githubusercontent.com`, `gitlab.com`, `maven.neoforged.net` | modpack porting's sources | `horizon-port-pack` |
 | `playhorizon.dev` | the download link shown with no resources | `no_resources.rs` |
 | `api.github.com`, `discord.com` | hosting: updates, Discord webhooks | `horizon-server` |
 | `api.github.com`, `uploads.github.com`, `playhorizon.dev` | the registry's submission service | `horizon-mod-registry` |
-| Modrinth, CurseForge, Fabric, Quilt, Forge, NeoForge, GitHub, Microsoft and Xbox sign-in, Tailscale, `discord.gg`, Sculk Hosting, `static.rust-lang.org` | the launcher's browsers, loaders, sign-in, hosting and partner pages | `launcher/src/` |
+| Modrinth, CurseForge, Fabric, Quilt, Forge, NeoForge, GitHub, Microsoft and Xbox sign-in, Tailscale, `static.rust-lang.org` | the launcher's browsers, loaders, sign-in and toolchain installation | `launcher/src/` |
 
 These are not addresses:
 
@@ -193,7 +183,7 @@ These are not addresses:
 ## Reviewer checklist
 
 - The PR names its layer, and new code sits in a crate or module of that layer (the table above).
-- No new upward dependency. CI fails on one; a module that calls up from an engine crate is just as wrong.
+- Review new upward dependencies explicitly; diagnostic baselines do not authorize new architecture changes.
 - Horizon features in the game are behind `horizon-extras`. Platform features that change the vanilla look are
   off by default.
 - No new built-in address outside the Horizon layer.
@@ -205,8 +195,8 @@ One small PR at a time, stacked:
 1. This page.
 2. `tools/check_layers.py` in CI and pr_ready, with the checklist in the PR template.
 3. `tools/check_addresses.py` in CI and pr_ready: built-in addresses only in the home, the rest only shrinks.
-4. Moves, most contributor value first. The extras (cosmetics, emotes, Discord, the official server, telemetry
-   and the ping) leave the engine crates for Horizon crates. Then the renderer's platform and Horizon modules
+4. Moves, most contributor value first. Removed product services stay removed on the fork.
+   The renderer's retained platform and Horizon modules
    leave `horizon-client-render`. Then the executable splits from the gameplay library. Each move:
    - keeps the default build the same for players and costs nothing at run time;
    - keeps `--no-default-features` and horizon-plain building;
