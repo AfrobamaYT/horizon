@@ -18,7 +18,7 @@ impl Hooks for SaveOnPickup {
             host.commands()
                 .run_command("summon minecraft:armor_stand 5 64 5")
         );
-        assert!(host.commands().run_command(self.line));
+        assert!(!host.commands().run_command(self.line));
         self.calls.fetch_add(1, Ordering::SeqCst);
         Flow::Cancel
     }
@@ -67,6 +67,27 @@ fn save_requested_during_pickup_keeps_lifted_items_on_disk() {
                 .chunks
                 .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
             game.world.modified.insert((0, 0));
+            // Each intrinsic family must refuse both full and single-level snapshots.
+            macro_rules! refuses {
+                ($($field:ident).+) => {{
+                    let pass = game.$($field).+.lift();
+                    assert!(game.save_game().is_err(), stringify!($($field).+));
+                    assert!(game.save_level(true).is_err());
+                    game.$($field).+.restore(pass, horizon_client::join_seq::RestoreOrder::SurvivorsFirst);
+                }};
+            }
+            refuses!(mobs);
+            refuses!(dropped);
+            refuses!(boats);
+            refuses!(carts);
+            refuses!(armor_stands);
+            refuses!(tnts);
+            refuses!(falling);
+            refuses!(orbs);
+            refuses!(creatures.projectiles);
+            refuses!(rockets);
+            refuses!(tridents);
+            game.with_entity_held_out(999, |game| assert!(game.save_game().is_err()));
             game.player = Some(PlayerMotion::new(game.motion, Vec3::new(2.0, 64.0, 2.0)).unwrap());
             game.level.player_uuid = Some([0, 0, 0, 99]);
             game.spawn_item(
@@ -101,6 +122,11 @@ fn save_requested_during_pickup_keeps_lifted_items_on_disk() {
             );
             assert_eq!(game.dropped[0].stack.count, 7);
             game.save.flush().unwrap();
+            assert!(
+                game.save.load_entities(0, 0).is_empty(),
+                "refused save wrote rows"
+            );
+            game.save_game().unwrap();
         });
         let disk = SaveDir::new(root.clone(), LevelShape::OVERWORLD);
         let tags = disk.load_entities(0, 0);

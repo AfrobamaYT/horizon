@@ -974,6 +974,7 @@ impl Game<'_> {
         let Some(i) = self.mobs.iter().position(|m| m.id == id) else {
             return Ok(());
         };
+        let _save_lease = horizon_client::join_seq::visibility::PassLease::enter();
         let mut m = self.mobs.extract(self.mobs[i].join).unwrap();
         let mut events = Vec::new();
         {

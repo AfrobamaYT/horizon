@@ -6928,6 +6928,7 @@ impl Game<'_> {
             .ui
             .rules
             .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS);
+        let _save_lease = horizon_client::join_seq::visibility::PassLease::enter();
         let mut f = self.falling.extract(self.falling[i].join).unwrap();
         let original = f.clone();
         match self.fall_step(&mut f, entity_drops, entities) {
@@ -15097,6 +15098,7 @@ impl Game<'_> {
     }
     /// Save the level in place: its changed chunks, its entities and its raids.
     fn save_level(&mut self, wait: bool) -> Result<()> {
+        Self::admit_entity_save()?;
         self.save_border();
         self.save_chunk_tickets()?;
         let deadline = Instant::now() + Duration::from_secs(30);

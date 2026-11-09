@@ -88,6 +88,7 @@ impl Game<'_> {
         id: u32,
         action: impl FnOnce(&mut Self) -> R,
     ) -> R {
+        let _save_lease = horizon_client::join_seq::visibility::PassLease::enter();
         if mod_api::__private::mods().is_empty() {
             return action(self);
         }

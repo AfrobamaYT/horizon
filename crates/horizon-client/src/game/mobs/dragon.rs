@@ -4391,6 +4391,7 @@ impl Game<'_> {
         if self.dragon.as_ref().is_some_and(|d| d.id == id) {
             // Only the fight's own dragon (`dragonFight`) ends it.
             let fight = self.is_fight_dragon();
+            let _save_lease = horizon_client::join_seq::visibility::PassLease::enter();
             if let Some(d) = self.dragon.extract() {
                 // remove, then gameEvent(ENTITY_DIE), before the fight hears of it.
                 self.dragon_died_event(d.id, d.position, d.alive());

@@ -1021,6 +1021,9 @@ impl Game<'_> {
     /// could not be is logged. A level not open any more is opened to be saved, like a parked one.
     /// The level in place is put back.
     pub(super) fn run_requested_saves(&mut self) {
+        if Self::admit_entity_save().is_err() {
+            return;
+        }
         let requested = std::mem::take(&mut self.levels.requested_saves);
         if requested.is_empty() || self.remote.is_some() {
             return;
@@ -1558,6 +1561,20 @@ mod tests {
 #[cfg(test)]
 mod request_save_tests {
     use super::{Dim, Levels};
+
+    #[test]
+    #[ignore = "needs prepared resources and isolated homes"]
+    fn requested_save_waits_without_consuming_the_queue_while_lifted() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.levels.request_save(Dim::Overworld);
+            let pass = game.dropped.lift();
+            game.run_requested_saves();
+            assert_eq!(game.levels.requested_saves, [Dim::Overworld]);
+            drop(pass);
+            game.run_requested_saves();
+            assert!(game.levels.requested_saves.is_empty());
+        });
+    }
 
     /// A level asked for twice is queued once, and clearing the levels drops the queue.
     #[test]

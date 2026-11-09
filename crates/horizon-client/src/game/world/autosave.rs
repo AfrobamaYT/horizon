@@ -3,6 +3,13 @@
 use super::*;
 
 impl Game<'_> {
+    pub(super) fn admit_entity_save() -> Result<()> {
+        if !horizon_client::join_seq::visibility::passes_settled() {
+            return Err("entity pass is lifted".into());
+        }
+        Ok(())
+    }
+
     pub(super) fn save_game(&mut self) -> Result<()> {
         self.save_game_with(true)
     }
@@ -119,6 +126,7 @@ impl Game<'_> {
     /// generated chunk is saved, hundreds at a time, encoded and written on
     /// the region writer meanwhile.
     pub(super) fn save_game_with(&mut self, wait: bool) -> Result<()> {
+        Self::admit_entity_save()?;
         if self.remote.is_some() {
             return Ok(());
         }

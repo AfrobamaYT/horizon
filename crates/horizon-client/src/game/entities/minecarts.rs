@@ -2748,6 +2748,7 @@ impl Game<'_> {
                 ];
                 self.native_vehicle_destroy(self.carts[i].kind.id(), at);
             }
+            let _save_lease = horizon_client::join_seq::visibility::PassLease::enter();
             let mut c = if tnt_prime {
                 self.carts.extract(self.carts[i].join).unwrap()
             } else {
