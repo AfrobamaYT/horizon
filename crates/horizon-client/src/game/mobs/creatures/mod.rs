@@ -2,10 +2,14 @@
 //! chunk-generation spawning (`NaturalSpawner`), mob events (attacks,
 //! breeding, conversions, drops), projectiles, player interactions
 //! (feeding, shearing, milking, spawn eggs, throwing) and rendering.
+#[cfg(test)]
+mod borrowed_panic_tests;
 mod borrowed_tick;
 #[cfg(test)]
 mod mob_dispatch_panic_tests;
 mod pufferfish_player;
+#[cfg(test)]
+mod retained_limits_tests;
 use super::api_values::{TryIntoApi, TryIntoEngine};
 
 use super::level_sounds::LevelSound;
@@ -139,6 +143,71 @@ pub(super) struct NativeSound {
     pub entity: Option<i32>,
 }
 
+#[derive(Default)]
+struct NormalActionFrame {
+    events: std::collections::VecDeque<MobEvent>,
+    broke: Vec<u32>,
+    actor: Option<u32>,
+}
+#[derive(Default)]
+struct NormalMobActions {
+    root: NormalActionFrame,
+    nested: Vec<NormalActionFrame>,
+}
+impl NormalMobActions {
+    fn new(events: Vec<MobEvent>) -> Self {
+        Self {
+            root: NormalActionFrame {
+                events: events.into(),
+                broke: Vec::new(),
+                actor: None,
+            },
+            nested: Vec::new(),
+        }
+    }
+}
+struct MobOutputBatch {
+    normal: NormalMobActions,
+    guests: Vec<(u32, u32, MobEvent)>,
+}
+// Backpressure applies to producer passes retained behind either producer or
+// consumer failure, never to healthy mob counts. Empty delivery resets the quota.
+// Sixteen retained passes permit 0.8 seconds of production at the vanilla tick rate.
+const MAX_PENDING_MOB_PASSES: usize = 16;
+#[derive(Default)]
+struct PendingMobBatch {
+    batches: std::collections::VecDeque<MobOutputBatch>,
+    pushes: horizon_client::mobs::PendingPushes,
+    retained_passes: usize,
+    refusal_logged: bool,
+}
+
+/// Remove the current action before dispatch; retain only the unentered tail on unwind.
+pub(super) struct RemainingActions<'a, T> {
+    remaining: std::vec::IntoIter<T>,
+    target: &'a mut Vec<T>,
+}
+impl<'a, T> RemainingActions<'a, T> {
+    pub(super) fn new(target: &'a mut Vec<T>) -> Self {
+        Self {
+            remaining: std::mem::take(target).into_iter(),
+            target,
+        }
+    }
+}
+impl<T> Iterator for RemainingActions<'_, T> {
+    type Item = T;
+    fn next(&mut self) -> Option<T> {
+        self.remaining.next()
+    }
+}
+impl<T> Drop for RemainingActions<'_, T> {
+    fn drop(&mut self) {
+        let remaining = std::mem::replace(&mut self.remaining, Vec::new().into_iter());
+        *self.target = remaining.collect();
+    }
+}
+
 /// Mob-system state owned by the game.
 #[derive(Default)]
 pub(super) struct Creatures {
@@ -175,6 +244,7 @@ pub(super) struct Creatures {
     /// Per-tick scratch retained between creature ticks.
     event_buf: Vec<MobEvent>,
     pickable_projectile_targets: Vec<(Who, Aabb)>,
+    pending: std::collections::HashMap<&'static str, PendingMobBatch>,
     /// The mobs whose own tick ran in the last `tick_creature_entities`:
     /// `ServerLevel.tick` ticks only the entities in entity-ticking range, so
     /// what the passes after the loop do for a mob's `aiStep`, goals or brain
@@ -438,6 +508,10 @@ enum OrbOrder {
 }
 
 impl Game<'_> {
+    pub(super) fn clear_pending_mob_actions(&mut self) {
+        self.creatures.pending.clear();
+    }
+
     /// The game's own player's uuid and entity id — the identity behind
     /// [`Self::player_view`], so a tick that lends no guest's view names its
     /// player (#1077). None where the view stands for nobody: no player of
@@ -1416,6 +1490,23 @@ impl Game<'_> {
     pub(super) fn tick_creature_entities(&mut self) -> Result<()> {
         // Its steps as spans for `horizon-report` (nothing is read while spans are off).
         let mut laps = horizon_client::spans::laps();
+        let level_id = self.dim.id();
+        if let Some(pending) = self.creatures.pending.get_mut(level_id)
+            && (pending.refusal_logged || pending.retained_passes >= MAX_PENDING_MOB_PASSES)
+        {
+            if !pending.refusal_logged {
+                log::warn!(
+                    "Refusing mob production in {level_id}: {} retained producer passes (limit {MAX_PENDING_MOB_PASSES}); draining before retry",
+                    pending.retained_passes
+                );
+                pending.refusal_logged = true;
+            }
+            // No new producer work until the backlog drains. Unrelated projectile
+            // phases still advance; mob-specific follow-up must not reuse old ticks.
+            self.creatures.ticked.clear();
+            self.deliver_pending_mob_actions(level_id)?;
+            return self.finish_creature_entities(&mut laps);
+        }
         // `EntityEvent.Size` for the sizes that changed outside the mob ticks (spawns,
         // commands, a player's interaction), before the ticks move by them.
         self.native_mob_sizes();
@@ -1454,7 +1545,6 @@ impl Game<'_> {
         }
         self.init_sulfur_attribute_maps();
         let uuid = self.level.player_uuid;
-        let level_id = self.dim.id();
         // LivingEntity.isPushable reads onClimbable live; a mob's cached one
         // is only refreshed by its own push step, so one that has not ticked
         // yet (the first tick after a load, a fresh spawn) or has moved since
@@ -1472,6 +1562,7 @@ impl Game<'_> {
         let mut events = std::mem::take(&mut self.creatures.event_buf);
         events.clear();
         let primable = self.sulfur_cubes_adopted_explosive();
+        let mut pending = self.creatures.pending.remove(level_id).unwrap_or_default();
         let mut mobs = self.mobs.lift();
         #[cfg(test)]
         super::entity::taken_pass_tests::after_take(self);
@@ -1516,6 +1607,7 @@ impl Game<'_> {
             mobs: &mut mobs,
             snapshot: &mut snapshot,
             events: &mut events,
+            pushes: &mut pending.pushes,
             dead: &mut dead,
             corpses: &mut corpses,
             died: &mut died,
@@ -1534,6 +1626,13 @@ impl Game<'_> {
             level_id,
             round: &round,
         });
+        if dispatch_panic.is_some() {
+            // The aborted pass never applies retention, including previously
+            // finished despawn answers. Do not carry those into the retry.
+            for m in &mut mobs {
+                m.despawn = mod_api::NativeDespawn::default();
+            }
+        }
         lent.give_back(&mut self.world);
         self.last_hurt_by_player = player_credit;
         if let Some(host) = self.lan.as_mut()
@@ -1566,7 +1665,25 @@ impl Game<'_> {
         snapshot.clear();
         self.creatures.seen_buf = snapshot;
         self.creatures.ticked = ticked;
+        // Completed brain actions are never fed back into the producer pass.
+        if !events.is_empty() || !guest_events.is_empty() {
+            pending.batches.push_back(MobOutputBatch {
+                normal: NormalMobActions::new(std::mem::take(&mut events)),
+                guests: std::mem::take(&mut guest_events),
+            });
+        }
+        // A successful producer can still be retained behind a failing consumer.
+        // Count before any downstream callbacks; fully empty delivery resets it.
+        pending.retained_passes += 1;
+        if dispatch_panic.is_none() {
+            // The successful final sweep consumed all pushes for surviving mobs.
+            pending.pushes = Default::default();
+        }
+        self.creatures.pending.insert(level_id, pending);
+        self.creatures.event_buf = events;
         if let Some(payload) = dispatch_panic {
+            // Restoration may itself panic and replace this payload; a second
+            // destructor panic may abort. panic=abort cannot recover at all.
             std::panic::resume_unwind(payload);
         }
         self.native_tick_post_batch(round);
@@ -1602,10 +1719,47 @@ impl Game<'_> {
             let bounds = m.bounds();
             self.effects_on_death(&names, bounds, false, Some(m.id), Some(&mut m.random));
         }
-        let event_result = self.handle_mob_events_reusable(&mut events);
-        self.creatures.event_buf = events;
-        event_result?;
-        self.lan_guest_mob_events(guest_events);
+        self.deliver_pending_mob_actions(level_id)?;
+        self.finish_creature_entities(&mut laps)
+    }
+
+    fn deliver_pending_mob_actions(&mut self, level_id: &'static str) -> Result<()> {
+        let mut pending = self.creatures.pending.remove(level_id).unwrap_or_default();
+        let delivery = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<()> {
+            while let Some(batch) = pending.batches.front_mut() {
+                self.handle_mob_events_pending(&mut batch.normal)?;
+                self.lan_guest_mob_events(&mut batch.guests);
+                self.creatures.event_buf = pending
+                    .batches
+                    .pop_front()
+                    .unwrap()
+                    .normal
+                    .root
+                    .events
+                    .into();
+            }
+            if !pending.pushes.is_empty() {
+                for mob in &mut self.mobs {
+                    horizon_client::mobs::apply_mob_pushes(mob, &mut pending.pushes);
+                }
+                // As in the producer's successful final sweep, removed targets
+                // have no remaining owner to receive a push.
+                pending.pushes = Default::default();
+            }
+            Ok(())
+        }));
+        if pending.batches.is_empty() && pending.pushes.is_empty() {
+            pending.retained_passes = 0;
+            pending.refusal_logged = false;
+        }
+        self.creatures.pending.insert(level_id, pending);
+        match delivery {
+            Ok(result) => result,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
+    }
+
+    fn finish_creature_entities(&mut self, laps: &mut horizon_client::spans::Laps) -> Result<()> {
         self.drain_entity_inside();
         laps.lap("creature_events");
         self.ordered_before(super::ordered_tick::Batch::Projectiles)?;
@@ -2570,18 +2724,23 @@ impl Game<'_> {
     }
 
     pub(super) fn handle_mob_events_reusable(&mut self, events: &mut Vec<MobEvent>) -> Result<()> {
-        self.handle_mob_events_with_actor(events, None)
+        let mut actions = NormalMobActions::new(std::mem::take(events));
+        let result = self.handle_mob_events_pending(&mut actions);
+        *events = actions.root.events.into();
+        result
     }
 
-    /// `actor` is retained for player events nested under `IfBroke`, which
-    /// leave the mob tick before their conditional effects are evaluated.
-    fn handle_mob_events_with_actor(
-        &mut self,
-        events: &mut Vec<MobEvent>,
-        actor: Option<u32>,
-    ) -> Result<()> {
-        let mut broke: Vec<u32> = Vec::new();
-        for e in events.drain(..) {
+    fn handle_mob_events_pending(&mut self, actions: &mut NormalMobActions) -> Result<()> {
+        loop {
+            let frame = actions.nested.last_mut().unwrap_or(&mut actions.root);
+            let Some(e) = frame.events.pop_front() else {
+                if actions.nested.pop().is_some() {
+                    continue;
+                }
+                return Ok(());
+            };
+            let actor = frame.actor;
+            let broke = &mut frame.broke;
             match e {
                 MobEvent::ForPlayer { conn, event } => {
                     let mut event = *event;
@@ -3463,8 +3622,11 @@ impl Game<'_> {
                     } else {
                         otherwise
                     };
-                    let mut follow = follow;
-                    self.handle_mob_events_with_actor(&mut follow, Some(mob))?;
+                    actions.nested.push(NormalActionFrame {
+                        events: follow.into(),
+                        broke: Vec::new(),
+                        actor: Some(mob),
+                    });
                 }
                 MobEvent::Jump { mob } => {
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
@@ -3939,7 +4101,6 @@ impl Game<'_> {
                 }
             }
         }
-        Ok(())
     }
     /// `TurtleEggBlock.decreaseEggs` after an entity's step or landing won its
     /// roll (`destroyEgg`): the break sound and the remaining eggs (a stack of

@@ -48,6 +48,7 @@ pub(super) struct BorrowedMobTick<'a> {
     pub(super) mobs: &'a mut horizon_client::join_seq::JoinList<Mob>,
     pub(super) snapshot: &'a mut Vec<Seen>,
     pub(super) events: &'a mut Vec<MobEvent>,
+    pub(super) pushes: &'a mut horizon_client::mobs::PendingPushes,
     pub(super) dead: &'a mut Vec<Mob>,
     pub(super) corpses: &'a mut Vec<Mob>,
     pub(super) died: &'a mut horizon_client::fast_hash::FxHashSet<u32>,
@@ -96,7 +97,7 @@ impl Game<'_> {
         let level_id = state.level_id;
         let round = state.round;
         let mut dispatch_panic = None;
-        let mut pushes = horizon_client::mobs::PendingPushes::default();
+        let mut pushes = std::mem::take(state.pushes);
         let original_len = snapshot.len();
         let mut keep = vec![true; original_len];
         let mut grid =
@@ -630,6 +631,7 @@ impl Game<'_> {
                 horizon_client::mobs::apply_mob_pushes(m, &mut pushes);
             }
         }
+        *state.pushes = pushes;
         *state.mobs = mobs;
         *state.snapshot = snapshot;
         *state.events = events;
