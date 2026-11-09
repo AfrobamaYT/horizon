@@ -76,6 +76,16 @@ mechanism rather than catalog-generated per-type serialization forms. This
 follows `crates/horizon-mod-api/src/world/game_rule_value.rs:7` and the derive
 entry point at `crates/horizon-mod-api-macros/src/lib.rs:6`. The generator builds
 host call tables only; engine structs stay out of the public API and ABI.
+Before applying these derives in `horizon-mod-package`, move the shared Wire
+contract and its supporting codec/layout primitives into a lower, API-owned
+crate that depends on neither package nor API. Both crates depend directly on
+that crate; `mod_api::wire` re-exports the same contract. Update the existing
+derive to resolve that lower crate directly for package-owned declarations,
+while retaining the same explicit derive mechanism for native and wasm. Do not
+add a package-to-API dependency: the API already depends on the package
+(`crates/horizon-mod-api/Cargo.toml:15`), and the current derive emits
+`::mod_api::wire` (`crates/horizon-mod-api-macros/src/wire.rs:49`). This dependency
+restructure is a prerequisite in stage 2, not a second serialization mechanism.
 Explicit enum tags and bounded decoding remain requirements. Both targets
 submit the same fields and receive the same refusal. Bound strings and list
 sizes using existing package limits before allocation; reject malformed tags,
@@ -144,6 +154,8 @@ and rollback semantics, rebasing against whichever version lands first.
 | Duplicate generated names | NameCollision; neither partial block nor bucket published |
 | Tank-only plus world in one mod | Two Fluid entries, one validation pass, no second registration loop |
 | Save/reload | Name round trip preserves identity despite changed process ordering; open savepoint refuses save |
+| First upgrade or corrupt schema | Existing world with missing, unreadable or corrupt saved schema refuses before chunk loading or any write; original files remain byte-for-byte unchanged |
+| New world schema | Persist the validated initial schema before allowing chunk publication or saves |
 | Transaction abort | Tank insert followed by abort restores original amount; forged authority follows #2453 refusal |
 
 Tag membership also requires replacing the current vanilla-only mask behavior
@@ -164,7 +176,8 @@ against vanilla before treating its NeoForge claims as an oracle.
 ## Proposed stages (file none)
 
 1. Approve declaration shape, refusal policy and publicly verified capabilities.
-2. Replace package and API declarations together; apply the shared explicit Wire
+2. Move the shared Wire contract below package and API as specified above, then
+   replace package and API declarations together; apply the shared explicit Wire
    derive to API-owned types for both native and wasm. Generate host call tables
    only, with no catalog-generated per-type Wire forms.
    Update every caller, sample, fixture, catalog note, docs/mods.md and affected
@@ -180,11 +193,17 @@ Saved-world policy (proposed): mode and generated source/flowing/block/bucket
 names form the persistent content schema. A mode change or generated-name change
 requires a new world; refuse opening an existing world with that schema mismatch
 before loading chunks or writing saves, and report the owner and changed names.
-Rebuilding mods does not migrate saved data. Implement an explicit saved-schema
+An existing world with a missing, unreadable or corrupt saved schema also
+refuses before chunk loading or any write, including on its first upgrade to
+this design. Never infer a baseline from the currently installed declarations.
+Only a newly created world records the validated initial schema before chunk
+publication or saves. Rebuilding mods does not migrate saved data. Implement an explicit saved-schema
 check in the implementation stage; this is not an existing loader guarantee.
 Current scheduled-fluid ticks serialize names and resolve them on load
 (`crates/horizon-client/src/save.rs:625`, `:632`, `:1982`), so renaming cannot be
-treated as a process-index change. Add acceptance fixtures for both mode changes
+treated as a process-index change. In particular, `read_ticks` uses
+`filter_map` and drops unresolved names (`crates/horizon-client/src/save.rs:605`,
+`:606`); accepting a new baseline could therefore silently lose old ticks. Add acceptance fixtures for both mode changes
 and name changes: refusal leaves the original save untouched. Add no alias,
 fallback parser or automatic remapping.
 
