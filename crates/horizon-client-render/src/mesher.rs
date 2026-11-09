@@ -1647,10 +1647,10 @@ impl<'a> Tints<'a> {
     }
     /// The blended tint of block `(x, y, z)` (section-local x/z, y in 0..16).
     fn get(&mut self, resolver: Resolver, x: i32, y: i32, z: i32) -> u32 {
-        if let Resolver::Mod(index) = resolver {
-            if !mod_tint::resolver_exists(index) {
-                return 0xFF_FFFF;
-            }
+        if let Resolver::Mod(index) = resolver
+            && !mod_tint::resolver_exists(index)
+        {
+            return 0xFF_FFFF;
         }
         // One biome over every blend square: the mean of (2r+1)^2 equal
         // colours is that colour, unless it varies by position (swamp grass).
