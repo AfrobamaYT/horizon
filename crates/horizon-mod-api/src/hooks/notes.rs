@@ -110,8 +110,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   the level `dimension`, before it moves (NeoForge's `EntityTravelToDimensionEvent`); `cause` is `nether_portal`,
   `end_portal`, `end_gateway` or `teleport` (a `/tp` or spectator teleport into another level). Set `cancel` to
   keep it where it is. Players and every other entity that crosses a portal or a command's teleport are asked;
-  a ridden vehicle and its server players are asked together and one cancel keeps them all. The player's state
-  is not swapped in.
+  passengers are asked recursively, and a refused passenger stays behind, dismounted, with its own subtree.
+  Discarding an entity in the callback prevents its travel. The player's state is not swapped in.
 - **`native_block_damage_abort(player, name, pos)`**: a server player stopped digging `pos` before it broke. It is
   heard after the server clears the dig and sends the block state back to the client. The player's state is not
   swapped in.
