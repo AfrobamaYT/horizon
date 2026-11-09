@@ -24,6 +24,7 @@
 - [Design: mods extending the mod API](concepts/mod-extensions.md)
 - [Design: multi-block placement](concepts/multi-block-placement.md)
 - [Design: snapshot participants](concepts/snapshot-participants.md)
+- [Design: stale handle errors](concepts/stale-handle-errors.md)
 - [Design: Part instance state](concepts/part-instance-state.md)
 - [Design: general entity types](concepts/general-entity-types.md)
 - [Design: pending children](concepts/pending-children.md)
