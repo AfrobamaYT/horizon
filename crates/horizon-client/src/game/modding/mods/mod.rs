@@ -466,6 +466,7 @@ pub(super) fn register_resource_sources(role: ExecutionRole) {
 /// The client presentation registrations, resolved once before the first level opens: the
 /// dimension transition screens and the entity spectator shaders.
 pub(super) fn register_client_presentations(role: ExecutionRole) {
+    register_preset_editors(role);
     register_dimension_transition_screens(role);
     register_entity_spectator_shaders(role);
 }

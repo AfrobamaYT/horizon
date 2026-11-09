@@ -117,5 +117,6 @@ pub(in crate::game) use add_attribute_tooltips::HookedAttributeTooltips;
 pub(in crate::game) use fishing_medium::NativeFishingMedium;
 pub(in crate::game) use living_change_target::NativeHookHost;
 include!("shared.rs");
+include!("preset_title.rs");
 
 use mod_api::ModBlockEntity;
