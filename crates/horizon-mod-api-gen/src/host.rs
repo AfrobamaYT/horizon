@@ -492,6 +492,10 @@ fn outer_type(ty: &Type, expected: &str) -> bool {
     matches!(ty, Type::Path(path) if path.path.segments.last().is_some_and(|segment| segment.ident == expected))
 }
 
+/// The conversion code for a host method's boundary arguments, the arguments to pass on, and
+/// whether it is a checked write (`&mut self`, a `Result`, a converted value). A checked write
+/// refuses an invalid value with its error; a read converts a borrowed stack without the write
+/// limits, and any other refused value makes the method return its default.
 fn boundary_arguments(
     sig: &syn::Signature,
     method: &str,
