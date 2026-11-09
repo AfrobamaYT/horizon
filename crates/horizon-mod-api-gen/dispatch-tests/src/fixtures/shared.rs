@@ -39,7 +39,7 @@ use stubs::*;
 struct Text;
 struct ScreenshotImage;
 #[derive(Debug, PartialEq)]
-struct NativeZoom(u32);
+struct Zoom(u32);
 enum Flow {
     Continue,
     Cancel,
@@ -423,9 +423,9 @@ impl Hooks for Mod {
     fn level_tick_pre(&self, _: &mut dyn ServerHost, _: &mut LevelTickPreEvent<'_>) {
         self.calls.lock().unwrap().push(self.id);
     }
-    fn zoom(&self, _: &dyn ClientHost, _: &mut ZoomEvent) -> Option<NativeZoom> {
+    fn zoom(&self, _: &dyn ClientHost, _: &mut ZoomEvent) -> Option<Zoom> {
         self.calls.lock().unwrap().push(self.id);
-        Some(NativeZoom(self.id))
+        Some(Zoom(self.id))
     }
     fn should_apply_effect_tick_this_tick(
         &self,
@@ -497,12 +497,12 @@ mod stubs {
     pub(super) trait LevelTicksHost: LevelHost {}
     pub(super) trait LevelRandomHost: LevelHost {}
     pub(super) trait LevelWriteHost: LevelTicksHost + LevelRandomHost {}
-    pub(super) struct NativeDifficulty;
-    pub(super) struct NativeSpawner;
+    pub(super) struct Difficulty;
+    pub(super) struct SpawnSource;
     pub(super) struct Tag;
     pub(super) struct FeatureFlags(pub ());
-    pub(super) struct NativeNoteInstrument;
-    pub(super) struct NativeScreenView<'a>(pub &'a ());
+    pub(super) struct NoteInstrument;
+    pub(super) struct ScreenView<'a>(pub &'a ());
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub(super) struct EffectKey(pub(super) u32);
     #[derive(Debug, PartialEq)]
@@ -527,14 +527,14 @@ mod stubs {
     pub(super) struct Hand;
     #[derive(Clone, Copy)]
     pub(super) struct BlockHit;
-    pub(super) struct NativeBlockClick<'a>(pub &'a ());
+    pub(super) struct BlockClick<'a>(pub &'a ());
     #[derive(Clone, Copy)]
     pub(super) enum BonemealSource {
         Interaction,
     }
     pub(super) struct TooltipDisplay<'a>(pub &'a ());
-    pub(super) struct NativeTriState;
-    pub(super) struct NativeInteractionResult;
+    pub(super) struct TriState;
+    pub(super) struct InteractionResult;
     pub(super) struct HurtSource<'a> {
         pub(super) damage_type: &'a str,
         pub(super) position: Option<[f64; 3]>,
@@ -576,14 +576,14 @@ mod stubs {
         }
     }
     pub(super) struct LootStack;
-    pub(super) struct NativeLootContext;
+    pub(super) struct LootContext;
     pub(super) struct NativeReloadListener;
     pub(super) struct RecipePropertyAddition;
     pub(super) struct AdvancementProgress {
         pub done: bool,
     }
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub(super) enum NativeProgressType {
+    pub(super) enum ProgressType {
         Grant,
         Revoke,
     }
@@ -608,14 +608,14 @@ mod stubs {
     pub(super) struct SoundPlay;
     pub(super) struct ChannelRef;
     #[derive(Clone, Copy)]
-    pub(super) struct NativePlayerFood;
+    pub(super) struct PlayerFood;
     pub(super) use super::generated::mod_api::LivingRef;
     #[derive(Clone, Copy)]
     pub(super) struct EntityRef;
     #[derive(Clone, Copy)]
     pub(super) struct MinecartRef;
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub(super) enum NativeMinecartKind {
+    pub(super) enum MinecartKind {
         Rideable,
     }
     pub(super) struct EffectTickChange;

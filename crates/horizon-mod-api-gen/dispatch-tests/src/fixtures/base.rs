@@ -134,7 +134,7 @@ fn command_dispatch_forwards_typed_input_and_source() {
 
 #[test]
 fn advancement_progress_reports_grant_and_revoke_identity() {
-    struct Observer(Arc<Mutex<Vec<NativeProgressType>>>);
+    struct Observer(Arc<Mutex<Vec<ProgressType>>>);
     #[mod_api::__subscriptions]
     impl Hooks for Observer {
         fn player_advancement_progress(
@@ -149,7 +149,7 @@ fn advancement_progress_reports_grant_and_revoke_identity() {
             assert_eq!(event.criterion, "criterion");
             assert_eq!(
                 event.progress.done,
-                event.progress_type == NativeProgressType::Grant
+                event.progress_type == ProgressType::Grant
             );
             self.0.lock().unwrap().push(event.progress_type);
         }
@@ -161,7 +161,7 @@ fn advancement_progress_reports_grant_and_revoke_identity() {
     )];
     let mods: Arc<[ModEntry]> = mods.into();
     install(mods.clone());
-    for progress_type in [NativeProgressType::Grant, NativeProgressType::Revoke] {
+    for progress_type in [ProgressType::Grant, ProgressType::Revoke] {
         dispatch_player_advancement_progress(
             &mut TestHost,
             calls::PlayerAdvancementProgressCall {
@@ -172,14 +172,14 @@ fn advancement_progress_reports_grant_and_revoke_identity() {
                 criterion: "criterion",
                 progress_type,
                 progress: &AdvancementProgress {
-                    done: progress_type == NativeProgressType::Grant,
+                    done: progress_type == ProgressType::Grant,
                 },
             },
         );
     }
     assert_eq!(
         *observed.lock().unwrap(),
-        vec![NativeProgressType::Grant, NativeProgressType::Revoke]
+        vec![ProgressType::Grant, ProgressType::Revoke]
     );
 }
 #[test]
@@ -578,7 +578,7 @@ fn dispatch_contracts() {
     calls.lock().unwrap().clear();
     let mut zoom = None;
     dispatch_zoom(&host, &mut zoom);
-    assert_eq!(zoom, Some(NativeZoom(1)));
+    assert_eq!(zoom, Some(Zoom(1)));
     assert_eq!(*calls.lock().unwrap(), [1]);
     calls.lock().unwrap().clear();
     dispatch_zoom(&host, &mut zoom);
@@ -692,9 +692,9 @@ mod stubs {
     pub(super) struct BlockId;
     pub(super) struct Ticks;
     pub(super) struct Compound;
-    pub(super) type NativeDispensed = (Option<super::ItemStack>, i32);
-    pub(super) struct NativeLootDrops<'a>(pub &'a ());
-    pub(super) struct NativeHandRender<'a>(pub &'a ());
+    pub(super) type Dispensed = (Option<super::ItemStack>, i32);
+    pub(super) struct LootDrops<'a>(pub &'a ());
+    pub(super) struct HandRender<'a>(pub &'a ());
     pub(super) struct Suggestion;
     pub(super) struct BiomeColors;
     pub(super) struct UseAnimation;
@@ -709,29 +709,29 @@ mod stubs {
         Press,
         Held,
     }
-    pub(super) struct NativeMobRender<'a>(pub &'a ());
-    pub(super) struct NativeShake;
+    pub(super) struct MobRender<'a>(pub &'a ());
+    pub(super) struct Shake;
     pub(super) struct Music;
     pub(super) struct MusicLayer;
-    pub(super) struct NativeBlockRim;
-    pub(super) struct NativeColoredLight;
-    pub(super) struct NativeMinimap;
-    pub(super) struct NativePanelEvent;
-    pub(super) struct NativeScreen;
+    pub(super) struct BlockRim;
+    pub(super) struct ColoredLight;
+    pub(super) struct Minimap;
+    pub(super) struct PanelEvent;
+    pub(super) struct Screen;
     pub(super) struct ModContainer;
     pub(super) struct MerchantOffer;
     pub(super) struct ModFluidTanks;
     pub(super) struct ModEnergyBuffer;
-    pub(super) struct NativeDataMapType;
-    pub(super) struct NativeMapDecoration;
-    pub(super) struct NativeMapInfo<'a>(pub &'a ());
-    pub(super) struct NativePlayerRender<'a>(pub &'a ());
+    pub(super) struct DataMapType;
+    pub(super) struct MapDecoration;
+    pub(super) struct MapInfo<'a>(pub &'a ());
+    pub(super) struct PlayerRender<'a>(pub &'a ());
     pub(super) struct PosedParts;
     pub(super) struct HiddenParts;
-    pub(super) struct NativeCommand;
-    pub(super) struct NativeLifecycleContext;
+    pub(super) struct Command;
+    pub(super) struct LifecycleContext;
     pub(super) struct Load(pub &'static str);
-    pub(super) struct NativeServerPlayer;
+    pub(super) struct ServerPlayer;
     pub(super) struct CommandSource {
         pub(super) sign: i32,
     }

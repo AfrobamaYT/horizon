@@ -1487,13 +1487,13 @@ mod tests {
         }
         for name in [
             "mod_api::ConnectionKind",
-            "mod_api::containers::ModRevision",
-            "mod_api::camera::UseItem",
+            "mod_api::item::containers::ModRevision",
+            "mod_api::client::camera::UseItem",
             "mod_api::wire::Id",
         ] {
             assert!(wire.contains(name), "supported public path {name} was lost");
         }
-        assert!(!wire.contains("mod_api::wire_slots::Id"));
+        assert!(!wire.contains("mod_api::wire::wire_slots::Id"));
     }
 
     fn point(attribute: &str, method: &str) -> Result<point_shape::Shape, String> {

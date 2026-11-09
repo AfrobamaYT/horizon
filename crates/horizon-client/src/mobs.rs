@@ -1897,7 +1897,7 @@ pub struct Mob {
     /// Set by `remove`: the mob disappears without dying (conversion, despawn, pickup).
     pub removed: bool,
     /// What `mob_despawn` answered for this tick, read and reset by `check_despawn`.
-    pub despawn: mod_api::NativeDespawn,
+    pub despawn: mod_api::Despawn,
     /// Client-side animation clocks (attack swing, eating, shaking...).
     pub anim: anim::AnimState,
     /// Attribute values that differ per mob (slime size, babies, effects).
@@ -4083,7 +4083,7 @@ impl Mob {
             last_direct: None,
             combat: combat::Tracker::default(),
             removed: false,
-            despawn: mod_api::NativeDespawn::Default,
+            despawn: mod_api::Despawn::Default,
             custom_name: None,
             custom_name_text: None,
             name_visible: false,

@@ -1,2 +1,1 @@
-pub mod snapshots;
-pub use snapshots::{LootStack, NativeLootContext, PlacementContext};
+pub use world::snapshots::{LootStack, LootContext, PlacementContext};

@@ -98,17 +98,17 @@ def mirror_source(e, name):
 def handle_source(e, name):
     return (f"/// {e['doc']}\n#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]\n"
             '// exhaustive: its fields are private, so mods cannot build or destructure it\n'
-            f'pub struct {name} {{\n    pub(crate) epoch: crate::NativeWorldEpoch,\n    pub(crate) id: u64,\n}}\n\n'
+            f'pub struct {name} {{\n    pub(crate) epoch: crate::WorldEpoch,\n    pub(crate) id: u64,\n}}\n\n'
             f'impl {name} {{\n    /// Create a handle for the game.\n'
             '    // hidden: a game-side helper, not part of the mod surface\n    #[doc(hidden)]\n'
-            '    pub fn new(epoch: crate::NativeWorldEpoch, id: u64) -> Self {\n        Self { epoch, id }\n    }\n}\n\n'
+            '    pub fn new(epoch: crate::WorldEpoch, id: u64) -> Self {\n        Self { epoch, id }\n    }\n}\n\n'
             # Opaque handles get a hand-written Wire impl here (as `BossBarRef`), and the game reads them through `Fields`.
             f'impl crate::wire::Wire for {name} {{\n    const MIN: usize = 16;\n'
             '    fn put(&self, out: &mut crate::wire::Writer) {\n        out.put(&self.epoch);\n        out.put(&self.id);\n    }\n'
             '    fn take(input: &mut crate::wire::Reader<\'_>) -> Result<Self, crate::wire::WireError> {\n'
             '        Ok(Self { epoch: input.take()?, id: input.take()? })\n    }\n}\n\n'
             f'/// What the game reads of a [`{name}`].\n#[doc(hidden)]\npub struct {name}Fields {{\n'
-            '    pub epoch: crate::NativeWorldEpoch,\n    pub id: u64,\n}\n\n'
+            '    pub epoch: crate::WorldEpoch,\n    pub id: u64,\n}\n\n'
             f'impl crate::__private::game::Fields for {name} {{\n    type Fields<\'a> = {name}Fields;\n'
             f'    fn fields(&self) -> {name}Fields {{\n        {name}Fields {{ epoch: self.epoch, id: self.id }}\n    }}\n}}\n')
 

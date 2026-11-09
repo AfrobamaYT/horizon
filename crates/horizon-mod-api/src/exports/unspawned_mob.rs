@@ -1,5 +1,4 @@
-mod unspawned_mob;
-pub use unspawned_mob::{
-    NativeAgeableGroup, NativeSpawnGroup, NativeTropicalVariant, UnspawnedMobEdits,
+pub use entity::unspawned_mob::{
+    AgeableGroup, SpawnGroup, TropicalVariant, UnspawnedMobEdits,
     UnspawnedMobError,
 };
