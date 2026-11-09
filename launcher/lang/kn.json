@@ -1262,8 +1262,6 @@
   "A game is running. Files it may use are kept.": "ಆಟ ನಡೆಯುತ್ತಿದೆ. ಅದು ಬಳಸಬಹುದಾದ ಕಡತಗಳನ್ನು ಉಳಿಸಿಕೊಳ್ಳಲಾಗುತ್ತದೆ.",
   "Clear all launcher caches? Up to {size} can be freed. Files a game or build uses are kept.": "ಎಲ್ಲಾ ಲಾಂಚರ್ ಕ್ಯಾಶ್‌ಗಳನ್ನು ತೆರವುಗೊಳಿಸಬೇಕೆ? {size} ವರೆಗೆ ಮುಕ್ತಗೊಳಿಸಬಹುದು. ಆಟ ಅಥವಾ ನಿರ್ಮಾಣ ಬಳಸುವ ಕಡತಗಳನ್ನು ಉಳಿಸಿಕೊಳ್ಳಲಾಗುತ್ತದೆ.",
   "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "{category} ತೆರವುಗೊಳಿಸಬೇಕೆ? {size} ವರೆಗೆ ಮುಕ್ತಗೊಳಿಸಬಹುದು. ಆಟ ಅಥವಾ ನಿರ್ಮಾಣ ಬಳಸುವ ಕಡತಗಳನ್ನು ಉಳಿಸಿಕೊಳ್ಳಲಾಗುತ್ತದೆ.",
-  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
-  "Space it couldn't free: an older game build can use this cache without runtime leases.": "Space it couldn't free: an older game build can use this cache without runtime leases.",
   "{mod}: layout mismatch in library {library} for type {type}": "{mod}: layout mismatch in library {library} for type {type}",
   "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet": "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet"
 }

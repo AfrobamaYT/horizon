@@ -1262,8 +1262,6 @@
   "A game is running. Files it may use are kept.": "游戏正在运行。将保留它可能使用的文件。",
   "Clear all launcher caches? Up to {size} can be freed. Files a game or build uses are kept.": "清除所有启动器缓存？最多可释放 {size}。将保留游戏或构建正在使用的文件。",
   "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "清除{category}？最多可释放 {size}。将保留游戏或构建正在使用的文件。",
-  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
-  "Space it couldn't free: an older game build can use this cache without runtime leases.": "Space it couldn't free: an older game build can use this cache without runtime leases.",
   "{mod}: layout mismatch in library {library} for type {type}": "{mod}: layout mismatch in library {library} for type {type}",
   "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet": "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet"
 }

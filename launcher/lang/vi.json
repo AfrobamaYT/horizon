@@ -1262,8 +1262,6 @@
   "A game is running. Files it may use are kept.": "Một trò chơi đang chạy. Các tệp trò chơi có thể dùng được giữ lại.",
   "Clear all launcher caches? Up to {size} can be freed. Files a game or build uses are kept.": "Xóa tất cả bộ nhớ đệm của trình khởi chạy? Có thể giải phóng tới {size}. Các tệp trò chơi hoặc quá trình xây dựng đang dùng được giữ lại.",
   "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "Xóa {category}? Có thể giải phóng tới {size}. Các tệp trò chơi hoặc quá trình xây dựng đang dùng được giữ lại.",
-  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
-  "Space it couldn't free: an older game build can use this cache without runtime leases.": "Space it couldn't free: an older game build can use this cache without runtime leases.",
   "{mod}: layout mismatch in library {library} for type {type}": "{mod}: layout mismatch in library {library} for type {type}",
   "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet": "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet"
 }

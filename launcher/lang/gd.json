@@ -1262,8 +1262,6 @@
   "A game is running. Files it may use are kept.": "Tha gèam a' ruith. Thèid faidhlichean a dh'fhaodadh e cleachdadh a ghlèidheadh.",
   "Clear all launcher caches? Up to {size} can be freed. Files a game or build uses are kept.": "Am falamhaich thu gach tasgadan an lòinseir? Gabhaidh suas ri {size} a shaoradh. Thèid faidhlichean a chleachdas gèam no togail a ghlèidheadh.",
   "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "Am falamhaich thu {category}? Gabhaidh suas ri {size} a shaoradh. Thèid faidhlichean a chleachdas gèam no togail a ghlèidheadh.",
-  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
-  "Space it couldn't free: an older game build can use this cache without runtime leases.": "Space it couldn't free: an older game build can use this cache without runtime leases.",
   "{mod}: layout mismatch in library {library} for type {type}": "{mod}: layout mismatch in library {library} for type {type}",
   "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet": "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet"
 }
