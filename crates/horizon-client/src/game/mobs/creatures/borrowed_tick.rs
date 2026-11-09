@@ -237,26 +237,57 @@ impl Game<'_> {
             ticked.insert(m.id);
             // `horizon-report`'s cost by mob type (tick_profile.rs).
             let sampled = super::super::tick_profile::start().map(|t| (t, mobs[i].kind.clone()));
-            let kept = horizon_client::mobs::riders::tick(mobs, i, &w, &mut level, events);
+            let tick = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                horizon_client::mobs::riders::tick(mobs, i, &w, &mut level, events)
+            }));
             if let Some((started, kind)) = sampled {
                 super::super::tick_profile::add(level_id, &kind, started);
-            }
-            let m = &mut mobs[i];
-            m.despawn = mod_api::NativeDespawn::default();
-            if credit_expiring && m.ai.last_hurt_by_player == 0 {
-                player_credit.remove(&m.id);
             }
             if seen_guest.is_none() {
                 base.player = w.player;
             } else if let Some(k) = lent {
                 *spare = w.player.map(|v| std::mem::replace(&mut guests[k].1, v));
             }
+            horizon_client::mobs::take_mob_pushes(events, from, pushes);
+            if let Some(conn) = seen_guest {
+                // ShulkerBullet.finalTarget is the guest's entity: the
+                // bullet homes on it while the projectiles tick, where
+                // `Who::Player` is the host's own player.
+                if let Some(&(_, id)) = guest_ids.iter().find(|g| g.0 == conn) {
+                    for e in &mut events[from..] {
+                        if let MobEvent::Projectile(p) = e
+                            && let ProjectileKind::ShulkerBullet { target, .. } = &mut p.kind
+                            && *target == Some(Who::Player)
+                        {
+                            *target = Some(Who::Mob(id));
+                        }
+                    }
+                }
+                let mut k = from;
+                while k < events.len() {
+                    if super::super::lan_mobs::acts_on_player(&events[k]) {
+                        guest_events.push((conn, mobs[i].id, events.remove(k)));
+                    } else {
+                        k += 1;
+                    }
+                }
+            }
+            // Normalize the current mob's already-produced outputs before the
+            // outer boundary retains them, including on native movement unwind.
+            let kept = match tick {
+                Ok(kept) => kept,
+                Err(payload) => std::panic::resume_unwind(payload),
+            };
+            let m = &mut mobs[i];
+            m.despawn = mod_api::NativeDespawn::default();
+            if credit_expiring && m.ai.last_hurt_by_player == 0 {
+                player_credit.remove(&m.id);
+            }
             // A killed mob's body is removed: its effects that act on
             // death run (`LivingEntity.remove` with KILLED).
             if !kept && !m.alive() && !m.removed && !m.extra.effects.is_empty() {
                 corpses.push(m.clone());
             }
-            horizon_client::mobs::take_mob_pushes(events, from, pushes);
             // LivingEntity.tickDeath: after twenty ticks the body is removed.
             if !kept && !m.removed && !m.alive() && m.death_time >= 20 {
                 let (width, height) = (f64::from(m.width()), f64::from(m.height()));
@@ -275,29 +306,6 @@ impl Game<'_> {
                     None
                 };
                 gone.push((m.id, m.position, width, height, split));
-            }
-            if let Some(conn) = seen_guest {
-                // ShulkerBullet.finalTarget is the guest's entity: the
-                // bullet homes on it while the projectiles tick, where
-                // `Who::Player` is the host's own player.
-                if let Some(&(_, id)) = guest_ids.iter().find(|g| g.0 == conn) {
-                    for e in &mut events[from..] {
-                        if let MobEvent::Projectile(p) = e
-                            && let ProjectileKind::ShulkerBullet { target, .. } = &mut p.kind
-                            && *target == Some(Who::Player)
-                        {
-                            *target = Some(Who::Mob(id));
-                        }
-                    }
-                }
-                let mut k = from;
-                while k < events.len() {
-                    if super::super::lan_mobs::acts_on_player(&events[k]) {
-                        guest_events.push((conn, m.id, events.remove(k)));
-                    } else {
-                        k += 1;
-                    }
-                }
             }
             // Killed during its own tick (drowning, burning, falling...).
             if !m.alive() && !m.removed && died.insert(m.id) {

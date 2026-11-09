@@ -4,6 +4,8 @@
 //! (feeding, shearing, milking, spawn eggs, throwing) and rendering.
 #[cfg(test)]
 mod borrowed_panic_tests;
+#[cfg(test)]
+mod retained_limits_tests;
 mod borrowed_tick;
 #[cfg(test)]
 mod mob_dispatch_panic_tests;
