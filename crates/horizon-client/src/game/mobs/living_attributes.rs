@@ -220,7 +220,18 @@ impl AttributeWrite {
     /// `finalize`, which saves its bases and permanent modifiers.
     fn apply_to_mob(self, m: &mut Mob, a: Attr) -> bool {
         let taken = |m: &Mob, id: &str| {
-            finalize::has_modifier(m, a, id) || finalize::has_transient_modifier(m, a, id)
+            finalize::has_modifier(m, a, id)
+                || finalize::has_transient_modifier(m, a, id)
+                || (id == "minecraft:baby" && finalize::transient(m, a).is_some())
+        };
+        let remove = |m: &mut Mob, id: &str| {
+            if id == "minecraft:baby" && finalize::transient(m, a).is_some() {
+                m.extra
+                    .attributes
+                    .get_or_insert_with(Box::default)
+                    .baby_speed_removed = true;
+            }
+            finalize::remove_modifier(m, a, id);
         };
         match self {
             Self::Add {
@@ -233,7 +244,7 @@ impl AttributeWrite {
                     if !replace {
                         return false;
                     }
-                    finalize::remove_modifier(m, a, id);
+                    remove(m, id);
                 }
                 let op = match modifier.operation() {
                     Operation::AddValue => Op::AddValue,
@@ -250,7 +261,7 @@ impl AttributeWrite {
             Self::Remove(id) => {
                 let had = taken(m, &id);
                 if had {
-                    finalize::remove_modifier(m, a, &id);
+                    remove(m, &id);
                 }
                 had
             }
@@ -712,14 +723,15 @@ mod tests {
             assert_eq!(values(game), (8.0, 0.0));
             // A horse's body piece armors it by its stack's rows.
             let horse_kind = game.res.mob_types().get("minecraft:horse").unwrap().clone();
-            game.mobs.push(Mob::new(15, horse_kind, Vec3::ZERO, 0.0));
-            let horse = living(game, 15);
+            // The fixture dragon owns IDs 14 through 22, including its parts.
+            game.mobs.push(Mob::new(40, horse_kind, Vec3::ZERO, 0.0));
+            let horse = living(game, 40);
             assert!(game.living_set_equipment(
                 horse,
                 EquipmentSlot::Body,
                 stack("minecraft:diamond_horse_armor")
             ));
-            let armored = armor::values(game.mobs.iter().find(|m| m.id == 15).unwrap());
+            let armored = armor::values(game.mobs.iter().find(|m| m.id == 40).unwrap());
             assert!(
                 armored.0 >= 1.0,
                 "the body piece armors the horse: {armored:?}"

@@ -20,6 +20,7 @@
 //! - `registry build|review|check|list`: the registry repository's CI.
 //! - `use-jar <path>`: list an exact original Java jar as a passive asset/data source.
 use horizon_mod_package::{Content, Manifest, Package, index::native, manifest::MANIFEST};
+mod bounded;
 mod check;
 mod inject;
 mod inject_sync;

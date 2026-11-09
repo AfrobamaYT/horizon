@@ -72,6 +72,37 @@ pub mod points {
     pub(super) fn host_side<'a>(game: &'a mut super::Game<'_>) -> mod_api::HostSide<'a> {
         super::execution_role::host_side(game)
     }
+
+    /// An engine value's `mod_api` mirror for a point record, through the boundary's conversion.
+    #[allow(dead_code, reason = "used by the staged copy's points")]
+    pub(super) fn mirror_in<T: super::api_values::TryIntoApi + ?Sized>(
+        value: &T,
+    ) -> Option<T::Api> {
+        value.try_into_api().ok()
+    }
+
+    /// A listener's `mod_api` value as the engine's, validated as every mod value is; a value the
+    /// engine refuses leaves the engine's own in place.
+    #[allow(dead_code, reason = "used by the staged copy's points")]
+    pub(super) fn mirror_out<A: super::api_values::TryIntoEngine<()>>(
+        value: &A,
+        point: &str,
+    ) -> Option<A::Engine> {
+        let engine = value.try_into_engine(&()).ok();
+        if engine.is_none() {
+            log::warn!(
+                "point {point}: a listener's value has no engine form; the engine's is kept"
+            );
+        }
+        engine
+    }
+
+    /// An engine value with no `mod_api` form at this call: its listeners are skipped this once.
+    #[cold]
+    #[allow(dead_code, reason = "used by the staged copy's points")]
+    pub(super) fn unconverted(point: &str) {
+        log::warn!("point {point}: a value has no API form; its listeners were skipped");
+    }
 }
 mod host;
 mod native_hooks;
@@ -3749,10 +3780,10 @@ impl Game<'_> {
     }
     /// The level's dimension type: a mod's or a data pack's own when it has one, else the
     /// built-in level's.
-    fn dimension_type(&self) -> &'static horizon_world::dimension_type::DimensionFacts {
+    fn dimension_type(&self) -> &horizon_world::dimension_type::DimensionFacts {
         // A client of a server has the facts its server sent for the level, which are its own,
         // not the table the server's levels (in this process, for an integrated server) read.
-        if let Some(facts) = self.remote.as_ref().and_then(|r| r.level_facts) {
+        if let Some(facts) = self.remote.as_ref().and_then(|r| r.level_facts.as_deref()) {
             return facts;
         }
         // Else the level the server named, whether or not the client has the mod that
@@ -3763,9 +3794,26 @@ impl Game<'_> {
             .map(|r| r.level.as_str())
             .filter(|level| !level.is_empty())
             .unwrap_or_else(|| self.dim.id());
-        horizon_world::dimension_type::DimensionFacts::of_level(
+        self.dimension_facts_for(
             horizon_core::LevelKey::parse(level).unwrap_or(horizon_core::LevelKey::OVERWORLD),
         )
+    }
+    /// A client only knows its current level's type; other keys use built-in defaults.
+    fn dimension_facts_for(
+        &self,
+        key: horizon_core::LevelKey,
+    ) -> &horizon_world::dimension_type::DimensionFacts {
+        use horizon_world::dimension_type::DimensionFacts;
+        if let Some(remote) = &self.remote {
+            if horizon_core::LevelKey::parse(&remote.level).ok() == Some(key)
+                && let Some(facts) = remote.level_facts.as_deref()
+            {
+                return facts;
+            }
+            DimensionFacts::of_builtin_level(key)
+        } else {
+            DimensionFacts::of_level(key)
+        }
     }
     fn dimension_type_of(
         &self,
@@ -4784,22 +4832,30 @@ impl Game<'_> {
             return;
         }
         let mut lent = horizon_client::health::LentLevel::take(&mut self.world);
-        let mut level = horizon_client::health::DamageLevel::lent(
-            &self.world,
-            self.pack.assets.registry,
-            &mut lent,
-            Some(world_items!(self)),
-            Some(&self.pack.block_registries),
-            &self.damage_hooks,
-        );
-        let contact = horizon_client::block_contact::Contact {
-            entity: id as i32,
-            kind: "minecraft:item",
-            state,
-            position: on,
-        };
-        let _ = horizon_client::block_contact::fall(&mut level, contact, distance, 0.0);
+        // A native fall_on Part can unwind. Keep the persistent level carrier
+        // outside the callback's temporary views, and return its progressed state
+        // before propagating the original panic. This does not restore the item batch.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut level = horizon_client::health::DamageLevel::lent(
+                &self.world,
+                self.pack.assets.registry,
+                &mut lent,
+                Some(world_items!(self)),
+                Some(&self.pack.block_registries),
+                &self.damage_hooks,
+            );
+            let contact = horizon_client::block_contact::Contact {
+                entity: id as i32,
+                kind: "minecraft:item",
+                state,
+                position: on,
+            };
+            let _ = horizon_client::block_contact::fall(&mut level, contact, distance, 0.0);
+        }));
         lent.give_back(&mut self.world);
+        if let Err(payload) = result {
+            std::panic::resume_unwind(payload);
+        }
     }
     /// An item that joined during this tick's entity pass: it first ticks on
     /// the next one.
@@ -17681,7 +17737,6 @@ pub fn run_with(
         use mod_api::__private::game::RegistrationContextNew;
         let context = mod_api::RegistrationContext::new();
         let inventory: Vec<_> = context.mods().iter().cloned().collect();
-        horizon_client::install_points_catalog();
         horizon_mod_wasm::initialize(&inventory);
     }
     mod_points::__private::seal();
@@ -17725,6 +17780,7 @@ pub fn run_with(
     mods::register_item_tint_sources(options.execution_role);
     mods::register_enchantment_damage_effects();
     mods::register_dimension_transition_screens(options.execution_role);
+    mods::register_color_resolvers(options.execution_role);
     mods::register_block_tint_sources(options.execution_role);
     mods::register_particle_providers(options.execution_role);
     mods::freeze_declarations();

@@ -390,7 +390,7 @@ impl ClimbingWorld for FlagClimbing<'_> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::game) mod tests {
     use super::super::Game;
     use super::super::native_entity_refs::tests::with_game;
     use horizon_client::mobs::{Mob, villager};
@@ -559,7 +559,7 @@ mod tests {
         });
     }
 
-    fn guest_server(game: &mut Game<'_>, dedicated: bool, owner: bool) {
+    pub(in crate::game) fn guest_server(game: &mut Game<'_>, dedicated: bool, owner: bool) {
         use super::super::{execution_role::ExecutionRole, lan::LanSettings};
         use horizon_client::lan::{NetConfig, hub::HubConfig};
         game.options.execution_role = if dedicated {
@@ -601,7 +601,7 @@ mod tests {
         );
     }
 
-    fn guest(
+    pub(in crate::game) fn guest(
         game: &mut Game<'_>,
         conn: u32,
     ) -> (
@@ -667,7 +667,7 @@ mod tests {
         }
     }
 
-    fn sync_guests(game: &mut Game<'_>) {
+    pub(in crate::game) fn sync_guests(game: &mut Game<'_>) {
         use horizon_client::lan::hub::TickCtx;
         let mut ctx = TickCtx {
             world: &mut game.world,
@@ -688,7 +688,7 @@ mod tests {
         game.lan.as_mut().unwrap().hub.tick_level(&mut ctx);
     }
 
-    fn packets(
+    pub(in crate::game) fn packets(
         rx: &std::sync::mpsc::Receiver<horizon_client::lan::Out>,
     ) -> Vec<horizon_protocol::packets::play::Clientbound> {
         use horizon_client::lan::Out;

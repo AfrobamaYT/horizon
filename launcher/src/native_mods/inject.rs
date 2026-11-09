@@ -23,6 +23,9 @@ pub(super) struct ListedPoint {
     pub(super) target: String,
     pub(super) raw: bool,
     pub(super) at_return: bool,
+    /// Why its API listeners are refused, naming the parameter with no API type.
+    #[serde(default)]
+    pub(super) api_refusal: Option<String>,
     pub(super) listener: Option<String>,
     pub(super) return_listener: Option<String>,
 }
