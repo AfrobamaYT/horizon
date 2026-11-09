@@ -1,13 +1,13 @@
+pub mod backend;
 pub mod block;
 pub mod client;
 pub mod command;
 pub mod content;
 pub mod entity;
 pub mod item;
+pub mod runtime;
 pub mod text;
 // hidden: the wasm boundary's encoding, used by generated code, not a mod's API
-pub mod backend;
-pub mod runtime;
 #[doc(hidden)]
 pub mod wire;
 pub mod world;
