@@ -199,7 +199,10 @@ impl WorldOptions {
                 all_presets
             }
         };
-        if !self.preset_order.iter().any(|id| id == self.preset_id()) {
+        // Re-Create retains Debug even when the normal tag hides it.
+        if self.preset_id() != crate::save::WorldPreset::Debug.id()
+            && !self.preset_order.iter().any(|id| id == self.preset_id())
+        {
             self.custom_preset = self.preset_order.first().cloned();
             if let Some(preset) = self
                 .custom_preset

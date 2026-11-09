@@ -167,6 +167,37 @@ fn an_empty_normal_world_preset_tag_falls_back_to_all_registry_presets() {
 }
 
 #[test]
+fn recreating_a_debug_world_preset_keeps_its_hidden_type() {
+    let mut f = Fixture::new();
+    f.world("Debug", "Debug");
+    crate::save::write_world_gen_settings(
+        &f.title.saves.join("Debug"),
+        123456,
+        crate::save::WorldGen {
+            preset: crate::save::WorldPreset::Debug,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    f.select();
+    f.click("Re-Create");
+    let Mode::Create { options, .. } = &f.title.mode else {
+        panic!("create")
+    };
+    assert_eq!(options.preset_id(), "minecraft:debug_all_block_states");
+    assert!(
+        !options
+            .preset_order
+            .iter()
+            .any(|id| id == "minecraft:debug_all_block_states")
+    );
+    let Action::Create { options, .. } = f.title.create_action() else {
+        panic!("create action")
+    };
+    assert_eq!(options.world_gen().preset, crate::save::WorldPreset::Debug);
+}
+
+#[test]
 fn world_preset_narration_matches_the_cycle_and_only_hints_actual_amplified() {
     let mut options = WorldOptions {
         custom_preset: Some("example:islands".into()),
