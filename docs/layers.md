@@ -10,9 +10,9 @@ This page says what belongs to each layer, which crate may depend on which, and 
 Contributors fixing vanilla behaviour should never have to touch cosmetics, the shop or a server address. A fork
 should be able to take the engine and the platform without Horizon's product.
 
-The upstream checkers remain diagnostic on this fork while their baselines are adapted to the split mod crates
-and separate workspaces. They are not readiness gates yet. The explicit fork baseline rows and reasons live in
-`tools/layers.json` and `tools/addresses.json`; no engine/API refactor is implied by importing these tools.
+Both checks below run in CI's verify job and in `tools/pr_ready.py`, against the fork's baseline: the explicit
+rows and reasons in `tools/layers.json` and `tools/addresses.json`, which cover the split mod crates and the separate
+launcher and registry workspaces. No engine/API refactor is implied by importing these tools.
 
 Credits: the three layers, the dependency rule, the address rule and the plan come from duckybertduck's proposal
 ("3-layer split: engine / platform / Horizon", #contributors, 2026-11-08). The rule that the mod API owns its types
@@ -107,9 +107,10 @@ say) goes in its own module, never mixed into an engine module. Horizon code in 
 
 ## The check
 
-`python3 tools/check_layers.py` reads the `cargo metadata` of the three workspaces `tools/layers.json` lists (the
-game, `launcher/` and `crates/horizon-mod-registry/`; no build, about a second) and
-[`tools/layers.json`](../tools/layers.json), which gives every crate its layer. It fails when:
+`python3 tools/check_layers.py` runs in CI's verify job and in `tools/pr_ready.py`. It reads the `cargo metadata`
+of the three workspaces `tools/layers.json` lists (the game, `launcher/` and `crates/horizon-mod-registry/`; no
+build, about a second) and [`tools/layers.json`](../tools/layers.json), which gives every crate its layer. It
+fails when:
 
 - a crate has no layer;
 - a dependency goes up a layer and neither `allowed` lists it nor `optional` lists it as an optional dependency;
@@ -142,8 +143,8 @@ An address is built in when the code contacts it without the player typing it. E
 endpoints. Every other built-in address belongs to the Horizon layer, in one file: `crates/horizon-addresses/src/lib.rs`,
 which the game's Horizon crates and the launcher both read. Platform code gets its addresses passed in from there.
 
-`python3 tools/check_addresses.py` (currently a manual diagnostic on this fork) reads the string literals of
-shipped Rust and finds every host: a URL's host, or a whole string that is a host name. Tests are skipped, and so are
+`python3 tools/check_addresses.py` runs in CI's verify job and in `tools/pr_ready.py`. It reads the string
+literals of shipped Rust and finds every host: a URL's host, or a whole string that is a host name. Tests are skipped, and so are
 placeholders (`example.com`, `*.test`) and local IPs. [`tools/addresses.json`](../tools/addresses.json) says where
 each host may be:
 
@@ -192,7 +193,7 @@ These are not addresses:
 ## Reviewer checklist
 
 - The PR names its layer, and new code sits in a crate or module of that layer (the table above).
-- Review new upward dependencies explicitly; diagnostic baselines do not authorize new architecture changes.
+- Review new upward dependencies explicitly; the recorded baselines do not authorize new architecture changes.
 - Horizon features in the game are behind `horizon-extras`. Platform features that change the vanilla look are
   off by default.
 - No new built-in address outside the Horizon layer.
