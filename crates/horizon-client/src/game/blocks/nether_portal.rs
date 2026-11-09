@@ -72,6 +72,7 @@ impl Plan {
 #[derive(Debug)]
 enum TransferredArrivalState {
     Entity(super::entity_initialization::TransferredEntityState),
+    VehicleTree(super::persist::TransferredVehicleTree),
 }
 
 #[derive(Debug)]
@@ -672,11 +673,12 @@ impl Game<'_> {
         // entity's portal time and cooldown wait, kept as they are.
         let entity_ticking = self.entity_ticking_area();
         let mut waiting: Vec<u32> = Vec::new();
+        let frozen = self.mobs_below_off_level();
         let tracked = &self.portals.entities;
         for_each_entity!(entity_lists_of!(self), entity => {
             if entity.portal_size().is_some() && entity.is_vehicle() == vehicles {
                 let at = entity.position();
-                if !entity_ticking(at.x.floor() as i32, at.z.floor() as i32) {
+                if frozen.contains(&entity.id()) || !entity_ticking(at.x.floor() as i32, at.z.floor() as i32) {
                     if tracked.contains_key(&entity.id()) {
                         waiting.push(entity.id());
                     }
@@ -893,6 +895,7 @@ impl Game<'_> {
         // Only the entities that tick (in entity-ticking chunks) move, so only
         // they can have swept into a portal.
         let entity_ticking = self.entity_ticking_area();
+        let frozen = self.mobs_below_off_level();
         // The first portal block each entity's box swept through since the
         // start of its tick (a stuck arrow that did not move enters none).
         for_each_entity!(entity_lists_of!(self), entity => {
@@ -900,7 +903,7 @@ impl Game<'_> {
                 continue;
             };
             let (id, to) = (entity.id(), entity.position());
-            if !entity_ticking(to.x.floor() as i32, to.z.floor() as i32) {
+            if frozen.contains(&id) || !entity_ticking(to.x.floor() as i32, to.z.floor() as i32) {
                 continue;
             }
             if !entity.portal_sweeps() || !entity.can_use_portal(self) {
@@ -1020,6 +1023,19 @@ impl Game<'_> {
     }
     /// `Entity.teleportCrossDimension` away from the loaded dimension: the
     /// entity is saved and removed, and waits for its dimension to load.
+    fn remove_portal_vehicle_tree(&mut self, root: u32) {
+        let mounts: Vec<_> = self.mob_objects().map(|m| (m.id, m.extra.mount)).collect();
+        let tree = super::persist::vehicle_tree(root, &mounts);
+        self.mobs.retain(|m| !tree.contains(&m.id));
+        self.persist.off_level.retain(|id, _| !tree.contains(id));
+        self.boats.retain(|b| !tree.contains(&b.id));
+        self.carts.retain(|c| !tree.contains(&c.id));
+        for id in tree {
+            self.release_vehicle_container(id);
+            self.detach_entity(id);
+        }
+    }
+
     fn send_through_portal(&mut self, id: u32, entry: BlockPos) {
         let arrivals = self.portals.arrivals.len();
         if let Some(i) = self.dropped.iter().position(|e| e.id == id) {
@@ -1124,21 +1140,21 @@ impl Game<'_> {
             if !self.may_travel_through(id, &plan) {
                 return;
             }
-            let mut tag = self.mob_tree_nbt(i);
+            let Some(mut tag) = self.vehicle_tree_nbt(id) else {
+                return;
+            };
             // Entity.removeAfterChangingDimensions drops the leash.
             if let Tag::Compound(c) = &mut tag {
                 c.remove(&"leash".into());
             }
-            let mut gone = vec![id];
-            gone.extend(self.remove_mob_riders(id));
-            self.mobs.retain(|m| m.id != id);
-            for g in gone {
-                self.detach_entity(g);
-            }
+            let Some(state) = self.capture_vehicle_tree_state(id) else {
+                return;
+            };
+            self.remove_portal_vehicle_tree(id);
             self.portals.arrivals.push(Arrival {
                 plan,
                 tag,
-                transferred: None,
+                transferred: Some(TransferredArrivalState::VehicleTree(state)),
             });
             self.portals.dirty = true;
         } else if let Some(i) = self.boats.iter().position(|b| b.id == id) {
@@ -1149,20 +1165,17 @@ impl Game<'_> {
                 return;
             }
             self.release_vehicle_container(id);
-            let uuid = self.uuid_for(id);
-            let b = &self.boats[i];
-            let mut tag = b.to_nbt(uuid, self.persist_raw(id));
-            // The mobs riding it cross with it and mount it again.
-            self.put_mob_passengers(&mut tag, id);
-            for rider in self.remove_mob_riders(id) {
-                self.detach_entity(rider);
-            }
-            self.boats.remove(i);
-            self.detach_entity(id);
+            let Some(tag) = self.vehicle_tree_nbt(id) else {
+                return;
+            };
+            let Some(state) = self.capture_vehicle_tree_state(id) else {
+                return;
+            };
+            self.remove_portal_vehicle_tree(id);
             self.portals.arrivals.push(Arrival {
                 plan,
                 tag,
-                transferred: None,
+                transferred: Some(TransferredArrivalState::VehicleTree(state)),
             });
             self.portals.dirty = true;
         } else if let Some(i) = self.carts.iter().position(|c| c.id == id) {
@@ -1176,8 +1189,9 @@ impl Game<'_> {
                 return;
             }
             self.release_vehicle_container(id);
-            let uuid = self.uuid_for(id);
-            let mut tag = self.carts[i].to_nbt(uuid, self.persist_raw(id));
+            let Some(mut tag) = self.vehicle_tree_nbt(id) else {
+                return;
+            };
             // `PositionMoveRotation.of(this)` takes the cart's `getKnownMovement`:
             // `OldMinecartBehavior` clamps it to 0.4 either way along x and z.
             let m = horizon_client::entity_nbt::motion(&tag);
@@ -1187,17 +1201,14 @@ impl Game<'_> {
                     doubles([m.x.clamp(-0.4, 0.4), m.y, m.z.clamp(-0.4, 0.4)]),
                 );
             }
-            // The mobs riding it cross with it and mount it again.
-            self.put_mob_passengers(&mut tag, id);
-            for rider in self.remove_mob_riders(id) {
-                self.detach_entity(rider);
-            }
-            self.carts.remove(i);
-            self.detach_entity(id);
+            let Some(state) = self.capture_vehicle_tree_state(id) else {
+                return;
+            };
+            self.remove_portal_vehicle_tree(id);
             self.portals.arrivals.push(Arrival {
                 plan,
                 tag,
-                transferred: None,
+                transferred: Some(TransferredArrivalState::VehicleTree(state)),
             });
             self.portals.dirty = true;
         } else if let Some(i) = self
@@ -1246,26 +1257,6 @@ impl Game<'_> {
         if self.portals.arrivals.len() > arrivals {
             self.native_entity_portal(self.dim.id(), id, [entry.x, entry.y, entry.z]);
         }
-    }
-    /// Removes the mobs riding `vehicle`, and those riding them, from the
-    /// level: `Entity.teleportCrossDimension` takes the whole tree with its
-    /// root. Their ids.
-    fn remove_mob_riders(&mut self, vehicle: u32) -> Vec<u32> {
-        let mut tree = vec![vehicle];
-        let mut k = 0;
-        while k < tree.len() {
-            let v = tree[k];
-            tree.extend(
-                self.mobs
-                    .iter()
-                    .filter(|m| m.extra.mount == Some(v))
-                    .map(|m| m.id),
-            );
-            k += 1;
-        }
-        tree.remove(0);
-        self.mobs.retain(|m| !tree.contains(&m.id));
-        tree
     }
     /// The chunks of the arrivals still waiting to land in `dim`, for the
     /// streaming `extra` areas that light them: vanilla's portal ticket
@@ -1350,6 +1341,14 @@ impl Game<'_> {
                 c.insert("PortalCooldown".into(), Tag::Int(ENTITY_DELAY));
             }
             // ServerLevel.addDuringTeleport: a fresh add, not loaded from disk.
+            if let Some(TransferredArrivalState::VehicleTree(state)) = transferred {
+                let key = Self::chunk_of(at);
+                if self.restore_vehicle_tree_state(tag, state).is_some() {
+                    self.native_joins_flush(false, 0);
+                    self.native_entities_load(self.dim.id(), [key.0, key.1], 1);
+                }
+                continue;
+            }
             super::persist::mark_fresh(&mut tag);
             let key = ((at.x.floor() as i32) >> 4, (at.z.floor() as i32) >> 4);
             if let Some(TransferredArrivalState::Entity(state)) = transferred {
@@ -1483,6 +1482,51 @@ mod tests {
         Arc, Mutex,
         atomic::{AtomicU32, Ordering},
     };
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn portal_capture_preserves_rejected_objects_and_reverses_admission() {
+        with_gate(|game, _, _| {
+            assert!(game.run_command("summon minecraft:pig 0 64 0 {UUID:[I;0,0,0,175],Tags:[portal_root],Passengers:[{id: minecraft:pig,UUID:[I;0,0,0,175],Passengers:[{id:minecraft:pig,UUID:[I;0,0,0,176]}]}]}"));
+            let root = game
+                .mobs
+                .iter()
+                .find(|m| {
+                    game.persist_raw(m.id).is_some_and(|t| {
+                        horizon_client::entity_nbt::uuid(t) == Some([0, 0, 0, 175])
+                    })
+                })
+                .unwrap()
+                .id;
+            let child = game.mob_passenger_ids(root)[0];
+            let leaf = game.mob_passenger_ids(child)[0];
+            assert!(!game.mobs.iter().any(|m| m.id == child));
+            game.tickets.add_portal((0, 0));
+            assert!(game.entity_ticking_area()(0, 0));
+            game.set_portal_cooldown(leaf);
+            let cooldown = game.portals.entities[&leaf].cooldown;
+            game.handle_entity_portals();
+            assert_eq!(game.portals.entities[&leaf].cooldown, cooldown);
+            game.send_through_portal(root, BlockPos::new(0, 64, 0));
+            assert!(game.mob_object(root).is_none());
+            assert!(game.mob_object(child).is_none());
+            assert!(game.mob_object(leaf).is_none());
+            let arrival = game.portals.arrivals.pop().unwrap();
+            let Some(TransferredArrivalState::VehicleTree(state)) = arrival.transferred else {
+                panic!("missing tree state")
+            };
+            let restored = game.restore_vehicle_tree_state(arrival.tag, state).unwrap();
+            let new_child = restored.by_source[&child];
+            assert!(!game.mobs.iter().any(|m| m.id == restored.root));
+            assert!(game.mobs.iter().any(|m| m.id == new_child));
+            assert_eq!(game.mob_passenger_ids(restored.root), [new_child]);
+            assert!(game.mobs_below_off_level().contains(&new_child));
+            assert!(
+                game.mobs_below_off_level()
+                    .contains(&restored.by_source[&leaf])
+            );
+        });
+    }
 
     /// Cancels the travel of the entity whose id `spare` holds, and logs each
     /// (entity, dimension, cause) it is asked.
