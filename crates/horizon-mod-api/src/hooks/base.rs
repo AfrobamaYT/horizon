@@ -256,10 +256,12 @@ pub trait Hooks {
     fn minimap();
     /// The player changed setting `key` of mod `mod_id` on its page in Options > Mods
     /// (`Registrar::register_setting`); the new value is kept already, so read it with
-    /// `setting_bool` and its siblings. Every mod hears every change: check `mod_id`.
+    /// `setting_bool` and its siblings. Only mod `mod_id` hears it: a mod is told of its own
+    /// settings, never another's.
     #[hook(
         side = "client",
         contract = "listen",
+        owner = "mod_id",
         neoforge = "ModConfigEvent.Reloading (a ModConfigSpec value set on the config screen)"
     )]
     fn setting_changed();

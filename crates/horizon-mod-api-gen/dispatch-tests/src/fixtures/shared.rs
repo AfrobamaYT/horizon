@@ -152,6 +152,13 @@ fn receives_cancelled(hook: HookId) -> bool {
 fn entered(hook_id: HookId, hook: &'static str) -> impl Iterator<Item = &'static dyn Hooks> {
     entered_with_id(hook_id, hook).map(|(_, hooks)| hooks)
 }
+fn entered_owned<'a>(
+    hook_id: HookId,
+    hook: &'static str,
+    owner: &'a str,
+) -> impl Iterator<Item = &'static dyn Hooks> + 'a {
+    entered_with_id(hook_id, hook).filter_map(move |(id, hooks)| (id == owner).then_some(hooks))
+}
 fn entered_with_id(
     hook_id: HookId,
     hook: &'static str,
