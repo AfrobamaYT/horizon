@@ -12,7 +12,7 @@ def user_step_started(job):
 
 
 def genuine_failure(jobs):
-    return any(job.get("conclusion") == "failure" and user_step_started(job) for job in jobs)
+    return any(job.get("conclusion") in ("failure", "timed_out") and user_step_started(job) for job in jobs)
 
 
 def recovery_reason(jobs, now):

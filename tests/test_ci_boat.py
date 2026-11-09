@@ -65,6 +65,9 @@ class BoatHealthTests(unittest.TestCase):
         self.assertEqual(watch.recovery_reason([queued, failed], NOW), "")
         failed["name"] = "launcher"
         self.assertEqual(watch.recovery_reason([queued, failed], NOW), "")
+        failed["conclusion"] = "timed_out"
+        self.assertEqual(watch.recovery_reason([queued, failed], NOW), "")
+        self.assertEqual(boat.previous_attempt_reason([queued, failed], NOW), "")
         self.assertIn("queued", watch.recovery_reason([queued], NOW))
 
     def test_previous_cancelled_queue_retains_outage(self):
@@ -129,6 +132,30 @@ class BoatHealthTests(unittest.TestCase):
             self.assertIn("label=ubuntu-latest", output.read_text())
             self.assertIn("forced_github=true", output.read_text())
             self.assertIn("previous attempt", summary.read_text())
+
+    def test_support_requires_original_trusted_gate_and_unmodified_pr(self):
+        run = dict(pull_requests=[dict(base=dict(sha="base"))], head_sha="head")
+        with patch.object(controller, "api", side_effect=[dict(sha="same")] * 4 + [dict(files=[])]):
+            self.assertEqual(controller.unsupported_reason("repo", run, "trusted"), "")
+        with patch.object(controller, "api", side_effect=[dict(sha="old"), dict(sha="new")]):
+            self.assertIn("original base", controller.unsupported_reason("repo", run, "trusted"))
+        for files in ([dict(filename="tools/ci/boat_health.py")], [dict(filename="renamed", previous_filename=".github/workflows/dyna-ci.yml")], [dict(filename="other")] * 300):
+            with patch.object(controller, "api", side_effect=[dict(sha="same")] * 4 + [dict(files=files)]):
+                self.assertTrue(controller.unsupported_reason("repo", run, "trusted"))
+        with patch.object(controller, "api") as api:
+            self.assertIn("unavailable", controller.unsupported_reason("repo", dict(pull_requests=[]), "trusted"))
+            api.assert_not_called()
+
+    def test_active_candidates_are_paginated_separately_from_failures(self):
+        first_page = [dict(id=index) for index in range(100)]
+        with patch.object(controller, "api", side_effect=[dict(workflow_runs=first_page), dict(workflow_runs=[dict(id=100)]), dict(workflow_runs=[]), dict(workflow_runs=[])]) as api:
+            result = list(controller.candidates("repo", 123))
+        self.assertEqual(len(result), 101)
+        urls = [call.args[0] for call in api.call_args_list]
+        self.assertIn("status=queued", urls[0])
+        self.assertIn("page=2", urls[1])
+        self.assertIn("status=in_progress", urls[2])
+        self.assertIn("status=failure", urls[3])
 
     def test_allowlist_and_switch(self):
         for enabled, author, actor in [("off", "alice", "alice"), ("on", "bob", "alice"), ("on", "alice", "bob")]:

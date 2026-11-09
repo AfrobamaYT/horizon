@@ -4,7 +4,8 @@
 This script comes exclusively from the controller's default-branch workflow SHA.
 It neither downloads nor executes code from the triggering PR.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from urllib.parse import urlencode
 import json
 import os
 import subprocess
@@ -57,6 +58,67 @@ def recover(repo, run):
     post(path + "/rerun")
 
 
+def unsupported_reason(repo, run, trusted_ref):
+    """Require the original merge's trusted base to contain our exact routing gate.
+
+    A rerun preserves its original workflow revision. Never assume a new controller
+    can retrofit old runs, or execute PR content to find out whether it can.
+    """
+    pulls = run.get("pull_requests", [])
+    if len(pulls) != 1:
+        return "original PR base SHA is unavailable or ambiguous"
+    base = pulls[0]["base"]["sha"]
+    paths = ("tools/ci/boat_health.py", ".github/workflows/dyna-ci.yml")
+    for path in paths:
+        try:
+            original = api(f"repos/{repo}/contents/{path}?ref={base}")
+        except subprocess.CalledProcessError:
+            return "original fallback gate is missing or unreadable"
+        trusted = api(f"repos/{repo}/contents/{path}?ref={trusted_ref}")
+        if original["sha"] != trusted["sha"]:
+            return "original base does not contain this controller's exact fallback gate"
+    comparison = api(f"repos/{repo}/compare/{base}...{run['head_sha']}")
+    files = comparison["files"]
+    # GitHub truncates compare file lists at 300. An incomplete diff cannot prove
+    # the PR left the trusted routing code alone.
+    if len(files) >= 300:
+        return "PR changed-file list may be truncated"
+    if any(file["filename"] in paths or file.get("previous_filename") in paths for file in files):
+        return "PR modifies fallback routing code"
+    return ""
+
+
+def candidates(repo, workflow):
+    """Active runs cannot be displaced by a stream of newer completed runs."""
+    for status in ("queued", "in_progress", "failure"):
+        page = 1
+        while True:
+            query = dict(event="pull_request", status=status, per_page=100, page=page)
+            if status == "failure":
+                query["created"] = ">=" + (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+            runs = api(f"repos/{repo}/actions/workflows/{workflow}/runs?{urlencode(query)}")["workflow_runs"]
+            yield from runs
+            if len(runs) < 100:
+                break
+            page += 1
+
+
+def consider(repo, run, workflow, trusted_ref):
+    if not eligible(run, repo, workflow):
+        return
+    jobs = api(f"repos/{repo}/actions/runs/{run['id']}/attempts/1/jobs?per_page=100")["jobs"]
+    if not recovery_reason(jobs, datetime.now(timezone.utc)):
+        return
+    unsupported = unsupported_reason(repo, run, trusted_ref)
+    if unsupported:
+        log(f"Run {run['id']}: skipped recovery: {unsupported}.")
+        return
+    # Read again after support inspection: run state may have changed meanwhile.
+    run = api(f"repos/{repo}/actions/runs/{run['id']}")
+    if eligible(run, repo, workflow):
+        recover(repo, run)
+
+
 def main():
     repo = os.environ["GITHUB_REPOSITORY"]
     workflow = api(f"repos/{repo}/actions/workflows/dyna-ci.yml")["id"]
@@ -65,12 +127,10 @@ def main():
     if os.environ["GITHUB_EVENT_NAME"] == "workflow_run":
         run_id = event["workflow_run"]["id"]
         run = api(f"repos/{repo}/actions/runs/{run_id}")
-        if eligible(run, repo, workflow):
-            recover(repo, run)
+        consider(repo, run, workflow, os.environ["GITHUB_WORKFLOW_SHA"])
     else:
-        for run in api(f"repos/{repo}/actions/workflows/{workflow}/runs?event=pull_request&per_page=30")["workflow_runs"]:
-            if eligible(run, repo, workflow):
-                recover(repo, run)
+        for run in candidates(repo, workflow):
+            consider(repo, run, workflow, os.environ["GITHUB_WORKFLOW_SHA"])
 
 
 if __name__ == "__main__":
