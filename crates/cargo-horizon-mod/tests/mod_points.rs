@@ -84,11 +84,12 @@ fn main() {
     let mut ledger = chemlib::tanks::Ledger { entries: Vec::new() };
     chemlib::tanks::record(&mut ledger, 3);
     println!(
-        "{unpatched} {patched} {} {} {} {}",
+        "{unpatched} {patched} {} {} {} {} {}",
         after[1].amount,
         chem_addon::MOVED.load(Ordering::Relaxed),
         chemlib::audit(&after),
-        ledger.entries.len()
+        ledger.entries.len(),
+        chem_addon::FLOW_RATE.load(Ordering::Relaxed)
     );
 }
 "#;
@@ -219,6 +220,14 @@ fn an_addon_patches_a_library_through_its_mod_points() {
             &hash("chemlib::transfer"),
         ),
         inject(
+            "flow",
+            "chemlib::flow",
+            Kind::Head,
+            Access::Api,
+            "saw_flow",
+            &hash("chemlib::flow"),
+        ),
+        inject(
             "ledger",
             "chemlib::tanks::record",
             Kind::Head,
@@ -233,7 +242,7 @@ fn an_addon_patches_a_library_through_its_mod_points() {
         catalog: &catalog,
     };
     // The ledger has no Wire form: its api listeners are refused naming it, its internals kept.
-    let mut api_ledger = injects[2].clone();
+    let mut api_ledger = injects[3].clone();
     api_ledger.access = Access::Api;
     assert!(
         mod_points::route("chem_addon", &api_ledger, &shared)
@@ -312,6 +321,9 @@ fn an_addon_patches_a_library_through_its_mod_points() {
         .args(["run", "--quiet", "-p", "probe"])
         .current_dir(&scratch)
         .env("CARGO_TARGET_DIR", scratch.join("target"))
+        // The staged library, the addon and the generated table build without a warning,
+        // `unexpected_cfgs` included.
+        .env("RUSTFLAGS", "-D warnings")
         .output()
         .unwrap();
     assert!(
@@ -321,9 +333,10 @@ fn an_addon_patches_a_library_through_its_mod_points() {
     );
     // Unpatched: 10 moved. The api head listener doubled the rate (20 moved, so the second
     // tank holds 20); the internals return listener saw the 20; the opted-out audit and the
-    // internals-only ledger point ran as written.
+    // internals-only ledger point ran as written; the api listener at the private `flow` saw
+    // the doubled rate.
     assert_eq!(
         String::from_utf8_lossy(&output.stdout).trim(),
-        "10 20 20 20 100 1"
+        "10 20 20 20 100 1 20"
     );
 }
