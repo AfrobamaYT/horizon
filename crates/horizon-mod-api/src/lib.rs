@@ -3103,6 +3103,80 @@ pub enum MobCategory {
     Misc,
 }
 
+/// How many mobs of each spawning category a level's natural spawning allows
+/// (`MobCategory.getMaxInstancesPerChunk`), read and set through
+/// `LevelRef::spawn_limits` and `set_spawn_limits`. Each limit counts twice, as
+/// vanilla's own does: the level spawns a category only while its count of
+/// that category's mobs stays under `limit * spawnable chunks / 289` (one
+/// player's 17 by 17 chunks hold the vanilla value), and only in a chunk with
+/// a player near it who has fewer than `limit` of them around. A limit of 0
+/// stops the category's natural spawning. `MobCategory::Misc` never spawns
+/// naturally, so it has no limit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: one field per vanilla spawning category; mods build it from `VANILLA`
+pub struct SpawnLimits {
+    /// `MONSTER`: 70 in vanilla.
+    pub monster: u32,
+    /// `CREATURE`: 10 in vanilla.
+    pub creature: u32,
+    /// `AMBIENT`: 15 in vanilla.
+    pub ambient: u32,
+    /// `AXOLOTLS`: 5 in vanilla.
+    pub axolotls: u32,
+    /// `UNDERGROUND_WATER_CREATURE`: 5 in vanilla.
+    pub underground_water_creature: u32,
+    /// `WATER_CREATURE`: 5 in vanilla.
+    pub water_creature: u32,
+    /// `WATER_AMBIENT`: 20 in vanilla.
+    pub water_ambient: u32,
+}
+
+impl SpawnLimits {
+    /// Vanilla's limits, which every level starts with.
+    pub const VANILLA: Self = Self {
+        monster: 70,
+        creature: 10,
+        ambient: 15,
+        axolotls: 5,
+        underground_water_creature: 5,
+        water_creature: 5,
+        water_ambient: 20,
+    };
+}
+
+impl Default for SpawnLimits {
+    fn default() -> Self {
+        Self::VANILLA
+    }
+}
+
+/// Which categories a level's natural spawning (`NaturalSpawner.spawnForChunk`)
+/// may spawn at all, read and set through `LevelRef::spawn_flags` and
+/// `set_spawn_flags`. A flag only takes away, for its level alone: monsters
+/// still need the `spawn_monsters` game rule, and nothing spawns naturally with
+/// `spawn_mobs` off. Spawners, patrols, sieges, phantoms, a new chunk's
+/// creatures and other custom spawners don't read the flags.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: one switch for monsters, one for the rest; mods build it with a literal
+pub struct SpawnFlags {
+    /// Whether `MobCategory::Monster` spawns: off acts as the `spawn_monsters`
+    /// rule off does (`getFilteredSpawningCategories`' `spawnEnemies`).
+    pub monsters: bool,
+    /// Whether every other spawning category spawns: creatures, ambient and
+    /// water mobs, axolotls. Horizon's own; vanilla has no such switch.
+    pub friendlies: bool,
+}
+
+impl Default for SpawnFlags {
+    /// Both on, as every level starts.
+    fn default() -> Self {
+        Self {
+            monsters: true,
+            friendlies: true,
+        }
+    }
+}
+
 /// Why a mob spawns (`EntitySpawnReason`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]

@@ -538,3 +538,24 @@ fn player_rules_take_their_hosts(
     let _: bool = player.set_respawn_config(server, Some(config));
     let _: bool = player.set_sleep_timer(server, 0);
 }
+
+/// Compile-only: mob spawning and the spawn policy as a mod calls them, the reads on any host
+/// and the writes, which change what the level spawns, on a server host.
+#[allow(dead_code)]
+fn spawn_policy_writes_take_a_server_host(
+    read: &dyn Host,
+    server: &mut dyn ServerHost,
+    level: LevelRef,
+) {
+    let _: Option<SpawnLimits> = level.spawn_limits(read);
+    let _: Option<SpawnFlags> = level.spawn_flags(read);
+    let _: Option<bool> = level.can_spawn_entities_in_chunk(read, [0, 0]);
+    let _: bool = level.set_spawn_limits(server, SpawnLimits::VANILLA);
+    let _: bool = level.set_spawn_flags(server, SpawnFlags::default());
+    let _: Option<EntityRef> = level.spawn_mob(
+        server,
+        "minecraft:zombie",
+        [0.5, 64.0, 0.5],
+        NativeSpawnReason::Command,
+    );
+}

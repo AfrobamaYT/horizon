@@ -397,6 +397,9 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Backend::level_fluid_height_for_camera` | crosses | Wire call |
 | `Backend::level_fluid_can_be_replaced_with` | crosses | Wire call |
 | `Backend::level_ray_trace_entities` | crosses | Wire call |
+| `Backend::level_spawn_limits` | crosses | Wire call |
+| `Backend::level_spawn_flags` | crosses | Wire call |
+| `Backend::level_can_spawn_entities_in_chunk` | crosses | Wire call |
 | `Backend::living_effect` | crosses | Wire call |
 | `Backend::living_effects` | crosses | Wire call |
 | `Backend::living_potion_affected` | crosses | Wire call |
@@ -650,6 +653,9 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `BackendMut::game_insert` | crosses | Wire call |
 | `BackendMut::game_extract` | crosses | Wire call |
 | `BackendMut::drop_at` | crosses | Wire call |
+| `BackendMut::level_spawn_mob` | crosses | Wire call |
+| `BackendMut::level_set_spawn_limits` | crosses | Wire call |
+| `BackendMut::level_set_spawn_flags` | crosses | Wire call |
 | `BackendMut::chunk_set_forced` | crosses | Wire call |
 | `BackendMut::chunk_set_mod_forced` | crosses | Wire call |
 | `BackendMut::level_set_block` | crosses | Wire call |
