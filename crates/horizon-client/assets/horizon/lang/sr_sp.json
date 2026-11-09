@@ -398,9 +398,6 @@
   "horizon.controller.guide.trade": "Тргуј",
   "horizon.controller.guide.use": "Користи",
   "horizon.controller.guide.zoom": "Зумирај",
-  "horizon.emote_wheel.empty": "Још нема емоција",
-  "horizon.emote_wheel.help": "Пустите или кликните да бисте пустили · 1–8 · Esc затвара",
-  "horizon.emote_wheel.title": "Емоције",
   "horizon.extras.agent_control": "Агент Цонтрол",
   "horizon.extras.agent_control.tooltip": "Ваш сопствени АИ агент може да игра ову игру преко хоризон-цтл или МЦП клијента, само на овом рачунару.",
   "horizon.extras.auto_reconnect": "Аутоматско поновно повезивање",
@@ -409,9 +406,6 @@
   "horizon.extras.chat_animation.tooltip": "Нова линија за ћаскање клизи са леве стране док бледи, уместо да изгледа цела.",
   "horizon.extras.chat_indicator": "Индикатор поруке",
   "horizon.extras.chat_indicator.tooltip": "Трака у боји лево од линије за ћаскање.",
-  "horizon.extras.cosmetics_solo": "У игри за једног играча",
-  "horizon.extras.cosmetics_solo.tooltip": "Приказује вашу козметику и значку на ознаци имена и у вашим световима за једног играча (ваша ознака имена са „Сопствена ознака имена“). Искључено: само на серверима.",
-  "horizon.extras.discord_presence": "Discord Rich Presence",
   "horizon.extras.dynamic_lights": "Динамичка светла",
   "horizon.extras.dynamic_lights.tooltip": "Бакље и други извори светлости који су држани, испуштени или запаљени осветљавају блокове око себе.",
   "horizon.extras.fullbright": "Фуллбригхт",
@@ -502,7 +496,6 @@
   "horizon.mods.browse.by": "од %s",
   "horizon.mods.browse.changelog": "Дневник промена",
   "horizon.mods.browse.done": "%s %s је инсталиран и укључен.",
-  "horizon.mods.browse.enabled": "Мод",
   "horizon.mods.browse.failed": "Не могу да прочитам регистар модова: %s",
   "horizon.mods.browse.has_update": " (ажурирање)",
   "horizon.mods.browse.install": "Инсталирај",
@@ -662,7 +655,6 @@
   "horizon.pages.split_setup.tooltip": "Прозори и монитори, и ко где игра.",
   "horizon.pages.studio": "Студио реприза",
   "horizon.pages.studio.tooltip": "Прегледајте сачуване снимке и њихове метаподатке.",
-  "horizon.plain.official": "Званични Horizon са покретачем, модовима и ажурирањима: playhorizon.dev",
   "horizon.pvp.chat_compact": "Збијено ћаскање",
   "horizon.pvp.chat_compact.tooltip": "Порука поновљена узастопно приказује се једном, са бројем понављања: (x3).",
   "horizon.pvp.chat_copy": "Копирај кликом",
@@ -1041,6 +1033,5 @@
   "horizon.tempban.list.entry": "%1$s је забрањен од %2$s %3$s (до %4$s)",
   "horizon.tempban.success": "%1$s забрањен на %2$s, до %3$s",
   "horizon.tempban.usage": "/tempban <player> <duration> [reason]",
-  "horizon.title.not_affiliated": "Није повезано са Mojang-ом или Microsoft-ом",
-  "key.emote": "Точак емоција"
+  "horizon.title.not_affiliated": "Није повезано са Mojang-ом или Microsoft-ом"
 }

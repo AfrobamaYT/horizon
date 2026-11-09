@@ -493,7 +493,6 @@
   "horizon.mods.browse.by": "por %s",
   "horizon.mods.browse.changelog": "Registro de alterações",
   "horizon.mods.browse.done": "%s %s está instalado e ligado.",
-  "horizon.mods.browse.enabled": "Mod",
   "horizon.mods.browse.failed": "Não foi possível ler o registro de mods: %s",
   "horizon.mods.browse.has_update": " (atualização)",
   "horizon.mods.browse.install": "Instalar",

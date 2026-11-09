@@ -4956,7 +4956,7 @@ texture=wide",
 
     #[test]
     fn a_gui_models_glint_follows_it_in_its_depth_pass() {
-        let mut batch = HudBatch::new([640, 480]);
+        let mut batch = HudBatch::scratch([640, 480]);
         batch.scale = 2.0;
         let face = |z: f32| [[0.0, 0.0, z], [0.0, 1.0, z], [1.0, 1.0, z], [1.0, 0.0, z]];
         let uv = [[0.25, 0.5]; 4];

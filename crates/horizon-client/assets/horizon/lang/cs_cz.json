@@ -398,9 +398,6 @@
   "horizon.controller.guide.trade": "Obchodovat",
   "horizon.controller.guide.use": "Použít",
   "horizon.controller.guide.zoom": "Přiblížit",
-  "horizon.emote_wheel.empty": "Zatím žádné emoty",
-  "horizon.emote_wheel.help": "Pustit nebo kliknout pro přehrání · 1–8 · Esc zavře",
-  "horizon.emote_wheel.title": "Emoty",
   "horizon.extras.agent_control": "Kontrola agentů",
   "horizon.extras.agent_control.tooltip": "Váš vlastní AI agent může hrát tuto hru prostřednictvím horizon-ctl nebo klienta MCP pouze na tomto počítači.",
   "horizon.extras.auto_reconnect": "Automatické opětovné připojení",
@@ -409,8 +406,6 @@
   "horizon.extras.chat_animation.tooltip": "Nová čára chatu se vsune zleva, zatímco se mizí, místo aby vypadala celá.",
   "horizon.extras.chat_indicator": "Indikátor zprávy",
   "horizon.extras.chat_indicator.tooltip": "Barevný pruh nalevo od chatovací linky.",
-  "horizon.extras.cosmetics_solo": "V jednom hráči",
-  "horizon.extras.cosmetics_solo.tooltip": "Zobrazujte svou kosmetiku a odznak své jmenovky i ve svých světech pro jednoho hráče (svou jmenovku pomocí Vlastní jmenovka). Vypnuto: jen na serverech.",
   "horizon.extras.dynamic_lights": "Dynamická světla",
   "horizon.extras.dynamic_lights.tooltip": "Pochodně a jiné světelné zdroje držené, shozené nebo v plamenech osvětlují bloky kolem nich.",
   "horizon.extras.fullbright": "Plné osvětlení",
@@ -501,7 +496,6 @@
   "horizon.mods.browse.by": "od %s",
   "horizon.mods.browse.changelog": "Seznam změn",
   "horizon.mods.browse.done": "%s %s je nainstalován a zapnut.",
-  "horizon.mods.browse.enabled": "Mod",
   "horizon.mods.browse.failed": "Registr modů nelze přečíst: %s",
   "horizon.mods.browse.has_update": " (aktualizace)",
   "horizon.mods.browse.install": "Nainstalovat",
@@ -661,7 +655,6 @@
   "horizon.pages.split_setup.tooltip": "Okna a monitory a kdo kde hraje.",
   "horizon.pages.studio": "Replay Studio",
   "horizon.pages.studio.tooltip": "Procházejte uložené záznamy a jejich metadata.",
-  "horizon.plain.official": "Oficiální Horizon se spouštěčem, mody a aktualizacemi: playhorizon.dev",
   "horizon.pvp.chat_compact": "Kompaktní chat",
   "horizon.pvp.chat_compact.tooltip": "Zpráva opakovaná v řadě se zobrazí jednou, s počtem příchodů: (x3).",
   "horizon.pvp.chat_copy": "Kopírovat kliknutím",
@@ -1040,6 +1033,5 @@
   "horizon.tempban.list.entry": "%1$s byl zabanován hráčem %2$s %3$s (do %4$s)",
   "horizon.tempban.success": "%1$s na %2$s, do %3$s",
   "horizon.tempban.usage": "/tempban <hráč> <doba> [důvod]",
-  "horizon.title.not_affiliated": "Není spojen s Mojang nebo Microsoft",
-  "key.emote": "Kolečko emotů"
+  "horizon.title.not_affiliated": "Není spojen s Mojang nebo Microsoft"
 }

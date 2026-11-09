@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Apply audited path policies only to unmerged paths; print remaining areas."""
 import fnmatch
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -58,6 +59,21 @@ def main(target):
             subprocess.run(['git', 'checkout', target, '--', path], check=True)
             print('Took upstream (regenerate if listed):', path)
     remaining = git('diff', '--name-only', '--diff-filter=U').splitlines()
+    # Client translations may only name canonical en_us keys. Upstream adds
+    # translations for features intentionally removed from the fork's catalog.
+    lang_root = Path('crates/horizon-client/assets/horizon/lang')
+    canonical = lang_root / 'en_us.json'
+    if canonical.exists() and str(canonical) not in remaining:
+        keys = json.loads(canonical.read_text()).keys()
+        for path in lang_root.glob('*.json'):
+            if str(path) in remaining:
+                continue
+            data = json.loads(path.read_text())
+            stale = data.keys() - keys
+            if stale:
+                path.write_text(json.dumps({k: v for k, v in data.items() if k in keys}, ensure_ascii=False, indent=2) + '\n')
+                subprocess.run(['git', 'add', '--', str(path)], check=True)
+                print(f'Pruned {len(stale)} noncanonical keys: {path}')
     for group, count in sorted(Counter(map(area, remaining)).items()):
         print(f'{group}: {count}')
     print(f'Remaining REAL conflicts: {len(remaining)}')

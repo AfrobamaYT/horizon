@@ -398,9 +398,6 @@
   "horizon.controller.guide.trade": "Соода",
   "horizon.controller.guide.use": "Колдонуу",
   "horizon.controller.guide.zoom": "Жакындатуу",
-  "horizon.emote_wheel.empty": "Азырынча эмоция жок",
-  "horizon.emote_wheel.help": "Ойнотуу үчүн коё бериңиз же басыңыз · 1–8 · Esc жабат",
-  "horizon.emote_wheel.title": "Эмоциялар",
   "horizon.extras.agent_control": "Агенттик башкаруу",
   "horizon.extras.agent_control.tooltip": "Сиздин жеке AI агентиңиз бул оюнду horizon-ctl же MCP кардары аркылуу ушул компьютерде гана ойной алат.",
   "horizon.extras.auto_reconnect": "Авто кайра туташуу",
@@ -409,9 +406,6 @@
   "horizon.extras.chat_animation.tooltip": "Жаңы чат сызыгы сол жактан жылдырып, ал толугу менен көрүнбөй, өчүп калат.",
   "horizon.extras.chat_indicator": "Билдирүү көрсөткүчү",
   "horizon.extras.chat_indicator.tooltip": "Чат сызыгынын сол жагындагы түстүү тилке.",
-  "horizon.extras.cosmetics_solo": "Жеке оюнда",
-  "horizon.extras.cosmetics_solo.tooltip": "Косметикаңызды жана ат белгиңиздин белгисин жеке оюн дүйнөлөрүңүздө да көрсөтүңүз (ат белгиңиз «Өз атыңыздын белгиси» менен). Өчүк: серверлерде гана.",
-  "horizon.extras.discord_presence": "Discord'догу статус",
   "horizon.extras.dynamic_lights": "Динамикалык жарыктар",
   "horizon.extras.dynamic_lights.tooltip": "Факелдер жана башка жарык булактары алардын айланасындагы блокторду кармап турган, түшүрүлгөн же күйгүзүп күйгүзөт.",
   "horizon.extras.fullbright": "Толук жарык",
@@ -502,7 +496,6 @@
   "horizon.mods.browse.by": "%s тарабынан",
   "horizon.mods.browse.changelog": "Өзгөрүүлөр тарыхы",
   "horizon.mods.browse.done": "%s %s орнотулду жана күйгүзүлдү.",
-  "horizon.mods.browse.enabled": "Мод",
   "horizon.mods.browse.failed": "Мод реестрин окуу мүмкүн болбоду: %s",
   "horizon.mods.browse.has_update": " (жаңыртуу)",
   "horizon.mods.browse.install": "Орнотуу",
@@ -662,7 +655,6 @@
   "horizon.pages.split_setup.tooltip": "Терезелер жана мониторлор жана ким кайда ойнойт.",
   "horizon.pages.studio": "Кайталоо студиясы",
   "horizon.pages.studio.tooltip": "Сакталган жазууларды жана алардын метаберилмелерин карап чыгыңыз.",
-  "horizon.plain.official": "Лаунчер, моддор жана жаңыртуулар менен расмий Horizon: playhorizon.dev",
   "horizon.pvp.chat_compact": "Ыкчам маек",
   "horizon.pvp.chat_compact.tooltip": "Катары менен кайталанган билдирүү бир жолу көрүнөт, канча жолу келгени менен: (x3).",
   "horizon.pvp.chat_copy": "Басканда көчүрүү",
@@ -1041,6 +1033,5 @@
   "horizon.tempban.list.entry": "%1$s'ге %2$s %3$s тыюу салды (%4$s чейин)",
   "horizon.tempban.success": "%1$s %2$s бою, %3$s чейин",
   "horizon.tempban.usage": "/tempban <player> <duration> [reason]",
-  "horizon.title.not_affiliated": "Mojang же Microsoft менен байланышы жок",
-  "key.emote": "Эмоция дөңгөлөгү"
+  "horizon.title.not_affiliated": "Mojang же Microsoft менен байланышы жок"
 }

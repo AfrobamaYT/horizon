@@ -398,9 +398,6 @@
   "horizon.controller.guide.trade": "Kauple",
   "horizon.controller.guide.use": "Kasuta",
   "horizon.controller.guide.zoom": "Suumi",
-  "horizon.emote_wheel.empty": "Emotsioone veel pole",
-  "horizon.emote_wheel.help": "Vabasta või klõpsa, et esitada · 1–8 · Esc sulgeb",
-  "horizon.emote_wheel.title": "Emotsioonid",
   "horizon.extras.agent_control": "Agendi kontroll",
   "horizon.extras.agent_control.tooltip": "Teie enda tehisintellekti agent saab seda mängu mängida horizon-ctl-i või MCP-kliendi kaudu ainult selles arvutis.",
   "horizon.extras.auto_reconnect": "Automaatne taasühendamine",
@@ -409,8 +406,6 @@
   "horizon.extras.chat_animation.tooltip": "Uus vestlusliin libiseb vasakult sisse, kui see sumbub, selle asemel, et paista tervena.",
   "horizon.extras.chat_indicator": "Sõnumi indikaator",
   "horizon.extras.chat_indicator.tooltip": "Vestlusrea vasakul olev värviline riba.",
-  "horizon.extras.cosmetics_solo": "Üksikmängus",
-  "horizon.extras.cosmetics_solo.tooltip": "Näita oma kosmeetikat ja nimesildi märki ka oma üksikmängu maailmades (oma nimesilt valikuga Oma nimesilt). Väljas: ainult serverites.",
   "horizon.extras.dynamic_lights": "Dünaamilised tuled",
   "horizon.extras.dynamic_lights.tooltip": "Tõrvikud ja muud valgusallikad hoidsid, kukkusid või põlesid põlema, valgustavad neid ümbritsevaid klotse.",
   "horizon.extras.fullbright": "Täisheledus",
@@ -501,7 +496,6 @@
   "horizon.mods.browse.by": "%s poolt",
   "horizon.mods.browse.changelog": "Muudatuste logi",
   "horizon.mods.browse.done": "%s %s on paigaldatud ja sees.",
-  "horizon.mods.browse.enabled": "Mod",
   "horizon.mods.browse.failed": "Modiregistrit ei saanud lugeda: %s",
   "horizon.mods.browse.has_update": " (uuendus)",
   "horizon.mods.browse.install": "Paigalda",
@@ -661,7 +655,6 @@
   "horizon.pages.split_setup.tooltip": "Aknad ja monitorid ning kes kus mängib.",
   "horizon.pages.studio": "Taasesituse stuudio",
   "horizon.pages.studio.tooltip": "Sirvi salvestatud salvestisi ja nende metaandmeid.",
-  "horizon.plain.official": "Ametlik Horizon koos käivitaja, modide ja uuendustega: playhorizon.dev",
   "horizon.pvp.chat_compact": "Kompaktne vestlus",
   "horizon.pvp.chat_compact.tooltip": "Järjest korduv sõnum kuvatakse üks kord, koos korduste arvuga: (x3).",
   "horizon.pvp.chat_copy": "Kopeeri klõpsates",
@@ -1040,6 +1033,5 @@
   "horizon.tempban.list.entry": "%1$s keelas %2$s %3$s (kuni %4$s)",
   "horizon.tempban.success": "%1$s kestusega %2$s, kuni %3$s",
   "horizon.tempban.usage": "/tempban <player> <duration> [reason]",
-  "horizon.title.not_affiliated": "Ei ole seotud Mojangi ega Microsoftiga",
-  "key.emote": "Emotsiooniratas"
+  "horizon.title.not_affiliated": "Ei ole seotud Mojangi ega Microsoftiga"
 }

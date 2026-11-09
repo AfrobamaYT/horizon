@@ -1533,6 +1533,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::player_flyable_fall` | crosses | Wire call |
 | `Hooks::player_harvest_check` | crosses | Wire call |
 | `Hooks::player_heart_type` | crosses | Wire call |
+| `Hooks::player_inventory_changed` | crosses | Wire call |
 | `Hooks::player_item_smithed` | crosses | Wire call |
 | `Hooks::player_name_format` | crosses | Wire call |
 | `Hooks::player_set_spawn` | crosses | Wire call |

@@ -1635,12 +1635,22 @@ mod tests {
             "assets/minecraft/polytone/block_modifiers/torch.json",
             serde_json::json!({"disable_particles": true}),
         )]);
-        let engine = engine(Registry::read(&root, Default::default(), blocks));
+        let engine = engine(Registry::read(
+            &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
+            Default::default(),
+            blocks,
+        ));
         let state = |name| blocks.default_state(name).unwrap();
         assert!(engine.polytone_disables_particles(state("minecraft:torch")));
         assert!(!engine.polytone_disables_particles(state("minecraft:air")));
         // Without a Polytone pack nothing is stopped.
-        let plain = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        let plain = ParticleEngine::new(
+            &horizon_assets::resource_source::ResourceSource::directory(
+                Path::new("").to_path_buf(),
+            ),
+            &HashMap::new(),
+            &HashSet::new(),
+        );
         assert!(!plain.polytone_disables_particles(state("minecraft:torch")));
     }
 
@@ -2271,7 +2281,11 @@ mod tests {
             "assets/minecraft/polytone/custom_particles/flame.json",
             serde_json::json!({"has_physics": false, "initializer": {"lifetime": "33", "size": "0.75"}}),
         )]);
-        let mut engine = engine(Registry::read(&root, Default::default(), blocks()));
+        let mut engine = engine(Registry::read(
+            &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
+            Default::default(),
+            blocks(),
+        ));
         // The vanilla flame's sprite set (what the pack's particles/flame.json lists).
         engine.sets.insert(ParticleType::Flame, 1);
         engine.set_sprites.push(vec![20, 21]);
@@ -2281,7 +2295,7 @@ mod tests {
             [0.0; 3],
         );
         assert_eq!(engine.pending.len(), 1);
-        let p = &engine.pending[0];
+        let p = engine.pending[0].ordinary().unwrap();
         assert!(
             p.controller.is_some(),
             "the pack's particle, not vanilla's flame"
@@ -2329,7 +2343,11 @@ mod tests {
             collision: &scene.collision,
             player: None,
         };
-        let mut engine = engine(Registry::read(&root, Default::default(), blocks));
+        let mut engine = engine(Registry::read(
+            &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
+            Default::default(),
+            blocks,
+        ));
         // The test chunk's biome is the table's first: a cold one first, then a warm one.
         let first = |name: &str| {
             Arc::new(crate::biome::Biomes::from_jsons(&[(
@@ -2345,7 +2363,10 @@ mod tests {
         registry.set_biomes(&first("minecraft:desert"));
         engine.polytone_animate(&level, [1, 64, 1]);
         assert_eq!(engine.pending.len(), 1);
-        assert_eq!(engine.pending[0].position, [1.0, 65.0, 1.0]);
+        assert_eq!(
+            engine.pending[0].ordinary().unwrap().position,
+            [1.0, 65.0, 1.0]
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -2361,7 +2382,11 @@ mod tests {
                 serde_json::json!({"life": "50", "filter": {"item": "minecraft:apple"}}),
             ),
         ]);
-        let registry = Registry::read(&root, Default::default(), blocks());
+        let registry = Registry::read(
+            &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
+            Default::default(),
+            blocks(),
+        );
         let run = |id: &str, source: Option<&str>| {
             let mut p = Particle::blank(ParticleType::Block, [0.0; 3]);
             p.size = 0.1;

@@ -398,9 +398,6 @@
   "horizon.controller.guide.trade": "Сауҙа",
   "horizon.controller.guide.use": "Ҡулланыу",
   "horizon.controller.guide.zoom": "Яҡынайтыу",
-  "horizon.emote_wheel.empty": "Әлегә эмоттар юҡ",
-  "horizon.emote_wheel.help": "Уйнау өсөн ҡуйып ебәрегеҙ йәки баҫығыҙ · 1–8 · Esc яба",
-  "horizon.emote_wheel.title": "Эмоттар",
   "horizon.extras.agent_control": "Агент контроле",
   "horizon.extras.agent_control.tooltip": "Һеҙҙең үҙ AI агент был уйынды уйнай ала аша horizon-ctl йәки MCP клиент, был компьютерҙа ғына.",
   "horizon.extras.auto_reconnect": "Авто-яңынан тоташтырыу",
@@ -409,8 +406,6 @@
   "horizon.extras.chat_animation.tooltip": "Яңы чат һыҙығы һулдан шыуып инә, ә ул һүнә, урынына бөтөн күренә.",
   "horizon.extras.chat_indicator": "Хәбәр күрһәткесе",
   "horizon.extras.chat_indicator.tooltip": "Чат һыҙығының һул яғында төҫлө һыҙыҡ.",
-  "horizon.extras.cosmetics_solo": "Бер уйынсылы режимда",
-  "horizon.extras.cosmetics_solo.tooltip": "Косметикағыҙҙы һәм исем билдәгеҙҙәге билдәне үҙегеҙҙең бер уйынсылы донъяларығыҙҙа ла күрһәтеү (исем билдәгеҙ Үҙ исем билдәһе менән). Һүндерелгән: тик серверҙарҙа ғына.",
   "horizon.extras.dynamic_lights": "Динамик яҡтылыҡ",
   "horizon.extras.dynamic_lights.tooltip": "Факелдар һәм башҡа яҡтылыҡ сығанаҡтары тотолған, төшөрөлгән йәки ут өҫтөндә улар тирәһендәге блоктарҙы яҡтырта.",
   "horizon.extras.fullbright": "Фуллбрайт",
@@ -501,7 +496,6 @@
   "horizon.mods.browse.by": "%s авторы",
   "horizon.mods.browse.changelog": "Үҙгәрештәр тарихы",
   "horizon.mods.browse.done": "%s %s ҡуйылды һәм тоҡандырылды.",
-  "horizon.mods.browse.enabled": "Мод",
   "horizon.mods.browse.failed": "Мод реестрын уҡып булманы: %s",
   "horizon.mods.browse.has_update": " (яңыртыу)",
   "horizon.mods.browse.install": "Ҡуйыу",
@@ -661,7 +655,6 @@
   "horizon.pages.split_setup.tooltip": "Тәҙрәләр һәм мониторҙар, ә кем ҡайҙа уйнай.",
   "horizon.pages.studio": "Реплей студияһы",
   "horizon.pages.studio.tooltip": "Һаҡланған яҙмаларҙы һәм уларҙың мета мәғлүмәттәрен ҡарағыҙ.",
-  "horizon.plain.official": "Стартер, модтар һәм яңыртыуҙар менән рәсми Horizon: playhorizon.dev",
   "horizon.pvp.chat_compact": "Йыйнаҡ чат",
   "horizon.pvp.chat_compact.tooltip": "Рәттән ҡабатланған хәбәр бер тапҡыр күренә, ни тиклем тапҡыр килгәне менән: (x3).",
   "horizon.pvp.chat_copy": "Баҫҡанда күсереү",
@@ -1040,6 +1033,5 @@
   "horizon.tempban.list.entry": "%1$s %2$s тарафынан %3$s банланған (%4$s тиклем)",
   "horizon.tempban.success": "%1$s %2$s ваҡытҡа, %3$s тиклем",
   "horizon.tempban.usage": "/tempban <уйынсы> <оҙайлыҡ> [сәбәп]",
-  "horizon.title.not_affiliated": "Mojang йәки Microsoft менән бәйле түгел",
-  "key.emote": "Эмот тәгәрмәсе"
+  "horizon.title.not_affiliated": "Mojang йәки Microsoft менән бәйле түгел"
 }

@@ -54,7 +54,11 @@ fn worker_prepares_owned_models_and_inventory_before_handoff() {
     .unwrap();
     let worker_root = root.clone();
     let prepared = std::thread::spawn(move || {
-        GameCpuResources::load(&worker_root, None).map_err(|error| error.to_string())
+        GameCpuResources::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(worker_root),
+            None,
+        )
+        .map_err(|error| error.to_string())
     })
     .join()
     .unwrap()
@@ -75,5 +79,11 @@ fn worker_prepares_owned_models_and_inventory_before_handoff() {
         "minecraft:stone"
     );
     // No documents from the old generation remain available to reload.
-    assert!(GameCpuResources::load(&root, None).is_err());
+    assert!(
+        GameCpuResources::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            None
+        )
+        .is_err()
+    );
 }

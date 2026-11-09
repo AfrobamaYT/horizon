@@ -3399,7 +3399,7 @@ mod tests {
         s: &Settings,
         window: [u32; 2],
     ) -> (f32, f32) {
-        let mut batch = HudBatch::new(window);
+        let mut batch = HudBatch::scratch(window);
         shell.draw(s, &mut batch, &atlas(), (0.0, 0.0), false, None);
         crate::widgets::end_frame(crate::widgets::generation() + 1);
         (batch.width, batch.height)

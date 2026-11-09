@@ -398,9 +398,6 @@
   "horizon.controller.guide.trade": "取引",
   "horizon.controller.guide.use": "使う",
   "horizon.controller.guide.zoom": "ズーム",
-  "horizon.emote_wheel.empty": "エモートはまだありません",
-  "horizon.emote_wheel.help": "離すかクリックで再生 · 1–8 · Esc で閉じる",
-  "horizon.emote_wheel.title": "エモート",
   "horizon.extras.agent_control": "エージェント制御",
   "horizon.extras.agent_control.tooltip": "独自の AI エージェントは、このコンピューター上でのみ、horizon-ctl または MCP クライアントを通じてこのゲームをプレイできます。",
   "horizon.extras.auto_reconnect": "自動再接続",
@@ -409,8 +406,6 @@
   "horizon.extras.chat_animation.tooltip": "新しいチャット ラインは全体として表示されるのではなく、フェードインしながら左側からスライドして表示されます。",
   "horizon.extras.chat_indicator": "メッセージインジケーター",
   "horizon.extras.chat_indicator.tooltip": "チャットラインの左側にある色付きのバー。",
-  "horizon.extras.cosmetics_solo": "シングルプレイでも表示",
-  "horizon.extras.cosmetics_solo.tooltip": "シングルプレイのワールドでもコスメティックとネームタグのバッジを表示します (バッジは「自分だけのネームタグ」と併用)。オフ: サーバーのみ。",
   "horizon.extras.dynamic_lights": "ダイナミックライト",
   "horizon.extras.dynamic_lights.tooltip": "トーチやその他の光源を持ったり、落としたり、火をつけたりすると、周囲のブロックが点灯します。",
   "horizon.extras.fullbright": "フルブライト",
@@ -501,7 +496,6 @@
   "horizon.mods.browse.by": "%s 作",
   "horizon.mods.browse.changelog": "変更履歴",
   "horizon.mods.browse.done": "%s %s をインストールし、有効にしました。",
-  "horizon.mods.browse.enabled": "Mod",
   "horizon.mods.browse.failed": "Mod レジストリを読み込めませんでした: %s",
   "horizon.mods.browse.has_update": " (更新あり)",
   "horizon.mods.browse.install": "インストール",
@@ -1039,6 +1033,5 @@
   "horizon.tempban.list.entry": "%1$s は %2$s によって %3$s BAN されました (%4$s まで)",
   "horizon.tempban.success": "%1$s を %2$s BAN しました (%3$s まで)",
   "horizon.tempban.usage": "/tempban <プレイヤー> <期間> [理由]",
-  "horizon.title.not_affiliated": "Mojang や Microsoft とは関係ありません",
-  "key.emote": "エモートホイール"
+  "horizon.title.not_affiliated": "Mojang や Microsoft とは関係ありません"
 }

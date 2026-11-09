@@ -398,9 +398,6 @@
   "horizon.controller.guide.trade": "معامله",
   "horizon.controller.guide.use": "استفاده",
   "horizon.controller.guide.zoom": "بزرگ‌نمایی",
-  "horizon.emote_wheel.empty": "هنوز ایموتی نیست",
-  "horizon.emote_wheel.help": "برای پخش رها کنید یا کلیک کنید · 1–8 · Esc می‌بندد",
-  "horizon.emote_wheel.title": "ایموت‌ها",
   "horizon.extras.agent_control": "کنترل عامل",
   "horizon.extras.agent_control.tooltip": "عامل هوش مصنوعی شما می تواند این بازی را از طریق horizon-ctl یا یک کلاینت MCP، فقط در این رایانه انجام دهد.",
   "horizon.extras.auto_reconnect": "اتصال مجدد خودکار",
@@ -409,9 +406,6 @@
   "horizon.extras.chat_animation.tooltip": "یک خط چت جدید به جای اینکه کامل نشان داده شود، از سمت چپ وارد می شود و در حالی که محو می شود.",
   "horizon.extras.chat_indicator": "نشانگر پیام",
   "horizon.extras.chat_indicator.tooltip": "نوار رنگی در سمت چپ یک خط چت.",
-  "horizon.extras.cosmetics_solo": "در تک‌نفره",
-  "horizon.extras.cosmetics_solo.tooltip": "لوازم آرایشی و نشان برچسب نام خود را در دنیاهای تک‌نفره‌تان هم نشان دهید (برچسب نام شما با «برچسب نام خود»). خاموش: فقط در سرورها.",
-  "horizon.extras.discord_presence": "Discord Rich Presence",
   "horizon.extras.dynamic_lights": "چراغ های دینامیک",
   "horizon.extras.dynamic_lights.tooltip": "مشعل ها و دیگر منابع نوری که نگه داشته، افتاده اند یا آتش می گیرند بلوک های اطراف خود را روشن می کنند.",
   "horizon.extras.fullbright": "فول برایت",
@@ -502,7 +496,6 @@
   "horizon.mods.browse.by": "از %s",
   "horizon.mods.browse.changelog": "تغییرات",
   "horizon.mods.browse.done": "%s %s نصب شده و روشن است.",
-  "horizon.mods.browse.enabled": "مد",
   "horizon.mods.browse.failed": "فهرست مدها خوانده نشد: %s",
   "horizon.mods.browse.has_update": " (به‌روزرسانی)",
   "horizon.mods.browse.install": "نصب",
@@ -662,7 +655,6 @@
   "horizon.pages.split_setup.tooltip": "پنجره ها و مانیتورها و اینکه چه کسی کجا بازی می کند.",
   "horizon.pages.studio": "استودیو بازپخش",
   "horizon.pages.studio.tooltip": "ضبط‌های ذخیره‌شده و فراداده‌شان را مرور کنید.",
-  "horizon.plain.official": "Horizon رسمی با لانچر، مدها و به‌روزرسانی‌ها: playhorizon.dev",
   "horizon.pvp.chat_compact": "چت فشرده",
   "horizon.pvp.chat_compact.tooltip": "پیامی که پشت سر هم تکرار شود یک بار نشان داده می‌شود، با تعداد دفعات: (x3).",
   "horizon.pvp.chat_copy": "کپی با کلیک",
@@ -1041,6 +1033,5 @@
   "horizon.tempban.list.entry": "%1$s توسط %2$s %3$s بن شد (تا %4$s)",
   "horizon.tempban.success": "%1$s برای %2$s، تا %3$s",
   "horizon.tempban.usage": "/tempban <player> <duration> [reason]",
-  "horizon.title.not_affiliated": "به Mojang یا Microsoft وابسته نیست",
-  "key.emote": "چرخ ایموت"
+  "horizon.title.not_affiliated": "به Mojang یا Microsoft وابسته نیست"
 }

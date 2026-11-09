@@ -398,9 +398,6 @@
   "horizon.controller.guide.trade": "Handle",
   "horizon.controller.guide.use": "Bruk",
   "horizon.controller.guide.zoom": "Zoom",
-  "horizon.emote_wheel.empty": "Ingen emotes ennå",
-  "horizon.emote_wheel.help": "Slipp eller klikk for å spille · 1–8 · Esc lukker",
-  "horizon.emote_wheel.title": "Emotes",
   "horizon.extras.agent_control": "Agentkontroll",
   "horizon.extras.agent_control.tooltip": "Din egen AI-agent kan spille dette spillet gjennom horizon-ctl eller en MCP-klient, kun på denne datamaskinen.",
   "horizon.extras.auto_reconnect": "Koble til automatisk",
@@ -409,8 +406,6 @@
   "horizon.extras.chat_animation.tooltip": "En ny chat-linje glir inn fra venstre mens den toner inn, i stedet for å virke hel.",
   "horizon.extras.chat_indicator": "Meldingsindikator",
   "horizon.extras.chat_indicator.tooltip": "Den fargede linjen til venstre for en chattelinje.",
-  "horizon.extras.cosmetics_solo": "I enspiller",
-  "horizon.extras.cosmetics_solo.tooltip": "Vis kosmetikk og merket på navneskiltet ditt også i enspiller-verdene dine (navneskiltet ditt med Eget navneskilt). Av: bare på servere.",
   "horizon.extras.dynamic_lights": "Dynamiske lys",
   "horizon.extras.dynamic_lights.tooltip": "Fakler og andre lyskilder som holdes, slippes eller brenner tenner blokkene rundt dem.",
   "horizon.extras.fullbright": "Fullt lys",
@@ -501,7 +496,6 @@
   "horizon.mods.browse.by": "av %s",
   "horizon.mods.browse.changelog": "Endringslogg",
   "horizon.mods.browse.done": "%s %s er installert og på.",
-  "horizon.mods.browse.enabled": "Mod",
   "horizon.mods.browse.failed": "Kunne ikke lese modregisteret: %s",
   "horizon.mods.browse.has_update": " (oppdatering)",
   "horizon.mods.browse.install": "Installer",
@@ -661,7 +655,6 @@
   "horizon.pages.split_setup.tooltip": "Vinduene og skjermene, og hvem som spiller hvor.",
   "horizon.pages.studio": "Replay-studio",
   "horizon.pages.studio.tooltip": "Bla gjennom lagrede opptak og metadataene deres.",
-  "horizon.plain.official": "Offisiell Horizon med launcher, mods og oppdateringer: playhorizon.dev",
   "horizon.pvp.chat_compact": "Kompakt chat",
   "horizon.pvp.chat_compact.tooltip": "En melding som gjentas på rad vises én gang, med hvor mange ganger den kom: (x3).",
   "horizon.pvp.chat_copy": "Kopier ved klikk",
@@ -1040,6 +1033,5 @@
   "horizon.tempban.list.entry": "%1$s ble bannlyst av %2$s %3$s (til %4$s)",
   "horizon.tempban.success": "%1$s i %2$s, til %3$s",
   "horizon.tempban.usage": "/tempban <spiller> <varighet> [årsak]",
-  "horizon.title.not_affiliated": "Ikke tilknyttet Mojang eller Microsoft",
-  "key.emote": "Emote-hjul"
+  "horizon.title.not_affiliated": "Ikke tilknyttet Mojang eller Microsoft"
 }

@@ -398,9 +398,6 @@
   "horizon.controller.guide.trade": "Tirgoties",
   "horizon.controller.guide.use": "Lietot",
   "horizon.controller.guide.zoom": "Tuvināt",
-  "horizon.emote_wheel.empty": "Vēl nav emociju",
-  "horizon.emote_wheel.help": "Atlaidiet vai noklikšķiniet, lai atskaņotu · 1–8 · Esc aizver",
-  "horizon.emote_wheel.title": "Emocijas",
   "horizon.extras.agent_control": "Aģentu kontrole",
   "horizon.extras.agent_control.tooltip": "Jūsu AI aģents var spēlēt šo spēli, izmantojot horizon-ctl vai MCP klientu, tikai šajā datorā.",
   "horizon.extras.auto_reconnect": "Automātiski atjaunot savienojumu",
@@ -409,8 +406,6 @@
   "horizon.extras.chat_animation.tooltip": "Jauna tērzēšanas līnija ieslīd no kreisās puses, kamēr tā pazūd, nevis tiek rādīta vesela.",
   "horizon.extras.chat_indicator": "Ziņojuma indikators",
   "horizon.extras.chat_indicator.tooltip": "Krāsaina josla pa kreisi no tērzēšanas līnijas.",
-  "horizon.extras.cosmetics_solo": "Viena spēlētāja režīmā",
-  "horizon.extras.cosmetics_solo.tooltip": "Rādiet savu kosmētiku un sava vārda zīmes emblēmu arī savās viena spēlētāja pasaulēs (jūsu vārda zīme ar Paša vārda zīme). Izslēgts: tikai serveros.",
   "horizon.extras.dynamic_lights": "Dinamiskās gaismas",
   "horizon.extras.dynamic_lights.tooltip": "Lāpas un citi gaismas avoti turēja, nometa vai aizdedzināja blokus ap tiem.",
   "horizon.extras.fullbright": "Pilns apgaismojums",
@@ -501,7 +496,6 @@
   "horizon.mods.browse.by": "autors: %s",
   "horizon.mods.browse.changelog": "Izmaiņu žurnāls",
   "horizon.mods.browse.done": "%s %s ir instalēta un ieslēgta.",
-  "horizon.mods.browse.enabled": "Modifikācija",
   "horizon.mods.browse.failed": "Nevarēja nolasīt modifikāciju reģistru: %s",
   "horizon.mods.browse.has_update": " (atjauninājums)",
   "horizon.mods.browse.install": "Instalēt",
@@ -661,7 +655,6 @@
   "horizon.pages.split_setup.tooltip": "Logi un monitori, un kurš kur spēlē.",
   "horizon.pages.studio": "Atkārtojumu studija",
   "horizon.pages.studio.tooltip": "Pārlūkojiet saglabātos ierakstus un to metadatus.",
-  "horizon.plain.official": "Oficiālais Horizon ar palaidēju, modifikācijām un atjauninājumiem: playhorizon.dev",
   "horizon.pvp.chat_compact": "Kompakta tērzēšana",
   "horizon.pvp.chat_compact.tooltip": "Pēc kārtas atkārtots ziņojums rādās vienreiz, ar to, cik reizes tas pienāca: (x3).",
   "horizon.pvp.chat_copy": "Kopēt ar klikšķi",
@@ -1040,6 +1033,5 @@
   "horizon.tempban.list.entry": "%1$s aizliedza %2$s %3$s (līdz %4$s)",
   "horizon.tempban.success": "%1$s uz %2$s, līdz %3$s",
   "horizon.tempban.usage": "/tempban <player> <duration> [reason]",
-  "horizon.title.not_affiliated": "Nav saistīts ar Mojang vai Microsoft",
-  "key.emote": "Emociju ritenis"
+  "horizon.title.not_affiliated": "Nav saistīts ar Mojang vai Microsoft"
 }

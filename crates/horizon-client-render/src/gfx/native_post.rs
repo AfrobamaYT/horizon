@@ -2638,7 +2638,7 @@ file = \"b.wgsl\"
         let Some((device, _)) = device() else {
             return;
         };
-        let hud = crate::hud::HudBatch::new([4, 4]);
+        let hud = crate::hud::HudBatch::scratch([4, 4]);
         let frame = crate::gfx::pack_uniforms::initial_history_tests::frame(&hud);
         let mut native = NativeFrame::new(
             &device,

@@ -398,9 +398,6 @@
   "horizon.controller.guide.trade": "Comercia",
   "horizon.controller.guide.use": "Utilitza",
   "horizon.controller.guide.zoom": "Apropa",
-  "horizon.emote_wheel.empty": "Encara no hi ha emotes",
-  "horizon.emote_wheel.help": "Deixa anar o fes clic per reproduir · 1–8 · Esc tanca",
-  "horizon.emote_wheel.title": "Emotes",
   "horizon.extras.agent_control": "Control d'agents",
   "horizon.extras.agent_control.tooltip": "El vostre propi agent d'IA pot jugar a aquest joc mitjançant horizon-ctl o un client MCP, només en aquest ordinador.",
   "horizon.extras.auto_reconnect": "Reconnexió automàtica",
@@ -409,8 +406,6 @@
   "horizon.extras.chat_animation.tooltip": "Una nova línia de xat es desplaça des de l'esquerra mentre s'esvaeix, en lloc de semblar sencera.",
   "horizon.extras.chat_indicator": "Indicador de missatge",
   "horizon.extras.chat_indicator.tooltip": "La barra de colors a l'esquerra d'una línia de xat.",
-  "horizon.extras.cosmetics_solo": "A un jugador",
-  "horizon.extras.cosmetics_solo.tooltip": "Mostra els teus cosmètics i la insígnia de la teva etiqueta de nom també als teus mons d'un jugador (la teva etiqueta de nom amb Etiqueta de nom pròpia). Apagat: només als servidors.",
   "horizon.extras.dynamic_lights": "Llums dinàmics",
   "horizon.extras.dynamic_lights.tooltip": "Les torxes i altres fonts de llum agafades, caigudes o al foc il·luminen els blocs que els envolten.",
   "horizon.extras.fullbright": "Lluminós total",
@@ -501,7 +496,6 @@
   "horizon.mods.browse.by": "per %s",
   "horizon.mods.browse.changelog": "Canvis",
   "horizon.mods.browse.done": "%s %s està instal·lat i actiu.",
-  "horizon.mods.browse.enabled": "Mod",
   "horizon.mods.browse.failed": "No s'ha pogut llegir el registre de mods: %s",
   "horizon.mods.browse.has_update": " (actualització)",
   "horizon.mods.browse.install": "Instal·la",
@@ -661,7 +655,6 @@
   "horizon.pages.split_setup.tooltip": "Les finestres i els monitors, i qui juga on.",
   "horizon.pages.studio": "Replay Studio",
   "horizon.pages.studio.tooltip": "Navega pels enregistraments desats i les seves metadades.",
-  "horizon.plain.official": "Horizon oficial amb llançador, mods i actualitzacions: playhorizon.dev",
   "horizon.pvp.chat_compact": "Xat compacte",
   "horizon.pvp.chat_compact.tooltip": "Un missatge repetit seguit es mostra un cop, amb quantes vegades ha arribat: (x3).",
   "horizon.pvp.chat_copy": "Copia en fer clic",
@@ -1040,6 +1033,5 @@
   "horizon.tempban.list.entry": "%1$s va ser bandejat per %2$s %3$s (fins a %4$s)",
   "horizon.tempban.success": "%1$s durant %2$s, fins a %3$s",
   "horizon.tempban.usage": "/tempban <player> <duration> [reason]",
-  "horizon.title.not_affiliated": "No està afiliat a Mojang o Microsoft",
-  "key.emote": "Roda d'emotes"
+  "horizon.title.not_affiliated": "No està afiliat a Mojang o Microsoft"
 }

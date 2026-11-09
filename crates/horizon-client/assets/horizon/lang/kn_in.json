@@ -398,9 +398,6 @@
   "horizon.controller.guide.trade": "ವ್ಯಾಪಾರ ಮಾಡಿ",
   "horizon.controller.guide.use": "ಬಳಸಿ",
   "horizon.controller.guide.zoom": "ಜೂಮ್ ಮಾಡಿ",
-  "horizon.emote_wheel.empty": "ಇನ್ನೂ ಎಮೋಟ್‌ಗಳಿಲ್ಲ",
-  "horizon.emote_wheel.help": "ಪ್ಲೇ ಮಾಡಲು ಬಿಡಿ ಅಥವಾ ಕ್ಲಿಕ್ ಮಾಡಿ · 1–8 · Esc ಮುಚ್ಚುತ್ತದೆ",
-  "horizon.emote_wheel.title": "ಎಮೋಟ್‌ಗಳು",
   "horizon.extras.agent_control": "ಏಜೆಂಟ್ ನಿಯಂತ್ರಣ",
   "horizon.extras.agent_control.tooltip": "ನಿಮ್ಮ ಸ್ವಂತ AI ಏಜೆಂಟ್ ಈ ಕಂಪ್ಯೂಟರ್‌ನಲ್ಲಿ ಮಾತ್ರ horizon-ctl ಅಥವಾ MCP ಕ್ಲೈಂಟ್ ಮೂಲಕ ಈ ಆಟವನ್ನು ಆಡಬಹುದು.",
   "horizon.extras.auto_reconnect": "ಸ್ವಯಂ-ಮರುಸಂಪರ್ಕ",
@@ -409,8 +406,6 @@
   "horizon.extras.chat_animation.tooltip": "ಹೊಸ ಚಾಟ್ ಲೈನ್ ಸಂಪೂರ್ಣವಾಗಿ ಕಾಣಿಸಿಕೊಳ್ಳುವ ಬದಲು ಮಸುಕಾಗುವಾಗ ಎಡದಿಂದ ಸ್ಲೈಡ್ ಆಗುತ್ತದೆ.",
   "horizon.extras.chat_indicator": "ಸಂದೇಶ ಸೂಚಕ",
   "horizon.extras.chat_indicator.tooltip": "ಚಾಟ್ ಲೈನ್‌ನ ಎಡಭಾಗದಲ್ಲಿ ಬಣ್ಣದ ಪಟ್ಟಿ.",
-  "horizon.extras.cosmetics_solo": "ಸಿಂಗಲ್ ಪ್ಲೇಯರ್‌ನಲ್ಲಿ",
-  "horizon.extras.cosmetics_solo.tooltip": "ನಿಮ್ಮ ಸೌಂದರ್ಯವರ್ಧಕಗಳು ಮತ್ತು ಹೆಸರು ಟ್ಯಾಗ್‌ನ ಬ್ಯಾಡ್ಜ್ ಅನ್ನು ನಿಮ್ಮ ಸಿಂಗಲ್-ಪ್ಲೇಯರ್ ಜಗತ್ತುಗಳಲ್ಲೂ ತೋರಿಸಿ (ಸ್ವಂತ ಹೆಸರಿನ ಟ್ಯಾಗ್‌ನೊಂದಿಗೆ ನಿಮ್ಮ ಹೆಸರು ಟ್ಯಾಗ್). ಆಫ್: ಸರ್ವರ್‌ಗಳಲ್ಲಿ ಮಾತ್ರ.",
   "horizon.extras.dynamic_lights": "ಡೈನಾಮಿಕ್ ದೀಪಗಳು",
   "horizon.extras.dynamic_lights.tooltip": "ಟಾರ್ಚ್‌ಗಳು ಮತ್ತು ಇತರ ಬೆಳಕಿನ ಮೂಲಗಳು ಹಿಡಿದಿಟ್ಟುಕೊಳ್ಳುತ್ತವೆ, ಬೀಳುತ್ತವೆ ಅಥವಾ ಬೆಂಕಿಯಲ್ಲಿ ಅವುಗಳ ಸುತ್ತಲಿನ ಬ್ಲಾಕ್‌ಗಳನ್ನು ಬೆಳಗಿಸುತ್ತವೆ.",
   "horizon.extras.fullbright": "ಫುಲ್ ಬ್ರೈಟ್",
@@ -501,7 +496,6 @@
   "horizon.mods.browse.by": "%s ರಿಂದ",
   "horizon.mods.browse.changelog": "ಬದಲಾವಣೆಗಳ ಪಟ್ಟಿ",
   "horizon.mods.browse.done": "%s %s ಸ್ಥಾಪಿತವಾಗಿದೆ ಮತ್ತು ಆನ್ ಆಗಿದೆ.",
-  "horizon.mods.browse.enabled": "ಮೋಡ್",
   "horizon.mods.browse.failed": "ಮೋಡ್ ನೋಂದಣಿಯನ್ನು ಓದಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ: %s",
   "horizon.mods.browse.has_update": " (ನವೀಕರಣ)",
   "horizon.mods.browse.install": "ಸ್ಥಾಪಿಸಿ",
@@ -661,7 +655,6 @@
   "horizon.pages.split_setup.tooltip": "ಕಿಟಕಿಗಳು ಮತ್ತು ಮಾನಿಟರ್‌ಗಳು ಮತ್ತು ಯಾರು ಎಲ್ಲಿ ಆಡುತ್ತಾರೆ.",
   "horizon.pages.studio": "ಮರುಪಂದ್ಯ ಸ್ಟುಡಿಯೋ",
   "horizon.pages.studio.tooltip": "ಉಳಿಸಿದ ರೆಕಾರ್ಡಿಂಗ್‌ಗಳು ಮತ್ತು ಅವುಗಳ ಮೆಟಾಡೇಟಾವನ್ನು ಬ್ರೌಸ್ ಮಾಡಿ.",
-  "horizon.plain.official": "ಲಾಂಚರ್, ಮೋಡ್ಸ್ ಮತ್ತು ನವೀಕರಣಗಳೊಂದಿಗೆ ಅಧಿಕೃತ Horizon: playhorizon.dev",
   "horizon.pvp.chat_compact": "ಸಂಕ್ಷಿಪ್ತ ಚಾಟ್",
   "horizon.pvp.chat_compact.tooltip": "ಸತತವಾಗಿ ಪುನರಾವರ್ತನೆಯಾದ ಸಂದೇಶ ಒಮ್ಮೆ ಕಾಣಿಸುತ್ತದೆ, ಎಷ್ಟು ಬಾರಿ ಬಂತು ಎಂದು: (x3).",
   "horizon.pvp.chat_copy": "ಕ್ಲಿಕ್‌ನಲ್ಲಿ ನಕಲಿಸಿ",
@@ -1040,6 +1033,5 @@
   "horizon.tempban.list.entry": "%1$s ಅನ್ನು %2$s %3$s ನಿಷೇಧಿಸಿದರು (%4$s ರವರೆಗೆ)",
   "horizon.tempban.success": "%1$s %2$s ಕಾಲ, %3$s ರವರೆಗೆ",
   "horizon.tempban.usage": "/tempban <player> <duration> [reason]",
-  "horizon.title.not_affiliated": "Mojang ಅಥವಾ Microsoft ನೊಂದಿಗೆ ಸಂಯೋಜಿತವಾಗಿಲ್ಲ",
-  "key.emote": "ಎಮೋಟ್ ಚಕ್ರ"
+  "horizon.title.not_affiliated": "Mojang ಅಥವಾ Microsoft ನೊಂದಿಗೆ ಸಂಯೋಜಿತವಾಗಿಲ್ಲ"
 }

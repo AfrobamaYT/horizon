@@ -398,9 +398,6 @@
   "horizon.controller.guide.trade": "Trguj",
   "horizon.controller.guide.use": "Uporabi",
   "horizon.controller.guide.zoom": "Povečaj",
-  "horizon.emote_wheel.empty": "Ni še izrazov",
-  "horizon.emote_wheel.help": "Spustite ali kliknite za predvajanje · 1–8 · Esc zapre",
-  "horizon.emote_wheel.title": "Izrazi",
   "horizon.extras.agent_control": "Agentski nadzor",
   "horizon.extras.agent_control.tooltip": "Vaš agent z umetno inteligenco lahko igra to igro prek horizon-ctl ali odjemalca MCP samo na tem računalniku.",
   "horizon.extras.auto_reconnect": "Samodejna ponovna povezava",
@@ -409,9 +406,6 @@
   "horizon.extras.chat_animation.tooltip": "Nova vrstica za klepet zdrsne z leve, medtem ko zbledi, namesto da bi bila videti cela.",
   "horizon.extras.chat_indicator": "Indikator sporočila",
   "horizon.extras.chat_indicator.tooltip": "Barvna vrstica na levi strani vrstice za klepet.",
-  "horizon.extras.cosmetics_solo": "V igri za enega igralca",
-  "horizon.extras.cosmetics_solo.tooltip": "Prikažite svojo kozmetiko in značko svoje imenske oznake tudi v svetovih za enega igralca (svojo imensko oznako z Lastna oznaka z imenom). Izklopljeno: samo na strežnikih.",
-  "horizon.extras.discord_presence": "Discord Rich Presence",
   "horizon.extras.dynamic_lights": "Dinamične luči",
   "horizon.extras.dynamic_lights.tooltip": "Bakle in drugi viri svetlobe, ki jih držijo, odvržejo ali prižgejo, prižgejo bloke okoli njih.",
   "horizon.extras.fullbright": "Polna svetlost",
@@ -502,7 +496,6 @@
   "horizon.mods.browse.by": "od %s",
   "horizon.mods.browse.changelog": "Dnevnik sprememb",
   "horizon.mods.browse.done": "%s %s je nameščen in vklopljen.",
-  "horizon.mods.browse.enabled": "Modifikacija",
   "horizon.mods.browse.failed": "Registra modifikacij ni bilo mogoče prebrati: %s",
   "horizon.mods.browse.has_update": " (posodobitev)",
   "horizon.mods.browse.install": "Namesti",
@@ -662,7 +655,6 @@
   "horizon.pages.split_setup.tooltip": "Okna in monitorji ter kdo kje igra.",
   "horizon.pages.studio": "Studio ponovitev",
   "horizon.pages.studio.tooltip": "Brskajte po shranjenih posnetkih in njihovih metapodatkih.",
-  "horizon.plain.official": "Uradni Horizon z zaganjalnikom, modifikacijami in posodobitvami: playhorizon.dev",
   "horizon.pvp.chat_compact": "Strnjen klepet",
   "horizon.pvp.chat_compact.tooltip": "Sporočilo, ki se ponovi zaporedoma, se prikaže enkrat, s številom ponovitev: (x3).",
   "horizon.pvp.chat_copy": "Kopiraj ob kliku",
@@ -1041,6 +1033,5 @@
   "horizon.tempban.list.entry": "%1$s je prepovedal %2$s %3$s (do %4$s)",
   "horizon.tempban.success": "%1$s za %2$s, do %3$s",
   "horizon.tempban.usage": "/tempban <igralec> <trajanje> [razlog]",
-  "horizon.title.not_affiliated": "Ni povezan z Mojangom ali Microsoftom",
-  "key.emote": "Kolo izrazov"
+  "horizon.title.not_affiliated": "Ni povezan z Mojangom ali Microsoftom"
 }

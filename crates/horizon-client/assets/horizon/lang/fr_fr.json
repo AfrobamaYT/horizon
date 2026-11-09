@@ -504,7 +504,6 @@
   "horizon.mods.browse.title": "Parcourir les mods",
   "horizon.mods.browse.update": "Mettre à jour",
   "horizon.mods.extra": "Ces mods ne sont pas sur ce serveur :\n%s",
-  "horizon.mods.in_world": " (quittez le monde pour changer)",
   "horizon.mods.mismatch": "Vos mods ne correspondent pas à ceux de ce serveur.",
   "horizon.mods.missing": "Installez ces mods pour rejoindre le serveur :\n%s",
   "horizon.mods.not_built": " (non compilé)",

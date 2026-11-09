@@ -398,9 +398,6 @@
   "horizon.controller.guide.trade": "Handelen",
   "horizon.controller.guide.use": "Gebruiken",
   "horizon.controller.guide.zoom": "Zoomen",
-  "horizon.emote_wheel.empty": "Nog geen emotes",
-  "horizon.emote_wheel.help": "Loslaten of klikken om te spelen · 1–8 · Esc sluit",
-  "horizon.emote_wheel.title": "Emotes",
   "horizon.extras.agent_control": "Agentcontrole",
   "horizon.extras.agent_control.tooltip": "Je eigen AI-agent kan dit spel alleen op deze computer spelen via horizon-ctl of een MCP-client.",
   "horizon.extras.auto_reconnect": "Automatisch opnieuw verbinden",
@@ -409,8 +406,6 @@
   "horizon.extras.chat_animation.tooltip": "Een nieuwe chatlijn schuift van links naar binnen terwijl deze invaagt, in plaats van geheel te lijken.",
   "horizon.extras.chat_indicator": "Berichtindicator",
   "horizon.extras.chat_indicator.tooltip": "De gekleurde balk links van een chatlijn.",
-  "horizon.extras.cosmetics_solo": "In singleplayer",
-  "horizon.extras.cosmetics_solo.tooltip": "Toon je cosmetica en de badge van je naamplaatje ook in je singleplayerwerelden (je naamplaatje met Eigen naamplaatje). Uit: alleen op servers.",
   "horizon.extras.dynamic_lights": "Dynamische lichten",
   "horizon.extras.dynamic_lights.tooltip": "Fakkels en andere lichtbronnen die je vasthoudt, laat vallen of in brand steken, verlichten de blokken eromheen.",
   "horizon.extras.fullbright": "Volledig helder",
@@ -501,7 +496,6 @@
   "horizon.mods.browse.by": "door %s",
   "horizon.mods.browse.changelog": "Wijzigingenlog",
   "horizon.mods.browse.done": "%s %s is geïnstalleerd en staat aan.",
-  "horizon.mods.browse.enabled": "Mod",
   "horizon.mods.browse.failed": "Kon het modregister niet lezen: %s",
   "horizon.mods.browse.has_update": " (nieuwe versie)",
   "horizon.mods.browse.install": "Installeren",
@@ -1039,6 +1033,5 @@
   "horizon.tempban.list.entry": "%1$s is door %2$s verbannen, %3$s (tot %4$s)",
   "horizon.tempban.success": "%1$s voor %2$s, tot %3$s",
   "horizon.tempban.usage": "/tempban <speler> <duur> [reden]",
-  "horizon.title.not_affiliated": "Niet aangesloten bij Mojang of Microsoft",
-  "key.emote": "Emotewiel"
+  "horizon.title.not_affiliated": "Niet aangesloten bij Mojang of Microsoft"
 }

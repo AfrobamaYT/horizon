@@ -398,9 +398,6 @@
   "horizon.controller.guide.trade": "Handla",
   "horizon.controller.guide.use": "Brúka",
   "horizon.controller.guide.zoom": "Zoom",
-  "horizon.emote_wheel.empty": "Ongar emotes enn",
-  "horizon.emote_wheel.help": "Slepp ella klikk fyri at spæla · 1–8 · Esc letur aftur",
-  "horizon.emote_wheel.title": "Emotes",
   "horizon.extras.agent_control": "Umboðsmannsstýring",
   "horizon.extras.agent_control.tooltip": "Tín egni AI umboðsmaður kann spæla hetta spælið gjøgnum horizon-ctl ella ein MCP klient, á hesi telduni bert.",
   "horizon.extras.auto_reconnect": "Sjálvvirkandi endursamband",
@@ -409,8 +406,6 @@
   "horizon.extras.chat_animation.tooltip": "Ein nýggj kjaklinja rennur inn frá vinstru, meðan hon doyvir inn, í staðin fyri at síggja heil út.",
   "horizon.extras.chat_indicator": "Boðvísari",
   "horizon.extras.chat_indicator.tooltip": "Litaða strikan til vinstru á kjaklinju.",
-  "horizon.extras.cosmetics_solo": "Í einspælara",
-  "horizon.extras.cosmetics_solo.tooltip": "Vís títt kosmetikk og merkið á tínum navnamerki eisini í tínum einspælarheimum (títt navnamerki við Egnum navnamerki). Sløkt: bert á ambætarum.",
   "horizon.extras.dynamic_lights": "Dynamisk ljós",
   "horizon.extras.dynamic_lights.tooltip": "Kyndlar og aðrar ljóskeldur, sum verða hildnar, sleptar ella í eldi, tendra blokkarnar rundan um seg.",
   "horizon.extras.fullbright": "Fullljós",
@@ -501,7 +496,6 @@
   "horizon.mods.browse.by": "av %s",
   "horizon.mods.browse.changelog": "Broytingarskrá",
   "horizon.mods.browse.done": "%s %s er innstallað og tendrað.",
-  "horizon.mods.browse.enabled": "Mod",
   "horizon.mods.browse.failed": "Kundi ikki lesa modskránna: %s",
   "horizon.mods.browse.has_update": " (dagføring)",
   "horizon.mods.browse.install": "Innstalla",
@@ -661,7 +655,6 @@
   "horizon.pages.split_setup.tooltip": "Vindeyguni og skjálvtar, og hvør spælir hvar.",
   "horizon.pages.studio": "Endursýnarstudio",
   "horizon.pages.studio.tooltip": "Kanna goymdar upptøkur og metadátur teirra.",
-  "horizon.plain.official": "Almenna Horizon við sjósetara, mods og dagføringum: playhorizon.dev",
   "horizon.pvp.chat_compact": "Kompakt prát",
   "horizon.pvp.chat_compact.tooltip": "Eitt boð, sum endurtók seg í rað, vísist eina ferð, við hvussu nógvar ferðir tað kom: (x3).",
   "horizon.pvp.chat_copy": "Avrita við klikki",
@@ -1040,6 +1033,5 @@
   "horizon.tempban.list.entry": "%1$s varð bannaður av %2$s %3$s (til %4$s)",
   "horizon.tempban.success": "%1$s í %2$s, til %3$s",
   "horizon.tempban.usage": "/tempban <player> <duration> [reason]",
-  "horizon.title.not_affiliated": "Ikki tilknýtt Mojang ella Microsoft",
-  "key.emote": "Emote-hjól"
+  "horizon.title.not_affiliated": "Ikki tilknýtt Mojang ella Microsoft"
 }

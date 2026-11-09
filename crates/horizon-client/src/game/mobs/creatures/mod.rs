@@ -3488,13 +3488,17 @@ impl Game<'_> {
                                 .find(|m| m.id == mob)
                                 .map(|m| m.kind.id.clone())
                         {
-                            self.native_entity_change_block_v3(
-                                mob,
-                                &kind,
-                                pos,
-                                &old_name,
-                                name,
-                                &mut cancel,
+                            let from = self.world.block(pos[0], pos[1], pos[2]);
+                            self.native_entity_change_block_pre(
+                                native_hooks::EntityChangeBlockPreCall {
+                                    player: None,
+                                    entity: Some(mob),
+                                    kind: &kind,
+                                    pos,
+                                    from,
+                                    to: state,
+                                    cancel: &mut cancel,
+                                },
                             );
                         }
                         if !cancel {
@@ -6501,24 +6505,18 @@ impl Game<'_> {
                 };
                 let owner = self.potion_owner(p.owner);
                 let item = stack.item.to_string();
-                let mut cancel = false;
+                self.splash(
+                    stack,
+                    at,
+                    mob,
+                    block,
+                    p.age,
+                    &owner,
+                    self.entity_silent(p.id),
+                    p.velocity,
+                );
                 if stack.item.as_ref() != "minecraft:experience_bottle" {
-                    self.native_potion_splash_v2(&item, [at.x, at.y, at.z], &mut cancel);
-                }
-                if !cancel {
-                    self.splash(
-                        stack,
-                        at,
-                        mob,
-                        block,
-                        p.age,
-                        &owner,
-                        self.entity_silent(p.id),
-                        p.velocity,
-                    );
-                    if stack.item.as_ref() != "minecraft:experience_bottle" {
-                        self.native_potion_splash(&item, [at.x, at.y, at.z]);
-                    }
+                    self.native_potion_splash(&item, [at.x, at.y, at.z]);
                 }
             }
             // LlamaSpit.onHitEntity hurts only when the owner is a LivingEntity.

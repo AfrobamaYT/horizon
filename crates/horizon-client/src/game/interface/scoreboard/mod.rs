@@ -236,6 +236,7 @@ impl Game<'_> {
             Target::Orb(id) => Some(uuid_text(self.uuid_for(id))),
             // Projectiles have no UUID here.
             Target::Projectile(_) | Target::DragonPart(_) => None,
+            Target::Knot(id) => self.persist.uuids.get(&id).map(|&u| uuid_text(u)),
         }
     }
     fn holder_for(&mut self, t: Target) -> Option<Holder> {

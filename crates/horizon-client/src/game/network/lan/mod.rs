@@ -2724,12 +2724,6 @@ impl Game<'_> {
                             Text::translate("multiplayer.player.joined", &[who])
                                 .with_color(horizon_client::text::YELLOW),
                         );
-                        self.lan = Some(host);
-                        self.native_player_join_message(uuid, &name, &mut line);
-                        host = self.lan.take()?;
-                        if let Some(line) = line {
-                            self.system_message(line);
-                        }
                     }
                     if let Some((uuid, name)) = self
                         .lan
@@ -2814,16 +2808,10 @@ impl Game<'_> {
                     } else if self.player.is_some() && guest.placed && !guest.quiet_leave {
                         // ServerGamePacketListenerImpl.removePlayerFromWorld.
                         let who = self.player_text(&guest.name, guest.uuid);
-                        let mut line = Some(
+                        self.system_message(
                             Text::translate("multiplayer.player.left", &[who])
                                 .with_color(horizon_client::text::YELLOW),
                         );
-                        self.lan = Some(host);
-                        self.native_player_leave_message(guest.uuid, &guest.name, &mut line);
-                        host = self.lan.take()?;
-                        if let Some(line) = line {
-                            self.system_message(line);
-                        }
                     }
                     if guest.placed
                         && self

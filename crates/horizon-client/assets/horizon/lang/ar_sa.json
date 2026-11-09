@@ -398,9 +398,6 @@
   "horizon.controller.guide.trade": "المتاجرة",
   "horizon.controller.guide.use": "استخدام",
   "horizon.controller.guide.zoom": "تكبير",
-  "horizon.emote_wheel.empty": "لا توجد تعبيرات بعد",
-  "horizon.emote_wheel.help": "أفلت أو انقر للتشغيل · 1–8 · Esc يغلق",
-  "horizon.emote_wheel.title": "التعبيرات",
   "horizon.extras.agent_control": "مراقبة الوكيل",
   "horizon.extras.agent_control.tooltip": "يمكن لوكيل الذكاء الاصطناعي الخاص بك لعب هذه اللعبة من خلال Horizon-ctl أو عميل MCP، على هذا الكمبيوتر فقط.",
   "horizon.extras.auto_reconnect": "إعادة الاتصال التلقائي",
@@ -409,8 +406,6 @@
   "horizon.extras.chat_animation.tooltip": "ينزلق خط الدردشة الجديد من اليسار بينما يتلاشى للداخل، بدلاً من أن يظهر كاملاً.",
   "horizon.extras.chat_indicator": "مؤشر الرسالة",
   "horizon.extras.chat_indicator.tooltip": "الشريط الملون الموجود على يسار خط الدردشة.",
-  "horizon.extras.cosmetics_solo": "في اللاعب الفردي",
-  "horizon.extras.cosmetics_solo.tooltip": "إظهار مستحضرات التجميل وشارة علامة اسمك في عوالم اللاعب الفردي أيضًا (علامة اسمك مع علامة الاسم الخاصة). إيقاف: على الخوادم فقط.",
   "horizon.extras.dynamic_lights": "أضواء ديناميكية",
   "horizon.extras.dynamic_lights.tooltip": "تم حمل المشاعل ومصادر الضوء الأخرى أو إسقاطها أو إشعال النار فيها على الكتل المحيطة بها.",
   "horizon.extras.fullbright": "فولبرايت",
@@ -501,7 +496,6 @@
   "horizon.mods.browse.by": "بواسطة %s",
   "horizon.mods.browse.changelog": "سجل التغييرات",
   "horizon.mods.browse.done": "تم تثبيت %s %s وهو مفعّل.",
-  "horizon.mods.browse.enabled": "تعديل",
   "horizon.mods.browse.failed": "تعذّرت قراءة سجل التعديلات: %s",
   "horizon.mods.browse.has_update": " (تحديث)",
   "horizon.mods.browse.install": "تثبيت",
@@ -661,7 +655,6 @@
   "horizon.pages.split_setup.tooltip": "النوافذ والشاشات ومن يلعب أين.",
   "horizon.pages.studio": "استوديو إعادة التشغيل",
   "horizon.pages.studio.tooltip": "تصفّح التسجيلات المحفوظة وبياناتها الوصفية.",
-  "horizon.plain.official": "Horizon الرسمي مع المشغّل والتعديلات والتحديثات: playhorizon.dev",
   "horizon.pvp.chat_compact": "دردشة مدمجة",
   "horizon.pvp.chat_compact.tooltip": "الرسالة المتكررة على التوالي تظهر مرة واحدة، مع عدد مرات وصولها: (x3).",
   "horizon.pvp.chat_copy": "نسخ بالنقر",
@@ -1040,6 +1033,5 @@
   "horizon.tempban.list.entry": "تم حظر %1$s بواسطة %2$s %3$s (حتى %4$s)",
   "horizon.tempban.success": "%1$s لمدة %2$s، حتى %3$s",
   "horizon.tempban.usage": "/tempban <player> <duration> [reason]",
-  "horizon.title.not_affiliated": "لا ينتمي إلى Mojang أو Microsoft",
-  "key.emote": "عجلة التعبيرات"
+  "horizon.title.not_affiliated": "لا ينتمي إلى Mojang أو Microsoft"
 }

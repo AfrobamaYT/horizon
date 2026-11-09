@@ -398,9 +398,6 @@
   "horizon.controller.guide.trade": "Prekiauti",
   "horizon.controller.guide.use": "Naudoti",
   "horizon.controller.guide.zoom": "Priartinti",
-  "horizon.emote_wheel.empty": "Emocijų dar nėra",
-  "horizon.emote_wheel.help": "Atleiskite arba spustelėkite, kad leistumėte · 1–8 · Esc uždaro",
-  "horizon.emote_wheel.title": "Emocijos",
   "horizon.extras.agent_control": "Agento kontrolė",
   "horizon.extras.agent_control.tooltip": "Jūsų dirbtinio intelekto agentas gali žaisti šį žaidimą per „horizon-ctl“ arba MCP klientą tik šiame kompiuteryje.",
   "horizon.extras.auto_reconnect": "Automatinis pakartotinis prisijungimas",
@@ -409,9 +406,6 @@
   "horizon.extras.chat_animation.tooltip": "Nauja pokalbio linija slenka iš kairės, kol ji išnyksta, o ne atrodo visa.",
   "horizon.extras.chat_indicator": "Pranešimo indikatorius",
   "horizon.extras.chat_indicator.tooltip": "Spalvota juosta pokalbio linijos kairėje.",
-  "horizon.extras.cosmetics_solo": "Vieno žaidėjo režime",
-  "horizon.extras.cosmetics_solo.tooltip": "Rodykite savo kosmetiką ir vardo žymos ženklelį ir savo vieno žaidėjo pasauliuose (vardo žymą su Savo vardo žyma). Išjungta: tik serveriuose.",
-  "horizon.extras.discord_presence": "Discord Rich Presence",
   "horizon.extras.dynamic_lights": "Dinaminiai žibintai",
   "horizon.extras.dynamic_lights.tooltip": "Fakelai ir kiti šviesos šaltiniai laikė, numetė ar degė, apšviečia aplink juos esančius blokus.",
   "horizon.extras.fullbright": "Visiškas apšvietimas",
@@ -502,7 +496,6 @@
   "horizon.mods.browse.by": "sukūrė %s",
   "horizon.mods.browse.changelog": "Pakeitimai",
   "horizon.mods.browse.done": "%s %s įdiegta ir įjungta.",
-  "horizon.mods.browse.enabled": "Modifikacija",
   "horizon.mods.browse.failed": "Nepavyko nuskaityti modifikacijų registro: %s",
   "horizon.mods.browse.has_update": " (atnaujinimas)",
   "horizon.mods.browse.install": "Įdiegti",
@@ -662,7 +655,6 @@
   "horizon.pages.split_setup.tooltip": "Langai ir monitoriai ir kas kur žaidžia.",
   "horizon.pages.studio": "Pakartojimų studija",
   "horizon.pages.studio.tooltip": "Naršykite išsaugotus įrašus ir jų metaduomenis.",
-  "horizon.plain.official": "Oficialus Horizon su paleidimo priemone, modifikacijomis ir atnaujinimais: playhorizon.dev",
   "horizon.pvp.chat_compact": "Kompaktiškas pokalbis",
   "horizon.pvp.chat_compact.tooltip": "Iš eilės kartojamas pranešimas rodomas kartą, nurodant, kiek kartų atėjo: (x3).",
   "horizon.pvp.chat_copy": "Kopijuoti spustelėjus",
@@ -1041,6 +1033,5 @@
   "horizon.tempban.list.entry": "%1$s buvo užblokuotas %2$s %3$s (iki %4$s)",
   "horizon.tempban.success": "%1$s %2$s, iki %3$s",
   "horizon.tempban.usage": "/tempban <player> <duration> [reason]",
-  "horizon.title.not_affiliated": "Nesusijęs su „Mojang“ ar „Microsoft“.",
-  "key.emote": "Emocijų ratas"
+  "horizon.title.not_affiliated": "Nesusijęs su „Mojang“ ar „Microsoft“."
 }

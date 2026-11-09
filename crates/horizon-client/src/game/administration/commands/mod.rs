@@ -88,6 +88,8 @@ pub(super) enum Target {
     /// A cast fishing hook (`minecraft:fishing_bobber`), which lives with the
     /// player who cast it. Only a mod's handle names one.
     Hook(u32),
+    /// The fence knot a lead tie made, by entity id.
+    Knot(u32),
 }
 macro_rules! target_entity_mut {
     ($game:expr, $target:expr, $e:ident => $body:expr) => {{
@@ -233,7 +235,8 @@ fn non_player_entity_id(t: Target) -> Option<i32> {
     | Target::Trident(id)
     | Target::Spawner(id)
     | Target::Cloud(id)
-    | Target::Hook(id)) = t
+    | Target::Hook(id)
+    | Target::Knot(id)) = t
     else {
         return None;
     };
@@ -742,6 +745,7 @@ impl Game<'_> {
             Target::Spawner(_) => "minecraft:ominous_item_spawner".into(),
             Target::Cloud(_) => "minecraft:area_effect_cloud".into(),
             Target::Hook(_) => "minecraft:fishing_bobber".into(),
+            Target::Knot(_) => "minecraft:leash_knot".into(),
         }
     }
     /// The name of the player the game acts for: a guest's own while their
@@ -1088,6 +1092,7 @@ impl Game<'_> {
                 .filter(|c| c.id != 0)
                 .map(|c| Target::Cloud(c.id)),
         );
+        candidates.extend(self.natural_knot_ids().into_iter().map(Target::Knot));
         // `isRemoved` from a mod's call on, though the sweep has not taken it out.
         if !self.persist.removals.is_empty() {
             candidates.retain(|t| !self.persist.removals.contains(t));
@@ -1179,6 +1184,7 @@ impl Game<'_> {
             Target::Spawner(id) => self.ominous_spawners.iter().any(|s| s.id == id),
             Target::Cloud(id) => self.breath_clouds.iter().any(|c| c.id == id),
             Target::Hook(id) => self.fishing_hook_by_id(id).is_some(),
+            Target::Knot(id) => self.natural_knot(id).is_some(),
         }
     }
     /// Run `f` with the level that holds the entity a target names in place
@@ -2025,7 +2031,11 @@ impl Game<'_> {
             }
             // Wall-mounted entities do not move; a hook follows its own tick and a
             // dragon part its dragon's.
-            Target::Frame(_) | Target::Painting(_) | Target::Hook(_) | Target::DragonPart(_) => {}
+            Target::Frame(_)
+            | Target::Painting(_)
+            | Target::Hook(_)
+            | Target::DragonPart(_)
+            | Target::Knot(_) => {}
         }
         // Entity.teleportSameDimension: the riders go with their vehicle at
         // once, by the offset it took and the turn it was given.
@@ -2703,6 +2713,7 @@ impl Game<'_> {
             Target::Spawner(id) => self.ominous_spawners.retain(|s| s.id != id),
             Target::Cloud(id) => self.breath_clouds.retain(|c| c.id != id),
             Target::Hook(id) => self.remove_fishing_hook(id),
+            Target::Knot(_) => {}
             // No command names a part, and `kill` on one would not stop its dragon.
             Target::DragonPart(_) => {}
         }

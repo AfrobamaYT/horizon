@@ -123,6 +123,8 @@ impl<'scope, T: Send + 'scope> Step<'scope, T> {
 /// `load_resources` binds them into the pack tables and `WorldCore`.
 pub(super) struct CoreTables {
     pub(super) item_data: Arc<horizon_world::item_defaults::ItemData>,
+    pub(super) entity_models: Option<Arc<horizon_client::mobs::EntityModelDocument>>,
+    pub(super) item_defaults: Arc<horizon_world::item_defaults::Defaults>,
     pub(super) assets: Assets,
     pub(super) render: RenderAssets,
     pub(super) item_renderer: horizon_client::item_render::ItemRenderer,
@@ -190,8 +192,8 @@ pub(super) fn load_core(
     let item_data = Arc::new(mods::load_item_data(root, role).map_err(|e| e.to_string())?);
     let registry = assets.registry;
     let entity_models_for_render = entity_models.clone();
-    let (render, gameplay, visibility, biomes, environment, collision) =
-        std::thread::scope(|scope| {
+    let (render, gameplay, visibility, biomes, environment, collision) = std::thread::scope(
+        |scope| {
             let assets = &assets;
             let item_data = &item_data;
             let render = Step::spawn(scope, parallel, "render", move || {
@@ -217,6 +219,10 @@ pub(super) fn load_core(
                     if headless {
                         horizon_client::item_render::ItemRenderer::load_for_server(
                             resources, library, item_data,
+                        )
+                    } else if let Some(document) = entity_models_for_render.as_deref() {
+                        horizon_client::item_render::ItemRenderer::load_with_library_and_entity_models(
+                            resources, library, document, item_data,
                         )
                     } else {
                         horizon_client::item_render::ItemRenderer::load_with_library(
@@ -276,9 +282,10 @@ pub(super) fn load_core(
                 environment.join(),
                 collision.join(),
             )
-        });
+        },
+    );
     // The packs' failure first: it rolls back whatever else failed.
-    let (render, item_renderer, _) = match render {
+    let (render, item_renderer, item_defaults) = match render {
         Ok(render) => render,
         Err(e) => return Ok(Err(e)),
     };
@@ -286,6 +293,8 @@ pub(super) fn load_core(
     progress.set(3);
     Ok(Ok(CoreTables {
         item_data,
+        item_defaults,
+        entity_models,
         gameplay,
         biomes: biomes?,
         environment: environment?,
@@ -520,8 +529,8 @@ pub(super) fn load_resources(
         }
     };
     let mut can_rollback = true;
-    let (core, loaded_gui, resolved, entity_models) = loop {
-        let (ui, core, entity_models) = std::thread::scope(|scope| {
+    let (core, loaded_gui, resolved) = loop {
+        let (ui, core) = std::thread::scope(|scope| {
             let core = Step::spawn(scope, parallel, "core", || {
                 // A failed pack starts core again from the game's own
                 // resources, which the world's preload must read: with packs
@@ -531,21 +540,11 @@ pub(super) fn load_resources(
                     load_core(&resolved, &additional_data, role, parallel, progress, early)
                 })
             });
-            // The handoff's entity models, the rest worker's mob models and
-            // its transformers all read this one document. A server draws
-            // none of them.
-            let entity_models = (!headless).then(|| {
-                Step::spawn(scope, parallel, "entity_models", || {
-                    startup::time("core.entity_models", || {
-                        horizon_client::mobs::EntityModelDocument::load(&root).ok()
-                    })
-                })
-            });
             let ui = load_ui(resolved.source()).map(|ui| offer(ui, &root));
-            (ui, core.join(), entity_models.and_then(|step| step.join()))
+            (ui, core.join())
         });
         let failure = match (ui, core) {
-            (Ok(gui), Ok(Ok(core))) => break (core, gui, resolved, entity_models),
+            (Ok(gui), Ok(Ok(core))) => break (core, gui, resolved),
             (Err(e), _) if can_rollback => e.to_string(),
             (_, Ok(Err(e))) if can_rollback => e,
             (_, Ok(Err(e))) => {
@@ -571,6 +570,8 @@ pub(super) fn load_resources(
     log::info!("load core tables: {:.2}s", started.elapsed().as_secs_f32());
     let CoreTables {
         item_data,
+        item_defaults,
+        entity_models,
         assets,
         render,
         item_renderer,

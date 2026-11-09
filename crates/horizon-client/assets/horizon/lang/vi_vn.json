@@ -398,9 +398,6 @@
   "horizon.controller.guide.trade": "Giao dịch",
   "horizon.controller.guide.use": "Dùng",
   "horizon.controller.guide.zoom": "Thu phóng",
-  "horizon.emote_wheel.empty": "Chưa có biểu cảm nào",
-  "horizon.emote_wheel.help": "Thả hoặc nhấp để chơi · 1–8 · Esc để đóng",
-  "horizon.emote_wheel.title": "Biểu cảm",
   "horizon.extras.agent_control": "Kiểm soát đại lý",
   "horizon.extras.agent_control.tooltip": "Tác nhân AI của riêng bạn chỉ có thể chơi trò chơi này thông qua Horizon-ctl hoặc ứng dụng khách MCP, trên máy tính này.",
   "horizon.extras.auto_reconnect": "Tự động kết nối lại",
@@ -409,8 +406,6 @@
   "horizon.extras.chat_animation.tooltip": "Một dòng trò chuyện mới trượt vào từ bên trái trong khi nó mờ dần thay vì xuất hiện nguyên vẹn.",
   "horizon.extras.chat_indicator": "Chỉ báo tin nhắn",
   "horizon.extras.chat_indicator.tooltip": "Thanh màu ở bên trái dòng trò chuyện.",
-  "horizon.extras.cosmetics_solo": "Trong chơi đơn",
-  "horizon.extras.cosmetics_solo.tooltip": "Hiển thị mỹ phẩm và huy hiệu trên thẻ tên của bạn cả trong thế giới chơi đơn (thẻ tên của bạn khi bật Thẻ tên riêng). Tắt: chỉ trên máy chủ.",
   "horizon.extras.dynamic_lights": "Đèn năng động",
   "horizon.extras.dynamic_lights.tooltip": "Đuốc và các nguồn sáng khác được giữ, thả hoặc đốt sẽ chiếu sáng các khối xung quanh chúng.",
   "horizon.extras.fullbright": "Ánh sáng đầy đủ",
@@ -501,7 +496,6 @@
   "horizon.mods.browse.by": "bởi %s",
   "horizon.mods.browse.changelog": "Nhật ký thay đổi",
   "horizon.mods.browse.done": "%s %s đã được cài và bật.",
-  "horizon.mods.browse.enabled": "Mod",
   "horizon.mods.browse.failed": "Không đọc được danh mục mod: %s",
   "horizon.mods.browse.has_update": " (cập nhật)",
   "horizon.mods.browse.install": "Cài đặt",
@@ -661,7 +655,6 @@
   "horizon.pages.split_setup.tooltip": "Cửa sổ và màn hình, ai chơi ở đâu.",
   "horizon.pages.studio": "Studio phát lại",
   "horizon.pages.studio.tooltip": "Duyệt các bản ghi đã lưu và thông tin của chúng.",
-  "horizon.plain.official": "Horizon chính thức với trình khởi chạy, mod và cập nhật: playhorizon.dev",
   "horizon.pvp.chat_compact": "Trò chuyện gọn",
   "horizon.pvp.chat_compact.tooltip": "Tin nhắn lặp liên tiếp chỉ hiện một lần, kèm số lần xuất hiện: (x3).",
   "horizon.pvp.chat_copy": "Nhấp để sao chép",
@@ -1040,6 +1033,5 @@
   "horizon.tempban.list.entry": "%1$s đã bị %2$s cấm %3$s (đến %4$s)",
   "horizon.tempban.success": "%1$s trong %2$s, đến %3$s",
   "horizon.tempban.usage": "/tempban <người chơi> <thời gian> [lý do]",
-  "horizon.title.not_affiliated": "Không liên kết với Mojang hoặc Microsoft",
-  "key.emote": "Vòng biểu cảm"
+  "horizon.title.not_affiliated": "Không liên kết với Mojang hoặc Microsoft"
 }

@@ -837,10 +837,10 @@ mod tests {
         let s = many_screens(12);
         let mut shell = shell_at(Tab::Screen(4));
         // 427x480 GUI px: tall enough for the pack list, the pack's line and its 13 screens.
-        let mut batch = HudBatch::new([854, 960]);
+        let mut batch = HudBatch::scratch([854, 960]);
         shell.draw(&s, &mut batch, &atlas(), (0.0, 0.0), false, None);
         assert_eq!(shell.page_places().len(), 1 + 13);
-        let mut batch = HudBatch::new([854, 480]);
+        let mut batch = HudBatch::scratch([854, 480]);
         shell.draw(&s, &mut batch, &atlas(), (0.0, 0.0), false, None);
         let parts: Vec<(Tab, Part)> = shell.page_places().iter().map(|p| (p.0, p.2)).collect();
         assert_eq!(
@@ -911,7 +911,7 @@ mod tests {
         press(&mut shell, &mut s, Item::Link(1));
         press(&mut shell, &mut s, Item::Link(2));
         assert_eq!(shell.open_page(), Some(Tab::Screen(2)));
-        let mut batch = HudBatch::new([1708, 960]);
+        let mut batch = HudBatch::scratch([1708, 960]);
         shell.draw(&s, &mut batch, &atlas(), (0.0, 0.0), false, None);
         assert_eq!(shell.lit_page(), Some(Tab::Screen(1)));
         assert!(shell.key(&mut s, K::Escape, None, false, SIZE).is_empty());

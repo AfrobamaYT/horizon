@@ -398,9 +398,6 @@
   "horizon.controller.guide.trade": "Худалдаалах",
   "horizon.controller.guide.use": "Ашиглах",
   "horizon.controller.guide.zoom": "Томруулах",
-  "horizon.emote_wheel.empty": "Эможи хараахан байхгүй",
-  "horizon.emote_wheel.help": "Тоглуулахын тулд тавих эсвэл дарах · 1–8 · Esc хаана",
-  "horizon.emote_wheel.title": "Эможи",
   "horizon.extras.agent_control": "Агентын хяналт",
   "horizon.extras.agent_control.tooltip": "Таны AI агент энэ тоглоомыг зөвхөн энэ компьютер дээр horizon-ctl эсвэл MCP клиентээр дамжуулан тоглох боломжтой.",
   "horizon.extras.auto_reconnect": "Автоматаар дахин холбох",
@@ -409,9 +406,6 @@
   "horizon.extras.chat_animation.tooltip": "Шинэ чатын шугам нь бүхэлдээ харагдахын оронд бүдгэрч байх хооронд зүүн талаас гулсуулна.",
   "horizon.extras.chat_indicator": "Мессежийн үзүүлэлт",
   "horizon.extras.chat_indicator.tooltip": "Чатын шугамын зүүн талд байгаа өнгөт мөр.",
-  "horizon.extras.cosmetics_solo": "Ганц тоглогчийн горимд",
-  "horizon.extras.cosmetics_solo.tooltip": "Косметик болон нэрийн хавтангийн тэмдгээ ганц тоглогчийн дэлхийд ч харуулна (нэрийн хавтангаа «Өөрийн нэрийн хавтан»-аар). Унтраалттай: зөвхөн сервер дээр.",
-  "horizon.extras.discord_presence": "Discord Rich Presence",
   "horizon.extras.dynamic_lights": "Динамик гэрэл",
   "horizon.extras.dynamic_lights.tooltip": "Бамбар болон бусад гэрлийн эх үүсвэрүүд нь барьсан, унасан эсвэл гал дээр байгаа нь эргэн тойрон дахь блокуудыг гэрэлтүүлдэг.",
   "horizon.extras.fullbright": "Бүрэнбрайт",
@@ -502,7 +496,6 @@
   "horizon.mods.browse.by": "%s бичсэн",
   "horizon.mods.browse.changelog": "Өөрчлөлтийн түүх",
   "horizon.mods.browse.done": "%s %s суулгагдаж, асаалттай байна.",
-  "horizon.mods.browse.enabled": "Мод",
   "horizon.mods.browse.failed": "Мод бүртгэлийг уншиж чадсангүй: %s",
   "horizon.mods.browse.has_update": " (шинэчлэлт)",
   "horizon.mods.browse.install": "Суулгах",
@@ -662,7 +655,6 @@
   "horizon.pages.split_setup.tooltip": "Цонх, дэлгэц, хэн хаана тоглодог.",
   "horizon.pages.studio": "Replay Studio",
   "horizon.pages.studio.tooltip": "Хадгалагдсан бичлэгүүд болон тэдгээрийн мета өгөгдлийг үзнэ.",
-  "horizon.plain.official": "Лаунчер, мод, шинэчлэлт бүхий албан ёсны Horizon: playhorizon.dev",
   "horizon.pvp.chat_compact": "Нягт чат",
   "horizon.pvp.chat_compact.tooltip": "Дараалан давтагдсан мессеж нэг удаа, хэдэн удаа ирсэнтэй нь хамт харагдана: (x3).",
   "horizon.pvp.chat_copy": "Дарахад хуулах",
@@ -1041,6 +1033,5 @@
   "horizon.tempban.list.entry": "%1$s-г %2$s %3$s хориглосон (%4$s хүртэл)",
   "horizon.tempban.success": "%1$s %2$s-ийн турш, %3$s хүртэл",
   "horizon.tempban.usage": "/tempban <player> <duration> [reason]",
-  "horizon.title.not_affiliated": "Mojang эсвэл Microsoft-той холбоогүй",
-  "key.emote": "Эможи хүрд"
+  "horizon.title.not_affiliated": "Mojang эсвэл Microsoft-той холбоогүй"
 }

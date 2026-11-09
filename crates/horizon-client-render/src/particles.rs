@@ -2116,7 +2116,7 @@ impl ParticleEngine {
         // the sprite set its particles/<name>.json names, no tint, 20..40 ticks.
         // A pack's custom particle: a new type, or one replacing the vanilla type of its id.
         let custom = match &o.mod_particle {
-            Some(name) => Some(name.as_str()),
+            Some(name) => Some(name.as_ref()),
             None => self.polytone_overrides.get(&ty).map(String::as_str),
         };
         if let Some(name) = custom
