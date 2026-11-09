@@ -146,13 +146,16 @@ impl PackResources {
     ) -> Result<Self> {
         let visibility = models::load_visibility(root.prepared(), assets.registry)?;
         api_values::resolve_block_definitions(assets.registry)?;
-        let tables = Arc::new(MeshTables::new(
-            &assets,
-            &render,
-            facts,
-            visibility,
-            api_values::mod_tint_values(assets.registry)?,
-        )?);
+        let tables = Arc::new(
+            MeshTables::new(
+                &assets,
+                &render,
+                facts,
+                visibility,
+                api_values::mod_tint_values(assets.registry)?,
+            )?
+            .with_polytone_colormaps(root.source(), assets.registry),
+        );
         let item_renderer = horizon_client::item_render::ItemRenderer::load_with_library(
             root,
             render.model_library.clone(),
@@ -284,12 +287,13 @@ fn pack_environments(
 /// The custom particles and block emitters of the packs merged at `root` (#11486); `None` when
 /// no pack has any.
 fn pack_particles(
-    root: &std::path::Path,
+    root: &horizon_assets::resource_source::ResourceRoot,
     blocks: &'static horizon_world::registry::BlockRegistry,
 ) -> Option<Arc<horizon_client::particles::polytone::Registry>> {
-    let configs = horizon_client::packs::polytone_configs(&horizon_client::packs::Source::Dir(
-        root.to_path_buf(),
+    let configs = horizon_client::packs::polytone_configs(&horizon_client::packs::Source::Opened(
+        root.source().clone(),
     ));
-    let registry = horizon_client::particles::polytone::Registry::read(root, configs, blocks);
+    let registry =
+        horizon_client::particles::polytone::Registry::read(root.source(), configs, blocks);
     (!registry.is_empty()).then(|| Arc::new(registry))
 }

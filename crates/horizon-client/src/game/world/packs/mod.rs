@@ -59,7 +59,6 @@ pub fn open_uri(uri: &str) {
 /// packs are found in `vanilla`.
 pub fn startup_root(
     vanilla: &Path,
-    base: &Path,
     selected: &[String],
     server: &[Pack],
     mod_sources: &super::mods::ModsState,

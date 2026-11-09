@@ -20,13 +20,14 @@ fn game() -> Game<'static> {
     );
     let settings = Settings::default();
     let loaded = load_resources(
-        root.clone(),
+        horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+        Vec::new(),
         None,
         &root,
         &settings,
         std::time::Instant::now(),
         false,
-        true,
+        execution_role::ExecutionRole::IntegratedServer,
         &Progress::new(),
         &mut |_, _| unreachable!(),
     )
@@ -41,7 +42,9 @@ fn game() -> Game<'static> {
         loaded.gui.unwrap(),
         options,
         settings,
-        Audio::silent(&root),
+        Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            root.clone(),
+        )),
         None,
     )
     .unwrap();
@@ -81,10 +84,24 @@ fn game() -> Game<'static> {
     )
     .unwrap();
     game.world_root = dir;
-    game.world_tables = game.build_world_tables(false, &[]).unwrap().0;
+    let root = game.options.resources.clone();
+    let stack = crate::game::functions::pack_stack(
+        &game.world_root,
+        &root,
+        &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
+        &Default::default(),
+        false,
+        &[],
+        &[],
+    );
+    game.world_tables = game
+        .build_world_tables(&stack, false, &root, false)
+        .unwrap()
+        .0;
     let _ = horizon_client::structure_blocks::world_loot_data(
         &game.options.resources,
         &game.pack_files(),
+        game.res.item_defaults(),
     );
     // As the world opens: its registries, with the packs' tables.
     game.build_registries();

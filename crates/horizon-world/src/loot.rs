@@ -1737,16 +1737,37 @@ impl<R: RandomSource> Context<'_, R> {
             // (`item_tooltip::TooltipDisplay`), so the ids are kept as given.
             "minecraft:toggle_tooltips" => {
                 let id = "minecraft:tooltip_display";
-                let mut display = stack.components.iter().rev().find(|(k, _)| k == id)
-                    .and_then(|(_, v)| match v { Some(Tag::Compound(map)) => Some(map.clone()), _ => None }).unwrap_or_default();
-                let mut hidden = match display.remove(&"hidden_components".into()) { Some(Tag::List(values)) => values, _ => Vec::new() };
+                let mut display = stack
+                    .components
+                    .iter()
+                    .rev()
+                    .find(|(k, _)| k == id)
+                    .and_then(|(_, v)| match v {
+                        Some(Tag::Compound(map)) => Some(map.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                let mut hidden = match display.remove(&"hidden_components".into()) {
+                    Some(Tag::List(values)) => values,
+                    _ => Vec::new(),
+                };
                 for (component, shown) in f["toggles"].as_object().into_iter().flatten() {
-                    hidden.retain(|h| !matches!(h, Tag::String(value) if value == &component.as_str().into()));
-                    if shown.as_bool() == Some(false) { hidden.push(Tag::String(component.as_str().into())); }
+                    hidden.retain(
+                        |h| !matches!(h, Tag::String(value) if value == &component.as_str().into()),
+                    );
+                    if shown.as_bool() == Some(false) {
+                        hidden.push(Tag::String(component.as_str().into()));
+                    }
                 }
-                if !hidden.is_empty() { display.insert("hidden_components".into(), Tag::List(hidden)); }
+                if !hidden.is_empty() {
+                    display.insert("hidden_components".into(), Tag::List(hidden));
+                }
                 stack.components.retain(|(k, _)| k != id);
-                if !display.is_empty() { stack.components.push((id.to_owned(), Some(Tag::Compound(display)))); }
+                if !display.is_empty() {
+                    stack
+                        .components
+                        .push((id.to_owned(), Some(Tag::Compound(display))));
+                }
             }
             "minecraft:set_item" => {
                 if let Some(item) = f["item"].as_str() {
@@ -1813,13 +1834,20 @@ impl<R: RandomSource> Context<'_, R> {
                     .components
                     .iter()
                     .find(|(k, _)| k == id)
-                    .and_then(|(_, v)| match v { Some(Tag::List(values)) => Some(values.clone()), _ => None })
+                    .and_then(|(_, v)| match v {
+                        Some(Tag::List(values)) => Some(values.clone()),
+                        _ => None,
+                    })
                     .unwrap_or_default();
                 let mut spec = f.clone();
                 spec["values"] = f["lore"].clone();
-                let lines = list_operation(&spec, old, |v| horizon_core::json_nbt::json_to_tag(v).unwrap_or(Tag::String("".into())));
+                let lines = list_operation(&spec, old, |v| {
+                    horizon_core::json_nbt::json_to_tag(v).unwrap_or(Tag::String("".into()))
+                });
                 stack.components.retain(|(k, _)| k != id);
-                stack.components.push((id.to_owned(), Some(Tag::List(lines))));
+                stack
+                    .components
+                    .push((id.to_owned(), Some(Tag::List(lines))));
             }
             // SetNameFunction: the component the target names (custom_name by
             // default). The entity-resolved selectors and scores are not
@@ -1977,15 +2005,30 @@ impl<R: RandomSource> Context<'_, R> {
             // (`item_data::written_book_from_tag`).
             "minecraft:set_written_book_pages" => {
                 let id = "minecraft:written_book_content";
-                let mut content = stack.components.iter().rev().find(|(k, _)| k == id)
-                    .and_then(|(_, v)| match v { Some(Tag::Compound(map)) => Some(map.clone()), _ => None }).unwrap_or_default();
-                let old = match content.remove(&"pages".into()) { Some(Tag::List(values)) => values, _ => Vec::new() };
+                let mut content = stack
+                    .components
+                    .iter()
+                    .rev()
+                    .find(|(k, _)| k == id)
+                    .and_then(|(_, v)| match v {
+                        Some(Tag::Compound(map)) => Some(map.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                let old = match content.remove(&"pages".into()) {
+                    Some(Tag::List(values)) => values,
+                    _ => Vec::new(),
+                };
                 let mut spec = f.clone();
                 spec["values"] = f["pages"].clone();
-                let pages = list_operation(&spec, old, |v| horizon_core::json_nbt::json_to_tag(v).unwrap_or(Tag::String("".into())));
+                let pages = list_operation(&spec, old, |v| {
+                    horizon_core::json_nbt::json_to_tag(v).unwrap_or(Tag::String("".into()))
+                });
                 content.insert("pages".into(), Tag::List(pages));
                 stack.components.retain(|(k, _)| k != id);
-                stack.components.push((id.to_owned(), Some(Tag::Compound(content))));
+                stack
+                    .components
+                    .push((id.to_owned(), Some(Tag::Compound(content))));
             }
             // SetComponentsFunction: the patch's components, applied when the
             // stack becomes an item (trim on worn armour, see `mobs::finalize`).

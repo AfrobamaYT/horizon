@@ -55,7 +55,6 @@ fn state(id: u32, kind: &str, position: [f64; 3], yaw: f32, on_ground: bool) -> 
 /// `VehicleEntity`'s DATA_ID_HURT, DATA_ID_HURTDIR and DATA_ID_DAMAGE
 /// (entries 8 to 10) when they differ from their defaults (0, 1, 0).
 fn vehicle_meta(e: &mut EntityState, hurt_time: i32, hurt_dir: i32, damage: f32) {
-    let meta = &mut e.meta;
     if hurt_time != 0 {
         e.meta.push((8, serializer::INT, Value::Int(hurt_time)));
     }
@@ -157,7 +156,7 @@ impl Game<'_> {
 
     /// Who rides what (`Entity.getPassengers`): the players in their vehicles and
     /// mobs on mobs.
-    pub(super) fn lan_riding(&self, guests: &[(u32, i32)], riding: &mut Riding) {
+    pub(super) fn lan_riding(&mut self, guests: &[(u32, i32)], riding: &mut Riding) {
         riding.clear();
         // Players arrive in boarding order; the first rider drives.
         for &(vehicle, guest) in guests {
@@ -506,7 +505,16 @@ impl Game<'_> {
             e.pitch = o.pitch;
             e.head_yaw = o.yaw;
             if let Some(tag) = self.persist.raw.get(&o.id) {
-                self.lan_display_data(tag, hub, e);
+                if let Some(item) = self.lan_display_data(tag, e) {
+                    if let Some((_, _, Value::Item(stack))) =
+                        e.meta.iter_mut().find(|(index, _, _)| *index == 23)
+                    {
+                        *stack = self
+                            .lan
+                            .as_mut()
+                            .and_then(|host| host.hub.stack(&Some(item)));
+                    }
+                }
             }
         }
     }

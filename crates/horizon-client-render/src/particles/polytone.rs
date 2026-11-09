@@ -8,6 +8,7 @@ use super::{
     ParticleType, ParticleUpdate, PendingParticle, Sprite,
 };
 use crate::environment::Frame;
+use horizon_assets::resource_source::ResourceSource;
 use horizon_core::random::{LegacyRandom, RandomSource};
 use horizon_polytone::expr::{Host, Program, Root, Value as V};
 use horizon_polytone::particles::{
@@ -17,6 +18,7 @@ use horizon_polytone::particles::{
 use horizon_world::registry::BlockRegistry;
 use serde_json::Value as Json;
 use std::collections::{BTreeMap, HashMap};
+#[cfg(test)]
 use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -71,7 +73,7 @@ struct Tint {
 
 impl Tint {
     /// `colormap`: an id, or `{"colormap": id, "cache": ...}`. Inline colormaps aren't read.
-    fn read(pack_root: &Path, json: &Json) -> Option<Self> {
+    fn read(pack_root: &ResourceSource, json: &Json) -> Option<Self> {
         let (id, cache) = match json {
             Json::String(id) => (id.as_str(), TintCache::EveryTick),
             Json::Object(o) => (
@@ -94,12 +96,7 @@ impl Tint {
             "minecraft:foliage_color" => TintSource::Biome(|b| b.foliage),
             "minecraft:dry_foliage_color" => TintSource::Biome(|b| b.dry_foliage),
             "minecraft:water_color" => TintSource::Biome(|b| b.water),
-            _ => TintSource::Pack(crate::environment::Colormap::load(
-                &horizon_assets::resource_source::ResourceSource::directory(
-                    pack_root.to_path_buf(),
-                ),
-                &id,
-            )?),
+            _ => TintSource::Pack(crate::environment::Colormap::load(pack_root, &id)?),
         };
         Some(Self { source, cache })
     }
@@ -119,75 +116,59 @@ impl Tint {
 }
 
 /// Every `.json` under `dir`, with its path relative to `root`.
-fn json_files(root: &Path, dir: &Path) -> Vec<(String, Json)> {
-    let mut out = Vec::new();
-    let mut stack = vec![dir.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                stack.push(path);
-                continue;
+fn json_files(root: &ResourceSource, kind: &str) -> Vec<(String, Json)> {
+    root.list("assets/")
+        .into_iter()
+        .filter(|path| path.ends_with(".json") && path.contains(&format!("/polytone/{kind}/")))
+        .filter_map(|path| {
+            let bytes = root.read(&path).ok()?;
+            match serde_json::from_slice(&bytes) {
+                Ok(json) => Some((path, json)),
+                Err(e) => {
+                    log::warn!("{path}: {e}");
+                    None
+                }
             }
-            if path.extension().is_none_or(|e| e != "json") {
-                continue;
-            }
-            let Ok(relative) = path.strip_prefix(root) else {
-                continue;
-            };
-            let relative = relative.to_string_lossy().into_owned();
-            match horizon_world::json_file::read::<Json>(&path) {
-                Ok(json) => out.push((relative, json)),
-                Err(e) => log::warn!("{relative}: {e}"),
-            }
-        }
-    }
-    out
+        })
+        .collect()
 }
 
 impl Registry {
     /// Every `assets/<namespace>/polytone/{custom_particles,block_modifiers,entity_modifiers}/**.json` under a
     /// pack overlay root.
     pub fn read(
-        pack_root: &Path,
+        pack_root: &ResourceSource,
         configs: horizon_polytone::pack::Configs,
         blocks: &'static BlockRegistry,
     ) -> Self {
         let mut types = HashMap::new();
         let mut modifiers = Vec::new();
         let mut entity_modifiers = Vec::new();
-        let namespaces = std::fs::read_dir(pack_root.join("assets"))
-            .into_iter()
-            .flatten()
-            .flatten();
-        for namespace in namespaces {
-            let polytone = namespace.path().join("polytone");
-            for (relative, json) in json_files(pack_root, &polytone.join("custom_particles")) {
-                let Some(id) = horizon_polytone::implicit_id(&relative, "custom_particles") else {
-                    continue;
-                };
-                match CustomParticle::parse(&json) {
-                    Ok(particle) => {
-                        types.insert(id, Arc::new(particle));
-                    }
-                    Err(e) => log::warn!("{relative}: {e}"),
+        for (relative, json) in json_files(pack_root, "custom_particles") {
+            let Some(id) = horizon_polytone::implicit_id(&relative, "custom_particles") else {
+                continue;
+            };
+            match CustomParticle::parse(&json) {
+                Ok(particle) => {
+                    types.insert(id, Arc::new(particle));
                 }
+                Err(e) => log::warn!("{relative}: {e}"),
             }
-            for (relative, json) in json_files(pack_root, &polytone.join("entity_modifiers")) {
-                let implicit = horizon_polytone::implicit_id(&relative, "entity_modifiers");
-                match EntityEmitters::parse(&json, implicit.as_deref()) {
-                    Ok(Some(m)) if !m.emitters.is_empty() => entity_modifiers.push(Arc::new(m)),
-                    Ok(_) => {}
-                    Err(e) => log::warn!("{relative}: {e}"),
-                }
+        }
+        for (relative, json) in json_files(pack_root, "entity_modifiers") {
+            let implicit = horizon_polytone::implicit_id(&relative, "entity_modifiers");
+            match EntityEmitters::parse(&json, implicit.as_deref()) {
+                Ok(Some(m)) if !m.emitters.is_empty() => entity_modifiers.push(Arc::new(m)),
+                Ok(_) => {}
+                Err(e) => log::warn!("{relative}: {e}"),
             }
-            for (relative, json) in json_files(pack_root, &polytone.join("block_modifiers")) {
-                let implicit = horizon_polytone::implicit_id(&relative, "block_modifiers");
-                match BlockEmitters::parse(&json, implicit.as_deref()) {
-                    Ok(Some(m)) => modifiers.push(Arc::new(m)),
-                    Ok(_) => {}
-                    Err(e) => log::warn!("{relative}: {e}"),
-                }
+        }
+        for (relative, json) in json_files(pack_root, "block_modifiers") {
+            let implicit = horizon_polytone::implicit_id(&relative, "block_modifiers");
+            match BlockEmitters::parse(&json, implicit.as_deref()) {
+                Ok(Some(m)) => modifiers.push(Arc::new(m)),
+                Ok(_) => {}
+                Err(e) => log::warn!("{relative}: {e}"),
             }
         }
         // Each block's modifiers: the highest priority ones (block tags aren't resolved here).
@@ -1424,7 +1405,11 @@ mod tests {
             collision: &scene.collision,
             player: None,
         };
-        let mut engine = engine(Registry::read(&root, Default::default(), blocks));
+        let mut engine = engine(Registry::read(
+            &ResourceSource::directory(root.clone()),
+            Default::default(),
+            blocks,
+        ));
         // Air has no emitters; the torch fires its first emitter only.
         engine.polytone_animate(&level, [1, 64, 2]);
         assert!(engine.pending.is_empty());
@@ -1451,7 +1436,11 @@ mod tests {
             collision: &scene.collision,
             player: None,
         };
-        let mut engine = engine(Registry::read(&root, Default::default(), blocks));
+        let mut engine = engine(Registry::read(
+            &ResourceSource::directory(root.clone()),
+            Default::default(),
+            blocks,
+        ));
         engine.polytone_animate(&level, [1, 64, 1]);
         let PendingParticle::Ordinary(mut p) = engine.pending.pop().unwrap() else {
             panic!("expected ordinary particle")
@@ -1498,7 +1487,11 @@ mod tests {
             collision: &scene.collision,
             player: None,
         };
-        let registry = Registry::read(&root, Default::default(), blocks);
+        let registry = Registry::read(
+            &ResourceSource::directory(root.clone()),
+            Default::default(),
+            blocks,
+        );
         let frame = registry.frame.clone();
         let mut engine = engine(registry);
         let feet = [1.0, 64.0, 1.0];
@@ -1555,7 +1548,11 @@ mod tests {
             collision: &scene.collision,
             player: None,
         };
-        let mut engine = engine(Registry::read(&root, Default::default(), blocks));
+        let mut engine = engine(Registry::read(
+            &ResourceSource::directory(root.clone()),
+            Default::default(),
+            blocks,
+        ));
         let rect = crate::hud::Rect {
             u0: 0.0,
             v0: 0.0,
@@ -1621,7 +1618,11 @@ mod tests {
             collision: &scene.collision,
             player: None,
         };
-        let registry = Arc::new(Registry::read(&root, Default::default(), blocks));
+        let registry = Arc::new(Registry::read(
+            &ResourceSource::directory(root.clone()),
+            Default::default(),
+            blocks,
+        ));
         // The chunk's biome is id 0: plains, whose foliage is #336699.
         registry.set_biomes(&Arc::new(crate::biome::Biomes::from_jsons(&[(
             "minecraft:plains",

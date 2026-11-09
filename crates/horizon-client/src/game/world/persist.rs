@@ -1204,10 +1204,6 @@ impl Game<'_> {
         self.remember(id, uuid, tag);
         self.bind_saved_entity_attachments(id, &mut m.attachment_lifetime);
         self.mobs.push(m);
-        if finalize {
-            self.enchant_spawn_equipment(id);
-            self.halloween_spawn_head(id);
-        }
         if let Some(passengers) = passengers {
             self.load_passengers(id, passengers);
         }
@@ -1306,7 +1302,7 @@ impl Game<'_> {
                     && !live_seen.contains(&self.mobs[j].id)
             })
             .collect();
-        riders.sort_by_key(|&j| self.mobs[j].extra.vehicle_order);
+        extra_riders.sort_by_key(|&j| self.mobs[j].extra.vehicle_order);
         if let Some(driver) = self
             .mobs
             .iter()
@@ -6372,13 +6368,14 @@ mod trader_llama_discard_tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -6398,7 +6395,9 @@ mod trader_llama_discard_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();

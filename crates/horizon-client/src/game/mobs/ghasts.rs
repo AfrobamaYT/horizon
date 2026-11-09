@@ -6,7 +6,6 @@ use super::level_sounds::LevelSound;
 use horizon_client::actions::Action;
 use horizon_client::{
     entities::ObstacleGrid,
-    items::ItemStack,
     mobs::{Mob, MobEvent, Species, happy_ghast},
 };
 use horizon_core::geometry::{Aabb, Vec3};

@@ -13348,7 +13348,13 @@ impl Game<'_> {
             let (a, b) = (&self.orbs[i], &self.orbs[j]);
             let (into, into_value, from, from_value, vanilla) =
                 (a.id, a.value, b.id, b.value, b.can_merge(a.id, a.value));
-            if !self.orb_merges(into, into_value, from, from_value, vanilla) {
+            if !self.orb_merges(
+                into,
+                into_value.max(0) as u32,
+                from,
+                from_value.max(0) as u32,
+                vanilla,
+            ) {
                 continue;
             }
             let Some(i) = self.orbs.locate(into_join) else {
@@ -14910,7 +14916,7 @@ impl Game<'_> {
             .save_later(&chunks, self.pack.assets.registry, world_biomes!(self))?;
         // Prepare entities while the chunk writer runs, then use one barrier.
         if !wait {
-            self.world.modified.autosaved(&keys, now);
+            self.world.modified.autosaved(&keys, Instant::now());
         }
         self.save_entities(false)?;
         self.save_raids();
@@ -16194,7 +16200,7 @@ impl Game<'_> {
         self.native_chunks_loaded();
         self.native_chunks_unloaded(&unloaded);
         for chunk in &unloaded {
-            self.world.modified.remove(&(chunk.x, chunk.z));
+            self.world.modified.unloaded(&(chunk.x, chunk.z));
         }
         if let Some(lod) = &mut self.lod {
             self.lod_observe
@@ -16219,15 +16225,6 @@ impl Game<'_> {
                 }
             });
         }
-        for chunk in &unloaded {
-            self.world.modified.unloaded(&(chunk.x, chunk.z));
-        }
-        let dirty: Vec<_> = unloaded
-            .iter()
-            .filter(|c| self.world.modified.remove(&(c.x, c.z)))
-            .cloned()
-            .collect();
-        let modified = horizon_client::spans::time("with_entities", || self.with_entities(&dirty));
         horizon_client::spans::time("unload_entities", || self.unload_entities(&unloaded));
         if !unloaded.is_empty() {
             let gone: horizon_client::fast_hash::FxHashSet<(i32, i32)> =

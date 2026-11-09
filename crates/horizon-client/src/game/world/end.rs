@@ -1741,7 +1741,7 @@ fn eye_quad(
 }
 
 #[cfg(test)]
-#[path = "end_gateway_ticking_tests.rs"]
+#[path = "end/end_gateway_ticking_tests.rs"]
 mod ticking_tests;
 
 #[cfg(test)]

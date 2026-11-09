@@ -4822,7 +4822,7 @@ impl Game<'_> {
                 // advance projectile flags or motion while its chunk unloads.
                 let at = projectiles[i].position;
                 if !ticking(at.x.floor() as i32, at.z.floor() as i32) {
-                    projectiles[i].previous = at;
+                    projectiles.update(i, |p| p.previous = at);
                     continue;
                 }
                 // A ghast's fireball or a wind charge is pickable, so a pearl, an
@@ -12235,7 +12235,7 @@ mod breeding_orb_tests {
                 game.award_breeding_experience(7, [8.5, 64.0, 8.5]);
                 assert_eq!(game.orbs.len(), orbs + 1, "a fresh orb, not merged");
                 assert_eq!(
-                    game.orbs.last().map(|o| (o.value, o.count)),
+                    game.orbs.last().map(|o| (o.points(), o.count)),
                     Some((roll, 1))
                 );
                 values.insert(roll);

@@ -1009,7 +1009,7 @@ impl MeshTables {
     #[must_use]
     pub fn with_polytone_colormaps(
         mut self,
-        pack_root: &std::path::Path,
+        pack_root: &horizon_assets::resource_source::ResourceSource,
         registry: &horizon_world::registry::BlockRegistry,
     ) -> Self {
         let modifiers = crate::environment::polytone_colormap_modifiers(pack_root);
@@ -1019,12 +1019,7 @@ impl MeshTables {
         let mut loaded: std::collections::HashMap<String, Option<u16>> = Default::default();
         let mut index = |id: &str, colormaps: &mut Vec<Arc<crate::environment::Colormap>>| {
             *loaded.entry(id.to_owned()).or_insert_with(|| {
-                let colormap = crate::environment::Colormap::load(
-                    &horizon_assets::resource_source::ResourceSource::directory(
-                        pack_root.to_path_buf(),
-                    ),
-                    id,
-                )?;
+                let colormap = crate::environment::Colormap::load(pack_root, id)?;
                 colormaps.push(Arc::new(colormap));
                 Some((colormaps.len() - 1) as u16)
             })

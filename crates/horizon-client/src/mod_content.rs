@@ -2717,7 +2717,9 @@ pub fn biome_modifiers_over_packs(
             Some(J::Bool(true)) => None,
             _ => biome_tags.get(id).map(String::as_str),
         };
-        let merged = merge_tag(old, values, id, &|id| id == "minecraft" || saved.enabled_mods.iter().any(|enabled| enabled == id))?;
+        let merged = merge_tag(old, values, id, &|id| {
+            id == "minecraft" || saved.enabled_mods.iter().any(|enabled| enabled == id)
+        })?;
         biome_tags.insert(id.to_owned(), merged);
     }
     let placed = packs
@@ -2820,89 +2822,6 @@ impl Overlay<'_> {
     }
 }
 
-/// Threads copying the mods' files into the overlay ([`Overlay::copy_all`]).
-const COPY_THREADS: usize = 8;
-
-/// The namespace folders (`assets/<ns>`, `data/<ns>`) of `copies` (path → file) that can
-/// be cloned whole: the folder, the mod's folder it is cloned from, and the files of that
-/// folder the copies leave out (a refused block's model), to delete from the clone. The
-/// base has no such folder, all its files come from one mod folder holding only files and
-/// folders (no link), and at most as many are left out as are copied.
-fn whole_folders(
-    base: &Path,
-    copies: &BTreeMap<&str, &Path>,
-) -> Vec<(String, PathBuf, Vec<String>)> {
-    let mut groups: BTreeMap<&str, (Option<PathBuf>, BTreeSet<&str>)> = BTreeMap::new();
-    for (rel, from) in copies {
-        let mut parts = rel.splitn(3, '/');
-        let (Some(top), Some(ns), Some(_)) = (parts.next(), parts.next(), parts.next()) else {
-            continue;
-        };
-        let folder = &rel[..top.len() + 1 + ns.len()];
-        let source = from
-            .ancestors()
-            .nth(rel.split('/').count())
-            .filter(|root| root.join(rel) == *from)
-            .map(|root| root.join(folder));
-        let group = groups
-            .entry(folder)
-            .or_insert_with(|| (source.clone(), BTreeSet::new()));
-        if group.0 != source {
-            group.0 = None;
-        }
-        group.1.insert(&rel[folder.len() + 1..]);
-    }
-    groups
-        .into_iter()
-        .filter_map(|(folder, (source, files))| {
-            let source = source?;
-            let mut found = BTreeSet::new();
-            if fs::symlink_metadata(base.join(folder)).is_ok()
-                || !only_files(&source, &source, &mut found)
-                || !files.iter().all(|f| found.contains(*f))
-            {
-                return None;
-            }
-            let left_out: Vec<String> = found
-                .into_iter()
-                .filter(|f| !files.contains(f.as_str()))
-                .collect();
-            (left_out.len() <= files.len()).then(|| (folder.to_owned(), source, left_out))
-        })
-        .collect()
-}
-
-/// Gathers the files below `dir` as `/`-joined paths from `root`; false at anything
-/// that is neither a file nor a folder, or can't be read.
-fn only_files(root: &Path, dir: &Path, found: &mut BTreeSet<String>) -> bool {
-    let Ok(read) = fs::read_dir(dir) else {
-        return false;
-    };
-    for entry in read {
-        let Ok(entry) = entry else { return false };
-        let Ok(kind) = entry.file_type() else {
-            return false;
-        };
-        let path = entry.path();
-        if kind.is_dir() {
-            if !only_files(root, &path, found) {
-                return false;
-            }
-        } else if kind.is_file() {
-            let Some(rel) = path
-                .strip_prefix(root)
-                .ok()
-                .and_then(|rel| rel.iter().map(|p| p.to_str()).collect::<Option<Vec<_>>>())
-            else {
-                return false;
-            };
-            found.insert(rel.join("/"));
-        } else {
-            return false;
-        }
-    }
-    true
-}
 fn out_path(overlay: &Overlay<'_>, rel: &str) -> PathBuf {
     overlay.out.join(rel)
 }
@@ -3282,7 +3201,6 @@ pub fn build(
     let jobs = table_jobs(base, &overlay)?;
     tables(base, &plan, &overlay, &jobs)?;
     // Mod files, and every tag addition gathered per tag file.
-    let mut copies = Vec::new();
     let mut tags: BTreeMap<String, TagMerge> = BTreeMap::new();
     let mut warnings = Vec::new();
     let mut worldgen: BTreeMap<&str, Vec<(String, String)>> = BTreeMap::new();

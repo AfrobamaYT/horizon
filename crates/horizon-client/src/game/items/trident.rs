@@ -51,7 +51,6 @@ pub(super) struct ThrownTrident {
     /// Water membership from the preceding `baseTick` (not updated while stuck).
     was_touching_water: bool,
     /// `Entity.random`, used for the extinguishing sound and a breeze's turn.
-    random: horizon_core::random::LegacyRandom,
     /// `AbstractArrow.lastState`: the block it stuck in; not saved.
     last_state: Option<horizon_world::registry::BlockStateId>,
     /// `Projectile.lastDeflectedBy`: the breeze that already turned this trident.

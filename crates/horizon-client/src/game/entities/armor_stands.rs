@@ -900,18 +900,18 @@ impl Game<'_> {
             a.speed_instance = true;
             // LivingEntity.aiStep -> EntityEquipment.tick, before movement.
             // Inspect in slot order, then mutate only each actual owned compass.
-            let clear = self.armor_stands[i].equipment.each_ref().map(|stack| {
-                stack.as_ref().is_some_and(|stack| {
-                    stack.item.as_ref() == "minecraft:compass"
-                        && super::maps::lodestone_target_gone(self, stack, self.dim.id())
-                })
-            });
-            for (stack, clear) in self.armor_stands[i].equipment.iter_mut().zip(clear) {
-                if clear && let Some(stack) = stack {
+            for slot in 0..horizon_items::equipment::SLOT_NAMES.len() {
+                let Some(mut stack) = self.armor_stands[i].equipment.get(slot).cloned() else {
+                    continue;
+                };
+                if stack.item.as_ref() == "minecraft:compass"
+                    && super::maps::lodestone_target_gone(self, &stack, self.dim.id())
+                {
                     stack.data_mut().set_other(
                         "minecraft:lodestone_tracker",
-                        Some(horizon_world::nbt::Tag::Compound(Default::default())),
+                        Some(horizon_core::nbt::Tag::Compound(Default::default())),
                     );
+                    self.armor_stands[i].equipment.set(slot, Some(stack));
                 }
             }
             let a = &mut self.armor_stands[i];
@@ -1214,36 +1214,7 @@ impl Game<'_> {
     /// the table's random sequence or else the level's random, each stack
     /// spawned at the stand's position. Its view is only the type and whether
     /// it burns; no damage source, killer or player is known here.
-    fn armor_stand_death_loot(&mut self, at: [f64; 3], on_fire: bool) {
-        const TABLE: &str = "minecraft:entities/armor_stand";
-        let Some(loot) = horizon_client::structure_blocks::loot_data(
-            &self.options.resources,
-            &self.pack_files(),
-        ) else {
-            return;
-        };
-        if !loot.has_table(TABLE) {
-            return;
-        }
-        let params = horizon_world::loot::EntityLootParams {
-            this: horizon_world::loot::LootEntity {
-                on_fire,
-                baby: false,
-                ..horizon_world::loot::LootEntity::new("minecraft:armor_stand")
-            },
-            ..horizon_world::loot::EntityLootParams::default()
-        };
-        let stacks = match loot.random_sequence(TABLE) {
-            Some(id) => {
-                let random = self.rand_sequences.get(id, self.level.seed);
-                loot.roll_entity(TABLE, random, &params)
-            }
-            None => loot.roll_entity(TABLE, &mut self.world.random, &params),
-        };
-        for stack in stacks.iter().filter(|s| !s.is_empty()) {
-            self.spawn_item_own(super::creatures::from_loot(stack), at, 10);
-        }
-    }
+
     /// `ArmorStand.hurtServer` for a command's damage of `damage_type` from the
     /// causing entity `causing`, up to its sources that act and still return
     /// false: a blast breaks the stand (`brokenByAnything`, `kill`), fire that
@@ -2408,7 +2379,7 @@ mod stand_lodestone_inventory_tick_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
     fn actual_stand_equipment_compasses_tick_after_loaded_lodestone_removal() {
-        let mut game = crate::game::native_machines::tests::server_game();
+        let mut game = crate::game::game_tests::tests::server_game();
         game.build_registries();
         game.set_allow_commands(true);
         game.level.health = 20.0;
@@ -2452,7 +2423,7 @@ mod stand_lodestone_inventory_tick_tests {
             assert!(a.no_gravity);
             assert!(a.first_tick, "fresh actual stand has not ticked yet");
             assert_eq!(a.health, 20.0);
-            for stack in a.equipment[..2].iter().flatten() {
+            for stack in a.equipment.iter().take(2).flatten() {
                 assert_eq!(&*stack.item, "minecraft:compass");
                 assert_eq!(stack.count, 1);
                 assert_eq!(
@@ -2503,13 +2474,13 @@ mod stand_lodestone_inventory_tick_tests {
             assert_eq!(a.position, Vec3::new(f64::from(n * 2) + 0.5, 200.0, 4.5));
             assert_eq!(a.health, 20.0);
             assert!(a.no_gravity);
-            for (slot, stack) in a.equipment[..2].iter().enumerate() {
+            for (slot, stack) in a.equipment.iter().take(2).enumerate() {
                 let stack = stack.as_ref().unwrap();
                 assert_eq!(stack.count, 1);
                 let data = stack.data().unwrap();
                 assert_eq!(
                     data.other("minecraft:custom_data").unwrap().get("marker"),
-                    Some(&horizon_world::nbt::Tag::Int(n))
+                    Some(&horizon_core::nbt::Tag::Int(n))
                 );
                 let present = data
                     .other("minecraft:lodestone_tracker")
@@ -2595,7 +2566,7 @@ mod postbaseline_lodestone_controls {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
     fn postbaseline_six_slots_noncompass_guard_and_dimension_preservation() {
-        let mut game = crate::game::native_machines::tests::server_game();
+        let mut game = crate::game::game_tests::tests::server_game();
         game.build_registries();
         game.set_allow_commands(true);
         game.block_ticks
@@ -2706,7 +2677,7 @@ mod postbaseline_lodestone_controls {
                     .other("minecraft:custom_data")
                     .unwrap()
                     .get("marker"),
-                Some(&horizon_world::nbt::Tag::Int(slot as i32))
+                Some(&horizon_core::nbt::Tag::Int(slot as i32))
             );
         }
         let after: Vec<_> = (0..6)

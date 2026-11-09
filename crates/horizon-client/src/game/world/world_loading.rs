@@ -1436,13 +1436,14 @@ mod unused_feature_startup_tests {
         let resources = PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            resources.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(resources.clone()),
+            Vec::new(),
             None,
             &resources,
             &settings,
             Instant::now(),
             false,
-            true,
+            execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -1484,6 +1485,7 @@ mod unused_feature_startup_tests {
                 &options.resources,
                 loaded.resources.biomes(),
                 &level.enabled_features,
+                &loaded.pack.additional_data,
             );
             assert_eq!(
                 overrides
@@ -1506,6 +1508,7 @@ mod unused_feature_startup_tests {
                 creative: false,
                 create: None,
                 owner: None,
+                rule_registry: Level::default().rule_registry,
             };
             let result = request.prepare(
                 &loaded.resources,
@@ -1540,13 +1543,14 @@ mod unused_feature_preservation_tests {
         let resources = PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            resources.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(resources.clone()),
+            Vec::new(),
             None,
             &resources,
             &settings,
             Instant::now(),
             false,
-            true,
+            execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -1584,6 +1588,7 @@ mod unused_feature_preservation_tests {
             &options.resources,
             loaded.resources.biomes(),
             &level.enabled_features,
+            &loaded.pack.additional_data,
         );
         assert_eq!(
             overrides.entries("features").collect::<Vec<_>>(),
@@ -1618,6 +1623,7 @@ mod unused_feature_preservation_tests {
             creative: false,
             create: None,
             owner: None,
+            rule_registry: Level::default().rule_registry,
         };
         assert!(
             request
