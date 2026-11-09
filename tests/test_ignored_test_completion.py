@@ -129,6 +129,25 @@ class Legs(unittest.TestCase):
         skipped = {command[i + 1] for i, arg in enumerate(command) if arg == "--skip"}
         self.assertEqual(skipped, {"marked", *owned[2]})
 
+    def test_should_panic_results_complete_a_leg_and_preserve_known_failures(self):
+        good, bad = leg_names()[1][:2]
+        listing = f"{good}: test\n{bad}: test\n"
+        for should_panic_passes in (True, False):
+            verdict = "ok" if should_panic_passes else "FAILED"
+            output = target(2, f"test {good} - should panic ... {verdict}\n"
+                            f"test {bad} ... FAILED\n",
+                            summary(passed=int(should_panic_passes), failed=2-int(should_panic_passes)))
+
+            def fake(command, **_):
+                return subprocess.CompletedProcess(command, 0 if "--list" in command else 101,
+                                                   listing if "--list" in command else output)
+
+            with patch.object(ignored_tests.subprocess, "run", side_effect=fake), contextlib.redirect_stdout(io.StringIO()):
+                result = ignored_tests.run("example", [], 1, 2)
+            self.assertEqual(result, {good: should_panic_passes, bad: False})
+            code, _ = self.judge({("example", bad): None}, result)
+            self.assertEqual(code, 0 if should_panic_passes else 1)
+
     def test_a_listed_test_that_never_reports_fails_the_leg(self):
         owned = leg_names()[1][:2]
         listing = "".join(f"{name}: test\n" for name in owned)
