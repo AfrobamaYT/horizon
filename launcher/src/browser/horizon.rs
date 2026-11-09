@@ -657,6 +657,14 @@ impl Source for Registry {
     }
 }
 
+/// The versions the player picked in game folder `home`, by mod id.
+pub fn chosen(home: &Path) -> std::collections::BTreeMap<String, String> {
+    fs::read(home.join("mod-browser/chosen-versions.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
 /// Downloads a registry file, checked; `file://` files only from a local index.
 fn fetch(
     file: &FileRef,
