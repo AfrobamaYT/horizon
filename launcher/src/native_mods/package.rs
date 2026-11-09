@@ -120,7 +120,19 @@ pub(super) fn checked_bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
             {
                 continue;
             }
-            let reason = if let Some(name) = dependent
+            let points = library.points.as_ref().and_then(|catalog| {
+                dependent.manifest.inject.iter().find_map(|inject| {
+                    manifest::inject::mod_points::cross_target(
+                        &dependent.manifest.id,
+                        inject,
+                        &library.manifest.id,
+                        catalog,
+                    )
+                })
+            });
+            let reason = if let Some(refusal) = points {
+                super::mod_points::refusal(&refusal)
+            } else if let Some(name) = dependent
                 .layouts
                 .first_difference(&library.manifest.id, &library.layouts)
             {
@@ -146,6 +158,12 @@ mod mixed_tests {
     use super::*;
 
     fn refusal(hash: &str) -> String {
+        refusal_with(hash, "", None)
+    }
+
+    /// The refusal of a native `addon` with `injects` depending on a wasm `lib` whose layout of
+    /// `T` hashes to `hash` and whose build listed `points`.
+    fn refusal_with(hash: &str, injects: &str, points: Option<&str>) -> String {
         let home = tempfile::tempdir().unwrap();
         let addon = home.path().join("addon");
         let library = home.path().join("lib");
@@ -163,7 +181,7 @@ mod mixed_tests {
         fs::write(
             addon.join(manifest::MANIFEST),
             format!(
-                "{}[dependencies]\nlib='*'\n[native]\ngame='26.3'\nhorizon='{}'\nmixins='{}'\n",
+                "{}{injects}[dependencies]\nlib='*'\n[native]\ngame='26.3'\nhorizon='{}'\nmixins='{}'\n",
                 header("addon"),
                 "a".repeat(40),
                 "b".repeat(40)
@@ -191,7 +209,31 @@ mod mixed_tests {
             format!(r#"{{"lib":{{"T":"{hash}"}}}}"#),
         )
         .unwrap();
+        if let Some(points) = points {
+            fs::write(library.join("points.json"), points).unwrap();
+        }
         checked_bundles(home.path()).expect_err("mixed dependency must refuse")
+    }
+
+    #[test]
+    fn a_mod_point_listener_across_targets_is_refused_by_its_reason() {
+        let points = r#"{"crate":"lib","table":"__horizon_points","points":[
+            {"name":"transfer","target":"lib::transfer","hash":"0123456789abcdef",
+             "signature":"lib::transfer: fn transfer(rate: u32) -> u32 [u32]","raw":true,
+             "at_return":true,"returns":"result","host":"none","return_ty":"u32",
+             "listener":"__horizon_points::TransferListener"}]}"#;
+        let inject = |access| {
+            format!("[[inject]]\nid='double'\nat='lib::transfer'\nkind='head'\nwith='double'\naccess='{access}'\nhash='0123456789abcdef'\n")
+        };
+        assert_eq!(
+            refusal_with("0123456789abcdef", &inject("internals"), Some(points)),
+            "addon:double: internals access to lib needs the same target: the same binary on native, the same dependency group on wasm"
+        );
+        // An api record that could cross gets the general refusal.
+        assert!(
+            refusal_with("0123456789abcdef", &inject("api"), Some(points))
+                .ends_with("mixed native and wasm dependencies aren't supported yet")
+        );
     }
 
     #[test]

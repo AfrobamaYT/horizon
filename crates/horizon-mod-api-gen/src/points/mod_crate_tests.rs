@@ -30,6 +30,8 @@ pub fn fill(tank: &mut Tank) {}
 fn private_helper(amount: u32) -> u32 { amount }
 pub fn opaque(value: Opaque) {}
 fn hidden(value: Hidden) {}
+mod vault { #[derive(mod_api::Wire)] pub struct Sealed; }
+pub fn seal(value: vault::Sealed) {}
 #[mod_api::no_point]
 pub fn opted_out(amount: u32) {}
 #[no_point]
@@ -76,6 +78,7 @@ fn every_eligible_function_public_and_private_gets_a_point_by_the_engine_rules()
             "hidden",
             "opaque",
             "private_helper",
+            "seal",
             "tanks_drain",
             "tanks_tank_fill",
             "transfer"
@@ -112,6 +115,11 @@ fn every_eligible_function_public_and_private_gets_a_point_by_the_engine_rules()
         by_name(&points, "hidden").api_refusal.as_deref(),
         Some("argument 1 `value` (`Hidden`) has no API type yet"),
         "a private type can't be in a record addons read"
+    );
+    assert_eq!(
+        by_name(&points, "seal").api_refusal.as_deref(),
+        Some("argument 1 `value` (`vault::Sealed`) has no API type yet"),
+        "a pub type no addon can reach, in a private module, is refused too"
     );
     assert_eq!(by_name(&points, "private_helper").returns, "result");
     assert_eq!(
@@ -178,7 +186,7 @@ fn two_points_with_one_name_fail_the_build_naming_both() {
 fn staging_marks_each_point_and_writes_the_table_beside_the_crate_root() {
     let dir = crate_with("stage", LIB, TANKS);
     let points = stage_mod(&dir, &WireTypes::new()).unwrap().points;
-    assert_eq!(points.len(), 7);
+    assert_eq!(points.len(), 8);
     let lib = fs::read_to_string(dir.join("src/lib.rs")).unwrap();
     assert!(lib.contains(
         "#[::mod_api::__point(name = \"transfer\", table = \"crate::__horizon_points\", raw, free, api(Chemical = \"crate::Chemical\"))] pub fn transfer"

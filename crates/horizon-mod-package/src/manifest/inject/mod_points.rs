@@ -3,13 +3,15 @@
 //! `api` and `internals` levels and refusals, plus a signature hash an addon pins, checked when it
 //! loads: a library rebuilt with a changed function refuses the addon instead of running it
 //! against another signature. The native launcher and the wasm loader route through this one
-//! function.
+//! function, and an edge across targets is refused by [`cross_target`] where it names a reason more
+//! precise than the mixed-target refusal.
 use super::{Entry, Inject, InjectError, NoSlotReason, Place, Route, SlotKind, Target};
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::{fmt, io::Read};
 
 /// The file a mod's build writes its points to, at the package root.
 pub const FILE: &str = "points.json";
+const MAX_BYTES: u64 = 8 << 20;
 
 /// A mod crate's points, as its build lists them.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -57,17 +59,27 @@ pub struct Point {
     pub return_listener: Option<String>,
 }
 
-/// An installed library whose points an addon may target.
+/// An installed library, built for the addon's target, whose points the addon may target.
 pub struct Library<'a> {
     pub id: &'a str,
     pub version: &'a str,
-    /// Built for the same target as the addon: the same binary on native, or a wasm library
-    /// whose dependents link into its dependency group.
-    pub same_target: bool,
     pub catalog: &'a Catalog,
 }
 
 impl Catalog {
+    /// Reads a package's `points.json`, bounded: package metadata is untrusted.
+    pub fn read(reader: impl Read) -> Result<Self, String> {
+        let mut bytes = Vec::new();
+        reader
+            .take(MAX_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| format!("{FILE}: {e}"))?;
+        if bytes.len() as u64 > MAX_BYTES {
+            return Err(format!("{FILE}: exceeds 8 MiB"));
+        }
+        serde_json::from_slice(&bytes).map_err(|e| format!("{FILE}: {e}"))
+    }
+
     /// Whether `at` names a function of this crate.
     pub fn owns(&self, at: &str) -> bool {
         at.split("::").next() == Some(self.krate.as_str())
@@ -108,8 +120,6 @@ pub enum Refusal {
         library: String,
         reason: String,
     },
-    /// Mod points don't cross targets yet: mixed native and wasm dependencies are refused.
-    CrossTarget { id: String, library: String },
 }
 
 impl fmt::Display for Refusal {
@@ -147,11 +157,6 @@ impl fmt::Display for Refusal {
                 f,
                 "{id}: an api listener at {library} on the other target crosses through the \
                  game, and {reason}: add #[derive(mod_api::Wire)] to it"
-            ),
-            Self::CrossTarget { id, library } => write!(
-                f,
-                "{id}: {library} is on the other target: mixed native and wasm dependencies \
-                 aren't supported yet"
             ),
         }
     }
@@ -198,18 +203,6 @@ pub fn route<'a>(
             pinned: inject.hash.clone(),
             installed: point.hash.clone(),
             signature: point.signature.clone(),
-        });
-    }
-    if !library.same_target {
-        let library = library.id.to_owned();
-        return Err(match (inject.access, &point.api_refusal) {
-            (super::Access::Internals, _) => Refusal::CrossTargetInternals { id, library },
-            (super::Access::Api, Some(reason)) => Refusal::CrossTargetNoWire {
-                id,
-                library,
-                reason: reason.clone(),
-            },
-            (super::Access::Api, None) => Refusal::CrossTarget { id, library },
         });
     }
     let api = inject.access == super::Access::Api;
@@ -272,6 +265,34 @@ pub fn route<'a>(
             reason,
             declaration: inject.at.clone(),
         })),
+    }
+}
+
+/// Why `inject`, an `[[inject]]` of mod `mod_id` at a point of `library` built for the other
+/// target, can never cross: `internals` reaches the library's own types, and an `api` record needs a
+/// `Wire` form for every parameter. `None` when the point exists and its record could cross, so the
+/// edge gets the general mixed-target refusal.
+pub fn cross_target(
+    mod_id: &str,
+    inject: &Inject,
+    library: &str,
+    catalog: &Catalog,
+) -> Option<Refusal> {
+    let plain = |path: &str| path.replace(' ', "");
+    let point = catalog
+        .points
+        .iter()
+        .find(|point| plain(&point.target) == plain(&inject.at))?;
+    let id = format!("{mod_id}:{}", inject.id);
+    let library = library.to_owned();
+    match (inject.access, &point.api_refusal) {
+        (super::Access::Internals, _) => Some(Refusal::CrossTargetInternals { id, library }),
+        (super::Access::Api, Some(reason)) => Some(Refusal::CrossTargetNoWire {
+            id,
+            library,
+            reason: reason.clone(),
+        }),
+        (super::Access::Api, None) => None,
     }
 }
 

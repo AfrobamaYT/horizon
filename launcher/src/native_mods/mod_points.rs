@@ -72,7 +72,6 @@ pub(super) fn routes<'a>(
                 &Library {
                     id: &library.id,
                     version: &library.version,
-                    same_target: true,
                     catalog: &library.points,
                 },
             )?;
@@ -179,10 +178,6 @@ pub(super) fn refusal(refusal: &Refusal) -> String {
         } => trf(
             "{id}: an api listener at {library} on the other target crosses through the game, and {reason}: add #[derive(mod_api::Wire)] to it",
             &[("id", id), ("library", library), ("reason", reason)],
-        ),
-        Refusal::CrossTarget { id, library } => trf(
-            "{id}: {library} is on the other target: mixed native and wasm dependencies aren't supported yet",
-            &[("id", id), ("library", library)],
         ),
     }
 }

@@ -46,11 +46,10 @@ fn inject(at: &str, kind: Kind, access: Access, hash: &str) -> Inject {
     }
 }
 
-fn library(catalog: &Catalog, same_target: bool) -> Library<'_> {
+fn library(catalog: &Catalog) -> Library<'_> {
     Library {
         id: "chemlib",
         version: "1.2.0",
-        same_target,
         catalog,
     }
 }
@@ -58,7 +57,7 @@ fn library(catalog: &Catalog, same_target: bool) -> Library<'_> {
 #[test]
 fn an_injection_routes_to_its_place_by_access_and_kind() {
     let catalog = catalog();
-    let same = library(&catalog, true);
+    let same = library(&catalog);
     let hash = &catalog.points[0].hash;
     for (kind, access, place) in [
         (Kind::Head, Access::Api, "transfer"),
@@ -82,8 +81,7 @@ fn an_injection_routes_to_its_place_by_access_and_kind() {
 #[test]
 fn each_refusal_names_what_changed_or_why() {
     let catalog = catalog();
-    let same = library(&catalog, true);
-    let other = library(&catalog, false);
+    let same = library(&catalog);
     let hash = catalog.points[0].hash.clone();
     let opaque = catalog.points[1].hash.clone();
     let refused = |inject: Inject, library: &Library<'_>| {
@@ -126,32 +124,6 @@ fn each_refusal_names_what_changed_or_why() {
         )
         .contains("argument 1 `value` (`Opaque`) has no API type yet")
     );
-    // Internals reach the library's own types: refused across targets, whatever the record.
-    assert_eq!(
-        refused(
-            inject("chemlib::transfer", Kind::Head, Access::Internals, &hash),
-            &other
-        ),
-        "addon:listen: internals access to chemlib needs the same target: the same binary on \
-         native, the same dependency group on wasm"
-    );
-    assert_eq!(
-        refused(
-            inject("chemlib::opaque", Kind::Head, Access::Api, &opaque),
-            &other
-        ),
-        "addon:listen: an api listener at chemlib on the other target crosses through the \
-         game, and argument 1 `value` (`Opaque`) has no API type yet: add \
-         #[derive(mod_api::Wire)] to it"
-    );
-    assert_eq!(
-        refused(
-            inject("chemlib::transfer", Kind::Head, Access::Api, &hash),
-            &other
-        ),
-        "addon:listen: chemlib is on the other target: mixed native and wasm dependencies \
-         aren't supported yet"
-    );
     // The opaque point keeps its internals form on the same target.
     assert!(
         route(
@@ -164,4 +136,60 @@ fn each_refusal_names_what_changed_or_why() {
     let mut call = inject("chemlib::transfer", Kind::BeforeCall, Access::Api, &hash);
     call.call = Some("chemlib::helper".into());
     assert!(refused(call, &same).starts_with("E_INJECT_NO_SLOT"));
+}
+
+#[test]
+fn across_targets_internals_and_unwired_records_are_refused_by_reason() {
+    let catalog = catalog();
+    let (hash, opaque) = (&catalog.points[0].hash, &catalog.points[1].hash);
+    let refused = |at: &str, access: Access, hash: &str| {
+        cross_target(
+            "addon",
+            &inject(at, Kind::Head, access, hash),
+            "chemlib",
+            &catalog,
+        )
+        .map(|refusal| refusal.to_string())
+    };
+    // Internals reach the library's own types: refused across targets, whatever the record.
+    assert_eq!(
+        refused("chemlib::transfer", Access::Internals, hash).as_deref(),
+        Some(
+            "addon:listen: internals access to chemlib needs the same target: the same binary \
+             on native, the same dependency group on wasm"
+        )
+    );
+    assert_eq!(
+        refused("chemlib::opaque", Access::Api, opaque).as_deref(),
+        Some(
+            "addon:listen: an api listener at chemlib on the other target crosses through the \
+             game, and argument 1 `value` (`Opaque`) has no API type yet: add \
+             #[derive(mod_api::Wire)] to it"
+        )
+    );
+    // A record that could cross, or no such point: the general mixed-target refusal applies.
+    assert_eq!(refused("chemlib::transfer", Access::Api, hash), None);
+    assert_eq!(refused("chemlib::gone", Access::Internals, hash), None);
+}
+
+#[test]
+fn a_package_catalog_is_read_bounded_and_strict() {
+    let json = serde_json::to_vec(&catalog()).unwrap();
+    assert_eq!(Catalog::read(json.as_slice()).unwrap(), catalog());
+    assert!(
+        Catalog::read(b"{".as_slice())
+            .unwrap_err()
+            .starts_with("points.json")
+    );
+    assert!(
+        Catalog::read(br#"{"crate":"c","table":"t","points":[],"extra":1}"#.as_slice())
+            .unwrap_err()
+            .contains("extra")
+    );
+    let huge = vec![b' '; (8 << 20) + 1];
+    assert!(
+        Catalog::read(huge.as_slice())
+            .unwrap_err()
+            .contains("exceeds")
+    );
 }

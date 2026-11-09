@@ -6,8 +6,8 @@
 //! as the mod's `points.json`, each with the signature hash an addon's declaration pins.
 //!
 //! A parameter crosses an `api` record when its type has a `Wire` form: scalars, text and std
-//! containers, `mod_api`'s types, and the mod's own `pub` types that carry `#[derive(Wire)]` (or a
-//! hand-written `impl Wire`). Nothing adds the derive: any other parameter makes the point's API
+//! containers, `mod_api`'s types, and the mod's own publicly reachable types that carry
+//! `#[derive(Wire)]` (or a hand-written `impl Wire`), as [`crate::wire_types`] finds them. Nothing adds the derive: any other parameter makes the point's API
 //! listeners refuse, naming it, and leaves its `internals` form.
 use super::{Found, GamePoint, WireTypes, file_functions, imports, module_files, unraw};
 pub use horizon_mod_package::manifest::inject::mod_points::Catalog;
@@ -15,7 +15,7 @@ use quote::quote;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use syn::{Item, Type};
+use syn::Type;
 
 /// The module a mod crate's slot table is generated into, at its crate root.
 pub const TABLE: &str = "__horizon_points";
@@ -66,67 +66,6 @@ fn files(dir: &Path) -> Result<(String, PathBuf, Vec<File>), String> {
         });
     }
     Ok((krate, root, out))
-}
-
-/// The crate's `pub` types with a `Wire` form, by full path: `#[derive(Wire)]` (any path ending in
-/// `Wire`) or a hand-written `impl Wire for` the type, in any module, inline ones included.
-fn own_wire_types(files: &[File]) -> BTreeSet<String> {
-    fn walk(
-        module: &str,
-        items: &[Item],
-        public: &mut BTreeSet<String>,
-        wire: &mut BTreeSet<String>,
-    ) {
-        let derives_wire = |attrs: &[syn::Attribute]| {
-            attrs
-                .iter()
-                .filter(|attr| attr.path().is_ident("derive"))
-                .any(|attr| {
-                    attr.parse_args_with(
-                        syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated,
-                    )
-                    .is_ok_and(|paths| {
-                        paths
-                            .iter()
-                            .any(|path| path.segments.last().is_some_and(|s| s.ident == "Wire"))
-                    })
-                })
-        };
-        for item in items {
-            let (ident, vis, attrs) = match item {
-                Item::Struct(item) => (&item.ident, &item.vis, &item.attrs),
-                Item::Enum(item) => (&item.ident, &item.vis, &item.attrs),
-                Item::Mod(inline) => {
-                    if let Some((_, inner)) = &inline.content {
-                        walk(&format!("{module}::{}", inline.ident), inner, public, wire);
-                    }
-                    continue;
-                }
-                Item::Impl(block) => {
-                    if let (Some((_, path, _)), Type::Path(ty)) = (&block.trait_, &*block.self_ty)
-                        && path.segments.last().is_some_and(|s| s.ident == "Wire")
-                        && let Some(last) = ty.path.segments.last()
-                    {
-                        wire.insert(format!("{module}::{}", last.ident));
-                    }
-                    continue;
-                }
-                _ => continue,
-            };
-            let path = format!("{module}::{ident}");
-            if matches!(vis, syn::Visibility::Public(_)) {
-                public.insert(path.clone());
-            }
-            if derives_wire(attrs) {
-                wire.insert(path);
-            }
-        }
-    }
-    let (mut public, mut wire) = (BTreeSet::new(), BTreeSet::new());
-    for file in files {
-        walk(&file.module, &file.parsed.items, &mut public, &mut wire);
-    }
-    wire.intersection(&public).cloned().collect()
 }
 
 /// The `api(…)` keys of `found`'s signature: each leaf naming a type with a `Wire` form, the
@@ -220,7 +159,14 @@ struct Listed<'a> {
 }
 
 fn listed<'a>(files: &'a [File], krate: &str, wire: &WireTypes) -> Result<Vec<Listed<'a>>, String> {
-    let own = own_wire_types(files);
+    let own: BTreeSet<String> = crate::wire_types::reachable(
+        krate,
+        files
+            .iter()
+            .map(|file| (file.module.as_str(), file.parsed.items.as_slice())),
+    )
+    .into_values()
+    .collect();
     let mut out = Vec::new();
     let mut names = std::collections::BTreeMap::new();
     for (index, file) in files.iter().enumerate() {

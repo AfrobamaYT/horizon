@@ -230,7 +230,6 @@ fn an_addon_patches_a_library_through_its_mod_points() {
     let shared = Library {
         id: "chemlib",
         version: "1.0.0",
-        same_target: true,
         catalog: &catalog,
     };
     // The ledger has no Wire form: its api listeners are refused naming it, its internals kept.

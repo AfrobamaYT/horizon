@@ -14,16 +14,37 @@ type Exports = BTreeMap<String, Vec<(String, String)>>;
 pub fn public_types(krate: &str, lib: &Path) -> Result<Vec<String>, String> {
     let dir = lib.parent().ok_or("library has no source directory")?;
     let files = crate::points::module_files(krate.into(), lib.into(), dir.into(), true)?;
-    let mut exports = BTreeMap::new();
-    let mut types = BTreeSet::new();
+    let mut parsed = Vec::new();
     for file in files {
         let source = fs::read_to_string(file.path).map_err(|e| e.to_string())?;
-        let parsed = syn::parse_file(&source).map_err(|e| e.to_string())?;
-        items(krate, &file.module, &parsed.items, &mut exports, &mut types);
+        parsed.push((
+            file.module,
+            syn::parse_file(&source).map_err(|e| e.to_string())?,
+        ));
     }
-    let mut found = BTreeSet::new();
+    let public = reachable(
+        krate,
+        parsed
+            .iter()
+            .map(|(module, file)| (module.as_str(), file.items.as_slice())),
+    );
+    Ok(public.into_keys().collect())
+}
+
+/// The crate's publicly reachable wire types, each public path with the path it is defined at,
+/// from its parsed module files.
+pub(crate) fn reachable<'a>(
+    krate: &str,
+    files: impl IntoIterator<Item = (&'a str, &'a [Item])>,
+) -> BTreeMap<String, String> {
+    let mut exports = BTreeMap::new();
+    let mut types = BTreeSet::new();
+    for (module, parsed) in files {
+        items(krate, module, parsed, &mut exports, &mut types);
+    }
+    let mut found = BTreeMap::new();
     visit(krate, krate, &exports, &types, &mut Vec::new(), &mut found);
-    Ok(found.into_iter().collect())
+    found
 }
 
 fn visit(
@@ -32,7 +53,7 @@ fn visit(
     exports: &Exports,
     types: &BTreeSet<String>,
     visiting: &mut Vec<String>,
-    found: &mut BTreeSet<String>,
+    found: &mut BTreeMap<String, String>,
 ) {
     if visiting.iter().any(|m| m == module) {
         return;
@@ -45,7 +66,7 @@ fn visit(
         }
         let path = format!("{public}::{name}");
         if types.contains(target) {
-            found.insert(path);
+            found.insert(path, target.clone());
         } else {
             visit(target, &path, exports, types, visiting, found);
         }
