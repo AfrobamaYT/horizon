@@ -625,8 +625,7 @@ impl Game<'_> {
     /// merged, load conditions held — to every Horizon client when it joins
     /// and again after each `/reload`; a vanilla client is sent nothing new.
     /// Asked once per load, when the server's data tables are built, and the
-    /// same types go to every player: unlike NeoForge, which asks again for
-    /// each joining player, it can't differ between players. Push nothing and
+    /// same types go to every player: it can't differ between players. Push nothing and
     /// nothing is sent; push nothing after a load that pushed some and the
     /// clients go back to their own recipes. Server-side (the single
     /// player's integrated server included).
@@ -1549,8 +1548,7 @@ impl Game<'_> {
     /// leaves none to hear its character, where vanilla's closed screen hears
     /// nothing, and one that moves the focus types into the box it moved to.
     /// They fire even when `native_screen_key_pressed_pre` cancelled the press
-    /// that carried the text, as NeoForge delivers `CharacterTyped.Pre` for a
-    /// cancelled `KeyPressed.Pre`: the characters left reach the text box
+    /// that carried the text: the characters left reach the text box
     /// without the key's own effects. Cancelling one character drops only that
     /// one. The control socket's `type` fires it too, but not for its `\b`
     /// backspace. Same screens as the key press, and it fires with no text box
@@ -1845,8 +1843,8 @@ impl Game<'_> {
     ) {
         self.fire_sign_changed(call);
     }
-    /// A command a player typed (NeoForge's `CommandEvent`, before
-    /// `Commands.performCommand` runs it), without its slash: any command,
+    /// A command a player typed (NeoForge's `CommandEvent`), asked before
+    /// vanilla's `Commands.performCommand` runs it, without its slash: any command,
     /// vanilla's and the mods' own, also one the player may not run. Set
     /// `canceled` to stop it: nothing runs and nothing is answered but the
     /// lines pushed to `replies`, which go to the player as system chat.
@@ -2242,7 +2240,7 @@ impl Game<'_> {
     /// (`FishingHook.catchingFish`), 2 the reel-in of a bite, which gives the
     /// catch, 3 the reel-in with nothing on the line, 4 the reel-in of a
     /// bobber hooked to an entity or item (like Bukkit's `PlayerFishEvent`;
-    /// NeoForge's `ItemFishedEvent` is later, in `FishingHook.retrieve`). Set `cancel` on the cast and nothing
+    /// not NeoForge's `ItemFishedEvent`). Set `cancel` on the cast and nothing
     /// is thrown; on a bite the fish gets away and the wait starts over; on
     /// a reel-in (2 to 4) nothing happens, the bobber stays out and the rod
     /// takes no wear. The bobber ending by itself (too far, the rod put
@@ -2975,14 +2973,13 @@ impl Game<'_> {
     /// the clock to `wake_up_from_sleep`): `new_time` comes in as the next
     /// morning's day time and may be changed to wake everyone at another
     /// time. A time before `current` (the day time now) is refused, as
-    /// `setTimeAddition` refuses one, and the morning stays. Unlike
-    /// NeoForge, which refuses a bad value as it is set, the check runs once
+    /// `setTimeAddition` refuses one, and the morning stays. The check runs once
     /// after every mod, so a later mod sees the value an earlier one left.
     /// On the server, only when the `advance_time` rule is on;
     /// `native_time_skip` then hears the jump to the time chosen here and
     /// may still cancel it. The players wake and the weather resets as
-    /// usual either way. Set `canceled` and the clock is left where it is, as
-    /// NeoForge's cancel leaves it: `native_time_skip` is not asked either.
+    /// usual either way. Set `canceled` and the clock is left where it is:
+    /// `native_time_skip` is not asked either.
     pub(in crate::game) fn native_sleep_finished_time(
         &mut self,
         dimension: &str,
