@@ -26,6 +26,7 @@ mod connected_advancement_save_tests {
         let mut game_resources = None;
         let mut game = crate::game::game_tests::tests::server_game(&mut game_resources);
         game.options.execution_role = ExecutionRole::DedicatedServer;
+        game.options.dedicated = Some(Vec::new());
         let dir = std::env::temp_dir().join(format!(
             "horizon-connected-advancement-save-{}",
             std::process::id()
@@ -191,6 +192,8 @@ mod connected_advancement_preservation_tests {
         let mut game_resources = None;
         let mut game = crate::game::game_tests::tests::server_game(&mut game_resources);
         game.options.execution_role = ExecutionRole::DedicatedServer;
+        // Let a legacy launch-config gate reach the wrong-role control below.
+        game.options.dedicated = Some(Vec::new());
         let dir = std::env::temp_dir().join(format!(
             "horizon-advancement-preservation-{}",
             std::process::id()
