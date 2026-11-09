@@ -325,10 +325,13 @@ A Rust file over 3000 lines may not grow compared with the base of the branch. `
 `game/remote.rs` (~10,900) and `gfx.rs` (~10,100) are the worst; they slow incremental builds. Smaller files may
 grow to 3000 lines, and a big file may shrink or stay as it is. The fork records restored upstream growth in
 `tools/file_size_baseline.txt`, at each file's exact size in that sync. A changed
-`# sync-baseline: <full upstream SHA>` header must name an available commit that is not already an
-ancestor of the base and is a direct parent of a merge in `base..HEAD`. Without this proof, adding or
-raising an entry fails against `--base`. Shallow checkouts fail explicitly; fetch full history first.
-This proves a merge, not repository ownership: reviewers still check the sync and its growth list
+`# sync-baseline: <full upstream SHA>` header must name a commit that is an ancestor of upstream main,
+explicitly fetched from `https://github.com/horizon-rust/horizon.git` into `refs/sync/upstream-main`.
+It must not be an ancestor of the base and must be a parent of a merge in `base..HEAD`. Without this
+proof, adding or raising an entry fails against `--base`. Missing network access, failed fetches and
+shallow history fail closed. The addresses and layers checks reuse the same provenance helper to
+permit only exact rows or assignments from the verified upstream inventories. A PR can still merge
+a real upstream commit and add unrelated caps: review the sync and growth list
 (see `tools/sync/README.md`). A listed file must stay within its cap, and a cap above
 the current size (or naming a deleted file) fails: lower or remove the entry when the file shrinks. Sync
 PRs list every entry and its growth. This records restoration debt, not permission for other PRs to grow it.
