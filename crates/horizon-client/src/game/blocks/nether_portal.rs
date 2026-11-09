@@ -1489,6 +1489,12 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn portal_capture_preserves_rejected_objects_and_reverses_admission() {
         with_gate(|game, _, _| {
+            game.options.execution_role =
+                super::super::execution_role::ExecutionRole::IntegratedServer;
+            game.options.game_dir = Some(
+                std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap())
+                    .join("portal-tree"),
+            );
             game.build_registries();
             game.set_allow_commands(true);
             game.world.chunks.insert(
@@ -1522,9 +1528,13 @@ mod tests {
             assert!(game.mob_object(leaf).is_none());
             // Land the queued payload through the real arrival transform/adoption path.
             game.portals.arrivals[0].plan =
-                Plan::end_portal(Dim::End, BlockPos::new(0, 64, 0), 0.9, 0.9);
-            for z in -1..=1 {
-                for x in -1..=1 {
+                Plan::end_portal(Dim::Overworld, BlockPos::new(0, 64, 0), 0.9, 0.9);
+            assert_eq!(game.dim, Dim::Overworld);
+            game.enter_level(Dim::End).unwrap();
+            assert_eq!(game.dim, Dim::End);
+            let target = game.portals.arrivals[0].plan.approximate;
+            for z in (target.z >> 4) - 1..=(target.z >> 4) + 1 {
+                for x in (target.x >> 4) - 1..=(target.x >> 4) + 1 {
                     game.streaming
                         .insert_remote(&mut game.world, horizon_client::chunk::Chunk::empty(x, z));
                 }
