@@ -981,3 +981,104 @@ mod off_level_tests {
         });
     }
 }
+
+#[cfg(test)]
+mod nested_vehicle_discard_tests {
+    use super::*;
+    use horizon_client::mobs::Mob;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    struct DiscardVehicleOnDismount(Arc<AtomicUsize>);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for DiscardVehicleOnDismount {
+        fn entity_mount(
+            &self,
+            host: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::EntityMountEvent<'_>,
+        ) -> mod_api::Flow {
+            assert!(!event.mounting);
+            assert_eq!(event.entity, 72);
+            self.0.fetch_add(1, Ordering::Relaxed);
+            // The nested notification sees the root already logically removed.
+            // Do not recurse deliberately or hold a lock across a host call.
+            if let Some(vehicle) = host.entity(event.vehicle) {
+                assert!(vehicle.discard(host));
+            }
+            mod_api::Flow::Cancel
+        }
+    }
+    fn discard_during_dismount(cart: bool) {
+        let count = Arc::new(AtomicUsize::new(0));
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "discard_vehicle_on_dismount",
+            Box::new(DiscardVehicleOnDismount(count.clone())),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            crate::game::native_entity_refs::tests::with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
+                let at = Vec3::new(10.0, 200.0, 20.0);
+                if cart {
+                    game.carts.push(super::super::minecarts::Minecart::new(
+                        71,
+                        super::super::minecarts::CartKind::Rideable,
+                        at,
+                    ));
+                } else {
+                    game.boats
+                        .push(super::super::boats::Boat::new(71, "oak".into(), at, 0.0));
+                }
+                let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+                let mut rider = Mob::new(72, kind.clone(), Vec3::new(2.0, 190.0, 3.0), 0.0);
+                rider.extra.mount = Some(71);
+                game.mobs.push(rider);
+                let mut child = Mob::new(73, kind, Vec3::ZERO, 0.0);
+                child.extra.mount = Some(72);
+                child.age = 19;
+                game.persist
+                    .off_level
+                    .insert(73, super::super::persist::OffLevel::Mob(child));
+                let rider = game.entity(72).unwrap();
+                game.entity_stop_riding(rider);
+                assert_eq!(
+                    count.load(Ordering::Relaxed),
+                    1,
+                    "nested removal must not dispatch the same in-flight dismount twice"
+                );
+                assert_eq!(game.mob_object(72).unwrap().extra.mount, None);
+                assert_eq!(
+                    game.mob_object(72).unwrap().position,
+                    Vec3::new(2.0, 200.0, 3.0)
+                );
+                let child = game.mob_object(73).unwrap();
+                assert_eq!(child.extra.mount, Some(72));
+                assert_eq!(child.position.x, 2.0);
+                assert_eq!(child.position.z, 3.0);
+                assert!(child.position.y >= 200.0);
+                assert_eq!(child.age, 19);
+                assert!(game.entity(73).is_none());
+                game.native_removals_flush();
+                assert_eq!(
+                    count.load(Ordering::Relaxed),
+                    1,
+                    "deferred sweep must not notify again"
+                );
+                assert!(game.entity(71).is_none());
+                assert_eq!(game.mob_object(72).unwrap().extra.mount, None);
+            });
+        });
+    }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn nested_vehicle_discard_notifies_a_boat_dismount_once() {
+        discard_during_dismount(false);
+    }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn nested_vehicle_discard_notifies_a_cart_dismount_once() {
+        discard_during_dismount(true);
+    }
+}
