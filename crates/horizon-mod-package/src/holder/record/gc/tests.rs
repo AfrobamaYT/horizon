@@ -1,7 +1,22 @@
 use super::*;
 use crate::runtime_leases::{Error, Registry};
-// Fork temporarily inherits other threads' locks until exec closes them.
-static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+// A module-local mutex cannot exclude forks from other libtest modules. Run
+// gate-lifetime assertions without unrelated threads temporarily inheriting locks.
+fn isolated() -> bool {
+    if std::env::var_os("RECORD_GC_ISOLATED").is_some() {
+        return false;
+    }
+    let test = std::thread::current().name().unwrap().to_owned();
+    assert!(
+        Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &test, "--nocapture"])
+            .env("RECORD_GC_ISOLATED", "1")
+            .status()
+            .unwrap()
+            .success()
+    );
+    true
+}
 
 fn fixture() -> (tempfile::TempDir, PathBuf) {
     let root = tempfile::tempdir().unwrap();
@@ -59,13 +74,17 @@ fn assert_malformed_roots_retained(invalid: &[usize]) {
 
 #[test]
 fn both_malformed_roots_retain_entire_group() {
-    let _serial = SERIAL.lock().unwrap();
+    if isolated() {
+        return;
+    }
     assert_malformed_roots_retained(&[0, 1]);
 }
 
 #[test]
 fn either_malformed_root_retains_entire_group() {
-    let _serial = SERIAL.lock().unwrap();
+    if isolated() {
+        return;
+    }
     for index in 0..2 {
         assert_malformed_roots_retained(&[index]);
     }
@@ -94,7 +113,9 @@ fn closed_stdio_actor() {
 #[cfg(unix)]
 #[test]
 fn collection_with_closed_stdio() {
-    let _serial = SERIAL.lock().unwrap();
+    if isolated() {
+        return;
+    }
     let (root, path) = fixture();
     let status = Command::new(std::env::current_exe().unwrap())
         .args(["--exact", "holder::record::gc::tests::closed_stdio_actor"])
@@ -119,7 +140,9 @@ fn independent_owner_actor() {
 
 #[test]
 fn final_process_exit_authorizes_collection() {
-    let _serial = SERIAL.lock().unwrap();
+    if isolated() {
+        return;
+    }
     use std::io::{BufRead, BufReader};
     use std::process::Stdio;
     let (root, path) = fixture();
@@ -167,7 +190,9 @@ fn final_process_exit_authorizes_collection() {
 
 #[test]
 fn collective_owners_and_complete_group() {
-    let _serial = SERIAL.lock().unwrap();
+    if isolated() {
+        return;
+    }
     let (root, path) = fixture();
     let first = Registry::existing(root.path()).unwrap();
     let last = Registry::existing(root.path()).unwrap();
@@ -185,7 +210,9 @@ fn collective_owners_and_complete_group() {
 
 #[test]
 fn malformed_unknown_and_wrong_identity_retain_entire_group() {
-    let _serial = SERIAL.lock().unwrap();
+    if isolated() {
+        return;
+    }
     for variant in 0..10 {
         let (root, path) = fixture();
         let payload = path.join("launch.json");
@@ -236,7 +263,9 @@ fn malformed_unknown_and_wrong_identity_retain_entire_group() {
 #[cfg(unix)]
 #[test]
 fn links_are_not_followed_or_unlinked() {
-    let _serial = SERIAL.lock().unwrap();
+    if isolated() {
+        return;
+    }
     for hard in [false, true] {
         let (root, path) = fixture();
         let outside = root.path().join("outside");
