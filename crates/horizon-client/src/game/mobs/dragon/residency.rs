@@ -44,7 +44,7 @@ impl Game<'_> {
     }
 
     pub(super) fn assign_resident_crystal_ids(&mut self) {
-        super::entity_residency::assign_resident_ids!(
+        crate::game::entity_residency::assign_resident_ids!(
             self.crystals,
             c,
             &mut self.next_entity,

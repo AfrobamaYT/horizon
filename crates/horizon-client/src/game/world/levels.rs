@@ -116,7 +116,7 @@ pub(super) struct Parked {
 }
 
 impl Parked {
-    resident_owners!(define_resident_access, self, projectiles);
+    resident_owners!(define_resident_access, self, projectiles, knots);
 }
 
 impl Game<'_> {
@@ -685,10 +685,7 @@ impl Game<'_> {
         swap(&mut self.hoppers, &mut p.hoppers);
         swap(&mut self.mobs, &mut p.mobs);
         swap(&mut self.knot_ids, &mut p.knot_ids);
-        swap(
-            &mut self.resident_entities.knots,
-            &mut p.resident_entities.knots,
-        );
+        swap(&mut self.resident_entities.knots, &mut p.knots);
         swap(&mut self.creatures.projectiles, &mut p.projectiles);
         swap(&mut self.dropped, &mut p.dropped);
         swap(&mut self.orbs, &mut p.orbs);

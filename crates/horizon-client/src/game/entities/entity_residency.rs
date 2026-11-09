@@ -37,10 +37,10 @@ macro_rules! assign_resident_ids {
 }
 pub(crate) use assign_resident_ids;
 
-// Projectiles are nested in Game and direct in Parked. All other owners have
-// the same field path; keep binding and resolution on this one family list.
+// Projectiles and knots have distinct Game/Parked field paths; keep binding
+// and resolution on this one family list.
 macro_rules! resident_owners {
-    ($then:ident, $this:ident, $($projectiles:ident).+) => {
+    ($then:ident, $this:ident, $($projectiles:ident).+, $($knots:ident).+) => {
         $then! {
             ($this, $($projectiles).+)
             Mob => Mob: mobs,
@@ -56,7 +56,7 @@ macro_rules! resident_owners {
             Crystal => Crystal: crystals,
             Tnt => Tnt: tnts,
             Cushion => Cushion: cushions,
-            Knot => Knot: knots,
+            Knot => Knot: $($knots).+,
             Falling => Falling: falling,
             Rocket => Rocket: rockets,
             Trident => Trident: tridents,
@@ -230,7 +230,12 @@ macro_rules! define_resident_access {
 pub(crate) use define_resident_access;
 
 impl Game<'_> {
-    resident_owners!(define_resident_access, self, creatures.projectiles);
+    resident_owners!(
+        define_resident_access,
+        self,
+        creatures.projectiles,
+        resident_entities.knots
+    );
 }
 
 #[cfg(test)]
