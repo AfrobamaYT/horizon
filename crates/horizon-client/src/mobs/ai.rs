@@ -31,7 +31,13 @@ use crate::powder_snow::particle_velocity as powder_snow_particle_velocity;
 
 /// The inside-block effects of fire and lava (`InsideBlockEffectType`
 /// FIRE_IGNITE and LAVA_IGNITE): ignite, then hurt.
-fn block_contact_damage(m: &mut Mob, _w: &MobWorld, level: &mut DamageLevel<'_>, fire: f32) {
+fn block_contact_damage(
+    m: &mut Mob,
+    _w: &MobWorld,
+    level: &mut DamageLevel<'_>,
+    fire: f32,
+    lava: bool,
+) {
     if fire > 0.0 && !m.kind.flags.fire_immune {
         let multiplier = m.burning_time();
         m.fire_ticks = crate::motion::environment::ignite_contact(
@@ -42,7 +48,7 @@ fn block_contact_damage(m: &mut Mob, _w: &MobWorld, level: &mut DamageLevel<'_>,
         );
         m.damage(level, fire, Damage::of(DamageKind::InFire));
     }
-    if m.fluids.in_lava && !m.kind.flags.fire_immune {
+    if lava && !m.kind.flags.fire_immune {
         m.ignite_for_ticks(300);
         m.damage(level, 4.0, Damage::of(DamageKind::Lava));
     }
@@ -685,6 +691,10 @@ pub fn tick(
         m.removed = true;
         return false;
     }
+    // Entity.commonTick: `invulnerableTime` counts down before setOldPosAndRot.
+    if m.invulnerable_time > 0 {
+        m.invulnerable_time -= 1;
+    }
     // `Entity.computeSpeed`: what it moved in the last tick.
     let known_speed = m.position.subtract(m.previous);
     m.previous = m.position;
@@ -715,6 +725,9 @@ pub fn tick(
         super::strider::pre_tick(m, w, events);
     }
     let was_on_fire = base_tick(m, w, level, events);
+    if m.impulse_grace_time > 0 {
+        m.impulse_grace_time -= 1;
+    }
     if m.species() == Species::Rabbit {
         super::rabbit::base_tick(m);
     }
@@ -878,6 +891,11 @@ fn effects_from_blocks(
     level: &mut DamageLevel<'_>,
     events: &mut Vec<MobEvent>,
 ) {
+    // Entity.applyEffectsFromBlocks fixes the tick's movements before
+    // stepOn: a hurt below that teleports an enderman or a shulker leaves
+    // the scan on the path it had.
+    let start = m.previous;
+    let travel = m.position.subtract(start);
     // Block.stepOn for the block under a mob on the ground (`getOnPosLegacy`):
     // MagmaBlock.stepOn's hot floor, 1 damage (a mob never sneaks).
     if m.on_ground && m.alive() {
@@ -909,16 +927,13 @@ fn effects_from_blocks(
         }
     }
     let mut visited: Vec<[i32; 3]> = Vec::new();
-    let travel = m.position.subtract(m.previous);
     let longest = travel.x.abs().max(travel.y.abs()).max(travel.z.abs());
     let steps = ((longest / 0.2).ceil() as i32).clamp(1, 100);
     for step in 0..=steps {
         if !m.alive() {
             return;
         }
-        let at = m
-            .previous
-            .add_vector(travel.scale(f64::from(step) / f64::from(steps)));
+        let at = start.add_vector(travel.scale(f64::from(step) / f64::from(steps)));
         let b = m.bounds_at(at).deflate(Vec3::new(1e-5, 1e-5, 1e-5));
         for x in b.min_position().x.floor() as i32..=b.max_position().x.floor() as i32 {
             for y in b.min_position().y.floor() as i32..=b.max_position().y.floor() as i32 {
@@ -1282,6 +1297,8 @@ fn base_tick(
         super::undead::drowned_update_swimming(m, w);
     }
     let fire = crate::motion::environment::fire_contact(w.world, w.registry, m.bounds());
+    let lava = m.fluids.in_lava;
+    let contact_at = m.position;
     if fire > 0.0 {
         m.ticks_frozen = 0;
     }
@@ -1417,7 +1434,7 @@ fn base_tick(
     // lava ignites to the full 160 / 300 ticks and its hit lands after the
     // invulnerable time of that tick has already dropped.
     let was_on_fire = m.fire_ticks > 0;
-    block_contact_damage(m, w, level, fire);
+    block_contact_damage(m, w, level, fire, lava);
     // Enderman.hurtServer and Shulker.hurtServer teleport inside the hurt
     // (fire, lava, a block, an effect).
     hurt_teleports(m, w, events);
@@ -1462,6 +1479,24 @@ fn freeze_tick(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>) {
 }
 /// Whether the mob's box (shrunk by `1.0E-5`, as in `Entity.checkInsideBlocks`)
 /// touches powder snow.
+/// Whether the mob's box (shrunk by `1.0E-5`) touches a lava block: the
+/// LAVA_IGNITE contact read where a teleport landed, whose own fluid check
+/// (`Enderman.canRandomlyTeleportTo`, a shulker's empty spot) keeps lava
+/// from the feet.
+fn touches_lava(m: &Mob, w: &MobWorld) -> bool {
+    let b = m.bounds().deflate(Vec3::new(1e-5, 1e-5, 1e-5));
+    let (min, max) = (b.min_position(), b.max_position());
+    for x in min.x.floor() as i32..=max.x.floor() as i32 {
+        for y in min.y.floor() as i32..=max.y.floor() as i32 {
+            for z in min.z.floor() as i32..=max.z.floor() as i32 {
+                if &*w.facts.get(w.world.block(x, y, z)).name == "minecraft:lava" {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
 pub(super) fn in_powder_snow(m: &Mob, w: &MobWorld) -> bool {
     let b = m.bounds().deflate(Vec3::new(1e-5, 1e-5, 1e-5));
     let (min, max) = (b.min_position(), b.max_position());
@@ -1788,6 +1823,10 @@ fn ai_step(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, events: &mut 
     if m.species() == Species::Fox {
         super::fox::pre_ai_step(m);
     }
+    // Blaze.aiStep slows the fall before super.aiStep(), so before travel.
+    if m.species() == Species::Blaze {
+        super::nether::blaze_ai_step(m);
+    }
     // AbstractHorse.aiStep: the tail swishes now and then (moveTail).
     if super::equine::is_equine(m.species()) {
         super::equine::tail_tick(m);
@@ -1869,6 +1908,14 @@ fn hurt_by_water(
         m.damage(level, 1.0, Damage::of(DamageKind::Drown));
         hurt_teleports(m, w, events);
     }
+}
+/// A hurt the mob's own tick deals (`Entity.baseTick`, `tickEffects`, a
+/// block's touch, cramming), with the teleport `Enderman.hurtServer` or
+/// `Shulker.hurtServer` makes inside it: a second hurt of the same tick draws
+/// after the first one's teleport and sees where it landed.
+fn hurt(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>, amount: f32, source: Damage) {
+    m.damage(amount, source);
+    hurt_teleports(m, w, events);
 }
 /// The teleport `Enderman.hurtServer` or `Shulker.hurtServer` makes inside a
 /// hurt, after the hurt's sound; with or without AI.
@@ -2378,7 +2425,7 @@ fn server_ai_step(
     m.jump_control_tick();
 }
 /// `Armadillo.pickNextScuteDropTime`: 5 to 10 minutes.
-fn next_scute_time(m: &mut Mob) -> i32 {
+pub(crate) fn next_scute_time(m: &mut Mob) -> i32 {
     m.random.next_int_bound(20 * 60 * 5).unwrap_or(0) + 20 * 60 * 5
 }
 /// `Armadillo.customServerAiStep`: the scute timer keeps counting down and is
@@ -2463,7 +2510,6 @@ fn species_ai_step(
         Species::Endermite => endermite_lifetime(m),
         Species::Wolf => super::tame::ai_step(m, w, events),
         Species::Cat => super::tame::cat_ai_step(m, events),
-        Species::Blaze => super::nether::blaze_ai_step(m, events),
         Species::IronGolem => super::golem::iron_ai_step(m, w),
         Species::Piglin | Species::PiglinBrute | Species::Hoglin => {
             super::piglin::ai_step(m, w, level.random(), events)
@@ -3428,6 +3474,8 @@ pub(crate) fn tick_effects(
                     amp,
                     1.0,
                 );
+                // A harming tick's hurt teleports inside it too.
+                hurt_teleports(m);
             }
             "minecraft:regeneration"
                 if count % interval(50) == 0 && !m.kind.flags.undead && m.alive() =>
@@ -6858,6 +6906,119 @@ mod trader_llama_no_ai_tests {
         assert!(
             differences.is_empty(),
             "NoAI trader timer mismatch: {differences:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod hurt_teleport_contact_tests {
+    use super::*;
+    use crate::mobs::world::with_built_test_world;
+    use horizon_world::registry::BlockRegistry;
+    use std::sync::Arc;
+
+    /// A stone floor over the loaded 2x2 chunks (so a teleport finds ground),
+    /// `under` below the mob's spot and `at` in it.
+    fn build(
+        under: &'static str,
+        at: &'static str,
+    ) -> impl FnOnce(&mut crate::world::World, &BlockRegistry) {
+        move |world, registry| {
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            for cx in -1..1 {
+                for cz in -1..1 {
+                    world
+                        .chunks
+                        .insert((cx, cz), Arc::new(crate::chunk::Chunk::empty(cx, cz)));
+                }
+            }
+            for x in -16..16 {
+                for z in -16..16 {
+                    world.set(x, 63, z, stone).unwrap();
+                }
+            }
+            world
+                .set(0, 63, 0, registry.default_state(under).unwrap())
+                .unwrap();
+            world
+                .set(0, 64, 0, registry.default_state(at).unwrap())
+                .unwrap();
+        }
+    }
+
+    fn enderman(types: &crate::mobs::MobTypes, seed: i64) -> Mob {
+        let kind = Arc::new(types.types["minecraft:enderman"].clone());
+        let mut m = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
+        register(&mut m);
+        m.random = LegacyRandom::new(seed);
+        m.on_ground = true;
+        m.stuck_multiplier = Vec3::ZERO;
+        m
+    }
+
+    /// `Entity.applyEffectsFromBlocks` fixes the tick's movements before
+    /// `stepOn`: when the magma's hurt teleports an enderman, the scan still
+    /// walks the path it had, and the cobweb it stood in still holds it.
+    #[test]
+    fn a_magma_teleport_leaves_the_block_scan_on_the_old_path() {
+        with_built_test_world(
+            &[],
+            build("minecraft:magma_block", "minecraft:cobweb"),
+            |w, types| {
+                let mut teleported = 0;
+                for seed in 0..40 {
+                    let mut m = enderman(types, seed);
+                    let mut random = LegacyRandom::new(42);
+                    let mut events = Vec::new();
+                    effects_from_blocks(&mut m, w, &mut random, &mut events);
+                    if m.position != Vec3::new(0.5, 64.0, 0.5) {
+                        teleported += 1;
+                        assert_eq!(
+                            m.stuck_multiplier,
+                            Vec3::new(0.25, f64::from(0.05_f32), 0.25),
+                            "seed {seed}: the cobweb on the old path"
+                        );
+                    }
+                }
+                assert!(teleported > 0, "some seed teleports");
+            },
+        );
+    }
+
+    /// A hurt in `baseTick` that teleports an enderman (`snapTo` resets the
+    /// old position) leaves aiStep's fire contact at the landing spot: no
+    /// fire there, so the fire timer only counts down (no re-ignite to 160).
+    #[test]
+    fn a_burning_teleport_does_not_take_the_old_spots_fire_along() {
+        with_built_test_world(
+            &[],
+            build("minecraft:stone", "minecraft:fire"),
+            |w, types| {
+                let mut teleported = 0;
+                for seed in 0..40 {
+                    let mut m = enderman(types, seed);
+                    m.fire_ticks = 20;
+                    // Whether the burning hurt's own teleport lands (one in ten
+                    // draws none, and a try can find no ground: the old spot's
+                    // fire then ignites it before the second hurt teleports it).
+                    let mut first = m.clone();
+                    let mut events = Vec::new();
+                    hurt(
+                        &mut first,
+                        w,
+                        &mut events,
+                        1.0,
+                        Damage::of(DamageKind::OnFire),
+                    );
+                    base_tick(&mut m, w, &mut events);
+                    if first.position != Vec3::new(0.5, 64.0, 0.5) {
+                        assert_eq!(m.position, first.position, "seed {seed}: the same teleport");
+                        teleported += 1;
+                        assert_eq!(m.fire_ticks, 19, "seed {seed}: no fire where it landed");
+                    }
+                }
+                assert!(teleported > 0, "some seed teleports");
+            },
         );
     }
 }

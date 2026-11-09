@@ -944,7 +944,7 @@ fn saved_piece_id(piece: &horizon_core::nbt::Tag) -> Option<&'static str> {
 }
 /// A saved piece's tag as the JSON `PoolPiece::from_saved` reads: compounds and lists as they
 /// are, numbers as numbers.
-fn tag_json(tag: &horizon_core::nbt::Tag) -> Value {
+pub(crate) fn tag_json(tag: &horizon_core::nbt::Tag) -> Value {
     use horizon_core::nbt::Tag;
     match tag {
         Tag::Byte(v) => Value::from(i64::from(*v)),

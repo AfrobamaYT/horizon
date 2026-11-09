@@ -105,7 +105,8 @@ pub fn common(from: &Mob, to: &mut Mob, preserve_can_pick_up_loot: bool) {
     to.persistent |= from.persistent;
     to.name_visible = from.name_visible;
     to.invulnerable_flag = from.invulnerable_flag;
-    to.invulnerable = from.invulnerable;
+    // setInvulnerableTime(getInvulnerableTime()); the hurt cooldown is not copied.
+    to.invulnerable_time = from.invulnerable_time;
     to.no_gravity = from.no_gravity;
     to.silent = from.silent;
     // COMPONENTS_TO_COPY: the custom name.

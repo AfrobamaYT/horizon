@@ -655,9 +655,6 @@ impl Game<'_> {
         self.breath_clouds.for_each_mut(|b| {
             super::entity::assign_stored_id(next, &mut b.id, None);
         });
-        self.dragon_fireballs.iter_mut().for_each(|b| {
-            assign_entity_id(next, &mut b.id);
-        });
     }
 
     /// Primed TNT, falling blocks, projectiles, tridents, firework rockets and
@@ -941,11 +938,6 @@ impl Game<'_> {
             ),
             None,
         );
-        for b in self.dragon_fireballs.iter().filter(|b| b.id > after) {
-            let p = b.position;
-            let e = add_state(out, b.id, "minecraft:dragon_fireball", at(p), 0.0, false);
-            e.velocity = [b.velocity.x, b.velocity.y, b.velocity.z];
-        }
         for b in self.breath_clouds.iter().filter(|b| b.id > after) {
             // The hub is out of `self.lan` while these states are built, so
             // the particle must be encoded through the hub passed in: going

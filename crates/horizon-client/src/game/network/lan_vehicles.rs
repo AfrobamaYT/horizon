@@ -560,6 +560,22 @@ impl Game<'_> {
             b.yaw = p.yaw;
             b.on_ground = p.on_ground;
         });
+        // handleMoveVehicle's `vehicle.move` counts the fall
+        // (AbstractBoat.checkFallDamage); the server's baseTick resets it in
+        // water (updateFluidInteraction), which this boat's skipped tick
+        // doesn't run.
+        use super::entity::Entity as _;
+        let mut probe = self.boats[i].clone();
+        let in_water = probe
+            .push_by_fluid(&self.world, &self.res.motion().fluids, &self.loop_context)
+            .0
+            > 0.0;
+        let fall = if in_water {
+            0.0
+        } else {
+            self.boat_fall(&self.boats[i], resolved.y)
+        };
+        self.boats.update(i, |b| b.fall_distance = fall);
         let seat = self.player_boat_seat(i);
         let Some(host) = self.lan.as_mut() else {
             return;
@@ -785,6 +801,15 @@ mod controller_tests {
             (game.boats[0].position.x - (start.x + 0.3)).abs() < 1.0e-9,
             "the driver moves the boat: {:?}",
             game.boats[0].position
+        );
+        // handleMoveVehicle's `vehicle.move` runs AbstractBoat.checkFallDamage:
+        // a boat that lands on the ground (a fall loaded from its save, here)
+        // has no fall left.
+        game.boats[0].fall_distance = 5.0;
+        game.guest_move_vehicle(&mut host, 3, &move_to(start.x + 0.6));
+        assert_eq!(
+            game.boats[0].fall_distance, 0.0,
+            "a guest's boat on the ground"
         );
     }
 }

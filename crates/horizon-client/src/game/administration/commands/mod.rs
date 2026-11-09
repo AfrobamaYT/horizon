@@ -122,6 +122,8 @@ pub(in crate::game) struct OtherEntity {
     pub interaction: Option<super::interactions::InteractionState>,
     /// Only explicitly loaded leash knots own this BlockAttachedEntity check counter.
     pub knot_check: Option<u8>,
+    /// A summoned or loaded `minecraft:eye_of_ender`'s flight; None for every other kind.
+    pub eye: Option<super::end::SummonedEye>,
 }
 
 horizon_client::impl_joined!(OtherEntity);
@@ -1642,6 +1644,43 @@ impl Game<'_> {
         self.feedback(message);
         Ok(targets.len() as i32)
     }
+    /// `Entity.teleportTo(level, x, y, z, relatives, yRot, xRot, ...)`, as
+    /// `/tp` and `/spreadplayers` call it: its transition has no motion and no
+    /// relative delta, so `teleportSetPosition` leaves the moving entity still.
+    /// (An end gateway's or a vehicle's transition carries its motion.)
+    pub(super) fn teleport_stops(&mut self, t: Target) {
+        let _ = self.in_target_level(t, |g| {
+            target_entity_mut!(g, t, e => *e.velocity_mut() = Vec3::ZERO);
+            // The dragon's flight builds on the motion it carries.
+            if let Target::Dragon(id) = t
+                && let Some(d) = g.dragon.as_mut().filter(|d| d.id == id)
+            {
+                d.stop();
+            }
+        });
+    }
+    /// `TeleportCommand.performTeleport` after a successful `teleportTo` in
+    /// the target's own level: unless it is a fall-flying living entity, its
+    /// vertical motion is zeroed and it is on the ground; a mob's navigation
+    /// stops (`PathfinderMob`; the others hold no path). The players' own
+    /// ground is their clients'.
+    fn tp_lands(&mut self, t: Target) {
+        self.teleport_stops(t);
+        let _ = self.in_target_level(t, |g| {
+            if let Target::Mob(id) = t
+                && let Some(m) = g.mobs.iter_mut().find(|m| m.id == id)
+            {
+                m.nav_stop();
+                if m.extra.fall_flying {
+                    return;
+                }
+            }
+            target_entity_mut!(g, t, e => {
+                e.velocity_mut().y = 0.0;
+                e.set_on_ground(true);
+            });
+        });
+    }
     pub(in crate::game) fn teleport_to(
         &mut self,
         t: Target,
@@ -2134,6 +2173,7 @@ impl Game<'_> {
                     // TeleportCommand.teleportToEntity: the destination's angles,
                     // which the riders turn to as well.
                     self.teleport_to(t, pos, rotation, true);
+                    self.tp_lands(t);
                 }
             }
             let message = if targets.len() == 1 {
@@ -2245,6 +2285,7 @@ impl Game<'_> {
             if let Some(f) = facing {
                 self.send_player_look_at(t, anchored_eyes, f, facing_entity);
             }
+            self.tp_lands(t);
         }
         let [x, y, z] = pos.map(|v| Text::literal(format_double(v)));
         let message = if targets.len() == 1 {
@@ -2493,27 +2534,29 @@ impl Game<'_> {
         // Entity.kill (BlockAttachedEntity.kill; ArmorStand's generic_kill hit,
         // which bypasses its invulnerability; a vehicle is no LivingEntity):
         // removed, then ENTITY_DIE by the entity itself. Mobs post theirs as
-        // they die, the crystal and the dragon on their own paths, and an item
-        // entity can dampen it (ItemEntity.dampensVibrations), so it is not here.
-        let died = matches!(
+        // they die, the dragon on its own path, and EndCrystal.kill posts it
+        // after onDestroyedBy. The source is captured before the removal: an
+        // armor stand is living (wardens can't target it), and a dropped item
+        // keeps its stack's ItemEntity.dampensVibrations.
+        let died = (!matches!(
             t,
-            Target::Stand(_)
-                | Target::Frame(_)
-                | Target::Painting(_)
-                | Target::Boat(_)
-                | Target::Cart(_)
-                | Target::Orb(_)
-                | Target::Projectile(_)
-                | Target::Fangs(_)
-                | Target::Tnt(_)
-                | Target::Falling(_)
-                | Target::Rocket(_)
-                | Target::Trident(_)
-                | Target::Spawner(_)
-                | Target::Cloud(_)
-        )
+            Target::Player
+                | Target::Guest(_)
+                | Target::Mob(_)
+                | Target::Crystal(_)
+                | Target::Dragon(_)
+        ))
         .then(|| self.target_position(t))
         .flatten();
+        let mut context = self.who_context(None, None);
+        context.living = matches!(t, Target::Stand(_));
+        if let Target::Item(id) = t {
+            context.dampens = self.dropped.iter().find(|i| i.id == id).is_some_and(|i| {
+                self.res
+                    .items()
+                    .item_in_tag("minecraft:dampens_vibrations", &i.stack.item)
+            });
+        }
         match t {
             Target::Guest(_) => {
                 self.for_player(t, |g| g.kill_target(Target::Player));
@@ -2616,7 +2659,7 @@ impl Game<'_> {
         // The orbs marked for removal are gone (Entity.kill removes them).
         self.orbs.retain(|o| o.age < u32::MAX / 2);
         if let Some(at) = died {
-            self.entity_killed_event(at, false);
+            self.post_game_event("minecraft:entity_die", at, context);
         }
         self.native_leaves_flush();
     }
@@ -3279,7 +3322,8 @@ impl Game<'_> {
         // of states, and matching a tag is a name lookup.
         let mut matched: std::collections::HashMap<BlockStateId, bool> =
             std::collections::HashMap::new();
-        let plain = !(destroy || hollow || outline);
+        // A tag can change a block entity whose block is already in place.
+        let plain = !(destroy || hollow || outline) && block.nbt.is_none();
         for y in min[1]..=max[1] {
             for z in min[2]..=max[2] {
                 for x in min[0]..=max[0] {
@@ -3322,7 +3366,8 @@ impl Game<'_> {
                         self.destroy_block_dropping([x, y, z])?;
                         affected = true;
                     }
-                    let target = if (outline || hollow) && !edge {
+                    let core = (outline || hollow) && !edge;
+                    let target = if core {
                         if outline {
                             if affected {
                                 count += 1;
@@ -3339,7 +3384,16 @@ impl Game<'_> {
                         target
                     };
                     let previous = self.world.block(x, y, z);
-                    if self.place_state([x, y, z], target, strict, true)? {
+                    let placed = self.place_state([x, y, z], target, strict, true)?;
+                    // BlockInput.place loads the tag into the block entity now
+                    // there; a tag that changed it counts the block as placed.
+                    // A hollow fill's core is plain air.
+                    let loaded = !core
+                        && block
+                            .nbt
+                            .as_deref()
+                            .is_some_and(|nbt| self.load_block_entity_nbt([x, y, z], nbt));
+                    if placed || loaded {
                         count += 1;
                         if !strict {
                             updated.push(([x, y, z], previous));

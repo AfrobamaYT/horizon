@@ -41,6 +41,7 @@ impl Game<'_> {
             return false;
         };
         self.teleport_to(t, pos, rotation, true);
+        self.teleport_stops(t);
         true
     }
     /// Sends the entity to `pos` in the level `dimension`
