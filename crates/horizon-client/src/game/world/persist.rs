@@ -61,6 +61,8 @@ pub struct EntityMemory {
     pub(super) off_level: HashMap<u32, OffLevel>,
     /// Destruction callbacks already consumed for geometry retained after removal.
     score_destroyed: HashSet<u32>,
+    /// Mount notifications currently on the callback stack, keyed by object IDs.
+    pub(super) mount_notifications: HashSet<(u32, u32, bool)>,
     /// Synched entity-data entries dirtied by forced writes since the last sync.
     pub(super) forced_meta: HashMap<u32, [u64; 4]>,
     /// Entities of types Horizon does not simulate, kept per chunk and

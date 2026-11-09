@@ -499,7 +499,12 @@ impl Game<'_> {
     /// underwater/activator ejections never take this forced completion path.
     pub(super) fn dismount_destroyed_vehicle_mobs(&mut self, vehicle: u32, y: f64) {
         for rider in self.mob_passenger_ids(vehicle) {
-            self.dismount_mob(rider);
+            if self
+                .mob_object(rider)
+                .is_some_and(|mob| !mob.removed && mob.extra.mount == Some(vehicle))
+            {
+                self.dismount_mob(rider);
+            }
         }
         self.finish_destroyed_vehicle_riders(vehicle, y);
     }

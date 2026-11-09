@@ -82,3 +82,11 @@ obtain its handle. Cyclic relationships have no root and return `None`.
 its handle can be returned. An off-level first passenger means `None`, not a later
 resident rider. All these reads refuse stale input handles; none loads a retained
 object into the level or exposes a handle for it.
+
+During actual boat or cart destruction, Mob dismount notification still runs,
+but remaining edges are forcibly unlinked even when a listener cancels. This
+safe interim prevents references to dropped vehicles and preserves each Mob's
+resident or off-level classification and the frozen state of descendants.
+Retaining removed vehicles to preserve canceled relationships is deferred to
+[#2446](https://github.com/arismoko/horizon/issues/2446). Cancellation while the
+vehicle remains live, including underwater or activator ejection, still works.

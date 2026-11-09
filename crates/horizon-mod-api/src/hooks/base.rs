@@ -2343,9 +2343,12 @@ pub trait Hooks {
     /// strider, horse and its kin, llama, nautilus, happy ghast) and getting off one by their
     /// own input, `/ride`, a stab, a buck, a teleport or spectator mode; and for the mobs
     /// Horizon seats on a vehicle (jockeys, raiders on a ravager, `/ride`) and lets off one
-    /// (`/ride`, a stab). It is not told for a rider whose vehicle was removed from the
-    /// level (a boat or minecart destroyed, a broken cushion), nor for riders loaded with a
-    /// save. The acting player is the one whose action runs, a guest on a server. Server-side.
+    /// (`/ride`, a stab), including Mob dismounts during removal cleanup. While a
+    /// boat or cart is actually destroyed, remaining Mob edges are currently unlinked
+    /// after notification even if canceled, rather than retaining a dangling vehicle.
+    /// Preserving those canceled relationships is deferred (#2446); cancellation on a
+    /// live vehicle remains effective. Loading a save does not notify. The acting player
+    /// is the one whose action runs, a guest on a server. Server-side.
     #[hook(
         side = "server",
         contract = "cancel",
