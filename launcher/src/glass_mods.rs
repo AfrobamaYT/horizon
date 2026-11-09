@@ -529,17 +529,6 @@ impl Launcher {
                             ui::text(13., FontWeight::NORMAL, 0.6)
                                 .truncate()
                                 .child(p.summary.clone()),
-                        )
-                        .children(
-                            m.works
-                                .get(&p.id)
-                                .filter(|_| p.source == SourceId::Horizon)
-                                .map(|(works, line)| {
-                                    ui::text(12., FontWeight::NORMAL, ink::FULL)
-                                        .truncate()
-                                        .text_color(if *works { ui::live() } else { white(0.4) })
-                                        .child(line.clone())
-                                }),
                         ),
                 )
                 .child(right.flex_none())
