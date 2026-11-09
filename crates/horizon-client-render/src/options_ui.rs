@@ -504,7 +504,17 @@ impl Opt {
         let Some(pos) = self.slider_position(s) else {
             return;
         };
-        let next_pos = if let Some(steps) = self.slider_steps() {
+        // A mod's range steps by its registered step.
+        let steps = match self {
+            Opt::ModSetting(i, j) => match mod_setting(s, i, j).map(|m| &m.value) {
+                Some(crate::mod_list::NativeSettingValue::Range { min, max, step, .. }) => {
+                    Some(((max - min) / step).round().max(1.0) as u32)
+                }
+                _ => None,
+            },
+            _ => self.slider_steps(),
+        };
+        let next_pos = if let Some(steps) = steps {
             let steps = steps as f32;
             let current = (pos * steps).round();
             let next = if forward {
@@ -2371,6 +2381,9 @@ impl OptionsUi {
         opt.step_slider(s, forward, width);
         self.slider_value = None;
         let mut events = vec![Event::Changed, Event::SliderDrag];
+        if let Opt::ModSetting(i, j) = opt {
+            events.push(Event::NativeSetting(usize::from(i), usize::from(j)));
+        }
         if let (Opt::Volume(source), Some(after)) = (opt, volume(s))
             && before_vol != Some(after)
         {

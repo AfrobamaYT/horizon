@@ -3587,12 +3587,22 @@ impl Game<'_> {
                 let kept = self.setting(mod_id, &spec.key);
                 let value = match (&spec.kind, spec.read(kept.as_deref())) {
                     (_, mod_api::SettingValue::Toggle(on)) => NativeSettingValue::Toggle(on),
-                    (mod_api::SettingKind::Choice { options, .. }, mod_api::SettingValue::Choice(index)) => {
-                        NativeSettingValue::Choice { options: options.clone(), index }
-                    }
-                    (mod_api::SettingKind::Range { min, max, step, .. }, mod_api::SettingValue::Range(value)) => {
-                        NativeSettingValue::Range { min: *min, max: *max, step: *step, value }
-                    }
+                    (
+                        mod_api::SettingKind::Choice { options, .. },
+                        mod_api::SettingValue::Choice(index),
+                    ) => NativeSettingValue::Choice {
+                        options: options.clone(),
+                        index,
+                    },
+                    (
+                        mod_api::SettingKind::Range { min, max, step, .. },
+                        mod_api::SettingValue::Range(value),
+                    ) => NativeSettingValue::Range {
+                        min: *min,
+                        max: *max,
+                        step: *step,
+                        value,
+                    },
                     (_, mod_api::SettingValue::Color(rgb)) => NativeSettingValue::Color(rgb),
                     _ => NativeSettingValue::Toggle(false),
                 };
