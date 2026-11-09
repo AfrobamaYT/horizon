@@ -1,5 +1,32 @@
 //! Checked layout fingerprints recorded by the mod compiler.
+use serde::Deserialize;
 use std::{collections::BTreeMap, io::Read};
+
+struct Unique<V>(BTreeMap<String, V>);
+impl<'de, V: Deserialize<'de>> Deserialize<'de> for Unique<V> {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct Visitor<V>(std::marker::PhantomData<V>);
+        impl<'de, V: Deserialize<'de>> serde::de::Visitor<'de> for Visitor<V> {
+            type Value = Unique<V>;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("an object with unique keys")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut a: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut map = BTreeMap::new();
+                while let Some((key, value)) = a.next_entry::<String, V>()? {
+                    if map.insert(key.clone(), value).is_some() {
+                        return Err(serde::de::Error::custom(format!("duplicate key {key}")));
+                    }
+                }
+                Ok(Unique(map))
+            }
+        }
+        d.deserialize_map(Visitor(std::marker::PhantomData))
+    }
+}
 
 pub const FILE: &str = "layouts.json";
 const MAX_BYTES: u64 = 1 << 20;
@@ -19,8 +46,9 @@ impl Layouts {
         if bytes.len() as u64 > MAX_BYTES {
             return Err(format!("{FILE}: exceeds 1 MiB"));
         }
-        let maps: BTreeMap<String, BTreeMap<String, String>> =
-            serde_json::from_slice(&bytes).map_err(|e| format!("{FILE}: {e}"))?;
+        let parsed: Unique<Unique<String>> =
+            serde_json::from_slice(&bytes).map_err(|e| format!("{FILE} is malformed: {e}"))?;
+        let maps: BTreeMap<_, _> = parsed.0.into_iter().map(|(k, v)| (k, v.0)).collect();
         for (owner, types) in &maps {
             for (name, hash) in types {
                 if hash.len() != 16
@@ -53,6 +81,8 @@ mod tests {
     fn malformed_metadata_is_refused() {
         for bytes in [
             b"{".as_slice(),
+            br#"{"lib":{},"lib":{}}"#,
+            br#"{"lib":{"T":"0123456789abcdef","T":"0123456789abcdef"}}"#,
             br#"{"lib":{"T":"ABCDEF0123456789"}}"#,
             br#"{"lib":{"T":12}}"#,
             br#"{"lib":{"T":"0123"}}"#,

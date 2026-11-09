@@ -3,6 +3,9 @@
 //! versions, one library copy shared by its dependents). Every refusal names its reason for the
 //! Mods page.
 pub mod link;
+#[cfg(test)]
+#[path = "../tests/support/no_hooks.rs"]
+mod no_hooks;
 mod points;
 mod runtime;
 #[allow(
@@ -339,7 +342,18 @@ pub fn refusal(id: &str) -> Option<Refusal> {
 /// `assets/` and `data/` load as content beside its code. Refusals are kept for [`refused`].
 pub fn load_installed(game_dir: &Path, dev: &[PathBuf]) -> Loaded {
     let enabled = horizon_mod_package::mod_list::ModList::load(game_dir).enabled;
-    let mut refused = Vec::new();
+    let mut refused: Vec<_> = horizon_mod_package::selection::package_errors(
+        horizon_mod_package::find(&game_dir.join(horizon_mod_package::mod_list::DIR))
+            .into_iter()
+            .chain(horizon_mod_package::find(
+                &game_dir.join(horizon_mod_package::mod_list::NATIVE_DIR),
+            ))
+            .chain(dev.iter().cloned()),
+    )
+    .into_iter()
+    .filter(|(id, _)| enabled.contains(id) || !dev.is_empty())
+    .map(|(id, why)| (id, Refusal::Package(why)))
+    .collect();
     let native: Vec<_> =
         horizon_mod_package::find(&game_dir.join(horizon_mod_package::mod_list::NATIVE_DIR))
             .into_iter()
@@ -774,6 +788,11 @@ mod tests {
 #[cfg(test)]
 mod mixed_install_tests {
     use super::*;
+    #[test]
+    fn malformed_layout_retains_identity() {
+        let why = refusal("malformed");
+        assert!(why.contains("layouts.json is malformed"), "{why}");
+    }
     fn refusal(hash: &str) -> String {
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -824,6 +843,10 @@ mod mixed_install_tests {
             format!(r#"{{"lib":{{"T":"{hash}"}}}}"#),
         )
         .unwrap();
+        if hash == "malformed" {
+            std::fs::write(addon.join("layouts.json"), b"{").unwrap();
+            std::fs::write(library.join("layouts.json"), b"{}").unwrap();
+        }
         let loaded = load_installed(&root, &[addon, library]);
         std::fs::remove_dir_all(root).unwrap();
         assert!(loaded.mods.is_empty());

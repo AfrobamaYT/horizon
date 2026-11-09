@@ -98,6 +98,20 @@ fn copy_files(to: &Path, files: impl IntoIterator<Item = (String, Vec<u8>)>) -> 
 
 /// Check target-crossing edges before the native-only dependency resolver.
 pub(super) fn checked_bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
+    let paths = horizon_mod_package::find(folder)
+        .into_iter()
+        .chain(horizon_mod_package::find(
+            &folder
+                .parent()
+                .unwrap_or(folder)
+                .join(horizon_mod_package::mod_list::DIR),
+        ));
+    if let Some((id, error)) = horizon_mod_package::selection::package_errors(paths)
+        .into_iter()
+        .next()
+    {
+        return Err(format!("{id}: {error}"));
+    }
     let found = super::scan_bundles(folder)?;
     let wasm: Vec<_> = horizon_mod_package::find(folder)
         .into_iter()
@@ -157,6 +171,11 @@ pub(super) fn checked_bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
 mod mixed_tests {
     use super::*;
 
+    #[test]
+    fn malformed_layout_retains_identity() {
+        let why = refusal("malformed");
+        assert!(why.contains("lib: layouts.json is malformed"), "{why}");
+    }
     fn refusal(hash: &str) -> String {
         refusal_with(hash, "", None)
     }
@@ -211,6 +230,9 @@ mod mixed_tests {
         .unwrap();
         if let Some(points) = points {
             fs::write(library.join("points.json"), points).unwrap();
+        }
+        if hash == "malformed" {
+            fs::write(library.join("layouts.json"), b"{").unwrap();
         }
         checked_bundles(home.path()).expect_err("mixed dependency must refuse")
     }

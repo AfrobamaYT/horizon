@@ -223,7 +223,7 @@ const AUTO_UPLOADS_AT_ONCE: usize = 8;
 const HELD_FAR_COLUMNS: usize = 1 << 13;
 
 #[derive(Clone)]
-struct Options {
+pub(crate) struct Options {
     resources: PathBuf,
     distance: i32,
     distance_override: Option<i32>,
@@ -318,23 +318,9 @@ impl Options {
             )
         })
     }
-    /// The command line, then what it asks of the process: the game folder, the account.
-    /// A bad command line is a [`launch_api::UsageError`] (exit code 2, no crash report).
-    fn read(launch: LaunchArguments) -> Result<Option<Self>> {
-        let Some(mut o) =
-            Self::from_launch(launch).map_err(|e| launch_api::UsageError(e.to_string()))?
-        else {
-            return Ok(None);
-        };
-        // Paths given on the command line stay relative to where the game was started.
-        if o.game_dir.is_some() {
-            o.control = o.control.map(std::path::absolute).transpose()?;
-        }
-        // Refused here, before the account's file is used up or anything loads.
-        if let Some(path) = &o.control {
-            horizon_client::control::check_path(path).map_err(|e| {
-                launch_api::UsageError(format!("--control-socket {}: {e}", path.display()))
-            })?;
+    fn read(mut o: Self) -> Result<Self> {
+        if o.pregen {
+            horizon_client::command::vanilla::set_horizon_commands(true);
         }
         // The launcher's account: online-mode servers need it. A bad file
         // only leaves the game offline.
@@ -363,9 +349,6 @@ impl Options {
         }
         split::launcher::read_now();
         if let Some(dir) = o.game_dir.take() {
-            // These too stay relative to where the game was started.
-            o.resources = std::path::absolute(&o.resources)?;
-            o.report = o.report.map(std::path::absolute).transpose()?;
             std::fs::create_dir_all(&dir)
                 .and_then(|()| std::env::set_current_dir(&dir))
                 .map_err(|e| format!("game folder {}: {e}", dir.display()))?;
@@ -384,7 +367,7 @@ impl Options {
                 eprintln!("Quick play: there is no world {world} in saves/");
             }
         }
-        Ok(Some(o))
+        Ok(o)
     }
     /// The command line alone: no file is read and nothing changes. `None` for `--help` and
     /// `--launch-api`, which print and end the run.
@@ -488,7 +471,6 @@ impl Options {
                     // Horizon's own commands (/pregen), off by default as on vanilla.
                     "--pregen" => {
                         o.pregen = true;
-                        horizon_client::command::vanilla::set_horizon_commands(true);
                     }
                     _ => return Err(format!("{arg}: unknown option").into()),
                 },
@@ -6911,31 +6893,6 @@ impl Game<'_> {
         self.set_screen(Screen::Inventory);
         self.capture(false);
         self.right = false;
-    }
-    /// FallingBlockEntity.tick: fall with 0.04 gravity and 0.98F drag, then land.
-    /// One falling block's `tick`: places or drops its block in its own tick,
-    /// so a block falling onto one that just landed lands on top of it. `i` is
-    /// its place in the list; the caller has checked it is ticking.
-    /// `entities` are the boxes that stop its move.
-    fn tick_one_falling(&mut self, i: usize, entities: &[Aabb]) -> Result<()> {
-        let entity_drops = self
-            .ui
-            .rules
-            .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS);
-        let mut f = self.falling.extract(self.falling[i].join).unwrap();
-        let original = f.clone();
-        match self.fall_step(&mut f, entity_drops, entities) {
-            Ok(FallStep::Falling) => self.falling.put_back(i.min(self.falling.len()), f),
-            Ok(FallStep::Gone) => {}
-            Ok(FallStep::Dropped(at)) => self.drop_falling_block(f.state, at),
-            Ok(FallStep::Landed(pos)) => self.finish_falling_block(f, pos),
-            Err(error) => {
-                horizon_client::join_seq::store_back(&mut f, original);
-                self.falling.put_back(i.min(self.falling.len()), f);
-                return Err(error);
-            }
-        }
-        Ok(())
     }
     /// One `FallingBlockEntity.tick` move of `f`.
     fn fall_step(
@@ -15092,6 +15049,7 @@ impl Game<'_> {
     }
     /// Save the level in place: its changed chunks, its entities and its raids.
     fn save_level(&mut self, wait: bool) -> Result<()> {
+        Self::admit_entity_save()?;
         self.save_border();
         self.save_chunk_tickets()?;
         let deadline = Instant::now() + Duration::from_secs(30);
@@ -18031,13 +17989,11 @@ fn run_loading(
 
 pub use launch_api::{UsageError, exit_code};
 
-pub fn run_with(
-    launch: LaunchArguments,
+pub(crate) fn run_with(
+    options: Options,
     native: horizon_mod_package::runtime::Runtime,
 ) -> Result<()> {
-    let Some(mut options) = Options::read(launch)? else {
-        return Ok(());
-    };
+    let mut options = Options::read(options)?;
     options.mods.native = Arc::new(native);
     if options.execution_role == execution_role::ExecutionRole::DedicatedServer
         && !dedicated::preflight(&mut options)?

@@ -1,8 +1,6 @@
 //! Horizon launcher: installs Horizon builds, prepares them from the player's own Minecraft,
 //! and starts the client or a dedicated server.
-
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
-
 mod agents_page;
 mod art;
 mod blocks;
@@ -30,6 +28,7 @@ mod glass_instance_java;
 mod glass_palette;
 mod glass_settings;
 mod glass_shot_blur;
+mod glass_storage;
 mod glass_toast;
 mod glass_ui;
 mod glass_versions;
@@ -83,7 +82,6 @@ mod themes_page;
 mod titlebar;
 mod while_playing;
 mod worlds_page;
-
 use gpui::{
     actions, div, ease_out_quint, prelude::*, px, relative, size, Animation, AnimationExt,
     AnyElement, App, Bounds, ClickEvent, Context, Div, ElementId, FocusHandle, FontWeight, Hsla,
@@ -97,6 +95,7 @@ use horizon_launcher::i18n::{self, tr, trf};
 use horizon_launcher::instances;
 use horizon_launcher::native_mods;
 use horizon_launcher::native_status;
+use horizon_launcher::storage;
 use scrollbar::Scrollbar;
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
@@ -132,7 +131,7 @@ impl Page {
         };
         // The data folder did not open: start on Settings, where the message and the two
         // recoveries are (an explicit HORIZON_LAUNCHER_PAGE still wins, for screenshots).
-        page_after_startup(
+        location_page::page_after_startup(
             page,
             horizon_launcher::data_location::startup_error().is_some(),
         )
@@ -248,6 +247,11 @@ struct Launcher {
     /// What each installed version takes on disk, measured on a thread for the Versions page, and
     /// the installed list it was measured for.
     disk: Vec<(String, u64)>,
+    storage_report: Option<storage::Report>,
+    storage_pending: bool,
+    /// A Clear the player still has to confirm: `Some(None)` is Clear all.
+    storage_confirm: Option<Option<storage::Category>>,
+    storage_error: Option<String>,
     disk_for: Vec<String>,
     install_error: Option<(String, String)>,
     /// Import a game build (`build_import`, on the Versions page): whether one is being copied in,
@@ -498,6 +502,7 @@ impl Launcher {
             }
         })
         .detach();
+        horizon_launcher::storage::eviction::cleanup_after_start();
         let mut settings = Settings::load();
         i18n::set(settings.language());
         if settings.minecraft_dir.is_none() {
@@ -561,6 +566,10 @@ impl Launcher {
             installing: None,
             removing: Vec::new(),
             disk: Vec::new(),
+            storage_report: None,
+            storage_pending: false,
+            storage_confirm: None,
+            storage_error: None,
             disk_for: Vec::new(),
             install_error: None,
             importing_build: false,
@@ -1286,6 +1295,7 @@ impl Launcher {
                     }
                 }
                 Msg::DiskUse(disk) => self.disk = disk,
+                Msg::Storage(result) => self.storage_arrived(result),
                 Msg::Imported(result) => {
                     self.importing_build = false;
                     self.installed = backend::installed();
@@ -5497,16 +5507,6 @@ fn key_bindings() -> Vec<KeyBinding> {
     Vec::new()
 }
 
-/// A data folder that did not open starts on Settings, where the message, Retry and
-/// "Use the default folder" are; an explicit page still wins.
-fn page_after_startup(page: Page, data_folder_failed: bool) -> Page {
-    if page == Page::Play && data_folder_failed {
-        Page::Settings
-    } else {
-        page
-    }
-}
-
 /// The menu bar on macOS, where "Quit" belongs to the app menu.
 fn menus() -> Vec<Menu> {
     vec![
@@ -5552,7 +5552,7 @@ fn main() {
     }
     #[cfg(windows)]
     backend::remove_replaced_binaries();
-    backend::cleanup_launcher_updates();
+    backend::startup_cleanup();
     // What the launcher downloads goes through the player's proxy, if they set one: the parts
     // that build their own agents (`horizon-port-pack`) are told before anything starts.
     horizon_launcher::proxy::announce(horizon_launcher::backend::Settings::load().proxy);
@@ -5644,17 +5644,6 @@ fn closed_by_press(closed_at: Option<Point<Pixels>>, event: &ClickEvent) -> bool
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn an_unopenable_data_folder_starts_on_settings_instead_of_exiting() {
-        use super::{page_after_startup, Page};
-        assert!(matches!(
-            page_after_startup(Page::Play, true),
-            Page::Settings
-        ));
-        assert!(matches!(page_after_startup(Page::Play, false), Page::Play));
-        assert!(matches!(page_after_startup(Page::Mods, true), Page::Mods));
-    }
-
     #[test]
     fn a_menu_button_stays_closed_after_the_press_that_closed_its_menu() {
         use super::closed_by_press;

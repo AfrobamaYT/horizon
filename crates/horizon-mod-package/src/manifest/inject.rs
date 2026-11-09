@@ -167,7 +167,7 @@ pub enum NoSlotReason {
     WasmSitesPending,
     LocalSlotsPending,
     ExtensionSlotsPending,
-    ApiSitesPending,
+    ApiSitesUnsupported,
     SourcePending,
     ReplacePending,
     NoApiRecord,
@@ -183,7 +183,7 @@ impl fmt::Display for NoSlotReason {
             Self::WasmSitesPending => "wasm sites pending",
             Self::LocalSlotsPending => "local slots pending (I5)",
             Self::ExtensionSlotsPending => "extension slots pending (I6)",
-            Self::ApiSitesPending => "API site listeners pending (U4c)",
+            Self::ApiSitesUnsupported => "API call-site injections require internals",
             Self::SourcePending => "source injects pending (U5)",
             Self::ReplacePending => "internals replace listeners pending (U9)",
             Self::NoApiRecord => "no API record: a parameter has no API type yet",
@@ -256,7 +256,7 @@ impl fmt::Display for InjectError {
                 declaration,
             } => write!(
                 f,
-                "{id}: {reason}; slot declaration {declaration}; use a native mod or a game build supporting this slot"
+                "{id}: {reason}; slot declaration {declaration}; access = \"api\" never rebuilds the game; use access = \"internals\" where supported or request a hook"
             ),
         }
     }
