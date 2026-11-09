@@ -34,6 +34,10 @@ use std::{
     process::{Command, ExitCode},
 };
 
+fn is_compiler_wrapper(name: &str) -> bool {
+    name.strip_suffix(".exe").unwrap_or(name).ends_with("rustc")
+}
+
 fn main() -> ExitCode {
     // Cargo runs `cargo-horizon-mod horizon-mod <args>`.
     let mut args: Vec<String> = std::env::args().skip(1).collect();
@@ -41,7 +45,7 @@ fn main() -> ExitCode {
         // `rustc`, or `rustc.exe` on Windows.
         && args
             .first()
-            .is_some_and(|a| a.strip_suffix(".exe").unwrap_or(a).ends_with("rustc"))
+            .is_some_and(|a| is_compiler_wrapper(a))
     {
         return match wasm::rustc(args) {
             Ok(()) => ExitCode::SUCCESS,
@@ -625,7 +629,7 @@ mod wrapper_suffix_tests {
             ("/rustc/tool", false),
         ] {
             assert_eq!(
-                name.strip_suffix(".exe").unwrap_or(name).ends_with("rustc"),
+                super::is_compiler_wrapper(name),
                 expected,
                 "{name}"
             );
