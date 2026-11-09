@@ -1,5 +1,5 @@
 //! Publish a native mod's requested slots through the game's shared slot parser.
-use horizon_mod_api_gen::sites::{Slots, slots};
+use horizon_mod_api_gen::sites::Slots;
 use horizon_mod_package::{
     Manifest,
     manifest::{MANIFEST, inject::Kind},
@@ -24,9 +24,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
 
 fn sync(dir: &Path, repo: &Path) -> Result<(), String> {
     let path = dir.join(MANIFEST);
-    let manifest = Manifest::parse(
-        &fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?,
-    )?;
+    let manifest = Manifest::parse(&crate::bounded::read(&path, crate::bounded::MAX_MANIFEST)?)?;
     // Manifest::parse validates the owner id (charset and no path separators) at this write boundary.
     if manifest.id == "horizon" {
         return Err("horizon.txt is reserved for the engine seed".into());
@@ -43,7 +41,24 @@ fn sync(dir: &Path, repo: &Path) -> Result<(), String> {
         ));
     }
     let output = directory.join(format!("{}.txt", manifest.id));
-    let existing = slots(&directory).map_err(|e| e.to_string())?;
+    let mut files = fs::read_dir(&directory)
+        .map_err(|e| e.to_string())?
+        .map(|e| e.map(|e| e.path()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    files.sort();
+    let mut existing = Slots::default();
+    let mut old = String::new();
+    for file in files
+        .into_iter()
+        .filter(|p| p.extension().is_some_and(|e| e == "txt"))
+    {
+        let text = crate::bounded::read(&file, crate::bounded::MAX_SLOTS)?;
+        existing.extend(&file, &text).map_err(|e| e.to_string())?;
+        if file == output {
+            old = text;
+        }
+    }
     let mut requested = Slots::default();
     let lines = manifest
         .inject
@@ -78,11 +93,6 @@ fn sync(dir: &Path, repo: &Path) -> Result<(), String> {
     requested
         .extend(&output, &lines)
         .map_err(|e| e.to_string())?;
-    let old = match fs::read_to_string(&output) {
-        Ok(old) => old,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(e) => return Err(format!("{}: {e}", output.display())),
-    };
     let header = format!(
         "# {}: written by cargo horizon-mod inject sync\n",
         manifest.id

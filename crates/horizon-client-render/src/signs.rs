@@ -126,7 +126,7 @@ impl SignText {
         // Signs are drawn every frame: a line read as plain text (most of them) skips the
         // NBT -> JSON -> component round trip. Its click event does not change the drawing.
         if self.saved[i].is_none() {
-            return Text::literal(self.lines[i].as_str());
+            return Text::untrusted(self.lines[i].as_str());
         }
         scoreboard::comp_text(&scoreboard::tag_to_json(&self.message(i)))
     }
@@ -370,8 +370,8 @@ mod tests {
     fn run_colors(text: &SignText, line: usize) -> Vec<(String, Option<u32>)> {
         text.line_text(line)
             .spans
-            .into_iter()
-            .map(|s| (s.text, s.style.color))
+            .iter()
+            .map(|s| (s.text.clone(), s.style.color))
             .collect()
     }
     #[test]

@@ -15,36 +15,7 @@
 
 include!(concat!(env!("OUT_DIR"), "/points_generated.rs"));
 
-/// Native scoped callable sources for generated point bridges.
-#[doc(hidden)]
-pub mod callable;
 mod registry;
-pub mod snapshot;
-
-/// Source-local paths for checked native row readers.
-#[doc(hidden)]
-pub mod locators;
-
-/// Sparse native edit path metadata.
-#[doc(hidden)]
-pub mod native_patch;
-
-/// Bounded output for generated native row readers.
-#[doc(hidden)]
-pub mod native_window;
-
-/// Live, borrowed native row traversal.
-#[doc(hidden)]
-pub mod native_read;
-
-/// Borrowed native row node adapters.
-#[doc(hidden)]
-pub mod native_nodes;
-
-/// Registration-time endpoint exposure policies.
-pub mod endpoint_policy;
-/// Endpoint-local receiver field grants and selected-layout schema keys.
-pub mod exposure;
 #[cfg(target_arch = "wasm32")]
 pub use guest::register;
 #[cfg(not(target_arch = "wasm32"))]
@@ -59,7 +30,7 @@ pub mod guest;
 pub mod __private {
     use crate::PointId;
     pub use crate::registry::{
-        ApiKind, Forward, POINTS, PointHost, RawForward, RawKind, SITES, SlotListener, seal, wrap,
+        ApiKind, Forward, POINTS, PointHost, RawKind, SITES, SlotListener, seal, wrap,
     };
 
     /// Runs the checked API functions and forwarding endpoints under their owner guards.
