@@ -1850,7 +1850,8 @@ pub fn mob_from_nbt_with_random(
     random: horizon_core::random::LegacyRandom,
 ) -> Option<Mob> {
     let kind = types.get(&self::kind(tag)?)?.clone();
-    let position = position(tag)?;
+    // Entity.load: an absent or undecodable Pos uses Vec3.ZERO.
+    let position = position(tag).unwrap_or(Vec3::ZERO);
     let [yaw, pitch] = rotation(tag);
     let mut m = Mob::with_random(id, kind, position, yaw, random);
     m.velocity = motion(tag);

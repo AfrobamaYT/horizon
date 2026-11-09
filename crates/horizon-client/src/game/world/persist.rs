@@ -2718,8 +2718,27 @@ mod tests {
             super::super::native_entity_refs::tests::with_game(|game| {
                 let wolf = game.load_mob(entity("minecraft:wolf"), None).unwrap();
                 let golem = game.load_mob(entity("minecraft:iron_golem"), None).unwrap();
-                game.load_mob(entity("minecraft:pig"), None).unwrap();
+                let pig = game.load_mob(entity("minecraft:pig"), None).unwrap();
+                for id in [wolf, golem, pig] {
+                    assert_eq!(
+                        game.mobs.iter().find(|mob| mob.id == id).unwrap().position,
+                        Vec3::ZERO
+                    );
+                }
                 assert_eq!(*observed.lock().unwrap(), [(wolf, true), (golem, true)]);
+                // The same codec default applies when Pos cannot decode.
+                for pos in [
+                    Tag::String("invalid".into()),
+                    Tag::List(vec![Tag::Double(1.0f64.to_bits())]),
+                ] {
+                    let raw =
+                        Tag::compound([("id", Tag::String("minecraft:pig".into())), ("Pos", pos)]);
+                    let id = game.load_mob(raw, None).unwrap();
+                    assert_eq!(
+                        game.mobs.iter().find(|mob| mob.id == id).unwrap().position,
+                        Vec3::ZERO
+                    );
+                }
             });
         });
     }
