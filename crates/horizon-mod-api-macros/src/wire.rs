@@ -17,16 +17,22 @@ pub(crate) fn expand(mut input: DeriveInput) -> syn::Result<TokenStream> {
             })?;
         }
     }
-    for param in input.generics.type_params_mut() {
-        param.bounds.push(parse_quote!(::mod_api::wire::Wire));
+    if via.is_none() {
+        for param in input.generics.type_params_mut() {
+            param.bounds.push(parse_quote!(::mod_api::wire::Wire));
+        }
     }
     let (imp, ty, clause) = input.generics.split_for_impl();
     let w = quote!(::mod_api::wire);
     if let Some(via) = via {
         return Ok(quote! {
+            #[automatically_derived]
             impl #imp #w::Wire for #name #ty #clause {
                 const MIN: usize = <#via as #w::Wire>::MIN;
                 const LAYOUT: u64 = <#via as #w::Wire>::LAYOUT;
+                fn layout(visiting: &mut Vec<&'static str>) -> u64 {
+                    <#via as #w::Wire>::layout(visiting)
+                }
                 fn put(&self, out: &mut #w::Writer) {
                     out.put(&<#via as ::core::convert::From<&Self>>::from(self));
                 }
@@ -93,8 +99,8 @@ pub(crate) fn expand(mut input: DeriveInput) -> syn::Result<TokenStream> {
                 owned.push(quote!(#pat => { out.put(&#index); #(#os)* }));
                 takes.push(quote!(#index => #build,));
             }
-            puts = vec![quote!(match self { #(#puts),*, _ => unreachable!() })];
-            owned = vec![quote!(match self { #(#owned),*, _ => unreachable!() })];
+            puts = vec![quote!(match self { #(#puts,)* _ => unreachable!() })];
+            owned = vec![quote!(match self { #(#owned,)* _ => unreachable!() })];
             takes = vec![
                 quote!(match input.take::<u32>()? { #(#takes)* tag => return Err(#w::WireError::Tag(tag)) }),
             ];
@@ -109,9 +115,18 @@ pub(crate) fn expand(mut input: DeriveInput) -> syn::Result<TokenStream> {
     };
     Ok(quote! {
         #[allow(unreachable_patterns, unused_variables)]
-        impl #imp #w::Wire for #name #ty #clause {
+        #[automatically_derived]
+            impl #imp #w::Wire for #name #ty #clause {
             const MIN: usize = #min;
-            const LAYOUT: u64 = #layout;
+            const LAYOUT: u64 = #w::layout_name(stringify!(#name));
+            fn layout(visiting: &mut Vec<&'static str>) -> u64 {
+                let identity = ::core::any::type_name::<Self>();
+                if visiting.contains(&identity) { return #w::layout_name("recursive"); }
+                visiting.push(identity);
+                let hash = #layout;
+                visiting.pop();
+                hash
+            }
             fn put(&self, out: &mut #w::Writer) { #(#puts)* }
             fn put_owned(self, out: &mut #w::Writer) { #(#owned)* }
             fn take(input: &mut #w::Reader<'_>) -> Result<Self, #w::WireError> { #take }
@@ -123,10 +138,13 @@ fn fields(fields: &Fields) -> (TokenStream, TokenStream, Vec<syn::Ident>) {
     let binds: Vec<_> = fields
         .iter()
         .enumerate()
-        .map(|(i, f)| f.ident.clone().unwrap_or_else(|| format_ident!("f{i}")))
+        .map(|(i, _)| format_ident!("__wire_f_{i}"))
         .collect();
     let pattern = match fields {
-        Fields::Named(_) => quote!({ #(#binds),* }),
+        Fields::Named(fields) => {
+            let names = fields.named.iter().map(|f| &f.ident);
+            quote!({ #(#names: #binds),* })
+        }
         Fields::Unnamed(_) => quote!((#(#binds),*)),
         Fields::Unit => quote!(),
     };
@@ -147,40 +165,42 @@ fn construct(fields: &Fields, prefix: TokenStream) -> TokenStream {
     }
 }
 
-fn field_layout(previous: TokenStream, field: &syn::Field, own: &syn::Ident) -> TokenStream {
-    struct Recursive<'a> {
-        own: &'a syn::Ident,
-        found: bool,
-    }
-    impl<'ast> Visit<'ast> for Recursive<'_> {
-        fn visit_type_path(&mut self, p: &'ast syn::TypePath) {
-            self.found |= p
-                .path
-                .segments
-                .iter()
-                .any(|s| s.ident == *self.own || s.ident == "Self");
-            syn::visit::visit_type_path(self, p);
-        }
-    }
-    let mut recursive = Recursive { own, found: false };
-    recursive.visit_type(&field.ty);
+fn field_layout(previous: TokenStream, field: &syn::Field, _: &syn::Ident) -> TokenStream {
     let ty = &field.ty;
-    let form = if recursive.found {
-        quote!(::mod_api::wire::layout_name("recursive"))
-    } else {
-        quote!(<#ty as ::mod_api::wire::Wire>::LAYOUT)
-    };
     let name = field
         .ident
         .as_ref()
         .map(ToString::to_string)
         .unwrap_or_default();
-    quote!(::mod_api::wire::layout_mix(::mod_api::wire::layout_mix(#previous, ::mod_api::wire::layout_name(#name)), #form))
+    quote!(::mod_api::wire::layout_mix(::mod_api::wire::layout_mix(#previous, ::mod_api::wire::layout_name(#name)), <#ty as ::mod_api::wire::Wire>::layout(visiting)))
 }
 
 fn check_owned(ty: &Type) -> syn::Result<()> {
     struct Borrowed(Option<syn::Error>);
     impl<'ast> Visit<'ast> for Borrowed {
+        fn visit_type_path(&mut self, p: &'ast syn::TypePath) {
+            if p.path.segments.last().is_some_and(|s| s.ident == "Cow") {
+                if let syn::PathArguments::AngleBracketed(args) =
+                    &p.path.segments.last().unwrap().arguments
+                {
+                    for arg in &args.args {
+                        if let syn::GenericArgument::Type(t) = arg {
+                            self.visit_type(t);
+                        }
+                    }
+                }
+                return;
+            }
+            syn::visit::visit_type_path(self, p);
+        }
+        fn visit_lifetime(&mut self, lifetime: &'ast syn::Lifetime) {
+            if lifetime.ident != "static" {
+                self.0 = Some(syn::Error::new_spanned(
+                    lifetime,
+                    "Wire is for owned values; a borrowed record crosses as a call argument",
+                ));
+            }
+        }
         fn visit_type_reference(&mut self, r: &'ast syn::TypeReference) {
             let static_str = r.mutability.is_none()
                 && r.lifetime.as_ref().is_some_and(|l| l.ident == "static")
@@ -209,6 +229,8 @@ mod tests {
             "struct Tuple(u32, String);",
             "struct Unit;",
             "enum Plain { A = 7, B = 9 }",
+            "enum Empty {}",
+            "struct Shadow { out: u32, input: u8 }",
             "enum Payload { A(u32), B { text: String }, C }",
             "struct Generic<T, const N: usize> { value: [T; N] }",
             "struct Recursive { children: Vec<Recursive> }",
