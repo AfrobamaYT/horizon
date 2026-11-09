@@ -47,7 +47,7 @@ mod tests {
             for id in 800..820 {
                 game.mobs.push(Mob::new(id, kind.clone(), Vec3::ZERO, 0.0));
             }
-            game.with_residency_tick(Game::tick_remote).unwrap();
+            game.tick().unwrap();
             let mut remaining = Vec::new();
             journal.drain_into(&mut remaining);
             assert!(
