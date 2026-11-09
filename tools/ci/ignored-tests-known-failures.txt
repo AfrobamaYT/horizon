@@ -53,7 +53,6 @@ horizon-client game::native_damage_tests::arrow_hits_name_the_projectile_on_play
 horizon-client game::native_player_modes::tests::one_player_may_harm_another_by_the_pvp_rule_and_their_teams #2178
 horizon-client game::item_contact_tests::the_active_stack_survives_a_partial_contact_and_consumption_removes_the_entity #2180
 horizon-client game::item_interact_mob_tests::actual_item_interact_mob_fallback_priority_and_filters #2180
-horizon-client game::spill::tests::a_block_entity_removing_itself_in_its_tick_is_not_asked #2180
 horizon-client game::lan::tests::datapack_damage_lazy_wire_load_caches_after_all_packs_are_removed #2181
 horizon-client game::lan::world_spawn_sync_tests::setworldspawn_reaches_guests_in_other_dimensions_and_keeps_compass_overrides #2181
 horizon-client game::lan_actions::crack_feedback_tests::crack_packets_follow_start_clock_and_strict_observer_radius #2181
