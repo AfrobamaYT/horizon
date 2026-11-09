@@ -5137,7 +5137,13 @@ impl Mob {
         ) {
             through = damage - taken;
         }
-        self.absorption = (self.absorption - (damage - through)).max(0.0);
+        let left = self.absorption - (damage - through);
+        // LivingEntity.setAbsorptionAmount clamps the remainder to the attribute maximum.
+        self.absorption = if left < 0.0 {
+            0.0
+        } else {
+            left.min(armor::max_absorption(self))
+        };
         through
     }
     /// `LivingEntity.checkTotemDeathProtection`: the first hand with a
@@ -7701,6 +7707,8 @@ mod hurt_cooldown_incoming_tests {
         let mut test_level = crate::health::TestLevel::new(0);
         let level = &mut test_level.level();
         let mut m = mob(Species::Pig);
+        // Absorption I gives max_absorption 4, so the 1.5 remainder is valid.
+        m.add_effect("absorption", 600, 0);
         m.absorption = 1.5;
         assert!(m.damage(level, 1.0, Damage::of(DamageKind::Generic)));
         assert_eq!((m.health, m.absorption), (40.0, 0.5));
