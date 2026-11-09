@@ -14,7 +14,7 @@ pub use mod_api::recipe_book::RecipeBookCategory;
 use std::collections::{BTreeSet, HashMap};
 
 mod custom_books;
-pub use custom_books::{BookError, BookFlags, CustomBooks};
+pub use custom_books::{BookError, BookFlags, CustomBooks, read_saved};
 
 /// Validate declarations once per recipe table. The first valid declaration
 /// owns its category id and recipe type; vanilla categories are never replaced.

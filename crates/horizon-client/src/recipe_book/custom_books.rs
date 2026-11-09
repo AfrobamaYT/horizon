@@ -3,7 +3,7 @@
 //! to its two flags. A book missing from it reads `(false, false)`. The map is saved in the
 //! player's `recipeBook` compound under [`EXTENSION`]. Its entries are kept while their mod is
 //! absent, so reinstalling the mod finds them again.
-use horizon_core::nbt::{JavaString, Tag};
+use horizon_core::nbt::{self, JavaString, Limits, NamedTag, Tag};
 use std::collections::BTreeMap;
 
 /// The key of the map inside `recipeBook`.
@@ -14,6 +14,27 @@ pub const MAX_BOOKS: usize = 1024;
 pub const MAX_ID_BYTES: usize = 256;
 /// At most this many bytes of the saved extension, as NBT encodes it.
 pub const MAX_ENCODED_BYTES: usize = 512 * 1024;
+
+/// How the NBT reader reads [`EXTENSION`] in a saved file: at most [`MAX_ENCODED_BYTES`],
+/// two levels deep (the map and a book's flags), and no key twice.
+pub const READ_BUDGET: nbt::Bounded = nbt::Bounded {
+    key: EXTENSION,
+    max_bytes: MAX_ENCODED_BYTES,
+    max_depth: 2,
+};
+
+/// A saved `.dat` file's root, with [`READ_BUDGET`] on mods' recipe-book flags: an extension
+/// over it, or with a key twice, is read past without being built, and mods' books then read
+/// as closed. Everything else reads as `nbt::read_named` with `Limits::saved()` reads it.
+pub fn read_saved(raw: &[u8]) -> Result<(NamedTag, usize), nbt::Error> {
+    let (named, used, rejected) = nbt::read_named_bounded(raw, Limits::saved(), READ_BUDGET)?;
+    if rejected > 0 {
+        log::warn!(
+            "Horizon: skipped {rejected} {EXTENSION} over its limits or with a repeated key;              mods' recipe books read as closed"
+        );
+    }
+    Ok((named, used))
+}
 
 /// A mod book's two flags, as each vanilla book has: whether its screen shows the book
 /// (`open`), and whether it lists only what can be crafted (`filtering`).
@@ -65,9 +86,11 @@ impl CustomBooks {
     pub fn iter(&self) -> impl Iterator<Item = (&str, BookFlags)> {
         self.books.iter().map(|(id, flags)| (id.as_str(), *flags))
     }
+    /// How many books have saved flags.
     pub fn len(&self) -> usize {
         self.books.len()
     }
+    /// Whether no book has saved flags.
     pub fn is_empty(&self) -> bool {
         self.books.is_empty()
     }

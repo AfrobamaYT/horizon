@@ -3506,7 +3506,7 @@ fn try_read_dat(path: &Path) -> std::result::Result<Tag, DatIssue> {
         Ok(raw) => raw,
         Err(_) => bytes,
     };
-    nbt::read_named(&raw, Limits::saved())
+    crate::recipe_book::read_saved(&raw)
         .map(|(named, _)| named.tag)
         .map_err(|e| DatIssue::Unreadable(e.to_string()))
 }

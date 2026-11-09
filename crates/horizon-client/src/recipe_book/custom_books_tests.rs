@@ -249,3 +249,96 @@ fn the_encoded_size_counts_as_nbt_writes_it() {
     assert!(encoded_within(&tag, size));
     assert!(!encoded_within(&tag, size - 1));
 }
+
+/// A saved player root in raw NBT: `recipeBook` with empty lists, the furnace book open and an
+/// `EXTENSION` compound whose entries `books` writes.
+fn raw_player(books: impl FnOnce(&mut Vec<u8>)) -> Vec<u8> {
+    let mut out = vec![10, 0, 0];
+    key(&mut out, 10, "recipeBook");
+    for list in ["recipes", "toBeDisplayed"] {
+        key(&mut out, 9, list);
+        out.extend([8, 0, 0, 0, 0]);
+    }
+    key(&mut out, 1, "isFurnaceGuiOpen");
+    out.push(1);
+    key(&mut out, 10, EXTENSION);
+    books(&mut out);
+    out.extend([0, 0, 0]);
+    out
+}
+
+fn key(out: &mut Vec<u8>, id: u8, name: &str) {
+    out.push(id);
+    out.extend((name.len() as u16).to_be_bytes());
+    out.extend(name.as_bytes());
+}
+
+fn raw_book(out: &mut Vec<u8>, id: &str, open: u8) {
+    key(out, 10, id);
+    key(out, 1, "open");
+    out.push(open);
+    key(out, 1, "filtering");
+    out.push(0);
+    out.push(0);
+}
+
+/// The settings a raw player file loads, and whether its `recipeBook` kept the extension.
+fn load(raw: &[u8]) -> (Settings, bool) {
+    let (named, used) = read_saved(raw).expect("the file reads");
+    assert_eq!(used, raw.len());
+    let book = named.tag.get("recipeBook");
+    let kept = book.and_then(|b| b.get(EXTENSION)).is_some();
+    (Settings::read(book), kept)
+}
+
+#[test]
+fn a_saved_file_reads_the_extension_within_its_budget() {
+    let (settings, kept) = load(&raw_player(|out| raw_book(out, POT, 1)));
+    assert!(kept);
+    assert_eq!(settings.custom.get(POT), OPEN);
+    assert!(settings.open[BookType::Furnace.index()]);
+}
+
+#[test]
+fn a_saved_extension_with_a_book_twice_is_dropped_and_vanilla_reads() {
+    // A `Tag::Compound` cannot hold the same key twice, so only raw bytes show this.
+    let (settings, kept) = load(&raw_player(|out| {
+        raw_book(out, POT, 1);
+        raw_book(out, POT, 0);
+    }));
+    assert!(!kept, "the reader leaves the extension out");
+    assert!(settings.custom.is_empty());
+    assert!(settings.open[BookType::Furnace.index()]);
+}
+
+#[test]
+fn a_saved_extension_over_its_byte_or_depth_budget_is_dropped_unbuilt() {
+    let over_bytes = raw_player(|out| {
+        key(out, 10, POT);
+        key(out, 7, "pad");
+        out.extend(((MAX_ENCODED_BYTES + 1) as i32).to_be_bytes());
+        out.extend(std::iter::repeat_n(0, MAX_ENCODED_BYTES + 1));
+        out.push(0);
+    });
+    let too_deep = raw_player(|out| {
+        key(out, 10, POT);
+        key(out, 10, "nested");
+        out.extend([0, 0]);
+    });
+    for raw in [over_bytes, too_deep] {
+        let (settings, kept) = load(&raw);
+        assert!(!kept);
+        assert!(settings.custom.is_empty());
+        assert!(
+            settings.open[BookType::Furnace.index()],
+            "vanilla still reads"
+        );
+    }
+}
+
+#[test]
+fn a_truncated_extension_still_fails_the_file() {
+    let mut raw = raw_player(|out| raw_book(out, POT, 1));
+    raw.truncate(raw.len() - 4);
+    assert!(read_saved(&raw).is_err());
+}
