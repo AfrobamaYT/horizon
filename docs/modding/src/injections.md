@@ -358,6 +358,10 @@ A library's crate name is its mod id with `-` as `_`.
   that carry `#[derive(mod_api::Wire)]`. Nothing adds the derive; a parameter without one refuses the
   point's API listeners, naming it. A method of the library's own types has no API record (its
   `self` has no handle), as on the game.
+- **No Host.** As on the game, only a `Game` method's point gets a `Host`; free functions and
+  methods of other types get none, and a mod crate's functions have no `Game` receiver. A mod
+  point's `api` listener gets its record alone. A library that wants its addons to reach the host
+  takes a value that reaches it as a parameter.
 - **`access = "internals"`.** The listener gets the receiver and every parameter by reference, in
   their own types, through the raw form declared beside the function. It works from the library's
   own target: the same binary on native, the same dependency group on wasm. A wasm listener
@@ -377,8 +381,10 @@ A library's crate name is its mod id with `-` as `_`.
   more for the return; the listened path stays out of line. On the chemicals fixture's per-tick
   transfer (a ~2 ns function) that is about 1.2 ns a call natively and 1.6–2 ns on wasm.
 
-The build writes the mod's points to `points.json` in a wasm package; the launcher lists a native
-mod's from its source.
+The build writes the mod's points to `mod-points.json` in a wasm package and pins its SHA-512 in
+the manifest's `[wasm] points`; a package whose `mod-points.json` is missing, unpinned or changed is
+refused.
+The launcher lists a native mod's points from its source.
 
 ## Raw listeners and declared internals
 

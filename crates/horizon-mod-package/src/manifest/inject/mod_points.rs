@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::{fmt, io::Read};
 
 /// The file a mod's build writes its points to, at the package root.
-pub const FILE: &str = "points.json";
+pub const FILE: &str = "mod-points.json";
 const MAX_BYTES: u64 = 8 << 20;
 
 /// A mod crate's points, as its build lists them.
@@ -66,18 +66,44 @@ pub struct Library<'a> {
     pub catalog: &'a Catalog,
 }
 
-impl Catalog {
-    /// Reads a package's `points.json`, bounded: package metadata is untrusted.
-    pub fn read(reader: impl Read) -> Result<Self, String> {
-        let mut bytes = Vec::new();
-        reader
-            .take(MAX_BYTES + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|e| format!("{FILE}: {e}"))?;
-        if bytes.len() as u64 > MAX_BYTES {
-            return Err(format!("{FILE}: exceeds 8 MiB"));
+/// Reads a package's `points.json` bytes, bounded: package metadata is untrusted.
+pub fn read_bytes(reader: impl Read) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    reader
+        .take(MAX_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("{FILE}: {e}"))?;
+    if bytes.len() as u64 > MAX_BYTES {
+        return Err(format!("{FILE}: exceeds 8 MiB"));
+    }
+    Ok(bytes)
+}
+
+/// A wasm package's catalog, checked against the hash its `[wasm]` section pins: a missing,
+/// unpinned or changed `points.json` is refused, so an addon routes only through the catalog the
+/// library's build wrote. No pin and no file: a package without mod points.
+pub fn bound(bytes: Option<&[u8]>, pinned: Option<&str>) -> Result<Option<Catalog>, String> {
+    match (bytes, pinned) {
+        (None, None) => Ok(None),
+        (Some(_), None) => Err(format!(
+            "{FILE}: [wasm] pins no points; only the build writes {FILE}"
+        )),
+        (None, Some(_)) => Err(format!("{FILE}: missing; [wasm] pins one")),
+        (Some(bytes), Some(pinned)) => {
+            if super::super::sha512_of(bytes) != pinned {
+                return Err(format!(
+                    "{FILE}: does not match the hash [wasm] pins: changed after the build"
+                ));
+            }
+            Catalog::read(bytes).map(Some)
         }
-        serde_json::from_slice(&bytes).map_err(|e| format!("{FILE}: {e}"))
+    }
+}
+
+impl Catalog {
+    /// Parses a package's `points.json`, strictly.
+    pub fn read(bytes: &[u8]) -> Result<Self, String> {
+        serde_json::from_slice(bytes).map_err(|e| format!("{FILE}: {e}"))
     }
 
     /// Whether `at` names a function of this crate.

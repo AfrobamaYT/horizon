@@ -179,7 +179,7 @@ fn a_package_catalog_is_read_bounded_and_strict() {
     assert!(
         Catalog::read(b"{".as_slice())
             .unwrap_err()
-            .starts_with("points.json")
+            .starts_with("mod-points.json")
     );
     assert!(
         Catalog::read(br#"{"crate":"c","table":"t","points":[],"extra":1}"#.as_slice())
@@ -187,9 +187,5 @@ fn a_package_catalog_is_read_bounded_and_strict() {
             .contains("extra")
     );
     let huge = vec![b' '; (8 << 20) + 1];
-    assert!(
-        Catalog::read(huge.as_slice())
-            .unwrap_err()
-            .contains("exceeds")
-    );
+    assert!(read_bytes(huge.as_slice()).unwrap_err().contains("exceeds"));
 }

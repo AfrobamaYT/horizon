@@ -97,6 +97,10 @@ fn copy_files(to: &Path, files: impl IntoIterator<Item = (String, Vec<u8>)>) -> 
 }
 
 /// Check target-crossing edges before the native-only dependency resolver.
+///
+/// A package that can't be read stops the scan, naming the mod: every enabled native mod compiles
+/// into one game binary, and every other native refusal stops that build the same way. Leaving
+/// one mod out would quietly build a different set than the player enabled.
 pub(super) fn checked_bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
     let paths = horizon_mod_package::find(folder)
         .into_iter()
@@ -212,9 +216,15 @@ mod mixed_tests {
         fs::write(
             library.join(manifest::MANIFEST),
             format!(
-                "{}[wasm]\nsha512='{}'\ntoolchain='t'\nbuilt_with='t'\n",
+                "{}[wasm]\nsha512='{}'\ntoolchain='t'\nbuilt_with='t'\n{}",
                 header("lib"),
-                horizon_mod_package::manifest::sha512_of(module)
+                horizon_mod_package::manifest::sha512_of(module),
+                points
+                    .map(|points| format!(
+                        "points='{}'\n",
+                        horizon_mod_package::manifest::sha512_of(points.as_bytes())
+                    ))
+                    .unwrap_or_default()
             ),
         )
         .unwrap();
@@ -229,7 +239,7 @@ mod mixed_tests {
         )
         .unwrap();
         if let Some(points) = points {
-            fs::write(library.join("points.json"), points).unwrap();
+            fs::write(library.join(manifest::inject::mod_points::FILE), points).unwrap();
         }
         if hash == "malformed" {
             fs::write(library.join("layouts.json"), b"{").unwrap();

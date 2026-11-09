@@ -566,6 +566,14 @@ pub(super) fn build(
         let mut wasm = toml_edit::Table::new();
         wasm["sha512"] = toml_edit::value(&hashes[&id]);
         wasm["toolchain"] = toml_edit::value(&toolchain.version);
+        // Binds the catalog the build listed to the package (#2339).
+        let points = std::fs::read(
+            member
+                .root
+                .join(horizon_mod_package::manifest::inject::mod_points::FILE),
+        )
+        .map_err(|e| e.to_string())?;
+        wasm["points"] = toml_edit::value(sha512_of(&points));
         for dep in dependencies {
             let Some(hash) = hashes.get(&dep) else {
                 continue;

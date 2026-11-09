@@ -207,5 +207,21 @@ fn staging_marks_each_point_and_writes_the_table_beside_the_crate_root() {
     ] {
         assert!(text.contains(item), "{item}");
     }
+    // Mod points mirror the engine's rule for functions without a `Game` receiver: their API
+    // listeners get the record and no Host, on both targets (the staged table serves both).
+    assert!(points.iter().all(|point| point.host == "none"));
+    assert!(text.contains("PointHost :: None"));
+    for host in [
+        "host :",
+        "ServerHost",
+        "ClientHost",
+        "HostSide",
+        "PointHost :: Read",
+    ] {
+        assert!(
+            !text.contains(host),
+            "a mod point's listener takes no host: {host}"
+        );
+    }
     let _ = fs::remove_dir_all(dir);
 }
