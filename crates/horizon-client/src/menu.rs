@@ -2238,7 +2238,7 @@ impl Menu {
             return;
         }
         if self.slots[s].role == Role::CombineResult {
-            // SmithingMenu.onTake: NeoForge's ItemSmithedEvent first, then
+            // SmithingMenu.onTake: the `ItemSmithedEvent` hook, then
             // awardUsedRecipes, then one of each input.
             if self.kind == Kind::Smithing {
                 let inputs = [0, 1, 2].map(|i| self.containers[MAIN][i].clone());

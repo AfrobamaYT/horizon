@@ -5,8 +5,8 @@
 //! and the count is in the original probe's wide range (1..30), not an exact
 //! random result.
 use crate::game::*;
-fn game() -> Game<'static> {
-    let mut game = crate::game::game_tests::tests::server_game();
+fn game(resources: &mut Option<std::sync::Arc<Resources>>) -> Game<'_> {
+    let mut game = crate::game::game_tests::tests::server_game(resources);
     for command in [
         "difficulty easy",
         "gamerule spawn_mobs false",
@@ -22,7 +22,8 @@ fn game() -> Game<'static> {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn summoned_drowned_hold_shells_as_guaranteed_drops() {
-    let mut game = game();
+    let mut game_resources = None;
+    let mut game = game(&mut game_resources);
     for index in 0..400 {
         let (x, z) = (f64::from(index % 20) - 9.5, f64::from(index / 20) - 9.5);
         assert!(game.run_command(&format!("summon drowned {x} 100 {z}")));

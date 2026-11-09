@@ -5469,7 +5469,7 @@ fn configured_features_load_from_the_26_3_path() {
 
 /// A world's data pack that replaces a vanilla biome (Terralith's plains)
 /// keeps the mods' modifier features, and a pack's own biome its tag puts
-/// under the modifier's selector gets them: NeoForge applies modifiers after
+/// under the modifier's selector gets them: modifiers apply after
 /// every pack. A biome no pack touches stays as the content root has it.
 #[test]
 fn biome_modifiers_apply_over_world_packs() {

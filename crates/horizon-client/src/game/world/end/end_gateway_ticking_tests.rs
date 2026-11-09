@@ -15,6 +15,7 @@ fn item(id: u32, at: Vec3) -> ItemEntity {
     ItemEntity {
         attachment_lifetime: Default::default(),
         fall_distance: 0.0,
+        random: horizon_core::random::LegacyRandom::new(0),
         rotation: [0.0, 0.0],
         join: Default::default(),
         no_gravity: true,
@@ -48,7 +49,8 @@ fn item(id: u32, at: Vec3) -> ItemEntity {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn items_past_the_simulation_distance_enter_no_end_gateway() {
-    let mut game = server_game();
+    let mut resources = None;
+    let mut game = server_game(&mut resources);
     game.dim = Dim::End;
     game.settings.simulation_distance = 4;
     game.settings.render_distance = 12;
@@ -100,7 +102,8 @@ fn items_past_the_simulation_distance_enter_no_end_gateway() {
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_ticking_gateway_counts_its_age_in_its_block_entity() {
     use horizon_client::containers::BlockEntity;
-    let mut game = server_game();
+    let mut game_resources = None;
+    let mut game = server_game(&mut game_resources);
     game.dim = Dim::End;
     game.player = Some(
         horizon_client::motion::PlayerMotion::new(game.motion, Vec3::new(8.5, 65.0, 8.5)).unwrap(),
