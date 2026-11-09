@@ -2,7 +2,7 @@
 //! air, the visual fire flag and the fall distance.
 use super::{flag, float, int_value, put};
 use crate::projectiles::Projectile;
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 
 /// `Entity.load`: fire is read as a short, air as an int and the visual
 /// fire flag as a byte-valued boolean. Portal state lives on the level.

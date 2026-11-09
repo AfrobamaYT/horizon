@@ -234,7 +234,10 @@ impl Goal for UseSpell {
         if self.spell == Spell::Wololo {
             // EvokerWololoSpellGoal.canUse: a blue sheep within the box
             // (16 sideways, 4 up or down) and `range(16)`, no target, griefing on.
-            if m.ai.target.is_some() || m.extra.counter > 0 || age < self.next || !cx.w.mob_griefing
+            if m.ai.target.is_some()
+                || m.extra.counter > 0
+                || age < self.next
+                || !cx.w.can_grief(m.id)
             {
                 return false;
             }
@@ -479,7 +482,7 @@ pub fn charge_ticks(m: &Mob) -> i32 {
     25 - 5 * super::gear::level(m, super::gear::MAIN, "minecraft:quick_charge") as i32
 }
 fn holding_crossbow(m: &Mob) -> bool {
-    m.extra.main_hand.as_deref() == Some("minecraft:crossbow")
+    m.extra.main_hand_id() == Some("minecraft:crossbow")
 }
 
 /// `CrossbowItem.setCharged`: the loaded arrow lives in the stack's
@@ -527,9 +530,9 @@ impl Goal for CrossbowAttack {
                 .is_some_and(|t| t.alive && !(t.is_player && t.creative));
         valid && holding_crossbow(m)
     }
-    fn stop(&mut self, m: &mut Mob, _: &mut Cx) {
+    fn stop(&mut self, m: &mut Mob, cx: &mut Cx) {
         m.ai.aggressive = false;
-        m.ai.target = None;
+        m.set_ai_target(cx.w, None);
         self.see_time = 0;
         m.extra.flag = false;
         m.extra.using_item = 0;
@@ -588,7 +591,8 @@ impl Goal for CrossbowAttack {
                 }
             }
             Crossbow::Charging => {
-                m.extra.using_item += 1;
+                // A mod may have set the use's ticks left to anything.
+                m.extra.using_item = m.extra.using_item.saturating_add(1);
                 if m.extra.using_item >= charge_ticks(m) {
                     m.extra.using_item = 0;
                     m.extra.flag = false;
@@ -658,6 +662,18 @@ fn shoot_crossbow(m: &mut Mob, who: Who, cx: &mut Cx) {
         Some(Who::Mob(m.id)),
     );
     p.set_bonus(super::gear::arrow_bonus(m));
+    if let Some(state) = p.arrow.as_mut() {
+        state.fired_from_weapon = if m.extra.using_off_hand {
+            m.extra
+                .slot_stack(horizon_items::equipment::OFFHAND)
+                .cloned()
+        } else {
+            m.extra.main_hand_stack().cloned()
+        };
+        if state.fired_from_weapon.is_some() {
+            p.bonus.damage = 0.0;
+        }
+    }
     // rangedAttackUncertainty: 14 - 4 * difficulty.
     p.shoot(
         &mut crate::random_source::entity(),
@@ -773,7 +789,7 @@ pub fn anim_pose(m: &Mob, s: &State, p: &mut Poses, pose: ArmPose) {
     }
     match pose {
         ArmPose::Attacking => {
-            if m.extra.main_hand.is_none() {
+            if m.extra.main_hand_id().is_none() {
                 // animateZombieArms + bobArms
                 let swing = s.swing;
                 let a = (swing * PI).msin();
@@ -949,10 +965,10 @@ mod tests {
                 let mut mob = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
                 let mut goals = std::mem::take(&mut mob.ai.targets);
                 let mut events = Vec::new();
-                let mut lr = horizon_core::random::LegacyRandom::new(0);
+                let mut test_level = crate::health::TestLevel::new(0);
                 let mut cx = Cx {
                     w: &w,
-                    lr: &mut lr,
+                    level: &mut test_level.level(),
                     events: &mut events,
                 };
                 for _ in 0..100 {
@@ -1070,7 +1086,7 @@ mod tests {
     /// one that was named Johnny but is now Bob never started.
     #[test]
     fn a_vindicator_that_was_named_johnny_stays_johnny() {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         let mut m = Mob::new(
             1,
             {

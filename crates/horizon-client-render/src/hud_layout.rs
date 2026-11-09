@@ -6,60 +6,12 @@
 //! drawing so the parity fixture can compare them with the vanilla client.
 use crate::{font::Font, text::Text};
 use horizon_core::random::{LegacyRandom, RandomSource};
+pub use mod_api::client::hud_layout::{Blend, HealthInputs, HeartKind, PoseOp};
 use std::borrow::Cow;
-
-/// A `Matrix3x2fStack` operation applied to a copy of the current pose.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum PoseOp {
-    Translate(f32, f32),
-    Scale(f32, f32),
-}
-
-/// A JOML `Matrix3x2f` as `[m00, m01, m10, m11, m20, m21]`.
-pub type Pose = [f32; 6];
-pub const IDENTITY: Pose = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
-
-/// Applies `op` like JOML's `translate` / `scale` (same float order).
-pub fn pose_apply(m: &mut Pose, op: PoseOp) {
-    match op {
-        PoseOp::Translate(x, y) => {
-            m[4] += m[0] * x + m[2] * y;
-            m[5] += m[1] * x + m[3] * y;
-        }
-        PoseOp::Scale(x, y) => {
-            m[0] *= x;
-            m[1] *= x;
-            m[2] *= y;
-            m[3] *= y;
-        }
-    }
-}
-
-/// The render pipeline of a texture blit.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Blend {
-    /// `GUI_TEXTURED`.
-    Textured,
-    /// `VIGNETTE`: `dst * (1 - src)`.
-    Vignette,
-    /// `GUI_NAUSEA_OVERLAY`: additive.
-    Nausea,
-    /// `CROSSHAIR`: `BlendFunction.INVERT`, the colour under it inverted.
-    Crosshair,
-}
-impl Blend {
-    pub fn pipeline(self) -> &'static str {
-        match self {
-            Blend::Textured => "pipeline/gui_textured",
-            Blend::Vignette => "pipeline/vignette",
-            Blend::Nausea => "pipeline/gui_nausea_overlay",
-            Blend::Crosshair => "pipeline/crosshair",
-        }
-    }
-}
 
 /// One `GuiGraphicsExtractor` call.
 #[derive(Clone, Debug, PartialEq)]
+// exhaustive: a closed set the game matches without a wildcard
 pub enum GuiDraw {
     /// `blitSprite(pipeline, sprite, x, y, w, h, color)`; `region` =
     /// (spriteW, spriteH, u, v) for the partial overload.
@@ -127,6 +79,26 @@ pub enum GuiDraw {
     Push(Vec<PoseOp>),
     /// `pose().popMatrix()`.
     Pop,
+}
+
+/// A JOML `Matrix3x2f` as `[m00, m01, m10, m11, m20, m21]`.
+pub type Pose = [f32; 6];
+pub const IDENTITY: Pose = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+
+/// Applies `op` like JOML's `translate` / `scale` (same float order).
+pub fn pose_apply(m: &mut Pose, op: PoseOp) {
+    match op {
+        PoseOp::Translate(x, y) => {
+            m[4] += m[0] * x + m[2] * y;
+            m[5] += m[1] * x + m[3] * y;
+        }
+        PoseOp::Scale(x, y) => {
+            m[0] *= x;
+            m[1] *= x;
+            m[2] *= y;
+            m[3] *= y;
+        }
+    }
 }
 
 pub const WHITE: u32 = 0xFFFF_FFFF;
@@ -237,24 +209,6 @@ pub fn multiply(l: u32, r: u32) -> u32 {
 /// `Mth.lerpDiscrete`.
 pub fn lerp_discrete(alpha: f32, p0: i32, p1: i32) -> i32 {
     p0 + floor(alpha * (p1 - p0 - 1) as f32) + i32::from(alpha > 0.0)
-}
-/// `Mth.hsvToArgb`.
-pub fn hsv_to_argb(hue: f32, saturation: f32, value: f32, alpha: u32) -> u32 {
-    let h = (hue * 6.0) as i32 % 6;
-    let f = hue * 6.0 - h as f32;
-    let p = value * (1.0 - saturation);
-    let q = value * (1.0 - f * saturation);
-    let t = value * (1.0 - (1.0 - f) * saturation);
-    let (r, g, b) = match h {
-        0 => (value, t, p),
-        1 => (q, value, p),
-        2 => (p, value, t),
-        3 => (p, q, value),
-        4 => (t, p, value),
-        _ => (value, p, q),
-    };
-    let c = |v: f32| ((v * 255.0) as i32).clamp(0, 255) as u32;
-    argb(alpha, c(r), c(g), c(b))
 }
 /// `Font.width` of styled text.
 pub fn width(font: &Font, t: &Text) -> i32 {
@@ -483,14 +437,6 @@ pub fn experience_colored(
     out
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum HeartKind {
-    Normal,
-    Poisoned,
-    Withered,
-    Frozen,
-}
-
 /// State kept between frames (`Hud.lastHealth`, `displayHealth`, ...).
 #[derive(Clone, Debug, Default)]
 pub struct HealthHud {
@@ -504,31 +450,6 @@ pub struct HealthHud {
     /// The `ui.hud.bubble_pop` volume and pitch `playAirBubblePoppedSound`
     /// asked for this frame; the caller plays it and clears it.
     pub bubble_pop_sound: Option<(f32, f32)>,
-}
-
-pub struct HealthInputs {
-    /// `Hud.tickCount`.
-    pub tick: i32,
-    /// `Util.getMillis()` now.
-    pub millis: i64,
-    pub health: f32,
-    pub max_health: f32,
-    pub absorption: f32,
-    pub armor: i32,
-    pub food: i32,
-    pub saturation: f32,
-    pub kind: HeartKind,
-    pub regeneration: bool,
-    pub hunger: bool,
-    pub hardcore: bool,
-    /// `damageCooldownTime > 0`.
-    pub damage_cooldown: bool,
-    /// `getAirSupply`, `getMaxAirSupply`, `isEyeInFluid(WATER)`.
-    pub air: i32,
-    pub max_air: i32,
-    pub under_water: bool,
-    /// `getVehicleMaxHearts` of the ridden living vehicle (0 = none).
-    pub vehicle_hearts: i32,
 }
 
 /// `Hud.getVehicleMaxHearts` for a vehicle that shows its health.

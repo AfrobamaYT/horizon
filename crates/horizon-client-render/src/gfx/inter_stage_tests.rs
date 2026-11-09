@@ -128,6 +128,11 @@ fn composed() -> Vec<(&'static str, Vec<&'static str>, String)> {
             entity.clone() + include_str!("../static_entity.wgsl"),
         ),
         (
+            "prepared model",
+            vec!["entity.wgsl", "prepared_model.wgsl"],
+            entity.clone() + include_str!("../prepared_model.wgsl"),
+        ),
+        (
             "improved transparency clouds",
             vec!["entity.wgsl", "oit.wgsl", "oit_clouds.wgsl"],
             entity.clone() + include_str!("../oit.wgsl") + include_str!("../oit_clouds.wgsl"),
@@ -148,21 +153,6 @@ fn composed() -> Vec<(&'static str, Vec<&'static str>, String)> {
             "visibility buffer",
             vec!["terrain.wgsl", "visbuffer.wgsl"],
             super::terrain_shader() + include_str!("../visbuffer.wgsl"),
-        ),
-        // A native mod's world warp (gfx/world_warp.rs): its copies with the plainest warp.
-        (
-            "world warp terrain",
-            vec![
-                "terrain.wgsl",
-                "world_warp.wgsl",
-                "world_warp_fragment.wgsl",
-            ],
-            super::world_warp::terrain_shader(super::world_warp::IDENTITY).unwrap(),
-        ),
-        (
-            "world warp entities",
-            vec!["entity.wgsl", "static_entity.wgsl", "world_warp.wgsl"],
-            super::world_warp::entity_shader(super::world_warp::IDENTITY).unwrap(),
         ),
         (
             "improved transparency world border",

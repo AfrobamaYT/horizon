@@ -1,6 +1,7 @@
 //! Container block entities: chests/barrels (27 slots) and the three furnace
 //! kinds, ticking as `AbstractFurnaceBlockEntity.serverTick` with fuel times
 //! from the data-driven `context_int_provider`/`context_float_provider` files.
+
 pub use crate::chunk::block_entity::{
     Banner, Beacon, BlockEntity, Brushable, Campfire, ChiseledBookshelf, Crafter, CreakingHeart,
     EndGateway, Furnace, FurnaceKind, Jukebox, Lectern, MOD_MENUS, ModBlockEntity,
@@ -124,7 +125,7 @@ impl FurnaceKind {
         self != Self::Furnace
     }
     pub fn from_block(name: &str) -> Option<Self> {
-        match name {
+        match crate::block_entity_types::factory_block(name) {
             "minecraft:furnace" => Some(Self::Furnace),
             "minecraft:blast_furnace" => Some(Self::BlastFurnace),
             "minecraft:smoker" => Some(Self::Smoker),
@@ -171,7 +172,7 @@ pub fn default_name_key(block: &str) -> Option<&'static str> {
 /// `BaseContainerBlockEntity.getDisplayName` (`getName`), the title of the
 /// `ClientboundOpenScreenPacket` that opens it: the block entity's custom
 /// name (`CustomName`, a literal), else its default name.
-pub fn display_name(custom: Option<&str>, default_key: &str) -> horizon_world::nbt::Tag {
+pub fn display_name(custom: Option<&str>, default_key: &str) -> horizon_core::nbt::Tag {
     match custom {
         Some(name) => horizon_protocol::text::literal(name),
         None => horizon_protocol::text::translatable(default_key, &[]),
@@ -181,15 +182,15 @@ pub fn display_name(custom: Option<&str>, default_key: &str) -> horizon_world::n
 /// `ChestBlock.MENU_PROVIDER_COMBINER`'s `getDisplayName` for a double chest:
 /// the first half's custom name (the right half, `DoubleBlockCombiner`'s
 /// `FIRST`), else the second's, else `container.chestDouble`.
-pub fn double_chest_name(first: Option<&str>, second: Option<&str>) -> horizon_world::nbt::Tag {
+pub fn double_chest_name(first: Option<&str>, second: Option<&str>) -> horizon_core::nbt::Tag {
     display_name(first.or(second), "container.chestDouble")
 }
 
 /// `BaseContainerBlockEntity.sendChestLockedNotifications`: the action bar
 /// message of a container that refuses to open, `container.isLocked` naming it
 /// by its display name.
-pub fn locked_message(title: &horizon_world::nbt::Tag) -> horizon_world::nbt::Tag {
-    use horizon_world::nbt::Tag;
+pub fn locked_message(title: &horizon_core::nbt::Tag) -> horizon_core::nbt::Tag {
+    use horizon_core::nbt::Tag;
     Tag::compound([
         ("translate", Tag::String("container.isLocked".into())),
         ("with", Tag::List(vec![title.clone()])),
@@ -277,9 +278,9 @@ impl Campfire {
 }
 impl Skull {
     pub fn new(
-        profile: Option<horizon_world::nbt::Tag>,
+        profile: Option<horizon_core::nbt::Tag>,
         note_block_sound: Option<String>,
-        custom_name: Option<horizon_world::nbt::Tag>,
+        custom_name: Option<horizon_core::nbt::Tag>,
     ) -> Self {
         let skin = profile.as_ref().map(SkullSkin::of);
         Self {
@@ -291,7 +292,7 @@ impl Skull {
     }
 }
 impl SkullSkin {
-    pub fn of(profile: &horizon_world::nbt::Tag) -> Self {
+    pub fn of(profile: &horizon_core::nbt::Tag) -> Self {
         let download = crate::skins::profile_skin_url_nbt(profile).and_then(|url| {
             let location = crate::skins::skin_location(&crate::skins::texture_hash(&url)?);
             Some((url, location))
@@ -374,6 +375,14 @@ impl Crafter {
 }
 impl BlockEntity {
     pub fn for_block(name: &str) -> Option<Self> {
+        let factory = crate::block_entity_types::factory_block(name);
+        if crate::block_entity_types::factory_valid(name) == Some(false) {
+            return None;
+        }
+        Self::for_factory(factory)
+    }
+
+    fn for_factory(name: &str) -> Option<Self> {
         if let Some(hanging) = crate::signs::sign_kind(name) {
             return Some(Self::Sign(crate::signs::SignData {
                 hanging,
@@ -522,9 +531,19 @@ impl BlockEntity {
     /// only when its type is in the block's set, and drops it for the
     /// block's own otherwise. Each kind fits the blocks `for_block` maps to
     /// it (a furnace is its kind's, a sign only its standing or hanging
-    /// kind); a mod block's own can't tell its block here, so a non-vanilla
-    /// name is trusted — a name change drops it either way.
+    /// kind); native types use the accepted declaration's valid blocks.
     pub fn fits(&self, name: &str) -> bool {
+        if crate::block_entity_types::additional_valid(name, self.id())
+            || (!name.starts_with("minecraft:")
+                && crate::block_entity_types::valid(name, self.id()) == Some(true))
+        {
+            return true;
+        }
+        let factory = crate::block_entity_types::factory_block(name);
+        if factory != name {
+            return crate::block_entity_types::factory_valid(name) == Some(true)
+                && self.fits(factory);
+        }
         match self {
             Self::Chest(items) => container_size(name) == Some(items.len()),
             Self::Furnace(f) => FurnaceKind::from_block(name) == Some(f.kind),
@@ -537,7 +556,7 @@ impl BlockEntity {
             Self::Banner(_) => name.ends_with("_banner"),
             Self::CopperGolemStatue(_) => name.ends_with("copper_golem_statue"),
             Self::Shelf(_) => name == "minecraft:shelf" || name.ends_with("_shelf"),
-            Self::Mod(_) => !name.starts_with("minecraft:"),
+            Self::Mod(m) => crate::block_entity_types::type_for(name) == Some(m.id()),
             Self::Beehive(_) => matches!(name, "minecraft:beehive" | "minecraft:bee_nest"),
             Self::Campfire(_) => {
                 matches!(name, "minecraft:campfire" | "minecraft:soul_campfire")
@@ -609,7 +628,7 @@ impl BlockEntity {
             Self::Campfire(_) => "minecraft:campfire",
             Self::ChiseledBookshelf(_) => "minecraft:chiseled_bookshelf",
             Self::Shelf(_) => "minecraft:shelf",
-            Self::Mod(m) => &m.id,
+            Self::Mod(m) => m.id(),
             Self::PotentSulfur(_) => "minecraft:potent_sulfur",
             Self::StructureBlock(_) => "minecraft:structure_block",
             Self::JigsawBlock(_) => "minecraft:jigsaw",

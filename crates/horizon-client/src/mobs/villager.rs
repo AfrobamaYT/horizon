@@ -10,8 +10,8 @@ use horizon_core::geometry::trig::Mth;
 use horizon_core::random::RandomSource;
 use std::f32::consts::PI;
 
-// Villager state: `variant` type, `variant2` profession (index into
-// `render::PROFESSIONS`), `variant3` level, `home` the claimed job site,
+// Villager state: `variant` type, `profession` identity (index into
+// the frozen profession table), `villager_level` level, `home` the claimed job site,
 // `bed` and `meeting` the claimed bed head and bell, `ints[0]` the unhappy
 // counter, `ints[1]` the bed's facing while asleep (1 north, 2 south,
 // 3 west, 4 east), `trade` the offers, experience and restocks.
@@ -19,29 +19,160 @@ use std::f32::consts::PI;
 pub const NONE: u8 = 0;
 pub const NITWIT: u8 = 11;
 
-/// `PoiTypes`: the job site block of each profession.
-pub fn job_site_profession(block: &str) -> Option<u8> {
-    Some(match block.trim_start_matches("minecraft:") {
-        "blast_furnace" => 1,
-        "smoker" => 2,
-        "cartography_table" => 3,
-        "brewing_stand" => 4,
-        "composter" => 5,
-        "barrel" => 6,
-        "fletching_table" => 7,
-        "cauldron" | "water_cauldron" | "lava_cauldron" | "powder_snow_cauldron" => 8,
-        "lectern" => 9,
-        "stonecutter" => 10,
-        "loom" => 12,
-        "smithing_table" => 13,
-        "grindstone" => 14,
-        _ => return None,
-    })
+/// Vanilla profession metadata in the frozen table.
+#[derive(Debug)]
+pub struct Profession {
+    pub id: &'static str,
+    pub trade_set: Option<&'static str>,
+    pub render_index: u8,
+    held: Option<horizon_world::poi::PoiType>,
+    acquirable: Option<horizon_world::poi::PoiType>,
+}
+
+/// Immutable vanilla-only generation. A load-owned table replaces this before mod registration.
+pub struct ProfessionTable {
+    entries: Vec<Profession>,
+    by_poi: [Option<u8>; 13],
+}
+impl ProfessionTable {
+    fn vanilla() -> Self {
+        use horizon_world::poi::PoiType as P;
+        let entries = [
+            ("none", None, None),
+            ("armorer", Some("armorer"), Some(P::Armorer)),
+            ("butcher", Some("butcher"), Some(P::Butcher)),
+            ("cartographer", Some("cartographer"), Some(P::Cartographer)),
+            ("cleric", Some("cleric"), Some(P::Cleric)),
+            ("farmer", Some("farmer"), Some(P::Farmer)),
+            ("fisherman", Some("fisherman"), Some(P::Fisherman)),
+            ("fletcher", Some("fletcher"), Some(P::Fletcher)),
+            (
+                "leatherworker",
+                Some("leatherworker"),
+                Some(P::Leatherworker),
+            ),
+            ("librarian", Some("librarian"), Some(P::Librarian)),
+            ("mason", Some("mason"), Some(P::Mason)),
+            ("nitwit", None, None),
+            ("shepherd", Some("shepherd"), Some(P::Shepherd)),
+            ("toolsmith", Some("toolsmith"), Some(P::Toolsmith)),
+            ("weaponsmith", Some("weaponsmith"), Some(P::Weaponsmith)),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, (id, trade_set, poi))| Profession {
+            id,
+            trade_set,
+            render_index: i as u8,
+            held: poi,
+            acquirable: poi,
+        })
+        .collect::<Vec<_>>();
+        let mut by_poi = [None; 13];
+        for p in &entries {
+            if let Some(i) = p.acquirable.and_then(P::job_index) {
+                assert!(
+                    by_poi[i].replace(p.render_index).is_none(),
+                    "duplicate vanilla POI"
+                );
+            }
+        }
+        Self { entries, by_poi }
+    }
+    pub fn entries(&self) -> &[Profession] {
+        &self.entries
+    }
+    pub fn get(&self, index: u8) -> &Profession {
+        &self.entries[index as usize % self.entries.len()]
+    }
+    pub fn find(&self, name: &str) -> Option<u8> {
+        self.entries
+            .iter()
+            .find(|p| p.id == name)
+            .map(|p| p.render_index)
+    }
+    pub(super) fn by_poi(&self, poi: horizon_world::poi::PoiType) -> Option<u8> {
+        self.by_poi[poi.job_index()?]
+    }
+    pub(super) fn held(&self, index: u8, poi: horizon_world::poi::PoiType) -> bool {
+        self.entries
+            .get(usize::from(index))
+            .is_some_and(|p| p.held == Some(poi))
+    }
+    pub(super) fn acquirable(&self, index: u8, poi: horizon_world::poi::PoiType) -> bool {
+        if index == NONE {
+            poi.is_job()
+        } else {
+            self.entries
+                .get(usize::from(index))
+                .is_some_and(|p| p.acquirable == Some(poi))
+        }
+    }
+}
+
+/// The frozen vanilla-only generation shared by the existing context-free consumers.
+pub fn profession_table() -> &'static ProfessionTable {
+    static TABLE: std::sync::OnceLock<ProfessionTable> = std::sync::OnceLock::new();
+    TABLE.get_or_init(ProfessionTable::vanilla)
+}
+
+/// Existing u8 adapter; invalid values retain the historic wrapping behavior.
+pub fn profession(index: u8) -> &'static Profession {
+    profession_table().get(index)
+}
+
+/// A vanilla profession or an unresolved saved resource identity.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum ProfessionState {
+    #[default]
+    None,
+    Vanilla(u8),
+    Unresolved(String),
+}
+
+impl ProfessionState {
+    pub fn from_index(index: u8) -> Self {
+        if index == NONE {
+            Self::None
+        } else {
+            Self::Vanilla(index)
+        }
+    }
+
+    pub fn from_id(id: &str) -> Self {
+        let vanilla = id
+            .strip_prefix("minecraft:")
+            .or_else(|| (!id.contains(':')).then_some(id));
+        vanilla
+            .and_then(profession_index)
+            .map_or_else(|| Self::Unresolved(id.into()), Self::from_index)
+    }
+
+    pub fn index(&self) -> Option<u8> {
+        match self {
+            Self::None => Some(NONE),
+            Self::Vanilla(index) => Some(*index),
+            Self::Unresolved(_) => None,
+        }
+    }
+
+    pub fn id(&self) -> String {
+        match self {
+            Self::None => "minecraft:none".into(),
+            Self::Vanilla(index) => format!("minecraft:{}", profession(*index).id),
+            Self::Unresolved(id) => id.clone(),
+        }
+    }
+}
+
+/// Finds the existing storage index for a bare profession name.
+pub fn profession_index(name: &str) -> Option<u8> {
+    profession_table().find(name)
 }
 
 pub fn register(m: &mut Mob) {
-    if m.extra.variant3 == 0 {
-        m.extra.variant3 = 1;
+    if m.extra.villager_level == 0 {
+        m.extra.villager_level = 1;
     }
     // Villager's constructor: its brain does everything, it has no goals.
     m.ai.nav.can_open_doors = true;
@@ -295,6 +426,9 @@ pub struct Ext {
     pub hurt_seen: i32,
     /// A zombie villager's cure under way.
     pub cure: Option<super::zombie_villager::Cure>,
+    /// `CanContinueSleepingEvent.mayContinueSleeping`, set by the game before the tick
+    /// when a native mod may overwrite the bed check; empty means vanilla's.
+    pub may_continue_sleeping: Option<bool>,
     /// `ZombieVillager.villagerDataFinalized`: only a save with
     /// `VillagerDataFinalized` or `VillagerData` sets it.
     pub data_finalized: bool,
@@ -335,8 +469,8 @@ pub fn xp(m: &Mob) -> i32 {
 /// offers (`offers = null`), so the next `getOffers` rolls the new
 /// profession's trades.
 pub fn set_profession(m: &mut Mob, profession: u8) {
-    if m.extra.variant2 != profession {
-        m.extra.variant2 = profession;
+    if m.extra.profession.index() != Some(profession) {
+        m.extra.profession = ProfessionState::from_index(profession);
         if let Some(t) = m.extra.trade.as_mut() {
             t.offers.clear();
             t.unset = true;
@@ -344,8 +478,8 @@ pub fn set_profession(m: &mut Mob, profession: u8) {
     }
 }
 /// `VillagerProfession.workSound`.
-pub fn work_sound(profession: u8) -> Option<&'static str> {
-    Some(match super::render::PROFESSIONS[profession as usize % 15] {
+pub fn work_sound(index: u8) -> Option<&'static str> {
+    Some(match profession(index).id {
         "armorer" => "entity.villager.work_armorer",
         "butcher" => "entity.villager.work_butcher",
         "cartographer" => "entity.villager.work_cartographer",
@@ -393,7 +527,7 @@ pub fn gift_table(m: &Mob) -> String {
     if m.is_baby() {
         return "minecraft:gameplay/hero_of_the_village/baby_gift".into();
     }
-    let profession = super::render::PROFESSIONS[m.extra.variant2 as usize % 15];
+    let profession = profession(m.extra.profession.index().unwrap_or(0)).id;
     let name = match profession {
         "none" | "nitwit" => "unemployed",
         other => other,
@@ -426,14 +560,14 @@ pub fn farmer_items() -> &'static [&'static str] {
 }
 /// A villager's `requestedItems` by profession.
 pub fn requested_items(m: &Mob) -> &'static [&'static str] {
-    if super::render::PROFESSIONS[m.extra.variant2 as usize % 15] == "farmer" {
+    if profession(m.extra.profession.index().unwrap_or(0)).id == "farmer" {
         farmer_items()
     } else {
         &[]
     }
 }
 pub fn is_farmer(m: &Mob) -> bool {
-    super::render::PROFESSIONS[m.extra.variant2 as usize % 15] == "farmer"
+    profession(m.extra.profession.index().unwrap_or(0)).id == "farmer"
 }
 /// `SimpleContainer(8)`: stacks the villager carries.
 const INVENTORY_SLOTS: usize = 8;
@@ -470,7 +604,7 @@ pub(crate) fn add_to_container(
 /// at the type's limit for it; what does not fit is dropped.
 pub(crate) fn load_container(
     m: &Mob,
-    items: &[horizon_world::nbt::Tag],
+    items: &[horizon_core::nbt::Tag],
     slots: usize,
 ) -> Vec<ItemStack> {
     let mut inventory = Vec::new();
@@ -659,7 +793,7 @@ pub struct Meeting {
 /// `Villager.gossip` (at most once in 1200 ticks for both), then surplus
 /// food and wanted wares taken out of `a`'s inventory.
 pub fn meet(
-    mobs: &mut [Mob],
+    mobs: &mut crate::join_seq::JoinList<Mob>,
     a: usize,
     b: usize,
     now: i64,
@@ -856,8 +990,8 @@ pub fn can_breed(m: &Mob) -> bool {
 
 /// The saved fields (`FoodLevel`, `Gossips`, `LastGossipDecay`, `Inventory`,
 /// `LivingEntity`'s `sleeping_pos` and the sleep and golem memories).
-pub fn write_nbt(m: &Mob, map: &mut horizon_world::nbt::Compound) {
-    use horizon_world::nbt::Tag;
+pub fn write_nbt(m: &Mob, map: &mut horizon_core::nbt::Compound) {
+    use horizon_core::nbt::Tag;
     if let Some(p) = sleeping_pos(m) {
         map.insert("sleeping_pos".into(), Tag::IntArray(p.to_vec()));
     } else {
@@ -877,9 +1011,9 @@ pub fn write_nbt(m: &Mob, map: &mut horizon_world::nbt::Compound) {
     );
 }
 /// The memories of `Brain.memories` the villager keeps besides positions.
-pub fn write_memories(m: &Mob, memories: &mut Vec<(&'static str, horizon_world::nbt::Tag)>) {
+pub fn write_memories(m: &Mob, memories: &mut Vec<(&'static str, horizon_core::nbt::Tag)>) {
     use super::villager_brain::{Memories, NEVER, Slot};
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
     fn push<T>(
         out: &mut Vec<(&'static str, Tag)>,
         key: &'static str,
@@ -944,8 +1078,8 @@ pub fn write_memories(m: &Mob, memories: &mut Vec<(&'static str, horizon_world::
     });
 }
 
-pub fn read_nbt(m: &mut Mob, tag: &horizon_world::nbt::Tag) {
-    use horizon_world::nbt::Tag;
+pub fn read_nbt(m: &mut Mob, tag: &horizon_core::nbt::Tag) {
+    use horizon_core::nbt::Tag;
     fn int(t: Option<&Tag>) -> Option<i64> {
         match t {
             Some(Tag::Int(v)) => Some(i64::from(*v)),
@@ -1036,6 +1170,65 @@ pub fn read_nbt(m: &mut Mob, tag: &horizon_world::nbt::Tag) {
 mod tests {
     use super::*;
 
+    // 26.3 VillagerProfession.bootstrap, PoiTypes.bootstrap and TradeSets.
+    #[test]
+    fn vanilla_profession_table_and_job_sites() {
+        let cases = [
+            ("none", &[][..]),
+            ("armorer", &["blast_furnace"][..]),
+            ("butcher", &["smoker"][..]),
+            ("cartographer", &["cartography_table"][..]),
+            ("cleric", &["brewing_stand"][..]),
+            ("farmer", &["composter"][..]),
+            ("fisherman", &["barrel"][..]),
+            ("fletcher", &["fletching_table"][..]),
+            (
+                "leatherworker",
+                &[
+                    "cauldron",
+                    "water_cauldron",
+                    "lava_cauldron",
+                    "powder_snow_cauldron",
+                ][..],
+            ),
+            ("librarian", &["lectern"][..]),
+            ("mason", &["stonecutter"][..]),
+            ("nitwit", &[][..]),
+            ("shepherd", &["loom"][..]),
+            ("toolsmith", &["smithing_table"][..]),
+            ("weaponsmith", &["grindstone"][..]),
+        ];
+        for (index, (name, sites)) in cases.iter().enumerate() {
+            let index = index as u8;
+            assert_eq!(profession(index).id, *name);
+            assert_eq!(profession_index(name), Some(index));
+            assert_eq!(profession(index).render_index, index);
+            for site in *sites {
+                let state = horizon_world::chunk::BlockState {
+                    name: format!("minecraft:{site}"),
+                    properties: Default::default(),
+                };
+                let poi = horizon_world::poi::saved_poi(&state).unwrap();
+                assert_eq!(poi.id(), format!("minecraft:{name}"));
+                assert_eq!(profession_table().by_poi(poi), Some(index));
+                assert!(profession_table().held(index, poi));
+                assert!(profession_table().acquirable(index, poi));
+            }
+            for level in 1..=5 {
+                assert_eq!(
+                    crate::merchant::Trades::set_for(name, level),
+                    format!("minecraft:{name}/level_{level}")
+                );
+            }
+        }
+        assert_eq!(profession(255).id, "none");
+        assert_eq!(profession_index("other:farmer"), None);
+        assert_eq!(
+            crate::merchant::Trades::set_for("other:farmer", 2),
+            "minecraft:other:farmer/level_2"
+        );
+    }
+
     /// Added after the H138 baseline: `add_item` delegates to
     /// `add_to_container` with the eight villager slots, with the same
     /// inventories and remainders in the same order.
@@ -1123,7 +1316,7 @@ mod tests {
 
     #[test]
     fn villager_memory_nbt_shape() {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         let m = memory_fixture();
         let mut entries = Vec::new();
         write_memories(&m, &mut entries);
@@ -1160,7 +1353,7 @@ mod tests {
 
     #[test]
     fn villager_memory_round_trip() {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         let m = memory_fixture();
         let mut entries = Vec::new();
         write_memories(&m, &mut entries);
@@ -1284,22 +1477,22 @@ mod tests {
         let mut m = villager();
         m.extra.ints[1] = bed_facing_code(Some("north"));
         ext_mut(&mut m).sleeping_pos = Some([3, 64, -7]);
-        let mut map = horizon_world::nbt::Compound::new();
+        let mut map = horizon_core::nbt::Compound::new();
         write_nbt(&m, &mut map);
         let mut loaded = villager();
-        read_nbt(&mut loaded, &horizon_world::nbt::Tag::Compound(map));
+        read_nbt(&mut loaded, &horizon_core::nbt::Tag::Compound(map));
         assert!(sleeping(&loaded));
         assert_eq!(sleeping_pos(&loaded), Some([3, 64, -7]));
         let mut awake = villager();
-        let mut map = horizon_world::nbt::Compound::new();
+        let mut map = horizon_core::nbt::Compound::new();
         write_nbt(&awake, &mut map);
         assert!(!map.contains_key(&"sleeping_pos".into()));
-        read_nbt(&mut awake, &horizon_world::nbt::Tag::Compound(map));
+        read_nbt(&mut awake, &horizon_core::nbt::Tag::Compound(map));
         assert!(!sleeping(&awake));
     }
     #[test]
     fn saved_sleeping_position_follows_live_state_over_stale_input() {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         for asleep in [false, true] {
             let mut m = villager();
             if asleep {
@@ -1308,7 +1501,7 @@ mod tests {
             }
             let expected = asleep.then_some(Tag::IntArray(vec![3, 64, -7]));
             for stale in [false, true] {
-                let mut map = horizon_world::nbt::Compound::new();
+                let mut map = horizon_core::nbt::Compound::new();
                 map.insert("h232_control".into(), Tag::Int(42));
                 if stale {
                     map.insert("sleeping_pos".into(), Tag::IntArray(vec![9, 90, 9]));
@@ -1353,7 +1546,7 @@ mod tests {
         let t = m.extra.trade.as_ref().unwrap();
         assert!(t.offers.is_empty());
         assert!(t.unset);
-        assert_eq!(m.extra.variant2, 2);
+        assert_eq!(m.extra.profession.index().unwrap_or(0), 2);
     }
     /// The reported sequence: a villager works at a bench, the bench is
     /// destroyed (its job site is gone, so `ResetProfession` makes it
@@ -1370,7 +1563,7 @@ mod tests {
         let mut m = villager();
         // The composter's job: the villager is a farmer.
         set_profession(&mut m, 5);
-        assert_eq!(m.extra.variant2, 5);
+        assert_eq!(m.extra.profession.index().unwrap_or(0), 5);
         // Its trades were made, so the offers are there.
         let trade = m.extra.trade.get_or_insert_default();
         trade.unset = false;
@@ -1400,7 +1593,7 @@ mod tests {
         let t = m.extra.trade.as_ref().unwrap();
         assert!(t.offers.is_empty());
         assert!(t.unset);
-        assert_eq!(m.extra.variant2, 13);
+        assert_eq!(m.extra.profession.index().unwrap_or(0), 13);
     }
 
     fn stack(item: &str, count: u32) -> ItemStack {

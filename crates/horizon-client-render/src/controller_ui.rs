@@ -574,12 +574,15 @@ mod tests {
         ui.key(s, key, None, false, SIZE)
     }
     fn atlas() -> HudAtlas {
-        HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap()
+        HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+            "/nonexistent/horizon-test-assets".into(),
+        ))
+        .unwrap()
     }
     /// Draw a frame, as the options screen does with what it waits on, and the frame's widgets.
     fn draw(ui: &mut Ui, s: &Settings, waiting: Option<Capture>) -> HudBatch {
         let atlas = atlas();
-        let mut batch = HudBatch::new(WINDOW);
+        let mut batch = HudBatch::scratch(WINDOW);
         assert_eq!((batch.width, batch.height), SIZE);
         ui.draw(s, &mut batch, &atlas, (0.0, 0.0), false, waiting);
         crate::widgets::end_frame(crate::widgets::generation() + 1);
@@ -588,7 +591,7 @@ mod tests {
     /// What the strip says now.
     fn strip(ui: &mut Ui, s: &Settings, waiting: Option<Capture>, over: Item) -> Option<String> {
         let atlas = atlas();
-        let mut batch = HudBatch::new(WINDOW);
+        let mut batch = HudBatch::scratch(WINDOW);
         assert_eq!((batch.width, batch.height), SIZE);
         let at = ui.point_at(s, SIZE, over);
         ui.draw(s, &mut batch, &atlas, at, false, waiting);

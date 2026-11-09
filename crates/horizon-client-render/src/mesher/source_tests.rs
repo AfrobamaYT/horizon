@@ -76,7 +76,7 @@ fn fixture() -> (Scratch, Assets, RenderAssets, MeshTables, Biomes) {
     )]);
     let mut sprites = crate::sprites::Sprites::default();
     let catalog = crate::models::StateModels::from_facts(
-        &path,
+        &horizon_assets::resource_source::ResourceSource::directory(path.clone()),
         registry,
         &["fixture:signal"],
         &mut sprites,
@@ -164,6 +164,8 @@ fn fixture() -> (Scratch, Assets, RenderAssets, MeshTables, Biomes) {
         animated_layers: vec![false],
         colormaps: Vec::new(),
         water_colormap: None,
+        mod_fluids: vec![],
+        mod_tints: Default::default(),
     };
     let maps = path.join("assets/minecraft/textures/colormap");
     std::fs::create_dir_all(&maps).unwrap();
@@ -174,7 +176,10 @@ fn fixture() -> (Scratch, Assets, RenderAssets, MeshTables, Biomes) {
         "data/minecraft/worldgen/biome/plains.json",
         json!({"temperature":0.5,"downfall":0.5,"effects":{"water_color":4159204}}),
     );
-    let biomes = Biomes::load(&path).unwrap();
+    let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+        path.clone(),
+    ))
+    .unwrap();
     (Scratch(path), assets, render, tables, biomes)
 }
 
@@ -190,6 +195,7 @@ fn terrain_source_cpu_multipart_and_waterlogged_faces_keep_their_owner() {
         [None, None, None],
     ];
     let mut mesher = Mesher {
+        hidden_states: &[],
         nether_shading: false,
         shader_pack_lighting: false,
         separate_ao: false,

@@ -9,7 +9,10 @@ fn biomes() -> Biomes {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../../.local/horizon-client/26.3")
         });
-    Biomes::load(&root).unwrap()
+    Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))
+    .unwrap()
 }
 
 /// A chunk whose every quart cell holds `biome`.
@@ -100,8 +103,7 @@ fn one_biome_shortcut_blends_like_the_full_square() {
                                     assert_eq!(
                                         fast.get(resolver, x, y, z),
                                         full.get(resolver, x, y, z),
-                                        "{name} resolver {} r{radius} at {x} {y} {z} of y{base_y}",
-                                        resolver as usize
+                                        "{name} resolver {resolver:?} r{radius} at {x} {y} {z} of y{base_y}"
                                     );
                                 }
                             }
@@ -166,7 +168,11 @@ fn a_polytone_colormap_tints_by_biome_and_keeps_the_biome_colour_where_transpare
         ),
     ]);
     let colormaps = vec![Arc::new(
-        crate::environment::Colormap::load(&root, "mypack:water").unwrap(),
+        crate::environment::Colormap::load(
+            &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
+            "mypack:water",
+        )
+        .unwrap(),
     )];
     for (biome, expected) in [(1, 0xFF_0000), (0, 0x3F_76E4)] {
         let chunks: Vec<Vec<Chunk>> = (0..3)
@@ -213,7 +219,11 @@ fn a_biome_colormap_blends_over_a_biome_edge_as_the_vanilla_water_tint_does() {
                 json.into_bytes(),
             ),
         ]);
-        let map = crate::environment::Colormap::load(&root, "mypack:water").unwrap();
+        let map = crate::environment::Colormap::load(
+            &crate::resource_source::ResourceSource::directory(root.clone()),
+            "mypack:water",
+        )
+        .unwrap();
         std::fs::remove_dir_all(root).unwrap();
         vec![Arc::new(map)]
     };

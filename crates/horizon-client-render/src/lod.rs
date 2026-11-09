@@ -2201,6 +2201,7 @@ impl Lod {
             .ready
             .insert(fine, Arc::new(columns.to_vec()))
             .is_some();
+        self.sync_sample(fine);
         self.refresh_ready(fine, existed);
     }
     fn apply_detail(&mut self, (cx, cz): (i32, i32), columns: &ReducedColumns) {
@@ -4278,7 +4279,8 @@ mod tests {
             std::env::var_os("HORIZON_TEST_RESOURCES").expect("HORIZON_TEST_RESOURCES"),
         );
         let assets = Arc::new(Assets::load(&root)?);
-        let render = Arc::new(assets.reload(&root)?);
+        let resource_root = crate::resource_source::ResourceRoot::directory(root.clone());
+        let render = Arc::new(assets.reload(&resource_root)?);
         let facts = BlockFacts::load(&root, assets.registry)?;
         let context = WorkerContext {
             light: Arc::new(LightTables::load(&root, assets.registry, &facts)?),
@@ -4287,10 +4289,12 @@ mod tests {
                 &render,
                 &facts,
                 crate::models::load_visibility(&root, assets.registry)?,
+                None,
             )?),
             assets: assets.clone(),
             render,
-            biomes: Arc::new(Biomes::load(&root)?),
+            biomes: Arc::new(Biomes::load(&resource_root)?),
+            hidden_states: Arc::from([]),
         };
         let kinds = state_kinds(&facts);
         let mut chunk = Chunk::empty(0, 0);
@@ -4348,14 +4352,19 @@ mod tests {
             std::env::var_os("HORIZON_TEST_RESOURCES").expect("HORIZON_TEST_RESOURCES"),
         );
         let assets = Arc::new(Assets::load(&root)?);
-        let render = Arc::new(assets.reload(&root)?);
+        let render = Arc::new(assets.reload(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        )?);
         let facts = BlockFacts::load(&root, assets.registry)?;
-        let biomes = Arc::new(Biomes::load(&root)?);
+        let biomes = Arc::new(Biomes::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        )?);
         let tables = Arc::new(MeshTables::new(
             &assets,
             &render,
             &facts,
             crate::models::load_visibility(&root, assets.registry)?,
+            None,
         )?);
         let context = Arc::new(WorkerContext {
             light: Arc::new(LightTables::load(&root, assets.registry, &facts)?),
@@ -4363,6 +4372,7 @@ mod tests {
             assets: assets.clone(),
             render,
             biomes: biomes.clone(),
+            hidden_states: Arc::from([]),
         });
         let source = Arc::new(TestTerrain::new(assets.registry, &biomes)?);
         let mut lod = Lod::new(source, context);
@@ -4702,6 +4712,7 @@ mod tests {
         lod.ready
             .insert(parent, Arc::new(vec![Column::default(); 256]));
         lod.active = [parent].into_iter().collect();
+        lod.sync_sample(parent);
         lod.sample_jobs = SAMPLE_JOBS;
         lod.pending = (0..SAMPLE_JOBS - 1)
             .map(|i| TileKey {
@@ -5124,6 +5135,25 @@ mod tests {
         lod.replan([-10, 0], 0, 1, 0, None);
         assert!(lod.plan.nodes.contains(&a) && !lod.plan.nodes.contains(&b));
         assert!(lod.dirty.contains_key(&a), "its east wall is drawn now");
+    }
+
+    #[test]
+    fn observed_fine_columns_replace_active_mesh_samples() {
+        let mut lod = Lod::scheduler_for_test();
+        let key = TileKey {
+            x: 0,
+            z: 0,
+            level: 0,
+        };
+        lod.plan.nodes.insert(key);
+        lod.finish_sample(key, samples(70));
+        let previous = lod.mesh_samples.clone();
+
+        let observed: [Column; CELLS * CELLS] = samples(80).try_into().unwrap();
+        lod.apply_fine((0, 0), &observed);
+
+        assert_eq!(previous.get(&key).unwrap()[0].spans[0].max, 70);
+        assert_eq!(lod.mesh_samples.get(&key).unwrap()[0].spans[0].max, 80);
     }
 
     #[test]
@@ -5665,14 +5695,19 @@ mod tests {
             std::env::var_os("HORIZON_TEST_RESOURCES").expect("HORIZON_TEST_RESOURCES"),
         );
         let assets = Arc::new(Assets::load(&root)?);
-        let render = Arc::new(assets.reload(&root)?);
+        let render = Arc::new(assets.reload(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        )?);
         let facts = BlockFacts::load(&root, assets.registry)?;
-        let biomes = Arc::new(Biomes::load(&root)?);
+        let biomes = Arc::new(Biomes::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        )?);
         let tables = Arc::new(MeshTables::new(
             &assets,
             &render,
             &facts,
             crate::models::load_visibility(&root, assets.registry)?,
+            None,
         )?);
         let context = Arc::new(WorkerContext {
             light: Arc::new(LightTables::load(&root, assets.registry, &facts)?),
@@ -5680,6 +5715,7 @@ mod tests {
             assets,
             render,
             biomes,
+            hidden_states: Arc::from([]),
         });
         Ok((context, facts))
     }

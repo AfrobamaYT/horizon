@@ -38,7 +38,7 @@ fn opening_the_graphics_screen_keeps_the_offer_and_report() {
         size: (427.0, 240.0),
         ..Default::default()
     };
-    let batch = || HudBatch::new([427, 240]);
+    let batch = || HudBatch::scratch([427, 240]);
     ui.draw(
         &s,
         auto_window(Some(true)),
@@ -66,7 +66,7 @@ fn a_changed_report_shows_without_an_apply() {
         size: (427.0, 240.0),
         ..Default::default()
     };
-    let batch = || HudBatch::new([427, 240]);
+    let batch = || HudBatch::scratch([427, 240]);
     ui.show(Page::Graphics);
     ui.draw(
         &s,

@@ -1,5 +1,12 @@
 # Third-party notices
 
+## horizon-mixins
+
+The raw injection schema in `crates/horizon-mod-package/src/manifest.rs` is adapted from
+[horizon-mixins](https://github.com/horizon-rust/horizon-mixins/tree/ddd9700b21997c95d95ac6ee5ecafe3830cf622a),
+Copyright (c) 2026 levzzz, under the MIT license
+(`crates/horizon-mod-package/HORIZON_MIXINS_LICENSE`).
+
 ## Code removed for its license
 
 Horizon once shipped three pieces of code under MIT that came from projects whose licenses don't allow that. All
@@ -49,7 +56,9 @@ developers, with upstream fixes applied
 [gfx-rs/wgpu#10714](https://github.com/gfx-rs/wgpu/pull/10714)). Its GL backend also reports
 the context's sampled textures and samplers per shader stage (usually 32 on desktop GL,
 where WebGL2's minimum 16 was reported before), so a pipeline layout the driver accepts is
-not refused. It is licensed under MIT or Apache-2.0; both licenses are in that folder
+not refused. Its GL backend copies depth and stencil textures with a framebuffer blit, where
+`glCopyTexSubImage` read only colour and left the copy empty. It is licensed under MIT or
+Apache-2.0; both licenses are in that folder
 (`LICENSE.MIT`, `LICENSE.APACHE`).
 
 ## naga

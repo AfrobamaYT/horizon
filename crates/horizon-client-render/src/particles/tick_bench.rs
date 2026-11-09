@@ -5,6 +5,7 @@
 //! spawns and the engine tick apart, once the engine holds as many particles as it will.
 use super::*;
 use crate::{blocks::BlockFacts, chunk::Chunk, collisions, world::World};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -123,7 +124,13 @@ fn particle_tick_cost() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(2.0);
     for (name, types, rockets) in cases {
-        let mut engine = ParticleEngine::new(Path::new(""), &HashMap::new(), &HashSet::new());
+        let mut engine = ParticleEngine::new(
+            &horizon_assets::resource_source::ResourceSource::directory(
+                Path::new("").to_path_buf(),
+            ),
+            &HashMap::new(),
+            &HashSet::new(),
+        );
         engine.camera = [0.5, 298.0, 0.5];
         let mut rng = Lcg(1234);
         for _ in 0..600 {

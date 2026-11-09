@@ -1,11 +1,16 @@
 //! StructureTemplate: NBT loading, palettes, transforms and bounding boxes.
-use super::{BoundingBox, Mirror, Rotation, StateTransforms};
-use crate::{
-    chunk::BlockState,
-    nbt::{Compound, Tag},
-    registry::{BlockRegistry, BlockStateId},
-};
 use std::sync::{Arc, OnceLock};
+use {
+    super::{Mirror, Rotation, StateTransforms},
+    horizon_core::bounding_box::BoundingBox,
+};
+use {
+    crate::{
+        chunk::BlockState,
+        registry::{BlockRegistry, BlockStateId},
+    },
+    horizon_core::nbt::{Compound, Tag},
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct BlockInfo {
@@ -68,7 +73,7 @@ fn string(tag: Option<&Tag>) -> Option<String> {
     }
 }
 fn get<'a>(compound: &'a Compound, key: &str) -> Option<&'a Tag> {
-    compound.get(&crate::nbt::JavaString::from(key))
+    compound.get(&horizon_core::nbt::JavaString::from(key))
 }
 /// NbtUtils.readBlockState: unknown blocks read as air; missing or invalid
 /// properties keep the block's defaults.
@@ -510,11 +515,12 @@ mod save_tests {
             &[],
             DATA_VERSION,
         );
-        let named = crate::nbt::NamedTag {
+        let named = horizon_core::nbt::NamedTag {
             name: "".into(),
             tag,
         };
-        let raw = crate::nbt::write_named(&named, crate::nbt::Limits::templates()).unwrap();
+        let raw =
+            horizon_core::nbt::write_named(&named, horizon_core::nbt::Limits::templates()).unwrap();
         let file = crate::compression::Compression::Gzip.encode(&raw).unwrap();
         let resources = super::super::StructureResources::new(
             registry,

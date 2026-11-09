@@ -87,6 +87,19 @@ pub(super) fn capture(compiler: &Compiler<'_>, input: impl BufRead, mut log: imp
     output
 }
 
+/// Both rustc's prebuilt route and Cargo's source route preserve the rendered error.
+pub(super) fn with_internals_hint(error: String) -> String {
+    if error.contains("internals")
+        && ["E0432", "E0433", "E0603"]
+            .iter()
+            .any(|code| error.contains(code))
+    {
+        format!("{error}\n{}", crate::i18n::tr("Game internals must be declared: run cargo horizon-mod internals sync in the mod's folder, then build again."))
+    } else {
+        error
+    }
+}
+
 /// The mod whose own package `manifest` is (`native-api/<id>/`, `native-crates/<id>/<crate>/` in
 /// the stage), as `id version`; none for Horizon's crates.
 fn package_owner(compiler: &Compiler<'_>, manifest: &Value) -> Option<String> {
@@ -286,6 +299,17 @@ mod tests {
     }
 
     #[test]
+    fn undeclared_internals_on_both_compiler_routes_point_to_sync() {
+        for code in ["E0432", "E0433", "E0603"] {
+            let error = format!("error[{code}]: cannot import internals::game::Missing");
+            assert!(with_internals_hint(error.clone()).starts_with(&error));
+            assert!(with_internals_hint(error).contains("cargo horizon-mod internals sync"));
+        }
+        let unrelated = "error[E0432]: cannot import another::Missing";
+        assert_eq!(with_internals_hint(unrelated.into()), unrelated);
+    }
+
+    #[test]
     fn a_real_compiler_error_in_a_helper_names_its_mod_and_preserves_the_error() {
         let dir = fixture("compiler-culprit");
         let output = Command::new(env!("CARGO"))
@@ -318,14 +342,14 @@ mod tests {
 
         // The actual process reader and attempt logger keep both the owner and rustc's message.
         {
-            let _guard = super::super::tests::LOG_TEST.lock().unwrap();
+            let _guard = super::super::TEST_STATE.lock().unwrap();
             let mut command = Command::new(env!("CARGO"));
             command
                 .args(["check", "--offline", "--message-format=json"])
                 .arg("--manifest-path")
                 .arg(dir.join("Cargo.toml"))
                 .env("CARGO_TARGET_DIR", dir.join("target"));
-            let error = super::super::logged(|| {
+            let error = super::super::logged(|_| {
                 super::super::run_checked(
                     command,
                     "Compiling the fixture",
@@ -475,7 +499,7 @@ mod tests {
 
     /// A trait mod pinned to a fork's commit (its `[api]` package uses hooks the base Nightly
     /// lacks): the error is in the mod's own package, so the mod is named and left out, and the
-    /// build can move to the commit it pins. Horizon's own crates name no one.
+    /// build retries without that mod. Horizon's own crates name no one.
     #[test]
     fn an_error_in_a_mods_own_package_names_the_mod() {
         let dir = super::super::tests::dir("compiler-package-owner");

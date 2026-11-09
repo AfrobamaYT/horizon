@@ -5,7 +5,7 @@ use horizon_client::{
     mobs::{Anim, Brain, Flags, Mob, MobType, Part, Species, sheep_dye},
 };
 use horizon_core::geometry::Vec3;
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 use std::{io::Write, sync::Arc};
 
 fn kind() -> Arc<MobType> {

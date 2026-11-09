@@ -277,8 +277,6 @@ pub const ACTIONS: &[(&str, Option<Button>)] = &[
     ("key.screenshot", None),
     ("key.toggleGui", None),
     ("key.smoothCamera", None),
-    // Horizon's emote wheel: no button is free by default; the stick's cursor picks.
-    ("key.emote", None),
     ("key.fullscreen", None),
     ("key.socialInteractions", None),
     ("key.quickActions", None),
@@ -1850,11 +1848,11 @@ bind_key.hotbar.2:north
         assert_eq!(s.actions_of(Button::North), ["key.inventory"]);
         assert_eq!(s.actions_of(Button::RightBumper), [HOTBAR_NEXT]);
         assert!(s.actions_of(Button::Start).is_empty());
-        // Every default action names a key mapping or a pad action.
+        // Every default action names a vanilla mapping or a pad action.
         for (action, _) in ACTIONS {
             assert!(
                 action.starts_with("pad.")
-                    || crate::keybinds::all_mappings().any(|m| m.0 == *action),
+                    || crate::keybinds::MAPPINGS.iter().any(|m| m.0 == *action),
                 "{action}"
             );
         }

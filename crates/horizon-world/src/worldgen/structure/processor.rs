@@ -1,25 +1,30 @@
 //! Structure processors (`worldgen/processor_list`) and template placement.
-use super::{BlockInfo, BoundingBox, Mirror, Rotation, StructureResources, StructureTemplate};
-use crate::{
-    fluid::FluidKind,
-    heightmap::HeightmapType,
-    nbt::{Compound, JavaString, Tag},
-    registry::BlockStateId,
-    worldgen::{
-        DecodeError,
-        block_feature::FeatureBlockBindings,
-        feature::FeatureWorld,
-        placement::{PlacementContext, PlacementQueryError},
-        rule_test::RuleTest,
-        value_provider::IntProvider,
-    },
-};
 use horizon_core::{
     position::BlockPos,
     random::{LegacyRandom, PositionalRandom, RandomSource, position_seed},
 };
 use serde_json::Value;
 use std::{collections::BTreeSet, sync::Arc};
+use {
+    super::{BlockInfo, Mirror, Rotation, StructureResources, StructureTemplate},
+    horizon_core::bounding_box::BoundingBox,
+};
+use {
+    crate::{
+        fluid::FluidKind,
+        heightmap::HeightmapType,
+        registry::BlockStateId,
+        worldgen::{
+            DecodeError,
+            block_feature::FeatureBlockBindings,
+            feature::FeatureWorld,
+            placement::{PlacementContext, PlacementQueryError},
+            rule_test::RuleTest,
+            value_provider::IntProvider,
+        },
+    },
+    horizon_core::nbt::{Compound, JavaString, Tag},
+};
 
 mod litho;
 mod pillars;

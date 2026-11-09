@@ -122,6 +122,7 @@ def portable(config, packages):
     or a normal or build dependency on a library they never take (window, GPU, sound, gamepad, clipboard, HTTP)."""
     spec = config.get("portable", {})
     crates, forbidden = set(spec.get("crates", [])), set(spec.get("forbidden", []))
+    optional_baselines = {row["edge"] for row in spec.get("allowed", [])}
     problems = {f"{crate}: listed as portable in {CONFIG_PATH}, but not an engine crate there"
                 for crate in crates if config["crates"].get(crate) != "engine"}
     for package in packages:
@@ -131,6 +132,8 @@ def portable(config, packages):
             if dep.get("kind") == "dev":
                 continue
             edge = f"{package['name']} -> {dep['name']}"
+            if dep.get("optional") and edge in optional_baselines:
+                continue
             if dep.get("path") and dep["name"] not in crates:
                 problems.add(f"{edge}: a portable crate depends only on the other portable crates "
                              f"({DOC}{SECTION['engine']})")

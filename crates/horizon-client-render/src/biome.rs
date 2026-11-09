@@ -1,12 +1,13 @@
 //! Biome colours from the pinned biome definitions and colormaps
 //! (`Biome.getGrassColor`/`getFoliageColor`/..., `BlockTintSources`).
 use crate::Result;
+use horizon_assets::resource_source::{ResourceRoot, ResourceSource};
 use horizon_client_core::particle_type::ParticleType;
 use horizon_core::{noise::SimplexNoise, position::BlockPos, random::LegacyRandom};
+pub use mod_api::world::biome::{BiomeColors, SpawnEntry};
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashMap},
-    path::Path,
     sync::Arc,
 };
 
@@ -15,15 +16,6 @@ pub enum GrassModifier {
     None,
     DarkForest,
     Swamp,
-}
-#[derive(Clone, Debug)]
-pub struct SpawnEntry {
-    pub entity: String,
-    pub weight: u32,
-    pub min: u32,
-    pub max: u32,
-    /// A `ConstantInt` count (sampling draws nothing).
-    pub constant: bool,
 }
 /// A `natural_mob_spawns` / `spawn_overrides` entry list.
 pub fn parse_entries(list: &Value) -> Vec<SpawnEntry> {
@@ -189,11 +181,9 @@ fn color(v: &Value) -> Option<u32> {
         _ => None,
     }
 }
-fn colormap(root: &Path, name: &str) -> Result<Vec<u32>> {
-    let path = root.join(format!("assets/minecraft/textures/colormap/{name}.png"));
-    let mut decoder = png::Decoder::new(std::io::Cursor::new(horizon_core::prepared_files::read(
-        &path,
-    )?));
+fn colormap(root: &ResourceSource, name: &str) -> Result<Vec<u32>> {
+    let path = format!("assets/minecraft/textures/colormap/{name}.png");
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(root.read(&path)?));
     decoder.ignore_checksums(true);
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = decoder.read_info()?;
@@ -298,16 +288,18 @@ pub fn identifier_order(a: &str, b: &str) -> std::cmp::Ordering {
     split(a).cmp(&split(b))
 }
 impl Biomes {
-    pub fn load(root: &Path) -> Result<Self> {
+    pub fn load(root: &ResourceRoot) -> Result<Self> {
         let maps = Colormaps {
-            grass: colormap(root, "grass")?,
-            foliage: colormap(root, "foliage")?,
-            dry: colormap(root, "dry_foliage")?,
+            grass: colormap(root.source(), "grass")?,
+            foliage: colormap(root.source(), "foliage")?,
+            dry: colormap(root.source(), "dry_foliage")?,
         };
         let mut list = Vec::new();
         // The folder's own files (not its subfolders'), by file name: through `json_folder`,
         // from the prepared data file when there is one.
-        let folder = horizon_world::json_folder::read(&root.join("data/minecraft/worldgen/biome"))?;
+        let folder = horizon_world::json_folder::read(
+            &root.prepared().join("data/minecraft/worldgen/biome"),
+        )?;
         let mut files: Vec<_> = folder
             .files
             .iter()
@@ -426,18 +418,6 @@ impl Biomes {
             }
         }
     }
-}
-
-/// A biome's colours as a mod may change them (`native_biome_colors`), each
-/// 0xRRGGBB: what tints grass (before the dark forest's modifier; the swamp's
-/// noise colours replace it), leaves and vines, dry foliage (leaf litter) and
-/// water.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct BiomeColors {
-    pub grass: u32,
-    pub foliage: u32,
-    pub dry_foliage: u32,
-    pub water: u32,
 }
 
 impl Biomes {
@@ -794,5 +774,31 @@ mod blend_tests {
             last = v;
         }
         assert!(at(-2.0) > 0.0 && at(-2.0) < 0.5);
+    }
+}
+
+#[cfg(test)]
+mod source_tests {
+    use super::*;
+    #[test]
+    fn colormap_pixels_read_from_resolved_resources_without_files() {
+        use horizon_assets::resource_source::Resource;
+        let mut png = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut png, 1, 1);
+            encoder.set_color(png::ColorType::Rgb);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(&[12, 34, 56])
+                .unwrap();
+        }
+        let source = ResourceSource::indexed(std::collections::BTreeMap::from([(
+            "assets/minecraft/textures/colormap/grass.png".into(),
+            Resource::bytes(png),
+        )]));
+        assert_eq!(colormap(&source, "grass").unwrap(), [0x0c2238]);
+        assert!(colormap(&source, "missing").is_err());
     }
 }

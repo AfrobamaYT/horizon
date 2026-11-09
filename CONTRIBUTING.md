@@ -70,7 +70,7 @@ another project's source may also be read and used, **only when that project's l
 - **Java's own library is GPL too.** OpenJDK's source (`java.lang.Math`, `StrictMath`, `FdLibm`, `HashMap`, the
   sorts, `Double.toString`, HotSpot's intrinsics...) is GPL-2.0, so it is off limits like the rest. Reproduce Java's
   behaviour from its API documentation (the Javadoc) and from what a JVM returns, or from a permissive original such
-  as Sun's fdlibm C sources (see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)); see #6741.
+  as Sun's fdlibm C sources (see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)); see horizon-rust/horizon#6741.
 - **Check the license yourself.** Read the LICENSE file at the commit you use and the header of each file you take:
   some repositories mix licenses, and a file under another license is off limits. A license that changed: the one at
   your commit counts. In doubt, don't: ask in #contributors first.
@@ -93,7 +93,7 @@ names its sources: the sections of that specification, the documentation pages a
   that downloads NVIDIA's files itself, on the player's machine. No NVIDIA binaries, headers or SDK files in the
   repository.
 - **The JVM bridge** (running Java mods) is only ever a separate, optional download, never installed or on by
-  default. The game may offer to turn it on when it finds a Java mod; the player decides.
+  default. The game may offer to turn it on when it finds a Java mod; the player decides. Promotion out of beta requires MSPT and RAM benchmarks against Java with the same mods ([horizon-rust/horizon#13914](https://github.com/horizon-rust/horizon/issues/13914)).
 
 ## Before asking for review
 
@@ -113,6 +113,10 @@ including examples. The dependency scope includes optional, platform, build and 
 library, binary, integration and doc tests without building unrelated example executables. Shared Cargo
 configuration and toolchain changes select the whole workspace; CI also keeps its workspace-wide checks.
 
+### Translations
+
+Most translations are machine-written and remain unreviewed until a speaker checks them. See [docs/translations.md](docs/translations.md). Never mark machine-written text as reviewed.
+
 ## Claim before you start
 
 Work is tracked in GitHub issues, and an issue that is assigned is taken (so is one with the `in progress` label:
@@ -122,17 +126,15 @@ enough), then claim it. `/unclaim` gives it back. Issues labelled `tracker`, `pr
 claimed whole: claim one of the issues a tracker lists, or open one for the part you take.
 
 A claim with no open pull request linking the issue (`Fixes #123` in the description, or a draft) is released after
-5 days, with a comment: open a draft early. You can hold 8 open issues at a time, not counting the ones your
-pull requests already fix. Agents claim the same way.
+5 days, with a comment: open a draft early. Agents claim the same way.
 
 When your pull request changes the same functions as another open one, or closes the same issue, a bot comment names
 it (edited on every push, never repeated): talk to its author in the thread before you both finish the same work.
 
 ## Pull requests
 
-- **Small.** One change per pull request, under about 500 lines of code where you can; split bigger work into
-  pieces that each make sense alone. Small pull requests get reviewed and merged the same day. Bigger than that:
-  [large pull requests](#large-pull-requests).
+- **One change.** One concern per pull request (a hook, a handle, a feature or a fix), at whatever size it
+  needs. There's no line limit; split by concern, never by size, and don't bundle unrelated changes.
 - **Fill in the template**: what and why, the vanilla reference, the pr_ready block, screenshots for anything you
   can see.
 - **Tick "Allow edits by maintainers".** When something small is left (a lint, a rebase, a nit) we push the fixup

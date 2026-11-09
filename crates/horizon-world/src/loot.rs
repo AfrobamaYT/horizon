@@ -8,7 +8,6 @@
 //! maps are kept as found (structure search is not run); conditions that
 //! need an entity, tool or damage source fail when the context has none, as
 //! they do for containers.
-use crate::{lazy_json::LazyJson, nbt::Tag};
 use horizon_core::random::{LegacyRandom, RandomSource};
 use serde_json::Value;
 use std::{
@@ -16,8 +15,11 @@ use std::{
     collections::HashMap,
     fs, io,
     path::Path,
-    rc::Rc,
     sync::{Arc, Mutex, Weak},
+};
+use {
+    crate::{lazy_json::LazyJson, native_load_context::LoadContext},
+    horizon_core::nbt::Tag,
 };
 
 /// Raw files a world's data packs add over the game's own data, by
@@ -26,15 +28,33 @@ use std::{
 /// `datapack::DataStore.files` is the source; the content tables merge these
 /// over what they read from the resource root, the way
 /// `SimpleJsonResourceReloadListener` and `TagLoader` layer a pack stack.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 pub struct PackOverlay<'a> {
+    /// Immutable enabled package IDs for this owning server data load.
+    pub conditions: &'a crate::conditions::LoadConditions,
     pub files: &'a [(String, Vec<Vec<u8>>)],
 }
 impl PackOverlay<'static> {
     /// No packs: the tables are the resource root's alone.
-    pub const NONE: Self = Self { files: &[] };
+    pub const NONE: Self = Self {
+        files: &[],
+        conditions: &crate::conditions::LoadConditions::vanilla(),
+    };
 }
-impl PackOverlay<'_> {
+impl Default for PackOverlay<'_> {
+    fn default() -> Self {
+        PackOverlay::NONE
+    }
+}
+impl<'a> PackOverlay<'a> {
+    /// A pack view with the built-in package only. Engine-owned server loads
+    /// supply their captured `conditions` explicitly instead.
+    pub const fn new(files: &'a [(String, Vec<Vec<u8>>)]) -> Self {
+        Self {
+            files,
+            conditions: PackOverlay::NONE.conditions,
+        }
+    }
     /// The overlay's files under `<kind>/`, with the prefix stripped.
     pub fn kind(&self, kind: &str) -> impl Iterator<Item = (&str, &Vec<Vec<u8>>)> {
         let prefix = format!("{kind}/");
@@ -65,12 +85,11 @@ impl PackOverlay<'_> {
 /// A loot function of a mod's own kind: the entry named a `type` in a
 /// namespace outside `minecraft:`, and the roll kept it for this call.
 /// The kind, the JSON, the context and the stack to change are here.
-/// API 133.
 #[inline(never)]
 pub fn native_loot_function(
     kind: &str,
     data: &Value,
-    ctx: &NativeLootContext<'_>,
+    ctx: &LootContext<'_>,
     stack: &mut LootStack,
 ) {
     crate::native_load_hooks::loot_function(kind, data, ctx, stack);
@@ -79,19 +98,14 @@ pub fn native_loot_function(
 /// A loot condition of a mod's own kind: the entry named a `type` in a
 /// namespace outside `minecraft:`. The kind, the JSON, the context and
 /// whether it holds are here (`holds` starts `false`; a mod that claims
-/// the kind sets it). API 133.
+/// the kind sets it).
 #[inline(never)]
-pub fn native_loot_condition(
-    kind: &str,
-    data: &Value,
-    ctx: &NativeLootContext<'_>,
-    holds: &mut bool,
-) {
+pub fn native_loot_condition(kind: &str, data: &Value, ctx: &LootContext<'_>, holds: &mut bool) {
     crate::native_load_hooks::loot_condition(kind, data, ctx, holds);
 }
 
 /// The tool a loot context names: its item id and enchantments.
-pub struct NativeLootTool {
+pub struct LootTool {
     pub item: String,
     pub enchantments: Vec<(String, i32)>,
 }
@@ -103,7 +117,7 @@ pub struct NativeLootTool {
 /// loot_table, interact_loot); the entity, damage and player by the main
 /// loot engine; each is None in the other. A table without a mod's kinds
 /// draws nothing and stays bit-for-bit the same.
-pub struct NativeLootContext<'a> {
+pub struct LootContext<'a> {
     /// The entity the table names (`this`), if any.
     pub entity: Option<&'a LootEntity>,
     /// The damage that killed it, if any.
@@ -113,7 +127,7 @@ pub struct NativeLootContext<'a> {
     /// The tool used, if any. The items engine fills it (all of its
     /// tables: block drops, entity drops, loot_table, interact_loot);
     /// the main loot engine has no tool in its context.
-    pub tool: Option<NativeLootTool>,
+    pub tool: Option<LootTool>,
     /// The block a block-drop table breaks, if any. The items engine
     /// fills it; the main loot engine has no block in its context.
     pub block: Option<&'a str>,
@@ -127,17 +141,16 @@ pub struct NativeLootContext<'a> {
     /// Where the roll happens: the origin, the block entity and the level,
     /// when the game rolled the table at a place (a broken block's drops,
     /// a mob's death loot); None for the other rolls. Either engine fills it.
-    /// API 156.
-    pub place: Option<Rc<NativeLootPlace>>,
+    pub place: Option<Arc<LootPlace>>,
 }
 
 /// Where a loot roll happens, as a mod's own loot kinds see it:
 /// `LootContextParams.ORIGIN`, `LootContextParams.BLOCK_ENTITY`, and what
 /// vanilla's own conditions read of `LootContext.getLevel` (`TimeCheck`:
 /// the time; `WeatherCheck`: the rain and the thunder). The game sets it
-/// around a roll with [`with_native_loot_place`]. API 156.
+/// around a roll with [`with_native_loot_place`].
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct NativeLootPlace {
+pub struct LootPlace {
     /// `ORIGIN`: a broken block's centre, a dead mob's position.
     pub origin: Option<[f64; 3]>,
     /// `BLOCK_ENTITY`: the broken block's entity as it was before the
@@ -145,12 +158,12 @@ pub struct NativeLootPlace {
     /// mod's block entity carries its own data and its `Items`.
     pub block_entity: Option<Tag>,
     /// The level the roll is in.
-    pub level: Option<NativeLootLevel>,
+    pub level: Option<LootLevel>,
 }
 
 /// The level a loot roll is in, as a mod's own loot kinds see it.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct NativeLootLevel {
+pub struct LootLevel {
     /// The dimension's id (`minecraft:overworld`).
     pub dimension: String,
     /// `Level.getGameTime`.
@@ -165,27 +178,26 @@ pub struct NativeLootLevel {
 }
 
 thread_local! {
-    static NATIVE_LOOT_PLACE: RefCell<Option<Rc<NativeLootPlace>>> = const { RefCell::new(None) };
+    static NATIVE_LOOT_PLACE: RefCell<Option<Arc<LootPlace>>> = const { RefCell::new(None) };
 }
 
 /// Runs `roll` with `place` as where its loot rolls happen: every
-/// [`NativeLootContext`] made inside it, by either engine, carries it. The
+/// [`LootContext`] made inside it, by either engine, carries it. The
 /// place before is back when `roll` returns, so these nest.
-/// API 156.
-pub fn with_native_loot_place<T>(place: NativeLootPlace, roll: impl FnOnce() -> T) -> T {
-    struct Restore(Option<Rc<NativeLootPlace>>);
+pub fn with_native_loot_place<T>(place: LootPlace, roll: impl FnOnce() -> T) -> T {
+    struct Restore(Option<Arc<LootPlace>>);
     impl Drop for Restore {
         fn drop(&mut self) {
             let before = self.0.take();
             NATIVE_LOOT_PLACE.with(|p| *p.borrow_mut() = before);
         }
     }
-    let _restore = Restore(NATIVE_LOOT_PLACE.with(|p| p.replace(Some(Rc::new(place)))));
+    let _restore = Restore(NATIVE_LOOT_PLACE.with(|p| p.replace(Some(Arc::new(place)))));
     roll()
 }
 
 /// The place [`with_native_loot_place`] set for the rolls now running, if any.
-pub fn current_native_loot_place() -> Option<Rc<NativeLootPlace>> {
+pub fn current_native_loot_place() -> Option<Arc<LootPlace>> {
     NATIVE_LOOT_PLACE.with(|p| p.borrow().clone())
 }
 
@@ -209,9 +221,8 @@ pub struct LootStack {
     pub stew_effects: Vec<(String, i32)>,
     /// Set by set_name: (`custom_name` or `item_name`, the text component).
     pub names: Vec<(String, Value)>,
-    /// Set by set_components: (component id, its JSON value; null removes
-    /// it), a later patch of the same id replacing an earlier one.
-    pub components: Vec<(String, Value)>,
+    /// Ordered component patches. None removes a component; repeated IDs apply in order.
+    pub components: Vec<(String, Option<Tag>)>,
 }
 /// `ExplorationMapFunction`'s settings.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -377,6 +388,17 @@ pub struct EntityLootParams {
     /// The killing player's luck.
     pub luck: f32,
 }
+/// The most a table's read of an enchantment level counts as. A mod can answer
+/// any level, and what it answers drives loops: a stack of that size splits one
+/// stack at a time, and a binomial bonus draws once a level. `ItemEnchantments`
+/// keeps vanilla's levels to 255, so vanilla's rolls never reach this.
+pub const MAX_LOOT_LEVEL: i32 = 1024;
+/// What a roll asks when it reads an attacker's enchantment level (NeoForge's
+/// `EnchantedEntityLootEvent`): given the roll's random, the enchantment's id
+/// and the level, the level to use. The random is the roll's own: whoever
+/// answers can put it back in its home first, so draws made meanwhile keep
+/// their order.
+pub type EnchantedLevel<'a, R> = dyn FnMut(&mut R, &str, i32) -> i32 + 'a;
 /// `EquipmentSlot.VALUES` order.
 pub const EQUIPMENT_SLOTS: [&str; 8] = [
     "mainhand", "offhand", "feet", "legs", "chest", "head", "body", "saddle",
@@ -443,15 +465,15 @@ pub fn level_value(v: &Value, level: i32) -> f32 {
 /// data has `{}`. The pattern is SNBT, as data packs write it, or a JSON
 /// object (`TagParser.LENIENT_CODEC`); one that is not a compound matches
 /// nothing, where vanilla refuses to load the table.
-pub fn custom_data_matches(pattern: &Value, data: Option<&crate::nbt::Compound>) -> bool {
+pub fn custom_data_matches(pattern: &Value, data: Option<&horizon_core::nbt::Compound>) -> bool {
     let Some(Tag::Compound(pattern)) = nbt_predicate_tag(pattern) else {
         return false;
     };
-    let empty = crate::nbt::Compound::new();
+    let empty = horizon_core::nbt::Compound::new();
     let data = data.unwrap_or(&empty);
     pattern
         .iter()
-        .all(|(k, v)| crate::nbt::compare_nbt(v, data.get(k)))
+        .all(|(k, v)| horizon_core::nbt::compare_nbt(v, data.get(k)))
 }
 /// A tag written in a data pack's JSON: SNBT text read whole, or JSON as
 /// DataFixerUpper's `JsonOps.convertTo(NbtOps)` turns it into NBT (whole
@@ -460,7 +482,7 @@ pub fn custom_data_matches(pattern: &Value, data: Option<&crate::nbt::Compound>)
 pub fn nbt_predicate_tag(value: &Value) -> Option<Tag> {
     match value {
         Value::String(text) => {
-            let (tag, used) = crate::nbt::parse_snbt(text).ok()?;
+            let (tag, used) = horizon_core::nbt::parse_snbt(text).ok()?;
             text[used..].trim().is_empty().then_some(tag)
         }
         _ => json_tag(value),
@@ -563,8 +585,10 @@ fn list_operation<T: Clone>(
 fn compound_json(v: &Value) -> Option<Value> {
     match v {
         Value::Object(_) => Some(v.clone()),
-        Value::String(text) => match crate::nbt::parse_snbt(text) {
-            Ok((tag @ crate::nbt::Tag::Compound(_), _)) => Some(crate::worldgen::tag_json(&tag)),
+        Value::String(text) => match horizon_core::nbt::parse_snbt(text) {
+            Ok((tag @ horizon_core::nbt::Tag::Compound(_), _)) => {
+                Some(crate::worldgen::tag_json(&tag))
+            }
             _ => None,
         },
         _ => None,
@@ -606,10 +630,8 @@ fn overlay_map(overlay: &PackOverlay, kind: &str, out: &mut HashMap<String, Valu
         };
         out.insert(id.to_owned(), v);
     }
+    out.retain(|_, value| overlay.conditions.allows(value));
 }
-
-mod odds;
-pub use odds::LootOdds;
 
 /// Loot tables by id. Each is kept as its JSON text and read into a [`Value`]
 /// the first time it is rolled: of vanilla's ~1,450 tables a game rolls a
@@ -666,6 +688,7 @@ pub fn shared_tables(root: &Path, overlay: &PackOverlay) -> io::Result<Arc<LootT
         use std::hash::{DefaultHasher, Hash, Hasher};
         let mut hasher = DefaultHasher::new();
         root.hash(&mut hasher);
+        overlay.conditions.hash(&mut hasher);
         let data = root.join("data");
         let mut namespaces: Vec<_> = fs::read_dir(&data)
             .into_iter()
@@ -695,16 +718,7 @@ pub fn shared_tables(root: &Path, overlay: &PackOverlay) -> io::Result<Arc<LootT
     let mut tables = HashMap::new();
     load_kind(&root.join("data"), "loot_table", &mut tables)?;
     overlay_map(overlay, "loot_table", &mut tables);
-    // The mods' hooks run outside the lock.
-    let mut each: Vec<_> = tables.into_iter().collect();
-    each.sort_by(|a, b| a.0.cmp(&b.0));
-    let tables: LootTables = each
-        .into_iter()
-        .map(|(id, mut table)| {
-            native_loot_table_load(&id, &mut table);
-            (id, table)
-        })
-        .collect();
+    let tables: LootTables = tables.into_iter().collect();
     let mut loaded = LOADED.lock().unwrap_or_else(|e| e.into_inner());
     // Another thread may have loaded the same tables meanwhile: keep one.
     if let Some(tables) = held(&mut loaded) {
@@ -715,20 +729,18 @@ pub fn shared_tables(root: &Path, overlay: &PackOverlay) -> io::Result<Arc<LootT
     Ok(tables)
 }
 
-/// A native mod's hook point (docs/native-mods.md), listed in `native-hooks.json` with the game's:
+/// A native mod's hook point (docs/modding/src/how-to/native-mods.md), declared in `hooks/` with the game's:
 /// the loot table `id` (`minecraft:chests/simple_dungeon`, `minecraft:blocks/stone`,
 /// `minecraft:entities/zombie`) as it loads, its JSON after the data packs', before anything
 /// rolls it (NeoForge's `LootTableLoadEvent`, Fabric's `LootTableEvents.MODIFY`). Add pools to
 /// `table["pools"]` or entries to a pool's `entries`, change or replace it (no pools: it drops
 /// nothing; keep its `random_sequence` when replacing it, as a mob's table without one drops
-/// nothing). Called once per table and load, in id order, wherever the tables load: the server,
-/// and a client too, so make the same change each time, and don't load loot tables from here.
-/// Two loads may run at once on two threads. A `/reload` or a world opened with other packs
-/// may load them again, or keep the tables already loaded from the same files. API
-/// 75.
+/// nothing). Called once per table in id order when the server loads or reloads its data, with the
+/// `DataLoadContext` of that owning load (`origin()` is always `ServerDataLoad`: the client never loads
+/// loot tables, so the hook never fires there).
 #[inline(never)]
-pub fn native_loot_table_load(id: &str, table: &mut Value) {
-    crate::native_load_hooks::loot_table_load(id, table);
+pub fn native_loot_table_load(context: &LoadContext, id: &str, table: &mut Value) {
+    crate::native_load_hooks::loot_table_load(context, id, table);
 }
 
 fn load_kind(data: &Path, kind: &str, out: &mut HashMap<String, Value>) -> io::Result<()> {
@@ -796,11 +808,14 @@ fn cost(v: &Value) -> (i32, i32) {
 }
 
 impl LootData {
-    /// Load from a resource root holding `items.json` and `data/`: loot
-    /// tables, item modifiers, predicates, tags and recipes of every
-    /// namespace, vanilla's enchantments. `overlay` adds a world's data
-    /// packs over it.
-    pub fn load(root: &Path, overlay: &PackOverlay) -> io::Result<Self> {
+    /// Load tables, modifiers, predicates, tags and recipes from `data/`,
+    /// and item metadata from the owning load's default-component snapshot.
+    /// `overlay` adds a world's data packs over the resource root.
+    pub fn load(
+        root: &Path,
+        overlay: &PackOverlay,
+        defaults: &crate::item_defaults::ItemDefaults,
+    ) -> io::Result<Self> {
         let all = root.join("data");
         let data = all.join("minecraft");
         let tables = shared_tables(root, overlay)?;
@@ -810,8 +825,8 @@ impl LootData {
         let mut predicates = HashMap::new();
         load_kind(&all, "predicate", &mut predicates)?;
         overlay_map(overlay, "predicate", &mut predicates);
-        let raw = crate::item_defaults::shared(root)?;
-        let items = raw
+        let items = defaults
+            .entries()
             .iter()
             .map(|(name, c)| {
                 (
@@ -833,6 +848,7 @@ impl LootData {
             "",
             &mut raw_enchantments,
         )?;
+        overlay_map(overlay, "enchantment", &mut raw_enchantments);
         let mut names: Vec<&String> = raw_enchantments.keys().collect();
         names.sort();
         let enchantments = names
@@ -872,6 +888,9 @@ impl LootData {
             let mut raw = HashMap::new();
             load_kind(&all, &format!("tags/{registry}"), &mut raw)?;
             for (name, value) in raw {
+                if !overlay.conditions.allows(&value) {
+                    continue;
+                }
                 let values = value["values"].as_array().cloned().unwrap_or_default();
                 tags.insert((registry.to_owned(), name), values);
             }
@@ -879,13 +898,14 @@ impl LootData {
             // `replace` file drops what the lower sources put in
             // (`TagLoader.load` walks the resource stack the same way).
             for (id, files) in overlay.tag_kind(registry) {
-                let slot = tags
-                    .entry((registry.to_owned(), id.to_owned()))
-                    .or_default();
                 for bytes in files {
                     let Ok(v) = serde_json::from_slice::<Value>(bytes) else {
                         continue;
                     };
+                    if !overlay.conditions.allows(&v) {
+                        continue;
+                    }
+                    let slot = tags.entry((registry.to_owned(), id.clone())).or_default();
                     if v["replace"].as_bool() == Some(true) {
                         slot.clear();
                     }
@@ -918,6 +938,27 @@ impl LootData {
             smelting,
         })
     }
+    /// The table snapshot used by this loot data.
+    pub fn tables(&self) -> &Arc<LootTables> {
+        &self.tables
+    }
+
+    /// Apply native load hooks to a private server snapshot, leaving shared raw tables unchanged.
+    /// `context` is the owning server data load's.
+    pub fn apply_native_table_loads(&mut self, context: &LoadContext) {
+        let mut ids: Vec<_> = self.tables.0.keys().collect();
+        ids.sort();
+        self.tables = Arc::new(
+            ids.into_iter()
+                .map(|id| {
+                    let mut table = self.tables[id.as_str()].clone();
+                    native_loot_table_load(context, id, &mut table);
+                    (id.clone(), table)
+                })
+                .collect(),
+        );
+    }
+
     pub fn has_table(&self, table: &str) -> bool {
         self.tables.contains_key(table)
     }
@@ -978,6 +1019,7 @@ impl LootData {
             luck: 0.0,
             open_water: None,
             entity: Some(&damage_params),
+            enchanted_level: None,
         };
         let mut chance = chance;
         c.equipment_drops(&params.this, "victim", &mut chance);
@@ -1064,6 +1106,7 @@ impl LootData {
             luck,
             open_water,
             entity: None,
+            enchanted_level: None,
         };
         let mut items = Vec::new();
         c.table_raw(table, json, &mut |c, stack| c.data.split(stack, &mut items));
@@ -1079,6 +1122,27 @@ impl LootData {
         random: &mut R,
         params: &EntityLootParams,
     ) -> Vec<LootStack> {
+        self.roll_entity_with(table, random, params, None)
+    }
+    /// [`Self::roll_entity`] for a death, with `level` asked each time
+    /// `enchanted_count_increase` or `random_chance_with_enchanted_bonus`
+    /// reads the attacker's level.
+    pub fn roll_death_entity<R: RandomSource + Clone>(
+        &self,
+        table: &str,
+        random: &mut R,
+        params: &EntityLootParams,
+        level: &mut EnchantedLevel<'_, R>,
+    ) -> Vec<LootStack> {
+        self.roll_entity_with(table, random, params, Some(level))
+    }
+    fn roll_entity_with<'a, R: RandomSource + Clone>(
+        &'a self,
+        table: &str,
+        random: &mut R,
+        params: &'a EntityLootParams,
+        enchanted_level: Option<&'a mut EnchantedLevel<'a, R>>,
+    ) -> Vec<LootStack> {
         let Some(json) = self.tables.get(table) else {
             return Vec::new();
         };
@@ -1090,6 +1154,7 @@ impl LootData {
             luck: params.luck,
             open_water: None,
             entity: Some(params),
+            enchanted_level,
         };
         let mut items = Vec::new();
         c.table_raw(table, json, &mut |c, stack| c.data.split(stack, &mut items));
@@ -1115,6 +1180,7 @@ impl LootData {
             luck: 0.0,
             open_water: None,
             entity: None,
+            enchanted_level: None,
         };
         let mut items = Vec::new();
         c.table_raw(table, json, &mut |c, stack| c.data.split(stack, &mut items));
@@ -1169,6 +1235,7 @@ impl LootData {
             luck: 0.0,
             open_water: None,
             entity: None,
+            enchanted_level: None,
         };
         let mut items = Vec::new();
         c.table_raw(table, json, &mut |c, stack| c.data.split(stack, &mut items));
@@ -1206,6 +1273,39 @@ fn shuffle<T>(list: &mut [T], random: &mut impl RandomSource) {
         list.swap(i - 1, j);
     }
 }
+/// EnchantmentHelper's weighted selection over the eligible registry entries.
+fn weighted_enchantment(
+    data: &LootData,
+    random: &mut impl RandomSource,
+    list: &[(usize, i32)],
+) -> Option<(usize, i32)> {
+    let total: i64 = list
+        .iter()
+        .map(|&(i, _)| i64::from(data.enchantments[i].weight))
+        .sum();
+    if total <= 0 {
+        return None;
+    }
+    let mut selection = weight_draw(random, total);
+    for &entry in list {
+        selection -= i64::from(data.enchantments[entry.0].weight);
+        if selection < 0 {
+            return Some(entry);
+        }
+    }
+    None
+}
+
+// Preserve vanilla's int draw. Oversized pack totals use one unsigned long
+// modulo the total, a bounded, slightly biased fallback.
+fn weight_draw(random: &mut impl RandomSource, total: i64) -> i64 {
+    if total <= i64::from(i32::MAX) {
+        i64::from(random.next_int_bound(total as i32).unwrap_or(0))
+    } else {
+        ((random.next_long() as u64) % total as u64) as i64
+    }
+}
+
 /// Mth.nextInt.
 fn next_int(random: &mut impl RandomSource, min: i32, max: i32) -> i32 {
     if min >= max {
@@ -1261,6 +1361,8 @@ struct Context<'a, R> {
     open_water: Option<bool>,
     /// The entity, damage source and killer parameters.
     entity: Option<&'a EntityLootParams>,
+    /// Asked for a death's enchantment levels; None for every other roll.
+    enchanted_level: Option<&'a mut EnchantedLevel<'a, R>>,
 }
 type Sink<'s, R> = dyn FnMut(&mut Context<'_, R>, LootStack) + 's;
 
@@ -1279,6 +1381,21 @@ impl<R: RandomSource> Context<'_, R> {
     /// The `ATTACKING_ENTITY` parameter when it is a living entity.
     fn living_attacker(&self) -> Option<&LootEntity> {
         self.target("attacker").filter(|a| a.living)
+    }
+    /// The level `EnchantedCountIncreaseFunction` and
+    /// `LootItemRandomChanceWithEnchantedBonusCondition` use: the living
+    /// attacker's (0 without one), then what the death's `enchanted_level`
+    /// makes of it, up to what a table reads.
+    fn attacker_level(&mut self, enchantment: &str) -> i32 {
+        let data = self.data;
+        let level = self
+            .living_attacker()
+            .map_or(0, |a| data.enchantment_level(enchantment, a));
+        let level = match &mut self.enchanted_level {
+            Some(ask) => ask(&mut self.random, enchantment, level),
+            None => level,
+        };
+        level.min(MAX_LOOT_LEVEL)
     }
     /// The `equipment_drops` effects on one entity's equipment
     /// (`runIterationOnEquipment`), for the given `enchanted` target.
@@ -1404,9 +1521,7 @@ impl<R: RandomSource> Context<'_, R> {
                 }
                 "minecraft:killed_by_player" => self.entity.is_some_and(|p| p.player.is_some()),
                 "minecraft:random_chance_with_enchanted_bonus" => {
-                    let level = self.living_attacker().map_or(0, |a| {
-                        data.enchantment_level(c["enchantment"].as_str().unwrap_or(""), a)
-                    });
+                    let level = self.attacker_level(c["enchantment"].as_str().unwrap_or(""));
                     let chance = if level > 0 {
                         level_value(&c["enchanted_chance"], level)
                     } else {
@@ -1495,9 +1610,9 @@ impl<R: RandomSource> Context<'_, R> {
     }
     /// The context a mod's own loot kinds see: drawn lazily, only when
     /// the table has a mod's kind, so the random stays untouched without.
-    fn native_ctx(&mut self) -> NativeLootContext<'_> {
+    fn native_ctx(&mut self) -> LootContext<'_> {
         let seed = self.random.next_long();
-        NativeLootContext {
+        LootContext {
             entity: self.entity.map(|e| &e.this),
             damage: self.entity.and_then(|e| e.damage.as_ref()),
             player: self.entity.and_then(|e| e.player.as_ref()),
@@ -1637,12 +1752,9 @@ impl<R: RandomSource> Context<'_, R> {
                         .random
                         .next_int_bound(options.len() as i32)
                         .unwrap_or(0) as usize;
-                    stack
-                        .components
-                        .retain(|(k, _)| k != "minecraft:instrument");
                     stack.components.push((
                         "minecraft:instrument".to_owned(),
-                        Value::String(options[pick].clone()),
+                        Some(Tag::String(options[pick].as_str().into())),
                     ));
                 }
             }
@@ -1656,31 +1768,33 @@ impl<R: RandomSource> Context<'_, R> {
                 let mut display = stack
                     .components
                     .iter()
+                    .rev()
                     .find(|(k, _)| k == id)
-                    .map(|(_, v)| v.clone())
-                    .filter(Value::is_object)
-                    .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
-                let mut hidden: Vec<Value> = display["hidden_components"]
-                    .as_array()
-                    .cloned()
+                    .and_then(|(_, v)| match v {
+                        Some(Tag::Compound(map)) => Some(map.clone()),
+                        _ => None,
+                    })
                     .unwrap_or_default();
+                let mut hidden = match display.remove(&"hidden_components".into()) {
+                    Some(Tag::List(values)) => values,
+                    _ => Vec::new(),
+                };
                 for (component, shown) in f["toggles"].as_object().into_iter().flatten() {
-                    hidden.retain(|h| h.as_str() != Some(component.as_str()));
+                    hidden.retain(
+                        |h| !matches!(h, Tag::String(value) if value == &component.as_str().into()),
+                    );
                     if shown.as_bool() == Some(false) {
-                        hidden.push(Value::String(component.clone()));
+                        hidden.push(Tag::String(component.as_str().into()));
                     }
                 }
-                let Value::Object(map) = &mut display else {
-                    unreachable!("an object above")
-                };
-                if hidden.is_empty() {
-                    map.remove("hidden_components");
-                } else {
-                    map.insert("hidden_components".to_owned(), Value::Array(hidden));
+                if !hidden.is_empty() {
+                    display.insert("hidden_components".into(), Tag::List(hidden));
                 }
                 stack.components.retain(|(k, _)| k != id);
-                if display.as_object().is_none_or(|m| !m.is_empty()) {
-                    stack.components.push((id.to_owned(), display));
+                if !display.is_empty() {
+                    stack
+                        .components
+                        .push((id.to_owned(), Some(Tag::Compound(display))));
                 }
             }
             "minecraft:set_item" => {
@@ -1720,24 +1834,24 @@ impl<R: RandomSource> Context<'_, R> {
                     .components
                     .iter()
                     .find(|(k, _)| k == id)
-                    .and_then(|(_, v)| compound_json(v))
+                    .and_then(|(_, v)| v.as_ref().map(crate::worldgen::tag_json))
                     .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
                 merge_json(&mut data, &tag);
                 stack.components.retain(|(k, _)| k != id);
-                stack.components.push((id.to_owned(), data));
+                stack.components.push((id.to_owned(), json_tag(&data)));
             }
             "minecraft:enchanted_count_increase" => {
-                if let Some(attacker) = self.living_attacker() {
-                    let level =
-                        data.enchantment_level(f["enchantment"].as_str().unwrap_or(""), attacker);
-                    if level != 0 {
-                        let addition = level as f32 * self.float(&f["count"]);
-                        // ItemStack.grow(Math.round(addition)).
-                        stack.count = stack.get_count() + (addition + 0.5).floor() as i32;
-                        let limit = int_value(&f["limit"]).unwrap_or(0) as i32;
-                        if limit > 0 && !stack.is_empty() && stack.count > limit {
-                            stack.count = limit;
-                        }
+                let level = self.attacker_level(f["enchantment"].as_str().unwrap_or(""));
+                if level != 0 {
+                    let addition = level as f32 * self.float(&f["count"]);
+                    // ItemStack.grow(Math.round(addition)): an int sum, so a mod's
+                    // huge level wraps as in Java, and the stack is empty.
+                    stack.count = stack
+                        .get_count()
+                        .wrapping_add((addition + 0.5).floor() as i32);
+                    let limit = int_value(&f["limit"]).unwrap_or(0) as i32;
+                    if limit > 0 && !stack.is_empty() && stack.count > limit {
+                        stack.count = limit;
                     }
                 }
             }
@@ -1770,13 +1884,20 @@ impl<R: RandomSource> Context<'_, R> {
                     .components
                     .iter()
                     .find(|(k, _)| k == id)
-                    .and_then(|(_, v)| v.as_array().cloned())
+                    .and_then(|(_, v)| match v {
+                        Some(Tag::List(values)) => Some(values.clone()),
+                        _ => None,
+                    })
                     .unwrap_or_default();
                 let mut spec = f.clone();
                 spec["values"] = f["lore"].clone();
-                let lines = list_operation(&spec, old, Value::clone);
+                let lines = list_operation(&spec, old, |v| {
+                    horizon_core::json_nbt::json_to_tag(v).unwrap_or(Tag::String("".into()))
+                });
                 stack.components.retain(|(k, _)| k != id);
-                stack.components.push((id.to_owned(), Value::Array(lines)));
+                stack
+                    .components
+                    .push((id.to_owned(), Some(Tag::List(lines))));
             }
             // SetNameFunction: the component the target names (custom_name by
             // default). The entity-resolved selectors and scores are not
@@ -1793,45 +1914,68 @@ impl<R: RandomSource> Context<'_, R> {
             // loot random), flags and strings as they are written.
             "minecraft:set_custom_model_data" => {
                 let id = "minecraft:custom_model_data";
-                let content = stack.components.iter().find(|(k, _)| k == id);
+                let content = stack.components.iter().rev().find(|(k, _)| k == id);
                 let mut content = content
-                    .map(|(_, v)| v.clone())
-                    .filter(Value::is_object)
-                    .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
-                let old = |key: &str| -> Vec<Value> {
-                    content[key].as_array().cloned().unwrap_or_default()
+                    .and_then(|(_, v)| match v {
+                        Some(Tag::Compound(map)) => Some(map.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                let old = |key: &str| -> Vec<Tag> {
+                    match content.get(&key.into()) {
+                        Some(Tag::List(values)) => values
+                            .iter()
+                            .map(|value| {
+                                let number = match value {
+                                    Tag::Byte(v) => Some(f64::from(*v)),
+                                    Tag::Short(v) => Some(f64::from(*v)),
+                                    Tag::Int(v) => Some(f64::from(*v)),
+                                    Tag::Long(v) => Some(*v as f64),
+                                    Tag::Float(v) => Some(f64::from(f32::from_bits(*v))),
+                                    Tag::Double(v) => Some(f64::from_bits(*v)),
+                                    _ => None,
+                                };
+                                match (key, number) {
+                                    ("floats", Some(v)) => Tag::Float((v as f32).to_bits()),
+                                    ("colors", Some(v)) => Tag::Int(v as i32),
+                                    _ => value.clone(),
+                                }
+                            })
+                            .collect(),
+                        _ => Vec::new(),
+                    }
                 };
-                let mut replaced: Vec<(&str, Vec<Value>)> = Vec::new();
+                let mut replaced: Vec<(&str, Vec<Tag>)> = Vec::new();
                 if f["floats"].is_object() {
-                    let list =
-                        list_operation(&f["floats"], old("floats"), |v| Value::from(self.float(v)));
+                    let list = list_operation(&f["floats"], old("floats"), |v| {
+                        Tag::Float(self.float(v).to_bits())
+                    });
                     replaced.push(("floats", list));
                 }
                 if f["flags"].is_object() {
                     let list = list_operation(&f["flags"], old("flags"), |v| {
-                        Value::Bool(v.as_bool().unwrap_or(false))
+                        Tag::Byte(i8::from(v.as_bool().unwrap_or(false)))
                     });
                     replaced.push(("flags", list));
                 }
                 if f["strings"].is_object() {
                     let list = list_operation(&f["strings"], old("strings"), |v| {
-                        Value::String(v.as_str().unwrap_or_default().to_owned())
+                        Tag::String(v.as_str().unwrap_or_default().into())
                     });
                     replaced.push(("strings", list));
                 }
                 if f["colors"].is_object() {
                     let list =
-                        list_operation(&f["colors"], old("colors"), |v| Value::from(self.int(v)));
+                        list_operation(&f["colors"], old("colors"), |v| Tag::Int(self.int(v)));
                     replaced.push(("colors", list));
                 }
-                let Value::Object(map) = &mut content else {
-                    unreachable!("an object above")
-                };
                 for (key, list) in replaced {
-                    map.insert(key.to_owned(), Value::Array(list));
+                    content.insert(key.into(), Tag::List(list));
                 }
                 stack.components.retain(|(k, _)| k != id);
-                stack.components.push((id.to_owned(), content));
+                stack
+                    .components
+                    .push((id.to_owned(), Some(Tag::Compound(content))));
             }
             // SetBannerPatternFunction: the layers a banner or shield gets,
             // replacing the component's own list or added to its end
@@ -1839,13 +1983,20 @@ impl<R: RandomSource> Context<'_, R> {
             // pattern id and a dye name, so the list is kept as it came.
             "minecraft:set_banner_pattern" => {
                 let id = "minecraft:banner_patterns";
-                let layers = f["patterns"].as_array().cloned().unwrap_or_default();
+                let Ok(Tag::List(layers)) = horizon_core::json_nbt::json_to_tag(&f["patterns"])
+                else {
+                    return stack;
+                };
                 let layers = if f["append"].as_bool() == Some(true) {
                     stack
                         .components
                         .iter()
+                        .rev()
                         .find(|(k, _)| k == id)
-                        .and_then(|(_, v)| v.as_array().cloned())
+                        .and_then(|(_, v)| match v {
+                            Some(Tag::List(values)) => Some(values.clone()),
+                            _ => None,
+                        })
                         .unwrap_or_default()
                         .into_iter()
                         .chain(layers)
@@ -1854,7 +2005,9 @@ impl<R: RandomSource> Context<'_, R> {
                     layers
                 };
                 stack.components.retain(|(k, _)| k != id);
-                stack.components.push((id.to_owned(), Value::Array(layers)));
+                stack
+                    .components
+                    .push((id.to_owned(), Some(Tag::List(layers))));
             }
             // SetBookCoverFunction: the written book's title, author and
             // generation, kept over the component the stack already carries (an
@@ -1867,25 +2020,33 @@ impl<R: RandomSource> Context<'_, R> {
                 let mut content = stack
                     .components
                     .iter()
+                    .rev()
                     .find(|(k, _)| k == id)
-                    .map(|(_, v)| v.clone())
-                    .filter(Value::is_object)
-                    .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
-                if let Value::Object(map) = &mut content {
+                    .and_then(|(_, v)| match v {
+                        Some(Tag::Compound(map)) => Some(map.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                {
+                    let map = &mut content;
                     for field in ["title", "author"] {
-                        if let Some(value) = f.get(field) {
-                            map.insert(field.to_owned(), value.clone());
+                        if let Some(value) = f.get(field)
+                            && let Ok(tag) = horizon_core::json_nbt::json_to_tag(value)
+                        {
+                            map.insert(field.into(), tag);
                         }
                     }
                     // `WrittenBookContent`'s generation is 0 to 3; the codec
                     // refuses the rest, so a table that asks for more is clamped
                     // as the item's own parse does.
                     if let Some(generation) = f["generation"].as_i64() {
-                        map.insert("generation".to_owned(), Value::from(generation.clamp(0, 3)));
+                        map.insert("generation".into(), Tag::Int(generation.clamp(0, 3) as i32));
                     }
                 }
                 stack.components.retain(|(k, _)| k != id);
-                stack.components.push((id.to_owned(), content));
+                stack
+                    .components
+                    .push((id.to_owned(), Some(Tag::Compound(content))));
             }
             // SetWrittenBookPagesFunction: the pages go through the function's
             // `ListOperation` over the written book content the stack already
@@ -1897,26 +2058,48 @@ impl<R: RandomSource> Context<'_, R> {
                 let mut content = stack
                     .components
                     .iter()
+                    .rev()
                     .find(|(k, _)| k == id)
-                    .map(|(_, v)| v.clone())
-                    .filter(Value::is_object)
-                    .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
-                let old = content["pages"].as_array().cloned().unwrap_or_default();
+                    .and_then(|(_, v)| match v {
+                        Some(Tag::Compound(map)) => Some(map.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                let old = match content.remove(&"pages".into()) {
+                    Some(Tag::List(values)) => values,
+                    _ => Vec::new(),
+                };
                 let mut spec = f.clone();
                 spec["values"] = f["pages"].clone();
-                let pages = list_operation(&spec, old, Value::clone);
-                if let Value::Object(map) = &mut content {
-                    map.insert("pages".to_owned(), Value::Array(pages));
-                }
+                let pages = list_operation(&spec, old, |v| {
+                    horizon_core::json_nbt::json_to_tag(v).unwrap_or(Tag::String("".into()))
+                });
+                content.insert("pages".into(), Tag::List(pages));
                 stack.components.retain(|(k, _)| k != id);
-                stack.components.push((id.to_owned(), content));
+                stack
+                    .components
+                    .push((id.to_owned(), Some(Tag::Compound(content))));
             }
             // SetComponentsFunction: the patch's components, applied when the
             // stack becomes an item (trim on worn armour, see `mobs::finalize`).
             "minecraft:set_components" => {
                 for (id, value) in f["components"].as_object().into_iter().flatten() {
-                    stack.components.retain(|(k, _)| k != id);
-                    stack.components.push((id.clone(), value.clone()));
+                    let tag = if value.is_null() {
+                        None
+                    } else {
+                        // CustomData uses TagParser's lenient codec: an SNBT
+                        // string is a compound, not a literal string tag.
+                        let decoded = if id == "minecraft:custom_data" && value.is_string() {
+                            nbt_predicate_tag(value)
+                        } else {
+                            horizon_core::json_nbt::json_to_tag(value).ok()
+                        };
+                        let Some(tag) = decoded else {
+                            continue;
+                        };
+                        Some(tag)
+                    };
+                    stack.components.push((id.clone(), tag));
                 }
             }
             // A mod's own kind: the hook changes the stack.
@@ -1968,20 +2151,7 @@ impl<R: RandomSource> Context<'_, R> {
         if available.is_empty() {
             return results;
         }
-        let pick = |random: &mut R, list: &[(usize, i32)]| -> Option<(usize, i32)> {
-            let total: i32 = list.iter().map(|&(i, _)| data.enchantments[i].weight).sum();
-            if total <= 0 {
-                return None;
-            }
-            let mut selection = random.next_int_bound(total).unwrap_or(0);
-            for &entry in list {
-                selection -= data.enchantments[entry.0].weight;
-                if selection < 0 {
-                    return Some(entry);
-                }
-            }
-            None
-        };
+        let pick = |random: &mut R, list: &[(usize, i32)]| weighted_enchantment(data, random, list);
         results.extend(pick(&mut self.random, &available));
         while self.random.next_int_bound(50).unwrap_or(0) <= cost {
             if let Some(&(last, _)) = results.last() {
@@ -2048,16 +2218,16 @@ impl<R: RandomSource> Context<'_, R> {
                 + int_value(&e["quality"]).unwrap_or(0) as f32 * luck;
             w.floor().max(0.0) as i32
         };
-        let total: i32 = valid.iter().map(&weight).sum();
+        let total: i64 = valid.iter().map(|e| i64::from(weight(e))).sum();
         if total == 0 || valid.is_empty() {
             return;
         }
         let chosen = if valid.len() == 1 {
             valid.swap_remove(0)
         } else {
-            let mut index = self.random.next_int_bound(total).unwrap_or(0);
+            let mut index = weight_draw(&mut self.random, total);
             let Some(at) = valid.iter().position(|e| {
-                index -= weight(e);
+                index -= i64::from(weight(e));
                 index < 0
             }) else {
                 return;
@@ -2167,6 +2337,61 @@ fn enchant(stack: &mut LootStack, name: &str, level: i32) {
 mod namespace_tests {
     use super::*;
 
+    #[test]
+    fn conditional_loot_selection_and_cache_follow_the_owning_inventory() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-loot-conditions-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("data/demo/loot_table")).unwrap();
+        fs::write(
+            root.join("data/demo/loot_table/replaced.json"),
+            r#"{"pools":[]}"#,
+        )
+        .unwrap();
+        let conditional = br#"{"neoforge:conditions":[{"type":"neoforge:mod_loaded","modid":"package_id"}],"pools":[]}"#.to_vec();
+        fs::write(root.join("data/demo/loot_table/base.json"), &conditional).unwrap();
+        let files = vec![
+            ("loot_table/demo:replaced".into(), vec![br#"{"pools":[]}"#.to_vec(), conditional]),
+            ("loot_table/demo:unknown".into(), vec![br#"{"neoforge:conditions":[{"type":"unsupported"}],"pools":[]}"#.to_vec()]),
+            ("tags/demo:item/food".into(), vec![
+                br#"{"values":["minecraft:bread"]}"#.to_vec(),
+                br#"{"neoforge:conditions":[{"type":"unsupported"}],"replace":true,"values":["minecraft:stone"]}"#.to_vec(),
+            ]),
+            ("tags/demo:item/absent".into(), vec![br#"{"neoforge:conditions":[{"type":"unsupported"}],"values":[]}"#.to_vec()]),
+        ];
+        let enabled = crate::conditions::LoadConditions::new(["package_id"]);
+        let off = PackOverlay {
+            files: &files,
+            ..PackOverlay::NONE
+        };
+        let on = PackOverlay {
+            files: &files,
+            conditions: &enabled,
+        };
+        let absent = shared_tables(&root, &off).unwrap();
+        assert!(!absent.contains_key("demo:base"));
+        assert!(!absent.contains_key("demo:replaced")); // No lower-pack fallback.
+        let present = shared_tables(&root, &on).unwrap();
+        assert!(!Arc::ptr_eq(&absent, &present));
+        assert!(present.contains_key("demo:base"));
+        assert!(present.contains_key("demo:replaced"));
+        assert!(!present.contains_key("demo:unknown"));
+        assert!(Arc::ptr_eq(&absent, &shared_tables(&root, &off).unwrap()));
+        fs::write(root.join("items.json"), "{}").unwrap();
+        let defaults = crate::item_defaults::read(&root).unwrap();
+        let loot = LootData::load(&root, &off, &defaults).unwrap();
+        assert_eq!(
+            loot.tags[&("item".into(), "demo:food".into())],
+            vec![serde_json::json!("minecraft:bread")]
+        );
+        assert!(
+            !loot
+                .tags
+                .contains_key(&("item".into(), "demo:absent".into()))
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
     /// The same root and packs share one map while it is held; other packs
     /// get their own.
     #[test]
@@ -2187,7 +2412,7 @@ mod namespace_tests {
             "loot_table/minecraft:chests/b".to_owned(),
             vec![br#"{"pools": []}"#.to_vec()],
         )];
-        let packs = shared_tables(&root, &PackOverlay { files: &files }).unwrap();
+        let packs = shared_tables(&root, &PackOverlay::new(&files)).unwrap();
         assert!(!Arc::ptr_eq(&first, &packs));
         assert!(packs.contains_key("minecraft:chests/b"));
         // A table changed at the same path while `first` is still held: the
@@ -2260,7 +2485,8 @@ mod namespace_tests {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, text).unwrap();
         }
-        let data = LootData::load(&root, &PackOverlay::NONE).unwrap();
+        let defaults = crate::item_defaults::read(&root).unwrap();
+        let data = LootData::load(&root, &PackOverlay::NONE, &defaults).unwrap();
         assert!(data.has_table("minecraft:chests/village"));
         assert!(data.has_table("kaisyn:village/forest/house"));
         assert!(!data.has_table("minecraft:village/forest/house"));
@@ -2273,13 +2499,46 @@ mod namespace_tests {
             table,
         )
         .unwrap();
-        let data = LootData::load(&root, &PackOverlay::NONE).unwrap();
+        let data = LootData::load(&root, &PackOverlay::NONE, &defaults).unwrap();
         let filled = data.fill("kaisyn:village/forest/house", 1, 27, None);
         let count: i32 = filled.iter().flatten().map(|s| s.count).sum();
         assert_eq!(count, 3);
         let _ = fs::remove_dir_all(&root);
     }
 
+    #[test]
+    fn component_functions_decode_json_to_ordered_nbt_patches() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-loot-patches-{}", std::process::id()));
+        let table = r#"{"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:stone","modifier":[
+            {"type":"minecraft:set_components","components":{"test:value":7}},
+            {"type":"minecraft:set_components","components":{"test:value":null}},
+            {"type":"minecraft:set_components","components":{"test:value":[7]}}
+        ]}]}]}"#;
+        for (name, text) in [
+            ("items.json", r#"{"minecraft:stone":{}}"#),
+            ("data/minecraft/loot_table/patches.json", table),
+        ] {
+            let path = root.join(name);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, text).unwrap();
+        }
+        let defaults = crate::item_defaults::read(&root).unwrap();
+        let data = LootData::load(&root, &PackOverlay::NONE, &defaults).unwrap();
+        let filled = data.fill("minecraft:patches", 7, 27, None);
+        let stack = filled.iter().flatten().next().unwrap();
+        assert_eq!(
+            stack.components,
+            vec![
+                ("test:value".into(), Some(Tag::Byte(7))),
+                ("test:value".into(), None),
+                ("test:value".into(), Some(Tag::List(vec![Tag::Byte(7)]))),
+            ]
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// `SetInstrumentFunction`: a goat horn from a loot table gets one of the options as its instrument.
     /// `SetCustomModelDataFunction`: each of the model data's four lists goes
     /// through its `ListOperation` over the component the stack already has -
     /// floats appended, flags and strings replaced, a colour inserted first -
@@ -2292,6 +2551,7 @@ mod namespace_tests {
         let table = r#"{"pools": [{"rolls": 1, "entries": [{"type": "minecraft:item", "name": "minecraft:stick",
             "modifier": [
                 {"type": "minecraft:set_components", "components": {"minecraft:custom_model_data": {"floats": [1.0], "strings": ["old"]}}},
+                {"type": "minecraft:set_components", "components": {"minecraft:custom_model_data": {"floats": [3.0], "strings": ["old"]}}},
                 {"type": "minecraft:set_custom_model_data",
                  "floats": {"mode": "append", "values": [{"type": "minecraft:constant", "value": 2.0}]},
                  "flags": {"mode": "replace_all", "values": [true]},
@@ -2307,7 +2567,12 @@ mod namespace_tests {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, text).unwrap();
         }
-        let data = LootData::load(&root, &PackOverlay::NONE).unwrap();
+        let data = LootData::load(
+            &root,
+            &PackOverlay::NONE,
+            &crate::item_defaults::read(&root).unwrap(),
+        )
+        .unwrap();
         let filled = data.fill("minecraft:chests/model", 3, 27, None);
         let stack = filled.iter().flatten().next().expect("a stick");
         let component: Vec<_> = stack
@@ -2316,9 +2581,22 @@ mod namespace_tests {
             .filter(|(k, _)| k == "minecraft:custom_model_data")
             .collect();
         assert_eq!(component.len(), 1, "{:?}", stack.components);
-        let component = &component[0].1;
-        assert_eq!(component["floats"], serde_json::json!([1.0, 2.0]));
-        assert_eq!(component["flags"], serde_json::json!([true]));
+        let component =
+            horizon_core::json_nbt::tag_to_json(component[0].1.as_ref().unwrap()).unwrap();
+        assert_eq!(component["floats"], serde_json::json!([3.0, 2.0]));
+        let Some(Tag::Compound(fields)) = &stack
+            .components
+            .iter()
+            .find(|(id, _)| id == "minecraft:custom_model_data")
+            .unwrap()
+            .1
+        else {
+            panic!("model data must be a compound")
+        };
+        assert_eq!(
+            fields.get(&"flags".into()),
+            Some(&Tag::List(vec![Tag::Byte(1)]))
+        );
         assert_eq!(component["strings"], serde_json::json!(["new"]));
         assert_eq!(component["colors"], serde_json::json!([16711680]));
         let _ = fs::remove_dir_all(&root);
@@ -2367,7 +2645,12 @@ mod namespace_tests {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, text).unwrap();
         }
-        let data = LootData::load(&root, &PackOverlay::NONE).unwrap();
+        let data = LootData::load(
+            &root,
+            &PackOverlay::NONE,
+            &crate::item_defaults::read(&root).unwrap(),
+        )
+        .unwrap();
         let filled = data.fill("minecraft:chests/lore", 3, 27, None);
         let stack = filled.iter().flatten().next().expect("a stick");
         let component: Vec<_> = stack
@@ -2377,7 +2660,7 @@ mod namespace_tests {
             .collect();
         assert_eq!(component.len(), 1, "{:?}", stack.components);
         assert_eq!(
-            component[0].1,
+            horizon_core::json_nbt::tag_to_json(component[0].1.as_ref().unwrap()).unwrap(),
             serde_json::json!([{"text": "old"}, {"text": "new"}])
         );
         // `replace_all`: the function's lines are the whole list.
@@ -2386,7 +2669,12 @@ mod namespace_tests {
             table.replace(r#""mode": "append""#, r#""mode": "replace_all""#),
         )
         .unwrap();
-        let data = LootData::load(&root, &PackOverlay::NONE).unwrap();
+        let data = LootData::load(
+            &root,
+            &PackOverlay::NONE,
+            &crate::item_defaults::read(&root).unwrap(),
+        )
+        .unwrap();
         let filled = data.fill("minecraft:chests/lore", 3, 27, None);
         let stack = filled.iter().flatten().next().expect("a stick");
         let component: Vec<_> = stack
@@ -2394,7 +2682,10 @@ mod namespace_tests {
             .iter()
             .filter(|(k, _)| k == "minecraft:lore")
             .collect();
-        assert_eq!(component[0].1, serde_json::json!([{"text": "new"}]));
+        assert_eq!(
+            horizon_core::json_nbt::tag_to_json(component[0].1.as_ref().unwrap()).unwrap(),
+            serde_json::json!([{"text": "new"}])
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -2420,7 +2711,12 @@ mod namespace_tests {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, text).unwrap();
         }
-        let data = LootData::load(&root, &PackOverlay::NONE).unwrap();
+        let data = LootData::load(
+            &root,
+            &PackOverlay::NONE,
+            &crate::item_defaults::read(&root).unwrap(),
+        )
+        .unwrap();
         let filled = data.fill("minecraft:chests/banner", 5, 27, None);
         let banner = filled.iter().flatten().next().expect("a banner");
         let component: Vec<_> = banner
@@ -2430,7 +2726,7 @@ mod namespace_tests {
             .collect();
         assert_eq!(component.len(), 1, "{:?}", banner.components);
         assert_eq!(
-            component[0].1,
+            horizon_core::json_nbt::tag_to_json(component[0].1.as_ref().unwrap()).unwrap(),
             serde_json::json!([
                 {"pattern": "minecraft:stripe_bottom", "color": "red"},
                 {"pattern": "minecraft:border", "color": "blue"},
@@ -2443,7 +2739,12 @@ mod namespace_tests {
             table,
         )
         .unwrap();
-        let data = LootData::load(&root, &PackOverlay::NONE).unwrap();
+        let data = LootData::load(
+            &root,
+            &PackOverlay::NONE,
+            &crate::item_defaults::read(&root).unwrap(),
+        )
+        .unwrap();
         let filled = data.fill("minecraft:chests/banner", 5, 27, None);
         let banner = filled.iter().flatten().next().expect("a banner");
         let component: Vec<_> = banner
@@ -2452,7 +2753,7 @@ mod namespace_tests {
             .filter(|(k, _)| k == "minecraft:banner_patterns")
             .collect();
         assert_eq!(
-            component[0].1,
+            horizon_core::json_nbt::tag_to_json(component[0].1.as_ref().unwrap()).unwrap(),
             serde_json::json!([{"pattern": "minecraft:border", "color": "blue"}])
         );
         let _ = fs::remove_dir_all(&root);
@@ -2479,7 +2780,12 @@ mod namespace_tests {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, text).unwrap();
         }
-        let data = LootData::load(&root, &PackOverlay::NONE).unwrap();
+        let data = LootData::load(
+            &root,
+            &PackOverlay::NONE,
+            &crate::item_defaults::read(&root).unwrap(),
+        )
+        .unwrap();
         let filled = data.fill("minecraft:chests/book", 7, 27, None);
         let book = filled.iter().flatten().next().expect("a book");
         let content: Vec<_> = book
@@ -2488,7 +2794,7 @@ mod namespace_tests {
             .filter(|(k, _)| k == "minecraft:written_book_content")
             .collect();
         assert_eq!(content.len(), 1, "{:?}", book.components);
-        let content = &content[0].1;
+        let content = horizon_core::json_nbt::tag_to_json(content[0].1.as_ref().unwrap()).unwrap();
         assert_eq!(content["title"]["raw"], "A Guide");
         assert_eq!(content["author"], "Cartographer");
         assert_eq!(content["generation"], 2);
@@ -2519,7 +2825,12 @@ mod namespace_tests {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, text).unwrap();
         }
-        let data = LootData::load(&root, &PackOverlay::NONE).unwrap();
+        let data = LootData::load(
+            &root,
+            &PackOverlay::NONE,
+            &crate::item_defaults::read(&root).unwrap(),
+        )
+        .unwrap();
         let filled = data.fill("minecraft:chests/pages", 11, 27, None);
         let book = filled.iter().flatten().next().expect("a book");
         let content: Vec<_> = book
@@ -2529,7 +2840,7 @@ mod namespace_tests {
             .collect();
         assert_eq!(content.len(), 1, "{:?}", book.components);
         assert_eq!(
-            content[0].1,
+            horizon_core::json_nbt::tag_to_json(content[0].1.as_ref().unwrap()).unwrap(),
             serde_json::json!({
                 "title": {"raw": "A Guide"},
                 "author": "Cartographer",
@@ -2542,7 +2853,12 @@ mod namespace_tests {
             table.replace(r#""mode": "append""#, r#""mode": "replace_all""#),
         )
         .unwrap();
-        let data = LootData::load(&root, &PackOverlay::NONE).unwrap();
+        let data = LootData::load(
+            &root,
+            &PackOverlay::NONE,
+            &crate::item_defaults::read(&root).unwrap(),
+        )
+        .unwrap();
         let filled = data.fill("minecraft:chests/pages", 11, 27, None);
         let book = filled.iter().flatten().next().expect("a book");
         let content: Vec<_> = book
@@ -2551,7 +2867,7 @@ mod namespace_tests {
             .filter(|(k, _)| k == "minecraft:written_book_content")
             .collect();
         assert_eq!(
-            content[0].1,
+            horizon_core::json_nbt::tag_to_json(content[0].1.as_ref().unwrap()).unwrap(),
             serde_json::json!({
                 "title": {"raw": "A Guide"},
                 "author": "Cartographer",
@@ -2577,7 +2893,8 @@ mod namespace_tests {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, text).unwrap();
         }
-        let data = LootData::load(&root, &PackOverlay::NONE).unwrap();
+        let defaults = crate::item_defaults::read(&root).unwrap();
+        let data = LootData::load(&root, &PackOverlay::NONE, &defaults).unwrap();
         let mut seen = std::collections::BTreeSet::new();
         for seed in (0..40).map(|n| n * 7_919) {
             let filled = data.fill("minecraft:chests/horn", seed, 27, None);
@@ -2588,7 +2905,10 @@ mod namespace_tests {
                 .filter(|(k, _)| k == "minecraft:instrument")
                 .collect();
             assert_eq!(instrument.len(), 1, "{:?}", horn.components);
-            seen.insert(instrument[0].1.as_str().unwrap().to_owned());
+            seen.insert(match &instrument[0].1 {
+                Some(Tag::String(id)) => id.to_string_lossy(),
+                _ => panic!("instrument"),
+            });
         }
         assert_eq!(
             seen.into_iter().collect::<Vec<_>>(),
@@ -2602,6 +2922,7 @@ mod namespace_tests {
     #[test]
     fn tag_kind_yields_tag_loader_ids_for_content_id_keys() {
         let overlay = PackOverlay {
+            conditions: &crate::conditions::LoadConditions::vanilla(),
             files: &[
                 (
                     "tags/minecraft:item/food".to_owned(),
@@ -2635,6 +2956,7 @@ mod namespace_tests {
         )
         .unwrap();
         let overlay = PackOverlay {
+            conditions: &crate::conditions::LoadConditions::vanilla(),
             files: &[(
                 "tags/minecraft:item/food".to_owned(),
                 vec![
@@ -2643,7 +2965,8 @@ mod namespace_tests {
                 ],
             )],
         };
-        let data = LootData::load(&root, &overlay).unwrap();
+        let defaults = crate::item_defaults::read(&root).unwrap();
+        let data = LootData::load(&root, &overlay, &defaults).unwrap();
         assert!(data.in_tag("item", "minecraft:food", "minecraft:apple"));
         assert!(!data.in_tag("item", "minecraft:food", "minecraft:bread"));
         assert!(!data.in_tag("item", "minecraft:food", "minecraft:kelp"));
@@ -2671,7 +2994,12 @@ mod namespace_tests {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, text).unwrap();
         }
-        let data = LootData::load(&root, &PackOverlay::NONE).unwrap();
+        let data = LootData::load(
+            &root,
+            &PackOverlay::NONE,
+            &crate::item_defaults::read(&root).unwrap(),
+        )
+        .unwrap();
         let filled = data.fill("minecraft:chests/tooltip", 13, 27, None);
         let stack = filled.iter().flatten().next().expect("a stick");
         let display: Vec<_> = stack
@@ -2681,7 +3009,7 @@ mod namespace_tests {
             .collect();
         assert_eq!(display.len(), 1, "{:?}", stack.components);
         assert_eq!(
-            display[0].1,
+            horizon_core::json_nbt::tag_to_json(display[0].1.as_ref().unwrap()).unwrap(),
             serde_json::json!({"hidden_components": ["minecraft:lore"]})
         );
         let _ = fs::remove_dir_all(&root);
@@ -2710,7 +3038,12 @@ mod namespace_tests {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, text).unwrap();
         }
-        let data = LootData::load(&root, &PackOverlay::NONE).unwrap();
+        let data = LootData::load(
+            &root,
+            &PackOverlay::NONE,
+            &crate::item_defaults::read(&root).unwrap(),
+        )
+        .unwrap();
         let filled = data.fill("minecraft:chests/data", 17, 27, None);
         let stack = filled.iter().flatten().next().expect("a stick");
         let component: Vec<_> = stack
@@ -2720,7 +3053,7 @@ mod namespace_tests {
             .collect();
         assert_eq!(component.len(), 1, "{:?}", stack.components);
         assert_eq!(
-            component[0].1,
+            horizon_core::json_nbt::tag_to_json(component[0].1.as_ref().unwrap()).unwrap(),
             serde_json::json!({"a": {"b": 1, "d": 2, "e": 3}, "c": 2, "f": "x"})
         );
         let _ = fs::remove_dir_all(&root);
@@ -2731,15 +3064,89 @@ mod namespace_tests {
 mod native_kinds_tests {
     use super::*;
 
+    #[test]
+    fn weight_totals_pool_and_enchantments() {
+        for weights in [
+            [0, 0, 0],
+            [1, 2, 3],
+            [7, 0, 11],
+            // Exactly i32::MAX, with weights representable by loot's f32 calculation.
+            [1_073_741_760, 1_073_741_760, 127],
+            [i32::MAX; 3],
+        ] {
+            let entries: Vec<_> = weights.iter().enumerate().map(|(i,w)| serde_json::json!({"type":"minecraft:item", "name":format!("minecraft:item{i}"), "weight":w})).collect();
+            let mut data = table(
+                "weight_totals",
+                &serde_json::json!({"pools":[{"rolls":1,"entries":entries}]}).to_string(),
+            );
+            data.enchantments = weights
+                .iter()
+                .enumerate()
+                .map(|(i, &weight)| Enchantment {
+                    name: format!("test:{i}"),
+                    supported: Value::Null,
+                    primary: None,
+                    exclusive: Value::Null,
+                    max_level: 1,
+                    weight,
+                    min_cost: (0, 0),
+                    max_cost: (100, 0),
+                    slots: vec![],
+                    effects: Value::Null,
+                })
+                .collect();
+            let total: i64 = weights.iter().map(|&w| i64::from(w)).sum();
+            for seed in 0..64 {
+                let mut expected = LegacyRandom::new(seed);
+                let expected_pick = if total == 0 {
+                    None
+                } else {
+                    let mut at = if total <= i64::from(i32::MAX) {
+                        i64::from(expected.next_int_bound(total as i32).unwrap())
+                    } else {
+                        ((expected.next_long() as u64) % total as u64) as i64
+                    };
+                    weights.iter().position(|&w| {
+                        at -= i64::from(w);
+                        at < 0
+                    })
+                };
+                let mut random = LegacyRandom::new(seed);
+                assert_eq!(
+                    weighted_enchantment(&data, &mut random, &[(0, 1), (1, 1), (2, 1)])
+                        .map(|e| e.0),
+                    expected_pick
+                );
+                assert_eq!(random.next_long(), expected.next_long());
+                let mut random = LegacyRandom::new(seed);
+                let drops = data.roll("minecraft:test", &mut random, 0.0, None, None);
+                assert_eq!(
+                    drops.first().map(|s| s.item.clone()),
+                    expected_pick.map(|i| format!("minecraft:item{i}"))
+                );
+                let mut expected = LegacyRandom::new(seed);
+                if total > 0 {
+                    if total <= i64::from(i32::MAX) {
+                        expected.next_int_bound(total as i32).unwrap();
+                    } else {
+                        expected.next_long();
+                    }
+                }
+                assert_eq!(random.next_long(), expected.next_long());
+            }
+            assert!(weighted_enchantment(&data, &mut LegacyRandom::new(1), &[]).is_none());
+        }
+    }
+
     fn table(name: &str, json: &str) -> LootData {
         let root = std::env::temp_dir().join(format!("loot-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let dir = root.join("data/minecraft/loot_table");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("test.json"), json).unwrap();
-        // LootData::load reads items.json too.
         std::fs::write(root.join("items.json"), "{}").unwrap();
-        let data = LootData::load(&root, &PackOverlay::NONE).unwrap();
+        let defaults = crate::item_defaults::read(&root).unwrap();
+        let data = LootData::load(&root, &PackOverlay::NONE, &defaults).unwrap();
         let _ = std::fs::remove_dir_all(&root);
         data
     }
@@ -2841,10 +3248,10 @@ mod native_kinds_tests {
         assert_eq!(a, b, "same seed, different result");
     }
 
-    fn place(x: f64) -> NativeLootPlace {
-        NativeLootPlace {
+    fn place(x: f64) -> LootPlace {
+        LootPlace {
             origin: Some([x, 64.0, 0.5]),
-            ..NativeLootPlace::default()
+            ..LootPlace::default()
         }
     }
 
@@ -2946,7 +3353,8 @@ mod location_check_biome_tests {
         )
         .unwrap();
         fs::write(root.join("items.json"), "{}").unwrap();
-        let data = LootData::load(&root, &PackOverlay { files: packs }).unwrap();
+        let defaults = crate::item_defaults::read(&root).unwrap();
+        let data = LootData::load(&root, &PackOverlay::new(packs), &defaults).unwrap();
         let _ = fs::remove_dir_all(&root);
         data
     }
@@ -3014,6 +3422,108 @@ mod location_check_biome_tests {
         assert!(drops(&data, Some("minecraft:bamboo_jungle")));
         assert!(drops(&data, Some("minecraft:desert")));
         assert!(!drops(&data, Some("minecraft:savanna")));
+    }
+}
+
+#[cfg(test)]
+mod enchanted_level_tests {
+    use super::*;
+    use horizon_core::random::LegacyRandom;
+
+    fn table(name: &str, modifier: &str, condition: &str) -> LootData {
+        let json = format!(
+            r#"{{"pools":[{{"rolls":1,"entries":[{{"type":"minecraft:item","name":"minecraft:stone",
+                "condition":{condition},"modifier":{modifier}}}]}}]}}"#
+        );
+        let root = std::env::temp_dir().join(format!("loot-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("data/minecraft/loot_table");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("test.json"), json).unwrap();
+        std::fs::write(root.join("items.json"), "{}").unwrap();
+        let defaults = crate::item_defaults::read(&root).unwrap();
+        let data = LootData::load(&root, &PackOverlay::NONE, &defaults).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+        data
+    }
+
+    const INCREASE: &str = r#"[{"type":"minecraft:enchanted_count_increase",
+        "enchantment":"minecraft:looting","count":2.0}]"#;
+    const BONUS: &str = r#"{"type":"minecraft:random_chance_with_enchanted_bonus",
+        "enchantment":"minecraft:looting","unenchanted_chance":0.0,"enchanted_chance":1.0}"#;
+
+    fn count(data: &LootData, level: i32) -> i32 {
+        let mut heard = Vec::new();
+        let items = data.roll_death_entity(
+            "minecraft:test",
+            &mut LegacyRandom::new(1),
+            &EntityLootParams::default(),
+            &mut |_, enchantment: &str, was| {
+                heard.push((enchantment.to_owned(), was));
+                level
+            },
+        );
+        assert_eq!(heard, [("minecraft:looting".to_owned(), 0)]);
+        items.iter().map(LootStack::get_count).sum()
+    }
+
+    /// `EnchantedEntityLootEvent`: both readers use the level the game
+    /// answers, and one raised from 0 counts with no attacker at all.
+    #[test]
+    fn the_answered_level_drives_the_count_and_the_chance() {
+        let increase = table("enchanted-increase", INCREASE, "null");
+        assert_eq!(count(&increase, 0), 1);
+        assert_eq!(count(&increase, 3), 7);
+        let bonus = table("enchanted-bonus", "null", BONUS);
+        assert_eq!(count(&bonus, 0), 0);
+        assert_eq!(count(&bonus, 1), 1);
+    }
+
+    /// A mod may answer any level, and it counts as [`MAX_LOOT_LEVEL`]: the
+    /// stack, which splits one stack at a time, stays small, and the square
+    /// doesn't overflow. Below that, the level counts in full.
+    #[test]
+    fn a_huge_level_counts_as_the_most_a_table_reads() {
+        let increase = table("enchanted-huge-increase", INCREASE, "null");
+        assert_eq!(count(&increase, 1000), 2001);
+        assert_eq!(count(&increase, i32::MAX), 1 + 2 * MAX_LOOT_LEVEL);
+        let limited = r#"[{"type":"minecraft:enchanted_count_increase",
+            "enchantment":"minecraft:looting","count":2.0,"limit":5}]"#;
+        let limited = table("enchanted-huge-limited", limited, "null");
+        assert_eq!(count(&limited, i32::MAX), 5);
+        let squared = r#"{"type":"minecraft:random_chance_with_enchanted_bonus",
+            "enchantment":"minecraft:looting","unenchanted_chance":0.0,
+            "enchanted_chance":{"type":"minecraft:levels_squared","added":0.0}}"#;
+        assert_eq!(
+            count(&table("enchanted-huge-bonus", "null", squared), i32::MAX),
+            1
+        );
+    }
+
+    /// An answer of the level asked changes nothing about the roll, the
+    /// random's state included.
+    #[test]
+    fn asking_leaves_the_roll_as_it_was() {
+        let modifier = r#"[{"type":"minecraft:enchanted_count_increase",
+            "enchantment":"minecraft:looting",
+            "count":{"type":"minecraft:uniform","min":0.0,"max":1.0}},
+            {"type":"minecraft:set_count","count":{"type":"minecraft:uniform","min":1.0,"max":9.0}}]"#;
+        let condition = r#"{"type":"minecraft:random_chance_with_enchanted_bonus",
+            "enchantment":"minecraft:looting","unenchanted_chance":1.0,"enchanted_chance":1.0}"#;
+        let data = table("enchanted-same", modifier, condition);
+        let params = EntityLootParams::default();
+        let mut plain = LegacyRandom::new(5);
+        let mut asked = LegacyRandom::new(5);
+        let expected = data.roll_entity("minecraft:test", &mut plain, &params);
+        let items =
+            data.roll_death_entity("minecraft:test", &mut asked, &params, &mut |_, _, level| {
+                level
+            });
+        assert_eq!(
+            items.iter().map(|s| s.count).collect::<Vec<_>>(),
+            expected.iter().map(|s| s.count).collect::<Vec<_>>()
+        );
+        assert_eq!(asked.next_long(), plain.next_long());
     }
 }
 
@@ -3099,7 +3609,7 @@ impl LootData {
                 .iter()
                 .rev()
                 .find(|(id, _)| id == "minecraft:custom_data")
-                .and_then(|(_, value)| nbt_predicate_tag(value));
+                .and_then(|(_, value)| value.clone());
             let data = match &data {
                 Some(Tag::Compound(c)) => Some(c),
                 _ => None,
@@ -3152,7 +3662,11 @@ mod custom_data_predicate_tests {
     /// One pool per pattern: its wool, given `data` by `set_components`,
     /// doubled by `filtered` when the pattern matches. The wools doubled.
     fn doubled(data: Option<&str>) -> Vec<&'static str> {
-        let set = data.map_or(String::new(), |d| {
+        doubled_component(data.map(|s| Value::String(s.to_owned())))
+    }
+
+    fn doubled_component(data: Option<Value>) -> Vec<&'static str> {
+        let set = data.as_ref().map_or(String::new(), |d| {
             let d = serde_json::to_string(d).unwrap();
             format!(r#"{{"type":"minecraft:set_components","components":{{"minecraft:custom_data":{d}}}}},"#)
         });
@@ -3164,10 +3678,12 @@ mod custom_data_predicate_tests {
                 )
             })
             .collect();
+        // One directory per call: tests run in parallel, and two payloads of the same length shared one.
+        static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let root = std::env::temp_dir().join(format!(
             "loot-custom-data-{}-{}",
             std::process::id(),
-            data.map_or(0, str::len)
+            CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         let _ = std::fs::remove_dir_all(&root);
         let dir = root.join("data/minecraft/loot_table");
@@ -3178,7 +3694,12 @@ mod custom_data_predicate_tests {
         )
         .unwrap();
         std::fs::write(root.join("items.json"), "{}").unwrap();
-        let loot = LootData::load(&root, &PackOverlay::NONE).unwrap();
+        let loot = LootData::load(
+            &root,
+            &PackOverlay::NONE,
+            &crate::item_defaults::read(&root).unwrap(),
+        )
+        .unwrap();
         let _ = std::fs::remove_dir_all(&root);
         let drops = loot.roll("minecraft:test", &mut LegacyRandom::new(1), 0.0, None, None);
         assert_eq!(drops.len(), PATTERNS.len());
@@ -3194,6 +3715,23 @@ mod custom_data_predicate_tests {
     /// by `loot give @s kill`, VanillaCommandExecOracle, #12196): a typed NBT
     /// subset (`NbtUtils.compareNbt`), lists matched element by element, no
     /// custom data read as `{}`, and a JSON pattern's whole numbers as bytes.
+    #[test]
+    fn object_custom_data_keeps_json_ops_numeric_typing() {
+        // JsonOps→NbtOps narrows 1 to Byte, unchanged from json_to_tag.
+        // The int-only orange predicate must not match this object.
+        assert_eq!(
+            doubled_component(Some(serde_json::json!({"h": 1}))),
+            ["white", "light_gray", "cyan"]
+        );
+    }
+
+    #[test]
+    fn data_file_custom_data_snbt_matches_a_nonempty_predicate() {
+        // doubled writes and loads a real loot-table data file, including
+        // set_components followed by filtered, rather than calling the matcher.
+        assert_eq!(doubled(Some("{nested:{k:7}}")), ["magenta", "light_gray"]);
+    }
+
     #[test]
     fn filtered_matches_custom_data_as_vanilla() {
         let rich = r#"{h:1b,nested:{k:7,extra:9},entries:[{k:1b,extra:2b},{k:2b}],wide:9007199254740993L,spare:"keep"}"#;

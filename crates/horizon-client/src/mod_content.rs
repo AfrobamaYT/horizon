@@ -16,11 +16,17 @@
 //! content mod the root is the base root itself.
 use crate::{Result, blocks::MAP_COLORS};
 use horizon_core::geometry::{Aabb, Axis, ShapeOp, Vec3, VoxelShape};
-use horizon_mods::content::{
-    Block, BlockShapes, Content, CreativeTab, EntityType, Fluid, MenuType, MobEffect, Rarity,
-    StateProperty, StateValues,
+use horizon_core::{
+    nbt,
+    nbt::{Compound, JavaString, Limits, Tag},
 };
-use horizon_world::nbt::{self, Compound, JavaString, Tag};
+use horizon_mod_package::content::{
+    Block, BlockEntityType, BlockShapes, Content, CreativeTab, EntityType, FluidLook, MenuType,
+    MobEffect, Rarity, StateProperty, StateValues,
+};
+use horizon_mod_package::manifest::{
+    JarInputsError, JarRef, collect_jar_requirements, missing_jars,
+};
 use serde::{Deserialize, Serialize, de};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -29,10 +35,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// A content mod to put in the root: its id and content.
+/// A content mod to put in the root: its id, its content, and the Java jars
+/// it lists in manifest order — each an asset/data layer under the mod's own
+/// files, its file found by hash in `jar_store` (modding book's manifest reference).
 pub struct ContentMod {
     pub id: String,
     pub content: Content,
+    pub jars: Vec<JarRef>,
 }
 
 /// Leaves out a mod with an item whose `crafting_remainder` names an item the mod does not have:
@@ -81,6 +90,14 @@ pub fn mob_effects(mods: &[ContentMod]) -> Vec<&MobEffect> {
     effects
 }
 
+/// The mods' fluids in registry order, by id as effects are. Each takes two
+/// network ids after vanilla's, its source's then its flowing form's.
+pub fn fluids(mods: &[ContentMod]) -> Vec<&FluidLook> {
+    let mut fluids: Vec<&FluidLook> = mods.iter().flat_map(|m| &m.content.fluids).collect();
+    fluids.sort_by(|a, b| a.id.cmp(&b.id));
+    fluids
+}
+
 /// the mods' entity types in registry order, by id as effects are.
 pub fn entity_types(mods: &[ContentMod]) -> Vec<&EntityType> {
     let mut types: Vec<&EntityType> = mods.iter().flat_map(|m| &m.content.entity_types).collect();
@@ -93,6 +110,70 @@ pub fn menu_types(mods: &[ContentMod]) -> Vec<&MenuType> {
     let mut menus: Vec<&MenuType> = mods.iter().flat_map(|m| &m.content.menu_types).collect();
     menus.sort_by(|a, b| a.id.cmp(&b.id));
     menus
+}
+
+static FLUID_LOOKS: std::sync::RwLock<BTreeMap<String, FluidLook>> =
+    std::sync::RwLock::new(BTreeMap::new());
+
+/// Remembers how the mods' fluids look (`data/<id>/horizon/fluid/`), for what the client draws.
+pub fn set_fluid_looks(mods: &[ContentMod]) {
+    let looks: BTreeMap<String, FluidLook> = mods
+        .iter()
+        .flat_map(|m| &m.content.fluids)
+        .map(|f| (f.id.clone(), f.clone()))
+        .collect();
+    crate::fluid_models::set_world_looks(looks.values());
+    *FLUID_LOOKS.write().unwrap_or_else(|e| e.into_inner()) = looks;
+}
+
+/// Registers the world fluids the mods declare, before any block table is read from the root.
+/// Returns their registry names, source and flowing, for the fluid keys.
+pub fn register_world_fluids(
+    mods: &[ContentMod],
+) -> std::result::Result<Vec<String>, horizon_world::fluid::ModFluidRegistrationError> {
+    let mut names = Vec::new();
+    for look in mods.iter().flat_map(|m| &m.content.fluids) {
+        let Some(world) = look.world else { continue };
+        let flowing_id = look.flowing_id();
+        names.push(look.id.clone());
+        names.push(flowing_id.clone());
+        horizon_world::fluid::register_mod_fluid(horizon_world::fluid::ModFluidType {
+            id: look.id.clone(),
+            flowing_id,
+            bucket: look.bucket_id(),
+            rules: horizon_world::fluid::ModFluidRules {
+                tick_delay: world.tick_delay,
+                drop_off: world.drop_off,
+                slope_find_distance: world.slope_find_distance,
+                converts_to_source: world.source_conversion,
+            },
+        })?;
+    }
+    Ok(names)
+}
+
+/// Joins the world fluids native mods declare in code to the content mods of their namespaces:
+/// a fluid's file, if it has one, keeps saying how it looks.
+pub fn accept_world_fluids(mods: &mut [ContentMod], fluids: &[FluidLook]) {
+    for fluid in fluids {
+        let namespace = fluid.id.split_once(':').map_or("", |(ns, _)| ns);
+        let Some(owner) = mods.iter_mut().find(|m| m.id == namespace) else {
+            continue;
+        };
+        match owner.content.fluids.iter_mut().find(|f| f.id == fluid.id) {
+            Some(look) => look.world = fluid.world,
+            None => owner.content.fluids.push(fluid.clone()),
+        }
+    }
+}
+
+/// How the fluid `id` looks, when a mod declares it.
+pub fn fluid_look(id: &str) -> Option<FluidLook> {
+    FLUID_LOOKS
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(id)
+        .cloned()
 }
 
 /// JSON with its object keys in file order, so a rewritten table differs
@@ -607,14 +688,62 @@ fn resolve_shapes<'a>(
         .collect()
 }
 
+/// A content farmland declaration names a block absent from the loaded registry.
+#[derive(Debug)]
+pub struct UnknownBaseBlock {
+    /// The farmland declaration.
+    pub block: String,
+    /// The missing base ID.
+    pub base: String,
+}
+impl std::fmt::Display for UnknownBaseBlock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: base_block {} is not a block", self.block, self.base)
+    }
+}
+impl std::error::Error for UnknownBaseBlock {}
+
+/// A native block entity declaration uses vanilla's reserved namespace.
+#[derive(Debug)]
+pub struct ReservedBlockEntityNamespace {
+    /// The refused type's registry ID.
+    pub kind: String,
+}
+impl fmt::Display for ReservedBlockEntityNamespace {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "block entity type {} cannot use the minecraft namespace",
+            self.kind
+        )
+    }
+}
+impl std::error::Error for ReservedBlockEntityNamespace {}
+
+/// A block ID resolved against the complete content and vanilla registry.
+struct KnownBlock<'a>(&'a str);
+
+/// The template class's rule for downward skylight through a declared outline.
+#[derive(Clone, Copy)]
+enum SkylightRule {
+    Shape,
+    Fluid,
+    Template,
+}
+
 /// A block being added: its declaration and where its states go.
 struct NewBlock<'a> {
     decl: &'a Block,
+    base_block: Option<KnownBlock<'a>>,
     rename: Rename,
     /// The template's item, if it has one.
     item: Option<String>,
     shapes: Option<Vec<VoxelShape>>,
     collision_shapes: Option<Vec<VoxelShape>>,
+    /// Whether each shaped state contains fluid, including intrinsic template fluids.
+    has_fluid: Vec<bool>,
+    skylight: SkylightRule,
+    custom_dampening: bool,
     context_shapes: BTreeMap<String, Vec<VoxelShape>>,
     state_light: Option<Vec<u8>>,
     default: u32,
@@ -630,6 +759,17 @@ struct NewBlock<'a> {
     wall_of: Option<String>,
 }
 impl NewBlock<'_> {
+    /// The item its gameplay row names when that is not the template's item
+    /// renamed: `block_item`, or `minecraft:air` for a block with no item
+    /// (a sign's wall form keeps the paired sign's). `Block.asItem` and, unless
+    /// the block has a `pick_item` row of its own, pick-block read this value.
+    fn item_row(&self) -> Option<&str> {
+        match &self.decl.block_item {
+            Some(item) => Some(item),
+            None => (!self.decl.item && self.wall_of.is_none()).then_some("minecraft:air"),
+        }
+    }
+
     /// Template states and declared combinations in registry order.
     fn state_combinations(&self) -> impl Iterator<Item = (u32, &[(String, String)])> {
         let start = self.rename.states.start;
@@ -645,9 +785,10 @@ struct NewItem {
     rarity: Option<Rarity>,
     components: Vec<(String, J)>,
     crafting_remainder: Option<String>,
+    block: Option<String>,
+    arm_pose: Option<horizon_mod_package::content::ArmPose>,
     /// `StandingAndWallBlockItem.wallBlock`, when its block declares it.
     wall_block: Option<String>,
-    place_block: Option<String>,
 }
 
 struct Plan<'a> {
@@ -656,8 +797,10 @@ struct Plan<'a> {
     /// Every vanilla item id, including items omitted from the search tab.
     vanilla_items: BTreeSet<String>,
     effects: Vec<&'a MobEffect>,
-    fluids: Vec<&'a Fluid>,
+    fluids: Vec<&'a FluidLook>,
     entity_types: Vec<&'a EntityType>,
+    block_entity_types: Vec<&'a BlockEntityType>,
+    block_entity_factories: BTreeMap<&'a str, &'a str>,
     menu_types: Vec<&'a MenuType>,
     /// Vanilla's state count (the tables' length before).
     states: usize,
@@ -699,13 +842,14 @@ fn component_types(map: &J) -> BTreeSet<String> {
 /// `native_items`), joined to the content mods: each namespace's go into
 /// the content mod of that id when one is on (a native mod's own `.hmod`,
 /// with its models and textures), else into a content mod with no files of
-/// its own. Checked as files are ([`horizon_mods::Content::declare`],
+/// its own. Checked as files are ([`horizon_mod_package::Content::declare`],
 /// [`accept_mod`]); a namespace whose declarations are refused is left out
 /// whole, and its error returned.
 pub fn accept_declared(
     mods: &mut Vec<ContentMod>,
-    blocks: &[horizon_mods::content::Block],
-    items: &[horizon_mods::content::Item],
+    blocks: &[horizon_mod_package::content::Block],
+    items: &[horizon_mod_package::content::Item],
+    types: &[BlockEntityType],
     known: &BTreeSet<String>,
 ) -> Vec<String> {
     let namespace = |id: &str| id.split_once(':').map_or("", |(ns, _)| ns).to_owned();
@@ -724,17 +868,21 @@ pub fn accept_declared(
             .1
             .push(item.clone());
     }
+    for kind in types {
+        by_namespace.entry(namespace(&kind.id)).or_default();
+    }
     let mut errors = Vec::new();
     for (ns, (blocks, items)) in by_namespace {
+        let types = types.iter().filter(|t| namespace(&t.id) == ns).cloned();
         let result = match mods.iter().position(|m| m.id == ns) {
             Some(i) => {
-                let mut content = horizon_mods::Content::declared(&ns);
+                let mut content = horizon_mod_package::Content::declared(&ns);
                 content.blocks.clone_from(&mods[i].content.blocks);
                 content.items.clone_from(&mods[i].content.items);
                 content
                     .declare(&blocks, &items)
                     .and_then(|()| {
-                        let mut added = horizon_mods::Content::declared(&ns);
+                        let mut added = horizon_mod_package::Content::declared(&ns);
                         added.blocks.clone_from(&blocks);
                         added.items.clone_from(&items);
                         validate_components(&added, known).map_err(|e| e.to_string())
@@ -742,14 +890,17 @@ pub fn accept_declared(
                     .map(|()| {
                         mods[i].content.blocks.extend(blocks);
                         mods[i].content.items.extend(items);
+                        mods[i].content.block_entity_types.extend(types);
                     })
             }
             None => {
-                let mut content = horizon_mods::Content::declared(&ns);
+                let mut content = horizon_mod_package::Content::declared(&ns);
                 content.declare(&blocks, &items).and_then(|()| {
+                    content.block_entity_types.extend(types);
                     let candidate = ContentMod {
                         id: ns.clone(),
                         content,
+                        jars: Vec::new(),
                     };
                     accept_mod(mods, candidate, known).map_err(|e| e.to_string())
                 })
@@ -775,7 +926,7 @@ pub fn accept_mod(
     );
     if let Some(error) = mods
         .iter()
-        .find_map(|c| horizon_mods::content::clash((&c.id, &c.content.namespaces), own))
+        .find_map(|c| horizon_mod_package::content::clash((&c.id, &c.content.namespaces), own))
     {
         return Err(error.into());
     }
@@ -783,7 +934,10 @@ pub fn accept_mod(
     Ok(())
 }
 
-fn validate_components(content: &horizon_mods::Content, known: &BTreeSet<String>) -> Result<()> {
+fn validate_components(
+    content: &horizon_mod_package::Content,
+    known: &BTreeSet<String>,
+) -> Result<()> {
     for (id, components) in content.items.iter().map(|i| (&i.id, &i.components)).chain(
         content
             .blocks
@@ -924,6 +1078,50 @@ impl<'a> Plan<'a> {
             },
             false => BTreeSet::new(),
         };
+        // Class chains are most-derived first. Fluid-dependent overrides must
+        // use the resolved state's fluid, not the template's cached dry answer.
+        let mut skylight_rules = BTreeMap::new();
+        let mut custom_dampening = BTreeSet::new();
+        if base.join("block-behaviours.json").exists() {
+            let behaviors = read_json(&base.join("block-behaviours.json"))?;
+            let Some(J::Arr(blocks)) = behaviors.get("blocks") else {
+                return Err("block-behaviours.json has no blocks".into());
+            };
+            for block in blocks {
+                let (Some(J::Str(name)), Some(J::Arr(classes))) =
+                    (block.get("name"), block.get("class"))
+                else {
+                    continue;
+                };
+                let classes: Vec<&str> = classes
+                    .iter()
+                    .filter_map(|class| match class {
+                        J::Str(name) => Some(name.as_str()),
+                        _ => None,
+                    })
+                    .collect();
+                if let Some(rule) = classes.iter().find_map(|class| match *class {
+                    "BarrierBlock"
+                    | "CrossCollisionBlock"
+                    | "GlowLichenBlock"
+                    | "LightBlock"
+                    | "VegetationBlock"
+                    | "WallBlock" => Some(SkylightRule::Fluid),
+                    "BambooStalkBlock" | "HangingMossBlock" | "LiquidBlock"
+                    | "MossyCarpetBlock" | "PipeBlock" | "ShulkerBoxBlock" | "TintedGlassBlock"
+                    | "TransparentBlock" | "VineBlock" => Some(SkylightRule::Template),
+                    _ => None,
+                }) {
+                    skylight_rules.insert(name.clone(), rule);
+                }
+                if classes
+                    .iter()
+                    .any(|class| matches!(*class, "LeavesBlock" | "TintedGlassBlock"))
+                {
+                    custom_dampening.insert(name.clone());
+                }
+            }
+        }
         let mut facts = read_json(&base.join("facts.json"))?;
         let names: Vec<String> = match facts.at("states") {
             Some(J::Arr(states)) => states
@@ -952,6 +1150,67 @@ impl<'a> Plan<'a> {
             (names[start + len..].iter().all(|n| n != name))
                 .then_some(start as u32..(start + len) as u32)
         };
+        let declared_ids: BTreeSet<&str> = mods
+            .iter()
+            .flat_map(|m| m.content.blocks.iter().map(|b| b.id.as_str()))
+            .collect();
+        let mut block_entity_types: Vec<(&str, &BlockEntityType)> = mods
+            .iter()
+            .flat_map(|m| {
+                m.content
+                    .block_entity_types
+                    .iter()
+                    .map(move |kind| (m.id.as_str(), kind))
+            })
+            .collect();
+        block_entity_types.sort_by(|(_, a), (_, b)| a.id.cmp(&b.id));
+        let mut block_entity_factories = BTreeMap::new();
+        if !block_entity_types.is_empty() {
+            let registry = read_json(&base.join("registries.json"))?;
+            let Some(J::Obj(entries)) = registry
+                .get("minecraft:block_entity_type")
+                .and_then(|r| r.get("entries"))
+            else {
+                return Err("no minecraft:block_entity_type entries".into());
+            };
+            let mut ids: BTreeSet<&str> = entries.iter().map(|(id, _)| id.as_str()).collect();
+            for (mod_id, kind) in &block_entity_types {
+                if kind.id.starts_with("minecraft:") {
+                    return Err(ReservedBlockEntityNamespace {
+                        kind: kind.id.clone(),
+                    }
+                    .into());
+                }
+                if !ids.insert(&kind.id) {
+                    return Err(format!("block entity type {} is already declared", kind.id).into());
+                }
+                for block in &kind.blocks {
+                    if block.starts_with("minecraft:") {
+                        return Err(format!(
+                            "mod {mod_id}: block entity type {} cannot own vanilla block {block}",
+                            kind.id
+                        )
+                        .into());
+                    }
+                    if !declared_ids.contains(block.as_str()) {
+                        return Err(format!(
+                            "block entity type {}: {block} is not a block",
+                            kind.id
+                        )
+                        .into());
+                    }
+                    if let Some(previous) =
+                        block_entity_factories.insert(block.as_str(), kind.id.as_str())
+                    {
+                        return Err(format!(
+                            "block {block} belongs to both block entity types {previous} and {}",
+                            kind.id
+                        )
+                        .into());
+                    }
+                }
+            }
+        }
         let mut blocks = Vec::new();
         let mut next = names.len() as u32;
         let mut sorted: Vec<&ContentMod> = mods.iter().collect();
@@ -961,6 +1220,19 @@ impl<'a> Plan<'a> {
             let mut declared: Vec<&Block> = m.content.blocks.iter().collect();
             declared.sort_by(|a, b| a.id.cmp(&b.id));
             for decl in declared {
+                let base_block = match decl.base_block.as_deref() {
+                    Some(base) if defaults.contains_key(base) || declared_ids.contains(base) => {
+                        Some(KnownBlock(base))
+                    }
+                    Some(base) => {
+                        return Err(UnknownBaseBlock {
+                            block: decl.id.clone(),
+                            base: base.to_owned(),
+                        }
+                        .into());
+                    }
+                    None => None,
+                };
                 if defaults.contains_key(&decl.id) {
                     return Err(format!("{}: {} is already a block", m.id, decl.id).into());
                 }
@@ -1085,6 +1357,25 @@ impl<'a> Plan<'a> {
                     })
                 };
                 let collision_shapes = decl.collision_shapes.as_ref().map(resolve).transpose()?;
+                let mut has_fluid = Vec::new();
+                if shapes.is_some() {
+                    for &(state, combo) in &order {
+                        let J::Arr(row) = &rows[(states.start + state) as usize] else {
+                            unreachable!()
+                        };
+                        // facts.json exports !BlockState.getFluidState().isEmpty(),
+                        // including water in bubble columns and aquatic plants.
+                        let Some(J::Bool(fluid)) = row.get(2) else {
+                            return Err("facts.json: a state without a fluid flag".into());
+                        };
+                        has_fluid.push(
+                            *fluid
+                                || combos[combo as usize]
+                                    .iter()
+                                    .any(|(name, value)| name == "waterlogged" && value == "true"),
+                        );
+                    }
+                }
                 let mut context_shapes = BTreeMap::new();
                 for (channel, specs) in [
                     ("outline", &decl.outline_context_shapes),
@@ -1126,10 +1417,17 @@ impl<'a> Plan<'a> {
                 }
                 blocks.push(NewBlock {
                     decl,
+                    base_block,
                     rename,
                     item: None,
                     shapes,
                     collision_shapes,
+                    has_fluid,
+                    skylight: skylight_rules
+                        .get(&decl.template)
+                        .copied()
+                        .unwrap_or(SkylightRule::Shape),
+                    custom_dampening: custom_dampening.contains(&decl.template),
                     context_shapes,
                     state_light,
                     default,
@@ -1193,18 +1491,19 @@ impl<'a> Plan<'a> {
                     rarity: None,
                     components: component_patch(&b.decl.id, &b.decl.components)?,
                     crafting_remainder: None,
+                    block: None,
+                    arm_pose: None,
                     wall_block: b.decl.wall_block.clone(),
-                    place_block: None,
                 });
             }
         }
         for m in &sorted {
             for i in &m.content.items {
-                if let Some(target) = &i.place_block
-                    && !defaults.contains_key(target)
-                    && !blocks.iter().any(|b| &b.decl.id == target)
+                if let Some(block) = &i.block
+                    && !defaults.contains_key(block)
+                    && !blocks.iter().any(|b| b.decl.id == *block)
                 {
-                    return Err(format!("{}: place_block {target:?} is not a block", i.id).into());
+                    return Err(format!("{}: block {block:?} is not a block", i.id).into());
                 }
                 items.push(NewItem {
                     rename: Rename::new(&i.template, &i.id),
@@ -1212,8 +1511,9 @@ impl<'a> Plan<'a> {
                     rarity: i.rarity,
                     components: component_patch(&i.id, &i.components)?,
                     crafting_remainder: i.crafting_remainder.clone(),
+                    block: i.block.clone(),
+                    arm_pose: i.arm_pose,
                     wall_block: None,
-                    place_block: i.place_block.clone(),
                 });
             }
         }
@@ -1240,6 +1540,11 @@ impl<'a> Plan<'a> {
             effects: mob_effects(mods),
             fluids: fluids(mods),
             entity_types: entity_types(mods),
+            block_entity_types: block_entity_types
+                .into_iter()
+                .map(|(_, kind)| kind)
+                .collect(),
+            block_entity_factories,
             menu_types: menu_types(mods),
             states: names.len(),
             defaults,
@@ -1285,8 +1590,11 @@ impl<'a> Plan<'a> {
                 }
                 if gameplay {
                     row.set("id", J::Num(next.into()));
-                    if !b.decl.item && b.wall_of.is_none() {
-                        row.set("item", J::Str("minecraft:air".into()));
+                    if let Some(item) = b.item_row() {
+                        row.set("item", J::Str(item.into()));
+                    }
+                    if let Some(item) = &b.decl.pick_item {
+                        row.set("pick_item", J::Str(item.clone()));
                     }
                     self.override_gameplay(b, state_index, combo, &mut row);
                     if let Some(shapes) = &b.shapes {
@@ -1310,6 +1618,41 @@ impl<'a> Plan<'a> {
                                 )
                             })
                             .collect();
+                        // BlockState.initCache and BlockBehaviour.getLightDampening:
+                        // the declared outline is the block's occlusion shape.
+                        let full = !shape.join_is_not_empty(&VoxelShape::block(), ShapeOp::XOR)?;
+                        let can_occlude = matches!(row.get("can_occlude"), Some(J::Bool(true)));
+                        let solid = can_occlude && full;
+                        let down = match b.skylight {
+                            SkylightRule::Shape => !full && !b.has_fluid[state_index],
+                            SkylightRule::Fluid => !b.has_fluid[state_index],
+                            SkylightRule::Template => {
+                                matches!(row.get("skylight_down"), Some(J::Bool(true)))
+                            }
+                        };
+                        // A partial outline needs directional light occlusion even
+                        // when its full-cube template bypasses shape checks. Keep
+                        // the template's participation for special full shapes.
+                        let shape_occlusion = can_occlude
+                            && (!full || matches!(row.get("shape_occlusion"), Some(J::Bool(true))));
+                        row.set("shape_occlusion", J::Bool(shape_occlusion));
+                        row.set("solid_render", J::Bool(solid));
+                        row.set("skylight_down", J::Bool(down));
+                        if !b.custom_dampening {
+                            row.set(
+                                "dampening",
+                                J::Num(
+                                    (if solid {
+                                        15
+                                    } else if down {
+                                        0
+                                    } else {
+                                        1
+                                    })
+                                    .into(),
+                                ),
+                            );
+                        }
                         row.set("outline", J::Arr(boxes));
                         row.set("outline_edges", J::Arr(shape_edges(shape)));
                     }
@@ -1339,8 +1682,14 @@ impl<'a> Plan<'a> {
         if let Some(ticks) = &p.random_ticks {
             row.set("random_ticks", J::Bool(ticks.applies(combo)));
         }
+        if p.destroy_overlay == Some(false) {
+            row.set("no_destroy_overlay", J::Bool(true));
+        }
         if let Some(shape) = p.render_shape {
             row.set("render_shape", J::Str(shape.name().into()));
+        }
+        if let Some(reaction) = p.push_reaction {
+            row.set("push", J::Str(reaction.name().into()));
         }
         // `noOcclusion`: a block that can't occlude is never a solid render either, and a solid
         // render's full light dampening becomes a non-solid block's (`getLightDampening`: 0 when
@@ -1403,7 +1752,7 @@ impl<'a> Plan<'a> {
             BTreeSet::new()
         };
         for i in &self.items {
-            if !components && let Some(block) = &i.place_block {
+            if !components && let Some(block) = &i.block {
                 map.set(
                     &i.rename.to,
                     J::Obj(vec![
@@ -1448,6 +1797,18 @@ impl<'a> Plan<'a> {
             map.set(&i.rename.to, v);
         }
         if components {
+            for b in &self.blocks {
+                for (key, item) in [
+                    ("block_item", &b.decl.block_item),
+                    ("pick_item", &b.decl.pick_item),
+                ] {
+                    if let Some(item) = item
+                        && map.get(item).is_none()
+                    {
+                        return Err(format!("{}: {key} {item:?} is not an item", b.decl.id).into());
+                    }
+                }
+            }
             for i in &self.items {
                 if let Some(rest) = &i.crafting_remainder
                     && map.get(rest).is_none()
@@ -1496,8 +1857,8 @@ impl<'a> Plan<'a> {
                         for r in &self.renames(b) {
                             v.rename(r, false);
                         }
-                        if !b.decl.item && b.wall_of.is_none() {
-                            v.set("item", J::Str("minecraft:air".into()));
+                        if let Some(item) = b.item_row() {
+                            v.set("item", J::Str(item.into()));
                         }
                         // `SignBlock.getWoodType`: the wood's name is what
                         // the editor reads of it.
@@ -1505,6 +1866,36 @@ impl<'a> Plan<'a> {
                             && let Some(name) = v.at("fields/type/name")
                         {
                             *name = J::Str(wood.clone());
+                        }
+                        // `new FenceGateBlock(woodType, ..)`: the gate's own sounds replace its wood's.
+                        if let Some(fields) = v.at("fields/type") {
+                            if let Some(sound) = &b.decl.open_sound {
+                                fields.set("fenceGateOpen", J::Str(sound.clone()));
+                            }
+                            if let Some(sound) = &b.decl.close_sound {
+                                fields.set("fenceGateClose", J::Str(sound.clone()));
+                            }
+                        }
+                        // `createDefaultSignText`: the colour and glow a new sign's text starts with.
+                        if (b.decl.sign_text_color.is_some() || b.decl.sign_text_glow.is_some())
+                            && let Some(fields) = v.at("fields")
+                        {
+                            let color = b.decl.sign_text_color.as_deref().unwrap_or("black");
+                            let id = horizon_mod_package::content::DYE_COLORS
+                                .iter()
+                                .position(|name| *name == color)
+                                .unwrap_or_default();
+                            fields.set("sign_text_color", J::Num((id as u64).into()));
+                            fields.set(
+                                "sign_text_glow",
+                                J::Bool(b.decl.sign_text_glow.unwrap_or(false)),
+                            );
+                        }
+                        if let Some(base) = &b.base_block {
+                            let field = v
+                                .at("fields/baseBlock")
+                                .ok_or("farmland template has no base block")?;
+                            *field = J::Str(base.0.to_owned());
                         }
                         // A connecting block: the chorus plant's PipeBlock
                         // without its rules, joining the declared tag.
@@ -1577,9 +1968,18 @@ impl<'a> Plan<'a> {
                     }
                 }
             }
-            "landing-definitions.json" | "worldgen/blocks/survival-rules.json" => {
-                self.names(doc, false)
+            "landing-definitions.json" => {
+                self.names(doc, false);
+                for b in &self.blocks {
+                    if let Some(base) = &b.base_block {
+                        let entry = doc
+                            .get_mut(&b.decl.id)
+                            .ok_or("farmland template has no landing definition")?;
+                        entry.set("base", J::Str(base.0.to_owned()));
+                    }
+                }
             }
+            "worldgen/blocks/survival-rules.json" => self.names(doc, false),
             "worldgen/blocks/survival-extra-definitions.json" => {
                 if let Some(map) = doc.at("ignition_odds") {
                     self.names(map, false);
@@ -1589,17 +1989,18 @@ impl<'a> Plan<'a> {
             "registries.json" => {
                 // Network ids: the game and its server map items, blocks, mob
                 // effects and entity types through this report, so new ones get
-                // the ids after vanilla's, in plan order. A block entity type for
-                // each block too, named after it: a mod names its types only when
-                // one is made (`native_block_entity`), and the chunk packet
-                // carries the type of each block's entity.
+                // the ids after vanilla's, in plan order. Chunk packets carry
+                // the declared block entity type, not its block's id.
                 let new_items = self.items.iter().map(|i| i.rename.to.clone());
-                let new_blocks: Vec<_> = self.blocks.iter().map(|b| b.decl.id.clone()).collect();
+                let new_blocks = self.blocks.iter().map(|b| b.decl.id.clone());
                 let mut registries = vec![
                     ("minecraft:item", new_items.collect::<Vec<_>>()),
-                    ("minecraft:block", new_blocks.clone()),
-                    ("minecraft:block_entity_type", new_blocks),
+                    ("minecraft:block", new_blocks.collect()),
                 ];
+                if !self.block_entity_types.is_empty() {
+                    let new_types = self.block_entity_types.iter().map(|t| t.id.clone());
+                    registries.push(("minecraft:block_entity_type", new_types.collect()));
+                }
                 if !self.effects.is_empty() {
                     let new_effects = self.effects.iter().map(|e| e.id.clone());
                     registries.push(("minecraft:mob_effect", new_effects.collect()));
@@ -1625,10 +2026,6 @@ impl<'a> Plan<'a> {
                     let Some(J::Obj(entries)) =
                         doc.get_mut(registry).and_then(|r| r.get_mut("entries"))
                     else {
-                        // A report without block entity types gets none.
-                        if registry == "minecraft:block_entity_type" {
-                            continue;
-                        }
                         return Err(format!("no {registry} entries").into());
                     };
                     let next = entries
@@ -1706,7 +2103,7 @@ impl<'a> Plan<'a> {
         Ok(())
     }
 
-    fn collision_shapes(&self, tag: &mut Tag) -> Result<()> {
+    fn declared_shapes(&self, tag: &mut Tag, collision: bool) -> Result<()> {
         let Tag::Compound(root) = tag else {
             return Err("collision table is not a compound".into());
         };
@@ -1715,7 +2112,12 @@ impl<'a> Plan<'a> {
             return Err("collision table has no shapes".into());
         };
         for block in &self.blocks {
-            if let Some(shapes) = block.collision_shapes.as_ref().or(block.shapes.as_ref()) {
+            let shapes = if collision {
+                block.collision_shapes.as_ref().or(block.shapes.as_ref())
+            } else {
+                block.shapes.as_ref()
+            };
+            if let Some(shapes) = shapes {
                 let mut encoded = BTreeMap::new();
                 for (offset, shape) in shapes.iter().enumerate() {
                     let key: Vec<_> = shape
@@ -1794,7 +2196,7 @@ impl<'a> Plan<'a> {
     }
 
     /// The creative inventory (`creative-inventory.json`): each mod tab after
-    /// vanilla's, ten to a page as NeoForge pages them (the top row's first
+    /// vanilla's, ten to a page (the top row's first
     /// five columns, then the bottom row's), with only the items the game has;
     /// the mods' new items join the search tab under their English names.
     fn creative_tabs(&self, doc: &mut J) -> Result<()> {
@@ -1905,6 +2307,11 @@ impl<'a> Plan<'a> {
                         else {
                             continue;
                         };
+                        if b.decl.properties.occludes == Some(false)
+                            && let Tag::Byte(flags) = &mut v
+                        {
+                            *flags &= !16;
+                        }
                         if let (Some(f), Some(slot)) =
                             (b.decl.properties.friction, v.get_mut("friction"))
                         {
@@ -1963,15 +2370,12 @@ const BIOME_TAGS: &str = "worldgen/biome_tags.json";
 /// worldgen loader reads each from (id → the file's text): what structure
 /// mods hold. Biomes, noise and density functions change the terrain and
 /// are not read from mods.
-const WORLDGEN_BUNDLES: [(&str, &str); 7] = [
+const WORLDGEN_BUNDLES: [(&str, &str); 6] = [
     ("structure", "worldgen/structures.json"),
     ("structure_set", "worldgen/structure_sets.json"),
     ("template_pool", "worldgen/template_pools.json"),
     ("processor_list", "worldgen/processor_lists.json"),
-    // 26.3 names the folder `feature`; `configured_feature` is the 26.2 name, kept
-    // so older mods still load.
     ("feature", "worldgen/features.json"),
-    ("configured_feature", "worldgen/features.json"),
     ("placed_feature", "worldgen/placed_features.json"),
 ];
 
@@ -2100,6 +2504,7 @@ fn place_in_biomes(
     base: &Path,
     overlay: &Overlay<'_>,
     modifiers: &[biomes::Modifier],
+    enabled_mods: Vec<String>,
     biome_tags: Option<J>,
     placed: Option<J>,
     tags: &BTreeMap<String, TagMerge>,
@@ -2129,6 +2534,35 @@ fn place_in_biomes(
     let biome_tags = bundle(biome_tags, BIOME_TAGS)?;
     let placed: BTreeSet<String> = bundle(placed, PLACED_FEATURES)?.into_keys().collect();
     let feature_tags = bundle(None, FEATURE_TAGS)?;
+    let (entity_categories, entity_tags) = modifier_entities(base, overlay, tags)?;
+    let mut saved = SavedModifiers {
+        enabled_mods,
+        modifiers: modifiers.iter().map(|m| m.source.clone()).collect(),
+        unmodified: BTreeMap::new(),
+        feature_tags,
+        entity_categories,
+        entity_tags,
+    };
+    let before = doc.clone();
+    for (id, text) in saved.apply(&mut doc, modifiers, &biome_tags, &placed, warnings)? {
+        if let Some(J::Str(old)) = before.get(&id) {
+            saved.unmodified.insert(id.clone(), old.clone());
+        }
+        if let Some((ns, path)) = id.split_once(':') {
+            let file = format!("data/{ns}/worldgen/biome/{path}.json");
+            overlay.write(&file, text.as_bytes())?;
+        }
+    }
+    overlay.write(MODIFIERS, &serde_json::to_vec(&saved)?)?;
+    overlay.write(BIOMES, &serde_json::to_vec(&doc)?)
+}
+
+/// Registry metadata shared by both modifier loaders, after tag overlays are merged.
+fn modifier_entities(
+    base: &Path,
+    overlay: &Overlay<'_>,
+    tags: &BTreeMap<String, TagMerge>,
+) -> Result<(BTreeMap<String, String>, BTreeMap<String, String>)> {
     let entities_path = out_path(overlay, "entity-types.json");
     let entity_categories: BTreeMap<String, String> = match entities_path.exists() {
         true => match read_json(&entities_path)? {
@@ -2147,49 +2581,52 @@ fn place_in_biomes(
         },
         false => BTreeMap::new(),
     };
-    let mut entity_tags = BTreeMap::new();
-    let vanilla_entity_tags = base.join("data/minecraft/tags/entity_type");
-    if vanilla_entity_tags.is_dir() {
-        for file in &crate::json_folder::read(&vanilla_entity_tags)?.files {
-            let text = std::str::from_utf8(file.bytes()?)
-                .map_err(|e| format!("entity_type/{}: {e}", file.name))?;
-            entity_tags.insert(format!("minecraft:{}", file.name), text.to_owned());
+    let entity_tags = modifier_tags(base, overlay, tags, "entity_type")?;
+    Ok((entity_categories, entity_tags))
+}
+
+/// Registry tags after all accepted layers, shared by both modifier loaders.
+fn modifier_tags(
+    base: &Path,
+    overlay: &Overlay<'_>,
+    tags: &BTreeMap<String, TagMerge>,
+    registry: &str,
+) -> Result<BTreeMap<String, String>> {
+    let mut result = BTreeMap::new();
+    for ns in fs::read_dir(base.join("data"))
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        let dir = ns.path().join("tags").join(registry);
+        if !dir.is_dir() {
+            continue;
+        }
+        for file in &crate::json_folder::read(&dir)?.files {
+            result.insert(
+                format!("{}:{}", ns.file_name().to_string_lossy(), file.name),
+                std::str::from_utf8(file.bytes()?)?.to_owned(),
+            );
         }
     }
+    let prefix = format!("/tags/{registry}/");
     for file in tags.keys() {
         if let Some((ns, path)) = file
             .strip_prefix("data/")
-            .and_then(|r| r.split_once("/tags/entity_type/"))
+            .and_then(|s| s.split_once(&prefix))
             .and_then(|(ns, p)| Some((ns, p.strip_suffix(".json")?)))
         {
-            entity_tags.insert(
+            result.insert(
                 format!("{ns}:{path}"),
                 fs::read_to_string(out_path(overlay, file))?,
             );
         }
     }
-    let mut saved = SavedModifiers {
-        modifiers: modifiers.iter().map(|m| m.source.clone()).collect(),
-        unmodified: BTreeMap::new(),
-        feature_tags,
-        entity_categories,
-        entity_tags,
-    };
-    let before = doc.clone();
-    for (id, text) in saved.apply(&mut doc, modifiers, &biome_tags, &placed, warnings)? {
-        if let Some(J::Str(old)) = before.get(&id) {
-            saved.unmodified.insert(id.clone(), old.clone());
-        }
-        if let Some((ns, path)) = id.split_once(':') {
-            let file = format!("data/{ns}/worldgen/biome/{path}.json");
-            if out_path(overlay, &file).exists() {
-                overlay.write(&file, text.as_bytes())?;
-            }
-        }
-    }
-    overlay.write(MODIFIERS, &serde_json::to_vec(&saved)?)?;
-    overlay.write(BIOMES, &serde_json::to_vec(&doc)?)
+    Ok(result)
 }
+
+#[path = "mod_content_structures.rs"]
+mod structures;
 
 /// In a content root with biome modifiers: what applying them again over a
 /// world's data packs takes (`biome_modifiers_over_packs`).
@@ -2199,6 +2636,7 @@ const MODIFIERS: &str = "biome-modifiers.json";
 /// applied them.
 #[derive(Serialize, Deserialize)]
 struct SavedModifiers {
+    enabled_mods: Vec<String>,
     /// Each modifier's mod, file and text, in the order they apply.
     modifiers: Vec<[String; 3]>,
     /// The biomes the modifiers changed, as they were before.
@@ -2249,7 +2687,7 @@ impl SavedModifiers {
 }
 
 /// A world's data packs (`packs`) with the content root `root`'s biome
-/// modifiers applied over them. NeoForge applies modifiers once every data
+/// modifiers applied over them. Modifiers apply once every data
 /// pack is in, to the final biomes and tags: a pack's file for a biome
 /// (Terralith's `minecraft:plains`) keeps the mods' features and spawns, and
 /// a pack's biome its tags put under a modifier's selector gets them too.
@@ -2305,7 +2743,9 @@ pub fn biome_modifiers_over_packs(
             Some(J::Bool(true)) => None,
             _ => biome_tags.get(id).map(String::as_str),
         };
-        let merged = merge_tag(old, values, id)?;
+        let merged = merge_tag(old, values, id, &|id| {
+            id == "minecraft" || saved.enabled_mods.iter().any(|enabled| enabled == id)
+        })?;
         biome_tags.insert(id.to_owned(), merged);
     }
     let placed = packs
@@ -2331,13 +2771,11 @@ pub fn biome_modifiers_over_packs(
 
 #[path = "mod_content_biomes.rs"]
 mod biomes;
-#[path = "mod_content_tables.rs"]
-mod tables;
-use tables::{table_jobs, tables};
 
 /// The overlay being written: `out` mirrors `base` through links, and a
 /// directory becomes real only when something inside it is written.
 struct Overlay<'a> {
+    written: std::sync::Mutex<std::collections::BTreeSet<String>>,
     base: &'a Path,
     out: &'a Path,
 }
@@ -2347,7 +2785,11 @@ impl Overlay<'_> {
             fs::remove_dir_all(out)?;
         }
         fs::create_dir_all(out)?;
-        let overlay = Overlay { base, out };
+        let overlay = Overlay {
+            base,
+            out,
+            written: Default::default(),
+        };
         overlay.link_children(Path::new(""))?;
         Ok(overlay)
     }
@@ -2388,6 +2830,7 @@ impl Overlay<'_> {
         Ok(())
     }
     fn write(&self, rel: &str, bytes: &[u8]) -> Result<()> {
+        let name = rel;
         let rel = Path::new(rel);
         if let Some(parent) = rel.parent() {
             self.dir(parent)?;
@@ -2397,168 +2840,14 @@ impl Overlay<'_> {
             fs::remove_file(&path)?;
         }
         fs::write(path, bytes)?;
-        Ok(())
-    }
-    /// `write` for many files, each with a file's own bytes, copied without
-    /// reading them (a clone on APFS). One copy is a few filesystem calls and
-    /// Chipped alone has 10k textures, so [`COPY_THREADS`] threads share them,
-    /// once this thread made their folders. A path given twice keeps its last file.
-    fn copy_all(&self, copies: &[(String, PathBuf)]) -> Result<()> {
-        let mut last: BTreeMap<&str, &Path> = copies
-            .iter()
-            .map(|(rel, from)| (rel.as_str(), from.as_path()))
-            .collect();
-        // A namespace folder the base lacks, with every file of the mod's folder copied, is
-        // cloned whole where the system can: one call instead of one per file.
-        for (folder, from, left_out) in whole_folders(self.base, &last) {
-            if let Some(parent) = Path::new(&folder).parent() {
-                self.dir(parent)?;
-            }
-            let to = self.out.join(&folder);
-            // Another mod's data may have been written there already.
-            if fs::symlink_metadata(&to).is_ok() {
-                continue;
-            }
-            if horizon_threads::clone_tree(&from, &to).is_err() {
-                if fs::symlink_metadata(&to).is_ok() {
-                    fs::remove_dir_all(&to)?;
-                }
-                continue;
-            }
-            // What the copies leave out goes, with the folders it leaves empty.
-            for rel in &left_out {
-                fs::remove_file(to.join(rel))?;
-                for dir in Path::new(rel).ancestors().skip(1) {
-                    if dir.as_os_str().is_empty() || fs::remove_dir(to.join(dir)).is_err() {
-                        break;
-                    }
-                }
-            }
-            last.retain(|rel, _| !rel.starts_with(&format!("{folder}/")));
-        }
-        let parents: BTreeSet<&Path> = last
-            .keys()
-            .filter_map(|rel| Path::new(rel).parent())
-            .collect();
-        for parent in parents {
-            self.dir(parent)?;
-        }
-        let jobs: Vec<(&str, &Path)> = last.into_iter().collect();
-        let copy = |rel: &str, from: &Path| -> std::io::Result<()> {
-            let path = self.out.join(rel);
-            if fs::symlink_metadata(&path).is_ok() {
-                fs::remove_file(&path)?;
-            }
-            fs::copy(from, path).map(|_| ())
-        };
-        let next = std::sync::atomic::AtomicUsize::new(0);
-        let threads = horizon_threads::worker_count().clamp(1, COPY_THREADS);
-        std::thread::scope(|scope| {
-            let workers: Vec<_> = (0..threads)
-                .map(|_| {
-                    scope.spawn(|| -> std::result::Result<(), String> {
-                        loop {
-                            let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                            let Some((rel, from)) = jobs.get(i) else {
-                                return Ok(());
-                            };
-                            copy(rel, from).map_err(|e| format!("{rel}: {e}"))?;
-                        }
-                    })
-                })
-                .collect();
-            workers.into_iter().try_for_each(|w| {
-                w.join()
-                    .unwrap_or_else(|_| Err("a copy thread panicked".into()))
-            })
-        })?;
+        self.written
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(name.to_owned());
         Ok(())
     }
 }
 
-/// Threads copying the mods' files into the overlay ([`Overlay::copy_all`]).
-const COPY_THREADS: usize = 8;
-
-/// The namespace folders (`assets/<ns>`, `data/<ns>`) of `copies` (path → file) that can
-/// be cloned whole: the folder, the mod's folder it is cloned from, and the files of that
-/// folder the copies leave out (a refused block's model), to delete from the clone. The
-/// base has no such folder, all its files come from one mod folder holding only files and
-/// folders (no link), and at most as many are left out as are copied.
-fn whole_folders(
-    base: &Path,
-    copies: &BTreeMap<&str, &Path>,
-) -> Vec<(String, PathBuf, Vec<String>)> {
-    let mut groups: BTreeMap<&str, (Option<PathBuf>, BTreeSet<&str>)> = BTreeMap::new();
-    for (rel, from) in copies {
-        let mut parts = rel.splitn(3, '/');
-        let (Some(top), Some(ns), Some(_)) = (parts.next(), parts.next(), parts.next()) else {
-            continue;
-        };
-        let folder = &rel[..top.len() + 1 + ns.len()];
-        let source = from
-            .ancestors()
-            .nth(rel.split('/').count())
-            .filter(|root| root.join(rel) == *from)
-            .map(|root| root.join(folder));
-        let group = groups
-            .entry(folder)
-            .or_insert_with(|| (source.clone(), BTreeSet::new()));
-        if group.0 != source {
-            group.0 = None;
-        }
-        group.1.insert(&rel[folder.len() + 1..]);
-    }
-    groups
-        .into_iter()
-        .filter_map(|(folder, (source, files))| {
-            let source = source?;
-            let mut found = BTreeSet::new();
-            if fs::symlink_metadata(base.join(folder)).is_ok()
-                || !only_files(&source, &source, &mut found)
-                || !files.iter().all(|f| found.contains(*f))
-            {
-                return None;
-            }
-            let left_out: Vec<String> = found
-                .into_iter()
-                .filter(|f| !files.contains(f.as_str()))
-                .collect();
-            (left_out.len() <= files.len()).then(|| (folder.to_owned(), source, left_out))
-        })
-        .collect()
-}
-
-/// Gathers the files below `dir` as `/`-joined paths from `root`; false at anything
-/// that is neither a file nor a folder, or can't be read.
-fn only_files(root: &Path, dir: &Path, found: &mut BTreeSet<String>) -> bool {
-    let Ok(read) = fs::read_dir(dir) else {
-        return false;
-    };
-    for entry in read {
-        let Ok(entry) = entry else { return false };
-        let Ok(kind) = entry.file_type() else {
-            return false;
-        };
-        let path = entry.path();
-        if kind.is_dir() {
-            if !only_files(root, &path, found) {
-                return false;
-            }
-        } else if kind.is_file() {
-            let Some(rel) = path
-                .strip_prefix(root)
-                .ok()
-                .and_then(|rel| rel.iter().map(|p| p.to_str()).collect::<Option<Vec<_>>>())
-            else {
-                return false;
-            };
-            found.insert(rel.join("/"));
-        } else {
-            return false;
-        }
-    }
-    true
-}
 fn out_path(overlay: &Overlay<'_>, rel: &str) -> PathBuf {
     overlay.out.join(rel)
 }
@@ -2596,12 +2885,28 @@ fn link_file(
     fs::copy(target, at).map(|_| ())
 }
 
-/// A tag file's JSON text with `more` appended to its values (no repeats).
-fn merge_tag(text: Option<&str>, more: &[J], what: &str) -> Result<String> {
+/// Evaluate a tag layer before its values or replace flag participate in a merge.
+fn tag_conditions_hold(doc: &J, loaded: &horizon_world::conditions::ModLoaded<'_>) -> Result<bool> {
+    Ok(doc.get("neoforge:conditions").is_none()
+        || horizon_world::conditions::conditions_hold(&serde_json::to_value(doc)?, loaded))
+}
+
+/// A tag file's accepted values with `more` appended (no repeats).
+fn merge_tag(
+    text: Option<&str>,
+    more: &[J],
+    what: &str,
+    loaded: &horizon_world::conditions::ModLoaded<'_>,
+) -> Result<String> {
     let mut doc = match text {
         Some(t) => serde_json::from_str(t).map_err(|e| format!("{what}: {e}"))?,
         None => J::Obj(vec![("values".into(), J::Arr(Vec::new()))]),
     };
+    if !tag_conditions_hold(&doc, loaded)? {
+        doc = J::Obj(vec![("values".into(), J::Arr(Vec::new()))]);
+    }
+    // These conditions selected one source layer, not the flattened result.
+    doc.remove("neoforge:conditions");
     let Some(J::Arr(values)) = doc.get_mut("values") else {
         return Err(format!("{what}: no values").into());
     };
@@ -2610,19 +2915,6 @@ fn merge_tag(text: Option<&str>, more: &[J], what: &str) -> Result<String> {
             values.push(v.clone());
         }
     }
-    Ok(serde_json::to_string_pretty(&doc)?)
-}
-
-/// An atlas definition's JSON text with `more` sources after its own.
-fn merge_atlas(text: Option<&str>, more: &[J], what: &str) -> Result<String> {
-    let mut doc = match text {
-        Some(t) => serde_json::from_str(t).map_err(|e| format!("{what}: {e}"))?,
-        None => J::Obj(vec![("sources".into(), J::Arr(Vec::new()))]),
-    };
-    let Some(J::Arr(sources)) = doc.get_mut("sources") else {
-        return Err(format!("{what}: no sources").into());
-    };
-    sources.extend(more.iter().cloned());
     Ok(serde_json::to_string_pretty(&doc)?)
 }
 
@@ -2759,9 +3051,154 @@ impl TagMerge {
     }
 }
 
-/// Builds the content root for `mods` over `base` in `out`. Returns the
-/// warnings for the log: the shared tags a mod replaced.
-pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>> {
+/// Threads rewriting the tables at once. Each holds a whole table as a tree
+/// (gameplay-facts.json's is over a gigabyte with ATM10's mods), so more
+/// would mostly add memory.
+const TABLE_THREADS: usize = 3;
+
+/// The base's per-state tables, the largest first, with their directories
+/// made real in the overlay: [`tables`]' threads then only write files.
+fn table_jobs(base: &Path, overlay: &Overlay<'_>) -> Result<Vec<(&'static str, u64)>> {
+    let mut jobs: Vec<(&str, u64)> = JSON_TABLES
+        .iter()
+        .chain(&NBT_TABLES)
+        .filter_map(|name| Some((*name, fs::metadata(base.join(name)).ok()?.len())))
+        .collect();
+    jobs.sort_by_key(|(_, size)| std::cmp::Reverse(*size));
+    for (name, _) in &jobs {
+        if let Some(parent) = Path::new(name).parent() {
+            overlay.dir(parent)?;
+        }
+    }
+    Ok(jobs)
+}
+
+/// Rewrites the base's per-state tables (`jobs`, from [`table_jobs`]) for
+/// the mods' states into the overlay. They are independent:
+/// [`TABLE_THREADS`] threads take them, the largest first.
+fn tables(base: &Path, plan: &Plan, overlay: &Overlay<'_>, jobs: &[(&str, u64)]) -> Result<()> {
+    let table = |name: &str| -> Result<()> {
+        let path = base.join(name);
+        let bytes = if name == "entity-types.json" {
+            plan.entity_types_json(&fs::read(&path)?)
+                .map_err(|e| format!("{name}: {e}"))?
+        } else if JSON_TABLES.contains(&name) {
+            let mut doc = read_json(&path)?;
+            plan.json(name, &mut doc)
+                .map_err(|e| format!("{name}: {e}"))?;
+            serde_json::to_vec(&doc)?
+        } else {
+            let (mut named, _) = nbt::read_named(&fs::read(&path)?, Limits::tables())
+                .map_err(|e| format!("{name}: {e}"))?;
+            plan.nbt(&mut named.tag);
+            if name == "cached-collision.nbt" || name == "worldgen/blocks/cached-collision.nbt" {
+                plan.declared_shapes(&mut named.tag, true)?;
+            } else if name == "occlusion.nbt" {
+                plan.declared_shapes(&mut named.tag, false)?;
+            } else if name == "worldgen/blocks/block-properties.nbt" {
+                let occlusion = named
+                    .tag
+                    .get_mut("occlusion")
+                    .ok_or("block properties have no occlusion")?;
+                plan.declared_shapes(occlusion, false)?;
+            }
+            nbt::write_named(&named, Limits::tables()).map_err(|e| format!("{name}: {e}"))?
+        };
+        overlay.write(name, &bytes)
+    };
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let threads = horizon_threads::worker_count();
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..threads.min(TABLE_THREADS))
+            .map(|_| {
+                scope.spawn(|| -> std::result::Result<(), String> {
+                    loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some((name, _)) = jobs.get(i) else {
+                            return Ok(());
+                        };
+                        table(name).map_err(|e| e.to_string())?;
+                    }
+                })
+            })
+            .collect();
+        workers.into_iter().try_for_each(|w| {
+            w.join()
+                .unwrap_or_else(|_| Err("a table thread panicked".into()))
+        })
+    })?;
+    Ok(())
+}
+
+struct ModLayer<'a> {
+    assets: crate::packs::Pack,
+    data: crate::datapack::DataPack,
+    jar: Option<&'a JarRef>,
+}
+
+impl<'a> ModLayer<'a> {
+    fn new(id: String, source: crate::packs::Source, jar: Option<&'a JarRef>) -> Result<Self> {
+        let source = source.open()?;
+        let data = crate::datapack::DataPack::from_source(id.clone(), source.clone());
+        Ok(Self {
+            assets: crate::packs::Pack::mod_layer(id, crate::packs::Source::Opened(source)),
+            data,
+            jar,
+        })
+    }
+}
+
+struct ModLayers<'a> {
+    source: &'a ContentMod,
+    layers: Vec<ModLayer<'a>>,
+}
+
+/// Open every input before writing any decoded output.
+fn load_layers<'a>(jar_store: &Path, mods: &'a [ContentMod]) -> Result<Vec<ModLayers<'a>>> {
+    let requirements =
+        collect_jar_requirements(mods.iter().map(|m| (m.id.as_str(), m.jars.as_slice())))?;
+    if let Some(missing) = missing_jars(jar_store, &requirements)?.into_iter().next() {
+        return Err(missing.into());
+    }
+    let mut loaded = Vec::new();
+    for m in mods {
+        let mut layers = Vec::new();
+        for jar in &m.jars {
+            layers.push(ModLayer::new(
+                format!("{}/{}", m.id, jar.id()),
+                crate::packs::Source::Zip(jar.cache_path(jar_store)),
+                Some(jar),
+            )?);
+        }
+        if !m.content.files.is_empty() {
+            let source = m.content.source().to_owned();
+            layers.push(ModLayer::new(
+                m.id.clone(),
+                if source.is_dir() {
+                    crate::packs::Source::Dir(source)
+                } else {
+                    crate::packs::Source::Zip(source)
+                },
+                None,
+            )?);
+        }
+        loaded.push(ModLayers { source: m, layers });
+    }
+    Ok(loaded)
+}
+
+/// Builds generated content tables for `mods` over `base` in `out`.
+/// Asset layers remain in their sources and are resolved by `resolved_resources`.
+/// Each jar's file is `<sha512>.jar` in `jar_store`, where the launcher
+/// puts it. A missing file refuses the load before decoded output is written.
+/// Returns warnings for shared tag replacements and duplicate asset paths.
+pub fn build(
+    base: &Path,
+    jar_store: &Path,
+    mods: &[ContentMod],
+    out: &Path,
+    inventory: &horizon_mod_package::enabled::EnabledMods,
+) -> Result<Vec<String>> {
     // Two mods owning one namespace would mix their files.
     for (i, a) in mods.iter().enumerate() {
         for b in &mods[..i] {
@@ -2769,129 +3206,125 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
                 (b.id.as_str(), b.content.namespaces.as_slice()),
                 (a.id.as_str(), a.content.namespaces.as_slice()),
             );
-            if let Some(e) = horizon_mods::content::clash(b, a) {
+            if let Some(e) = horizon_mod_package::content::clash(b, a) {
                 return Err(e.into());
             }
         }
     }
     // The overlay links to the base: a relative base would leave them dangling.
     let base = &std::path::absolute(base)?;
-    let plan = {
-        let _step = crate::spans::startup::step("mods.plan");
-        Plan::new(base, mods)?
-    };
-    let overlay = Overlay::new(base, out)?;
+    let loaded = load_layers(jar_store, mods)?;
+    let mod_loaded =
+        |id: &str| id == "minecraft" || inventory.server_ids().any(|enabled| enabled == id);
+    let plan = Plan::new(base, mods)?;
+    // Publish the completed tables as one generation. Passive asset layers
+    // retain their original sources instead of being written into this tree.
+    let tables_root = out.with_file_name(format!(
+        "{}-tables",
+        out.file_name().unwrap_or_default().to_string_lossy()
+    ));
+    let overlay = Overlay::new(base, &tables_root)?;
+    let jobs = table_jobs(base, &overlay)?;
+    tables(base, &plan, &overlay, &jobs)?;
     // Mod files, and every tag addition gathered per tag file.
-    let mut copies = Vec::new();
     let mut tags: BTreeMap<String, TagMerge> = BTreeMap::new();
     let mut warnings = Vec::new();
     let mut worldgen: BTreeMap<&str, Vec<(String, String)>> = BTreeMap::new();
     let mut additions: BTreeMap<&str, Vec<Addition>> = BTreeMap::new();
     let mut modifiers = Vec::new();
-    let mut atlases: BTreeMap<String, Vec<J>> = BTreeMap::new();
-    // The tables are rewritten on threads of their own while the mods' files are read and
-    // copied: they need only the plan, and write the folders made real here first, which
-    // no mod file goes to (those are under assets/, data/ and worldgen/structure/).
-    let jobs = table_jobs(base, &overlay)?;
-    std::thread::scope(|scope| -> Result<()> {
-        let tables = scope.spawn(|| {
-            let _step = crate::spans::startup::step("mods.tables");
-            tables(base, &plan, &overlay, &jobs).map_err(|e| e.to_string())
-        });
-        let files = (|| -> Result<()> {
-            let _step = crate::spans::startup::step("mods.files");
-            for m in mods {
-                let declarations = format!("data/{}/horizon/", m.id);
-                let mut reader = m.content.reader()?;
-                for file in &m.content.files {
-                    let is_tag = file.starts_with("data/") && file.contains("/tags/");
-                    // Most files (textures, models...) only go into the overlay: copied, not read and
-                    // written again, they take a fraction of the time (Chipped alone has 10k textures).
-                    let plain = !(is_tag && file.ends_with(".json"))
-                        && !(file.starts_with("assets/minecraft/atlases/")
-                            && file.ends_with(".json"))
-                        && !file.starts_with(&declarations)
-                        && !biomes::is_modifier(file)
-                        && worldgen_entry(file).is_none()
-                        && !(file.starts_with("data/") && file.contains("/structure/"));
-                    if plain && let Some(from) = reader.path(file)? {
-                        copies.push((file.clone(), from));
+    let mut structure_modifiers = Vec::new();
+    let mut namespaces: std::collections::BTreeSet<String> = mods
+        .iter()
+        .flat_map(|m| m.content.namespaces.iter().cloned())
+        .collect();
+    for group in &loaded {
+        let m = group.source;
+        let declarations = format!("data/{}/horizon/", m.id);
+        for layer in &group.layers {
+            if let Some(jar) = layer.jar {
+                for name in layer.data.list("assets/").into_iter().filter(|name| {
+                    !crate::packs::merge_stacks(name) && m.content.files.contains(name)
+                }) {
+                    warnings.push(format!(
+                        "mod {}: jar {} also provides {name}; the mod's own file wins",
+                        m.id,
+                        jar.id()
+                    ));
+                }
+            }
+            for file in layer.data.list("data/") {
+                if let Some((namespace, _)) = file
+                    .strip_prefix("data/")
+                    .and_then(|rest| rest.split_once('/'))
+                {
+                    namespaces.insert(namespace.to_owned());
+                }
+                let is_tag = file.contains("/tags/") && file.ends_with(".json");
+                if !is_tag
+                    && (file.starts_with(&declarations)
+                        || (!biomes::is_modifier(&file)
+                            && !structures::is_modifier(&file)
+                            && worldgen_entry(&file).is_none()))
+                {
+                    continue;
+                }
+                let bytes = layer.data.read(&file).ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("{}: {file}", layer.assets.id),
+                    )
+                })?;
+                // Dynamic registry entries use the same owning-load conditions as tags.
+                // Evaluate before parsing required modifier fields.
+                if biomes::is_modifier(&file) || structures::is_modifier(&file) {
+                    let doc: J = serde_json::from_slice(&bytes)
+                        .map_err(|e| format!("mod {}: {file}: {e}", m.id))?;
+                    if !tag_conditions_hold(&doc, &mod_loaded)? {
                         continue;
                     }
-                    let bytes = reader.read(file)?;
-                    if is_tag && file.ends_with(".json") {
-                        let doc: J =
-                            serde_json::from_slice(&bytes).map_err(|e| format!("{file}: {e}"))?;
-                        let Some(J::Arr(values)) = doc.get("values") else {
-                            return Err(format!("{}: {file}: no values", m.id).into());
-                        };
-                        let replace = doc.get("replace") == Some(&J::Bool(true));
-                        let ns = file.split('/').nth(1).unwrap_or_default();
-                        let shared = !m.content.namespaces.iter().any(|n| n == ns);
-                        let merge = tags.entry(file.clone()).or_default();
-                        warnings.extend(merge.add(&m.id, file, replace, shared, values));
-                    } else if file.starts_with("assets/minecraft/atlases/")
-                        && file.ends_with(".json")
-                    {
-                        let doc: J =
-                            serde_json::from_slice(&bytes).map_err(|e| format!("{file}: {e}"))?;
-                        let Some(J::Arr(sources)) = doc.get("sources") else {
-                            return Err(format!("{}: {file}: no sources", m.id).into());
-                        };
-                        atlases
-                            .entry(file.clone())
-                            .or_default()
-                            .extend(sources.iter().cloned());
-                    } else if !file.starts_with(&declarations) {
-                        overlay.write(file, &bytes)?;
-                        if biomes::is_modifier(file) {
-                            let text =
-                                String::from_utf8(bytes).map_err(|e| format!("{file}: {e}"))?;
-                            modifiers.extend(biomes::Modifier::read(
-                                &m.id,
-                                file,
-                                &text,
-                                &mut warnings,
-                            )?);
-                        } else if let Some((bundle, id)) = worldgen_entry(file) {
-                            let text =
-                                String::from_utf8(bytes).map_err(|e| format!("{file}: {e}"))?;
-                            let entries = worldgen.entry(bundle).or_default();
-                            match Addition::read(bundle, &text)
-                                .map_err(|e| format!("{file}: {e}"))?
-                            {
-                                Some(addition) => {
-                                    additions.entry(bundle).or_default().push(addition)
-                                }
-                                None => entries.push((id, text)),
-                            }
-                        } else if let Some(template) = file
-                            .strip_prefix("data/")
-                            .and_then(|r| r.split_once("/structure/"))
-                            .filter(|(_, path)| path.ends_with(".nbt"))
-                        {
-                            // The worldgen loader's templates: worldgen/structure/<ns>/<path>.nbt.
-                            let (ns, path) = template;
-                            overlay.write(&format!("worldgen/structure/{ns}/{path}"), &bytes)?;
+                }
+                if is_tag {
+                    let doc: J =
+                        serde_json::from_slice(&bytes).map_err(|e| format!("{file}: {e}"))?;
+                    if !tag_conditions_hold(&doc, &mod_loaded)? {
+                        continue;
+                    }
+                    let Some(J::Arr(values)) = doc.get("values") else {
+                        return Err(format!("{}: {file}: no values", m.id).into());
+                    };
+                    let replace = doc.get("replace") == Some(&J::Bool(true));
+                    let ns = file.split('/').nth(1).unwrap_or_default();
+                    let shared = !m.content.namespaces.iter().any(|n| n == ns);
+                    let merge = tags.entry(file.clone()).or_default();
+                    warnings.extend(merge.add(&m.id, &file, replace, shared, values));
+                } else if !file.starts_with(&declarations) {
+                    if structures::is_modifier(&file) {
+                        let text = String::from_utf8(bytes).map_err(|e| format!("{file}: {e}"))?;
+                        structure_modifiers.extend(structures::Modifier::read(
+                            &m.id,
+                            &file,
+                            &text,
+                            &mut warnings,
+                        )?);
+                    } else if biomes::is_modifier(&file) {
+                        let text = String::from_utf8(bytes).map_err(|e| format!("{file}: {e}"))?;
+                        modifiers.extend(biomes::Modifier::read(
+                            &m.id,
+                            &file,
+                            &text,
+                            &mut warnings,
+                        )?);
+                    } else if let Some((bundle, id)) = worldgen_entry(&file) {
+                        let text = String::from_utf8(bytes).map_err(|e| format!("{file}: {e}"))?;
+                        let entries = worldgen.entry(bundle).or_default();
+                        match Addition::read(bundle, &text).map_err(|e| format!("{file}: {e}"))? {
+                            Some(addition) => additions.entry(bundle).or_default().push(addition),
+                            None => entries.push((id, text)),
                         }
                     }
                 }
             }
-            overlay.copy_all(&copies)
-        })();
-        let tables = tables
-            .join()
-            .unwrap_or_else(|_| Err("a table thread panicked".into()));
-        files?;
-        Ok(tables?)
-    })?;
-    // A reload appends every pack's sources for an atlas to the ones below it.
-    for (file, sources) in &atlases {
-        let vanilla = fs::read_to_string(base.join(file)).ok();
-        overlay.write(
-            file,
-            merge_atlas(vanilla.as_deref(), sources, file)?.as_bytes(),
-        )?;
+        }
     }
     // A tag naming an id nobody registers fails as a whole in vanilla, and
     // carried-over mods name blocks left out or other mods' ids: such
@@ -2912,7 +3345,7 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
             .filter(|_| !merge.replaced);
         overlay.write(
             file,
-            merge_tag(vanilla.as_deref(), &merge.values, file)?.as_bytes(),
+            merge_tag(vanilla.as_deref(), &merge.values, file, &mod_loaded)?.as_bytes(),
         )?;
         // data/<ns>/tags/block/<path>.json is the block tag <ns>:<path>.
         let Some((ns, path)) = file
@@ -2928,7 +3361,7 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
                 Some(J::Str(t)) if !merge.replaced => Some(t.clone()),
                 _ => None,
             };
-            let merged = merge_tag(text.as_deref(), &merge.values, name)?;
+            let merged = merge_tag(text.as_deref(), &merge.values, name, &mod_loaded)?;
             doc.set(&id, J::Str(merged));
         }
     }
@@ -2953,7 +3386,7 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
                 Some(J::Str(t)) if !merge.replaced => Some(t.clone()),
                 _ => None,
             };
-            let merged = merge_tag(text.as_deref(), &merge.values, BIOME_TAGS)?;
+            let merged = merge_tag(text.as_deref(), &merge.values, BIOME_TAGS, &mod_loaded)?;
             doc.set(&id, J::Str(merged));
         }
         overlay.write(BIOME_TAGS, &serde_json::to_vec(&doc)?)?;
@@ -2989,11 +3422,15 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
             base,
             &overlay,
             &modifiers,
+            inventory.server_ids().map(str::to_owned).collect(),
             biome_tag_doc,
             placed_doc,
             &tags,
             &mut warnings,
         )?;
+    }
+    if !structure_modifiers.is_empty() {
+        structures::apply(base, &overlay, &structure_modifiers, &tags, &mut warnings)?;
     }
     // The commands suggest ids from `command-registries.json`: add the
     // structures, pools, sets and features the mods bring.
@@ -3035,16 +3472,13 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
             overlay.write(&own, &fs::read(&vanilla)?)?;
         }
     }
-    let mut namespaces: Vec<&str> = mods
-        .iter()
-        .flat_map(|m| m.content.namespaces.iter().map(String::as_str))
-        .collect();
-    namespaces.sort();
     overlay.write(MARKER, &serde_json::to_vec(&namespaces)?)?;
-    let mod_ids: Vec<&str> = mods.iter().map(|m| m.id.as_str()).collect();
+    let requirements =
+        collect_jar_requirements(mods.iter().map(|m| (m.id.as_str(), m.jars.as_slice())))?;
+    overlay.write(JAR_INPUTS, &serde_json::to_vec(&requirements)?)?;
     overlay.write(
-        horizon_items::content_namespaces::MOD_IDS_MARKER,
-        &serde_json::to_vec(&mod_ids)?,
+        horizon_mod_package::enabled::MARKER,
+        &serde_json::to_vec(inventory)?,
     )?;
     let remainders: BTreeMap<&str, &str> = plan
         .items
@@ -3057,20 +3491,148 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
             &serde_json::to_vec(&remainders)?,
         )?;
     }
-    fluids::write_table(&overlay, &plan.fluids)?;
+    let placed_blocks: BTreeMap<&str, &str> = plan
+        .items
+        .iter()
+        .filter_map(|i| Some((i.rename.to.as_str(), i.block.as_deref()?)))
+        .collect();
+    if !placed_blocks.is_empty() {
+        overlay.write(
+            horizon_items::items::MOD_ITEM_BLOCKS,
+            &serde_json::to_vec(&placed_blocks)?,
+        )?;
+    }
+    let arm_poses: BTreeMap<&str, horizon_mod_package::content::ArmPose> = plan
+        .items
+        .iter()
+        .filter_map(|i| Some((i.rename.to.as_str(), i.arm_pose?)))
+        .collect();
+    if !arm_poses.is_empty() {
+        overlay.write(
+            horizon_items::items::MOD_ITEM_ARM_POSES,
+            &serde_json::to_vec(&arm_poses)?,
+        )?;
+    }
+    overlay.write(
+        BLOCK_ENTITY_TYPES,
+        &serde_json::to_vec(&plan.block_entity_factories)?,
+    )?;
     // clients must agree on the block states and the items', mob effects',
-    // fluids', entity types' and menu types' network ids.
+    // entity types', block entity types' and menu types' network ids.
     if !plan.blocks.is_empty()
         || !plan.items.is_empty()
         || !plan.effects.is_empty()
         || !plan.fluids.is_empty()
         || !plan.entity_types.is_empty()
+        || !plan.block_entity_types.is_empty()
         || !plan.menu_types.is_empty()
     {
         overlay.write(crate::content_identity::MARKER, b"1")?;
     }
     overlay.write(WARNINGS, warnings.join("\n").as_bytes())?;
+    let generated = serde_json::to_vec(
+        &*overlay
+            .written
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    )?;
+    overlay.write(GENERATED_FILES, &generated)?;
+    let _ = fs::remove_dir_all(out);
+    fs::rename(&tables_root, out)?;
     Ok(warnings)
+}
+
+const GENERATED_FILES: &str = "horizon-generated-content-files.json";
+
+/// Open the passive layers for one load. Assets and data retain the same jar
+/// readers; only files the table builder generated override the raw data.
+pub fn resolved_resources(
+    base: &Path,
+    prepared: PathBuf,
+    jar_store: &Path,
+    mods: &[ContentMod],
+    cache: PathBuf,
+) -> Result<horizon_assets::resource_source::ResourceRoot> {
+    use horizon_assets::resource_source::{Resource, ResourceRoot, ResourceSource};
+    let base_source = ResourceSource::directory(base.to_path_buf());
+    let loaded = load_layers(jar_store, mods)?;
+    let mut data = base_source
+        .list("data/")
+        .into_iter()
+        .map(|name| {
+            let resource = Resource::file(base_source.clone(), name.clone());
+            (name, resource)
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut changes = BTreeMap::new();
+    for group in &loaded {
+        let declarations = format!("data/{}/horizon/", group.source.id);
+        for layer in &group.layers {
+            for name in layer.data.list("data/") {
+                if !name.starts_with(&declarations) {
+                    changes.insert(
+                        name.clone(),
+                        Resource::file(layer.data.source().clone(), name),
+                    );
+                }
+            }
+        }
+    }
+    let mut assets_base = base_source.clone();
+    if prepared != base {
+        let generated: Vec<String> =
+            serde_json::from_slice(&fs::read(prepared.join(GENERATED_FILES))?)?;
+        let generated_source = ResourceSource::directory(prepared.clone());
+        let mut generated_assets = BTreeMap::new();
+        for name in generated {
+            if !horizon_assets::resource_source::stays_inside(&name) {
+                return Err(format!("invalid generated resource name: {name}").into());
+            }
+            let resource = Resource::file(generated_source.clone(), name.clone());
+            if name.starts_with("data/") {
+                changes.insert(name, resource);
+            } else if name.starts_with("assets/") {
+                generated_assets.insert(name, resource);
+            }
+        }
+        if !generated_assets.is_empty() {
+            let mut files = base_source
+                .list("")
+                .into_iter()
+                .map(|name| {
+                    let resource = Resource::file(base_source.clone(), name.clone());
+                    (name, resource)
+                })
+                .collect::<BTreeMap<_, _>>();
+            files.extend(generated_assets);
+            assets_base = ResourceSource::indexed(files);
+        }
+    }
+    let layers = loaded
+        .into_iter()
+        .flat_map(|group| group.layers.into_iter().map(|layer| layer.assets))
+        .collect::<Vec<_>>();
+    // Client resource readers also consume passive registry data (for
+    // example trim materials and dimension effects). Selected asset packs
+    // remain above the asset names without changing the server data source.
+    if !changes.is_empty() {
+        let mut files = assets_base
+            .list("")
+            .into_iter()
+            .map(|name| {
+                let resource = Resource::file(assets_base.clone(), name.clone());
+                (name, resource)
+            })
+            .collect::<BTreeMap<_, _>>();
+        files.extend(changes.clone());
+        assets_base = ResourceSource::indexed(files);
+    }
+    let assets = crate::packs::resources(assets_base, &layers)?;
+    data.extend(changes.clone());
+    Ok(ResourceRoot::new(prepared, cache, assets).with_data(
+        ResourceSource::indexed(data),
+        ResourceSource::indexed(changes),
+    ))
 }
 
 /// The root to load: `base` itself with no content, else the mods' overlay
@@ -3082,17 +3644,32 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
 /// The root is built once and kept: later starts with the same build, base
 /// and mod files reuse it. With ATM10's carried mods a build takes about
 /// 25 s and peaks above 3 GB, more than everything the game keeps.
-pub fn resource_root(base: &Path, mods: &[ContentMod], cache: &Path) -> Result<PathBuf> {
-    if mods
-        .iter()
-        .all(|m| m.content.is_empty() && m.content.blocks.is_empty() && m.content.items.is_empty())
-    {
+pub fn resource_root(
+    base: &Path,
+    jar_store: &Path,
+    mods: &[ContentMod],
+    cache: &Path,
+    inventory: &horizon_mod_package::enabled::EnabledMods,
+) -> Result<PathBuf> {
+    let has_content = mods.iter().any(|m| {
+        !m.jars.is_empty()
+            || !m.content.is_empty()
+            || !m.content.blocks.is_empty()
+            || !m.content.items.is_empty()
+            || !m.content.block_entity_types.is_empty()
+    });
+    if inventory.is_empty() && !has_content {
         return Ok(base.to_owned());
     }
-    let stamp = stamp(base, mods)?;
+    let stamp = stamp(base, jar_store, mods, inventory)?;
     let roots = cache.join("mod-content");
     let out = roots.join(&stamp[..ROOT_NAME]);
-    if fs::read(out.join(STAMP)).is_ok_and(|s| s == stamp.as_bytes()) {
+    if fs::read(out.join(STAMP)).is_ok_and(|s| s == stamp.as_bytes())
+        && fs::read(out.join(horizon_mod_package::enabled::MARKER)).is_ok_and(|bytes| {
+            serde_json::from_slice::<horizon_mod_package::enabled::EnabledMods>(&bytes)
+                .is_ok_and(|loaded| &loaded == inventory)
+        })
+    {
         // A reused root warns as the build did.
         let warnings = fs::read_to_string(out.join(WARNINGS)).unwrap_or_default();
         warnings.lines().for_each(|w| log::warn!("Horizon: {w}"));
@@ -3101,13 +3678,29 @@ pub fn resource_root(base: &Path, mods: &[ContentMod], cache: &Path) -> Result<P
         let _ = fs::write(used_path(&out), b"");
         return Ok(out);
     }
-    for warning in build(base, mods, &out)? {
-        log::warn!("Horizon: {warning}");
+    if has_content {
+        for warning in build(base, jar_store, mods, &out, inventory)? {
+            log::warn!("Horizon: {warning}");
+        }
+    } else {
+        // Code-only packages still own an inventory generation, but need no
+        // registry-table rewrite or content scan. Existing tables stay linked.
+        let base = std::path::absolute(base)?;
+        let overlay = Overlay::new(&base, &out)?;
+        overlay.write(
+            horizon_mod_package::enabled::MARKER,
+            &serde_json::to_vec(inventory)?,
+        )?;
+        overlay.write(GENERATED_FILES, b"[]")?;
     }
     fs::write(out.join(STAMP), stamp)?;
     prune_roots(&roots, &out, KEEP_ROOTS);
     Ok(out)
 }
+
+/// Declared native factory assignments, sorted by block id. Validity is extended
+/// after content resolution in the canonical `block_entity_types` table.
+pub const BLOCK_ENTITY_TYPES: &str = "horizon-block-entity-types.json";
 
 /// The length of a root's folder name: the start of its stamp.
 const ROOT_NAME: usize = 16;
@@ -3186,6 +3779,7 @@ pub fn live_switch(content: &Content) -> std::result::Result<(), &'static str> {
         || !content.entity_types.is_empty()
         || !content.menu_types.is_empty()
         || !content.creative_tabs.is_empty()
+        || !content.block_entity_types.is_empty()
     {
         return Err("horizon.mods.switch.registries");
     }
@@ -3195,7 +3789,9 @@ pub fn live_switch(content: &Content) -> std::result::Result<(), &'static str> {
             && parts.nth(1).is_some_and(|folder| {
                 matches!(folder, "worldgen" | "dimension" | "dimension_type")
                     || folder == "tags" && file.contains("/tags/worldgen/")
-                    || matches!(folder, "neoforge" | "forge") && file.contains("/biome_modifier/")
+                    || matches!(folder, "neoforge" | "forge")
+                        && (file.contains("/biome_modifier/")
+                            || file.contains("/structure_modifier/"))
             })
     };
     if content.files.iter().any(|f| worldgen(&f)) {
@@ -3209,11 +3805,45 @@ const WARNINGS: &str = "horizon-mod-content-warnings.txt";
 
 /// In a root built by [`resource_root`]: what it was built from.
 const STAMP: &str = "horizon-mod-content.stamp";
+const JAR_INPUTS: &str = "horizon-mod-jar-inputs.json";
+
+/// Check the accepted inputs of a composed resource root before server reload.
+/// This reads no candidate packages and never reopens or rehashes an archive.
+pub fn check_jars(root: &Path, jar_store: &Path) -> std::result::Result<(), JarInputsError> {
+    let marker = root.join(MARKER);
+    if !marker.try_exists().map_err(|source| JarInputsError::Io {
+        path: marker,
+        source,
+    })? {
+        return Ok(());
+    }
+    let path = root.join(JAR_INPUTS);
+    let bytes = fs::read(&path).map_err(|source| JarInputsError::Io {
+        path: path.clone(),
+        source,
+    })?;
+    let requirements: Vec<horizon_mod_package::manifest::JarRequirement> =
+        serde_json::from_slice(&bytes)
+            .map_err(|source| JarInputsError::Invalid { path, source })?;
+    let missing = missing_jars(jar_store, &requirements).map_err(|source| JarInputsError::Io {
+        path: jar_store.to_owned(),
+        source,
+    })?;
+    if let Some(missing) = missing.into_iter().next() {
+        return Err(JarInputsError::Missing(Box::new(missing)));
+    }
+    Ok(())
+}
 
 /// What a content root is built from: this build of the game, the base's
 /// manifest and the tables [`build`] rewrites, and every file of every mod
 /// in order. Files count by size and modification time, as build tools do.
-fn stamp(base: &Path, mods: &[ContentMod]) -> Result<String> {
+fn stamp(
+    base: &Path,
+    jar_store: &Path,
+    mods: &[ContentMod],
+    inventory: &horizon_mod_package::enabled::EnabledMods,
+) -> Result<String> {
     use sha2::{Digest, Sha256};
     let meta = |path: &Path| -> Result<String> {
         let m = fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -3228,7 +3858,10 @@ fn stamp(base: &Path, mods: &[ContentMod]) -> Result<String> {
             modified.as_nanos()
         ))
     };
-    let mut parts = vec!["horizon mod content 1".to_owned()];
+    let mut parts = vec![
+        "horizon mod content 7".to_owned(),
+        serde_json::to_string(inventory)?,
+    ];
     parts.push(meta(&std::env::current_exe()?)?);
     let base = std::path::absolute(base)?;
     parts.push(
@@ -3241,8 +3874,15 @@ fn stamp(base: &Path, mods: &[ContentMod]) -> Result<String> {
     }
     for m in mods {
         parts.push(m.id.clone());
+        parts.push(format!("jars {}", serde_json::to_string(&m.jars)?));
+        for jar in &m.jars {
+            parts.push(meta(&jar.cache_path(jar_store)).unwrap_or_else(|_| "not cached".into()));
+        }
         // What it declares, so blocks and items from code count too.
-        parts.push(format!("{:?} {:?}", m.content.blocks, m.content.items));
+        parts.push(format!(
+            "{:?} {:?} {:?}",
+            m.content.blocks, m.content.items, m.content.block_entity_types
+        ));
         let source = m.content.source();
         if m.content.files.is_empty() {
             // Declared in code only: nothing to read.
@@ -3261,10 +3901,6 @@ fn stamp(base: &Path, mods: &[ContentMod]) -> Result<String> {
     }
     Ok(format!("{:x}", hasher.finalize()))
 }
-
-#[path = "mod_content_fluids.rs"]
-mod fluids;
-pub use fluids::fluids;
 
 #[cfg(test)]
 #[path = "mod_content_tests.rs"]

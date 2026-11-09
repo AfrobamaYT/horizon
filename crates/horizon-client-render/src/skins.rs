@@ -175,9 +175,9 @@ pub fn services_profile_textures(profile: &serde_json::Value) -> Textures {
 /// `profile_skin_url` on a block entity's `profile` NBT (`SkullBlockEntity`):
 /// the same `properties` list, held as a compound. A name-only profile (a
 /// string tag) has no properties and no skin URL.
-pub fn profile_skin_url_nbt(profile: &horizon_world::nbt::Tag) -> Option<String> {
+pub fn profile_skin_url_nbt(profile: &horizon_core::nbt::Tag) -> Option<String> {
     let properties = match profile.get("properties")? {
-        horizon_world::nbt::Tag::List(list) => list,
+        horizon_core::nbt::Tag::List(list) => list,
         _ => return None,
     };
     let value = properties.iter().find_map(|p| {
@@ -191,20 +191,20 @@ pub fn profile_skin_url_nbt(profile: &horizon_world::nbt::Tag) -> Option<String>
 
 /// `ResolvableProfile.skinPatch().body()` of a skull's `profile` NBT: the
 /// `texture` id that replaces its skin.
-pub fn profile_texture_nbt(profile: &horizon_world::nbt::Tag) -> Option<String> {
+pub fn profile_texture_nbt(profile: &horizon_core::nbt::Tag) -> Option<String> {
     nbt_text(profile.get("texture"))
 }
 
 /// The profile's uuid as u128: `id` as an int array (block entity NBT) or a
 /// uuid string (older and component forms). Used for `DefaultPlayerSkin.get`
 /// when a head's skin is not downloaded yet.
-pub fn profile_uuid_nbt(profile: &horizon_world::nbt::Tag) -> Option<u128> {
+pub fn profile_uuid_nbt(profile: &horizon_core::nbt::Tag) -> Option<u128> {
     match profile.get("id")? {
-        horizon_world::nbt::Tag::IntArray(v) if v.len() == 4 => Some(
+        horizon_core::nbt::Tag::IntArray(v) if v.len() == 4 => Some(
             v.iter()
                 .fold(0u128, |a, &w| (a << 32) | u128::from(w as u32)),
         ),
-        horizon_world::nbt::Tag::String(s) => {
+        horizon_core::nbt::Tag::String(s) => {
             let digits: String = s.to_string_lossy().chars().filter(|c| *c != '-').collect();
             u128::from_str_radix(&digits, 16).ok()
         }
@@ -212,9 +212,9 @@ pub fn profile_uuid_nbt(profile: &horizon_world::nbt::Tag) -> Option<u128> {
     }
 }
 
-pub(crate) fn nbt_text(tag: Option<&horizon_world::nbt::Tag>) -> Option<String> {
+pub(crate) fn nbt_text(tag: Option<&horizon_core::nbt::Tag>) -> Option<String> {
     match tag {
-        Some(horizon_world::nbt::Tag::String(s)) => Some(s.to_string_lossy()),
+        Some(horizon_core::nbt::Tag::String(s)) => Some(s.to_string_lossy()),
         _ => None,
     }
 }
@@ -482,13 +482,12 @@ pub fn parse_profile(v: &serde_json::Value) -> ProfileInfo {
 /// `ResolvableProfile.create`'s `Dynamic` key from a skull's `profile` tag:
 /// a bare name string is `createUnresolved`, and a compound without
 /// properties and with exactly one of a name or an id is `Dynamic`.
-pub fn dynamic_nbt(profile: &horizon_world::nbt::Tag) -> Option<NameOrId> {
-    if let horizon_world::nbt::Tag::String(s) = profile {
+pub fn dynamic_nbt(profile: &horizon_core::nbt::Tag) -> Option<NameOrId> {
+    if let horizon_core::nbt::Tag::String(s) = profile {
         let name = s.to_string_lossy();
         return valid_player_name(&name).then_some(NameOrId::Name(name));
     }
-    if matches!(profile.get("properties"), Some(horizon_world::nbt::Tag::List(l)) if !l.is_empty())
-    {
+    if matches!(profile.get("properties"), Some(horizon_core::nbt::Tag::List(l)) if !l.is_empty()) {
         return None;
     }
     match (nbt_text(profile.get("name")), profile_uuid_nbt(profile)) {
@@ -519,7 +518,7 @@ fn prepare_head(profile: &serde_json::Value) -> HeadProfile {
 #[derive(Default)]
 struct HeadProfiles {
     entries: std::collections::HashMap<serde_json::Value, std::sync::Arc<HeadProfile>>,
-    nbt: std::collections::HashMap<horizon_world::nbt::Tag, std::sync::Arc<serde_json::Value>>,
+    nbt: std::collections::HashMap<horizon_core::nbt::Tag, std::sync::Arc<serde_json::Value>>,
     resolved: [std::collections::HashMap<String, std::sync::Arc<HeadProfile>>; 2],
 }
 
@@ -542,7 +541,7 @@ impl Resolver {
     /// mutated in place, and neither must leave a stale profile behind.
     pub fn head_profile_nbt(
         &mut self,
-        profile: &horizon_world::nbt::Tag,
+        profile: &horizon_core::nbt::Tag,
     ) -> std::sync::Arc<serde_json::Value> {
         if let Some(json) = self.heads.nbt.get(profile) {
             return json.clone();
@@ -923,7 +922,7 @@ pub struct Downloader {
     /// Skins and capes drawn from the atlas since `take_drawn`.
     drawn: std::collections::HashSet<String>,
     /// The resource packs' root, where a profile's `texture` patch is read.
-    resource_root: std::path::PathBuf,
+    resource_root: horizon_assets::resource_source::ResourceSource,
     /// How each `patch/` texture of the resource packs loaded, by location.
     resources: std::collections::HashMap<String, Download>,
     /// When each failed texture download was last tried, so it can be retried:
@@ -960,7 +959,9 @@ impl Downloader {
             images: Default::default(),
             image_order: Default::default(),
             drawn: Default::default(),
-            resource_root: Default::default(),
+            resource_root: horizon_assets::resource_source::ResourceSource::indexed(
+                Default::default(),
+            ),
             resources: Default::default(),
             failed: Default::default(),
             retry_after: std::time::Duration::from_secs(60),
@@ -968,11 +969,16 @@ impl Downloader {
     }
     /// The resource packs changed (or were first loaded) at `root`: patch
     /// textures load again from there.
-    pub fn set_resource_root(&mut self, root: std::path::PathBuf) {
-        for location in std::mem::take(&mut self.resources).into_keys() {
-            self.images.remove(&location);
-            self.image_order.retain(|l| *l != location);
-        }
+    pub fn set_resource_root(&mut self, root: horizon_assets::resource_source::ResourceSource) {
+        let previous = std::mem::take(&mut self.resources);
+        self.images
+            .retain(|location, _| !previous.contains_key(location));
+        self.image_order
+            .retain(|location| !previous.contains_key(location));
+        self.queued
+            .retain(|location| !previous.contains_key(location));
+        self.ready
+            .retain(|(location, _)| !previous.contains_key(location));
         self.resource_root = root;
     }
     /// `ClientAsset.ResourceTexture`: loads `<namespace>:textures/<path>.png`
@@ -988,10 +994,9 @@ impl Downloader {
             }
             None => {}
         }
-        let file = self
+        let image = self
             .resource_root
-            .join(format!("assets/{namespace}/textures/{path}.png"));
-        let image = std::fs::read(file)
+            .read(&format!("assets/{namespace}/textures/{path}.png"))
             .ok()
             .and_then(|b| crate::hud::decode_bytes(&b).ok())
             .and_then(|(w, h, rgba)| resample_64(w, h, &rgba));
@@ -1309,17 +1314,17 @@ mod tests {
     #[test]
     fn head_profile_nbt_cache_tracks_value_changes() {
         let mut resolver = super::Resolver::new();
-        let mut tag = horizon_world::nbt::Tag::String("Notch".into());
+        let mut tag = horizon_core::nbt::Tag::String("Notch".into());
         let first = resolver.head_profile_nbt(&tag);
         assert_eq!(*first, crate::scoreboard::tag_to_json(&tag));
         assert!(std::sync::Arc::ptr_eq(
             &first,
             &resolver.head_profile_nbt(&tag)
         ));
-        tag = horizon_world::nbt::Tag::String("Alex".into());
+        tag = horizon_core::nbt::Tag::String("Alex".into());
         assert_eq!(*resolver.head_profile_nbt(&tag), serde_json::json!("Alex"));
         for i in 0..super::MAX_HEAD_PROFILES {
-            resolver.head_profile_nbt(&horizon_world::nbt::Tag::Int(i as i32));
+            resolver.head_profile_nbt(&horizon_core::nbt::Tag::Int(i as i32));
         }
         assert!(resolver.heads.nbt.len() < super::MAX_HEAD_PROFILES);
     }
@@ -1724,7 +1729,7 @@ mod tests {
     #[test]
     fn skull_block_entity_profiles_supply_head_skins() {
         let value = "eyJ0ZXh0dXJlcyI6IHsiU0tJTiI6IHsidXJsIjogImh0dHBzOi8vdGV4dHVyZXMubWluZWNyYWZ0Lm5ldC90ZXh0dXJlL2FiYzEyMyJ9fX0=";
-        let profile = horizon_world::nbt::parse_snbt(&format!(
+        let profile = horizon_core::nbt::parse_snbt(&format!(
             r#"{{name:"T",id:[I;-158327916,1572358581,-2125825222,-487948715],properties:[{{name:"textures",value:"{value}"}}]}}"#
         ))
         .unwrap()
@@ -1742,11 +1747,11 @@ mod tests {
             )
         );
         // A name-only profile (a string tag) has no properties: no url, no id.
-        let named = horizon_world::nbt::Tag::String("MHF_Blaze".into());
+        let named = horizon_core::nbt::Tag::String("MHF_Blaze".into());
         assert_eq!(super::profile_skin_url_nbt(&named), None);
         assert_eq!(super::profile_uuid_nbt(&named), None);
         // A uuid in string form decodes too.
-        let text_id = horizon_world::nbt::parse_snbt(
+        let text_id = horizon_core::nbt::parse_snbt(
             r#"{name:"T",id:"e843a1f4-0000-0001-0000-000200000003"}"#,
         )
         .unwrap()
@@ -1816,6 +1821,45 @@ mod tests {
         writer.write_image_data(&rgba).unwrap();
         writer.finish().unwrap();
         out
+    }
+
+    #[test]
+    fn resource_reload_replaces_pixels_and_drops_queued_old_generation_images() {
+        use horizon_assets::resource_source::{Resource, ResourceSource};
+        let source = |color| {
+            ResourceSource::indexed(std::collections::BTreeMap::from([(
+                "assets/example/textures/player.png".into(),
+                Resource::bytes(png(color)),
+            )]))
+        };
+        let cache = std::env::temp_dir().join(format!(
+            "horizon-resource-skin-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut downloads = super::Downloader::new(cache.clone());
+        downloads.set_resource_root(source([255, 0, 0, 255]));
+        downloads.resource("patch/player", "example", "player");
+        assert_eq!(
+            &downloads.image("patch/player").unwrap()[..4],
+            [255, 0, 0, 255]
+        );
+        assert_eq!(downloads.ready.len(), 1);
+        downloads.set_resource_root(source([0, 0, 255, 255]));
+        assert!(downloads.image("patch/player").is_none());
+        assert!(downloads.ready.is_empty());
+        assert!(!downloads.queued.contains("patch/player"));
+        downloads.resource("patch/player", "example", "player");
+        let ready = downloads.take_ready();
+        assert_eq!(ready.len(), 1);
+        assert_eq!(&ready[0].1[..4], [0, 0, 255, 255]);
+        assert!(
+            !cache.exists(),
+            "resource images never enter the URL download cache"
+        );
     }
 
     /// A downloaded body reaches the disk cache only if it decodes; a broken

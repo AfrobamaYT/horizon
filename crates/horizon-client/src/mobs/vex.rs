@@ -9,6 +9,7 @@ use super::{
         Cx, Float, Goal, HurtByTarget, LookAtPlayer, MOVE, NearestTarget, goal_clone, reduced,
     },
 };
+use crate::health::DamageLevel;
 use horizon_core::geometry::trig::Mth;
 use horizon_core::{geometry::Vec3, random::RandomSource};
 use std::f32::consts::PI;
@@ -179,12 +180,13 @@ impl Goal for CopyOwnerTarget {
         m.target_info(cx.w).is_some_and(|t| t.alive)
     }
     fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
-        m.ai.target = owner(m, cx.w.who_lookup).and_then(|owner| {
+        let target = owner(m, cx.w.who_lookup).and_then(|owner| {
             cx.w.others
                 .iter()
                 .find(|s| s.id == owner)
                 .and_then(|s| s.target)
         });
+        m.set_ai_target(cx.w, target);
     }
 }
 /// `VexMoveControl`: accelerate straight at the wanted point.
@@ -225,7 +227,7 @@ pub fn travel(m: &mut Mob) -> bool {
     true
 }
 /// `Vex.tick`: the limited life costs a heart a second once spent.
-pub fn ai_step(m: &mut Mob, w: &super::MobWorld) {
+pub fn ai_step(m: &mut Mob, w: &super::MobWorld, level: &mut DamageLevel<'_>) {
     m.extra.point = m
         .target_info(w)
         .map(|t| [t.position.x, t.position.y, t.position.z]);
@@ -233,7 +235,7 @@ pub fn ai_step(m: &mut Mob, w: &super::MobWorld) {
         m.extra.egg_time -= 1;
         if m.extra.egg_time == 0 {
             m.extra.egg_time = 20;
-            m.damage(1.0, Damage::of(DamageKind::Generic));
+            m.damage(level, 1.0, Damage::of(DamageKind::Generic));
         }
     }
 }
@@ -247,7 +249,10 @@ pub fn anim(m: &Mob, s: &State, p: &mut Poses) {
     if m.extra.flag {
         p.xrot("body", 0.0);
         // setArmsCharging
-        let (right, left) = (m.extra.main_hand.is_some(), m.extra.off_hand.is_some());
+        let (right, left) = (
+            m.extra.main_hand_id().is_some(),
+            m.extra.off_hand_id().is_some(),
+        );
         if !right && !left {
             p.xrot("right_arm", -1.221_730_5);
             p.yrot("right_arm", PI / 12.0);
@@ -295,10 +300,10 @@ pub fn texture(m: &Mob) -> &'static str {
 /// loaded with stands when the owner is gone.
 pub fn write_nbt(
     m: &Mob,
-    map: &mut horizon_world::nbt::Compound,
+    map: &mut horizon_core::nbt::Compound,
     uuid_of: &mut impl FnMut(u32) -> Option<[i32; 4]>,
 ) {
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
     if let Some(h) = m.extra.home {
         map.insert("bound_pos".into(), Tag::IntArray(h.to_vec()));
     }
@@ -324,8 +329,8 @@ pub fn write_nbt(
 /// absent) and the owner's UUID, kept as the UUID it is - an id would name
 /// whatever mob has it now - and resolved through the level when the vex asks
 /// for its owner (`owner`).
-pub fn read_nbt(m: &mut Mob, tag: &horizon_world::nbt::Tag) {
-    use horizon_world::nbt::Tag;
+pub fn read_nbt(m: &mut Mob, tag: &horizon_core::nbt::Tag) {
+    use horizon_core::nbt::Tag;
     if let Some(Tag::IntArray(v)) = tag.get("bound_pos")
         && v.len() == 3
     {
@@ -340,7 +345,7 @@ mod owner_save_tests {
     use super::*;
     use crate::entity_nbt::{mob_from_nbt, mob_to_nbt};
     use crate::mobs::WhoLookup;
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
     use std::collections::HashMap;
     use std::sync::Arc;
 

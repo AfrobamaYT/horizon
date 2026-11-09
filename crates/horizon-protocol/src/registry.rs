@@ -7,7 +7,7 @@ use crate::{
     Error, Result,
     packets::configuration::{RegistryData, UpdateTags},
 };
-use horizon_world::nbt::{JavaString, Tag};
+use horizon_core::nbt::{JavaString, Tag};
 use std::{collections::HashMap, path::Path};
 
 /// One registry: names by network id and the reverse lookup.
@@ -124,25 +124,31 @@ impl Builtin {
 #[derive(Clone, Debug, Default)]
 pub struct Dynamic {
     pub registries: HashMap<String, Vec<(String, Option<Tag>)>>,
-    /// The `minecraft:dialog` tags the server sent: each tag's entries by id.
-    pub dialog_tags: HashMap<String, Vec<i32>>,
+    /// The tags the server sent, by registry: each tag's entries by id.
+    pub tags: HashMap<String, HashMap<String, Vec<i32>>>,
     /// The peer confirmed the native component registry identity.
     pub custom_components: bool,
 }
+/// The most registries whose tags one connection keeps. Vanilla names well under a hundred; a
+/// server naming more is not a registry list, and the bound keeps a hostile one from growing the
+/// client's memory with every packet.
+pub const MAX_TAG_REGISTRIES: usize = 512;
+
 impl Dynamic {
-    /// The dialog tags of a `ClientboundUpdateTagsPacket`.
+    /// A `ClientboundUpdateTagsPacket`: the registries it names replace their
+    /// tags, the others keep theirs. A registry beyond [`MAX_TAG_REGISTRIES`] is dropped.
     pub fn add_tags(&mut self, packet: &UpdateTags) {
-        for r in packet
-            .registries
-            .iter()
-            .filter(|r| r.registry == "minecraft:dialog")
-        {
-            self.dialog_tags = r
-                .tags
-                .iter()
-                .map(|t| (t.name.clone(), t.ids.clone()))
-                .collect();
+        for r in &packet.registries {
+            if self.tags.len() >= MAX_TAG_REGISTRIES && !self.tags.contains_key(&r.registry) {
+                continue;
+            }
+            let tags = r.tags.iter().map(|t| (t.name.clone(), t.ids.clone()));
+            self.tags.insert(r.registry.clone(), tags.collect());
         }
+    }
+    /// The entries of a tag by id.
+    pub fn tag(&self, registry: &str, tag: &str) -> Option<&[i32]> {
+        self.tags.get(registry)?.get(tag).map(Vec::as_slice)
     }
     pub fn add(&mut self, packet: RegistryData) {
         let entries = packet.entries.into_iter().map(|e| (e.id, e.data)).collect();
@@ -170,6 +176,15 @@ impl Dynamic {
     }
     pub fn is_empty(&self) -> bool {
         self.registries.is_empty()
+    }
+    /// The synchronized dimension type `id` as the JSON a data pack writes it, with its name:
+    /// what `DimensionFacts::patched` reads. None without data. A byte is a flag (every one the
+    /// type has is), and a number with no fraction is an integer, as Horizon's server sends a
+    /// pack's JSON numbers as doubles.
+    pub fn dimension_json(&self, id: i32) -> Option<(String, serde_json::Value)> {
+        let name = self.name("minecraft:dimension_type", id)?.to_owned();
+        let tag = self.data("minecraft:dimension_type", id)?;
+        Some((name, tag_json(tag)))
     }
     /// The dimension type's vertical range and sky light, from its
     /// synchronized data or the vanilla defaults for known names.
@@ -228,6 +243,37 @@ impl Dynamic {
         d
     }
 }
+/// A dimension type's tag as JSON (see `Dynamic::dimension_json`).
+fn tag_json(tag: &Tag) -> serde_json::Value {
+    use serde_json::{Number, Value};
+    let number = |v: f64| {
+        if v.fract() == 0.0 && v.abs() < 9e15 {
+            Value::from(v as i64)
+        } else {
+            Number::from_f64(v).map_or(Value::Null, Value::Number)
+        }
+    };
+    match tag {
+        Tag::End => Value::Null,
+        Tag::Byte(v) => Value::Bool(*v != 0),
+        Tag::Short(v) => Value::from(*v),
+        Tag::Int(v) => Value::from(*v),
+        Tag::Long(v) => Value::from(*v),
+        Tag::Float(v) => number(f64::from(f32::from_bits(*v))),
+        Tag::Double(v) => number(f64::from_bits(*v)),
+        Tag::String(s) => Value::String(s.to_string_lossy()),
+        Tag::List(items) => Value::Array(items.iter().map(tag_json).collect()),
+        Tag::Compound(map) => Value::Object(
+            map.iter()
+                .map(|(k, v)| (k.to_string_lossy(), tag_json(v)))
+                .collect(),
+        ),
+        Tag::ByteArray(v) => Value::Array(v.iter().map(|b| Value::from(*b)).collect()),
+        Tag::IntArray(v) => Value::Array(v.iter().map(|n| Value::from(*n)).collect()),
+        Tag::LongArray(v) => Value::Array(v.iter().map(|n| Value::from(*n)).collect()),
+    }
+}
+
 /// The parts of a DimensionType the client needs for chunk layout.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DimensionType {
@@ -296,6 +342,57 @@ pub fn ceil_log2(n: usize) -> u8 {
 mod tests {
     use super::*;
     use crate::packets::configuration::RegistryEntry;
+
+    #[test]
+    fn tags_replace_only_the_registries_a_packet_names() {
+        let packet = |registry: &str, name: &str, ids: Vec<i32>| UpdateTags {
+            registries: vec![crate::packets::configuration::RegistryTags {
+                registry: registry.into(),
+                tags: vec![crate::packets::configuration::TagEntry {
+                    name: name.into(),
+                    ids,
+                }],
+            }],
+        };
+        let mut dynamic = Dynamic::default();
+        dynamic.add_tags(&packet("minecraft:dialog", "minecraft:a", vec![1, 2]));
+        dynamic.add_tags(&packet("minecraft:item", "minecraft:b", vec![3]));
+        dynamic.add_tags(&packet("minecraft:item", "minecraft:c", vec![4]));
+        assert_eq!(
+            dynamic.tag("minecraft:dialog", "minecraft:a"),
+            Some(&[1, 2][..])
+        );
+        assert_eq!(dynamic.tag("minecraft:item", "minecraft:b"), None);
+        assert_eq!(dynamic.tag("minecraft:item", "minecraft:c"), Some(&[4][..]));
+    }
+
+    #[test]
+    fn tag_registries_are_bounded_and_known_ones_still_update() {
+        let packet = |registry: String, id: i32| UpdateTags {
+            registries: vec![crate::packets::configuration::RegistryTags {
+                registry,
+                tags: vec![crate::packets::configuration::TagEntry {
+                    name: "minecraft:t".into(),
+                    ids: vec![id],
+                }],
+            }],
+        };
+        let mut dynamic = Dynamic::default();
+        dynamic.add_tags(&packet("minecraft:item".into(), 1));
+        for i in 0..2 * MAX_TAG_REGISTRIES {
+            dynamic.add_tags(&packet(format!("attack:registry_{i}"), 0));
+        }
+        assert_eq!(dynamic.tags.len(), MAX_TAG_REGISTRIES);
+        // A registry kept before the bound is still replaced, and the others keep theirs.
+        dynamic.add_tags(&packet("minecraft:item".into(), 7));
+        assert_eq!(dynamic.tag("minecraft:item", "minecraft:t"), Some(&[7][..]));
+        assert_eq!(dynamic.tags.len(), MAX_TAG_REGISTRIES);
+        assert_eq!(
+            dynamic.tag("attack:registry_0", "minecraft:t"),
+            Some(&[0][..])
+        );
+        assert_eq!(dynamic.tag("attack:registry_600", "minecraft:t"), None);
+    }
 
     #[test]
     fn parses_registry_reports() {
@@ -405,6 +502,48 @@ mod tests {
         let dim = d.dimension(0);
         assert_eq!(dim.name, "pack:custom");
         assert_eq!(dim.default_clock.as_deref(), Some("minecraft:overworld"));
+    }
+
+    /// The server's dimension type reaches the game's facts through its JSON: a flag byte is a
+    /// bool, a whole double an integer, and the attributes keep their keys.
+    #[test]
+    fn a_synchronized_type_becomes_the_games_facts() {
+        use horizon_world::dimension_type::DimensionFacts;
+        let mut d = Dynamic::default();
+        d.add(RegistryData {
+            registry: "minecraft:dimension_type".into(),
+            entries: vec![RegistryEntry {
+                id: "mymod:pocket".into(),
+                data: Some(Tag::compound([
+                    ("min_y", Tag::Int(0)),
+                    ("height", Tag::Int(128)),
+                    ("logical_height", Tag::Int(128)),
+                    ("has_fixed_time", Tag::Byte(1)),
+                    ("coordinate_scale", Tag::Double(2.0f64.to_bits())),
+                    (
+                        "attributes",
+                        Tag::compound([
+                            ("minecraft:gameplay/fast_lava", Tag::Byte(1)),
+                            (
+                                "minecraft:gameplay/sky_light_level",
+                                Tag::Float(4.0f32.to_bits()),
+                            ),
+                        ]),
+                    ),
+                ])),
+            }],
+        });
+        let (name, json) = d.dimension_json(0).unwrap();
+        assert_eq!(name, "mymod:pocket");
+        assert_eq!(json["has_fixed_time"], true);
+        assert_eq!(json["coordinate_scale"], 2);
+        let facts =
+            DimensionFacts::patched(DimensionFacts::base_for_type(&name), &name, &json).unwrap();
+        assert_eq!(facts.coordinate_scale, 2.0);
+        assert!(facts.has_fixed_time && facts.fast_lava);
+        assert_eq!(facts.sky_light_level, 4.0);
+        assert_eq!(facts.height.height, 128);
+        assert!(Dynamic::default().dimension_json(0).is_none());
     }
 
     #[test]

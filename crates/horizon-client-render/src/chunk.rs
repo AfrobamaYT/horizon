@@ -1,8 +1,8 @@
 //! Resident client chunk storage. Sections are reference-counted so worker
 //! threads can mesh and light immutable snapshots while the game thread edits
 //! (copy-on-write through `Arc::make_mut`).
+use horizon_core::nbt::{Compound, Tag};
 use horizon_core::paletted::{PalettedContainer, Strategy};
-use horizon_world::nbt::{Compound, Tag};
 use horizon_world::registry::BlockStateId;
 use std::sync::{Arc, OnceLock};
 
@@ -71,9 +71,17 @@ impl LevelShape {
             logical_height,
         })
     }
+    pub fn with_ceiling(mut self, has_ceiling: bool) -> Self {
+        self.has_ceiling = has_ceiling;
+        self
+    }
     /// One above the highest block (`getMaxY() + 1`).
     pub fn max_y(self) -> i32 {
         self.min_y + self.height
+    }
+    /// Whether a block Y is inside the dimension's build height.
+    pub fn contains_y(self, y: i32) -> bool {
+        (self.min_y..self.max_y()).contains(&y)
     }
     pub fn min_section(self) -> i32 {
         self.min_y >> 4
@@ -93,18 +101,30 @@ impl LevelShape {
     }
 }
 
-/// The shapes of a world's three levels, from its dimension types.
+/// The shapes of a world's levels, from its dimension types.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LevelShapes {
     pub overworld: LevelShape,
     pub nether: LevelShape,
     pub end: LevelShape,
+    /// The levels past vanilla's three that the world's data packs give, by id.
+    /// Leaked once per world opened, so the shapes stay `Copy`.
+    pub extra: &'static [ExtraLevel],
+}
+/// A level past vanilla's three.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExtraLevel {
+    pub id: &'static str,
+    /// The dimension type its level stem names.
+    pub dimension_type: &'static str,
+    pub shape: LevelShape,
 }
 impl LevelShapes {
     pub const VANILLA: Self = Self {
         overworld: LevelShape::OVERWORLD,
         nether: LevelShape::NETHER,
         end: LevelShape::END,
+        extra: &[],
     };
     /// The shape of the level `id` (`minecraft:overworld`,
     /// `minecraft:the_nether`, `minecraft:the_end`); others get the
@@ -113,8 +133,26 @@ impl LevelShapes {
         match id {
             "minecraft:the_nether" => self.nether,
             "minecraft:the_end" => self.end,
-            _ => self.overworld,
+            _ => self
+                .extra
+                .iter()
+                .find(|level| level.id == id)
+                .map_or(self.overworld, |level| level.shape),
         }
+    }
+    /// Whether the world has the level `id`.
+    pub fn has(&self, id: &str) -> bool {
+        matches!(
+            id,
+            "minecraft:overworld" | "minecraft:the_nether" | "minecraft:the_end"
+        ) || self.extra.iter().any(|level| level.id == id)
+    }
+    /// The dimension type of the level `id`: a vanilla level's is its own name.
+    pub fn dimension_type<'a>(&self, id: &'a str) -> &'a str {
+        self.extra
+            .iter()
+            .find(|level| level.id == id)
+            .map_or(id, |level| level.dimension_type)
     }
     pub fn get_mut(&mut self, id: &str) -> &mut LevelShape {
         match id {
@@ -595,8 +633,10 @@ pub struct Chunk {
     pub postprocess: Vec<[i32; 3]>,
     /// Saved data Horizon keeps but does not simulate (save.rs).
     pub saved: Option<Arc<ChunkExtras>>,
+    /// Validated container limits, rebuilt on chunk admission and extras writes.
+    pub container_stack_limits: std::collections::HashMap<(i32, i32, i32), u32>,
     /// Entities read from a save (vanilla entity NBT), spawned on arrival.
-    pub entities: Vec<horizon_world::nbt::Tag>,
+    pub entities: Vec<horizon_core::nbt::Tag>,
     /// Structure starts reaching into this chunk (`structures.References`):
     /// structure id and the start's chunk.
     pub structure_refs: Vec<(Arc<str>, (i32, i32))>,
@@ -630,14 +670,15 @@ impl Chunk {
             structure_starts: Vec::new(),
             postprocess: Vec::new(),
             saved: None,
+            container_stack_limits: Default::default(),
             entities: Vec::new(),
         }
     }
     /// The original `structures.starts`, including starts with unknown pieces.
-    pub fn saved_structure_starts(&self) -> Option<&horizon_world::nbt::Compound> {
+    pub fn saved_structure_starts(&self) -> Option<&horizon_core::nbt::Compound> {
         let structures = self.saved.as_ref()?.root.get(&"structures".into())?;
         match structures.get("starts")? {
-            horizon_world::nbt::Tag::Compound(starts) => Some(starts),
+            horizon_core::nbt::Tag::Compound(starts) => Some(starts),
             _ => None,
         }
     }
@@ -890,9 +931,12 @@ impl RolledLoot {
 #[derive(Clone, Debug, Default)]
 pub struct ChunkExtras {
     /// Server-owned mod data attached to this chunk.
-    pub attachments: horizon_world::attachments::Attachments,
+    pub attachments: horizon_mod_runtime::attachments::Attachments,
     /// Attachment maps of the chunk's block entities, on a save snapshot.
-    pub block_entity_attachments: Vec<((i32, i32, i32), horizon_world::attachments::Attachments)>,
+    pub block_entity_attachments: Vec<(
+        (i32, i32, i32),
+        horizon_mod_runtime::attachments::Attachments,
+    )>,
     /// Chunk root keys written back as loaded (structures, PostProcessing,
     /// InhabitedTime, blending data, ...).
     pub root: Compound,
@@ -917,6 +961,30 @@ pub struct ChunkExtras {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_worlds_extra_levels_keep_their_shape_and_type() {
+        let shape = super::LevelShape::new(-128, 448, 448, true, false).unwrap();
+        let levels = super::LevelShapes {
+            extra: vec![super::ExtraLevel {
+                id: "test:pocket",
+                dimension_type: "test:small",
+                shape,
+            }]
+            .leak(),
+            ..super::LevelShapes::VANILLA
+        };
+        assert_eq!(levels.get("test:pocket"), shape);
+        assert_eq!(levels.dimension_type("test:pocket"), "test:small");
+        assert_eq!(
+            levels.dimension_type("minecraft:the_end"),
+            "minecraft:the_end"
+        );
+        assert!(levels.has("test:pocket"));
+        assert!(levels.has("minecraft:the_nether"));
+        assert!(!levels.has("test:gone"));
+        assert_eq!(levels.get("test:gone"), super::LevelShape::OVERWORLD);
+    }
+
     use super::*;
     #[test]
     fn each_light_form_keeps_every_value_and_run() {

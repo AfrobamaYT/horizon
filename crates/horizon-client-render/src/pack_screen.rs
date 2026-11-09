@@ -44,7 +44,7 @@ pub enum Source {
 }
 
 /// A pack as the screen shows it.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PackInfo {
     pub id: String,
     pub title: Text,
@@ -120,6 +120,40 @@ fn scale_icon((w, h, rgba): (u32, u32, Vec<u8>)) -> Option<Arc<[u8]>> {
         }
     }
     Some(out.into())
+}
+/// Points the icon blits of `draws` at the atlas's pack icon slots and writes the `icons` they
+/// name into them, one slot per blit (vanilla registers a texture per icon). Icons past the last
+/// slot keep `unknown_pack`.
+pub fn bind_icon_slots(
+    icons: &HashMap<String, Arc<[u8]>>,
+    draws: &mut [Draw],
+    atlas: &HudAtlas,
+    patches: &mut Vec<Patch>,
+) {
+    let mut slots = 0..PACK_ICON_SLOTS;
+    for draw in draws {
+        let Draw::Blit { texture, .. } = draw else {
+            continue;
+        };
+        let Some(icon) = icons.get(texture.as_str()) else {
+            continue;
+        };
+        let Some(slot) = slots.next() else {
+            return;
+        };
+        let sprite = format!("horizon/pack-icon{slot}");
+        let Some(rect) = atlas.sprites.get(&sprite) else {
+            return;
+        };
+        patches.push(Patch {
+            x: (rect.u0 * atlas.width as f32).round() as u32,
+            y: (rect.v0 * atlas.height as f32).round() as u32,
+            width: PACK_ICON_SIZE,
+            height: PACK_ICON_SIZE,
+            rgba: icon.to_vec(),
+        });
+        *texture = sprite;
+    }
 }
 /// `PackSelectionScreen.loadPackIcon`'s texture for a pack with an icon.
 pub fn icon_texture(id: &str) -> String {
@@ -934,30 +968,7 @@ impl PackScreen {
     /// writes the icons into them, one slot per icon drawn (vanilla registers a
     /// texture per pack). Icons past the last slot keep `unknown_pack`.
     pub fn bind_icons(&self, draws: &mut [Draw], atlas: &HudAtlas, patches: &mut Vec<Patch>) {
-        let mut slots = 0..PACK_ICON_SLOTS;
-        for draw in draws {
-            let Draw::Blit { texture, .. } = draw else {
-                continue;
-            };
-            let Some(icon) = self.icons.get(texture.as_str()) else {
-                continue;
-            };
-            let Some(slot) = slots.next() else {
-                return;
-            };
-            let sprite = format!("horizon/pack-icon{slot}");
-            let Some(rect) = atlas.sprites.get(&sprite) else {
-                return;
-            };
-            patches.push(Patch {
-                x: (rect.u0 * atlas.width as f32).round() as u32,
-                y: (rect.v0 * atlas.height as f32).round() as u32,
-                width: PACK_ICON_SIZE,
-                height: PACK_ICON_SIZE,
-                rgba: icon.to_vec(),
-            });
-            *texture = sprite;
-        }
+        bind_icon_slots(&self.icons, draws, atlas, patches);
     }
 
     /// The shown screen's calls (`Screen.extractRenderState`); `blink_ms`
@@ -1721,9 +1732,12 @@ mod icon_tests {
     /// that pack's options and nothing else; a pack without options has none.
     #[test]
     fn a_card_with_options_opens_its_own_pack_options() {
-        let atlas =
-            crate::hud::HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets"))
-                .unwrap();
+        let atlas = crate::hud::HudAtlas::build(
+            &horizon_assets::resource_source::ResourceSource::directory(
+                "/nonexistent/horizon-test-assets".into(),
+            ),
+        )
+        .unwrap();
         let m = Measure(&atlas.font);
         let packs = vec![pack("file/Configurable", None), pack("file/Plain", None)];
         let mut screen = PackScreen::new(&m, tr("resourcePack.title"), 480, 320, false, packs, &[]);
@@ -1760,9 +1774,12 @@ mod icon_tests {
     /// without one keeps `unknown_pack`.
     #[test]
     fn drawn_icons_take_atlas_slots() {
-        let atlas =
-            crate::hud::HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets"))
-                .unwrap();
+        let atlas = crate::hud::HudAtlas::build(
+            &horizon_assets::resource_source::ResourceSource::directory(
+                (std::path::Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+            ),
+        )
+        .unwrap();
         let m = Measure(&atlas.font);
         let dirt = load_icon(&png(1, 1, &[134, 96, 67, 255])).unwrap();
         let contrast = load_icon(&png(1, 1, &[0, 0, 0, 255])).unwrap();
@@ -1814,9 +1831,12 @@ mod click_sound_tests {
 
     #[test]
     fn a_cards_parts_do_not_overlap_each_other() {
-        let atlas =
-            crate::hud::HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets"))
-                .unwrap();
+        let atlas = crate::hud::HudAtlas::build(
+            &horizon_assets::resource_source::ResourceSource::directory(
+                (std::path::Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+            ),
+        )
+        .unwrap();
         let m = Measure(&atlas.font);
         // Both a wide window (two columns) and a narrow one (one column).
         for (w, h) in [(480, 320), (260, 320)] {
@@ -1855,9 +1875,12 @@ mod click_sound_tests {
 
     #[test]
     fn the_browsers_search_button_submits_what_was_typed() {
-        let atlas =
-            crate::hud::HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets"))
-                .unwrap();
+        let atlas = crate::hud::HudAtlas::build(
+            &horizon_assets::resource_source::ResourceSource::directory(
+                (std::path::Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+            ),
+        )
+        .unwrap();
         let m = Measure(&atlas.font);
         let mut screen = PackScreen::new(
             &m,
@@ -1893,9 +1916,12 @@ mod click_sound_tests {
 
     #[test]
     fn only_footer_and_confirmation_buttons_request_a_click_sound() {
-        let atlas =
-            crate::hud::HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets"))
-                .unwrap();
+        let atlas = crate::hud::HudAtlas::build(
+            &horizon_assets::resource_source::ResourceSource::directory(
+                (std::path::Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+            ),
+        )
+        .unwrap();
         let m = Measure(&atlas.font);
         let title = tr("resourcePack.title");
         let mut screen = PackScreen::new(&m, title, 480, 320, false, Vec::new(), &[]);
@@ -1992,9 +2018,12 @@ mod footer_label_tests {
     /// does not panic and scrolls; the short "Done" keeps its centre.
     #[test]
     fn a_footer_label_wider_than_its_button_scrolls() {
-        let atlas =
-            crate::hud::HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets"))
-                .unwrap();
+        let atlas = crate::hud::HudAtlas::build(
+            &horizon_assets::resource_source::ResourceSource::directory(
+                (std::path::Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+            ),
+        )
+        .unwrap();
         let m = Measure(&atlas.font);
         let wide = Text::literal("Otvori papku s paketami resursov, i jos nesto");
         assert!(m.width(&wide) > 146);
@@ -2031,7 +2060,10 @@ mod footer_label_tests {
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                     .join("../../.local/horizon-client/26.3")
             });
-        let atlas = crate::hud::HudAtlas::build(&root).unwrap();
+        let atlas = crate::hud::HudAtlas::build(
+            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+        )
+        .unwrap();
         let m = Measure(&atlas.font);
         let before = lang::code();
         let mut codes: Vec<String> = std::fs::read_dir(root.join("assets/minecraft/lang"))

@@ -2,7 +2,7 @@
 //! the entity types that may wear it (`LivingEntity.isEquippableInSlot`).
 use super::{Env, Menu};
 use crate::items::ItemStack;
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 use std::collections::HashSet;
 
 /// A stack's `Equippable`: its slot and `allowed_entities` (none = any).
@@ -73,7 +73,7 @@ fn qualified(id: &str) -> String {
 mod tests {
     use super::super::tests::{stack, with_menu};
     use super::super::{Input, Kind};
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
 
     fn equippable(fields: Vec<(&str, Tag)>) -> Option<crate::items::ItemStack> {
         let mut stone = stack("stone", 1)?;

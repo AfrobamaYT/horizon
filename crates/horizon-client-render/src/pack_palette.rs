@@ -72,15 +72,9 @@ mod tests {
     #[test]
     fn a_pack_recolours_only_what_it_names() {
         // Dyes no other test draws: the table is process-wide.
-        let dir = std::env::temp_dir().join(format!("pack-dyes-{}", std::process::id()));
-        let polytone = dir.join("assets/obs/polytone");
-        std::fs::create_dir_all(&polytone).unwrap();
-        std::fs::write(
-            polytone.join("colors.json"),
-            r#"{"dye": {"cyan": {"diffuse": "00ff00", "text": "0000ff"}}, "sheep": {"pink": "2040ff"}, "redstone": {"7": "0x123456"}}"#,
-        )
-        .unwrap();
-        set(&PackColors::read(&dir));
+        set(&PackColors::from_files([(None, Some(
+            r#"{"dye": {"cyan": {"diffuse": "00ff00", "text": "0000ff"}}, "sheep": {"pink": "2040ff"}, "redstone": {"7": "0x123456"}}"#.to_owned(),
+        ))]));
         let (cyan, pink, purple) = (9, 6, 10);
         assert_eq!(diffuse(cyan), 0x00ff00);
         assert_eq!(text(cyan), 0x0000ff);
@@ -94,6 +88,5 @@ mod tests {
         assert_eq!(redstone(7), None);
         assert_eq!(diffuse(cyan), 0x169C9C);
         assert_eq!(sheep_wool(pink as u8), 0xB6687F);
-        std::fs::remove_dir_all(&dir).ok();
     }
 }

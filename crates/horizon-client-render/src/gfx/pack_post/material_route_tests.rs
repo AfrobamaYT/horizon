@@ -90,7 +90,7 @@ fn authored_material_programs_render_and_legacy_draws_stay_unsplit() {
                 ..Default::default()
             },
         );
-        let hud = HudBatch::new(SIZE);
+        let hud = HudBatch::scratch(SIZE);
         for frame in 0..2 {
             gpu.clear(&color, &depth, 0.0);
             let mut rest = Vec::new();

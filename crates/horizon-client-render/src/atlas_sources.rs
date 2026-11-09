@@ -8,7 +8,6 @@ use horizon_client_core::pattern::Pattern;
 use serde_json::Value;
 use std::{
     collections::BTreeMap,
-    fs,
     path::{Path, PathBuf},
 };
 
@@ -172,72 +171,36 @@ fn decode_source(s: &Value) -> Option<SpriteSource> {
 
 /// The texture files of a resource tree: `namespace:path` for every
 /// `assets/<namespace>/textures/<path>.png`.
-pub fn list_textures(root: &Path) -> Vec<String> {
-    let mut out = Vec::new();
-    let Ok(namespaces) = fs::read_dir(root.join("assets")) else {
-        return out;
-    };
-    for ns in namespaces.flatten() {
-        let namespace = ns.file_name().to_string_lossy().into_owned();
-        let base = ns.path().join("textures");
-        // A prepared root's: from its data file, without listing the disk.
-        if let Some(files) = horizon_core::prepared_files::files_under(&base) {
-            out.extend(
-                files
-                    .iter()
-                    .filter_map(|file| file.strip_suffix(".png"))
-                    .map(|rel| format!("{namespace}:{rel}")),
-            );
-            continue;
-        }
-        let mut stack = vec![base.clone()];
-        while let Some(dir) = stack.pop() {
-            let Ok(entries) = fs::read_dir(&dir) else {
-                continue;
-            };
-            for e in entries.flatten() {
-                let p = e.path();
-                // `file_type` comes with the listing; `Path::is_dir` is a stat per
-                // entry, kept for links (which it follows).
-                let dir = match e.file_type() {
-                    Ok(t) if t.is_symlink() => p.is_dir(),
-                    Ok(t) => t.is_dir(),
-                    Err(_) => p.is_dir(),
-                };
-                if dir {
-                    stack.push(p);
-                } else if p.extension().is_some_and(|x| x == "png")
-                    && let Ok(rel) = p.strip_prefix(&base)
-                {
-                    let rel = rel.with_extension("").to_string_lossy().replace('\\', "/");
-                    out.push(format!("{namespace}:{rel}"));
-                }
-            }
-        }
-    }
-    out.sort();
-    out
+pub fn list_textures(source: &crate::resource_source::ResourceSource) -> Vec<String> {
+    source
+        .list_under("assets", &["textures"])
+        .into_iter()
+        .filter_map(|file| {
+            let (namespace, texture) = file.strip_prefix("assets/")?.split_once("/textures/")?;
+            Some(format!("{namespace}:{}", texture.strip_suffix(".png")?))
+        })
+        .collect()
 }
 /// The file of a texture identifier. A Custom Item Textures id (`cit_assets`) names its
 /// resource path, wherever the folder: `directory` is not used for it. An id whose path would
 /// leave the root (a pack's model may write any) names a file that is never there.
 pub fn texture_path(root: &Path, texture: &str, directory: &str) -> PathBuf {
+    root.join(texture_resource(texture, directory))
+}
+/// Resource name of a texture, including Custom Item Textures outside `textures/`.
+pub fn texture_resource(texture: &str, directory: &str) -> String {
     // No file can have a NUL in its name, so this one is never there.
     const NOWHERE: &str = "assets/minecraft/textures/horizon/\0refused.png";
     if texture.starts_with("horizon_cit:") {
-        return root.join(
-            crate::cit_assets::resource(texture, "png")
-                .as_deref()
-                .unwrap_or(NOWHERE),
-        );
+        return crate::cit_assets::resource(texture, "png").unwrap_or_else(|| NOWHERE.to_owned());
     }
     let (namespace, path) = texture.split_once(':').unwrap_or(("minecraft", texture));
     let rel = format!("assets/{namespace}/{directory}/{path}.png");
-    root.join(if horizon_optifine::paths::valid(&rel) {
-        &rel
+    if horizon_optifine::paths::valid(&rel) {
+        rel
     } else {
-        NOWHERE
-    })
+        NOWHERE.to_owned()
+    }
 }
 
 /// `SpriteSourceList.list`: every sprite id of the atlas and its origin.
@@ -325,6 +288,14 @@ pub fn list(sources: &[SpriteSource], textures: &[String]) -> BTreeMap<String, S
 /// An RGBA image.
 pub type Image = (u32, u32, Vec<u8>);
 
+/// The largest side of a sprite an `unstitch` region may cut, in pixels. Vanilla's
+/// `Unstitcher` has no limit of its own, but its stitcher can't place a sprite larger than the
+/// device's maximum texture size, and the renderer asks for the adapter's own limits. 32768 is the
+/// largest `max_texture_dimension_2d` current drivers report (NVIDIA's Vulkan; Direct3D 12 and
+/// Metal stop at 16384), so no region vanilla would stitch is refused. A larger declared region is
+/// skipped with a logged reason, never allocated.
+pub const MAX_REGION_SIDE: i64 = 32768;
+
 fn argb(rgba: &[u8]) -> Vec<u32> {
     rgba.as_chunks::<4>()
         .0
@@ -349,6 +320,7 @@ pub fn generate(
             let (w, h, pixels) = load(texture, "textures")?;
             let x_scale = f64::from(w) / divisor_x;
             let y_scale = f64::from(h) / divisor_y;
+            // A float-to-integer cast saturates (NaN is 0), so every value here is in range.
             let x = (region.x * x_scale).floor() as i64;
             let y = (region.y * y_scale).floor() as i64;
             let width = (region.width * x_scale).floor() as i64;
@@ -356,10 +328,32 @@ pub fn generate(
             if width <= 0 || height <= 0 {
                 return None;
             }
-            let mut out = vec![0u8; (width * height * 4) as usize];
+            // The region and divisors come from an atlas definition a mod or pack writes: refuse a
+            // sprite over the stated side before sizing anything.
+            if width > MAX_REGION_SIDE || height > MAX_REGION_SIDE {
+                log::warn!(
+                    "atlas region {} of {texture}: {width}x{height} exceeds the {MAX_REGION_SIDE}-pixel \
+                     sprite side; skipped",
+                    region.sprite
+                );
+                return None;
+            }
+            // Up to 4 GiB at the largest side: as vanilla's `NativeImage` allocation does, a
+            // refused allocation skips the sprite instead of ending the process.
+            let bytes = (width * height * 4) as usize;
+            let mut out = Vec::new();
+            if out.try_reserve_exact(bytes).is_err() {
+                log::warn!(
+                    "atlas region {} of {texture}: {width}x{height} could not be allocated; skipped",
+                    region.sprite
+                );
+                return None;
+            }
+            out.resize(bytes, 0u8);
             for row in 0..height {
                 for col in 0..width {
-                    let (sx, sy) = (x + col, y + row);
+                    // The offset is the pack's too: saturate, and the bounds check skips it.
+                    let (sx, sy) = (x.saturating_add(col), y.saturating_add(row));
                     if sx < 0 || sy < 0 || sx >= i64::from(w) || sy >= i64::from(h) {
                         continue;
                     }
@@ -397,33 +391,48 @@ pub fn generate(
 
 /// Every atlas definition of a resource tree (`atlases/*.json` in every
 /// namespace), by atlas id.
-pub fn atlases(root: &Path) -> BTreeMap<String, Vec<SpriteSource>> {
-    let mut out = BTreeMap::new();
-    let Ok(namespaces) = fs::read_dir(root.join("assets")) else {
-        return out;
-    };
-    for ns in namespaces.flatten() {
-        let namespace = ns.file_name().to_string_lossy().into_owned();
-        let Ok(files) = fs::read_dir(ns.path().join("atlases")) else {
-            continue;
-        };
-        for f in files.flatten() {
-            let path = f.path();
-            if path.extension().is_none_or(|e| e != "json") {
-                continue;
-            }
-            let name = path.file_stem().unwrap_or_default().to_string_lossy();
-            if let Some(sources) = fs::read_to_string(&path).ok().and_then(|t| decode(&t)) {
-                out.insert(format!("{namespace}:{name}"), sources);
-            }
-        }
-    }
-    out
+pub fn atlases(
+    source: &crate::resource_source::ResourceSource,
+) -> BTreeMap<String, Vec<SpriteSource>> {
+    source
+        .list_under("assets", &["atlases"])
+        .into_iter()
+        .filter_map(|file| {
+            let (namespace, path) = file.strip_prefix("assets/")?.split_once("/atlases/")?;
+            let name = path.strip_suffix(".json")?;
+            let sources = decode(&source.read_to_string(&file).ok()?)?;
+            Some((format!("{namespace}:{name}"), sources))
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn discovers_archive_textures_and_nested_atlas_definitions_in_place() {
+        use std::io::{Cursor, Write};
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for (name, bytes) in [
+            ("assets/demo/textures/item/x.png", b"png".as_slice()),
+            ("assets/zzz/textures/item/z.png", b"png"),
+            ("assets/demo/atlases/custom/nested.json", br#"{"sources":[{"type":"single","resource":"demo:item/x","sprite":"demo:renamed"}]}"#),
+            ("assets/demo/atlases/ignored.txt", b"ignored"),
+        ] {
+            writer.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+            writer.write_all(bytes).unwrap();
+        }
+        let source = crate::resource_source::ResourceSource::opened_archive(
+            crate::zip::Zip::from_bytes(writer.finish().unwrap().into_inner()).unwrap(),
+        );
+        let textures = list_textures(&source);
+        assert_eq!(textures, ["demo:item/x", "zzz:item/z"]);
+        let atlases = atlases(&source);
+        assert_eq!(atlases.keys().collect::<Vec<_>>(), [&"demo:custom/nested"]);
+        assert!(
+            matches!(list(&atlases["demo:custom/nested"], &textures).get("demo:renamed"), Some(SpriteOrigin::File(texture)) if texture == "demo:item/x")
+        );
+    }
 
     fn textures() -> Vec<String> {
         let mut t: Vec<String> = [
@@ -496,5 +505,48 @@ mod tests {
         assert_eq!(out[0], 10);
         assert_eq!(out[4], 11);
         assert_eq!(out[8], 14);
+    }
+
+    /// An unstitch region over a 4x4 texture with divisors 1: the region's numbers are pixels.
+    fn region_of(x: f64, y: f64, width: f64, height: f64) -> Option<Image> {
+        let pixels: Vec<u8> = (0..16u8).flat_map(|i| [i, i, i, 255]).collect();
+        let load = |_: &str, _: &str| Some((4u32, 4u32, pixels.clone()));
+        let origin = SpriteOrigin::Region {
+            texture: "t".into(),
+            region: Region {
+                sprite: "s".into(),
+                x,
+                y,
+                width,
+                height,
+            },
+            divisor_x: 4.0,
+            divisor_y: 4.0,
+        };
+        generate(&origin, &load)
+    }
+
+    /// A pack's declared region can't overflow the size or ask for a huge allocation: past the
+    /// stated side it is skipped, whatever the numbers, and the copy's offsets can't overflow.
+    #[test]
+    fn a_huge_declared_region_is_refused_not_allocated() {
+        for (width, height) in [
+            (f64::MAX, f64::MAX),
+            (i64::MAX as f64, 2.0),
+            (2.0, i64::MAX as f64),
+            (3_000_000_000.0, 3_000_000_000.0),
+            ((MAX_REGION_SIDE + 1) as f64, 1.0),
+            (f64::INFINITY, 1.0),
+        ] {
+            assert_eq!(region_of(0.0, 0.0, width, height), None, "{width}x{height}");
+        }
+        // The largest side is still a sprite (one row, so the test allocates little).
+        let (w, h, out) = region_of(0.0, 0.0, MAX_REGION_SIDE as f64, 1.0).unwrap();
+        assert_eq!((w, h), (MAX_REGION_SIDE as u32, 1));
+        assert_eq!(&out[..4], [0, 0, 0, 255]);
+        // An offset near the integer limit: the pixels outside the texture stay transparent.
+        let (w, h, out) = region_of(i64::MAX as f64, -(i64::MAX as f64), 2.0, 2.0).unwrap();
+        assert_eq!((w, h), (2, 2));
+        assert!(out.iter().all(|&byte| byte == 0));
     }
 }

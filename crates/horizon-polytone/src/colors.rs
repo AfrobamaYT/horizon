@@ -4,7 +4,6 @@
 //! number or a hex string.
 
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use serde_json::Value as Json;
 
@@ -46,26 +45,18 @@ pub struct PackColors {
 }
 
 impl PackColors {
-    /// The colours of every namespace's file under a pack overlay root (`colors.json` over
-    /// `color.properties` in the same namespace).
-    pub fn read(root: &Path) -> Self {
+    /// Parse each namespace's properties and JSON in overlay order. JSON overrides
+    /// properties within the same namespace; resource lookup belongs to the caller.
+    pub fn from_files(files: impl IntoIterator<Item = (Option<String>, Option<String>)>) -> Self {
         let mut colors = Self::default();
-        let mut namespaces: Vec<_> = std::fs::read_dir(root.join("assets"))
-            .into_iter()
-            .flatten()
-            .flatten()
-            .map(|e| e.path())
-            .collect();
-        namespaces.sort();
-        for namespace in namespaces {
-            let polytone = namespace.join("polytone");
-            if let Ok(text) = std::fs::read_to_string(polytone.join("color.properties")) {
+        for (properties, json) in files {
+            if let Some(text) = properties {
                 colors.add_properties(&text);
             }
-            if let Ok(text) = std::fs::read_to_string(polytone.join("colors.json")) {
+            if let Some(text) = json {
                 match serde_json::from_str::<Json>(&text) {
                     Ok(json) => colors.add_json("", &json),
-                    Err(e) => log::warn!("{}: {e}", polytone.join("colors.json").display()),
+                    Err(e) => log::warn!("Polytone colors.json: {e}"),
                 }
             }
         }

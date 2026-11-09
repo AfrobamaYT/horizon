@@ -4,7 +4,7 @@
 //! while the rope is slack).
 use super::{Mob, MobEvent, MobWorld, Species, Who};
 use horizon_core::geometry::Vec3;
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 
 /// `Leashable.LEASH_ELASTIC_DIST`.
 pub const ELASTIC: f64 = 6.0;
@@ -83,7 +83,7 @@ pub fn knot_state(pos: [i32; 3]) -> HolderState {
 pub fn holder_state(w: &MobWorld, holder: Holder) -> Option<HolderState> {
     match holder {
         Holder::Player => {
-            let p = w.player.as_ref()?;
+            let p = w.selected_player()?;
             let size = p.bounds.max_position().subtract(p.bounds.min_position());
             Some(HolderState {
                 position: p.position,
@@ -341,7 +341,7 @@ pub fn tick(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     // Leashable.tickLeash: a holder that cannot interact with the level (dead
     // or spectating, `Entity.canInteractWithLevel`) drops the lead.
     if holder == Holder::Player
-        && let Some(p) = w.player.as_ref()
+        && let Some(p) = w.selected_player()
         && m.extra.leash_player.is_none_or(|u| p.uuid == u)
         && (p.spectator || !p.alive)
     {
@@ -356,7 +356,7 @@ pub fn tick(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         holder != Holder::Player
             || m.extra
                 .leash_player
-                .is_none_or(|u| w.player.as_ref().is_some_and(|p| p.uuid == u))
+                .is_none_or(|u| w.selected_player().is_some_and(|p| p.uuid == u))
     });
     let Some(state) = state else {
         // The holder is gone: the lead drops.
@@ -745,7 +745,7 @@ mod tests {
                     );
                     if kind != "cow" {
                         mob.extra.age = if kind == "baby" { -24000 } else { 0 };
-                        super::super::happy_ghast::ensure_setup(&mut mob);
+                        super::super::happy_ghast::ensure_setup(&mut mob, None);
                     }
                     mob.on_ground = false;
                     mob.ai.nav.path = Some(Path {
@@ -1135,7 +1135,7 @@ mod tests {
             };
             let empty = new();
             let mut full = new();
-            full.extra.body = Some("minecraft:stone".into());
+            full.extra.set_body(Some("minecraft:stone".into()));
             for m in [&empty, &full] {
                 let o = leash_offset(m);
                 let h = f64::from(m.height() / 2.0);

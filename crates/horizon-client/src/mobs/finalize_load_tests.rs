@@ -7,7 +7,7 @@
 use super::*;
 use crate::entity_nbt::{mob_from_nbt, mob_to_nbt};
 use crate::mobs::MobType;
-use horizon_world::nbt::{Tag, parse_snbt};
+use horizon_core::nbt::{Tag, parse_snbt};
 use std::collections::HashMap;
 use std::sync::Arc;
 

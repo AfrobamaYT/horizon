@@ -40,6 +40,7 @@ pub struct FirstTick {
 }
 
 /// A criterion `CriteriaTriggers.TICK` newly granted, for the game to tell the mods.
+#[derive(Clone)]
 pub struct CriterionGrant {
     pub advancement: String,
     pub criterion: String,
@@ -63,6 +64,95 @@ impl ServerAdvancements {
             displays: RecipeIndex::load(resources, overlay),
             groups,
         }
+    }
+
+    /// The loaded definition whose criteria and requirements the player's progress uses.
+    pub fn definition(&self, id: &str) -> Option<&crate::advancements::Advancement> {
+        self.tree.get(id)
+    }
+
+    /// The unconditional tick criteria in tree order. A caller grants these one
+    /// at a time so it can notify mods before applying each completion's rewards.
+    pub fn tick_candidates(&self, progress: &Progress) -> Vec<CriterionGrant> {
+        let mut candidates = Vec::new();
+        for advancement in &self.tree.list {
+            if progress.done(advancement) {
+                continue;
+            }
+            for criterion in &advancement.criteria {
+                if criterion.trigger == "minecraft:tick"
+                    && criterion.conditions.is_null()
+                    && !progress.has(&advancement.id, &criterion.name)
+                {
+                    candidates.push(CriterionGrant {
+                        advancement: advancement.id.clone(),
+                        criterion: criterion.name.clone(),
+                    });
+                }
+            }
+        }
+        candidates
+    }
+
+    /// Grant one candidate, returning whether its advancement was already complete.
+    /// Recheck against the live tree and progress: a preceding hook may have changed either.
+    pub fn grant_tick(
+        &self,
+        progress: &mut Progress,
+        grant: &CriterionGrant,
+        now_millis: i64,
+    ) -> Option<bool> {
+        let advancement = self.tree.list.iter().find(|a| a.id == grant.advancement)?;
+        if progress.done(advancement)
+            || !advancement.criteria.iter().any(|c| {
+                c.name == grant.criterion && c.trigger == "minecraft:tick" && c.conditions.is_null()
+            })
+        {
+            return None;
+        }
+        let was_done = progress.done(advancement);
+        let date = crate::advancements::date_text(now_millis.div_euclid(1000));
+        progress
+            .grant(&advancement.id, &grant.criterion, &date)
+            .then_some(was_done)
+    }
+
+    /// Complete the grant after the listener returns, if it still completes the advancement.
+    pub fn reward_tick(
+        &self,
+        sync: &SyncData,
+        progress: &Progress,
+        book: &mut Settings,
+        grant: &CriterionGrant,
+        was_done: bool,
+    ) -> Option<Vec<u8>> {
+        let advancement = self.tree.list.iter().find(|a| a.id == grant.advancement)?;
+        if was_done || !progress.done(advancement) {
+            return None;
+        }
+        book.add_recipes(&self.displays, &advancement.rewards.recipes);
+        let entries = advancement
+            .rewards
+            .recipes
+            .iter()
+            .flat_map(|id| self.book_entries(id, sync, NOTIFY_AND_HIGHLIGHT))
+            .collect::<Vec<_>>();
+        (!entries.is_empty()).then(|| book_add(entries, false))
+    }
+
+    /// Drop progress for advancements or criteria absent from the reloaded tree.
+    pub fn prune_progress(&self, progress: &mut Progress) {
+        let by_id: HashMap<&str, &crate::advancements::Advancement> =
+            self.tree.list.iter().map(|a| (a.id.as_str(), a)).collect();
+        progress
+            .criteria
+            .retain(|id, got| match by_id.get(id.as_str()) {
+                Some(a) => {
+                    got.retain(|name, _| a.criteria.iter().any(|c| &c.name == name));
+                    true
+                }
+                None => false,
+            });
     }
 
     /// The first tick of a player without advancements: the criteria
@@ -166,17 +256,7 @@ impl ServerAdvancements {
         book: &mut Settings,
         granted: &mut Vec<CriterionGrant>,
     ) -> Option<Vec<u8>> {
-        let by_id: HashMap<&str, &crate::advancements::Advancement> =
-            self.tree.list.iter().map(|a| (a.id.as_str(), a)).collect();
-        progress
-            .criteria
-            .retain(|id, got| match by_id.get(id.as_str()) {
-                Some(a) => {
-                    got.retain(|name, _| a.criteria.iter().any(|c| &c.name == name));
-                    true
-                }
-                None => false,
-            });
+        self.prune_progress(progress);
         let date = crate::advancements::date_text(now_millis.div_euclid(1000));
         let mut entries = Vec::new();
         for a in &self.tree.list {
@@ -276,6 +356,44 @@ impl ServerAdvancements {
         self.tree
             .get(id)
             .map(|a| a.parent.is_none() && a.display.is_some())
+    }
+
+    /// Initial reset after staged first-tick grants. Fresh criteria keep the
+    /// millisecond timestamp from the tick; older progress keeps its saved date.
+    pub fn first_snapshot(
+        &self,
+        sync: &SyncData,
+        progress: &Progress,
+        fresh: &[CriterionGrant],
+        now_millis: i64,
+    ) -> (Vec<u8>, Vec<bool>) {
+        let visible = self.visibility(progress);
+        let shown: Vec<_> = (0..self.tree.list.len()).filter(|&i| visible[i]).collect();
+        let mut w = Writer::new();
+        w.bool(true);
+        w.varint(shown.len() as i32);
+        for &i in &shown {
+            self.write_advancement(&mut w, i, sync);
+        }
+        w.varint(0);
+        w.varint(shown.len() as i32);
+        for &i in &shown {
+            let id = &self.tree.list[i].id;
+            self.write_progress(&mut w, i, |criterion| {
+                let date = progress.criteria.get(id)?.get(criterion)?;
+                if fresh
+                    .iter()
+                    .any(|g| &g.advancement == id && g.criterion == criterion)
+                    && *date == crate::advancements::date_text(now_millis.div_euclid(1000))
+                {
+                    Some(now_millis)
+                } else {
+                    Some(crate::advancements::date_millis(date).unwrap_or(0))
+                }
+            });
+        }
+        w.bool(true);
+        (w.data, visible)
     }
 
     /// Which advancements a player with `progress` may see.
@@ -813,7 +931,14 @@ mod tests {
     /// The server's sync over `root`, and the one entry of `id` read back as
     /// the client's `RecipeBookEntry::read` reads it.
     fn entry(root: &std::path::Path, id: &str) -> (SyncData, RecipeBookEntry) {
-        let sync = SyncData::load(root, &horizon_world::loot::PackOverlay::NONE).unwrap();
+        let defaults = horizon_world::item_defaults::read(root).unwrap();
+        let sync = SyncData::load(
+            root,
+            &horizon_world::loot::PackOverlay::NONE,
+            &defaults,
+            &crate::test_resources::server_sources(root, &horizon_world::loot::PackOverlay::NONE),
+        )
+        .unwrap();
         let entries = sync
             .advancements
             .book_entries(id, &sync, NOTIFY_AND_HIGHLIGHT);
@@ -822,6 +947,103 @@ mod tests {
         let entry = RecipeBookEntry::read(&mut r).unwrap();
         assert_eq!(r.remaining(), 0, "the entry ends with its flags");
         (sync, entry)
+    }
+
+    #[test]
+    fn tick_grants_wait_for_listener_before_reward_and_recheck_progress() {
+        use crate::advancements::{Advancement, Criterion, Display, Frame, Rewards};
+        let mut tree = Tree::default();
+        tree.list.push(Advancement {
+            id: "test:tick".into(),
+            parent: None,
+            display: Some(Display {
+                icon: "minecraft:air".into(),
+                title: serde_json::json!("Title"),
+                description: serde_json::json!("Description"),
+                frame: Frame::Task,
+                background: None,
+                show_toast: true,
+                announce: false,
+                hidden: false,
+            }),
+            criteria: ["first", "second"]
+                .into_iter()
+                .map(|name| Criterion {
+                    name: name.into(),
+                    trigger: "minecraft:tick".into(),
+                    conditions: Value::Null.into(),
+                })
+                .collect(),
+            requirements: vec![vec!["first".into()], vec!["second".into()]],
+            rewards: Rewards {
+                recipes: vec!["test:reward".into()],
+                ..Default::default()
+            },
+        });
+        let mut sync = SyncData::empty();
+        sync.advancements.kids = tree.children();
+        sync.advancements.layout = tree.layout();
+        sync.advancements.tree = std::sync::Arc::new(tree);
+        let advancement = &sync.advancements;
+        let mut progress = Progress::default();
+        let mut book = Settings::default();
+        let candidates = advancement.tick_candidates(&progress);
+        assert_eq!(candidates.len(), 2);
+        let was_done = advancement
+            .grant_tick(&mut progress, &candidates[0], 12_345)
+            .unwrap();
+        assert!(progress.has("test:tick", "first"));
+        assert!(!book.knows("test:reward"));
+        advancement.reward_tick(&sync, &progress, &mut book, &candidates[0], was_done);
+        assert!(!book.knows("test:reward"));
+        let was_done = advancement
+            .grant_tick(&mut progress, &candidates[1], 12_345)
+            .unwrap();
+        assert!(progress.has("test:tick", "second"));
+        // This is where the Game invokes the mod listener: the criterion is
+        // visible, and the completion reward is still absent.
+        assert!(!book.knows("test:reward"));
+        advancement.reward_tick(&sync, &progress, &mut book, &candidates[1], was_done);
+        assert!(book.knows("test:reward"));
+        assert!(
+            advancement
+                .grant_tick(&mut progress, &candidates[1], 12_345)
+                .is_none()
+        );
+        assert!(advancement.tick_candidates(&progress).is_empty());
+        let (staged, _) = advancement.first_snapshot(&sync, &progress, &candidates, 12_345);
+        let original = advancement.first_tick(
+            &sync,
+            12_345,
+            &mut Progress::default(),
+            &mut Settings::default(),
+        );
+        assert_eq!(
+            staged, original.update_advancements,
+            "the staged first packet keeps the vanilla timestamp"
+        );
+    }
+
+    #[test]
+    fn content_recipe_unlock_sends_a_display() {
+        let root = resources("content_display", &[]);
+        std::fs::write(
+            root.join(horizon_items::content_namespaces::MARKER),
+            br#"["example"]"#,
+        )
+        .unwrap();
+        let dir = root.join("data/example/recipe");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("test.json"), r#"{"type":"minecraft:crafting_shaped","pattern":["X"],"key":{"X":"minecraft:raw_copper"},"result":{"id":"minecraft:copper_ingot"}}"#).unwrap();
+        let (sync, display) = entry(&root, "example:test");
+        assert_eq!(display.id, 0);
+        assert_eq!(
+            display.requirements,
+            Some(vec![HolderSet::Items(vec![
+                sync.id("minecraft:item", "minecraft:raw_copper").unwrap()
+            ])])
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// A shaped recipe whose key uses one of NeoForge's ingredient shapes
@@ -878,14 +1100,27 @@ mod tests {
             )]
         });
         let overlay = match &packs {
-            Some(p) => horizon_world::loot::PackOverlay { files: p },
+            Some(p) => horizon_world::loot::PackOverlay::new(p),
             None => horizon_world::loot::PackOverlay::NONE,
         };
-        let sync = SyncData::load(&root, &overlay).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let sync = SyncData::load(
+            &root,
+            &overlay,
+            &defaults,
+            &crate::test_resources::server_sources(&root, &overlay),
+        )
+        .unwrap();
         // What the craft hands the book: find_with over the crafting
         // copy, the way award_crafted calls it.
-        let items = crate::items::Items::catalog(&root, &overlay).unwrap();
-        let recipes = crate::crafting::Recipes::load(&root, &items, &overlay).unwrap();
+        let items = crate::items::Items::catalog(&root, &overlay, &defaults).unwrap();
+        let recipes = crate::crafting::Recipes::load(
+            &root,
+            &items,
+            &overlay,
+            &crate::test_resources::server_load(),
+        )
+        .unwrap();
         let grid = vec![Some(horizon_items::items::ItemStack {
             item: "minecraft:raw_copper".into(),
             count: 1,
@@ -893,7 +1128,12 @@ mod tests {
             extra: None,
         })];
         let (found, _) = recipes
-            .find_with(&grid, 1, &|_| None)
+            .find_with(
+                crate::test_resources::server_loop_context(),
+                &grid,
+                1,
+                &|_| None,
+            )
             .unwrap_or_else(|| panic!("{name}: the recipe matches a grid"));
         assert_eq!(
             found, name,
@@ -938,12 +1178,11 @@ mod tests {
         let dir = root.join("data/recipe_pilot/recipe");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("press.json"), recipe).unwrap();
-        for marker in [
-            horizon_items::content_namespaces::MARKER,
-            horizon_items::content_namespaces::MOD_IDS_MARKER,
-        ] {
-            std::fs::write(root.join(marker), br#"["recipe_pilot"]"#).unwrap();
-        }
+        std::fs::write(
+            root.join(horizon_items::content_namespaces::MARKER),
+            br#"["recipe_pilot"]"#,
+        )
+        .unwrap();
         let (sync, e) = entry(&root, "recipe_pilot:press");
         assert_eq!(
             e.id,
@@ -974,7 +1213,14 @@ mod tests {
                 "result":{"id":"minecraft:copper_ingot"}}"#,
             )],
         );
-        let sync = SyncData::load(&root, &horizon_world::loot::PackOverlay::NONE).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let sync = SyncData::load(
+            &root,
+            &horizon_world::loot::PackOverlay::NONE,
+            &defaults,
+            &crate::test_resources::server_sources(&root, &horizon_world::loot::PackOverlay::NONE),
+        )
+        .unwrap();
         assert!(
             !sync
                 .advancements
@@ -1011,7 +1257,14 @@ mod tests {
                 ),
             ],
         );
-        let sync = SyncData::load(&root, &horizon_world::loot::PackOverlay::NONE).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let sync = SyncData::load(
+            &root,
+            &horizon_world::loot::PackOverlay::NONE,
+            &defaults,
+            &crate::test_resources::server_sources(&root, &horizon_world::loot::PackOverlay::NONE),
+        )
+        .unwrap();
         let item = |n: &str| sync.id("minecraft:item", n).unwrap();
         let raw = item("minecraft:raw_copper");
         let redstone = item("minecraft:redstone");
@@ -1059,8 +1312,15 @@ mod tests {
             "recipe/pack:a_cut".to_owned(),
             vec![cut("minecraft:redstone").into_bytes()],
         )];
-        let sync =
-            SyncData::load(&root, &horizon_world::loot::PackOverlay { files: &packs }).unwrap();
+        let overlay = horizon_world::loot::PackOverlay::new(&packs);
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let sync = SyncData::load(
+            &root,
+            &overlay,
+            &defaults,
+            &crate::test_resources::server_sources(&root, &overlay),
+        )
+        .unwrap();
         let item = |n: &str| sync.id("minecraft:item", n).unwrap();
         let mut r = Reader::new(&sync.recipes);
         for _ in 0..r.varint().unwrap() {
@@ -1105,11 +1365,39 @@ mod tests {
             "recipe/pack:a_cut".to_owned(),
             vec![cut("minecraft:redstone").into_bytes()],
         )];
-        let overlay = horizon_world::loot::PackOverlay { files: &packs };
-        let vanilla = SyncData::load(&root, &horizon_world::loot::PackOverlay::NONE).unwrap();
-        let packed = SyncData::load(&root, &overlay).unwrap();
-        let over = SyncData::load_over(&root, &overlay, None, &packed).unwrap();
-        let full = SyncData::load_with_kept(&root, &overlay, None, Some(&packed)).unwrap();
+        let overlay = horizon_world::loot::PackOverlay::new(&packs);
+        let vanilla = SyncData::load(
+            &root,
+            &horizon_world::loot::PackOverlay::NONE,
+            &horizon_world::item_defaults::read(&root).unwrap(),
+            &crate::test_resources::server_sources(&root, &horizon_world::loot::PackOverlay::NONE),
+        )
+        .unwrap();
+        let packed = SyncData::load(
+            &root,
+            &overlay,
+            &horizon_world::item_defaults::read(&root).unwrap(),
+            &crate::test_resources::server_sources(&root, &overlay),
+        )
+        .unwrap();
+        let over = SyncData::load_over(
+            &root,
+            &overlay,
+            None,
+            &packed,
+            &horizon_world::item_defaults::read(&root).unwrap(),
+            &crate::test_resources::server_sources(&root, &overlay),
+        )
+        .unwrap();
+        let full = SyncData::load_with_kept(
+            &root,
+            &overlay,
+            None,
+            Some(&packed),
+            &horizon_world::item_defaults::read(&root).unwrap(),
+            &crate::test_resources::server_sources(&root, &overlay),
+        )
+        .unwrap();
         assert_ne!(full.recipes, vanilla.recipes, "the pack's recipe is sent");
         assert_eq!(over.recipes, full.recipes);
         assert_eq!(over.advancements.recipes, full.advancements.recipes);
@@ -1139,7 +1427,14 @@ mod tests {
                 ),
             ],
         );
-        let sync = SyncData::load(&root, &horizon_world::loot::PackOverlay::NONE).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let sync = SyncData::load(
+            &root,
+            &horizon_world::loot::PackOverlay::NONE,
+            &defaults,
+            &crate::test_resources::server_sources(&root, &horizon_world::loot::PackOverlay::NONE),
+        )
+        .unwrap();
         assert_eq!(
             sync.advancements.recipe_of_display(0),
             Some("minecraft:aaa_shaped")
@@ -1231,8 +1526,15 @@ mod tests {
                     .to_vec(),
             ],
         )];
-        let overlay = horizon_world::loot::PackOverlay { files: &packs };
-        let sync = SyncData::load(&root, &overlay).unwrap();
+        let overlay = horizon_world::loot::PackOverlay::new(&packs);
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let sync = SyncData::load(
+            &root,
+            &overlay,
+            &defaults,
+            &crate::test_resources::server_sources(&root, &overlay),
+        )
+        .unwrap();
         let entries = sync.advancements.book_entries(
             "minecraft:copper_ingot_from_smelting_raw_copper",
             &sync,
@@ -1324,9 +1626,21 @@ mod tests {
             return;
         }
         let none = &horizon_world::loot::PackOverlay::NONE;
-        let sync = SyncData::load(&root, none).unwrap();
-        let items = Items::catalog(&root, none).unwrap();
-        let recipes = Recipes::load(&root, &items, none).unwrap();
+        let sync = SyncData::load(
+            &root,
+            none,
+            &horizon_world::item_defaults::read(&root).unwrap(),
+            &crate::test_resources::server_sources(&root, none),
+        )
+        .unwrap();
+        let items = Items::catalog(
+            &root,
+            none,
+            &horizon_world::item_defaults::read(&root).unwrap(),
+        )
+        .unwrap();
+        let recipes =
+            Recipes::load(&root, &items, none, &crate::test_resources::server_load()).unwrap();
         let mut book = Book::build(&recipes, &items);
         book.set_display_ids(&RecipeIndex::load(&root, none));
         let before: Vec<(String, i32, Option<String>)> = book
