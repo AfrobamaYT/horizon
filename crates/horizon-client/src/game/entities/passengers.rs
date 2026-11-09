@@ -1417,3 +1417,11 @@ impl Game<'_> {
                 }
     }
 }
+
+impl Game<'_> {
+    pub(super) fn dismount_killed_cart(&mut self, id: u32) {
+                if let Some(y) = self.carts.iter().find(|c| c.id == id).map(|c| c.position.y) {
+                    self.dismount_destroyed_vehicle_mobs(id, y);
+                }
+    }
+}

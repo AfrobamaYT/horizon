@@ -2672,9 +2672,7 @@ impl Game<'_> {
                 }
             }
             Target::Cart(id) => {
-                if let Some(y) = self.carts.iter().find(|c| c.id == id).map(|c| c.position.y) {
-                    self.dismount_destroyed_vehicle_mobs(id, y);
-                }
+                self.dismount_killed_cart(id);
                 self.release_vehicle_container(id);
                 if let Some(i) = self.carts.iter().position(|c| c.id == id) {
                     let c = self.carts.remove(i);
