@@ -11,7 +11,7 @@ use horizon_client::{
     pose::Pose,
 };
 use horizon_core::nbt::Tag;
-use mod_api::NativeLootDrops;
+use mod_api::LootDrops;
 
 /// The item context of a leash success (`InteractionResult.Success`): tying
 /// held mobs to this one and the holder's detach are `withoutItem`, so item
@@ -448,7 +448,7 @@ impl Game<'_> {
             return;
         };
         let mut drops = vec![ItemStack::new("minecraft:lead", 1)];
-        let context = NativeLootDrops::from(mod_api::__private::built::NativeLootDrops {
+        let context = LootDrops::from(mod_api::__private::built::LootDrops {
             table: "",
             dimension: self.dim.id(),
             origin: at,
@@ -1237,9 +1237,9 @@ mod attach_tests {
         let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
         options.resources = root.clone();
         options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
-        let res: &'static _ = Box::leak(Box::new(loaded.resources));
+        let res = loaded.resources;
         let mut game = super::Game::new(
-            res,
+            &res,
             loaded.pack,
             loaded.gui.unwrap(),
             options,

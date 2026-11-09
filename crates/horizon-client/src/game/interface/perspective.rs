@@ -2,7 +2,7 @@
 //! in front, cycled by F5), the detached camera (`Camera.setup` with
 //! `getMaxZoom`), and the local player drawn as a model: in third person
 //! and in the inventory (`InventoryScreen.extractEntityInInventoryFollowsMouse`).
-use super::{Game, Screen, native_mob_draw::NativePlayerRender, shoulders::shoulder_variants};
+use super::{Game, Screen, native_mob_draw::PlayerRender, shoulders::shoulder_variants};
 use horizon_client::{
     blocks::BlockFacts,
     camera::{CameraEntity, CameraType, LivingCamera},
@@ -512,7 +512,7 @@ impl Game<'_> {
         let swinging = self.swing.swinging();
         // currentSwing.hand().asArm(mainArm).
         let swing_right_arm = swinging.then(|| {
-            (self.swing.attack_hand() == mod_api::first_person::Hand::Main)
+            (self.swing.attack_hand() == mod_api::client::first_person::Hand::Main)
                 != self.settings.main_hand_left
         });
         // LivingEntity.isVisuallySwimming and Entity.isInWater.
@@ -787,32 +787,45 @@ impl Game<'_> {
         // in place of the vanilla one and its layers (an invisible player is
         // not asked, as for the others).
         let name = self.own_profile_name();
-        let who = NativePlayerRender {
+        let who = PlayerRender {
             name: &name,
             local: true,
         };
-        if body && self.mod_player_geometry(m, who, alpha as f32, camera, packed, out) {
+        let (drawn, hidden) = match body {
+            true => self.mod_player_geometry(m, who, alpha as f32, camera, packed, out),
+            false => (false, mod_api::HiddenParts::default()),
+        };
+        if drawn {
             return;
         }
         // A spectator still draws its own model in third person: the poses'
         // visibility (set by player_model_visibility) hides body parts, and
         // translucent_body marks the body OIT for the ghostly look. Only first
         // person and dead players skip it.
-        let render = if body || self.spectator() {
-            horizon_client::mobs::render::render_with
+        if body || self.spectator() {
+            horizon_client::mobs::render::render_with_hidden(
+                m,
+                alpha as f32,
+                camera,
+                &lookup,
+                packed,
+                self.res.mob_data(),
+                &self.player_armor_layers(),
+                hidden,
+                out,
+            );
         } else {
-            horizon_client::mobs::render::render_layers
-        };
-        render(
-            m,
-            alpha as f32,
-            camera,
-            &lookup,
-            packed,
-            self.res.mob_data(),
-            &self.player_armor_layers(),
-            out,
-        );
+            horizon_client::mobs::render::render_layers(
+                m,
+                alpha as f32,
+                camera,
+                &lookup,
+                packed,
+                self.res.mob_data(),
+                &self.player_armor_layers(),
+                out,
+            );
+        }
         // AvatarRenderer.shouldRenderLayers: a spectator draws no layers.
         if horizon_client::mobs::render::layers_shown(m) {
             let chest = self.armor[1].as_ref().map(|s| &*s.item);

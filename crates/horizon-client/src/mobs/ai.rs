@@ -933,24 +933,19 @@ pub fn finish_tick(
     m.anim.end_tick(m.ai.swinging);
     tick_swing(m);
     flower_contact_effects(m, w);
-    if m.species() == Species::CopperGolem {
-        // CopperGolem.tick: updateWeathering after the living tick.
-        super::copper_golem::update_weathering(m, w, level.random(), events);
-    }
-    if m.species() == Species::Strider {
-        super::strider::float(m, w);
-    }
-    if m.species() == Species::Bat {
-        super::bat::tick(m);
-    }
-    if m.species() == Species::Bee {
-        super::bee::tick(m, level.random());
-    }
-    if m.species() == Species::Allay {
-        super::allay::tick(m, w, events);
-    }
-    if m.species() == Species::Panda {
-        super::panda::tick(m, w, events);
+    // The species' own tick after the living tick, with or without AI.
+    match m.species() {
+        // CopperGolem.tick: updateWeathering.
+        Species::CopperGolem => {
+            super::copper_golem::update_weathering(m, w, level.random(), events)
+        }
+        Species::Strider => super::strider::float(m, w),
+        Species::Bat => super::bat::tick(m),
+        Species::Bee => super::bee::tick(m, level.random()),
+        Species::Allay => super::allay::tick(m, w, events),
+        Species::Panda => super::panda::tick(m, w, events),
+        Species::Villager => super::villager::tick(m, w.game_time),
+        _ => {}
     }
     aquatic::school_tick(m, w, level.random());
     // Dolphin.tick: after super.tick, NoAI restores the species maximum.
@@ -2699,8 +2694,8 @@ fn check_despawn(m: &mut Mob, w: &MobWorld) -> bool {
     // `MobDespawnEvent` comes first in NeoForge's `Mob.checkDespawn`, so an answer
     // other than `Default` skips vanilla's checks and their `nextInt(800)` draw.
     match std::mem::take(&mut m.despawn) {
-        mod_api::NativeDespawn::Allow => return false,
-        mod_api::NativeDespawn::Deny => return true,
+        mod_api::Despawn::Allow => return false,
+        mod_api::Despawn::Deny => return true,
         _ => {}
     }
     // Mob.checkDespawn discards disallowed types even when persistent or NoAI.

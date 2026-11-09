@@ -2818,7 +2818,7 @@ impl Game<'_> {
             && mod_api::__private::listened(mod_api::HookId::ItemTooltip)
             && let Ok(stack) = stack.try_into_api()
         {
-            let display = mod_api::item_tooltip::TooltipDisplay::for_stack(&stack);
+            let display = mod_api::item::item_tooltip::TooltipDisplay::for_stack(&stack);
             let Ok(mut api_lines) = lines.try_into_api() else {
                 return lines;
             };
@@ -3414,6 +3414,9 @@ impl Game<'_> {
         }
         if let Some(ingredient) = ingredient {
             self.native_brewing_start(at, &ingredient);
+        }
+        if !was_idle || consumed_fuel || started || out != brewing::BrewTick::default() {
+            self.container_changed(pos);
         }
         let (x, y, z) = pos;
         if out.brewed {
@@ -4051,3 +4054,7 @@ mod cycling_tests {
         assert_eq!(y, 4.0);
     }
 }
+
+#[cfg(test)]
+#[path = "tests/brewing_changed_tests.rs"]
+mod brewing_changed_tests;

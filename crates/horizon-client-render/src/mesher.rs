@@ -3,7 +3,7 @@
 //! `ModelBlockRenderer`/`BlockModelLighter` (smooth light, ambient occlusion,
 //! cardinal shading, tint sources, block offsets; see `lighting`). Fluids
 //! follow `FluidRenderer` (see `fluid`).
-pub use mod_api::mesher::TintSource;
+pub use mod_api::client::mesher::TintSource;
 pub use mod_render::render::Vertex;
 mod fluid;
 mod leaf_culling;
@@ -759,7 +759,10 @@ struct ModFluidLayers {
     tint: Option<u32>,
 }
 fn redstone_color(power: u8) -> u32 {
-    // RedstoneWireBlock.COLORS
+    // RedstoneWireBlock.COLORS, or a pack's.
+    if let Some(color) = crate::pack_palette::redstone(power) {
+        return color;
+    }
     let f = f32::from(power) / 15.0;
     let r = f * 0.6 + if f > 0.0 { 0.4 } else { 0.3 };
     let g = (f * f * 0.7 - 0.5).clamp(0.0, 1.0);

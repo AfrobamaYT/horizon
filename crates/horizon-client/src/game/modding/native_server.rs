@@ -11,7 +11,6 @@ use super::api_values::{TryIntoApi, TryIntoEngine};
 use super::{Dim, Game, commands::execute, lan::LanHost, respawn_anchor::RespawnConfig};
 use crate::game::level_control_hooks::LevelControl;
 use mod_api::__private::game::*;
-pub use mod_api::game::NativeExperienceOrb;
 // Their old home, for mixin code that names them here.
 use horizon_client::{
     command::{Arg, ArgType, Context, Dispatcher},
@@ -23,11 +22,9 @@ use horizon_client::{
 use horizon_core::position::BlockPos;
 use horizon_protocol::packets::play::{self, Clientbound as C};
 use mod_api::LevelRef;
-pub(crate) use mod_api::NativeCommand;
 use mod_api::{
-    ActionOutcome, ActionRefused, FakeEffect, GameMode, GlobalPos, Identifier,
-    NativePlayerAbilities, NativePlayerFood, PlayerAction, PlayerActionSetup, PlayerRef,
-    PlayerRespawnConfig, ScopedActionResult,
+    ActionOutcome, ActionRefused, FakeEffect, GameMode, GlobalPos, Identifier, PlayerAction,
+    PlayerActionSetup, PlayerFood, PlayerRef, PlayerRespawnConfig, ScopedActionResult,
 };
 use serde_json::{Map, Value, json};
 use std::sync::{
@@ -61,6 +58,17 @@ const KINDS: [&str; 8] = [
     "item",
     "block_pos",
 ];
+
+/// The custom argument types the mods registered, by namespaced id, for the command tree being
+/// built and its server dispatcher.
+pub(super) type CommandArguments = HashMap<String, Arc<dyn mod_api::CommandArgumentType>>;
+
+/// The argument types the installed mods registered at startup.
+pub(super) fn command_arguments() -> CommandArguments {
+    mod_api::__private::command_argument_types()
+        .into_iter()
+        .collect()
+}
 
 /// The brigadier parser of an argument kind, its properties and its dispatcher type.
 fn parser(kind: &str) -> Option<(&'static str, Value, ArgType)> {
@@ -108,7 +116,10 @@ const LEVELS: [&str; 5] = ["", "moderators", "gamemasters", "admins", "owners"];
 
 /// One parsed word of a usage: its key in the tree and its node, without
 /// children.
-fn usage_nodes(usage: &str) -> Result<Vec<(String, Value, bool)>, String> {
+fn usage_nodes(
+    usage: &str,
+    custom: &CommandArguments,
+) -> Result<Vec<(String, Value, bool)>, String> {
     let mut out = Vec::new();
     let mut optional_seen = false;
     let mut greedy_seen = false;
@@ -140,14 +151,41 @@ fn usage_nodes(usage: &str) -> Result<Vec<(String, Value, bool)>, String> {
         if optional_seen && !optional {
             return Err(format!("`{usage}`: `{word}` follows an optional argument"));
         }
-        let Some((parser, properties, _)) = parser(kind) else {
-            return Err(format!("`{usage}`: unknown kind `{kind}`"));
+        let (parser, properties, greedy, custom) = match parser(kind) {
+            Some((parser, properties, _)) => (parser, properties, kind == "text", None),
+            None => {
+                let Some(argument) = custom.get(kind) else {
+                    return Err(format!("`{usage}`: unknown kind `{kind}`"));
+                };
+                let (properties, greedy) = match std::panic::catch_unwind(
+                    std::panic::AssertUnwindSafe(|| argument.kind()),
+                )
+                .map_err(|_| format!("`{usage}`: argument type `{kind}` panicked"))?
+                {
+                    mod_api::CommandArgumentKind::Word => (json!({"type": "word"}), false),
+                    mod_api::CommandArgumentKind::Greedy => (json!({"type": "greedy"}), true),
+                    _ => {
+                        return Err(format!(
+                            "`{usage}`: argument type `{kind}` uses a kind this build cannot read"
+                        ));
+                    }
+                };
+                ("brigadier:string", properties, greedy, Some(kind))
+            }
         };
         optional_seen |= optional;
-        greedy_seen |= kind == "text";
+        greedy_seen |= greedy;
         let mut node = json!({"type": "argument", "parser": parser});
         if !properties.is_null() {
             node["properties"] = properties;
+        }
+        if let Some(id) = custom {
+            // A client that does not know the type parses a word (or the rest of the line).
+            // Fabric sends the registered type's id, which an unmodded client cannot read and
+            // whose node it drops; a Brigadier string keeps the tree valid and asks the server
+            // for the completions.
+            node["custom_argument"] = id.into();
+            node["suggestions"] = "minecraft:ask_server".into();
         }
         out.push((name.to_owned(), node, optional));
     }
@@ -164,14 +202,15 @@ fn usage_nodes(usage: &str) -> Result<Vec<(String, Value, bool)>, String> {
 /// A command vanilla has (`vanilla`
 /// answers) or a usage that doesn't parse is left out, with why.
 pub(super) fn command_tree(
-    commands: &[NativeCommand],
+    commands: &[mod_api::Command],
     vanilla: impl Fn(&str) -> bool,
+    custom: &CommandArguments,
 ) -> (Value, HashMap<String, u8>, Vec<String>) {
     let mut root: Map<String, Value> = Map::new();
     let mut levels: HashMap<String, u8> = HashMap::new();
     let mut problems = Vec::new();
     for command in commands {
-        let nodes = match usage_nodes(&command.usage) {
+        let nodes = match usage_nodes(&command.usage, custom) {
             Ok(n) => n,
             Err(e) => {
                 problems.push(e);
@@ -189,10 +228,12 @@ pub(super) fn command_tree(
             let Some(entry) = children.get(name) else {
                 break;
             };
-            // `word` and `text` share a parser; their properties tell them apart.
+            // `word` and `text` share a parser; their properties tell them apart, and a custom
+            // kind shares the word (or greedy) properties with them.
             if entry["type"] != node["type"]
                 || entry["parser"] != node["parser"]
                 || entry["properties"] != node["properties"]
+                || entry["custom_argument"] != node["custom_argument"]
             {
                 conflict = Some(name);
                 break;
@@ -280,25 +321,20 @@ pub(super) fn register_dispatcher(
     dispatcher: &mut Dispatcher,
     tree: &Value,
     handler: &'static str,
+    arguments: &CommandArguments,
 ) {
     fn add(
         dispatcher: &mut Dispatcher,
         parent: usize,
         children: &Map<String, Value>,
         handler: &'static str,
+        arguments: &CommandArguments,
     ) {
         for (name, node) in children {
             let id = if node["type"] == "literal" {
                 dispatcher.literal(parent, name)
             } else {
-                let ty = KINDS
-                    .into_iter()
-                    .filter_map(parser)
-                    .find_map(|(id, properties, ty)| {
-                        (node["parser"] == id && node["properties"] == properties).then_some(ty)
-                    })
-                    .expect("native command tree contains registered parsers");
-                dispatcher.argument(parent, name, ty)
+                dispatcher.argument(parent, name, argument_type(node, arguments))
             };
             let level = node["permissions"]["permission"]["level"]
                 .as_str()
@@ -315,13 +351,91 @@ pub(super) fn register_dispatcher(
                 );
             }
             if let Some(children) = node["children"].as_object() {
-                add(dispatcher, id, children, handler);
+                add(dispatcher, id, children, handler, arguments);
             }
         }
     }
     if let Some(children) = tree["children"].as_object() {
-        add(dispatcher, 0, children, handler);
+        add(dispatcher, 0, children, handler, arguments);
     }
+}
+
+/// The message a mod's argument parser refused with, as the engine's text. A text the
+/// boundary cannot carry is reported as its own diagnostic: the refusal still fails the
+/// argument, never silently passing it.
+fn refused_argument_text(error: mod_api::CommandArgumentError) -> Text {
+    let message: mod_api::Text = error.into();
+    match message.try_into_engine(&()) {
+        Ok(text) => text,
+        Err(error) => Text::literal(error.to_string()),
+    }
+}
+
+/// The dispatcher type of one validated tree node: a vanilla kind, or the mod's registered
+/// argument type with its parser and suggestions.
+fn argument_type(node: &Value, arguments: &CommandArguments) -> ArgType {
+    if let Some(id) = node["custom_argument"].as_str() {
+        let argument = arguments
+            .get(id)
+            .unwrap_or_else(|| panic!("native command tree names unregistered argument type {id}"));
+        let parse = argument.clone();
+        let suggest = argument.clone();
+        // Use the validated tree property rather than calling mod code again.
+        let kind = if node["properties"]["type"] == "greedy" {
+            horizon_client::command::CustomArgumentKind::Greedy
+        } else {
+            horizon_client::command::CustomArgumentKind::Word
+        };
+        return ArgType::Custom(horizon_client::command::CustomArgument::new(
+            id,
+            kind,
+            move |input| {
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| parse.parse(input)))
+                    .map_err(|_| Text::tr("commands.generic.failed", &[]))?
+                    .map_err(refused_argument_text)
+            },
+            move |prefix| {
+                let Ok(results) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    suggest.suggest(prefix)
+                })) else {
+                    eprintln!("mod command argument completer panicked");
+                    return Vec::new();
+                };
+                // Suggestions use STRING_UTF8 (Java UTF-16 length). Tooltips are
+                // literal NBT strings, whose modified UTF-8 byte length is unsigned u16.
+                if results.iter().any(|s| {
+                    s.text.encode_utf16().count() > 32767
+                        || s.tooltip.as_ref().is_some_and(|tip| {
+                            tip.encode_utf16()
+                                .map(|unit| match unit {
+                                    1..=0x7f => 1,
+                                    0..=0x7ff => 2,
+                                    _ => 3,
+                                })
+                                .sum::<usize>()
+                                > 65535
+                        })
+                }) {
+                    eprintln!("mod command argument completion exceeds the protocol string limit");
+                    return Vec::new();
+                }
+                results
+                    .into_iter()
+                    .map(|suggestion| horizon_client::command::CustomSuggestion {
+                        text: suggestion.text,
+                        tooltip: suggestion.tooltip,
+                    })
+                    .collect()
+            },
+        ));
+    }
+    KINDS
+        .into_iter()
+        .filter_map(parser)
+        .find_map(|(id, properties, ty)| {
+            (node["parser"] == id && node["properties"] == properties).then_some(ty)
+        })
+        .expect("native command tree contains registered parsers")
 }
 
 /// The live player body, or a guest record outside a player swap.
@@ -374,22 +488,20 @@ impl PlayerRead<'_> {
         }
     }
 
-    fn food(&self) -> Option<NativePlayerFood> {
+    fn food(&self) -> Option<PlayerFood> {
         let food = &self.body()?.health.food;
         let (level, saturation) = match self {
             Self::Acting { .. } => (food.food, food.saturation),
             Self::Guest(guest) => (guest.food, guest.saturation),
         };
-        Some(NativePlayerFood::from(
-            mod_api::__private::built::NativePlayerFood {
-                level,
-                saturation,
-                exhaustion: food.exhaustion,
-            },
-        ))
+        Some(PlayerFood::from(mod_api::__private::built::PlayerFood {
+            level,
+            saturation,
+            exhaustion: food.exhaustion,
+        }))
     }
 
-    fn abilities(&self) -> Option<NativePlayerAbilities> {
+    fn abilities(&self) -> Option<mod_api::PlayerAbilities> {
         let a = match self {
             Self::Acting {
                 abilities: Some(a), ..
@@ -408,8 +520,8 @@ impl PlayerRead<'_> {
             }
             Self::Guest(guest) => guest.abilities,
         };
-        Some(NativePlayerAbilities::from(
-            mod_api::__private::built::NativePlayerAbilities {
+        Some(mod_api::PlayerAbilities::from(
+            mod_api::__private::built::PlayerAbilities {
                 invulnerable: a.invulnerable,
                 flying: a.flying,
                 may_fly: a.may_fly,
@@ -961,7 +1073,7 @@ impl Game<'_> {
     pub(super) fn player_set_abilities(
         &mut self,
         player: PlayerRef,
-        abilities: NativePlayerAbilities,
+        abilities: mod_api::PlayerAbilities,
     ) -> bool {
         if !abilities.fly_speed.is_finite() || !abilities.walk_speed.is_finite() {
             return false;
@@ -1092,12 +1204,12 @@ impl Game<'_> {
     /// `FoodData.getFoodLevel/getSaturationLevel/getExhaustionLevel`; Paper
     /// `HumanEntity#getFoodLevel/getSaturation/getExhaustion`. None until the
     /// guest's body exists, as well as for stale or unavailable players.
-    pub(super) fn player_food(&self, player: PlayerRef) -> Option<NativePlayerFood> {
+    pub(super) fn player_food(&self, player: PlayerRef) -> Option<PlayerFood> {
         self.player_read_both(player)?.food()
     }
 
     /// `Player.getAbilities`; Paper `Player#getAllowFlight/isFlying/getFlySpeed/getWalkSpeed`.
-    pub(super) fn player_abilities(&self, player: PlayerRef) -> Option<NativePlayerAbilities> {
+    pub(super) fn player_abilities(&self, player: PlayerRef) -> Option<mod_api::PlayerAbilities> {
         self.player_read_both(player)?.abilities()
     }
 
@@ -1633,7 +1745,7 @@ impl Game<'_> {
         dimension: &str,
         min: [f64; 3],
         max: [f64; 3],
-    ) -> Vec<NativeExperienceOrb> {
+    ) -> Vec<mod_api::ExperienceOrb> {
         if (self.serving.is_none() && self.options.dedicated.is_none())
             || dimension != self.dim.id()
         {
@@ -1642,7 +1754,7 @@ impl Game<'_> {
         self.orbs
             .iter()
             .filter(|o| o.count > 0)
-            .map(|o| NativeExperienceOrb {
+            .map(|o| mod_api::ExperienceOrb {
                 id: o.id,
                 position: [o.position.x, o.position.y, o.position.z],
                 value: o.value,
@@ -1744,6 +1856,7 @@ fn system_chat(line: &Text) -> C {
 pub(super) struct NativeCommands {
     levels: HashMap<String, u8>,
     tree: Value,
+    arguments: CommandArguments,
 }
 
 /// Where the game calls the server hook points.
@@ -1775,9 +1888,12 @@ impl Game<'_> {
             self.server_lists.is_some(),
         );
         commands.extend(extras.iter().cloned());
-        let (tree, mut levels, problems) = command_tree(&commands, |name| {
-            host.hub.vanilla_command(name) || vanilla.find(name).is_some()
-        });
+        let arguments = command_arguments();
+        let (tree, mut levels, problems) = command_tree(
+            &commands,
+            |name| host.hub.vanilla_command(name) || vanilla.find(name).is_some(),
+            &arguments,
+        );
         for p in problems {
             log::warn!("Horizon: a native mod's command was left out: {p}");
         }
@@ -1796,6 +1912,7 @@ impl Game<'_> {
         host.native_commands = Some(NativeCommands {
             levels,
             tree: execution_tree,
+            arguments,
         });
         if refresh {
             host.hub.store_mod_commands(0, tree);
@@ -1820,6 +1937,7 @@ impl Game<'_> {
                 Arc::make_mut(&mut self.ui.dispatcher.0),
                 &commands.tree,
                 "native_mod_command",
+                &commands.arguments,
             );
         }
     }
@@ -1900,7 +2018,7 @@ impl Game<'_> {
     ) -> super::commands::R<mod_api::CommandSource> {
         use super::commands::err;
         use mod_api::CommandSource;
-        let permission = mod_api::NativePermissionLevel::from_level(i32::from(permission));
+        let permission = mod_api::PermissionLevel::from_level(i32::from(permission));
         let source = self.command_source.unwrap_or_else(|| self.player_source());
         let origin = if let Some(id) = self.exec.functions.last() {
             CommandSource::Function {
@@ -1986,6 +2104,10 @@ impl Game<'_> {
                         .try_into_api()
                         .expect("command item validation resolves registered items"),
                 ),
+                Arg::Custom { kind, value } => Value::Custom {
+                    kind: kind.to_string(),
+                    value,
+                },
                 _ => unreachable!("the native tree contains only registered native argument kinds"),
             };
             arguments.push(CommandArgument::new(argument.name, value));
@@ -2410,8 +2532,8 @@ mod tests {
         );
         assert_eq!(
             read.abilities(),
-            Some(NativePlayerAbilities::from(
-                mod_api::__private::built::NativePlayerAbilities {
+            Some(mod_api::PlayerAbilities::from(
+                mod_api::__private::built::PlayerAbilities {
                     invulnerable: false,
                     flying: false,
                     may_fly: false,
@@ -2429,8 +2551,8 @@ mod tests {
         assert_eq!(read.mode(), 1);
         assert_eq!(
             read.abilities(),
-            Some(NativePlayerAbilities::from(
-                mod_api::__private::built::NativePlayerAbilities {
+            Some(mod_api::PlayerAbilities::from(
+                mod_api::__private::built::PlayerAbilities {
                     invulnerable: true,
                     flying: true,
                     may_fly: true,
@@ -2447,8 +2569,8 @@ mod tests {
         assert!(!abilities.may_build && !abilities.instabuild && abilities.may_fly);
     }
 
-    fn tree(commands: &[NativeCommand]) -> (Value, HashMap<String, u8>, Vec<String>) {
-        command_tree(commands, |name| name == "give")
+    fn tree(commands: &[mod_api::Command]) -> (Value, HashMap<String, u8>, Vec<String>) {
+        command_tree(commands, |name| name == "give", &HashMap::new())
     }
 
     fn stack(item: &str, count: u32) -> Option<ItemStack> {
@@ -2516,10 +2638,10 @@ mod tests {
     #[test]
     fn usages_merge_into_one_tree_with_runnable_nodes() {
         let (t, levels, problems) = tree(&[
-            NativeCommand::new("balance [player:player]"),
-            NativeCommand::new("pay <player:player> <amount:integer>"),
-            NativeCommand::op("eco give <player:player> <amount:integer>", 3),
-            NativeCommand::op("eco take <player:player> <amount:integer>", 3),
+            mod_api::Command::new("balance [player:player]"),
+            mod_api::Command::new("pay <player:player> <amount:integer>"),
+            mod_api::Command::op("eco give <player:player> <amount:integer>", 3),
+            mod_api::Command::op("eco take <player:player> <amount:integer>", 3),
         ]);
         assert!(problems.is_empty(), "{problems:?}");
         let c = &t["children"];
@@ -2560,11 +2682,16 @@ mod tests {
             ),
         ] {
             let (tree, _, problems) =
-                tree(&[NativeCommand::new(first), NativeCommand::new(second)]);
+                tree(&[mod_api::Command::new(first), mod_api::Command::new(second)]);
             assert_eq!(problems.len(), 1, "{first} then {second}: {problems:?}");
             assert!(problems[0].starts_with(&format!("`{second}`")));
             let mut dispatcher = Dispatcher::new();
-            register_dispatcher(&mut dispatcher, &tree, "native_mod_command");
+            register_dispatcher(
+                &mut dispatcher,
+                &tree,
+                "native_mod_command",
+                &HashMap::new(),
+            );
             let registries = horizon_client::command::Registries::default();
             assert!(dispatcher.parse(line, &registries).executable().is_ok());
             // The kept kind decides: `word` stops at the space, `text` takes it all.
@@ -2582,16 +2709,200 @@ mod tests {
         assert!(KINDS.into_iter().all(|kind| parser(kind).is_some()));
     }
 
+    /// A test mod's argument type: named machines, one word, completed by prefix.
+    struct MachineArgument;
+
+    impl mod_api::CommandArgumentType for MachineArgument {
+        fn kind(&self) -> mod_api::CommandArgumentKind {
+            mod_api::CommandArgumentKind::Word
+        }
+
+        fn parse(&self, input: &str) -> Result<String, mod_api::CommandArgumentError> {
+            match input {
+                "press" | "furnace" => Ok(input.to_owned()),
+                _ => Err(mod_api::CommandArgumentError::new(
+                    mod_api::Text::translate(
+                        "test.commands.machine.unknown",
+                        vec![mod_api::Text::literal(input)],
+                    ),
+                )),
+            }
+        }
+
+        fn suggest(&self, prefix: &str) -> Vec<mod_api::CommandSuggestion> {
+            ["press", "furnace"]
+                .into_iter()
+                .filter(|machine| machine.starts_with(prefix))
+                .map(mod_api::CommandSuggestion::new)
+                .collect()
+        }
+    }
+
+    struct HostileArgument;
+
+    impl mod_api::CommandArgumentType for HostileArgument {
+        fn kind(&self) -> mod_api::CommandArgumentKind {
+            mod_api::CommandArgumentKind::Word
+        }
+        fn parse(&self, input: &str) -> Result<String, mod_api::CommandArgumentError> {
+            if input == "panic" {
+                panic!("parser")
+            }
+            Ok(input.into())
+        }
+        fn suggest(&self, prefix: &str) -> Vec<mod_api::CommandSuggestion> {
+            match prefix {
+                "panic" => panic!("completer"),
+                "text" => vec![mod_api::CommandSuggestion::new("a".repeat(32768))],
+                "tip" => vec![mod_api::CommandSuggestion::with_tooltip(
+                    "ok",
+                    "a".repeat(65536),
+                )],
+                "unicode" => vec![mod_api::CommandSuggestion::with_tooltip(
+                    "ok",
+                    "\0".repeat(32768),
+                )],
+                _ => vec![mod_api::CommandSuggestion::with_tooltip(
+                    "a".repeat(32767),
+                    "a".repeat(65535),
+                )],
+            }
+        }
+    }
+
+    #[test]
+    fn hostile_argument_callbacks_are_refused_without_losing_the_dispatcher() {
+        let arguments: CommandArguments = HashMap::from([(
+            "test:hostile".into(),
+            Arc::new(HostileArgument) as Arc<dyn mod_api::CommandArgumentType>,
+        )]);
+        let (tree, _, problems) = super::command_tree(
+            &[mod_api::Command::new("probe <value:test:hostile>")],
+            |_| false,
+            &arguments,
+        );
+        assert!(problems.is_empty());
+        let mut dispatcher = Dispatcher::new();
+        register_dispatcher(&mut dispatcher, &tree, "native_mod_command", &arguments);
+        let registries = horizon_client::command::Registries::default();
+        for prefix in ["panic", "text", "tip", "unicode"] {
+            let input = format!("probe {prefix}");
+            let parsed = dispatcher.parse(&input, &registries);
+            assert_eq!(parsed.executable().is_err(), prefix == "panic");
+            let (_, suggestions) = dispatcher.suggestions(&parsed, input.len(), &registries);
+            assert!(suggestions.is_empty(), "{prefix}");
+        }
+        let input = "probe valid";
+        let parsed = dispatcher.parse(input, &registries);
+        let (_, suggestions) = dispatcher.suggestions(&parsed, input.len(), &registries);
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].text.len(), 32767);
+    }
+
+    #[test]
+    fn panicking_argument_kind_is_left_out_of_the_tree() {
+        struct PanicKind;
+        impl mod_api::CommandArgumentType for PanicKind {
+            fn kind(&self) -> mod_api::CommandArgumentKind {
+                panic!("kind")
+            }
+            fn parse(&self, _: &str) -> Result<String, mod_api::CommandArgumentError> {
+                unreachable!()
+            }
+            fn suggest(&self, _: &str) -> Vec<mod_api::CommandSuggestion> {
+                unreachable!()
+            }
+        }
+        let arguments: CommandArguments = HashMap::from([(
+            "test:panic".into(),
+            Arc::new(PanicKind) as Arc<dyn mod_api::CommandArgumentType>,
+        )]);
+        let (_, _, problems) = super::command_tree(
+            &[mod_api::Command::new("probe <value:test:panic>")],
+            |_| false,
+            &arguments,
+        );
+        assert_eq!(problems.len(), 1);
+        assert!(problems[0].contains("panicked"));
+    }
+
+    struct Machines;
+
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Machines {
+        fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+            r.register_command_argument("machine", MachineArgument);
+        }
+    }
+
+    #[test]
+    fn a_registered_argument_type_parses_and_completes_its_values() {
+        mod_api::__private::part_tests::install_parts_fixture(&[mod_api::ModEntry::new(
+            "test",
+            Box::new(Machines),
+        )])
+        .unwrap();
+        let arguments = command_arguments();
+        assert!(arguments.contains_key("test:machine"));
+
+        let (tree, _, problems) = super::command_tree(
+            &[mod_api::Command::new("machine use <machine:test:machine>")],
+            |_| false,
+            &arguments,
+        );
+        assert!(problems.is_empty(), "{problems:?}");
+        let machine = &tree["children"]["machine"]["children"]["use"]["children"]["machine"];
+        assert_eq!(machine["custom_argument"], "test:machine");
+        assert_eq!(machine["suggestions"], "minecraft:ask_server");
+        assert_eq!(machine["properties"], json!({"type": "word"}));
+
+        let mut dispatcher = Dispatcher::new();
+        register_dispatcher(&mut dispatcher, &tree, "native_mod_command", &arguments);
+        let registries = horizon_client::command::Registries::default();
+        let parsed = dispatcher.parse("machine use press", &registries);
+        let (context, _) = parsed.executable().unwrap();
+        assert_eq!(
+            context.get("machine"),
+            Some(&Arg::Custom {
+                kind: "test:machine".into(),
+                value: "press".into(),
+            })
+        );
+        assert!(
+            dispatcher
+                .parse("machine use banana", &registries)
+                .executable()
+                .is_err(),
+            "the mod's parser rejects what it does not know"
+        );
+
+        let typed = "machine use pr";
+        let parse = dispatcher.parse(typed, &registries);
+        let (_, suggestions) = dispatcher.suggestions(&parse, typed.len(), &registries);
+        assert_eq!(
+            suggestions
+                .iter()
+                .map(|s| s.text.as_str())
+                .collect::<Vec<_>>(),
+            ["press"]
+        );
+    }
+
     #[test]
     fn native_usages_parse_with_their_permissions_in_the_server_dispatcher() {
         let (tree, _, problems) = tree(&[
-            NativeCommand::new("warp [name:word]"),
-            NativeCommand::op("warp set <amount:integer>", 2),
-            NativeCommand::new("toggle <enabled:boolean>"),
+            mod_api::Command::new("warp [name:word]"),
+            mod_api::Command::op("warp set <amount:integer>", 2),
+            mod_api::Command::new("toggle <enabled:boolean>"),
         ]);
         assert!(problems.is_empty(), "{problems:?}");
         let mut dispatcher = Dispatcher::new();
-        register_dispatcher(&mut dispatcher, &tree, "native_mod_command");
+        register_dispatcher(
+            &mut dispatcher,
+            &tree,
+            "native_mod_command",
+            &HashMap::new(),
+        );
         let mut registries = horizon_client::command::Registries::default();
         assert!(dispatcher.parse("warp", &registries).executable().is_ok());
         assert!(
@@ -2655,7 +2966,7 @@ mod tests {
                 event: &mut mod_api::RegisterCommandsEvent<'_>,
             ) {
                 self.registrations.fetch_add(1, Ordering::Relaxed);
-                event.commands.push(NativeCommand::new(
+                event.commands.push(mod_api::Command::new(
                     if self.changed.load(Ordering::Relaxed) {
                         "after <n:integer>"
                     } else {
@@ -2768,11 +3079,11 @@ mod tests {
                 event: &mut mod_api::RegisterCommandsEvent<'_>,
             ) {
                 event.commands.extend([
-                    NativeCommand::new("typed give <who:player> <amount:integer> [message:text]"),
-                    NativeCommand::new("typed data <word:word> <number:number> <enabled:boolean> <item:item> <pos:block_pos>"),
-                    NativeCommand::new("typed opt [value:integer]"),
-                    NativeCommand::new("typed repeat <value:player> <value:integer>"),
-                    NativeCommand::op("protected <who:player>", 4),
+                    mod_api::Command::new("typed give <who:player> <amount:integer> [message:text]"),
+                    mod_api::Command::new("typed data <word:word> <number:number> <enabled:boolean> <item:item> <pos:block_pos>"),
+                    mod_api::Command::new("typed opt [value:integer]"),
+                    mod_api::Command::new("typed repeat <value:player> <value:integer>"),
+                    mod_api::Command::op("protected <who:player>", 4),
                 ]);
             }
             fn run_mod_command(
@@ -2926,7 +3237,7 @@ mod tests {
             datapack::{Function, FunctionLine},
         };
         use horizon_core::position::BlockPos;
-        use mod_api::{CommandSource, NativePermissionLevel as Permission};
+        use mod_api::{CommandSource, PermissionLevel as Permission};
         struct Commands(Arc<Mutex<Vec<CommandSource>>>);
         #[mod_api::__subscriptions]
         impl mod_api::Hooks for Commands {
@@ -2936,9 +3247,9 @@ mod tests {
                 event: &mut mod_api::RegisterCommandsEvent<'_>,
             ) {
                 event.commands.extend([
-                    NativeCommand::new("origin"),
-                    NativeCommand::op("denied", 4),
-                    NativeCommand::new("unhandled"),
+                    mod_api::Command::new("origin"),
+                    mod_api::Command::op("denied", 4),
+                    mod_api::Command::new("unhandled"),
                 ]);
             }
             fn run_mod_command(
@@ -3038,11 +3349,11 @@ mod tests {
                 event: &mut mod_api::RegisterCommandsEvent<'_>,
             ) {
                 event.commands.extend([
-                    NativeCommand::op("foo [value:integer]", 4),
-                    NativeCommand::new("foo bar"),
-                    NativeCommand::op("choice <a:integer>", 4),
-                    NativeCommand::new("choice <a:integer> bar"),
-                    NativeCommand::new("choice <b:word>"),
+                    mod_api::Command::op("foo [value:integer]", 4),
+                    mod_api::Command::new("foo bar"),
+                    mod_api::Command::op("choice <a:integer>", 4),
+                    mod_api::Command::new("choice <a:integer> bar"),
+                    mod_api::Command::new("choice <b:word>"),
                 ]);
             }
             fn run_mod_command(
@@ -3117,14 +3428,22 @@ mod tests {
                 } else {
                     "foo"
                 };
-                let mut commands = vec![NativeCommand::op(admin, 4), NativeCommand::new("foo bar")];
+                let mut commands = vec![
+                    mod_api::Command::op(admin, 4),
+                    mod_api::Command::new("foo bar"),
+                ];
                 if reverse {
                     commands.reverse();
                 }
                 let (tree, _, problems) = tree(&commands);
                 assert!(problems.is_empty(), "{problems:?}");
                 let mut dispatcher = Dispatcher::new();
-                register_dispatcher(&mut dispatcher, &tree, "native_mod_command");
+                register_dispatcher(
+                    &mut dispatcher,
+                    &tree,
+                    "native_mod_command",
+                    &HashMap::new(),
+                );
                 for permission in 0..=4 {
                     let registries = horizon_client::command::Registries {
                         permission,
@@ -3147,14 +3466,22 @@ mod tests {
     #[test]
     fn native_public_prefixes_do_not_open_admin_children() {
         for reverse in [false, true] {
-            let mut commands = vec![NativeCommand::new("foo"), NativeCommand::op("foo bar", 4)];
+            let mut commands = vec![
+                mod_api::Command::new("foo"),
+                mod_api::Command::op("foo bar", 4),
+            ];
             if reverse {
                 commands.reverse();
             }
             let (tree, _, problems) = tree(&commands);
             assert!(problems.is_empty(), "{problems:?}");
             let mut dispatcher = Dispatcher::new();
-            register_dispatcher(&mut dispatcher, &tree, "native_mod_command");
+            register_dispatcher(
+                &mut dispatcher,
+                &tree,
+                "native_mod_command",
+                &HashMap::new(),
+            );
             for permission in 0..=4 {
                 let registries = horizon_client::command::Registries {
                     permission,
@@ -3176,8 +3503,8 @@ mod tests {
     fn native_shared_executable_prefix_takes_its_lowest_usage_level() {
         for reverse in [false, true] {
             let mut commands = vec![
-                NativeCommand::op("foo [value:integer]", 4),
-                NativeCommand::op("foo", 2),
+                mod_api::Command::op("foo [value:integer]", 4),
+                mod_api::Command::op("foo", 2),
             ];
             if reverse {
                 commands.reverse();
@@ -3185,7 +3512,12 @@ mod tests {
             let (tree, _, problems) = tree(&commands);
             assert!(problems.is_empty(), "{problems:?}");
             let mut dispatcher = Dispatcher::new();
-            register_dispatcher(&mut dispatcher, &tree, "native_mod_command");
+            register_dispatcher(
+                &mut dispatcher,
+                &tree,
+                "native_mod_command",
+                &HashMap::new(),
+            );
             for permission in 0..=4 {
                 let registries = horizon_client::command::Registries {
                     permission,
@@ -3206,12 +3538,17 @@ mod tests {
     #[test]
     fn native_rejected_usage_cannot_open_an_executable_prefix() {
         let (tree, _, problems) = tree(&[
-            NativeCommand::op("foo <value:integer>", 4),
-            NativeCommand::new("foo [value:word]"),
+            mod_api::Command::op("foo <value:integer>", 4),
+            mod_api::Command::new("foo [value:word]"),
         ]);
         assert_eq!(problems.len(), 1);
         let mut dispatcher = Dispatcher::new();
-        register_dispatcher(&mut dispatcher, &tree, "native_mod_command");
+        register_dispatcher(
+            &mut dispatcher,
+            &tree,
+            "native_mod_command",
+            &HashMap::new(),
+        );
         for permission in 0..=4 {
             let registries = horizon_client::command::Registries {
                 permission,
@@ -3234,8 +3571,8 @@ mod tests {
     #[test]
     fn a_command_takes_its_lowest_level() {
         let (t, levels, _) = tree(&[
-            NativeCommand::new("warp [name:word]"),
-            NativeCommand::op("warp set <name:word>", 2),
+            mod_api::Command::new("warp [name:word]"),
+            mod_api::Command::op("warp set <name:word>", 2),
         ]);
         assert_eq!(levels["warp"], 0);
         assert!(t["children"]["warp"].get("permissions").is_none());
@@ -3246,14 +3583,14 @@ mod tests {
     #[test]
     fn bad_usages_and_vanilla_names_are_left_out() {
         let (t, levels, problems) = tree(&[
-            NativeCommand::new("give <x:integer>"),
-            NativeCommand::new("a [x:integer] <y:integer>"),
-            NativeCommand::new("b <x:text> <y:word>"),
-            NativeCommand::new("c <x:colour>"),
-            NativeCommand::new("<x:integer>"),
-            NativeCommand::new("Bad"),
-            NativeCommand::new("d <x:integer>"),
-            NativeCommand::new("d <x:word>"),
+            mod_api::Command::new("give <x:integer>"),
+            mod_api::Command::new("a [x:integer] <y:integer>"),
+            mod_api::Command::new("b <x:text> <y:word>"),
+            mod_api::Command::new("c <x:colour>"),
+            mod_api::Command::new("<x:integer>"),
+            mod_api::Command::new("Bad"),
+            mod_api::Command::new("d <x:integer>"),
+            mod_api::Command::new("d <x:word>"),
         ]);
         assert_eq!(problems.len(), 7, "{problems:?}");
         assert_eq!(levels.keys().collect::<Vec<_>>(), ["d"]);
@@ -3993,7 +4330,7 @@ mod fake_action_tests {
                 game.player_perform_action(player, interact(player.entity())),
                 Err(ActionRefused::InvalidTarget)
             );
-            let stale = mod_api::EntityRef::new(mod_api::NativeWorldEpoch::new(0), near.id());
+            let stale = mod_api::EntityRef::new(mod_api::WorldEpoch::new(0), near.id());
             assert_eq!(
                 game.player_perform_action(player, interact(stale)),
                 Err(ActionRefused::InvalidTarget)
@@ -4004,9 +4341,7 @@ mod fake_action_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn scoped_fake_use_hooks_see_the_setup_and_fail_is_not_consumed() {
-        use mod_api::{
-            Flow, Hooks, HostSide, NativeInteractionResult, PlayerActionSetup, RightClickBlockEvent,
-        };
+        use mod_api::{Flow, Hooks, HostSide, PlayerActionSetup, RightClickBlockEvent};
         use std::sync::{
             Arc,
             atomic::{AtomicBool, Ordering},
@@ -4028,7 +4363,7 @@ mod fake_action_tests {
                 );
                 assert_eq!(entity.is_shift_key_down(host), Some(true));
                 self.0.store(true, Ordering::Relaxed);
-                *event.cancellation_result = NativeInteractionResult::Fail;
+                *event.cancellation_result = mod_api::InteractionResult::Fail;
                 Flow::Cancel
             }
         }

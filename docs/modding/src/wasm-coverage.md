@@ -931,12 +931,12 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Tags::items` | crosses | Wire call |
 | `Tags::fluids` | crosses | Wire call |
 | `Tags::blocks` | crosses | Wire call |
-| `menu::SlotView::item` | crosses | Wire call |
-| `menu::SlotView::may_place` | crosses | Wire call |
-| `menu::SlotView::may_pickup` | crosses | Wire call |
-| `menu::SlotView::allow_modification` | crosses | Wire call |
-| `menu::SlotView::safe_insert` | crosses | Wire call |
-| `menu::SlotView::safe_take` | crosses | Wire call |
+| `item::menu::SlotView::item` | crosses | Wire call |
+| `item::menu::SlotView::may_place` | crosses | Wire call |
+| `item::menu::SlotView::may_pickup` | crosses | Wire call |
+| `item::menu::SlotView::allow_modification` | crosses | Wire call |
+| `item::menu::SlotView::safe_insert` | crosses | Wire call |
+| `item::menu::SlotView::safe_take` | crosses | Wire call |
 | `Registrar::declare_attribute` | crosses | Wire call |
 | `Registrar::block_entity_type_key` | crosses | Wire call |
 | `Registrar::declare_block_entity_type` | crosses | Wire call |
@@ -945,6 +945,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Registrar::block_key` | crosses | Wire call |
 | `Registrar::attach_block_part` | crosses | Wire call |
 | `Registrar::attach_block_part_tag` | crosses | Wire call |
+| `Registrar::add_command_argument` | crosses | Wire call |
 | `Registrar::add_dimension` | crosses | Wire call |
 | `Registrar::effect_key` | crosses | Wire call |
 | `Registrar::provide_entity_capability` | crosses | Wire call |
@@ -1409,6 +1410,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::block_screen_effect_draw` | crosses | Wire call |
 | `Hooks::block_tool_modification` | crosses | Wire call |
 | `Hooks::bonemeal` | crosses | Wire call |
+| `Hooks::build_creative_mode_tab_contents` | crosses | Wire call |
 | `Hooks::calculate_player_turn` | crosses | Wire call |
 | `Hooks::camera_pose` | crosses | Wire call |
 | `Hooks::camera_type_cycle` | crosses | Wire call |
@@ -1577,6 +1579,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::register_range_select_item_model_property` | crosses | Wire call |
 | `Hooks::register_runtime_sprites` | crosses | Wire call |
 | `Hooks::register_select_item_model_property` | crosses | Wire call |
+| `Hooks::register_texture_atlases` | crosses | Wire call |
 | `Hooks::render_arm` | crosses | Wire call |
 | `Hooks::render_frame_post` | crosses | Wire call |
 | `Hooks::render_frame_pre` | crosses | Wire call |
@@ -1719,6 +1722,9 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `BlockTintSource::relevant_properties` | crosses | Wire call |
 | `ParticleProvider::tick` | crosses | Wire call |
 | `EnchantmentDamageEffect::apply` | crosses | Wire call |
+| `CommandArgumentType::kind` | crosses | Wire call |
+| `CommandArgumentType::parse` | crosses | Wire call |
+| `CommandArgumentType::suggest` | crosses | Wire call |
 | `GroundStateProvider::state_at` | crosses | Wire call |
 | `PlaceProvider::stack` | crosses | Wire call |
 | `PlaceProvider::insert` | crosses | Wire call |

@@ -744,7 +744,7 @@ pub(super) fn mob_meta(
         meta.push((
             2,
             serializer::OPTIONAL_COMPONENT,
-            Value::OptText(Some(horizon_protocol::text::literal(name))),
+            Value::OptText(Some(super::names::name_component(m, name))),
         ));
     }
     if m.name_visible {
@@ -2414,7 +2414,7 @@ impl Game<'_> {
         entity: u32,
         kept: Option<&ModifiedEffectParticles>,
         effects: impl Fn() -> I,
-        active: impl Fn(usize) -> mod_api::NativeActiveEffect,
+        active: impl Fn(usize) -> mod_api::ActiveEffect,
     ) -> Option<Option<ModifiedEffectParticles>> {
         if effects().next().is_none() {
             return kept.is_some().then_some(None);
@@ -2568,7 +2568,7 @@ impl Game<'_> {
                             );
                         }
                     }
-                    // Canceled, NeoForge returns before `detectRateSpam`.
+                    // Canceled: stop before `detectRateSpam`.
                     if cancel {
                         continue;
                     }
@@ -4172,28 +4172,28 @@ fn describe_event(
 /// A client's settings as the mod API names them.
 fn client_info(
     i: &horizon_protocol::packets::configuration::ClientInformation,
-) -> mod_api::NativeClientInfo {
-    mod_api::NativeClientInfo {
+) -> mod_api::ClientInfo {
+    mod_api::ClientInfo {
         language: i.language.clone(),
         view_distance: i.view_distance,
         chat_visibility: match i.chat_visibility.rem_euclid(3) {
-            0 => mod_api::NativeChatVisibility::Full,
-            1 => mod_api::NativeChatVisibility::System,
-            _ => mod_api::NativeChatVisibility::Hidden,
+            0 => mod_api::ChatVisibility::Full,
+            1 => mod_api::ChatVisibility::System,
+            _ => mod_api::ChatVisibility::Hidden,
         },
         chat_colors: i.chat_colors,
         model_customisation: i.model_customisation,
         main_hand: if i.main_hand == 1 {
-            mod_api::NativeMainHand::Right
+            mod_api::MainHand::Right
         } else {
-            mod_api::NativeMainHand::Left
+            mod_api::MainHand::Left
         },
         text_filtering: i.text_filtering,
         allows_listing: i.allows_listing,
         particle_status: match i.particle_status.rem_euclid(3) {
-            0 => mod_api::NativeParticleStatus::All,
-            1 => mod_api::NativeParticleStatus::Decreased,
-            _ => mod_api::NativeParticleStatus::Minimal,
+            0 => mod_api::ParticleStatus::All,
+            1 => mod_api::ParticleStatus::Decreased,
+            _ => mod_api::ParticleStatus::Minimal,
         },
     }
 }
@@ -4309,9 +4309,9 @@ mod tests {
         let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
         options.resources = root.clone();
         options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
-        let res = Box::leak(Box::new(loaded.resources));
+        let res = loaded.resources;
         let mut game = super::Game::new(
-            res,
+            &res,
             loaded.pack,
             loaded.gui.unwrap(),
             options,
@@ -6003,7 +6003,8 @@ mod mob_pickup_sync_tests {
     #[test]
     #[ignore = "needs prepared resources and scratch homes/cwd"]
     fn a_mob_pickup_reaches_guests_as_a_take() {
-        let mut game = super::super::game_tests::tests::server_game();
+        let mut resources = None;
+        let mut game = super::super::game_tests::tests::server_game(&mut resources);
         game.build_registries();
         game.set_allow_commands(true);
         assert!(game.run_command("summon piglin 8.5 80 8.5 {NoAI:1b,PersistenceRequired:1b}"));
@@ -6106,7 +6107,8 @@ mod mob_swing_sync_tests {
     #[test]
     #[ignore = "needs prepared resources and scratch homes/cwd"]
     fn an_off_hand_mob_swing_reaches_guests_as_the_off_hand() {
-        let mut game = crate::game::game_tests::tests::server_game();
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
         game.build_registries();
         game.set_allow_commands(true);
         let piglin = "{NoAI:1b,PersistenceRequired:1b}";
@@ -6177,7 +6179,8 @@ mod owner_attachment_save_tests {
     #[test]
     #[ignore = "needs prepared resources and scratch homes/cwd"]
     fn an_autosave_writes_the_owners_live_attachments_to_the_file_it_loads() {
-        let mut game = crate::game::game_tests::tests::server_game();
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
         let _rx = super::world_spawn_sync_tests::host_for(&mut game);
         let uuid = 1;
         game.lan.as_mut().unwrap().owner = Some(Owner { uuid, saved: None });
@@ -6221,8 +6224,11 @@ mod connected_statistics_save_tests {
     fn connected_stats_save_control(stale: bool) {
         use super::super::{execution_role::ExecutionRole, stats};
         use std::sync::{Arc, Mutex};
-        let mut game = crate::game::game_tests::tests::server_game();
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
         game.options.execution_role = ExecutionRole::DedicatedServer;
+        // The command's dedicated-only guard also checks the launch mode.
+        game.options.dedicated = Some(Vec::new());
         let dir = std::env::current_dir().unwrap().join(if stale {
             "stats-stale"
         } else {
@@ -6327,7 +6333,8 @@ mod connected_statistics_save_exclusion_tests {
     #[test]
     #[ignore = "needs prepared resources and scratch homes/cwd"]
     fn excluded_guest_records_are_not_invented_or_written() {
-        let mut game = crate::game::game_tests::tests::server_game();
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
         let _rx = super::world_spawn_sync_tests::host_for(&mut game);
         game.world_root = std::env::current_dir().unwrap().join("stats-excluded");
         std::fs::create_dir_all(&game.world_root).unwrap();

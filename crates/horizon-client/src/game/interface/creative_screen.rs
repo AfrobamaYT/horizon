@@ -5,13 +5,26 @@ use super::*;
 impl Game<'_> {
     /// `CreativeModeInventoryScreen.hasPermissions` (`canUseGameMasterBlocks`
     /// and the Operator Items Tab option) given to `tryRefreshInvalidatedTabs`,
-    /// as the screen's constructor and `containerTick` do.
+    /// as the screen's constructor and `containerTick` do. When the tabs need
+    /// building, each item tab asks the mods for their stacks
+    /// (`BuildCreativeModeTabContentsEvent`) before the build takes them.
     pub(super) fn refresh_creative_tabs(&mut self) {
         let permissions = self.can_use_game_master_blocks() && self.settings.operator_items_tab;
         let enchantments = Arc::clone(self.item_enchantments());
         self.creative_screen.set_enchantments(enchantments);
+        let Some(tabs) = self.creative_screen.tabs_to_build(permissions) else {
+            return;
+        };
+        let added = tabs
+            .into_iter()
+            .map(|tab| {
+                let mut items = Vec::new();
+                self.native_build_creative_mode_tab_contents(&tab, permissions, &mut items);
+                (tab, items)
+            })
+            .collect();
         self.creative_screen
-            .set_permissions(permissions, &self.pack.names);
+            .build(permissions, added, &self.pack.names);
     }
     pub(super) fn creative_inventory_open(&self) -> bool {
         self.screen == Screen::Creative && self.creative_screen.tab().inventory

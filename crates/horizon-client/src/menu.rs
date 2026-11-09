@@ -17,7 +17,7 @@ use crate::{
 #[cfg(test)]
 use horizon_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs};
 use horizon_world::native_load_context::{LoopContext, LoopSide};
-pub use mod_api::menu::{LogicalSide, MenuButtonContext};
+pub use mod_api::item::menu::{LogicalSide, MenuButtonContext};
 mod models;
 pub use models::{
     AnvilCraft, AnvilUpdate, AnvilVanilla, CarriedAccess, GrindstonePlace, GrindstoneTake,
@@ -2238,7 +2238,7 @@ impl Menu {
             return;
         }
         if self.slots[s].role == Role::CombineResult {
-            // SmithingMenu.onTake: NeoForge's ItemSmithedEvent first, then
+            // SmithingMenu.onTake: the `ItemSmithedEvent` hook, then
             // awardUsedRecipes, then one of each input.
             if self.kind == Kind::Smithing {
                 let inputs = [0, 1, 2].map(|i| self.containers[MAIN][i].clone());

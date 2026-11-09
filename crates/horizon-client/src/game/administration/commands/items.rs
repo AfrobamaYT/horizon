@@ -2522,7 +2522,8 @@ mod registered_slot_source_read_tests {
     #[test]
     #[ignore = "needs prepared resources and isolated homes/cwd"]
     fn registered_first_three_reads_match_inline_and_keep_the_chest() {
-        let mut game = crate::game::game_tests::tests::server_game();
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
         game.build_registries();
         game.set_allow_commands(true);
         let root = std::env::current_dir()
@@ -2618,8 +2619,11 @@ mod registered_slot_source_read_tests {
 mod registered_slot_source_preservation_tests {
     use super::*;
 
-    fn scene(name: &str) -> (Game<'static>, std::path::PathBuf) {
-        let mut game = crate::game::game_tests::tests::server_game();
+    fn scene<'a>(
+        resources: &'a mut Option<std::sync::Arc<crate::game::Resources>>,
+        name: &str,
+    ) -> (Game<'a>, std::path::PathBuf) {
+        let mut game = crate::game::game_tests::tests::server_game(resources);
         game.build_registries();
         game.set_allow_commands(true);
         let root = std::env::current_dir().unwrap().join(name);
@@ -2651,7 +2655,8 @@ mod registered_slot_source_preservation_tests {
     #[test]
     #[ignore = "needs prepared resources and isolated homes/cwd"]
     fn loaded_snapshot_changes_only_on_existing_reload_with_pack_precedence() {
-        let (mut game, file) = scene("slot-source-snapshot-world");
+        let mut resources = None;
+        let (mut game, file) = scene(&mut resources, "slot-source-snapshot-world");
         let before = game.block_entity_nbt([0, 100, 0]).unwrap();
         let clock = game.world.game_time;
         count(&mut game, 3); // Higher-priority pack overrides the same id.
@@ -2672,7 +2677,8 @@ mod registered_slot_source_preservation_tests {
     #[test]
     #[ignore = "needs prepared resources and isolated homes/cwd"]
     fn admitted_item_arguments_still_fail_without_writing_or_player_fallback() {
-        let (mut game, _) = scene("slot-source-unsupported-world");
+        let mut resources = None;
+        let (mut game, _) = scene(&mut resources, "slot-source-unsupported-world");
         let before = game.block_entity_nbt([0, 100, 0]).unwrap();
         let clock = game.world.game_time;
         count(&mut game, 3);

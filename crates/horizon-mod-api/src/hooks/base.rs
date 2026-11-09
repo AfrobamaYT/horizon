@@ -224,7 +224,7 @@ pub trait Hooks {
     )]
     fn command();
     /// The client's own commands (NeoForge's `RegisterClientCommandsEvent`), which
-    /// `command` runs: push a `NativeCommand` per usage (`x <mode:word>`).
+    /// `command` runs: push a `Command` per usage (`x <mode:word>`).
     /// Asked when a connection starts and again when the server sends its
     /// own tree, so the chat box colours, completes and lists them as the
     /// game's own; a name the game already has keeps that command's
@@ -256,10 +256,12 @@ pub trait Hooks {
     fn minimap();
     /// The player changed setting `key` of mod `mod_id` on its page in Options > Mods
     /// (`Registrar::register_setting`); the new value is kept already, so read it with
-    /// `setting_bool` and its siblings. Only the setting owner's listeners receive this event.
+    /// `setting_bool` and its siblings. Only mod `mod_id` hears it: a mod is told of its own
+    /// settings, never another's.
     #[hook(
         side = "client",
         contract = "listen",
+        owner = "mod_id",
         neoforge = "ModConfigEvent.Reloading (a ModConfigSpec value set on the config screen)"
     )]
     fn setting_changed();
@@ -428,7 +430,10 @@ pub trait Hooks {
     /// name vanilla has is left out. Asked again after a mod calls
     /// `host.commands().refresh_commands()`. Each executable usage keeps its own
     /// permission level; a lower-level child only opens traversal through a
-    /// shared prefix, not execution of that prefix.
+    /// shared prefix, not execution of that prefix. An argument's kind is one
+    /// of `word`, `text`, `integer`, `number`, `boolean`, `player`, `item` and
+    /// `block_pos`, or a command argument type a mod registered
+    /// (`Registrar::register_command_argument`), named by its namespaced id.
     #[hook(
         side = "server",
         contract = "collect",
@@ -973,7 +978,7 @@ pub trait Hooks {
         holder: LivingRef,
         health: f32,
         max_health: f32,
-        food: Option<NativePlayerFood>,
+        food: Option<PlayerFood>,
         changes: &mut Vec<EffectTickChange>,
         keep: &mut bool,
     );
@@ -1344,7 +1349,7 @@ pub trait Hooks {
     /// stacks; empty ones don't drop (NeoForge's global loot modifiers, Fabric's
     /// `LootTableEvents.MODIFY_DROPS`); `context` says what dropped them and
     /// how, and it is called even when `drops` is empty. A player's use drops
-    /// through it too (`NativeLootDrops::used`: shears, a brush, an item
+    /// through it too (`LootDrops::used`: shears, a brush, an item
     /// frame), with that player named. Lead drops from untying or cutting a
     /// leash, and from a mob a player killed while leashed, pass through here
     /// too, with that player named. It hears blocks that a
@@ -1679,8 +1684,8 @@ pub trait Hooks {
         cancellable = true
     )]
     fn screen_mouse_scrolled_pre();
-    /// A command a player typed (NeoForge's `CommandEvent`), asked before
-    /// vanilla's `Commands.performCommand` runs it, without its slash: any command,
+    /// A command a player typed (NeoForge's `CommandEvent`, before
+    /// `Commands.performCommand` runs it), without its slash: any command,
     /// vanilla's and the mods' own, also one the player may not run. Set
     /// `canceled` to stop it: nothing runs and nothing is answered but the
     /// lines pushed to `replies`, which go to the player as system chat.
@@ -1757,7 +1762,8 @@ pub trait Hooks {
     /// leaves none to hear its character, where vanilla's closed screen hears
     /// nothing, and one that moves the focus types into the box it moved to.
     /// They fire even when `native_screen_key_pressed_pre` cancelled the press
-    /// that carried the text: the characters left reach the text box
+    /// that carried the text, as NeoForge delivers `CharacterTyped.Pre` for a
+    /// cancelled `KeyPressed.Pre`: the characters left reach the text box
     /// without the key's own effects. Cancelling one character drops only that
     /// one. The control socket's `type` fires it too, but not for its `\b`
     /// backspace. Same screens as the key press, and it fires with no text box
@@ -1960,7 +1966,8 @@ pub trait Hooks {
     /// merged, load conditions held — to every Horizon client when it joins
     /// and again after each `/reload`; a vanilla client is sent nothing new.
     /// Asked once per load, when the server's data tables are built, and the
-    /// same types go to every player: it can't differ between players. Push nothing and
+    /// same types go to every player: unlike NeoForge, which asks again for
+    /// each joining player, it can't differ between players. Push nothing and
     /// nothing is sent; push nothing after a load that pushed some and the
     /// clients go back to their own recipes. Server-side (the single
     /// player's integrated server included).
@@ -2404,13 +2411,13 @@ pub trait Hooks {
     fn gui_layer_post();
     /// Icons a mod puts on map `map` each time it is drawn: held, in an
     /// item frame or on the cartography table's screen (a map's pixels are
-    /// its own; nothing is saved in the map). Push `NativeMapDecoration`s
+    /// its own; nothing is saved in the map). Push `MapDecoration`s
     /// (an atlas sprite, a position in half map pixels, a rotation, and
     /// whether it shows in a frame and on the screen like vanilla's markers
     /// do); they are drawn after the vanilla ones with the same pose, and a
     /// sprite the atlas lacks is left out. `map.center`, `map.scale` and
     /// `map.dimension` say which blocks the map shows, and
-    /// `NativeMapDecoration::x` has the formula. Vanilla's decorations are
+    /// `MapDecoration::x` has the formula. Vanilla's decorations are
     /// not passed in. Asked every frame a map is drawn, so keep it cheap.
     /// The client half of `MapDecorationType` and `addDecoration`: a type
     /// registered on the server and saved in the map's data is not here.
@@ -2638,7 +2645,12 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// window's player is drawn only in third person (and F5 front view); an
     /// invisible player is not asked. `draw` is the frame of `native_mob_submit`:
     /// at the player's feet, turned with the body. The name tag, shadow,
-    /// flames and glowing outline draw as before.
+    /// flames and glowing outline draw as before. `hidden.hide(part)` leaves
+    /// only that part out of the vanilla model this frame (after Skin
+    /// Customization), as a mod drawing its own outer skin layer does: a
+    /// hidden part takes its children with it (the hat goes with the head),
+    /// while its armour, held items and other layers, the cape among them,
+    /// keep every part.
     #[hook(
         side = "client",
         contract = "cancel",
@@ -2653,7 +2665,10 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// in the entity's frame, which starts at its feet turned with the body
     /// (`mob.head_yaw`, `mob.pitch` and the walk cycle place a part, the eyes
     /// being at the entity type's eye height). `who` is set for a player.
-    /// Not asked for what a mod drew itself (`native_mob_submit`,
+    /// `parts` is a humanoid model's parts as vanilla posed them this frame
+    /// (`HumanoidModel.setupAnim`), read-only: attach geometry to an arm or
+    /// the head without animating it again; None for a model that isn't
+    /// humanoid. Not asked for what a mod drew itself (`native_mob_submit`,
     /// `native_player_submit`) nor for a mob that isn't drawn at all.
     #[hook(
         side = "client",
@@ -3270,7 +3285,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (closest: IItemExtension.getXpRepairRatio)"
+        neoforge = "none (NeoForge only scales a repair with IItemExtension.getXpRepairRatio)"
     )]
     fn mending_repair();
     /// A server explosion is about to begin at `center`, with `radius` (Bukkit's
@@ -3629,7 +3644,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "cancel",
         out = "cancel",
-        neoforge = "none (NeoForge's PlayerContainerEvent.Open fires after the menu is open and is not cancellable)",
+        neoforge = "none (not NeoForge's PlayerContainerEvent.Open: this hook can cancel the opening)",
         cancellable = true
     )]
     fn container_opened();
@@ -3801,7 +3816,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// (`FishingHook.catchingFish`), 2 the reel-in of a bite, which gives the
     /// catch, 3 the reel-in with nothing on the line, 4 the reel-in of a
     /// bobber hooked to an entity or item (like Bukkit's `PlayerFishEvent`;
-    /// not NeoForge's `ItemFishedEvent`). Set `cancel` on the cast and nothing
+    /// NeoForge's `ItemFishedEvent` is later, in `FishingHook.retrieve`). Set `cancel` on the cast and nothing
     /// is thrown; on a bite the fish gets away and the wait starts over; on
     /// a reel-in (2 to 4) nothing happens, the bobber stays out and the rod
     /// takes no wear. The bobber ending by itself (too far, the rod put
@@ -3813,7 +3828,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "cancel",
         out = "cancel",
-        neoforge = "none (not NeoForge's ItemFishedEvent: this hook is told of each cast, bite and reel-in, as Bukkit's PlayerFishEvent)"
+        neoforge = "none (NeoForge's ItemFishedEvent fires after the loot roll, in FishingHook.retrieve; Bukkit's PlayerFishEvent)"
     )]
     fn player_fish();
     /// A server player put a plant into a flower pot, after the potted block state was stored and the
@@ -3987,7 +4002,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (not EntityTeleportEvent.TeleportCommand: this hook is told after the move and cannot stop it)"
+        neoforge = "none (EntityTeleportEvent.TeleportCommand fires before the move and can cancel it; this hook is told after the move)"
     )]
     fn player_teleported();
     /// A totem of undying saved the server player `player` (`name`): their
@@ -4136,7 +4151,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         name: &str,
         advancement: &str,
         criterion: &str,
-        progress_type: NativeProgressType,
+        progress_type: ProgressType,
         progress: &AdvancementProgress,
     );
     /// A guest's arm swing was handled by the server. `hand` is `mainhand`. Server-side.
@@ -4617,12 +4632,13 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// the clock to `wake_up_from_sleep`): `new_time` comes in as the next
     /// morning's day time and may be changed to wake everyone at another
     /// time. A time before `current` (the day time now) is refused, as
-    /// `setTimeAddition` refuses one, and the morning stays. The check runs once
+    /// `setTimeAddition` refuses one, and the morning stays. Unlike
+    /// NeoForge, which refuses a bad value as it is set, the check runs once
     /// after every mod, so a later mod sees the value an earlier one left.
     /// On the server, only when the `advance_time` rule is on;
     /// `native_time_skip` then hears the jump to the time chosen here and
     /// may still cancel it. The players wake and the weather resets as
-    /// usual either way. Set `canceled` and the clock is left where it is:
+    /// usual either way. Set `canceled` and the clock is left where it is, as NeoForge's cancel leaves it:
     /// `native_time_skip` is not asked either.
     #[hook(
         side = "server",
