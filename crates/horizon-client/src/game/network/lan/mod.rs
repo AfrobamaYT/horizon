@@ -744,7 +744,7 @@ pub(super) fn mob_meta(
         meta.push((
             2,
             serializer::OPTIONAL_COMPONENT,
-            Value::OptText(Some(horizon_protocol::text::literal(name))),
+            Value::OptText(Some(super::names::name_component(m, name))),
         ));
     }
     if m.name_visible {
@@ -1683,11 +1683,7 @@ impl Game<'_> {
                 .get_or_init(|| Arc::new(horizon_client::save::SaveTables::new(&self.pack.assets)))
                 .clone(),
         );
-        encoder.mod_update_tag = Some(|pos, entity| {
-            let mut tag = None;
-            Game::api_block_entity_update_tag(pos, entity, &mut tag);
-            tag
-        });
+        self.lan_update_tag_sources(&mut encoder);
         let far = (net.lod_distance > 0)
             .then(|| horizon_client::lod_net::Service::new(net.lod_distance, biome_names.clone()));
         let lan = Lan::start_with(sync.clone(), net)?;
@@ -2008,37 +2004,7 @@ impl Game<'_> {
             }
         }
     }
-    /// `PlayerAdvancements.save` and `ServerStatsCounter.save` of a network player.
-    pub(super) fn save_guest_records(
-        &self,
-        host: &LanHost,
-        guest: &horizon_client::lan::guest::Guest,
-    ) {
-        if !guest.participates_in_player_simulation()
-            || !guest.placed
-            || guest.released
-            || self.adv.tree.list.is_empty()
-        {
-            return;
-        }
-        let Some(uuid) = self.records_uuid(host, guest.uuid) else {
-            return;
-        };
-        let path = super::stats::player_json(&self.world_root, "advancements", uuid);
-        let json = guest
-            .advancements
-            .to_json(&self.adv.tree, horizon_world::DATA_VERSION);
-        if let Some(dir) = path.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        if let Ok(text) = serde_json::to_string_pretty(&json) {
-            let _ = std::fs::write(path, text);
-        }
-        if let Some(play) = host.play.get(&guest.conn) {
-            play.stats
-                .write(&super::stats::player_json(&self.world_root, "stats", uuid));
-        }
-    }
+
     /// The advancements and statistics files of a held arrival, before it is placed
     /// (`player-confirm`): each through a new file, synced and renamed into place
     /// (`save::write_durable`), so the reply's `ok` means both are on the disk whole.
@@ -6402,3 +6368,9 @@ mod connected_statistics_save_exclusion_tests {
         );
     }
 }
+
+use super::stats;
+mod advancement_records;
+
+#[cfg(test)]
+include!("advancement_save_tests.rs");
