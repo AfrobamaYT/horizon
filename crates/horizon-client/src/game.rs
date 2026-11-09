@@ -17664,10 +17664,12 @@ fn load_world_rest(
         let _step = startup::step("rest.mobs");
         let mut types = if draws {
             match entity_models {
-                Some(document) => {
-                    MobTypes::load_with_document_and_defaults(root, document, item_defaults)?
-                }
-                None => MobTypes::load_with_defaults(root, item_defaults)?,
+                Some(document) => MobTypes::load_with_document_and_defaults(
+                    root,
+                    document,
+                    item_defaults.entries(),
+                )?,
+                None => MobTypes::load_with_defaults(root, item_defaults.entries())?,
             }
         } else {
             MobTypes::load_for_server(root)?
