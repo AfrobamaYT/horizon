@@ -13,12 +13,12 @@ use std::{
     },
 };
 
-/// One mod renderer, and whether it has panicked (then it is asked no more) or named a sprite the
-/// atlas lacks (logged once).
+/// One mod renderer, and whether it has panicked (then it is asked no more) or had a list refused
+/// (logged once).
 pub(super) struct Renderer {
     renderer: Arc<dyn SectionGeometry>,
     failed: AtomicBool,
-    missing_sprite: AtomicBool,
+    refused: AtomicBool,
 }
 
 impl Renderer {
@@ -26,7 +26,7 @@ impl Renderer {
         Self {
             renderer,
             failed: AtomicBool::new(false),
-            missing_sprite: AtomicBool::new(false),
+            refused: AtomicBool::new(false),
         }
     }
     /// Whether it panicked, so that it is asked no more.
@@ -58,8 +58,15 @@ pub(super) fn registered() -> Arc<[Renderer]> {
     REGISTERED.get().cloned().unwrap_or_else(|| Arc::new([]))
 }
 
+/// The most quads one renderer may add to one section (the section-meshing design's per-section
+/// ceiling); a longer list is refused whole.
+const MAX_QUADS: usize = 262_144;
+/// How far outside its section a quad's corner may reach, in blocks: the one-block halo the
+/// section is meshed with.
+const HALO: f32 = 1.0;
+
 /// Asks every renderer for the quads of the section `tints` is set up for, and adds them to `out`
-/// after the section's own blocks.
+/// after the section's own blocks. A renderer's list is taken whole or refused whole.
 pub(super) fn add(mesher: &Mesher<'_>, tints: &mut Tints<'_>, out: &mut SectionMesh) {
     let [cx, cz, base_y] = tints.origin;
     let origin = [cx * 16, base_y, cz * 16];
@@ -81,27 +88,56 @@ pub(super) fn add(mesher: &Mesher<'_>, tints: &mut Tints<'_>, out: &mut SectionM
             }
             continue;
         };
-        for quad in &quads {
-            emit(mesher, renderer, quad, out);
+        match layers(mesher, &quads) {
+            Ok(layers) => {
+                for (quad, layer) in quads.iter().zip(layers) {
+                    emit(mesher, quad, layer, out);
+                }
+            }
+            Err(why) => {
+                if !renderer.refused.swap(true, Ordering::Relaxed) {
+                    log::warn!(
+                        "Horizon: section geometry for the section at {origin:?} was refused: {why}"
+                    );
+                }
+            }
         }
     }
 }
 
-/// `quad` as four section vertices in its pass, or nothing for a sprite the atlas lacks or a
-/// corner that is not a number.
-fn emit(mesher: &Mesher<'_>, renderer: &Renderer, quad: &SectionQuad, out: &mut SectionMesh) {
-    let Some(&layer) = mesher.render.sprite_layers.get(&quad.sprite) else {
-        if !renderer.missing_sprite.swap(true, Ordering::Relaxed) {
-            log::warn!(
-                "Horizon: section geometry names sprite {}, which the block atlas lacks",
-                quad.sprite
-            );
-        }
-        return;
-    };
-    if quad.positions.iter().flatten().any(|c| !c.is_finite()) {
-        return;
+/// Each quad's atlas layer, or why the whole list is refused: too many quads, a sprite the atlas
+/// lacks, or a corner or UV that is not a number or is out of range.
+fn layers(mesher: &Mesher<'_>, quads: &[SectionQuad]) -> Result<Vec<u16>, String> {
+    if quads.len() > MAX_QUADS {
+        return Err(format!("{} quads, more than {MAX_QUADS}", quads.len()));
     }
+    let corner = |c: &f32| c.is_finite() && (-HALO..=16.0 + HALO).contains(c);
+    let uv = |c: &f32| c.is_finite() && (0.0..=1.0).contains(c);
+    quads
+        .iter()
+        .map(|quad| {
+            if !quad.positions.iter().flatten().all(corner) {
+                return Err(format!(
+                    "a corner outside the section: {:?}",
+                    quad.positions
+                ));
+            }
+            if !quad.uvs.iter().flatten().all(uv) {
+                return Err(format!("a UV outside 0 to 1: {:?}", quad.uvs));
+            }
+            match mesher.render.sprite_layers.get(&quad.sprite) {
+                Some(&layer) => Ok(layer as u16),
+                None => Err(format!(
+                    "sprite {}, which the block atlas lacks",
+                    quad.sprite
+                )),
+            }
+        })
+        .collect()
+}
+
+/// `quad` as four section vertices in its pass, drawn with atlas `layer`.
+fn emit(mesher: &Mesher<'_>, quad: &SectionQuad, layer: u16, out: &mut SectionMesh) {
     let [a, r, g, b] = quad.color.to_be_bytes().map(u32::from);
     let color = r | g << 8 | b << 16 | a << 24;
     let [sky, block] = quad.light.map(|l| u16::from(l.min(15)) * 16);
@@ -110,7 +146,7 @@ fn emit(mesher: &Mesher<'_>, renderer: &Renderer, quad: &SectionQuad, out: &mut 
         TerrainVertex::new(quad.positions[i], quad.uvs[i], 0, color, light)
     });
     let tile = TileLayer::Layer {
-        layer: layer as u16,
+        layer,
         translucent: quad.translucent,
         opaque: false,
     };

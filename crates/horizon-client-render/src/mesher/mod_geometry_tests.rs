@@ -5,9 +5,8 @@ use horizon_assets::resource_source::ResourceRoot;
 use mod_api::{BlockAndTintGetter, LightLayer, SectionGeometry, SectionQuad};
 use std::sync::Mutex;
 
-/// Puts one gold quad on top of every stone block at section-local (2, 4, 2), another in the
-/// translucent pass in every section, and one naming a sprite the atlas lacks; records each
-/// section it is asked for.
+/// Puts one gold quad on top of every stone block at section-local (2, 4, 2) and another in the
+/// translucent pass in every section; records each section it is asked for.
 struct Markers {
     asked: Mutex<Vec<[i32; 3]>>,
 }
@@ -27,15 +26,30 @@ impl SectionGeometry for Markers {
     fn add(&self, origin: [i32; 3], level: &dyn BlockAndTintGetter) -> Vec<SectionQuad> {
         self.asked.lock().unwrap().push(origin);
         let below = [origin[0] + 2, origin[1] + 4, origin[2] + 2];
-        let mut quads = vec![
-            quad(8.0, "minecraft:block/glass", true, [15, 0]),
-            quad(9.0, "missing:block/nothing", false, [15, 0]),
-        ];
+        let mut quads = vec![quad(8.0, "minecraft:block/glass", true, [15, 0])];
         if level.block_state(below) != level.block_state([origin[0], origin[1] + 15, origin[2]]) {
             let sky = level.brightness(LightLayer::Sky, below) as u8;
             quads.push(quad(5.01, "minecraft:block/gold_block", false, [sky, 3]));
         }
         quads
+    }
+}
+
+/// A good gold quad beside one naming a sprite the atlas lacks, or one with a corner that is not
+/// a number: the whole list is refused.
+struct Refused(f32);
+impl SectionGeometry for Refused {
+    fn add(&self, _: [i32; 3], _: &dyn BlockAndTintGetter) -> Vec<SectionQuad> {
+        let mut bad = quad(12.0, "minecraft:block/gold_block", false, [15, 0]);
+        if self.0.is_finite() {
+            bad.sprite = "missing:block/nothing".into();
+        } else {
+            bad.positions[1][0] = self.0;
+        }
+        vec![
+            quad(12.0, "minecraft:block/gold_block", false, [15, 0]),
+            bad,
+        ]
     }
 }
 
@@ -73,6 +87,8 @@ fn mod_quads_join_the_section_mesh_once_per_mesh_and_in_their_pass() {
     });
     tables.section_geometry = Arc::new([
         Renderer::new(Arc::new(Panics)),
+        Renderer::new(Arc::new(Refused(0.0))),
+        Renderer::new(Arc::new(Refused(f32::NAN))),
         Renderer::new(markers.clone()),
     ]);
     tables.mod_tints.values = Some(tint_values(assets.registry));
@@ -105,7 +121,11 @@ fn mod_quads_join_the_section_mesh_once_per_mesh_and_in_their_pass() {
     let mut scratch = MeshScratch::default();
     let first = mesher.mesh_reusing(&region, 0, SectionMesh::default(), &mut scratch);
     let solid = drawn_with(&first.solid, gold);
-    assert_eq!(solid.len(), 4, "one gold quad over the stone");
+    assert_eq!(
+        solid.len(),
+        4,
+        "one gold quad over the stone, none from the refused lists"
+    );
     assert!(solid.iter().all(|v| v.pos[1] == 5.01));
     assert!(
         solid.iter().all(|v| v.color == 0xFF60_4020),

@@ -13,7 +13,9 @@ pub trait SectionGeometry: Send + Sync + 'static {
     /// `render(context)`: the quads of the section whose lowest corner is block `origin` (a
     /// multiple of 16 on each axis). `level` reads the section's chunk and its eight neighbours.
     /// Asked on a meshing worker every time that section meshes, also when it holds only air; a
-    /// section the renderer has nothing for gets an empty list.
+    /// section the renderer has nothing for gets an empty list. The list is taken whole or refused
+    /// whole, logged once: more than 262144 quads, a corner or UV out of range or not a number, or
+    /// a sprite the atlas lacks refuses it. A renderer that panics is asked no more.
     fn add(&self, origin: [i32; 3], level: &dyn BlockAndTintGetter) -> Vec<SectionQuad>;
 }
 
@@ -23,12 +25,13 @@ pub trait SectionGeometry: Send + Sync + 'static {
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: mods build quads with struct literals
 pub struct SectionQuad {
-    /// The corners, in blocks from the section's lowest corner (0 to 16 inside the section).
+    /// The corners, in blocks from the section's lowest corner: 0 to 16 inside the section, and at
+    /// most one block outside it.
     pub positions: [[f32; 3]; 4],
     /// Each corner's texture coordinate within the sprite, 0 to 1.
     pub uvs: [[f32; 2]; 4],
     /// The block atlas sprite the quad draws, `minecraft:block/stone` or a mod's
-    /// `mymod:block/glow`. A sprite the atlas lacks is logged once and the quad is left out.
+    /// `mymod:block/glow`.
     pub sprite: String,
     /// ARGB the sprite's texels are multiplied by; `0xFFFFFFFF` leaves them as they are.
     pub color: u32,
