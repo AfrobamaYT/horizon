@@ -3123,6 +3123,18 @@ impl NativeDifficulty {
     pub fn new(base: u8, effective: f32) -> Self {
         Self { base, effective }
     }
+    /// `DifficultyInstance.getSpecialMultiplier`: 0 below an effective difficulty of 2, 1
+    /// above 4, and rising in a straight line between them. Mobs read it for their chance to
+    /// pick up loot, a zombie's reinforcements and a skeleton's enchanted bow.
+    pub fn special_multiplier(&self) -> f32 {
+        if self.effective < 2.0 {
+            0.0
+        } else if self.effective > 4.0 {
+            1.0
+        } else {
+            (self.effective - 2.0) / 2.0
+        }
+    }
 }
 
 /// What spawned a mob, where `EntitySpawnReason` alone does not say (`FinalizeSpawnEvent.getSpawner`).
