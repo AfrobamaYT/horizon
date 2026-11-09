@@ -2471,11 +2471,11 @@ impl Menu {
 }
 
 /// `ItemStack.getMaxStackSize`: the stack's component, else the item's; a removed
-/// component (`!minecraft:max_stack_size`) falls back to the item.
+/// component (`!minecraft:max_stack_size`) uses vanilla's fallback of one.
 pub(crate) fn item_max_stack(items: &Items, stack: &ItemStack) -> u32 {
     let patched = stack.data().and_then(|d| {
         if d.other("!minecraft:max_stack_size").is_some() {
-            return None;
+            return Some(1);
         }
         match d.other("minecraft:max_stack_size") {
             Some(horizon_core::nbt::Tag::Int(n)) if (1..=99).contains(n) => Some(*n as u32),
