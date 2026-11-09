@@ -1,5 +1,23 @@
 use super::*;
 
+// Other libtest threads can fork while Cleanup holds its exclusive gate. Keep
+// these lifetime assertions in a process with no unrelated descriptor owners.
+fn isolated() -> bool {
+    if std::env::var_os("RUNTIME_CLEANUP_ISOLATED").is_some() {
+        return false;
+    }
+    let test = std::thread::current().name().unwrap().to_owned();
+    assert!(
+        std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &test, "--nocapture"])
+            .env("RUNTIME_CLEANUP_ISOLATED", "1")
+            .status()
+            .unwrap()
+            .success()
+    );
+    true
+}
+
 fn setup() -> (tempfile::TempDir, Arc<Registry>) {
     let root = tempfile::tempdir().unwrap();
     let registry = Registry::with_release(root.path(), Release::Unlock).unwrap();
@@ -14,6 +32,9 @@ fn populate(registry: &Registry, count: usize) {
 
 #[test]
 fn boundaries_and_permanent_gate() {
+    if isolated() {
+        return;
+    }
     for count in [4095, 4096, 4097] {
         let (root, registry) = setup();
         populate(&registry, count);
@@ -44,6 +65,9 @@ fn boundaries_and_permanent_gate() {
 
 #[test]
 fn every_claim_owner_holds_the_gate_until_its_last_reference() {
+    if isolated() {
+        return;
+    }
     for mode in [LockMode::Shared, LockMode::Exclusive] {
         let (root, registry) = setup();
         let tree = open_directory(root.path()).unwrap();
@@ -67,6 +91,9 @@ fn every_claim_owner_holds_the_gate_until_its_last_reference() {
 
 #[test]
 fn unknown_entries_never_count_or_disappear() {
+    if isolated() {
+        return;
+    }
     let (root, registry) = setup();
     populate(&registry, 4095);
     let odd = [
@@ -93,6 +120,9 @@ fn unknown_entries_never_count_or_disappear() {
 
 #[test]
 fn existing_never_creates_missing_namespace_or_gate() {
+    if isolated() {
+        return;
+    }
     let root = tempfile::tempdir().unwrap();
     assert!(Cleanup::existing(root.path()).is_err());
     assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
@@ -109,6 +139,9 @@ fn existing_never_creates_missing_namespace_or_gate() {
 #[cfg(unix)]
 #[test]
 fn redirects_and_hardlinks_are_retained() {
+    if isolated() {
+        return;
+    }
     use std::os::unix::fs::symlink;
     let (root, registry) = setup();
     populate(&registry, 4096);
@@ -137,6 +170,9 @@ fn redirects_and_hardlinks_are_retained() {
 #[cfg(windows)]
 #[test]
 fn windows_open_reader_blocks_exclusive_gate_and_collection_shares_no_gate() {
+    if isolated() {
+        return;
+    }
     let (root, registry) = setup();
     let reader = initialize_lock(&registry.directory, "gate");
     assert!(reader.is_err()); // permanent gate is never recreated
