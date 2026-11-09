@@ -8,8 +8,19 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub mod eviction;
 mod inventory;
+pub mod policy;
 pub use inventory::{Report, Row};
+
+/// Shared with the launcher's existing server storage display.
+pub fn format_bytes(n: u64) -> String {
+    match n {
+        0..1_000_000 => format!("{} kB", n.div_ceil(1000)),
+        1_000_000..1_000_000_000 => format!("{:.1} MB", n as f64 / 1e6),
+        _ => format!("{:.2} GB", n as f64 / 1e9),
+    }
+}
 
 /// The five rows on the Storage page.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, clap::ValueEnum)]
@@ -20,6 +31,61 @@ pub enum Category {
     SpareGameBuilds,
     RustCompiler,
     OtherCaches,
+}
+
+/// Stamp a used cache unit through no-follow capabilities, not a path-following write.
+pub(crate) fn mark_used(path: &Path) -> Result<(), Error> {
+    use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
+    let Some(meta) = checked(path, path.is_dir())? else {
+        return Ok(());
+    };
+    #[cfg(not(windows))]
+    if path.canonicalize()? != path {
+        return Err(Error::Unsafe(path.to_owned()));
+    }
+    #[cfg(windows)]
+    for ancestor in path
+        .ancestors()
+        .skip(1)
+        .filter(|path| path.parent().is_some())
+    {
+        checked(ancestor, true)?;
+    }
+    let (folder, stamp) = if meta.is_dir() {
+        (path, std::ffi::OsString::from(".last-used"))
+    } else {
+        let name = path
+            .file_name()
+            .ok_or_else(|| Error::Unsafe(path.to_owned()))?;
+        let mut stamp = std::ffi::OsString::from(".");
+        stamp.push(name);
+        stamp.push(".last-used");
+        (
+            path.parent()
+                .ok_or_else(|| Error::Unsafe(path.to_owned()))?,
+            stamp,
+        )
+    };
+    let anchor = folder
+        .ancestors()
+        .last()
+        .ok_or_else(|| Error::Unsafe(path.to_owned()))?;
+    let mut directory = Dir::open_ambient_dir(anchor, cap_std::ambient_authority())?;
+    for part in folder
+        .strip_prefix(anchor)
+        .map_err(|_| Error::Unsafe(path.to_owned()))?
+        .components()
+    {
+        directory = directory.open_dir_nofollow(part.as_os_str())?;
+    }
+    let mut options = cap_std::fs::OpenOptions::new();
+    options
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .follow(FollowSymlinks::No);
+    directory.open_with(stamp, &options)?;
+    Ok(())
 }
 
 /// Fixed build-home caches. Instance and version inventory adds its protected entries separately.

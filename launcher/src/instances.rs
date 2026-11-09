@@ -423,6 +423,7 @@ pub fn delete_with_selection(query: &str) -> Result<(Instance, Result<(), String
     } else {
         Ok(())
     };
+    crate::storage::eviction::request_cleanup();
     Ok((gone, saved))
 }
 

@@ -206,6 +206,7 @@ pub(super) fn fetch(
     let name = native::prebuilt_archive(host.target, matches!(target, Target::Server));
     let dir = cache_dir(revision, &name);
     if dir.join(IDENTITY).is_file() {
+        crate::storage::mark_used(&dir).map_err(super::cache_error)?;
         return Ok(Ok(dir));
     }
     let release = release_url(revision);
@@ -271,6 +272,7 @@ pub(super) fn fetch(
     fs::rename(&unpacked, &dir).map_err(|e| e.to_string())?;
     crate::run_leases::publish(&dir).map_err(super::cache_error)?;
     let _ = fs::remove_dir_all(&partial);
+    crate::storage::mark_used(&dir).map_err(super::cache_error)?;
     Ok(Ok(dir))
 }
 
@@ -339,6 +341,9 @@ pub(super) fn planning_catalog(
     let game = cache_dir(revision, &name);
     if game.join(IDENTITY).is_file() {
         if let Ok(catalog) = internals::Catalog::read(&game) {
+            crate::storage::mark_used(&game).map_err(|error| SourceReason::Download {
+                why: super::cache_error(error),
+            })?;
             return Ok(catalog);
         }
     }
@@ -349,6 +354,7 @@ pub(super) fn planning_catalog(
     let directory = lease
         .directory(&["internals-sync", &unit])
         .map_err(|error| download(super::cache_error(error)))?;
+    crate::storage::mark_used(&cache).map_err(|error| download(super::cache_error(error)))?;
     catalog_pair(&directory, &cache, &name, &expected, || {
         crate::backend::get(&format!("{}/{name}", release_url(revision)))
             .map_err(download)
