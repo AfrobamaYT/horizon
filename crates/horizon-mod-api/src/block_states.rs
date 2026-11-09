@@ -9,6 +9,7 @@ use super::{
 /// One property and its legal values in a state definition.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct StateProperty {
     /// Property name.
     pub name: String,
@@ -26,6 +27,7 @@ impl StateProperty {
 /// A property constraint used when matching a state.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct StateConstraint {
     /// Property name.
     pub name: String,
@@ -46,6 +48,7 @@ impl StateConstraint {
 /// An invalid constraint, identifying its index in the supplied list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum StateMatchError {
     /// The definition has no such property.
     UnknownProperty(u32),

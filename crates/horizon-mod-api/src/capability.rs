@@ -24,6 +24,7 @@ pub struct CapabilityKey<T: ?Sized + 'static> {
 /// reached through (none: from no particular side): NeoForge's block capability context.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct BlockSide {
     /// The level.
     pub level: LevelRef,

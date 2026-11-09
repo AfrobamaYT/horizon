@@ -14,6 +14,7 @@ use std::sync::Arc;
 /// `register_color_resolvers`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: the game blends every resolver, so a new one must be handled there
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum ColorResolver {
     /// `BiomeColors.GRASS_COLOR_RESOLVER`: `Biome.getGrassColor`.
     Grass,
@@ -50,6 +51,7 @@ pub fn mod_color_resolver_index(resolver: ModColorResolver) -> u32 {
 /// A biome as a colour resolver reads it: vanilla's `Biome` in `ColorResolver.getColor`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct ResolverBiome {
     /// `Biome.getBaseTemperature`.
     pub temperature: f32,
@@ -171,6 +173,7 @@ pub trait BlockTintSource: Send + Sync + 'static {
 /// One of vanilla's tint sources (`BlockTintSources`), as the game colours its own blocks with it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: vanilla's closed set, each evaluated by the game
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum VanillaTint {
     /// `constant(color)`: one ARGB colour everywhere.
     Constant(u32),
@@ -206,6 +209,7 @@ pub enum VanillaTint {
 /// One layer of a block's tint list: one of vanilla's sources or a mod's own.
 #[derive(Clone)]
 // exhaustive: mods build one; the game evaluates both kinds
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum TintLayer {
     /// A vanilla source, evaluated by the game as for its own blocks.
     Vanilla(VanillaTint),

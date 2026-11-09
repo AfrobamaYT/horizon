@@ -816,6 +816,7 @@ impl Wire for crate::BiomeId {
     }
 }
 impl Wire for crate::ModColorResolver {
+    const LAYOUT_SEED: u64 = crate::wire::layout_name("ModColorResolver");
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
         out.put(&self.0);
@@ -1278,5 +1279,504 @@ mod depth_tests {
             let mut reader = Reader::new(out.bytes());
             assert!(reader.take::<Tag>().is_ok_and(|read| read == tag));
         }
+    }
+}
+
+// Re-exported types cannot carry a local derive. Keep their encoding explicit here.
+impl crate::wire::Wire for crate::Tag {
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::Tag));
+    const MIN: usize = 4;
+    fn put(&self, out: &mut crate::wire::Writer) {
+        match self {
+            Self::End => out.put(&0u32),
+            Self::Byte(f0) => {
+                out.put(&1u32);
+                out.put(f0);
+            }
+            Self::Short(f0) => {
+                out.put(&2u32);
+                out.put(f0);
+            }
+            Self::Int(f0) => {
+                out.put(&3u32);
+                out.put(f0);
+            }
+            Self::Long(f0) => {
+                out.put(&4u32);
+                out.put(f0);
+            }
+            Self::Float(f0) => {
+                out.put(&5u32);
+                out.put(f0);
+            }
+            Self::Double(f0) => {
+                out.put(&6u32);
+                out.put(f0);
+            }
+            Self::ByteArray(f0) => {
+                out.put(&7u32);
+                out.put(f0);
+            }
+            Self::String(f0) => {
+                out.put(&8u32);
+                out.put(f0);
+            }
+            Self::List(f0) => {
+                out.put(&9u32);
+                out.put(f0);
+            }
+            Self::Compound(f0) => {
+                out.put(&10u32);
+                out.put(f0);
+            }
+            Self::IntArray(f0) => {
+                out.put(&11u32);
+                out.put(f0);
+            }
+            Self::LongArray(f0) => {
+                out.put(&12u32);
+                out.put(f0);
+            }
+            _ => unreachable!("every case was read from the enum's source"),
+        }
+    }
+    fn put_owned(self, out: &mut crate::wire::Writer) {
+        match self {
+            Self::End => out.put_owned(0u32),
+            Self::Byte(f0) => {
+                out.put_owned(1u32);
+                out.put_owned(f0);
+            }
+            Self::Short(f0) => {
+                out.put_owned(2u32);
+                out.put_owned(f0);
+            }
+            Self::Int(f0) => {
+                out.put_owned(3u32);
+                out.put_owned(f0);
+            }
+            Self::Long(f0) => {
+                out.put_owned(4u32);
+                out.put_owned(f0);
+            }
+            Self::Float(f0) => {
+                out.put_owned(5u32);
+                out.put_owned(f0);
+            }
+            Self::Double(f0) => {
+                out.put_owned(6u32);
+                out.put_owned(f0);
+            }
+            Self::ByteArray(f0) => {
+                out.put_owned(7u32);
+                out.put_owned(f0);
+            }
+            Self::String(f0) => {
+                out.put_owned(8u32);
+                out.put_owned(f0);
+            }
+            Self::List(f0) => {
+                out.put_owned(9u32);
+                out.put_owned(f0);
+            }
+            Self::Compound(f0) => {
+                out.put_owned(10u32);
+                out.put_owned(f0);
+            }
+            Self::IntArray(f0) => {
+                out.put_owned(11u32);
+                out.put_owned(f0);
+            }
+            Self::LongArray(f0) => {
+                out.put_owned(12u32);
+                out.put_owned(f0);
+            }
+            _ => unreachable!(),
+        }
+    }
+    fn take(
+        input: &mut crate::wire::Reader<'_>,
+    ) -> ::std::result::Result<Self, crate::wire::WireError> {
+        input.nested(|input| {
+            Ok(match input.take::<u32>()? {
+                0 => Self::End,
+                1 => Self::Byte(input.take()?),
+                2 => Self::Short(input.take()?),
+                3 => Self::Int(input.take()?),
+                4 => Self::Long(input.take()?),
+                5 => Self::Float(input.take()?),
+                6 => Self::Double(input.take()?),
+                7 => Self::ByteArray(input.take()?),
+                8 => Self::String(input.take()?),
+                9 => Self::List(input.take()?),
+                10 => Self::Compound(input.take()?),
+                11 => Self::IntArray(input.take()?),
+                12 => Self::LongArray(input.take()?),
+                tag => return Err(crate::wire::WireError::Tag(tag)),
+            })
+        })
+    }
+}
+impl crate::wire::Wire for serde_json::Value {
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(serde_json::Value));
+    const MIN: usize = 4;
+    fn put(&self, out: &mut crate::wire::Writer) {
+        out.put_str(&::serde_json::to_string(self).unwrap_or_default());
+    }
+    fn take(
+        input: &mut crate::wire::Reader<'_>,
+    ) -> ::std::result::Result<Self, crate::wire::WireError> {
+        let text: ::std::string::String = input.take()?;
+        ::serde_json::from_str(&text)
+            .map_err(|_| crate::wire::WireError::Invalid("not valid JSON for its type"))
+    }
+}
+impl crate::wire::Wire for crate::Direction {
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::Direction));
+    const MIN: usize = 4;
+    fn put(&self, out: &mut crate::wire::Writer) {
+        out.put(&match self {
+            Self::Down => 0u32,
+            Self::Up => 1u32,
+            Self::North => 2u32,
+            Self::South => 3u32,
+            Self::West => 4u32,
+            Self::East => 5u32,
+            _ => unreachable!("every case was read from the enum's source"),
+        });
+    }
+    fn take(
+        input: &mut crate::wire::Reader<'_>,
+    ) -> ::std::result::Result<Self, crate::wire::WireError> {
+        Ok(match input.take::<u32>()? {
+            0 => Self::Down,
+            1 => Self::Up,
+            2 => Self::North,
+            3 => Self::South,
+            4 => Self::West,
+            5 => Self::East,
+            tag => return Err(crate::wire::WireError::Tag(tag)),
+        })
+    }
+}
+impl crate::wire::Wire for crate::BlockPos {
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::BlockPos));
+    const MIN: usize = <i32 as crate::wire::Wire>::MIN
+        + <i32 as crate::wire::Wire>::MIN
+        + <i32 as crate::wire::Wire>::MIN;
+    fn put(&self, out: &mut crate::wire::Writer) {
+        out.put(&self.x);
+        out.put(&self.y);
+        out.put(&self.z);
+    }
+    fn put_owned(self, out: &mut crate::wire::Writer) {
+        out.put_owned(self.x);
+        out.put_owned(self.y);
+        out.put_owned(self.z);
+    }
+    fn take(
+        input: &mut crate::wire::Reader<'_>,
+    ) -> ::std::result::Result<Self, crate::wire::WireError> {
+        input.nested(|input| {
+            Ok(Self {
+                x: input.take()?,
+                y: input.take()?,
+                z: input.take()?,
+            })
+        })
+    }
+}
+impl crate::wire::Wire for crate::EquipmentSlot {
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::EquipmentSlot));
+    const MIN: usize = 4;
+    fn put(&self, out: &mut crate::wire::Writer) {
+        out.put(&match self {
+            Self::MainHand => 0u32,
+            Self::OffHand => 1u32,
+            Self::Feet => 2u32,
+            Self::Legs => 3u32,
+            Self::Chest => 4u32,
+            Self::Head => 5u32,
+            Self::Body => 6u32,
+            Self::Saddle => 7u32,
+            _ => unreachable!("every case was read from the enum's source"),
+        });
+    }
+    fn take(
+        input: &mut crate::wire::Reader<'_>,
+    ) -> ::std::result::Result<Self, crate::wire::WireError> {
+        Ok(match input.take::<u32>()? {
+            0 => Self::MainHand,
+            1 => Self::OffHand,
+            2 => Self::Feet,
+            3 => Self::Legs,
+            4 => Self::Chest,
+            5 => Self::Head,
+            6 => Self::Body,
+            7 => Self::Saddle,
+            tag => return Err(crate::wire::WireError::Tag(tag)),
+        })
+    }
+}
+impl crate::wire::Wire for crate::GameMode {
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::GameMode));
+    const MIN: usize = 4;
+    fn put(&self, out: &mut crate::wire::Writer) {
+        out.put(&match self {
+            Self::Survival => 0u32,
+            Self::Creative => 1u32,
+            Self::Adventure => 2u32,
+            Self::Spectator => 3u32,
+            _ => unreachable!("every case was read from the enum's source"),
+        });
+    }
+    fn take(
+        input: &mut crate::wire::Reader<'_>,
+    ) -> ::std::result::Result<Self, crate::wire::WireError> {
+        Ok(match input.take::<u32>()? {
+            0 => Self::Survival,
+            1 => Self::Creative,
+            2 => Self::Adventure,
+            3 => Self::Spectator,
+            tag => return Err(crate::wire::WireError::Tag(tag)),
+        })
+    }
+}
+impl crate::wire::Wire for crate::NeighbourUpdate {
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::NeighbourUpdate));
+    const MIN: usize = 4;
+    fn put(&self, out: &mut crate::wire::Writer) {
+        match self {
+            Self::OutputSignal => out.put(&0u32),
+            Self::Neighbours => out.put(&1u32),
+            Self::NeighboursExcept(f0) => {
+                out.put(&2u32);
+                out.put(f0);
+            }
+            _ => unreachable!("every case was read from the enum's source"),
+        }
+    }
+    fn put_owned(self, out: &mut crate::wire::Writer) {
+        match self {
+            Self::OutputSignal => out.put_owned(0u32),
+            Self::Neighbours => out.put_owned(1u32),
+            Self::NeighboursExcept(f0) => {
+                out.put_owned(2u32);
+                out.put_owned(f0);
+            }
+            _ => unreachable!(),
+        }
+    }
+    fn take(
+        input: &mut crate::wire::Reader<'_>,
+    ) -> ::std::result::Result<Self, crate::wire::WireError> {
+        input.nested(|input| {
+            Ok(match input.take::<u32>()? {
+                0 => Self::OutputSignal,
+                1 => Self::Neighbours,
+                2 => Self::NeighboursExcept(input.take()?),
+                tag => return Err(crate::wire::WireError::Tag(tag)),
+            })
+        })
+    }
+}
+impl crate::wire::Wire for crate::ChunkPos {
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::ChunkPos));
+    const MIN: usize = <i32 as crate::wire::Wire>::MIN + <i32 as crate::wire::Wire>::MIN;
+    fn put(&self, out: &mut crate::wire::Writer) {
+        out.put(&self.x);
+        out.put(&self.z);
+    }
+    fn put_owned(self, out: &mut crate::wire::Writer) {
+        out.put_owned(self.x);
+        out.put_owned(self.z);
+    }
+    fn take(
+        input: &mut crate::wire::Reader<'_>,
+    ) -> ::std::result::Result<Self, crate::wire::WireError> {
+        input.nested(|input| {
+            Ok(Self {
+                x: input.take()?,
+                z: input.take()?,
+            })
+        })
+    }
+}
+impl crate::wire::Wire for crate::BoundingBox {
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::BoundingBox));
+    const MIN: usize = <[i32; 3] as crate::wire::Wire>::MIN + <[i32; 3] as crate::wire::Wire>::MIN;
+    fn put(&self, out: &mut crate::wire::Writer) {
+        out.put(&self.min);
+        out.put(&self.max);
+    }
+    fn put_owned(self, out: &mut crate::wire::Writer) {
+        out.put_owned(self.min);
+        out.put_owned(self.max);
+    }
+    fn take(
+        input: &mut crate::wire::Reader<'_>,
+    ) -> ::std::result::Result<Self, crate::wire::WireError> {
+        input.nested(|input| {
+            Ok(Self {
+                min: input.take()?,
+                max: input.take()?,
+            })
+        })
+    }
+}
+impl crate::wire::Wire for crate::LevelDimension {
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::LevelDimension));
+    const MIN: usize = 4;
+    fn put(&self, out: &mut crate::wire::Writer) {
+        match self {
+            Self::Overworld => out.put(&0u32),
+            Self::Nether => out.put(&1u32),
+            Self::End => out.put(&2u32),
+            Self::Custom(f0) => {
+                out.put(&3u32);
+                out.put(f0);
+            }
+            _ => unreachable!("every case was read from the enum's source"),
+        }
+    }
+    fn put_owned(self, out: &mut crate::wire::Writer) {
+        match self {
+            Self::Overworld => out.put_owned(0u32),
+            Self::Nether => out.put_owned(1u32),
+            Self::End => out.put_owned(2u32),
+            Self::Custom(f0) => {
+                out.put_owned(3u32);
+                out.put_owned(f0);
+            }
+            _ => unreachable!(),
+        }
+    }
+    fn take(
+        input: &mut crate::wire::Reader<'_>,
+    ) -> ::std::result::Result<Self, crate::wire::WireError> {
+        input.nested(|input| {
+            Ok(match input.take::<u32>()? {
+                0 => Self::Overworld,
+                1 => Self::Nether,
+                2 => Self::End,
+                3 => Self::Custom(input.take()?),
+                tag => return Err(crate::wire::WireError::Tag(tag)),
+            })
+        })
+    }
+}
+impl crate::wire::Wire for serde_json::Map<String, serde_json::Value> {
+    const LAYOUT_SEED: u64 =
+        crate::wire::layout_name(stringify!(serde_json::Map<String, serde_json::Value>));
+    const MIN: usize = 4;
+    fn put(&self, out: &mut crate::wire::Writer) {
+        out.put_str(&::serde_json::to_string(self).unwrap_or_default());
+    }
+    fn take(
+        input: &mut crate::wire::Reader<'_>,
+    ) -> ::std::result::Result<Self, crate::wire::WireError> {
+        let text: ::std::string::String = input.take()?;
+        ::serde_json::from_str(&text)
+            .map_err(|_| crate::wire::WireError::Invalid("not valid JSON for its type"))
+    }
+}
+impl crate::wire::Wire for crate::ArmPose {
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::ArmPose));
+    const MIN: usize = 4;
+    fn put(&self, out: &mut crate::wire::Writer) {
+        out.put(&match self {
+            Self::Empty => 0u32,
+            Self::Item => 1u32,
+            Self::Block => 2u32,
+            Self::Bow => 3u32,
+            Self::CrossbowHold => 4u32,
+            Self::CrossbowCharge => 5u32,
+            Self::ThrowTrident => 6u32,
+            Self::TootHorn => 7u32,
+            Self::Spyglass => 8u32,
+            Self::Spear => 9u32,
+            Self::Brush => 10u32,
+            _ => unreachable!("every case was read from the enum's source"),
+        });
+    }
+    fn take(
+        input: &mut crate::wire::Reader<'_>,
+    ) -> ::std::result::Result<Self, crate::wire::WireError> {
+        Ok(match input.take::<u32>()? {
+            0 => Self::Empty,
+            1 => Self::Item,
+            2 => Self::Block,
+            3 => Self::Bow,
+            4 => Self::CrossbowHold,
+            5 => Self::CrossbowCharge,
+            6 => Self::ThrowTrident,
+            7 => Self::TootHorn,
+            8 => Self::Spyglass,
+            9 => Self::Spear,
+            10 => Self::Brush,
+            tag => return Err(crate::wire::WireError::Tag(tag)),
+        })
+    }
+}
+impl crate::wire::Wire for crate::UseAnimation {
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::UseAnimation));
+    const MIN: usize = 4;
+    fn put(&self, out: &mut crate::wire::Writer) {
+        out.put(&match self {
+            Self::None => 0u32,
+            Self::Eat => 1u32,
+            Self::Drink => 2u32,
+            Self::Block => 3u32,
+            Self::Bow => 4u32,
+            Self::Trident => 5u32,
+            Self::Crossbow => 6u32,
+            Self::Spyglass => 7u32,
+            Self::TootHorn => 8u32,
+            Self::Brush => 9u32,
+            Self::Bundle => 10u32,
+            Self::Spear => 11u32,
+            _ => unreachable!("every case was read from the enum's source"),
+        });
+    }
+    fn take(
+        input: &mut crate::wire::Reader<'_>,
+    ) -> ::std::result::Result<Self, crate::wire::WireError> {
+        Ok(match input.take::<u32>()? {
+            0 => Self::None,
+            1 => Self::Eat,
+            2 => Self::Drink,
+            3 => Self::Block,
+            4 => Self::Bow,
+            5 => Self::Trident,
+            6 => Self::Crossbow,
+            7 => Self::Spyglass,
+            8 => Self::TootHorn,
+            9 => Self::Brush,
+            10 => Self::Bundle,
+            11 => Self::Spear,
+            tag => return Err(crate::wire::WireError::Tag(tag)),
+        })
+    }
+}
+impl crate::wire::Wire for crate::ConnectionKind {
+    const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(crate::ConnectionKind));
+    const MIN: usize = 4;
+    fn put(&self, out: &mut crate::wire::Writer) {
+        out.put(&match self {
+            Self::Fence => 0u32,
+            Self::Wall => 1u32,
+            Self::Bars => 2u32,
+            _ => unreachable!("every case was read from the enum's source"),
+        });
+    }
+    fn take(
+        input: &mut crate::wire::Reader<'_>,
+    ) -> ::std::result::Result<Self, crate::wire::WireError> {
+        Ok(match input.take::<u32>()? {
+            0 => Self::Fence,
+            1 => Self::Wall,
+            2 => Self::Bars,
+            tag => return Err(crate::wire::WireError::Tag(tag)),
+        })
     }
 }

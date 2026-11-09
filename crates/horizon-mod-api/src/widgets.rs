@@ -209,6 +209,7 @@ impl TextField {
 /// filled in by [`Widgets`].
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct TextFieldView {
     /// Where it is, `[x, y, width, height]` in GUI pixels.
     pub rect: [f32; 4],
@@ -241,6 +242,7 @@ pub struct TextFieldView {
 /// text to its end, so a press maps to the character it is on.
 #[derive(Clone, Debug, PartialEq, Default)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct TextFieldLayout {
     /// The first character shown.
     pub scroll: usize,

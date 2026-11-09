@@ -28,6 +28,7 @@ pub struct ModTicket {
 /// The chunks one owner holds, the two kinds apart (NeoForge's `TicketSet`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct TicketSet {
     /// Chunks held without natural spawning.
     pub non_natural_spawning: Vec<[i32; 2]>,

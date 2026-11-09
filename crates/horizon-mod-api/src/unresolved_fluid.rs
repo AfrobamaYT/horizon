@@ -8,6 +8,7 @@ use std::{
 /// A registered fluid, or an opaque retained name from unavailable content.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum FluidIdentity {
     /// A registered fluid.
     Resolved(FluidKey),

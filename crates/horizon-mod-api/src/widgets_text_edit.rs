@@ -7,6 +7,7 @@
 /// (`EditBox.value`, `cursorPos`, `highlightPos`, `maxLength`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct TextEdit {
     /// The text.
     pub value: String,

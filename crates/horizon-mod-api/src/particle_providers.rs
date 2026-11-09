@@ -13,6 +13,7 @@ use std::{collections::BTreeMap, sync::Arc};
 /// native and wasm mods alike.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it for each tick and a mod only edits its fields
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct ModParticle {
     /// `Particle.x/y/z`: the position now. A tick moves the particle by writing it.
     pub position: [f64; 3],

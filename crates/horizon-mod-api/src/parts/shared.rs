@@ -119,6 +119,7 @@ pub struct HookParts {
 // exhaustive: the three kinds of thing a capability is asked of
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug)]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum ProvidedBy {
     BlockEntity,
     Item,

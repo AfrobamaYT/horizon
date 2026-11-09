@@ -362,6 +362,7 @@ struct PartNode {
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
 #[serde(try_from = "MeshDefinitionData")]
 // exhaustive: private fields; use the builder to create the tree
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct MeshDefinition {
     parts: Vec<PartNode>,
 }
@@ -467,6 +468,7 @@ impl MeshDefinition {
 /// `LayerDefinition`: a mesh and the size of the texture its boxes are on.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct LayerDefinition {
     /// The model mesh to bake.
     pub mesh: MeshDefinition,
@@ -536,6 +538,7 @@ impl ModelPolygon {
 /// with (`reset_pose`).
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct ModelPart {
     /// Where it sits in its parent, in texels.
     pub x: f32,

@@ -14,6 +14,7 @@ use std::{fmt, marker::PhantomData};
 /// `minecraft:potion_contents`). Water and lava have none.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct FluidStack {
     /// The fluid.
     pub fluid: FluidIdentity,

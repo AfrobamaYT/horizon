@@ -180,6 +180,7 @@ pub struct HurtSource<'a> {
 /// `HURT_SERVER`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct Victim {
     pub position: [f64; 3],
     pub view: [f64; 3],
@@ -188,6 +189,7 @@ pub struct Victim {
 /// may change it (`LivingShieldBlockEvent`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct ShieldBlock {
     /// The player counts as blocking.
     /// The damage sequence's `blocked` value.

@@ -10,6 +10,7 @@ use crate::BlockState;
 /// not between writes (a preceding write may itself change the block).
 // exhaustive: the closed serialized write vocabulary and case order are a link contract.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum LandingWrite {
     /// `Level.setBlockAndUpdate(pos, state)`, notifying neighbors and clients.
     SetBlock(BlockState),

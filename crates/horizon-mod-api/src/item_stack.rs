@@ -63,6 +63,7 @@ pub struct ItemStack {
 /// A stack operation could not represent the requested count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum StackError {
     /// Empty stacks are represented by `None`, not by a zero-count item.
     Empty,
@@ -88,6 +89,7 @@ impl std::error::Error for StackError {}
 /// Why the game refused to accept an owned stack at a write boundary.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum StackWriteError {
     /// A text field failed component conversion before this write.
     Text(crate::text::TextFormError),

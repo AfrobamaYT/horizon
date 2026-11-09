@@ -4,6 +4,7 @@
 /// Which terrain material a [`TerrainModelOptions`] draw uses.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum TerrainMaterial {
     /// Each quad's own: solid, `cutout` or `cutout_mipped` as its model's `render_type` names
     /// it. A translucent quad, or a render type the game doesn't know, refuses the whole draw.
@@ -21,6 +22,7 @@ pub enum TerrainMaterial {
 /// a full-bright model stays shaded.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum TerrainShade {
     /// Each quad's own `shade` flag, as its model bakes it.
     #[default]
@@ -135,6 +137,7 @@ impl<'a> TerrainModelOptions<'a> {
 /// drew nothing. A refused draw appends no geometry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum TerrainModelError {
     /// The handle is stale or not a resolved standalone model.
     Model(crate::ModelError),

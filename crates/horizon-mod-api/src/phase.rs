@@ -2,6 +2,7 @@
 /// The owning boundary that starts a data load.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum DataLoadOrigin {
     /// Server data loading, including a reload.
     ServerDataLoad,
@@ -12,6 +13,7 @@ pub enum DataLoadOrigin {
 /// The side that owns a resource-generation loop.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum LoopSide {
     /// A server loop.
     Server,

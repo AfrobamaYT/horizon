@@ -4,6 +4,7 @@ use crate::*;
 /// Which of a column's heights (`Heightmap.Types`) a run's `y` counts from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeHeightmap {
     WorldSurface,
     MotionBlocking,
@@ -14,6 +15,7 @@ pub enum NativeHeightmap {
 /// given), set to palette entry `block`, only where filter `only` matches when one is given.
 #[derive(Clone, Copy, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeBlockRun {
     pub x: i32,
     pub z: i32,
@@ -26,6 +28,7 @@ pub struct NativeBlockRun {
 /// A bulk edit of complete typed states and partial predicates, named by run indices; NBT is not supported.
 #[derive(Clone, Debug, PartialEq, Default)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeBlockEdit {
     /// Complete states to write; properties are never parsed from command strings.
     pub palette: Vec<BlockState>,
@@ -37,6 +40,7 @@ pub struct NativeBlockEdit {
 /// degrees, and an offset in blocks along the camera's right, up and back.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeShake {
     pub pitch: f32,
     pub yaw: f32,
@@ -46,6 +50,7 @@ pub struct NativeShake {
 /// `PlayerSpawnPhantomsEvent.Result`: whether the phantom spawner tries a spawn near a player.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum PhantomSpawnResult {
     /// Always try, skipping the skylight and sea level check.
     Allow,
@@ -57,6 +62,7 @@ pub enum PhantomSpawnResult {
 /// `Player.BedSleepingProblem` as `CanContinueSleepingEvent.getProblem` reports it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum SleepProblem {
     /// The sleeper's bed is gone.
     NotPossibleHere,
@@ -66,6 +72,7 @@ pub enum SleepProblem {
 /// The world's clock as a client mod reads it (`clock`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeClock {
     /// Ticks since the world was created (`Level.getGameTime`).
     pub game_time: i64,
@@ -78,6 +85,7 @@ pub struct NativeClock {
 /// as indexes into `palette`, a column after another, and three biome tints a column (grass, foliage, water).
 #[derive(Clone, Debug, PartialEq, Default)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeColumnBlocks {
     /// Distinct complete states, including separate entries for different property combinations.
     pub palette: Vec<BlockState>,
@@ -88,6 +96,7 @@ pub struct NativeColumnBlocks {
 /// Which side reads a config and when (NeoForge's `ModConfig.Type`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeConfigKind {
     /// The window only, when the game starts.
     Client,
@@ -114,6 +123,7 @@ impl NativeConfigKind {
 /// written there when the file is missing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeConfig {
     pub mod_id: String,
     pub kind: NativeConfigKind,
@@ -140,6 +150,7 @@ impl NativeConfig {
 /// A config's file as the game read it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeConfigFile {
     pub mod_id: String,
     pub kind: NativeConfigKind,
@@ -151,6 +162,7 @@ pub struct NativeConfigFile {
 /// A data map type a mod registers (`RegisterDataMapTypesEvent`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeDataMapType {
     /// `mod_id:name`: not in the `minecraft` namespace. Its files are
     /// `data/<mod_id>/data_maps/<registry path>/<name>.json`.
@@ -162,6 +174,7 @@ pub struct NativeDataMapType {
 /// Read by mods only.
 #[derive(Clone, Debug)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeExperienceOrb {
     /// The entity's ID, as `native_entity_join_level` names it.
     pub id: u32,
@@ -174,6 +187,7 @@ pub struct NativeExperienceOrb {
 /// What a mod's falling block does when it lands and when it hits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeFalling {
     /// `FallingBlockEntity.dropItem`: whether it drops as an item where it
     /// can't be placed.
@@ -193,6 +207,7 @@ impl Default for NativeFalling {
 /// A stack as a client mod's use events carry it.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeHeldItem {
     pub id: ItemKey,
     pub count: u32,
@@ -206,6 +221,7 @@ pub struct NativeHeldItem {
 /// The block a ray along the view meets.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeHit {
     pub block_x: i32,
     pub block_y: i32,
@@ -220,6 +236,7 @@ pub struct NativeHit {
 /// What happened to a mod's claimed item, oldest first.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum NativeModEvent {
     /// A right-click with the item began its use: the stack, and 0 ticks.
     UseStart(NativeHeldItem, u32),
@@ -249,6 +266,7 @@ pub struct NativeMapInfo<'a> {
 /// decorations (`MapDecoration`).
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct NativeMapDecoration {
     /// An atlas sprite: vanilla's `map/decorations/<name>`, or a content
     /// mod's texture. An unknown sprite is left out.
@@ -339,7 +357,8 @@ pub(crate) mod built {
     #[allow(unused_imports)]
     use super::*;
     // exhaustive: the game builds it with a literal; mods only read it
-    pub struct NativeConfigFile {
+    #[derive(horizon_mod_api_macros::Wire)]
+pub struct NativeConfigFile {
         pub mod_id: String,
         pub kind: NativeConfigKind,
         pub file: String,

@@ -4,6 +4,7 @@ use crate::*;
 /// One click on the local player's open menu, submitted with `MenuRef::click`.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum MenuClick {
     /// Pick up, place or drop the carried stack; `None` means outside.
     Pickup {
@@ -27,6 +28,7 @@ pub enum MenuClick {
 /// The mouse button used to pick up or place a stack.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: the two vanilla pickup buttons
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum MouseButton {
     Left,
     Right,
@@ -35,6 +37,7 @@ pub enum MouseButton {
 /// The inventory location exchanged with a menu slot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: vanilla swaps target the hotbar or the offhand
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum SwapWith {
     /// A hotbar index in 0..=8; other indices refuse the entire batch.
     Hotbar(u8),
@@ -44,6 +47,7 @@ pub enum SwapWith {
 /// How a complete drag distributes the carried stack.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: vanilla has split, one-per-slot and creative-fill drags
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum DragKind {
     Split,
     One,
@@ -53,6 +57,7 @@ pub enum DragKind {
 
 /// Identity and location of a player pressing a mod container button.
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct MenuButtonContext {
     pub player: u128,
     pub player_entity_id: i32,
@@ -62,6 +67,7 @@ pub struct MenuButtonContext {
 /// The logical side on which a menu click runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: a closed set the game matches without a wildcard
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum LogicalSide {
     Client,
     Server,
@@ -105,6 +111,7 @@ pub struct StackedOnOther<'a> {
 /// more than it holds: all of it), each starting at vanilla's.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct AnvilUpdate {
     pub left: ItemStack,
     pub right: Option<ItemStack>,
@@ -123,6 +130,7 @@ pub struct AnvilUpdate {
 /// cost `createResult` made.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct AnvilVanilla {
     pub output: Option<ItemStack>,
     pub xp_cost: i32,
@@ -174,6 +182,7 @@ impl AnvilUpdate {
 /// vanilla's result, to read; set `output` to replace it.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct GrindstonePlace {
     pub top: Option<ItemStack>,
     pub bottom: Option<ItemStack>,
@@ -186,6 +195,7 @@ pub struct GrindstonePlace {
 /// and what the inputs hold afterwards (empty, as vanilla's).
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct GrindstoneTake {
     pub top: Option<ItemStack>,
     pub bottom: Option<ItemStack>,
@@ -197,6 +207,7 @@ pub struct GrindstoneTake {
 /// taken, before the crafting changed anything.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct AnvilCraft {
     pub left: Option<ItemStack>,
     pub right: Option<ItemStack>,

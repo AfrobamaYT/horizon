@@ -90,6 +90,7 @@ impl ItemRarity {
 /// A visible item bar: its width out of thirteen pixels and its RGB colour.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: a plain drawing value, also constructed by the bundle calculation.
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct ItemBar {
     /// Width out of thirteen pixels.
     pub width: i32,
@@ -100,6 +101,7 @@ pub struct ItemBar {
 /// Effective attack range for an actor, including the component's hitbox margin.
 #[derive(Clone, Copy, Debug, PartialEq)]
 // exhaustive: a value record
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct ItemAttackRange {
     /// Minimum reach before the margin.
     pub min: f32,
@@ -119,6 +121,7 @@ impl ItemAttackRange {
 /// Owned damage source information for a stack attack or a source-specific item query.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: a value record
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct ItemDamageSource {
     /// Registry identifier of the damage type.
     pub damage_type: crate::Identifier,
