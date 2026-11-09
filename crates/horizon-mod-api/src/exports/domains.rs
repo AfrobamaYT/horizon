@@ -22,10 +22,10 @@ pub use block::types::{
 pub use client::types::{
     Answered, BossBarColor, BossBarOverlay, BossBarRef, Camera, ClientAudioOptions, ClientBossBar,
     ClientChatOptions, ClientGraphicsOptions, ClientGuiOptions, ClientInputOptions,
-    ClientModifiers, ClientPacket, ClientPayload, ColoredLight, CrosshairTarget, HandRender,
-    HumanoidRenderState, KeyAction, KeyMapping, MenuRef, Minimap, NoteBlockChange, NoteInstrument,
-    PanelEvent, ParticleStatus, Screen, ScreenId, ScreenOpening, ScreenView, SoundAttenuation,
-    SoundPlay, SoundRef, SoundSource, SoundState, Stack, ToastKind, Zoom,
+    ClientModifiers, ClientPacket, ClientPayload, ClientTargeting, ColoredLight, CrosshairTarget,
+    HandRender, HumanoidRenderState, KeyAction, KeyMapping, MenuRef, Minimap, NoteBlockChange,
+    NoteInstrument, PanelEvent, ParticleStatus, Screen, ScreenId, ScreenOpening, ScreenView,
+    SoundAttenuation, SoundPlay, SoundRef, SoundSource, SoundState, Stack, ToastKind, Zoom,
 };
 pub use command::types::{Authority, Command, PermissionLevel};
 pub use entity::types::{
