@@ -417,6 +417,19 @@ impl Game<'_> {
                                     spare =
                                         w.player.map(|v| std::mem::replace(&mut guests[k].1, v));
                                 }
+                                horizon_client::mobs::take_mob_pushes(
+                                    &mut events,
+                                    from,
+                                    &mut pushes,
+                                );
+                                route_player_events(
+                                    &mut events,
+                                    from,
+                                    seen_guest,
+                                    &guest_ids,
+                                    &mut guest_events,
+                                    mobs[i].id,
+                                );
                                 dispatch_panic = Some(payload);
                                 break;
                             }
