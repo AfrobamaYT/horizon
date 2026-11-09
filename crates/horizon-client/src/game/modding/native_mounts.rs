@@ -30,7 +30,7 @@ impl Game<'_> {
             c.kind.id().into()
         } else if self.cushions.iter().any(|c| c.id == id) {
             "minecraft:cushion".into()
-        } else if let Some(m) = self.mobs.iter().find(|m| m.id == id) {
+        } else if let Some(m) = self.mob_object(id) {
             mob_kind(m)
         } else if self.armor_stands.iter().any(|a| a.id == id) {
             self.target_type(Target::Stand(id))
@@ -48,13 +48,7 @@ impl Game<'_> {
             return true;
         }
         let (entity, kind) = match rider {
-            Some(id) => (
-                id,
-                self.mobs
-                    .iter()
-                    .find(|m| m.id == id)
-                    .map_or_else(String::new, mob_kind),
-            ),
+            Some(id) => (id, self.mob_object(id).map_or_else(String::new, mob_kind)),
             None => (self.native_acting_entity(), "minecraft:player".into()),
         };
         let vehicle_kind = self.native_vehicle_kind(vehicle);

@@ -174,10 +174,7 @@ impl Game<'_> {
         self.native_entity_target(vehicle)?;
         let id = vehicle.id();
         let at = match self.native_entity_target(passenger.entity())? {
-            Target::Mob(rider) => {
-                let rider = self.mobs.iter().position(|m| m.id == rider)?;
-                self.mob_dismount_point(id, rider)
-            }
+            Target::Mob(rider) => self.mob_dismount_point(id, rider),
             Target::Player => self.player_dismount_point(id, self.yaw, self.player.as_ref()?),
             Target::Guest(conn) => {
                 let guest = self.command_guest(conn)?;

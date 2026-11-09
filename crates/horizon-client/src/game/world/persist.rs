@@ -5147,6 +5147,42 @@ mod summon_uuid_conflict_tests {
         Some(Tag::IntArray(vec![160, 0, 0, n]))
     }
 
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn dismount_uses_the_retained_vehicle_and_repairs_both_object_lists() {
+        with_game(|game, _| {
+            assert!(summon(
+                game,
+                "dismount_root",
+                170,
+                &riders(&[pig(
+                    "dismount_rejected",
+                    170,
+                    &riders(&[pig("dismount_leaf", 171, "")])
+                )]),
+            ));
+            let root = mob_tagged(game, "dismount_root")[0];
+            let leaf = mob_tagged(game, "dismount_leaf")[0];
+            let rejected = mount(game, leaf).unwrap();
+            assert!(game.level_entity(rejected as i32).is_none());
+            assert_eq!(game.mob_object(rejected).unwrap().extra.rider, Some(leaf));
+
+            game.dismount_mob(leaf);
+            let leaf = game.mob_object(leaf).unwrap();
+            assert_eq!(leaf.extra.mount, None);
+            // Entity.getDismountLocationForPassenger: adult pig height is 0.9f.
+            assert_eq!(leaf.position, Vec3::new(4.5, 200.89999997615814, 4.5));
+            assert_eq!(game.mob_object(rejected).unwrap().extra.rider, None);
+            assert_eq!(game.mob_object(root).unwrap().extra.rider, Some(rejected));
+
+            // Entity.remove ejects even a passenger that never entered the level.
+            game.dismount_mob(rejected);
+            assert_eq!(game.mob_object(rejected).unwrap().extra.mount, None);
+            assert_eq!(game.mob_object(root).unwrap().extra.rider, None);
+            assert!(game.level_entity(rejected as i32).is_none());
+        });
+    }
+
     /// A game with a loaded, force-loaded chunk 0 0, a live pig holding UUID
     /// 100 and a live armor stand holding UUID 150.
     fn with_game(test: impl FnOnce(&mut Game<'_>, u32)) {

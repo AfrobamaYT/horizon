@@ -1759,42 +1759,42 @@ impl Game<'_> {
     /// (Entity.removePassenger), then to where the vehicle lets it out
     /// (LivingEntity.dismountVehicle).
     pub(in crate::game) fn dismount_mob(&mut self, rider: u32) {
-        let Some(i) = self.mobs.iter().position(|m| m.id == rider) else {
-            return;
-        };
-        let Some(v) = self.mobs[i].extra.mount else {
+        let Some(v) = self.mob_object(rider).and_then(|mob| mob.extra.mount) else {
             return;
         };
         if !self.native_mob_may_ride(rider, v, false) {
             return;
         }
-        self.mobs[i].extra.mount = None;
+        if let Some(mob) = self.mob_object_mut(rider) {
+            mob.extra.mount = None;
+        }
         let remaining = self
-            .mobs
-            .iter()
+            .mob_objects()
             .filter(|m| m.extra.mount == Some(v))
-            .min_by_key(|m| m.extra.vehicle_order)
+            .min_by_key(|m| (m.extra.vehicle_order, m.id))
             .map(|m| m.id);
-        if let Some(vehicle) = self.mobs.iter_mut().find(|m| m.id == v) {
+        if let Some(vehicle) = self.mob_object_mut(v) {
             vehicle.extra.rider = remaining;
         }
-        let at = self
-            .mob_dismount_point(v, i)
-            .unwrap_or(self.mobs[i].position);
-        let m = &mut self.mobs[i];
+        let at = self.mob_dismount_point(v, rider);
+        let Some(m) = self.mob_object_mut(rider) else {
+            return;
+        };
+        let at = at.unwrap_or(m.position);
         m.extra.passenger = false;
         m.extra.boarding_cooldown = super::super::boat_passengers::BOARDING_COOLDOWN;
         m.position = at;
         m.previous = at;
     }
-    /// Where `dismount_mob` sets the mob at index `rider` down off the vehicle `v`: None when
+    /// Where `dismount_mob` sets object `rider` down off the vehicle `v`: None when
     /// `v` is no boat, cart or mob.
     pub(in crate::game) fn mob_dismount_point(
         &self,
         v: u32,
-        rider: usize,
+        rider: u32,
     ) -> Option<horizon_core::geometry::Vec3> {
-        let (width, yaw) = (f64::from(self.mobs[rider].width()), self.mobs[rider].yaw);
+        let mob = self.mob_object(rider)?;
+        let (width, yaw) = (f64::from(mob.width()), mob.yaw);
         if let Some(b) = self.boats.iter().position(|b| b.id == v) {
             return Some(self.boat_dismount_target(b, width, yaw));
         }
@@ -1802,7 +1802,7 @@ impl Game<'_> {
             .or_else(|| self.cart_dismount_point(v, rider))
             .or_else(|| {
                 // Entity.getDismountLocationForPassenger: on top of the vehicle.
-                let vehicle = self.mobs.iter().find(|m| m.id == v)?;
+                let vehicle = self.mob_object(v)?;
                 Some(super::super::mounts::on_top(vehicle))
             })
     }

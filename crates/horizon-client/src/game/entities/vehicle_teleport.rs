@@ -78,10 +78,10 @@ fn vehicle_id(t: Target) -> Option<u32> {
 
 impl Game<'_> {
     /// `AbstractMinecart.getDismountLocationForPassenger` for a standing mob.
-    pub(super) fn cart_dismount_point(&self, vehicle: u32, rider: usize) -> Option<Vec3> {
+    pub(super) fn cart_dismount_point(&self, vehicle: u32, rider: u32) -> Option<Vec3> {
         use horizon_core::geometry::Aabb;
         let cart = self.carts.iter().find(|c| c.id == vehicle)?;
-        let rider = &self.mobs[rider];
+        let rider = self.mob_object(rider)?;
         let direction =
             (f64::from(cart.yaw) / 90.0 + 0.5).floor() as i32 + if cart.flipped { 3 } else { 1 };
         let (fx, fz) = [(0, 1), (-1, 0), (0, -1), (1, 0)][(direction & 3) as usize];
@@ -130,13 +130,10 @@ impl Game<'_> {
 
     /// `AbstractHorse.getDismountLocationForPassenger`: try either side
     /// through the mount's height, then fall back to its feet.
-    pub(super) fn horse_dismount_point(&self, vehicle: u32, rider: usize) -> Option<Vec3> {
+    pub(super) fn horse_dismount_point(&self, vehicle: u32, rider: u32) -> Option<Vec3> {
         use horizon_core::geometry::{Aabb, trig};
-        let mount = self
-            .mobs
-            .iter()
-            .find(|m| m.id == vehicle && is_horse(m.species()))?;
-        let rider = &self.mobs[rider];
+        let mount = self.mob_object(vehicle).filter(|m| is_horse(m.species()))?;
+        let rider = self.mob_object(rider)?;
         let turn = if rider.main_arm_left() { -90.0 } else { 90.0 };
         let reach =
             (f64::from(mount.width()) + f64::from(rider.width()) + f64::from(1e-5_f32)) / 2.0;
