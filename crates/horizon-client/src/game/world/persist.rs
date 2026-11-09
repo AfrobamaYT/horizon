@@ -6,7 +6,7 @@ use horizon_client::{
     Result,
     chunk::Chunk,
     entity_nbt,
-    mobs::Who,
+    mobs::{Mob, Who},
     random_source,
     save::{ChunkExtras, random_uuid, text, uuid_from_text, uuid_text},
     scoreboard::Scoreboard,
@@ -27,6 +27,27 @@ use {
     horizon_world::{level::MovingPiston, registry::BlockStateId},
 };
 
+/// An entity object retained by passenger links but refused level residency.
+/// Queries and tracking never visit this store; internal topology and saving do.
+/// Other rejected object kinds can be added without changing residency ownership.
+pub(super) enum OffLevel {
+    Mob(Mob),
+}
+
+impl OffLevel {
+    fn as_mob(&self) -> Option<&Mob> {
+        match self {
+            Self::Mob(mob) => Some(mob),
+        }
+    }
+
+    fn as_mob_mut(&mut self) -> Option<&mut Mob> {
+        match self {
+            Self::Mob(mob) => Some(mob),
+        }
+    }
+}
+
 /// What Horizon remembers about loaded entities to save them faithfully.
 #[derive(Default)]
 pub struct EntityMemory {
@@ -35,6 +56,9 @@ pub struct EntityMemory {
     pub(super) uuids: HashMap<u32, [i32; 4]>,
     /// The compound each mob or item entity was loaded with.
     pub(super) raw: HashMap<u32, Tag>,
+    /// Full rejected passenger objects, not resident entities or frozen NBT copies.
+    /// Kept with the level while any live object graph still refers to them.
+    pub(super) off_level: HashMap<u32, OffLevel>,
     /// Synched entity-data entries dirtied by forced writes since the last sync.
     pub(super) forced_meta: HashMap<u32, [u64; 4]>,
     /// Entities of types Horizon does not simulate, kept per chunk and
@@ -61,6 +85,63 @@ pub struct EntityMemory {
     /// lookup from the call on, taken out of their lists at the next sweep of
     /// departed entities. Mobs go at once and never wait here.
     pub(super) removals: Vec<super::commands::Target>,
+}
+
+#[derive(Clone, Copy)]
+enum MobObject {
+    Resident(usize),
+    OffLevel(u32),
+}
+
+impl Game<'_> {
+    fn mob_at(&self, object: MobObject) -> &Mob {
+        match object {
+            MobObject::Resident(index) => &self.mobs[index],
+            MobObject::OffLevel(id) => self.persist.off_level[&id]
+                .as_mob()
+                .expect("mob object slot"),
+        }
+    }
+
+    fn mob_at_mut(&mut self, object: MobObject) -> &mut Mob {
+        match object {
+            MobObject::Resident(index) => &mut self.mobs[index],
+            MobObject::OffLevel(id) => self
+                .persist
+                .off_level
+                .get_mut(&id)
+                .and_then(OffLevel::as_mob_mut)
+                .expect("mob object slot"),
+        }
+    }
+
+    /// Internal object lookup, including a passenger refused level residency.
+    /// This is deliberately separate from `level_entity` and native handle queries.
+    pub(super) fn mob_object(&self, id: u32) -> Option<&Mob> {
+        self.mobs
+            .iter()
+            .find(|mob| mob.id == id)
+            .or_else(|| self.persist.off_level.get(&id).and_then(OffLevel::as_mob))
+    }
+
+    /// Mutate an extant mob object without making it resident.
+    pub(super) fn mob_object_mut(&mut self, id: u32) -> Option<&mut Mob> {
+        if let Some(index) = self.mobs.iter().position(|mob| mob.id == id) {
+            return Some(&mut self.mobs[index]);
+        }
+        self.persist
+            .off_level
+            .get_mut(&id)
+            .and_then(OffLevel::as_mob_mut)
+    }
+
+    /// Internal topology only: resident objects followed by retained passengers.
+    /// Callers needing level membership must continue to iterate `mobs` instead.
+    pub(super) fn mob_objects(&self) -> impl Iterator<Item = &Mob> {
+        self.mobs
+            .iter()
+            .chain(self.persist.off_level.values().filter_map(OffLevel::as_mob))
+    }
 }
 
 impl EntityMemory {
@@ -1154,6 +1235,9 @@ impl Game<'_> {
         }
         m.extra.mount = mount;
         m.extra.passenger = mount.is_some();
+        // The object id preserves load order even when some passengers are
+        // retained in the off-level store rather than the resident list.
+        m.extra.vehicle_order = i64::from(m.id);
         if finalize {
             let at = [m.position.x, m.position.y, m.position.z];
             let difficulty = self.local_difficulty(at);
@@ -1165,14 +1249,25 @@ impl Game<'_> {
         }
         horizon_client::mobs::armor::prepare(&m, &self.motion.attributes);
         let id = m.id;
+        // PersistentEntitySectionManager.addEntityUuid refuses residency, not
+        // the already-constructed object or its passenger links. Descendants
+        // are still considered individually in preorder.
+        let refused = uuid.is_some_and(|uuid| {
+            self.target_with_uuid(uuid)
+                .is_some_and(|target| target != super::commands::Target::Player)
+        });
         self.remember(id, uuid, tag);
-        self.bind_saved_entity_attachments(id, &mut m.attachment_lifetime);
-        self.mobs.push(m);
+        if refused {
+            self.persist.off_level.insert(id, OffLevel::Mob(m));
+        } else {
+            self.bind_saved_entity_attachments(id, &mut m.attachment_lifetime);
+            self.mobs.push(m);
+        }
         for rider in riders {
             if let Some(r) = self.load_mob(rider, Some(id))
-                && let Some(v) = self.mobs.iter_mut().find(|m| m.id == id)
+                && let Some(vehicle) = self.mob_object_mut(id)
             {
-                v.extra.rider.get_or_insert(r);
+                vehicle.extra.rider.get_or_insert(r);
             }
         }
         Some(id)
@@ -1233,26 +1328,38 @@ impl Game<'_> {
     /// `Passengers`, after the passengers it kept from loading. Discarded
     /// passengers cannot save even before their list entry is swept.
     pub(super) fn put_mob_passengers(&mut self, tag: &mut Tag, id: u32) {
-        let mut riders: Vec<usize> = (0..self.mobs.len())
-            .filter(|&j| {
-                self.mobs[j].extra.mount == Some(id)
-                    && self.mobs[j].alive()
-                    && !self.mobs[j].removed
-            })
-            .collect();
-        riders.sort_by_key(|&j| self.mobs[j].extra.vehicle_order);
-        if let Some(driver) = self
+        let mut riders: Vec<(i64, u32, MobObject)> = self
             .mobs
             .iter()
-            .find(|m| m.id == id)
-            .and_then(|m| m.extra.rider)
-            && let Some(pos) = riders.iter().position(|&j| self.mobs[j].id == driver)
-            && pos != 0
+            .enumerate()
+            .filter(|(_, mob)| mob.extra.mount == Some(id) && mob.alive() && !mob.removed)
+            .map(|(index, mob)| (mob.extra.vehicle_order, mob.id, MobObject::Resident(index)))
+            .chain(
+                self.persist
+                    .off_level
+                    .iter()
+                    .filter_map(|(&object_id, object)| {
+                        let mob = object.as_mob()?;
+                        (mob.extra.mount == Some(id) && mob.alive() && !mob.removed).then_some((
+                            mob.extra.vehicle_order,
+                            mob.id,
+                            MobObject::OffLevel(object_id),
+                        ))
+                    }),
+            )
+            .collect();
+        riders.sort_by_key(|&(order, id, _)| (order, id));
+        if let Some(driver) = self.mob_object(id).and_then(|mob| mob.extra.rider)
+            && let Some(position) = riders.iter().position(|&(_, id, _)| id == driver)
+            && position != 0
         {
-            let d = riders.remove(pos);
-            riders.insert(0, d);
+            let driver = riders.remove(position);
+            riders.insert(0, driver);
         }
-        let riders: Vec<Tag> = riders.into_iter().map(|j| self.mob_tree_nbt(j)).collect();
+        let riders = riders
+            .into_iter()
+            .map(|(_, _, object)| self.mob_object_tree_nbt(object))
+            .collect();
         add_passengers(tag, riders);
     }
     /// Read an unsimulated entity without assigning it a new identity.
@@ -1374,8 +1481,8 @@ impl Game<'_> {
     /// `Entity.getVehicle` of entity `id`: the mob, boat or minecart a mob
     /// rides (only a mob rides another entity here).
     fn vehicle_of(&self, id: u32) -> Option<u32> {
-        let v = self.mobs.iter().find(|m| m.id == id)?.extra.mount?;
-        let there = self.mobs.iter().any(|m| m.id == v)
+        let v = self.mob_object(id)?.extra.mount?;
+        let there = self.mob_objects().any(|m| m.id == v)
             || self.boats.iter().any(|b| b.id == v)
             || self.carts.iter().any(|c| c.id == v);
         there.then_some(v)
@@ -1517,13 +1624,18 @@ impl Game<'_> {
     }
     /// A mob's entity tag with the mobs riding it under `Passengers`.
     pub(super) fn mob_tree_nbt(&mut self, i: usize) -> Tag {
-        let id = self.mobs[i].id;
+        self.mob_object_tree_nbt(MobObject::Resident(i))
+    }
+
+    fn mob_object_tree_nbt(&mut self, object: MobObject) -> Tag {
+        let id = self.mob_at(object).id;
         let uuid = self.uuid_for(id);
         // A warden's anger names each suspect by UUID. A mob that has never been
         // loaded or saved has no UUID yet, so give it one, or the save would
         // drop the anger at it (`who_uuid` writes nothing for a mob the map does
         // not know).
-        let suspects: Vec<u32> = self.mobs[i]
+        let suspects: Vec<u32> = self
+            .mob_at(object)
             .extra
             .warden
             .as_ref()
@@ -1544,55 +1656,57 @@ impl Game<'_> {
         // `NeutralMob.addPersistentAngerSaveData`: the anger ends at an
         // absolute game time, so it goes on while the chunk is unloaded, and
         // the target is the entity the mob is angry at.
-        let anger = self.mobs[i].extra.anger;
+        let anger = self.mob_at(object).extra.anger;
         // A loaded NoAI Enderman owns an absolute NeutralMob timestamp;
         // its skipped AI does not decrement the derived gameplay counter.
-        if !(self.mobs[i].species() == horizon_client::mobs::Species::Enderman
-            && self.mobs[i].no_ai)
+        if !(self.mob_at(object).species() == horizon_client::mobs::Species::Enderman
+            && self.mob_at(object).no_ai)
         {
-            self.mobs[i].extra.anger_end = if anger > 0 {
+            self.mob_at_mut(object).extra.anger_end = if anger > 0 {
                 self.world.game_time + i64::from(anger)
             } else {
                 -1
             };
         }
-        self.mobs[i].extra.angry_at = if anger > 0 {
+        self.mob_at_mut(object).extra.angry_at = if anger > 0 {
             // A wolf and an iron golem keep their anger's target themselves,
             // also once the target is gone (`tame::update_persistent_anger`).
             if matches!(
-                self.mobs[i].species(),
+                self.mob_at(object).species(),
                 horizon_client::mobs::Species::Wolf | horizon_client::mobs::Species::IronGolem
             ) {
-                self.mobs[i].extra.angry_at
+                self.mob_at(object).extra.angry_at
             } else {
-                self.mobs[i].ai.target
+                self.mob_at(object).ai.target
             }
         } else {
             None
         };
         // A mob gets its UUID when it is first saved (`uuid_for`): the anger
         // target still in the world gets it now, so `uuid_of` can name it.
-        if let Some(horizon_client::mobs::Who::Mob(target)) = self.mobs[i].extra.angry_at
+        if let Some(horizon_client::mobs::Who::Mob(target)) = self.mob_at(object).extra.angry_at
             && target != 0
             && self.mobs.iter().any(|m| m.id == target)
         {
             self.uuid_for(target);
         }
         let mut tag = entity_nbt::mob_to_nbt(
-            &self.mobs[i],
+            self.mob_at(object),
             uuid,
             self.persist.raw.get(&id),
             Some(self.pack.assets.registry),
             |other| self.persist.uuid_of(other),
         );
-        if horizon_client::mobs::camel::is_camel(self.mobs[i].species())
+        if horizon_client::mobs::camel::is_camel(self.mob_at(object).species())
             && let Tag::Compound(c) = &mut tag
         {
-            let tick =
-                horizon_client::mobs::camel::synced_pose_tick(&self.mobs[i], self.world.game_time);
+            let tick = horizon_client::mobs::camel::synced_pose_tick(
+                self.mob_at(object),
+                self.world.game_time,
+            );
             c.insert("LastPoseTick".into(), Tag::Long(tick));
         }
-        self.write_leash(&mut tag, i);
+        self.write_leash(&mut tag, id);
         self.put_mob_passengers(&mut tag, id);
         tag
     }
