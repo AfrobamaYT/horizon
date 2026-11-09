@@ -5880,7 +5880,6 @@ mod mob_pickup_sync_tests {
                 latency: Arc::new(AtomicI32::new(0)),
                 address: "127.0.0.1:1".parse().unwrap(),
                 expected: false,
-                configured: Default::default(),
             },
             1,
             at,

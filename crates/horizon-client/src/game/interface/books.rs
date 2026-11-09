@@ -1643,7 +1643,12 @@ mod lectern_books_tag_tests {
         )
         .unwrap();
         game.world_root = dir;
-        game.world_tables = game.build_world_tables(false, &[]).unwrap().0;
+        let stack = game.reload_datapacks(false, &[]).unwrap();
+        let root = game.options.resources.clone();
+        game.world_tables = game
+            .build_world_tables(&stack, false, &root, game.mods.data_switched)
+            .unwrap()
+            .0;
 
         let state = game
             .pack
@@ -1678,7 +1683,7 @@ mod lectern_signal_tests {
     use super::lectern_signal;
     use horizon_client::{
         containers::{BlockEntity, Lectern},
-        item_data::{StackData, WrittenBook},
+        item_data::WrittenBook,
         items::ItemStack,
     };
     use horizon_core::position::BlockPos;
@@ -1724,15 +1729,12 @@ mod lectern_signal_tests {
             "a writable book is a book"
         );
         let mut written = ItemStack::new("minecraft:written_book", 1);
-        written.extra = Some(Box::new(StackData {
-            written: Some(WrittenBook {
-                title: "T".into(),
-                author: "A".into(),
-                pages: vec!["one".into(), "two".into()],
-                ..Default::default()
-            }),
+        written.data_mut().written = Some(WrittenBook {
+            title: "T".into(),
+            author: "A".into(),
+            pages: vec!["one".into(), "two".into()],
             ..Default::default()
-        }));
+        });
         assert_eq!(signal(&mut game, Some(written.clone()), 0), 1, "page 0");
         assert_eq!(signal(&mut game, Some(written), 1), 15, "last page");
     }

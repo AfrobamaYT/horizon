@@ -1627,7 +1627,7 @@ impl Game<'_> {
             .map(|o| NativeExperienceOrb {
                 id: o.id,
                 position: [o.position.x, o.position.y, o.position.z],
-                value: o.points(),
+                value: o.value,
                 count: o.count,
             })
             .filter(|o| orb_meets(o.position, min, max))
@@ -1637,7 +1637,7 @@ impl Game<'_> {
     /// (orbs merged into it, each worth `value`) and `age` (ticks lived; an orb
     /// despawns at 6000); a `None` is left as it is.
     /// False, and nothing written, for an orb not in the server level `dimension`, a
-    /// `value` or `count` of 0, and on a client of a server.
+    /// a `count` of 0, and on a client of a server.
     pub(super) fn set_experience_orb(
         &mut self,
         dimension: &str,
@@ -1648,7 +1648,6 @@ impl Game<'_> {
     ) -> bool {
         if (self.serving.is_none() && self.options.dedicated.is_none())
             || dimension != self.dim.id()
-            || value == Some(0)
             || count == Some(0)
         {
             return false;
@@ -1656,9 +1655,7 @@ impl Game<'_> {
         let Some(orb) = self.orbs.iter_mut().find(|o| o.id == id) else {
             return false;
         };
-        orb.value = value
-            .map(|v| v.min(i32::MAX as u32) as i32)
-            .unwrap_or(orb.value);
+        orb.value = value.unwrap_or(orb.value);
         orb.count = count.unwrap_or(orb.count);
         orb.age = age.unwrap_or(orb.age);
         true

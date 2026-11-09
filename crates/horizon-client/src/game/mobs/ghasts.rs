@@ -4,10 +4,7 @@
 use super::Game;
 use super::level_sounds::LevelSound;
 use horizon_client::actions::Action;
-use horizon_client::{
-    items::ItemStack,
-    mobs::{Mob, MobEvent, Species, happy_ghast},
-};
+use horizon_client::mobs::{Mob, MobEvent, Species, happy_ghast};
 use horizon_core::geometry::{Aabb, Vec3};
 use horizon_world::registry::BlockStateId;
 use mod_api::SoundSource;

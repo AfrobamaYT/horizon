@@ -49,7 +49,9 @@ fn with_game(f: impl FnOnce(&mut Game<'_>)) {
         loaded.gui.unwrap(),
         options,
         settings,
-        Audio::silent(&root),
+        Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            root.clone(),
+        )),
         None,
     )
     .unwrap();
@@ -64,7 +66,12 @@ fn with_game(f: impl FnOnce(&mut Game<'_>)) {
     game.run_command("forceload add 0 0");
     game.run_command("fill 0 199 0 15 199 15 stone");
     game.run_command("gamerule entity_drops false");
-    assert!(!game.ui.rules.bool("entity_drops"));
+    assert!(
+        !game
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS)
+    );
     f(&mut game);
 }
 

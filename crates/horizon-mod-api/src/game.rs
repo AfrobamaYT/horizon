@@ -166,7 +166,7 @@ pub struct NativeExperienceOrb {
     /// The entity's ID, as `native_entity_join_level` names it.
     pub id: u32,
     pub position: [f64; 3],
-    /// `ExperienceOrb.value`: the points one pickup gives.
+    /// `ExperienceOrb.value`: the signed points value saved by vanilla.
     pub value: i32,
     /// `ExperienceOrb.count`: orbs merged into this one, each worth `value`.
     pub count: u32,

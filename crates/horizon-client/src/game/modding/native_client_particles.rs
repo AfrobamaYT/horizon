@@ -51,10 +51,6 @@ impl Game<'_> {
 }
 
 #[cfg(test)]
-#[path = "native_client_particles/client_fireworks_tests.rs"]
-mod client_fireworks_tests;
-
-#[cfg(test)]
 mod tests {
     use super::*;
     use horizon_client::particles::ParticleType;

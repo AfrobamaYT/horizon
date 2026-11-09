@@ -681,7 +681,7 @@ mod reach_tests {
                 .block_entities
                 .insert(key, BlockEntity::Chest(vec![None; 27]));
         }
-        game.open_menu([8, 64, 8]);
+        game.open_block_effect_menu([8, 64, 8]);
         assert_eq!(game.container, Some(left), "the double chest opened");
 
         game.destroy_block_dropping([9, 64, 8])
@@ -727,7 +727,7 @@ mod lock_tests {
         game.world.set_block_lock(key, &lock);
 
         // An empty hand does not match `lock:{items:"minecraft:gold_ingot"}`.
-        game.open_menu([8, 64, 8]);
+        game.open_block_effect_menu([8, 64, 8]);
         assert_eq!(game.container, None, "a locked chest opened");
         assert!(
             game.titles.overlay.is_some(),
@@ -739,7 +739,7 @@ mod lock_tests {
         game.inventory[0] = None;
         game.offhand = Some(ItemStack::new("minecraft:gold_ingot", 1));
         game.titles.overlay = None;
-        game.open_menu([8, 64, 8]);
+        game.open_block_effect_menu([8, 64, 8]);
         assert_eq!(
             game.container, None,
             "an off-hand key opened a locked chest"
@@ -750,7 +750,7 @@ mod lock_tests {
         game.offhand = None;
         game.selected = 0;
         game.titles.overlay = None;
-        game.open_menu([8, 64, 8]);
+        game.open_block_effect_menu([8, 64, 8]);
         assert_eq!(game.container, Some(key), "the lock's item did not open it");
         assert!(game.titles.overlay.is_none());
     }
@@ -793,7 +793,7 @@ mod lock_tests {
         )]);
         game.world.set_block_lock(right_key, &lock);
 
-        game.open_menu([8, 64, 8]);
+        game.open_block_effect_menu([8, 64, 8]);
         assert_eq!(game.container, None, "a half-locked double chest opened");
         assert!(game.titles.overlay.is_some());
     }

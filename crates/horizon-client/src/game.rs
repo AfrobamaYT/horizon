@@ -13388,13 +13388,7 @@ impl Game<'_> {
             let (a, b) = (&self.orbs[i], &self.orbs[j]);
             let (into, into_value, from, from_value, vanilla) =
                 (a.id, a.value, b.id, b.value, b.can_merge(a.id, a.value));
-            if !self.orb_merges(
-                into,
-                into_value.max(0) as u32,
-                from,
-                from_value.max(0) as u32,
-                vanilla,
-            ) {
+            if !self.orb_merges(into, into_value, from, from_value, vanilla) {
                 continue;
             }
             let Some(i) = self.orbs.locate(into_join) else {

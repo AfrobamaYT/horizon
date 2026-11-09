@@ -980,7 +980,8 @@ mod tests {
                 Arc::new(Chunk::with_layout(0, 0, game.world.layout())),
             );
             // The eye is at y 65.62, so all eight test points are in block (0, 65, 0).
-            let mut player = PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
+            let mut player =
+                horizon_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
             player.position = Vec3::new(0.5, 64.0, 0.5);
             player.fire_ticks = 100;
             game.player = Some(player);

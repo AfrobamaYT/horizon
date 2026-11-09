@@ -805,8 +805,8 @@ mod controller_tests {
         // handleMoveVehicle's `vehicle.move` runs AbstractBoat.checkFallDamage:
         // a boat that lands on the ground (a fall loaded from its save, here)
         // has no fall left.
-        game.boats[0].fall_distance = 5.0;
-        game.guest_move_vehicle(&mut host, 3, &move_to(start.x + 0.6));
+        game.boats.update(0, |b| b.fall_distance = 5.0);
+        game.guest_move_vehicle(3, &move_to(start.x + 0.6));
         assert_eq!(
             game.boats[0].fall_distance, 0.0,
             "a guest's boat on the ground"

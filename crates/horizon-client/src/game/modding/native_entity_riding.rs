@@ -624,6 +624,7 @@ mod tests {
                     } else {
                         game.others.push(super::super::commands::OtherEntity {
                             knot_check: None,
+                            eye: None,
                             join: Default::default(),
                             item_transformation: None,
                             interaction: None,
@@ -1368,6 +1369,7 @@ mod tests {
             // An entity Horizon doesn't simulate keeps no box to stand on.
             game.others.push(super::super::commands::OtherEntity {
                 knot_check: None,
+                eye: None,
                 join: Default::default(),
                 item_transformation: None,
                 interaction: None,

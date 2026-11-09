@@ -183,7 +183,9 @@ fn a_cauldron_use_posts_its_fluid_event_after_the_sound() {
         loaded.gui.unwrap(),
         options,
         settings,
-        Audio::silent(&root),
+        Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            root.clone(),
+        )),
         None,
     )
     .unwrap();

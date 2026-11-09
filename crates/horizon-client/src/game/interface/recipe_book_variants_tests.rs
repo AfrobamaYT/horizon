@@ -45,7 +45,9 @@ fn game() -> (Game<'static>, mpsc::Receiver<horizon_client::lan::Out>) {
         loaded.gui.unwrap(),
         options,
         settings,
-        Audio::silent(&root),
+        Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            root.clone(),
+        )),
         None,
     )
     .unwrap();
@@ -98,7 +100,6 @@ fn game() -> (Game<'static>, mpsc::Receiver<horizon_client::lan::Out>) {
             latency: Arc::new(AtomicI32::new(0)),
             address: "127.0.0.1:25565".parse().unwrap(),
             expected: false,
-            configured: Default::default(),
         },
         2,
         [12.5, 100.0, 10.5],

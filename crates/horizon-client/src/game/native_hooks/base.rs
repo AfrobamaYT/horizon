@@ -4367,8 +4367,8 @@ impl Game<'_> {
         self.fire_food_level_changed(player, name, from, to, cancel);
     }
     /// Before `player` picks up orb `orb` in `dimension`. Mutations to `value`
-    /// and `count` take effect only when not canceled; value is clamped to
-    /// 1..=i32::MAX and count to at least one.
+    /// and `count` take effect only when not canceled. Value keeps vanilla
+    /// signed integer semantics; count is kept at least one.
     /// Canceling leaves the orb and pickup delay unchanged. Server-side.
     pub(in crate::game) fn native_pickup_xp(
         &mut self,

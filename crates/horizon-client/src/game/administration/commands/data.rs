@@ -1651,6 +1651,7 @@ mod tests {
                 join: Default::default(),
                 item_transformation: None,
                 knot_check: None,
+                eye: None,
                 interaction: None,
                 id: 12,
                 kind: "minecraft:block_display".into(),
