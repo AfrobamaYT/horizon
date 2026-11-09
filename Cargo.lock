@@ -1868,7 +1868,6 @@ version = "0.1.0"
 dependencies = [
  "arboard",
  "horizon-client-core",
- "horizon-dualsense",
  "horizon-theme",
  "png",
  "winit",
