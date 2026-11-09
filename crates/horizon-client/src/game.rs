@@ -1353,6 +1353,13 @@ impl LevelAccess for GameLevel<'_> {
         push: &[BlockPos],
         destroy: &[BlockPos],
     ) -> bool {
+        // A carrier transfer fence holds any pushed or destroyed cell:
+        // the whole move refuses (crate::game::carrier_transfers).
+        for pos in push.iter().chain(destroy.iter()) {
+            if self.world.carrier_fences.locks_cell(&[pos.x, pos.y, pos.z]) {
+                return false;
+            }
+        }
         let mut canceled = false;
         if self.native_authoritative {
             let step = direction.normal();
@@ -7134,6 +7141,11 @@ impl Game<'_> {
         self.award_stat("used", &stack.item, 1);
     }
     fn break_block(&mut self, pos: [i32; 3]) -> Result<()> {
+        // A carrier transfer fence holds this cell between prepared and
+        // committed: breaking refuses (crate::game::carrier_transfers).
+        if self.world.carrier_fences.locks_cell(&pos) {
+            return Err("a carrier transfer holds this cell".into());
+        }
         self.player_break_block(pos).map(|_| ())
     }
     /// `ServerPlayerGameMode.destroyBlock`: whether the block was removed.

@@ -93,6 +93,11 @@ pub struct World {
     pub modified: ModifiedChunks,
     /// Block entities, and the order they tick in.
     pub block_entities: crate::block_entities::BlockEntities,
+    /// Carrier transfer fences: the world cells and carriers locked
+    /// while a carrier operation runs between prepared and committed
+    /// (the game's carrier transfers). Empty, one load, when no
+    /// operation is in flight.
+    pub carrier_fences: crate::carrier_fences::Fences,
     /// Each chest's `ContainerOpenersCounter`: opener count and largest
     /// interaction range.
     pub chest_openers: FxHashMap<(i32, i32, i32), (i32, f64)>,
@@ -252,6 +257,7 @@ impl World {
             attachments: Default::default(),
             attachment_syncs: FxHashSet::default(),
             block_entities: Default::default(),
+            carrier_fences: Default::default(),
             chest_openers: FxHashMap::default(),
             block_names: FxHashMap::default(),
             watched: Vec::new(),
