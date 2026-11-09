@@ -602,9 +602,15 @@ pub(crate) struct Recovered {
 pub(crate) enum RecoveryRefused {
     /// The store itself refused to open.
     Store(Refusal),
-    /// An in-progress operation's file is gone, or does not decode: the
-    /// carrier is quarantined, its data neither replayed nor deleted.
-    Quarantine(String),
+    /// An in-progress operation's file is gone. By the approved contract
+    /// that is a world-load refusal — the file was durable before
+    /// `prepared`, so its absence is damage — never a quarantine.
+    /// Quarantine belongs to a committed carrier whose content is
+    /// unknown, which recovery here does not touch.
+    MissingOperation,
+    /// An in-progress operation's file does not decode. As with
+    /// [`RecoveryRefused::MissingOperation`], the world's load refuses.
+    OperationUnreadable(String),
     /// An affected chunk did not strictly read — damage, never absence.
     Region {
         /// The chunk's position.
@@ -628,7 +634,16 @@ impl fmt::Display for RecoveryRefused {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Store(refusal) => write!(f, "{refusal}"),
-            Self::Quarantine(why) => write!(f, "carrier quarantined: {why}"),
+            Self::MissingOperation => write!(
+                f,
+                "world load refused: the in-progress operation's file is gone"
+            ),
+            Self::OperationUnreadable(why) => {
+                write!(
+                    f,
+                    "world load refused: the operation file does not decode: {why}"
+                )
+            }
             Self::Region { chunk, why } => {
                 write!(f, "chunk ({},{}) refuses: {why}", chunk.0, chunk.1)
             }
@@ -658,11 +673,12 @@ pub(crate) fn recover(
         return Ok(Recovered::default());
     };
     let op_path = store.operation_path(op.op_id);
-    let bytes = fs::read(&op_path).map_err(|error| {
-        RecoveryRefused::Quarantine(format!("operation file does not read: {error}"))
+    let bytes = fs::read(&op_path).map_err(|error| match error.kind() {
+        std::io::ErrorKind::NotFound => RecoveryRefused::MissingOperation,
+        _ => RecoveryRefused::OperationUnreadable(error.to_string()),
     })?;
-    let operation =
-        decode_operation(&bytes, states).map_err(|e| RecoveryRefused::Quarantine(e.to_string()))?;
+    let operation = decode_operation(&bytes, states)
+        .map_err(|e| RecoveryRefused::OperationUnreadable(e.to_string()))?;
     let mut chunks: Vec<[i32; 2]> = Vec::new();
     for cell in &operation.cells {
         let key = [cell.world[0] >> 4, cell.world[2] >> 4];
@@ -1295,6 +1311,12 @@ pub(crate) enum OpError {
     },
     /// A state image the validator does not know.
     UnknownState,
+    /// A state string (block id, property name or value) past the NBT
+    /// string limit, which the disk writer would truncate to empty.
+    StringTooLong {
+        /// The offending length.
+        len: usize,
+    },
 }
 impl fmt::Display for OpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1323,6 +1345,10 @@ impl fmt::Display for OpError {
                 )
             }
             Self::UnknownState => write!(f, "unknown block state image"),
+            Self::StringTooLong { len } => write!(
+                f,
+                "state string of {len} bytes exceeds the NBT string limit"
+            ),
         }
     }
 }
@@ -1345,6 +1371,26 @@ pub(crate) fn encode_operation(operation: &Operation) -> Result<Vec<u8>, OpError
         return Err(OpError::CellCount {
             count: operation.cells.len(),
         });
+    }
+    // One NBT string each: a string past the wire limit would be written
+    // empty, so the refusal happens here, before any block is lifted.
+    // The limit is the model's own constant, the same one Cell::new
+    // enforces for the carrier codec.
+    use horizon_world::carrier::model::MAX_NBT_STRING_BYTES as NBT_STRING_LIMIT;
+    let mut string = |text: &str| -> Result<(), OpError> {
+        if text.len() > NBT_STRING_LIMIT {
+            return Err(OpError::StringTooLong { len: text.len() });
+        }
+        Ok(())
+    };
+    for cell in &operation.cells {
+        for image in [&cell.before, &cell.after] {
+            string(&image.name)?;
+            for (key, value) in &image.properties {
+                string(key)?;
+                string(value)?;
+            }
+        }
     }
     let mut entity_bytes = 0_usize;
     for cell in &operation.cells {

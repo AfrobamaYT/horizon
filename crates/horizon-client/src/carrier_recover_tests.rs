@@ -434,7 +434,7 @@ fn a_disassembly_places_its_after_image_with_the_entity() {
 }
 
 #[test]
-fn a_quarantined_operation_file_neither_replays_nor_deletes() {
+fn an_unreadable_or_missing_operation_refuses_the_world_load() {
     let fixture = Fixture::new("quarantine");
     let position = ChunkPos::new(0, 0);
     let chest_at = [4, 0, 4];
@@ -443,6 +443,8 @@ fn a_quarantined_operation_file_neither_replays_nor_deletes() {
         position,
         &chunk_root(chest_state_tag(), &[(chest_at, vec![9; 8])]),
     );
+    // An unreadable operation file is a world-load refusal, both for
+    // garbage bytes and for a file that is gone entirely.
     let mut store = fixture.store();
     let op_id = store.next_op_id();
     store
@@ -450,9 +452,21 @@ fn a_quarantined_operation_file_neither_replays_nor_deletes() {
         .unwrap();
     store.begin(OpKind::Assemble, 7, 1).unwrap();
     match recover(&mut store, &fixture.region(), &AllStatesKnown) {
-        Err(RecoveryRefused::Quarantine(_)) => {}
-        other => panic!("expected quarantine, got {other:?}"),
+        Err(RecoveryRefused::OperationUnreadable(_)) => {}
+        other => panic!("expected an unreadable operation, got {other:?}"),
     }
+    fs::remove_file(
+        fixture
+            .data()
+            .join(format!("horizon_carrier_op_{op_id}.nbt")),
+    )
+    .unwrap();
+    match recover(&mut store, &fixture.region(), &AllStatesKnown) {
+        Err(RecoveryRefused::MissingOperation) => {}
+        other => panic!("expected the missing operation to refuse, got {other:?}"),
+    }
+    let text = RecoveryRefused::MissingOperation.to_string();
+    assert!(text.contains("world load refused"), "{text}");
     // The chunk and the journal are exactly as the crash left them.
     let root = get_chunk(&fixture, position).unwrap();
     assert_eq!(chest_items(&root, chest_at), Some(8));
