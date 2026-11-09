@@ -1374,7 +1374,11 @@ impl super::Game<'_> {
         let Ok(mut api) = value.try_into_api() else {
             return;
         };
+        let original = api.clone();
         self.native_anvil_update(player, entity, pos, &mut api, cancel);
+        if api == original {
+            return;
+        }
         match api.try_into_engine(self.items()) {
             Ok(result) => *value = result,
             Err(_) => *cancel = true,
@@ -1391,7 +1395,11 @@ impl super::Game<'_> {
         let Ok(mut api) = value.try_into_api() else {
             return;
         };
+        let original = api.clone();
         self.native_grindstone_place(player, entity, pos, &mut api, cancel);
+        if api == original {
+            return;
+        }
         match api.try_into_engine(self.items()) {
             Ok(result) => *value = result,
             Err(_) => *cancel = true,
@@ -1408,7 +1416,11 @@ impl super::Game<'_> {
         let Ok(mut api) = value.try_into_api() else {
             return;
         };
+        let original = api.clone();
         self.native_grindstone_take(player, entity, pos, &mut api, cancel);
+        if api == original {
+            return;
+        }
         match api.try_into_engine(self.items()) {
             Ok(result) => *value = result,
             Err(_) => *cancel = true,
@@ -1973,10 +1985,16 @@ impl super::Game<'_> {
             return;
         };
         let revision = api.revision();
+        let original = cursor.clone();
         self.native_menu_button(context, &mut api, &mut cursor);
-        let cursor = cursor
-            .try_into_engine(self.items())
-            .map_err(|_| BlockEntitySnapshotError::InvalidStack);
+        let cursor = if cursor == original {
+            Ok(None)
+        } else {
+            cursor
+                .try_into_engine(self.items())
+                .map(Some)
+                .map_err(|_| BlockEntitySnapshotError::InvalidStack)
+        };
         if let Ok(cursor) = finish_block_entity_writeback(
             entity,
             &api,
@@ -1985,7 +2003,9 @@ impl super::Game<'_> {
             "menu_button",
             cursor,
         ) {
-            *carried = cursor;
+            if let Some(cursor) = cursor {
+                *carried = cursor;
+            }
         }
     }
     pub(in crate::game) fn api_menu_quick_move(
@@ -2004,6 +2024,7 @@ impl super::Game<'_> {
             return;
         };
         let revision = api.revision();
+        let original = held.clone();
         let mut candidate_handled = *handled;
         self.native_menu_quick_move(
             pos,
@@ -2013,9 +2034,13 @@ impl super::Game<'_> {
             &mut held,
             &mut candidate_handled,
         );
-        let held = held
-            .try_into_engine(self.items())
-            .map_err(|_| BlockEntitySnapshotError::InvalidStack);
+        let held = if held == original {
+            Ok(None)
+        } else {
+            held.try_into_engine(self.items())
+                .map(Some)
+                .map_err(|_| BlockEntitySnapshotError::InvalidStack)
+        };
         if let Ok(held) = finish_block_entity_writeback(
             entity,
             &api,
@@ -2024,7 +2049,9 @@ impl super::Game<'_> {
             "menu_quick_move",
             held,
         ) {
-            *stack = held;
+            if let Some(held) = held {
+                *stack = held;
+            }
             *handled = candidate_handled;
         }
     }
