@@ -365,9 +365,11 @@ from the crate root, snake-cased: `tanks_tank_fill` for `chemlib::tanks::Tank::f
   record's field types. When the library's function changes, the addon is refused at load:
   `E_INJECT_CHANGED: addon:double_rate: chemlib 1.1.0 changed chemlib::transfer: pinned …, installed …
   (signature)`. `cargo horizon-mod inject update` reports the change and repins with `--accept`.
-- **Across targets.** A native library with a wasm addon, or the reverse, is refused: internals with
-  "internals access to chemlib needs the same target", an `api` listener on a parameter without a
-  `Wire` form naming it, and any other with "mixed native and wasm dependencies aren't supported yet".
+- **Across targets.** A native library with a wasm addon, or the reverse, is refused at load. A native
+  addon's listener at a wasm library's point says why it can never cross: "internals access to chemlib
+  needs the same target", or an `api` listener on a parameter without a `Wire` form, naming it. Any
+  other mixed edge gets the general refusal, "mixed native and wasm dependencies aren't supported yet"
+  ([Wire types](how-to/wire-types.md)).
 - **Cost when nothing listens.** One relaxed load of the place's slot and a branch at the head, one
   more for the return; the listened path stays out of line. On the chemicals fixture's per-tick
   transfer (a ~2 ns function) that is about 1.2 ns a call natively and 1.6–2 ns on wasm.
