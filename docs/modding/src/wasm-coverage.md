@@ -1418,6 +1418,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::client_stopping` | crosses | Wire call |
 | `Hooks::client_tick_post` | crosses | Wire call |
 | `Hooks::client_tick_pre` | crosses | Wire call |
+| `Hooks::component_hover` | crosses | Wire call |
 | `Hooks::compute_fov_modifier` | crosses | Wire call |
 | `Hooks::create_fluid_source` | crosses | Wire call |
 | `Hooks::create_spawn_position` | crosses | Wire call |

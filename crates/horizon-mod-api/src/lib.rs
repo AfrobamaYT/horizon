@@ -106,6 +106,7 @@ pub enum AttributeRegistrationError {
 
 /// Tooltip color semantics for an attribute change.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+// exhaustive: vanilla's `Attribute.Sentiment` has these three values, and the game matches them all
 pub enum Sentiment {
     /// Increasing values are beneficial.
     #[default]
