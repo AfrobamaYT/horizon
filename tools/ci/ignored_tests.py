@@ -32,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tools import lab
 
 KNOWN = Path(__file__).with_name("ignored-tests-known-failures.txt")
-RESULT = re.compile(r"^test (\S+) \.\.\. (ok|FAILED)$")
+RESULT = re.compile(r"^test (\S+)(?: - should panic)? \.\.\. (ok|FAILED)$")
 SUMMARY = re.compile(r"^test result: \S+\. (\d+) passed; (\d+) failed; (\d+) ignored; (\d+) measured;")
 TARGET = re.compile(r"^\s+Running (?:unittests|tests/)")
 COUNT = re.compile(r"^running (\d+) tests?$")
