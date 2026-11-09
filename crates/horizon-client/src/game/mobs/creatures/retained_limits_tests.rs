@@ -530,3 +530,167 @@ fn push_only_failed_passes_are_refused_and_delivered_without_loss() {
         },
     );
 }
+
+struct RepeatedConsumer {
+    fail: std::sync::atomic::AtomicBool,
+    entered: AtomicUsize,
+}
+struct RepeatedConsumerHooks(Arc<RepeatedConsumer>);
+#[mod_api::__subscriptions]
+impl mod_api::Hooks for RepeatedConsumerHooks {
+    fn item_spawn(&self, _: &mut dyn mod_api::ServerHost, _: &mut mod_api::ItemSpawnEvent<'_>) {
+        self.0.entered.fetch_add(1, Ordering::SeqCst);
+        if self.0.fail.load(Ordering::SeqCst) {
+            std::panic::panic_any(91_u32);
+        }
+    }
+}
+
+#[test]
+#[ignore = "needs prepared resources and an isolated HORIZON_HOME"]
+fn successful_mixed_producers_are_bounded_behind_a_repeatedly_failing_consumer() {
+    crate::entry::install_client_hooks();
+    let probe = Arc::new(RepeatedConsumer {
+        fail: std::sync::atomic::AtomicBool::new(true),
+        entered: AtomicUsize::new(0),
+    });
+    mod_api::testing::with_mods(
+        vec![mod_api::ModEntry::new(
+            "repeated_consumer",
+            Box::new(RepeatedConsumerHooks(probe.clone())),
+        )]
+        .into(),
+        || {
+            crate::game::native_entity_refs::tests::with_game(|game| {
+                prepare(game);
+                for id in 0..16 {
+                    let kind = game
+                        .res
+                        .mob_types()
+                        .get("minecraft:chicken")
+                        .unwrap()
+                        .clone();
+                    let mut mob = Mob::new(
+                        100 + id,
+                        kind,
+                        Vec3::new(2.0 + (id % 8) as f64, 80.0, 3.0 + (id / 8) as f64),
+                        0.0,
+                    );
+                    mob.no_ai = true;
+                    game.mobs.push(mob);
+                }
+                for (id, x) in [(70, 1.2), (72, 1.0)] {
+                    let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+                    let mut mob = Mob::new(id, kind, Vec3::new(x, 80.0, 0.5), 0.0);
+                    mob.no_ai = true;
+                    game.mobs.push(mob);
+                }
+                let mut ages = Vec::new();
+                let mut peak_batches = 0;
+                let mut accepted_eggs = 0;
+                let mut push_passes = 0;
+                for attempt in 1..=40 {
+                    for (index, mob) in game.mobs.iter_mut().enumerate() {
+                        mob.position = if index < 16 {
+                            Vec3::new(2.0 + (index % 8) as f64, 80.0, 3.0 + (index / 8) as f64)
+                        } else {
+                            Vec3::new(if index == 16 { 1.2 } else { 1.0 }, 80.0, 0.5)
+                        };
+                        mob.velocity = Vec3::ZERO;
+                        mob.on_ground = true;
+                        mob.ambient_timer = -10000;
+                        if index < 16 {
+                            mob.extra.egg_time = if attempt % 2 == 1 { 1 } else { 100000 };
+                        }
+                    }
+                    let age = game.mobs[0].age;
+                    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        game.tick_creature_entities()
+                    }))
+                    .unwrap_err();
+                    assert_eq!(
+                        panic.downcast_ref::<u32>(),
+                        Some(&91),
+                        "only the consumer interrupts; admitted producers succeed"
+                    );
+                    let produced = game.mobs[0].age != age;
+                    if produced {
+                        if attempt % 2 == 1 {
+                            accepted_eggs += 16;
+                        }
+                        assert!(
+                            game.mobs[16].velocity.x != 0.0 || game.mobs[17].velocity.x != 0.0,
+                            "real successful producers also push"
+                        );
+                        push_passes += 1;
+                    } else {
+                        assert_eq!(
+                            game.mobs[16].velocity,
+                            Vec3::ZERO,
+                            "refusal must not replay an accepted push"
+                        );
+                        assert_eq!(game.mobs[17].velocity, Vec3::ZERO);
+                    }
+                    ages.push(game.mobs[0].age);
+                    peak_batches =
+                        peak_batches.max(game.creatures.pending[game.dim.id()].batches.len());
+                }
+                eprintln!(
+                    "REPEATED_CONSUMER:peak_batches={peak_batches}:producer_ages={ages:?}:accepted_eggs={accepted_eggs}:push_passes={push_passes}"
+                );
+                assert!(
+                    peak_batches <= 16,
+                    "successful producers grew retained batches beyond the cap: {peak_batches}"
+                );
+                assert_eq!(ages[15], 16);
+                assert!(
+                    ages[16..].iter().all(|&age| age == 16),
+                    "refusal starts on call17 and stays latched"
+                );
+                assert_eq!(push_passes, 16);
+                assert!(
+                    game.creatures.pending[game.dim.id()].pushes.is_empty(),
+                    "successful producer sweeps consumed their pushes"
+                );
+                probe.fail.store(false, Ordering::SeqCst);
+                let velocities = [game.mobs[16].velocity, game.mobs[17].velocity];
+                game.deliver_pending_mob_actions(game.dim.id()).unwrap();
+                assert_eq!(probe.entered.load(Ordering::SeqCst), accepted_eggs);
+                let eggs: u32 = game
+                    .dropped
+                    .iter()
+                    .filter(|d| {
+                        matches!(
+                            d.stack.item.as_ref(),
+                            "minecraft:egg" | "minecraft:brown_egg" | "minecraft:blue_egg"
+                        )
+                    })
+                    .map(|d| d.stack.count)
+                    .sum();
+                assert_eq!(
+                    eggs, accepted_eggs as u32,
+                    "every accepted event reaches its real item exactly once"
+                );
+                assert_eq!([game.mobs[16].velocity, game.mobs[17].velocity], velocities);
+                let pending = &game.creatures.pending[game.dim.id()];
+                assert_eq!(pending.retained_passes, 0);
+                assert!(!pending.refusal_logged);
+                game.deliver_pending_mob_actions(game.dim.id()).unwrap();
+                assert_eq!(
+                    probe.entered.load(Ordering::SeqCst),
+                    accepted_eggs,
+                    "no event replay"
+                );
+                for mob in game.mobs.iter_mut().take(16) {
+                    mob.extra.egg_time = 1;
+                }
+                game.tick_creature_entities().unwrap();
+                assert_eq!(
+                    game.mobs[0].age, 17,
+                    "fresh producer admitted after complete drain"
+                );
+                assert_eq!(probe.entered.load(Ordering::SeqCst), accepted_eggs + 16);
+            });
+        },
+    );
+}

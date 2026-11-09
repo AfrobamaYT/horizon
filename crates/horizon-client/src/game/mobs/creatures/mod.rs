@@ -169,8 +169,9 @@ struct MobOutputBatch {
     normal: NormalMobActions,
     guests: Vec<(u32, u32, MobEvent)>,
 }
-// Backpressure applies only to retained failed passes, never to healthy mob counts.
-// Sixteen failed passes permit 0.8 seconds of failed production at the vanilla tick rate.
+// Backpressure applies to producer passes retained behind either producer or
+// consumer failure, never to healthy mob counts. Empty delivery resets the quota.
+// Sixteen retained passes permit 0.8 seconds of production at the vanilla tick rate.
 const MAX_PENDING_MOB_PASSES: usize = 16;
 #[derive(Default)]
 struct PendingMobBatch {
@@ -1613,9 +1614,10 @@ impl Game<'_> {
                 guests: std::mem::take(&mut guest_events),
             });
         }
-        if dispatch_panic.is_some() {
-            pending.retained_passes += 1;
-        } else {
+        // A successful producer can still be retained behind a failing consumer.
+        // Count before any downstream callbacks; fully empty delivery resets it.
+        pending.retained_passes += 1;
+        if dispatch_panic.is_none() {
             // The successful final sweep consumed all pushes for surviving mobs.
             pending.pushes = Default::default();
         }
