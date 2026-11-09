@@ -4,9 +4,6 @@
 //! Hooks use `&self + Send + Sync` for shared and reentrant calls; see `docs/modding/src/how-to/native-mods.md`.
 //! Generate the trait and dispatch with `cargo run -p xtask -- mod-api`.
 #![deny(missing_docs)]
-// The generated `impl_*_areas!` macros are exported for test doubles outside the crate, and this crate's
-// own test doubles use them by path too.
-#![allow(macro_expanded_macro_exports_accessed_by_absolute_paths)]
 extern crate self as mod_api;
 
 /// A saved fluid name retained for the lifetime of the process.
