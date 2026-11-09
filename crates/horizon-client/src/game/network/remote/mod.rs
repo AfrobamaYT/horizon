@@ -13270,8 +13270,17 @@ mod tests {
                 _: &mut dyn mod_api::ClientHost,
                 event: &mut mod_api::ClientChatReceivedEvent<'_>,
             ) -> mod_api::Flow {
-                let mod_api::text::TextContent::Literal(text) = &event.message.content else {
-                    panic!("expected literal chat fixture");
+                use mod_api::text::TextContent;
+                let text = match &event.message.content {
+                    TextContent::Literal(text) => text,
+                    // Player chat arrives decorated with the sender and message.
+                    TextContent::Translatable { key, arguments, .. } if key == "chat.type.text" => {
+                        let TextContent::Literal(text) = &arguments[1].content else {
+                            panic!("expected literal player message fixture");
+                        };
+                        text
+                    }
+                    _ => return mod_api::Flow::Continue,
                 };
                 if text.contains("drop") {
                     return mod_api::Flow::Cancel;
