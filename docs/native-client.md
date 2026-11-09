@@ -431,7 +431,7 @@ in `horizon-extras.txt`; in splitscreen only the first player has it), and
 The crate `horizon-discord` (Horizon layer) speaks Discord's local IPC itself
 (the `discord-ipc-N` socket or named pipe, no SDK) from a thread of its own.
 The game hands it a status only when it changes, through the platform's
-`activity` hook (`game/activity.rs` says what the player does), and keeps the
+`activity` hook (`game/runtime/activity.rs` says what the player does), and keeps the
 switch itself: its settings store and its Extras row (the platform's settings
 and pages registries). Only the official executable (`horizon-official`)
 registers it: horizon-client's own executable shows no presence and no switch. It retries every 15 s
