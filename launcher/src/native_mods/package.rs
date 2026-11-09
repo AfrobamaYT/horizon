@@ -161,7 +161,7 @@ mod mixed_tests {
             format!("id='{id}'\nname='{id}'\nversion='1'\napi='0.2'\ncapabilities=['registries']\n")
         };
         fs::write(
-            addon.join(MANIFEST),
+            addon.join(manifest::MANIFEST),
             format!(
                 "{}[dependencies]\nlib='*'\n[native]\ngame='26.3'\nhorizon='{}'\nmixins='{}'\n",
                 header("addon"),
@@ -173,7 +173,7 @@ mod mixed_tests {
         let module = b"\x00\x61\x73\x6d\x01\x00\x00\x00\x00\x0f\x08\x64\x79\x6c\x69\x6e\x6b\x2e\x30\x01\x04\x00\x00\x00\x00\x01\x04\x01\x60\x00\x00\x03\x02\x01\x00\x07\x2e\x03\x0e\x68\x6f\x72\x69\x7a\x6f\x6e\x5f\x6c\x61\x79\x6f\x75\x74\x00\x00\x0a\x68\x6f\x72\x69\x7a\x6f\x6e\x5f\x69\x6e\x00\x00\x0c\x68\x6f\x72\x69\x7a\x6f\x6e\x5f\x68\x6f\x6f\x6b\x00\x00\x0a\x04\x01\x02\x00\x0b";
         fs::write(library.join("mod.wasm"), module).unwrap();
         fs::write(
-            library.join(MANIFEST),
+            library.join(manifest::MANIFEST),
             format!(
                 "{}[wasm]\nsha512='{}'\ntoolchain='t'\nbuilt_with='t'\n",
                 header("lib"),
