@@ -64,11 +64,13 @@ fn realms_pictures_do_not_enlarge_the_startup_atlas() {
         root.clone(),
     ))
     .unwrap();
+    // The fork reserves static atlas slots for panorama 0/2/3 and the Isles icon.
+    // Other pictures must remain lazy, including arbitrary preset icons.
     for name in [
-        "gui/title/background/panorama_0",
-        "gui/title/background/panorama_2",
-        "gui/title/background/panorama_3",
-        "gui/presets/isles",
+        "gui/title/background/panorama_1",
+        "gui/title/background/panorama_4",
+        "gui/title/background/panorama_5",
+        "gui/presets/custom",
     ] {
         let path = root.join(format!("assets/minecraft/textures/{name}.png"));
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -89,12 +91,12 @@ fn realms_pictures_do_not_enlarge_the_startup_atlas() {
         (atlas.width, atlas.height, atlas.pixels.len()),
         (control.width, control.height, control.pixels.len())
     );
-    assert!(!atlas.sprites.contains_key("gui/presets/isles"));
+    assert!(!atlas.sprites.contains_key("gui/presets/custom"));
     let image = atlas
         .pictures
         .lock()
         .unwrap()
-        .get("gui/presets/isles")
+        .get("gui/presets/custom")
         .unwrap();
     assert_eq!((image.width, image.height), (1024, 1024));
     eprintln!(
