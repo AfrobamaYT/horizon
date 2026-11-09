@@ -34,11 +34,18 @@ use std::{
     process::{Command, ExitCode},
 };
 
+fn is_compiler_wrapper(name: &str) -> bool {
+    name.strip_suffix(".exe").unwrap_or(name).ends_with("rustc")
+}
+
 fn main() -> ExitCode {
     // Cargo runs `cargo-horizon-mod horizon-mod <args>`.
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     if std::env::var_os("HORIZON_GROUP_WRAPPER").is_some()
-        && args.first().is_some_and(|a| a.ends_with("rustc"))
+        // `rustc`, or `rustc.exe` on Windows.
+        && args
+            .first()
+            .is_some_and(|a| is_compiler_wrapper(a))
     {
         return match wasm::rustc(args) {
             Ok(()) => ExitCode::SUCCESS,
@@ -602,5 +609,26 @@ mod tests {
         ]);
         assert_eq!(newest_prebuilt(&releases).as_deref(), Some(old));
         assert_eq!(newest_prebuilt(&serde_json::json!([])), None);
+    }
+}
+
+#[cfg(test)]
+mod wrapper_suffix_tests {
+    #[test]
+    fn compiler_names_keep_suffix_contract() {
+        for (name, expected) in [
+            ("diagnostic-rustc", true),
+            ("xrustc", true),
+            ("rustc", true),
+            ("/path/to/rustc", true),
+            ("rustc.exe", true),
+            ("diagnostic-rustc.exe", true),
+            ("rustc.custom", false),
+            ("rustc-wrapper", false),
+            ("cargo-horizon-mod", false),
+            ("/rustc/tool", false),
+        ] {
+            assert_eq!(super::is_compiler_wrapper(name), expected, "{name}");
+        }
     }
 }

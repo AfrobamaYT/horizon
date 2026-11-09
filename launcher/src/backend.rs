@@ -1228,95 +1228,13 @@ fn asset_installed<'a>(
 
 /// Downloads `release`'s archive for this platform, checks it against `sha256` (its signed
 /// checksum), and unpacks it as the installed version `tag`.
-pub(crate) fn install_as(
-    release: &Release,
-    tag: &str,
-    sha256: &str,
-    requested_architecture: Option<GameArchitecture>,
-    progress: impl Fn(f32),
-) -> Result<(), String> {
-    let (url, size) = release
-        .asset
-        .clone()
-        .ok_or_else(|| format!("{tag} has no build for this platform."))?;
-    let root = versions_dir();
-    let partial = root.join(format!(".{tag}.partial"));
-    let _ = fs::remove_dir_all(&partial);
-    fs::create_dir_all(&partial).map_err(|e| e.to_string())?;
-    let archive = partial.join("download");
-    download(&url, size, sha256, &archive, &progress)?;
-    let unpacked = partial.join("unpacked");
-    unpack(&archive, &url, &unpacked)?;
-    progress(0.97);
-    // The archives hold one top folder (horizon-linux-x86_64/...); the version folder is its contents.
-    let entries: Vec<_> = fs::read_dir(&unpacked)
-        .map_err(|e| e.to_string())?
-        .flatten()
-        .collect();
-    let top = match entries.as_slice() {
-        [only] if only.path().is_dir() => only.path(),
-        _ => unpacked.clone(),
-    };
-    if !top.join(CLIENT).exists() {
-        return Err(format!("The download has no {CLIENT}"));
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(top.join(CLIENT), fs::Permissions::from_mode(0o755));
-    }
-    if let (Some(requested), Some(binary)) = (requested_architecture, architecture_for_asset(&url))
-    {
-        fs::write(
-            top.join(GAME_BUILD_ARCHITECTURE),
-            serde_json::to_vec(&InstalledGameArchitecture { requested, binary })
-                .map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| e.to_string())?;
-    }
-    let target = version_dir(tag);
-    let _ = fs::remove_dir_all(&target);
-    fs::rename(&top, &target).map_err(|e| e.to_string())?;
-    fs::write(target.join(COMPLETE), "").map_err(|e| e.to_string())?;
-    let _ = fs::remove_dir_all(&partial);
-    reuse_prepared_for(tag);
-    progress(1.0);
-    Ok(())
-}
+mod installation;
+pub(crate) use installation::install_as;
 
 pub fn remove(tag: &str) -> Result<(), String> {
-    crate::cache_cleanup::Access::UninstrumentedGame
-        .check()
-        .map_err(crate::native_mods::cache_error)?;
     let dir = version_dir(tag);
-    remove_in(&dir)
-}
-
-fn remove_in(dir: &Path) -> Result<(), String> {
+    crate::cache_cleanup::delete_game_unit(&dir).map_err(crate::native_mods::cache_error)?;
     forget_prepared();
-    let installed = dir.join(COMPLETE).is_file();
-    // The marker goes first: a version counted as installed until its folder is gone comes back
-    // into `installed` when an overlapping removal re-reads the list mid-delete.
-    let _ = fs::remove_file(dir.join(COMPLETE));
-    // Windows holds a file for a moment after the game, a scan or the launcher's own reader lets
-    // go of it, and remove_dir_all stops at the first one. Retry for a second; a folder that is
-    // already gone is removed.
-    for attempt in 1.. {
-        match fs::remove_dir_all(dir) {
-            Ok(()) => break,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
-            Err(e) if attempt == 5 => {
-                // A failed removal must remain discoverable and retryable. Files may
-                // already have gone, so this is recovery metadata, not a rollback.
-                if installed && dir.is_dir() {
-                    fs::write(dir.join(COMPLETE), "")
-                        .map_err(|restore| format!("{e}; {restore}"))?;
-                }
-                return Err(e.to_string());
-            }
-            Err(_) => std::thread::sleep(std::time::Duration::from_millis(250)),
-        }
-    }
     Ok(())
 }
 
@@ -1355,13 +1273,6 @@ fn game_version_at(dir: &Path) -> String {
 pub fn resources(tag: &str) -> PathBuf {
     let base = crate::native_mods::about(tag).map(|about| about.base);
     resources_at(&version_dir(base.as_deref().unwrap_or(tag)))
-}
-
-/// Installed native clients retain their base's prepared data even when not selected.
-pub(crate) fn resource_dependents(tag: &str) -> bool {
-    installed()
-        .iter()
-        .any(|version| crate::native_mods::about(version).is_some_and(|about| about.base == tag))
 }
 
 fn resources_at(dir: &Path) -> PathBuf {
@@ -3000,6 +2911,7 @@ pub fn remove_version(tag: &str) -> Result<(), String> {
         return Err(format!("{tag} is running. Quit it first."));
     }
     remove(tag)?;
+    crate::storage::eviction::request_cleanup();
     let mut settings = Settings::load();
     if settings.selected.as_deref() == Some(tag) {
         settings.selected = installed().first().cloned();
@@ -3083,11 +2995,7 @@ pub(crate) fn in_use(_tag: &str) -> bool {
 /// is logged and the rest still go. Returns the versions deleted. They install again from GitHub.
 pub fn prune_old_versions() -> Vec<String> {
     let settings = Settings::load();
-    if !settings.auto_prune()
-        || crate::cache_cleanup::Access::UninstrumentedGame
-            .check()
-            .is_err()
-    {
+    if !settings.auto_prune() {
         return Vec::new();
     }
     let mut protected: Vec<String> = settings.selected.iter().cloned().collect();
@@ -3103,7 +3011,7 @@ pub fn prune_old_versions() -> Vec<String> {
         &protected,
         auto_installed,
     ) {
-        if resource_dependents(&tag) {
+        if crate::native_mods::resource_dependents(&tag) {
             eprintln!("Keeping old version {tag}: a native build uses its resources.");
             continue;
         }
@@ -4207,6 +4115,7 @@ pub enum Job {
 }
 
 pub enum Msg {
+    Storage(Result<Box<crate::storage::Report>, String>),
     Releases(Result<Vec<Release>, String>),
     Links(Links),
     Progress(String, f32),
@@ -4274,24 +4183,14 @@ pub struct Running {
     pub stdin: Option<ChildStdin>,
 }
 
-impl Running {
-    pub fn send(&mut self, line: &str) {
-        if let Some(stdin) = &mut self.stdin {
-            let _ = writeln!(stdin, "{line}");
-            let _ = stdin.flush();
-        }
-    }
-    pub fn kill(&self) {
-        let _ = self.child.lock().unwrap().kill();
-    }
-}
-
 /// Launcher-owned tree-lock primitives and optional Windows runtime state.
 pub struct RuntimeGuard {
     _leases: Vec<crate::run_leases::Claim>,
     #[cfg(windows)]
     _windows: Option<crate::windows_runtime::Guard>,
 }
+
+pub use crate::run_leases::control::startup_cleanup;
 
 pub fn prepare_command(cmd: Command) -> Result<(Command, RuntimeGuard), String> {
     let leases = crate::run_leases::shared(&cmd).map_err(crate::native_mods::cache_error)?;
@@ -4317,14 +4216,23 @@ pub fn prepare_command(cmd: Command) -> Result<(Command, RuntimeGuard), String> 
     ))
 }
 
+/// Spawn a terminal-attached game through the same lifetime protocol as GUI launches.
+pub fn spawn_attached(cmd: &mut Command) -> std::io::Result<std::process::Child> {
+    crate::run_leases::spawn(cmd, false)
+}
+
 pub fn spawn(job: Job, cmd: Command, tx: Sender<Msg>) -> Result<Running, String> {
     let (mut cmd, runtime) = prepare_command(cmd)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
     crate::process::hide_console(&mut cmd);
-    let mut child = cmd
-        .stdin(Stdio::piped())
+    cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+        .stderr(Stdio::piped());
+    let mut child = crate::run_leases::spawn(&mut cmd, true)
         .map_err(|e| format!("Could not start {:?}: {e}", cmd.get_program()))?;
     let stdin = child.stdin.take();
     let mut readers = Vec::new();
@@ -4504,10 +4412,9 @@ pub struct Settings {
     /// First-use native code permission for this launcher install, Unix seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native_mods_allowed_at: Option<u64>,
-    /// Combined fast/release compilation cache limit in GiB. Unset is 30; zero disables
-    /// automatic cleanup. Installed native versions and player data are not this cache.
+    /// Managed cache limit in GiB (unset: 25; zero: no automatic cleanup). Player data isn't cache.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_cache_gib: Option<u64>,
+    pub cache_limit_gib: Option<u64>,
     /// Developer options (hidden: seven clicks on the sidebar's launcher version reveal them):
     /// offline names play without an account that owns the game, in the window only
     /// (`account::Accounts::play_as_with`, `account::launch_for_game`). Never a download: the game still
@@ -4669,27 +4576,53 @@ mod tests {
 
     #[test]
     #[cfg(windows)]
-    fn failed_removal_stays_listed_and_can_be_retried() {
+    fn failed_removal_is_incomplete_and_can_be_retried() {
         use std::os::windows::fs::OpenOptionsExt;
-        let versions =
-            std::env::temp_dir().join(format!("horizon-remove-locked-{}", std::process::id()));
+        let Some(root) = std::env::var_os("REMOVE_TEST_ROOT") else {
+            let root = tempfile::tempdir().unwrap();
+            assert!(Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "backend::tests::failed_removal_is_incomplete_and_can_be_retried"
+                ])
+                .env("REMOVE_TEST_ROOT", root.path())
+                .env("HORIZON_LAUNCHER_HOME", root.path())
+                .env("HORIZON_HOME", root.path().join("home"))
+                .env("XDG_DATA_HOME", root.path().join("xdg-data"))
+                .env("XDG_CONFIG_HOME", root.path().join("xdg-config"))
+                .env("HORIZON_LAUNCHER_TRASH", root.path().join("trash"))
+                .env("HORIZON_LAUNCHER_CLIPBOARD", root.path().join("clipboard"))
+                .env("HORIZON_LAUNCHER_DESKTOP", root.path().join("desktop"))
+                .env("HORIZON_LAUNCHER_NO_SELF_UPDATE", "1")
+                .env("HORIZON_NO_AUDIO", "1")
+                .status()
+                .unwrap()
+                .success());
+            return;
+        };
+        let versions = PathBuf::from(root).join("versions");
         let dir = versions.join("v0.2.0");
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join(COMPLETE), "").unwrap();
-        fs::write(dir.join(CLIENT), "locked executable").unwrap();
-        // Refuse delete sharing, as a running Windows executable does.
+        fs::write(dir.join(COMPLETE), b"").unwrap();
+        fs::write(dir.join(CLIENT), horizon_mod_package::holder::CAPABILITY).unwrap();
+        crate::run_leases::publish(&dir).unwrap();
         let running = fs::File::options()
             .read(true)
             .share_mode(1)
             .open(dir.join(CLIENT))
             .unwrap();
-        assert!(remove_in(&dir).is_err());
-        assert_eq!(installed_in(&versions), ["v0.2.0"]);
-        drop(running);
-        remove_in(&dir).unwrap();
+        assert!(crate::cache_cleanup::delete_game_unit(&dir).is_err());
         assert!(installed_in(&versions).is_empty());
+        assert!(!dir.join(COMPLETE).exists());
+        drop(running);
+        crate::cache_cleanup::delete_game_unit_observed(&dir, || {
+            assert!(matches!(
+                crate::run_leases::installation(),
+                Err(crate::native_cache::Error::Busy)
+            ));
+        })
+        .unwrap();
         assert!(!dir.exists());
-        fs::remove_dir_all(versions).unwrap();
     }
 
     /// A canonical path loses Windows' verbatim prefix on a drive (horizon-mixins' output
@@ -4986,14 +4919,14 @@ pub fn {f}("
             "base": base, "horizon": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "target": "client"
         }).to_string()).unwrap();
         assert_eq!(resources(&native), resources(&base));
-        assert!(resource_dependents(&base));
+        assert!(crate::native_mods::resource_dependents(&base));
         assert!(remove_version(&base).is_err());
         assert!(base_dir.join(COMPLETE).exists());
         fs::remove_dir_all(&base_dir).unwrap();
         let error = need_prepared(&native).unwrap_err();
         assert!(error.contains(&base), "{error}");
         fs::remove_dir_all(&native_dir).unwrap();
-        assert!(!resource_dependents(&base));
+        assert!(!crate::native_mods::resource_dependents(&base));
     }
 
     #[test]
