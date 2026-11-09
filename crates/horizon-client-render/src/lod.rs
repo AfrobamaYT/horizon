@@ -2160,6 +2160,7 @@ impl Lod {
             .ready
             .insert(fine, Arc::new(columns.to_vec()))
             .is_some();
+        self.sync_sample(fine);
         self.refresh_ready(fine, existed);
     }
     fn apply_detail(&mut self, (cx, cz): (i32, i32), columns: &ReducedColumns) {
@@ -4459,6 +4460,7 @@ mod tests {
         lod.ready
             .insert(parent, Arc::new(vec![Column::default(); 256]));
         lod.active = [parent].into_iter().collect();
+        lod.sync_sample(parent);
         lod.sample_jobs = SAMPLE_JOBS;
         lod.pending = (0..SAMPLE_JOBS - 1)
             .map(|i| TileKey {
@@ -4881,6 +4883,25 @@ mod tests {
         lod.replan([-10, 0], 0, 1, 0, None);
         assert!(lod.plan.nodes.contains(&a) && !lod.plan.nodes.contains(&b));
         assert!(lod.dirty.contains_key(&a), "its east wall is drawn now");
+    }
+
+    #[test]
+    fn observed_fine_columns_replace_active_mesh_samples() {
+        let mut lod = Lod::scheduler_for_test();
+        let key = TileKey {
+            x: 0,
+            z: 0,
+            level: 0,
+        };
+        lod.plan.nodes.insert(key);
+        lod.finish_sample(key, samples(70));
+        let previous = lod.mesh_samples.clone();
+
+        let observed: [Column; CELLS * CELLS] = samples(80).try_into().unwrap();
+        lod.apply_fine((0, 0), &observed);
+
+        assert_eq!(previous.get(&key).unwrap()[0].spans[0].max, 70);
+        assert_eq!(lod.mesh_samples.get(&key).unwrap()[0].spans[0].max, 80);
     }
 
     #[test]

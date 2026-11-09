@@ -13,6 +13,10 @@ on:
     - cron: '17 3 * * *'
   workflow_dispatch:
     inputs:
+      github-fallback:
+        description: Force GitHub-hosted runners after a boat runner outage
+        type: boolean
+        default: false
       prepare-output-check:
         description: Check the prepared output digest
         type: boolean
@@ -50,7 +54,7 @@ jobs:
       contents: read
       actions: read
     outputs:
-      self_hosted: ${{ steps.runner.outputs.self_hosted }}
+      self_hosted: ${{ !inputs.github-fallback && steps.runner.outputs.self_hosted || 'false' }}
       # Every ignored-tests shard on main pushes and dispatches; empty on pull requests.
       ignored_matrix: ${{ steps.matrix.outputs.matrix || '{"shard":[]}' }}
       # Where lint and verify run when they don't go to Dyna's pool: boat-large for listed outside contributors
@@ -82,21 +86,33 @@ jobs:
           ENABLED=${ENABLED:-$VARS_ENABLED} LEASE=${LEASE:-$VARS_LEASE} bash tools/ci/dyna_ci_runner.sh >> "$GITHUB_OUTPUT"
       - id: hosted
         env:
-          BOAT_CI: ${{ vars.BOAT_CI }}
+          GH_TOKEN: ${{ github.token }}
+          BOAT_CI: ${{ !inputs.github-fallback && vars.BOAT_CI || 'off' }}
           BOAT_USERS: ${{ vars.BOAT_CI_USERS }}
           AUTHOR: ${{ github.event.pull_request.user.login || github.actor }}
           ACTOR: ${{ github.triggering_actor }}
-        run: |
-          label=ubuntu-latest
-          if [ "$BOAT_CI" = on ]; then
-            case ",$BOAT_USERS," in *",$AUTHOR,"*) case ",$BOAT_USERS," in *",$ACTOR,"*) label=boat-large ;; esac ;; esac
-          fi
-          echo "hosted runner: $label (author $AUTHOR, started by $ACTOR)"
-          echo "label=$label" >> "$GITHUB_OUTPUT"
+        run: python3 tools/ci/boat_health.py
       - name: The ignored-tests shard matrix
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         id: matrix
         run: python3 tools/ci/ignored_shards.py --matrix --all >> "$GITHUB_OUTPUT"
+
+  # Fork PR tokens cannot dispatch or cancel runs. They receive only the pre-pick gate.
+  # Same-run fallback jobs would leave the original queued checks pending, not green.
+  boat-watch:
+    needs: changes
+    if: needs.changes.outputs.hosted_label == 'boat-large' && needs.changes.outputs.self_hosted != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          RECOVERY_REF: ${{ github.head_ref || github.ref_name }}
+        run: python3 tools/ci/boat_watch.py
 
   pool-watch:
     needs: changes
@@ -243,7 +259,7 @@ jobs:
 
   verify:
     needs: changes
-    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-large' || vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || needs.changes.outputs.hosted_label || 'ubuntu-latest' }}
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-large' || !inputs.github-fallback && vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || needs.changes.outputs.hosted_label || 'ubuntu-latest' }}
     timeout-minutes: 45
     # Dyna's runner image now carries lavapipe, Mesa's software Vulkan driver, for ignored-tests' `gpu` tests.
     # verify's tests were written to skip GPU work when no adapter exists, and one of them
@@ -253,7 +269,7 @@ jobs:
       VK_ICD_FILENAMES: /nonexistent/no-vulkan-in-verify.json
       VK_DRIVER_FILES: /nonexistent/no-vulkan-in-verify.json
       JOBS: ${{ (needs.changes.outputs.self_hosted == 'true' || startsWith(needs.changes.outputs.hosted_label, 'boat')) && '-j4' || '' }}
-      RUNNER_KIND: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'other' || startsWith(needs.changes.outputs.hosted_label, 'boat') && 'boat' || 'github' }}
+      RUNNER_KIND: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || !inputs.github-fallback && vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'other' || startsWith(needs.changes.outputs.hosted_label, 'boat') && 'boat' || 'github' }}
     steps:
       - uses: actions/checkout@v4
       # Only this commit's own history (rust_changes.py's merge base, check_public_tree.py's range and HEAD
@@ -432,7 +448,7 @@ jobs:
   # alone and break it together (#2059 and the registry ratings did, 2026-10-26).
   launcher:
     needs: changes
-    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-medium' || vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-medium' || !inputs.github-fallback && vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -528,7 +544,7 @@ jobs:
           exit "$result"
 
   vanilla-parity:
-    if: github.repository == 'arismoko/horizon' && github.event_name == 'workflow_dispatch' && !inputs.prepare-output-check
+    if: github.repository == 'arismoko/horizon' && github.event_name == 'workflow_dispatch' && !inputs.prepare-output-check && !inputs.github-fallback
     runs-on: dyna-large
     permissions:
       contents: read
