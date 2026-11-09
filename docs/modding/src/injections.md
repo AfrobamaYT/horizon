@@ -158,7 +158,7 @@ the event, and writes take `host`.
 | Form | Where | Game rebuild | `mod.wasm` |
 | --- | --- | --- | --- |
 | API `[[inject]]` | admitted head/return slots | no | generated function records only |
-| Native internals `[[inject]]` | head/return slots and supported call sites | only without a compiled slot | — |
+| Internals `[[inject]]` | head/return slots and supported call sites | only without a compiled slot | raw function slots with a staged catalog |
 | Hook or Part method (no injection) | its documented firing point | no | yes |
 
 ## Ordering
