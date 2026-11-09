@@ -138,14 +138,18 @@ impl Game<'_> {
     /// particles (`sendParticles`, spread 0.2) and `destroy`. The blow is
     /// `Player.attack` on a target that is not a mob: its sounds, then the swing.
     pub(super) fn hit_shulker_bullet(&mut self, i: usize) {
-        let (_, _, _, magic) = self.melee_damage("minecraft:shulker_bullet", false);
+        let (_, _, _, magic) = self.melee_damage(
+            "minecraft:shulker_bullet",
+            false,
+            Some(self.creatures.projectiles[i].id),
+        );
         let sweep = self.sweep_before_hit("minecraft:shulker_bullet", false);
         let p = self.creatures.projectiles.remove(i);
         let at = [p.position.x, p.position.y, p.position.z];
         self.audio
             .play("minecraft:entity.shulker_bullet.hurt", Some(at), 1.0, 1.0);
         if let Some(ty) = horizon_client::particles::ParticleType::from_name("crit") {
-            let options = mod_api::particles::ParticleOptions::simple(ty);
+            let options = horizon_client::particles::ParticleOptions::simple(ty);
             self.particles
                 .send_particles(&options, at, [0.2, 0.2, 0.2], 0.0, 15);
             self.lan_level_particles(&options, at, [0.2, 0.2, 0.2], 0.0, 15, None);

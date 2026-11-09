@@ -1,11 +1,65 @@
 //! Typed rules for recipes whose result is not a fixed crafting stack.
 
 use crate::{Ingredient, ItemStack, Tag};
-pub use horizon_items::firework::FireworkShape;
+/// The explosion shape selected by a firework recipe.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum FireworkShape {
+    /// Small spherical explosion.
+    #[default]
+    SmallBall,
+    /// Large spherical explosion.
+    LargeBall,
+    /// Star-shaped explosion.
+    Star,
+    /// Creeper-face explosion.
+    Creeper,
+    /// Burst explosion.
+    Burst,
+}
+impl FireworkShape {
+    /// The component's serialized shape name.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::SmallBall => "small_ball",
+            Self::LargeBall => "large_ball",
+            Self::Star => "star",
+            Self::Creeper => "creeper",
+            Self::Burst => "burst",
+        }
+    }
+    /// Decode a component shape name; vanilla uses the small ball for unknown names.
+    pub fn from_name(name: &str) -> Self {
+        match name {
+            "large_ball" => Self::LargeBall,
+            "star" => Self::Star,
+            "creeper" => Self::Creeper,
+            "burst" => Self::Burst,
+            _ => Self::SmallBall,
+        }
+    }
+}
+#[cfg(test)]
+mod shape_tests {
+    use super::FireworkShape::*;
+    #[test]
+    fn firework_shape_case_order() {
+        assert_eq!(
+            [
+                SmallBall as u8,
+                LargeBall as u8,
+                Star as u8,
+                Creeper as u8,
+                Burst as u8
+            ],
+            [0, 1, 2, 3, 4]
+        );
+    }
+}
 
 /// An `ItemStackTemplate` in a crafting rule, not an assembled result.
 /// The rule decides which input supplies inherited components and, when
-/// `item` is absent, the result item. Use [`crate::LevelRef::craft`] for an
+/// `item` is absent, the result item. Use [`crate::LevelRef::recipe_for`] for an
 /// actual grid's output and remainders.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
@@ -67,7 +121,7 @@ pub enum RecipeTrimPattern {
 /// second recipe implementation. Only `Stonecutting` has a fixed output;
 /// every other variant depends on the grid or smithing inputs (components,
 /// counts, dyes, trim material, damage or map state). Special crafting
-/// results are assembled by [`crate::LevelRef::craft`], not by treating the
+/// results are assembled by [`crate::LevelRef::recipe_for`], not by treating the
 /// template as a fixed stack. A mod-defined recipe type keeps its raw JSON
 /// instead of inventing a vanilla rule.
 #[derive(Clone, Debug)]
@@ -224,4 +278,19 @@ pub enum RecipeRule {
     /// Repair two damaged items of the same kind; eligibility, damage and
     /// retained curses depend on the input stacks, not a fixed ingredient list.
     RepairItem,
+}
+
+/// Refusal when decoding a recipe-file field.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub enum RecipeJsonError {
+    /// The text is not syntactically valid JSON.
+    InvalidJson,
+    /// The resolved result cannot be represented by the API stack boundary.
+    InvalidStack(crate::StackWriteError),
+}
+impl From<crate::StackWriteError> for RecipeJsonError {
+    fn from(error: crate::StackWriteError) -> Self {
+        Self::InvalidStack(error)
+    }
 }

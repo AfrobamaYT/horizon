@@ -219,10 +219,7 @@ fn input(font: &Font, i: usize, control: &Control) -> Element {
             // CommonLayouts.labeledElement: the label, 4 below it the box,
             // both on the left. The label is a plain StringWidget: it has no
             // click handler, so a click event in it does nothing.
-            let mut shown = label.clone();
-            for span in &mut shown.spans {
-                span.style.click = None;
-            }
+            let shown = label.map_styles(|style| style.click = None);
             Element {
                 w: w.max(font.width_text(label)),
                 h: 9.0 + 4.0 + h,

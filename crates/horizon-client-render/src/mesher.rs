@@ -31,7 +31,10 @@ use horizon_world::{
     registry::BlockStateId,
 };
 use mod_tint::ModLayer;
-pub use mod_tint::register_block_tint_sources;
+pub use mod_tint::{
+    ModTintValues, has_custom_block_tint_sources, register_block_tint_sources,
+    register_color_resolvers,
+};
 #[cfg(test)]
 pub(crate) use sides::sort_tinted;
 pub use sides::{Part, Sides, group_parts};
@@ -759,6 +762,7 @@ impl MeshTables {
         render: &RenderAssets,
         facts: &BlockFacts,
         visibility: FaceVisibility,
+        mod_tint_values: Option<ModTintValues>,
     ) -> crate::Result<Self> {
         // Terrain vertices keep the sprite layer below `OPAQUE_LAYER`.
         let layers = render.sprite_layers.values().max().map_or(0, |l| l + 1);
@@ -935,7 +939,7 @@ impl MeshTables {
             mod_tints: mod_tint::ModTints::default(),
         };
         if let Some(registered) = mod_tint::registered() {
-            tables.apply_tint_layers(assets.registry, registered);
+            tables.apply_tint_layers(assets.registry, registered, mod_tint_values)?;
         }
         Ok(tables)
     }
@@ -987,9 +991,12 @@ impl MeshTables {
             ModLayer::Tint(tint) => default_color(*tint, grass),
             ModLayer::Split { hand, .. } => Some(*hand),
             ModLayer::WaterParticles => None,
-            ModLayer::Source(source) => {
-                Some(source.color(&self.mod_tints.states[state.0 as usize]) & 0xFF_FFFF)
-            }
+            ModLayer::Source(source) => Some(
+                source.color(
+                    &self.mod_tints.values().states[state.0 as usize],
+                    self.mod_tints.values().metadata,
+                ) & 0xFF_FFFF,
+            ),
         }
     }
     /// What tint source `index` (a face's `tintindex`) of `state` colours a face with in the
@@ -1010,7 +1017,10 @@ impl MeshTables {
             ModLayer::Split { world, .. } => Some(TintSource::Fixed(*world)),
             ModLayer::WaterParticles => None,
             ModLayer::Source(source) => Some(TintSource::Fixed(
-                source.color(&self.mod_tints.states[state.0 as usize]) & 0xFF_FFFF,
+                source.color(
+                    &self.mod_tints.values().states[state.0 as usize],
+                    self.mod_tints.values().metadata,
+                ) & 0xFF_FFFF,
             )),
         }
     }
@@ -1464,13 +1474,28 @@ pub fn hdr_tier(name: &str, level: u8) -> u8 {
 }
 const UNSET: u32 = u32::MAX;
 const NO_BIOME: u16 = u16::MAX;
-/// The `ColorResolver`s `ClientLevel` caches block tints for.
-#[derive(Clone, Copy)]
+/// The `ColorResolver`s `ClientLevel` caches block tints for: vanilla's four and the mods' own
+/// (`register_color_resolvers`), by registration index.
+#[derive(Clone, Copy, Debug)]
 enum Resolver {
     Grass,
     Foliage,
     Dry,
     Water,
+    Mod(u32),
+}
+/// One mod resolver's caches in a [`Layer`], as `cells` and `colors` hold vanilla's.
+struct ModCells {
+    cells: Vec<u32>,
+    colors: Box<[u32; 256]>,
+}
+impl Default for ModCells {
+    fn default() -> Self {
+        Self {
+            cells: Vec::new(),
+            colors: Box::new([UNSET; 256]),
+        }
+    }
 }
 /// Biome tints of one block layer: the zoomed biome of every block of the
 /// layer plus the blend radius around it, and the blended colours per column.
@@ -1483,6 +1508,34 @@ struct Layer {
     /// their offset from the first: each is shared by up to 16 cells of the layer.
     jitter: Vec<Option<[[f64; 3]; 8]>>,
     colors: [[u32; 256]; 4],
+    /// The mods' resolvers' caches, by registration index, made when one is first asked.
+    mods: Vec<ModCells>,
+}
+impl Layer {
+    /// The `cells` and `colors` caches of `resolver`. Takes the fields it lends, so `get` keeps
+    /// the zoomed biomes and jitter while it holds them.
+    fn caches<'l>(
+        cells: &'l mut [Vec<u32>; 4],
+        colors: &'l mut [[u32; 256]; 4],
+        mods: &'l mut Vec<ModCells>,
+        resolver: Resolver,
+    ) -> (&'l mut Vec<u32>, &'l mut [u32; 256]) {
+        let vanilla = match resolver {
+            Resolver::Grass => 0,
+            Resolver::Foliage => 1,
+            Resolver::Dry => 2,
+            Resolver::Water => 3,
+            Resolver::Mod(index) => {
+                let index = index as usize;
+                if mods.len() <= index {
+                    mods.resize_with(index + 1, ModCells::default);
+                }
+                let caches = &mut mods[index];
+                return (&mut caches.cells, &mut caches.colors);
+            }
+        };
+        (&mut cells[vanilla], &mut colors[vanilla])
+    }
 }
 /// `ClientLevel.calculateBlockTint` behind a per-layer `BlockTintCache`: each
 /// block averages the colours of the biomes `BiomeManager.getBiome` picks (the
@@ -1594,6 +1647,11 @@ impl<'a> Tints<'a> {
     }
     /// The blended tint of block `(x, y, z)` (section-local x/z, y in 0..16).
     fn get(&mut self, resolver: Resolver, x: i32, y: i32, z: i32) -> u32 {
+        if let Resolver::Mod(index) = resolver
+            && !mod_tint::resolver_exists(index)
+        {
+            return 0xFF_FFFF;
+        }
         // One biome over every blend square: the mean of (2r+1)^2 equal
         // colours is that colour, unless it varies by position (swamp grass).
         if let Some(biome) = self.uniform_biome() {
@@ -1602,7 +1660,8 @@ impl<'a> Tints<'a> {
                 Resolver::Grass if !matches!(info.modifier, GrassModifier::Swamp) => {
                     return self.biomes.grass(biome, 0.0, 0.0) & 0xFF_FFFF;
                 }
-                Resolver::Grass => {}
+                // Grass by position and a mod's colours may vary within the biome.
+                Resolver::Grass | Resolver::Mod(_) => {}
                 Resolver::Foliage => return info.foliage & 0xFF_FFFF,
                 Resolver::Dry => return info.dry_foliage & 0xFF_FFFF,
                 Resolver::Water => return info.water & 0xFF_FFFF,
@@ -1616,17 +1675,23 @@ impl<'a> Tints<'a> {
                 cells: Default::default(),
                 jitter: Vec::new(),
                 colors: [[UNSET; 256]; 4],
+                mods: Vec::new(),
             })
         });
+        let (cells, colors) = Layer::caches(
+            &mut layer.cells,
+            &mut layer.colors,
+            &mut layer.mods,
+            resolver,
+        );
         let slot = (z * 16 + x) as usize;
-        let cached = layer.colors[resolver as usize][slot];
+        let cached = colors[slot];
         if cached != UNSET {
             return cached;
         }
         let [cx, cz, base_y] = self.origin;
         let (bx, by, bz) = (cx * 16, base_y + y, cz * 16);
         let (mut red, mut green, mut blue) = (0, 0, 0);
-        let cells = &mut layer.cells[resolver as usize];
         if cells.is_empty() {
             cells.resize(dim * dim, UNSET);
         }
@@ -1672,6 +1737,12 @@ impl<'a> Tints<'a> {
                     Resolver::Foliage => self.biomes.get(biome).foliage,
                     Resolver::Dry => self.biomes.get(biome).dry_foliage,
                     Resolver::Water => self.biomes.get(biome).water,
+                    Resolver::Mod(index) => mod_tint::resolve(
+                        index,
+                        self.biomes.get(biome),
+                        f64::from(bx + x + dx),
+                        f64::from(bz + z + dz),
+                    ),
                 };
                 cells[cell] = c;
                 red += c >> 16 & 255;
@@ -1681,7 +1752,7 @@ impl<'a> Tints<'a> {
         }
         let n = ((2 * r + 1) * (2 * r + 1)) as u32;
         let color = (red / n) << 16 | (green / n) << 8 | (blue / n);
-        layer.colors[resolver as usize][slot] = color;
+        colors[slot] = color;
         color
     }
 }

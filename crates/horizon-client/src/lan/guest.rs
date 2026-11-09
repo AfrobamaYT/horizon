@@ -564,6 +564,26 @@ impl Guest {
     pub fn is_fake(&self) -> bool {
         self.kind == GuestKind::Fake
     }
+    /// Whether the guest is online and placed in level `dimension`: one of the
+    /// level's players (`ServerLevel.players`).
+    pub fn placed_in(&self, dimension: &str) -> bool {
+        self.participates_online() && self.placed && self.dimension == dimension
+    }
+    /// Whether the guest is sent level `dimension`: placed in it, or held, which
+    /// looks at it without being part of it.
+    pub fn watches_level(&self, dimension: &str) -> bool {
+        self.participates_online() && (self.placed || self.held) && self.dimension == dimension
+    }
+    /// `ChunkMap.isChunkTracked`: whether the guest watches chunk `(x, z)` of
+    /// level `dimension`, inside its view (`ChunkTrackingView.contains`) and
+    /// sent rather than pending. A far-ring column past the view is not tracked.
+    pub fn tracks_chunk(&self, dimension: &str, (x, z): (i32, i32)) -> bool {
+        self.watches_level(dimension)
+            && self.sent_chunks.contains(&(x, z))
+            && self
+                .center
+                .is_some_and(|(cx, cz)| super::hub::tracked(cx, cz, self.view_distance, x, z))
+    }
 
     fn with_defaults(
         kind: GuestKind,
@@ -1074,8 +1094,9 @@ pub fn stack_to_network(
 ) -> Option<Stack> {
     network_stack(&item_id, &synced_id, s)
 }
-/// `ProvidesTrimMaterial.STREAM_CODEC`, `ProvidesBannerPatterns.STREAM_CODEC` and
-/// `AdventureModePredicate.STREAM_CODEC`: encode supported typed saved forms.
+/// `ProvidesTrimMaterial.STREAM_CODEC`, `ProvidesBannerPatterns.STREAM_CODEC`,
+/// `AdventureModePredicate.STREAM_CODEC` and `ItemAttributeModifiers.STREAM_CODEC`:
+/// encode supported typed saved forms.
 /// A failed child discards this entire local buffer, including its prefix.
 fn builtin_component(
     name: &str,
@@ -1086,6 +1107,9 @@ fn builtin_component(
     use horizon_protocol::buf::Writer;
     let mut w = Writer::new();
     match name {
+        "minecraft:attribute_modifiers" => {
+            return crate::item_sync::attribute_modifiers::encode(value, ids);
+        }
         "minecraft:provides_trim_material" => match value {
             Tag::String(name) => {
                 let name = name.to_string().ok()?;
@@ -1475,6 +1499,10 @@ fn network_stack(
             (
                 "minecraft:can_break",
                 horizon_protocol::item::component::CAN_BREAK,
+            ),
+            (
+                "minecraft:attribute_modifiers",
+                horizon_protocol::item::component::ATTRIBUTE_MODIFIERS,
             ),
         ] {
             if d.other(&format!("!{name}")).is_some() {

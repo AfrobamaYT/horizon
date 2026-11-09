@@ -3,5 +3,5 @@
 
 ### The build's warnings
 
-Before it builds, the launcher reads the mods' injections and writes warnings to `native/build.log`; none stops the
-build. They are listed in [Injections](../../injections.md).
+Before it builds, the launcher validates injection declarations and reports their slot/source routes
+in `native/build.log`. Invalid or stale declarations stop the build; see [Injections](../../injections.md).

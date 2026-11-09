@@ -6,36 +6,12 @@
 //! its own blocks. A mod's source is its own [`BlockTintSource`], held by the game and asked on the
 //! meshing workers: like a structure type on the worldgen workers, it gets no `Host` and keeps no
 //! mutable state, since two workers can mesh neighbouring sections at once.
-use super::{BlockStateId, Direction, FluidState, LightLayer};
+use super::{BiomeColors, BlockMetadata, BlockState, Direction, FluidState, LightLayer};
 use std::sync::Arc;
 
-/// A block state as a tint source reads it, vanilla's `BlockState`: its id, its block and its
-/// property values. The game keeps one per state while a mod's source is registered and hands out
-/// shared copies, so reading one allocates nothing.
-#[derive(Clone, Debug, PartialEq, Eq)]
-// exhaustive: the game builds it; mods only read it
-pub struct BlockState {
-    /// Its id in the game's block-state registry.
-    pub id: BlockStateId,
-    /// Its block (`BlockState.getBlock()`): `mymod:cable`, `minecraft:oak_leaves`.
-    pub block: Arc<str>,
-    /// Its property values (`BlockState.getValues()`), by name: `("color", "red")`.
-    pub properties: Arc<[(Arc<str>, Arc<str>)]>,
-}
-
-impl BlockState {
-    /// `BlockState.getValue`: the value of `property`, as its string; None where the block has no
-    /// such property.
-    pub fn value(&self, property: &str) -> Option<&str> {
-        self.properties
-            .iter()
-            .find(|(name, _)| &**name == property)
-            .map(|(_, value)| &**value)
-    }
-}
-
 /// The colour calculations block tints blend over the biomes around a block (vanilla's
-/// `BiomeColors` resolvers, `ColorResolver`).
+/// `BiomeColors` resolvers, `ColorResolver`): vanilla's four, and the ones mods register in
+/// `register_color_resolvers`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: the game blends every resolver, so a new one must be handled there
 pub enum ColorResolver {
@@ -47,6 +23,82 @@ pub enum ColorResolver {
     DryFoliage,
     /// `BiomeColors.WATER_COLOR_RESOLVER`: `Biome.getWaterColor`.
     Water,
+    /// A mod's own resolver, as [`ColorResolvers::register`] returned it.
+    Mod(ModColorResolver),
+}
+
+/// A mod's colour resolver, as the game keeps it: what [`ColorResolvers::register`] returns, to
+/// pass to [`BlockAndTintGetter::block_tint`]. Process-local; do not persist it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub struct ModColorResolver(pub(crate) u32);
+
+/// Construct a mod colour resolver's handle at the hidden integration boundary.
+// hidden: only the game's registry hands out a resolver's handle.
+#[doc(hidden)]
+pub fn mod_color_resolver(index: u32) -> ModColorResolver {
+    ModColorResolver(index)
+}
+
+/// The index the game keeps `resolver` under, at the hidden integration boundary.
+// hidden: only the game's mesher reads it.
+#[doc(hidden)]
+pub fn mod_color_resolver_index(resolver: ModColorResolver) -> u32 {
+    resolver.0
+}
+
+/// A biome as a colour resolver reads it: vanilla's `Biome` in `ColorResolver.getColor`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct ResolverBiome {
+    /// `Biome.getBaseTemperature`.
+    pub temperature: f32,
+    /// `ClimateSettings.downfall`.
+    pub downfall: f32,
+    /// Its grass, foliage, dry foliage and water colours as this client holds them, after
+    /// `biome_colors`.
+    pub colors: BiomeColors,
+}
+
+/// A mod's colour resolver: vanilla's `ColorResolver`, which the game blends over the biomes
+/// around a block as it blends its own (`ClientLevel.calculateBlockTint`, over the biome blend
+/// radius) and caches per section while it meshes. Held by the game and asked on the meshing
+/// workers, so it keeps no mutable state and gets no `Host`.
+pub trait BiomeColorResolver: Send + Sync + 'static {
+    /// `getColor(biome, x, z)`: the colour of `biome` (`minecraft:plains`) at block column
+    /// `(x, z)`, 0xRRGGBB.
+    fn color(&self, biome: &str, info: &ResolverBiome, x: f64, z: f64) -> u32;
+}
+
+/// The colour resolver registry `register_color_resolvers` hands out: NeoForge's
+/// `RegisterColorHandlersEvent.ColorResolvers`.
+pub trait ColorResolvers {
+    /// `register(resolver)`: adds `resolver` to the ones the game blends and caches, and returns
+    /// the [`ColorResolver`] a block tint source passes to
+    /// [`BlockAndTintGetter::block_tint`].
+    fn register(&mut self, resolver: Arc<dyn BiomeColorResolver>) -> ColorResolver;
+}
+
+/// The game's [`ColorResolvers`]: the registered resolvers, each at the index its handle names.
+#[derive(Default)]
+// exhaustive: its field is private; the game builds it
+pub struct ColorResolverRegistry {
+    resolvers: Vec<Arc<dyn BiomeColorResolver>>,
+}
+
+impl ColorResolvers for ColorResolverRegistry {
+    fn register(&mut self, resolver: Arc<dyn BiomeColorResolver>) -> ColorResolver {
+        let index = u32::try_from(self.resolvers.len()).expect("at most u32::MAX colour resolvers");
+        self.resolvers.push(resolver);
+        ColorResolver::Mod(ModColorResolver(index))
+    }
+}
+
+impl ColorResolverRegistry {
+    /// The resolvers, each at the index its handle names.
+    pub fn into_resolvers(self) -> Arc<[Arc<dyn BiomeColorResolver>]> {
+        self.resolvers.into()
+    }
 }
 
 /// What a tint source reads of the world around the block it colours: vanilla's
@@ -70,7 +122,7 @@ pub trait BlockAndTintGetter {
     /// Nether's flat lighting in the Nether).
     fn shade(&self, face: Direction) -> f32;
     /// `getBlockTint(pos, resolver)`: the resolver's colour at `pos` blended over the biome blend
-    /// radius, as opaque ARGB.
+    /// radius, as opaque ARGB. A mod's resolver blends as vanilla's do.
     fn block_tint(&self, pos: [i32; 3], resolver: ColorResolver) -> u32;
     /// `LevelHeightAccessor.getMinY`: the lowest block Y.
     fn min_y(&self) -> i32;
@@ -84,27 +136,29 @@ pub trait BlockAndTintGetter {
 pub trait BlockTintSource: Send + Sync + 'static {
     /// `color(state)`: the colour without a world, where the block is drawn away from a level (a
     /// block in a minecart, a mod's drawn block). Also the default of the two below.
-    fn color(&self, state: &BlockState) -> u32;
+    fn color(&self, state: &BlockState, metadata: &dyn BlockMetadata) -> u32;
     /// `colorInWorld(state, level, pos)`: the colour of the block at `pos`, as the chunk mesher
     /// draws it. The mesher asks once per block and tint index each time it meshes the section.
     fn color_in_world(
         &self,
         state: &BlockState,
+        metadata: &dyn BlockMetadata,
         level: &dyn BlockAndTintGetter,
         pos: [i32; 3],
     ) -> u32 {
         let _ = (level, pos);
-        self.color(state)
+        self.color(state, metadata)
     }
     /// `colorAsTerrainParticle(state, level, pos)`: the colour of the bits the block breaks into
     /// and of falling dust.
     fn color_as_terrain_particle(
         &self,
         state: &BlockState,
+        metadata: &dyn BlockMetadata,
         level: &dyn BlockAndTintGetter,
         pos: [i32; 3],
     ) -> u32 {
-        self.color_in_world(state, level, pos)
+        self.color_in_world(state, metadata, level, pos)
     }
     /// `relevantProperties()`: the property names the colour depends on. Vanilla groups states
     /// for shared baked models by them (`ModelGroupCollector`); Horizon bakes every state, so the
@@ -221,9 +275,34 @@ impl BlockTintRegistry {
 mod tests {
     use super::*;
 
+    struct Cold;
+    impl BiomeColorResolver for Cold {
+        fn color(&self, _: &str, info: &ResolverBiome, _: f64, _: f64) -> u32 {
+            if info.temperature < 0.15 {
+                0xFF_FFFF
+            } else {
+                0
+            }
+        }
+    }
+
+    #[test]
+    fn each_registered_resolver_gets_its_own_handle_and_slot() {
+        let mut registry = ColorResolverRegistry::default();
+        let first = registry.register(Arc::new(Cold));
+        let second = registry.register(Arc::new(Cold));
+        assert_ne!(first, second);
+        let resolvers = registry.into_resolvers();
+        assert_eq!(resolvers.len(), 2);
+        let ColorResolver::Mod(second) = second else {
+            panic!("a registered resolver is a mod's");
+        };
+        assert_eq!(mod_color_resolver_index(second), 1);
+    }
+
     struct Fixed(u32);
     impl BlockTintSource for Fixed {
-        fn color(&self, _: &BlockState) -> u32 {
+        fn color(&self, _: &BlockState, _: &dyn BlockMetadata) -> u32 {
             self.0
         }
     }

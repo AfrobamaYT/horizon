@@ -11,7 +11,6 @@ use horizon_client::{
     screen_effects::{Blend, ScreenQuad},
 };
 use horizon_core::{geometry::Vec3, position::BlockPos};
-use horizon_world::registry::BlockStateId;
 use mod_api::{
     BlockScreenEffect, BlockScreenEffectDrawEvent, ClientHost, ExtractBlockScreenEffectEvent, Flow,
     GuiRenderPostEvent, Hooks, ModEntry, Mods,
@@ -45,7 +44,7 @@ const LEAVE: Plan = Plan {
 #[derive(Debug, PartialEq)]
 struct Asked {
     effect: BlockScreenEffect,
-    state: BlockStateId,
+    state: mod_api::BlockState,
     pos: BlockPos,
     partial_tick: f32,
     hide_gui: bool,
@@ -204,7 +203,7 @@ fn a_mod_draws_prepends_replaces_and_cancels_overlays() {
                 ASKED.lock().unwrap().drain(..).collect::<Vec<_>>(),
                 [Asked {
                     effect: Block,
-                    state: stone,
+                    state: crate::game::api_values::TryIntoApi::try_into_api(&stone).unwrap(),
                     pos: BlockPos::new(0, 65, 0),
                     partial_tick: 0.25,
                     hide_gui: true,
@@ -261,7 +260,7 @@ fn a_mod_draws_prepends_replaces_and_cancels_overlays() {
                 ASKED.lock().unwrap().drain(..).collect::<Vec<_>>(),
                 [Asked {
                     effect: Fire,
-                    state: fire,
+                    state: crate::game::api_values::TryIntoApi::try_into_api(&fire).unwrap(),
                     pos: BlockPos::new(0, 64, 0),
                     partial_tick: 0.25,
                     hide_gui: false,

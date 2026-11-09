@@ -548,6 +548,8 @@ impl Game<'_> {
         let in_area = |y: f32| y >= ay && y < ay + ah;
         let mut tooltip = None;
         let mut item_tip = None;
+        // The hovered text's style, drawn last as componentHoverEffect draws it.
+        let mut hovered = None;
         let mut start = None;
         let mut mark = None;
         for (part, clipped) in layout.placed(open.scroll.amount) {
@@ -575,9 +577,7 @@ impl Game<'_> {
                         )
                     {
                         widgets::widget_cursor(style.click.is_some(), true);
-                        if let Some(hover) = style.hover {
-                            tooltip = Some(*hover);
-                        }
+                        hovered = Some(style);
                     }
                 }
                 Part::Field { input, rect } => {
@@ -771,6 +771,9 @@ impl Game<'_> {
         if let Some(stack) = item_tip {
             self.draw_stack_tooltip(batch, &stack, cursor.0, cursor.1);
         }
+        if let Some(style) = hovered {
+            self.component_hover_effect(batch, &style, cursor);
+        }
     }
 
     /// A left click on a dialog screen.
@@ -920,8 +923,13 @@ impl Game<'_> {
                 Some(ClickEvent::SuggestCommand(command)) => Click::SuggestCommand(command),
                 Some(ClickEvent::RunCommand(command)) => Click::RunCommand(command),
                 Some(ClickEvent::CopyToClipboard(value)) => Click::CopyToClipboard(value),
-                Some(ClickEvent::ShowDialog(dialog)) => Click::ShowDialog(dialog),
-                Some(ClickEvent::Custom { id, payload }) => Click::Custom { id, payload },
+                Some(ClickEvent::ShowDialog(dialog)) => {
+                    Click::ShowDialog(std::sync::Arc::unwrap_or_clone(dialog))
+                }
+                Some(ClickEvent::Custom { id, payload }) => Click::Custom {
+                    id,
+                    payload: payload.map(std::sync::Arc::unwrap_or_clone),
+                },
                 Some(ClickEvent::OpenFile(_)) | None => return Ok(()),
             };
             let after = open.dialog.after_action;

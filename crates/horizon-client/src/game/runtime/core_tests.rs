@@ -62,19 +62,11 @@ fn reload_resolves_parts_against_reloaded_tags() {
             game.block_in_tag(stone_key, "base_stone_overworld"),
             Some(true)
         );
-        let stone = game
-            .pack
-            .assets
-            .registry
-            .default_state("minecraft:stone")
-            .unwrap();
-        assert!(
-            !mod_api::__private::parts(mod_api::HookId::AnalogOutput, "test")
-                .for_hook(mod_api::HookId::AnalogOutput)
-                .unwrap()
-                .block_state(stone)
-                .is_empty()
-        );
+        let stone = game.block_state_default(stone_key).unwrap();
+        assert!(api_values::block_state::block_listens(
+            mod_api::HookId::AnalogOutput,
+            stone
+        ));
         game.session_lock = None;
         let _ = std::fs::remove_dir_all(dir);
     });
@@ -263,7 +255,10 @@ fn right_click_block_controls_cauldron_use() {
             .registry
             .default_state("minecraft:cauldron")
             .unwrap();
-        assert!(game.level_set_block(level, [0, 64, 0], empty, NativeBlockUpdateFlags::NEIGHBORS));
+        assert_eq!(
+            game.level_set_block(level, [0, 64, 0], empty, NativeBlockUpdateFlags::NEIGHBORS),
+            Ok(true)
+        );
         game.inventory[game.selected] = Some(ItemStack::new("minecraft:water_bucket", 1));
         let hit = Hit {
             pos: [0, 64, 0],
@@ -276,7 +271,10 @@ fn right_click_block_controls_cauldron_use() {
         allowed.store(true, Ordering::SeqCst);
         game.use_hand(Some(&hit)).unwrap();
         assert_ne!(game.world.block(0, 64, 0), empty);
-        assert!(game.level_set_block(level, hit.pos, empty, NativeBlockUpdateFlags::NEIGHBORS));
+        assert_eq!(
+            game.level_set_block(level, hit.pos, empty, NativeBlockUpdateFlags::NEIGHBORS),
+            Ok(true)
+        );
         game.inventory[game.selected] = Some(ItemStack::new("minecraft:water_bucket", 1));
         game.keys.insert(KeyCode::ShiftLeft);
         game.use_hand(Some(&hit)).unwrap();
@@ -289,7 +287,10 @@ fn right_click_block_controls_cauldron_use() {
             .registry
             .default_state("minecraft:campfire")
             .unwrap();
-        assert!(game.level_set_block(level, hit.pos, campfire, NativeBlockUpdateFlags::NEIGHBORS));
+        assert_eq!(
+            game.level_set_block(level, hit.pos, campfire, NativeBlockUpdateFlags::NEIGHBORS),
+            Ok(true)
+        );
         let entity = game.new_block_entity("minecraft:campfire").unwrap();
         game.world.block_entities.insert((0, 64, 0), entity);
         game.inventory[game.selected] = Some(ItemStack::new("minecraft:beef", 2));
@@ -307,7 +308,10 @@ fn right_click_block_controls_cauldron_use() {
             .registry
             .default_state("minecraft:oak_fence")
             .unwrap();
-        assert!(game.level_set_block(level, hit.pos, fence, NativeBlockUpdateFlags::NEIGHBORS));
+        assert_eq!(
+            game.level_set_block(level, hit.pos, fence, NativeBlockUpdateFlags::NEIGHBORS),
+            Ok(true)
+        );
         let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
         let mut mob = horizon_client::mobs::Mob::new(
             12,
@@ -357,7 +361,10 @@ fn fence_ties_without_a_lead_only_on_main_hand() {
             .registry
             .default_state("minecraft:oak_fence")
             .unwrap();
-        assert!(game.level_set_block(level, [0, 64, 0], fence, NativeBlockUpdateFlags::NEIGHBORS));
+        assert_eq!(
+            game.level_set_block(level, [0, 64, 0], fence, NativeBlockUpdateFlags::NEIGHBORS),
+            Ok(true)
+        );
         let hit = Hit {
             pos: [0, 64, 0],
             face: [0, 1, 0],
@@ -484,6 +491,9 @@ fn screen_ids_are_distinct_and_stable() {
         Screen::ConfirmLink,
         Screen::DialogWarning,
         Screen::Win,
+        Screen::Mod,
+        Screen::HudEditor,
+        Screen::Studio,
         Screen::DebugOptions,
     ];
     let ids: Vec<&'static str> = all.iter().map(|screen| screen.id()).collect();
@@ -500,6 +510,8 @@ fn screen_ids_are_distinct_and_stable() {
     assert_eq!(Screen::Playing.id(), "playing");
     assert_eq!(Screen::Inventory.id(), "inventory");
     assert_eq!(Screen::Win.id(), "win");
+    assert_eq!(Screen::Studio.id(), "studio");
+    assert_ne!(Screen::Studio.id(), Screen::Chat.id());
 }
 
 /// The `modifiers` a native mod's input hooks hand over are GLFW's bits
@@ -1127,4 +1139,26 @@ fn integrated_server_save_persists_owner_player_data() {
     );
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `Screen::Studio` is the Studio script slot: it never draws the chat screen
+/// (`Screen::Studio => {}` in `game.rs`'s draw match, unlike
+/// `Screen::Chat => draw_chat_screen`), it never blurs the background, and
+/// while it is up gameplay does not own the keyboard (WASD cannot walk
+/// through it, and movement keys are cleared on open).
+#[test]
+fn studio_screen_stays_off_the_chat_slot() {
+    assert!(Screen::Studio != Screen::Chat);
+    assert_eq!(Screen::Studio.id(), "studio");
+    assert!(!Screen::Studio.blurs_background(false));
+    assert!(!Screen::Studio.blurs_background(true));
+    assert!(!gameplay_has_keyboard(Screen::Studio, false, false));
+    // The pure gate behind `Game::open_studio_screen`, as
+    // `native_mod_screen_open`'s `mod_screen_opens` is gated.
+    use super::studio::studio_screen_opens;
+    assert_eq!(studio_screen_opens(Screen::Playing, false), None);
+    assert_eq!(studio_screen_opens(Screen::Playing, true), Some(false));
+    assert_eq!(studio_screen_opens(Screen::Chat, false), Some(false));
+    assert_eq!(studio_screen_opens(Screen::Studio, false), Some(true));
+    assert_eq!(studio_screen_opens(Screen::Studio, true), Some(true));
 }

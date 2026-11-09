@@ -334,12 +334,8 @@ impl Game<'_> {
             }
             None => (true, Vec3::new(0.5, 0.0, 0.0)),
         };
-        // DimensionType.getTeleportationScale: 8 out of the Nether, 1/8 into it.
-        let scale = if self.dim == Dim::Nether {
-            8.0
-        } else {
-            1.0 / 8.0
-        };
+        // DimensionType.getTeleportationScale: the coordinate scales of the two levels.
+        let scale = Dim::teleportation_scale(self.dim, target);
         Plan {
             dim: target,
             // getPortalDestination clamps to the border of the level it leads to.
@@ -1321,7 +1317,7 @@ impl Game<'_> {
         let allowed = if f.id == 0 {
             self.may_enter(plan.dim)
         } else {
-            self.may_travel_through(f.id, &plan)
+            self.with_entity_held_out(f.id, |game| game.may_travel_through(f.id, &plan))
         };
         if !allowed {
             return None;
@@ -1427,12 +1423,28 @@ mod tests {
     struct Gate {
         spare: Arc<AtomicU32>,
         heard: Arc<Mutex<Vec<(u32, String, String)>>>,
+        discard: bool,
     }
     #[mod_api::__subscriptions]
     impl mod_api::Hooks for Gate {
+        fn entity_mount(
+            &self,
+            host: &mut dyn mod_api::ServerHost,
+            e: &mut mod_api::EntityMountEvent<'_>,
+        ) -> mod_api::Flow {
+            if self.spare.load(Ordering::Relaxed) == 1004
+                && !e.mounting
+                && e.entity == 102
+                && let Some(sibling) = host.entity(103)
+            {
+                assert!(sibling.discard(host));
+            }
+            mod_api::Flow::Continue
+        }
+
         fn entity_travel_to_dimension(
             &self,
-            _: &mut dyn mod_api::ServerHost,
+            host: &mut dyn mod_api::ServerHost,
             e: &mut mod_api::EntityTravelToDimensionEvent,
         ) -> mod_api::Flow {
             self.heard.lock().unwrap().push((
@@ -1440,6 +1452,28 @@ mod tests {
                 e.dimension.to_string(),
                 e.cause.to_string(),
             ));
+            let attack = self.spare.load(Ordering::Relaxed);
+            if attack == 1001
+                && e.entity.id() == 102
+                && self
+                    .heard
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|e| e.0 == 102)
+                    .count()
+                    == 1
+            {
+                let root = mod_api::EntityRef::new(e.entity.epoch(), 101);
+                assert!(root.start_riding(host, e.entity, true));
+            }
+            if attack == 1002 && e.entity.id() == 102 {
+                assert!(mod_api::EntityRef::new(e.entity.epoch(), 103).discard(host));
+            }
+            if self.discard {
+                assert!(e.entity.discard(host));
+                return mod_api::Flow::Continue;
+            }
             if e.entity.id() == self.spare.load(Ordering::Relaxed) {
                 mod_api::Flow::Cancel
             } else {
@@ -1450,6 +1484,13 @@ mod tests {
 
     /// Runs `test` with a `Gate` installed, on a server with guests 12 and 13.
     fn with_gate(test: impl FnOnce(&mut Game<'_>, &AtomicU32, &Mutex<Vec<(u32, String, String)>>)) {
+        with_gate_mode(false, test);
+    }
+
+    fn with_gate_mode(
+        discard: bool,
+        test: impl FnOnce(&mut Game<'_>, &AtomicU32, &Mutex<Vec<(u32, String, String)>>),
+    ) {
         let spare = Arc::new(AtomicU32::new(0));
         let heard = Arc::default();
         let mods = vec![mod_api::ModEntry::new(
@@ -1457,6 +1498,7 @@ mod tests {
             Box::new(Gate {
                 spare: Arc::clone(&spare),
                 heard: Arc::clone(&heard),
+                discard,
             }),
         )]
         .into();
@@ -1518,6 +1560,165 @@ mod tests {
             assert_eq!(
                 *heard.lock().unwrap(),
                 [(ids[0], nether(), cause()), (ids[1], nether(), cause())]
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn discarded_item_does_not_travel() {
+        with_gate_mode(true, |game, _, heard| {
+            game.spawn_item(
+                horizon_client::items::ItemStack::new("minecraft:stone", 1),
+                [0.5, 64.0, 0.5],
+                [0.0; 3],
+                0,
+            );
+            let id = game.dropped[0].id;
+            game.send_through_portal(id, BlockPos::new(0, 64, 0));
+            assert!(game.portals.arrivals.is_empty());
+            assert_eq!(heard.lock().unwrap().len(), 1);
+            assert!(game.level_entity(id as i32).is_none());
+            assert_eq!(game.persist.removals.len(), 1);
+            game.native_removals_flush();
+            assert!(game.dropped.is_empty());
+            assert!(game.persist.removals.is_empty());
+            game.native_removals_flush();
+            assert!(game.dropped.is_empty());
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn discarded_mob_and_tnt_do_not_travel() {
+        with_gate_mode(true, |game, _, heard| {
+            let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
+            game.mobs.push(horizon_client::mobs::Mob::new(
+                101,
+                kind,
+                Vec3::new(0.5, 64.0, 0.5),
+                0.0,
+            ));
+            game.spawn_primed_tnt(BlockPos::new(2, 64, 0), false, None, None);
+            let tnt = game.tnts.last().unwrap().id;
+            for id in [101, tnt] {
+                game.send_through_portal(id, BlockPos::new(0, 64, 0));
+                assert!(game.level_entity(id as i32).is_none());
+            }
+            assert!(game.portals.arrivals.is_empty());
+            assert_eq!(heard.lock().unwrap().len(), 2);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn refused_mob_passenger_stays_behind() {
+        with_gate(|game, spare, heard| {
+            let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
+            for id in [101, 102, 103] {
+                let mut mob = horizon_client::mobs::Mob::new(
+                    id,
+                    kind.clone(),
+                    Vec3::new(0.5, 64.0, 0.5),
+                    0.0,
+                );
+                if id != 101 {
+                    mob.extra.mount = Some(101);
+                }
+                game.mobs.push(mob);
+            }
+            spare.store(102, Ordering::Relaxed);
+            game.send_through_portal(101, BlockPos::new(0, 64, 0));
+            assert_eq!(game.portals.arrivals.len(), 1);
+            assert_eq!(game.mobs.iter().map(|m| m.id).collect::<Vec<_>>(), [102]);
+            assert_eq!(game.mobs[0].extra.mount, None);
+            assert_eq!(
+                heard
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .map(|e| e.0)
+                    .collect::<Vec<_>>(),
+                [101, 102, 103]
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn passenger_callbacks_cannot_revisit_ancestors_or_discarded_siblings() {
+        for attack in [1004, 1001, 1002] {
+            with_gate(|game, spare, heard| {
+                let kind = game.res.mob_types().get("minecraft:camel").unwrap().clone();
+                for id in [101, 102, 103] {
+                    let mut mob = horizon_client::mobs::Mob::new(
+                        id,
+                        kind.clone(),
+                        Vec3::new(0.5, 64.0, 0.5),
+                        0.0,
+                    );
+                    if id != 101 {
+                        mob.extra.mount = Some(101);
+                    }
+                    game.mobs.push(mob);
+                }
+                spare.store(attack, Ordering::Relaxed);
+                assert!(game.entity_may_travel(101, Dim::Nether, TravelCause::Teleport));
+                let ids: Vec<_> = heard.lock().unwrap().iter().map(|e| e.0).collect();
+                assert_eq!(
+                    ids,
+                    if attack == 1001 {
+                        vec![101, 102, 103]
+                    } else {
+                        vec![101, 102]
+                    }
+                );
+                assert!(
+                    !(game.mobs[0].extra.mount == Some(102)
+                        && game.mobs[1].extra.mount == Some(101))
+                );
+            });
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mixed_passengers_follow_boarding_not_connection_order() {
+        with_gate(|game, _, heard| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:happy_ghast")
+                .unwrap()
+                .clone();
+            for id in [101, 102] {
+                let mut mob = horizon_client::mobs::Mob::new(
+                    id,
+                    kind.clone(),
+                    Vec3::new(0.5, 64.0, 0.5),
+                    0.0,
+                );
+                if id == 102 {
+                    mob.extra.mount = Some(101);
+                    mob.extra.vehicle_order = 20;
+                }
+                game.mobs.push(mob);
+            }
+            for (conn, order) in [(12, 30), (13, 10)] {
+                game.lan.as_mut().unwrap().hub.update_guest(conn, |g| {
+                    g.vehicle = Some(101);
+                    g.vehicle_order = order;
+                });
+            }
+            assert!(game.entity_may_travel(101, Dim::Nether, TravelCause::Teleport));
+            assert_eq!(
+                heard
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .map(|e| e.0)
+                    .collect::<Vec<_>>(),
+                [101, 13, 102, 12]
             );
         });
     }
