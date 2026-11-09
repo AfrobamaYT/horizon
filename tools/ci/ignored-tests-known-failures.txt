@@ -45,19 +45,13 @@ horizon-client-render gfx::pack_post::destination_tests::clear_budget_tests::siz
 
 # Client failures exposed after enforcing target completion (#2137).
 horizon-client game::persist::summon_uuid_conflict_tests::summon_skips_a_uuid_taken_earlier_in_the_same_tree #2175
-horizon-client game::explosion::tests::explosion_and_mob_breaks_apply_block_drops #2176
 horizon-client game::explosion::tests::explosion_items_parity_fixture #2177 harness
 horizon-client game::native_live_holder_tests::thousand_live_block_entity_ticks #2177 harness
 horizon-client game::remote_vehicles::tests::steering_mount_control_matches_vanilla #2177 harness
 horizon-client game::native_damage_tests::arrow_hits_name_the_projectile_on_players_mobs_and_the_dragon #2178
 horizon-client game::native_player_modes::tests::one_player_may_harm_another_by_the_pvp_rule_and_their_teams #2178
-horizon-client game::spill::tests::a_block_entity_removing_itself_in_its_tick_is_not_asked #2180
 horizon-client game::native_components::item_resource_property_tests::item_resource_changed_defaults_and_consumption #2183
 horizon-client game::transactions::tests::an_aborted_transaction_puts_back_what_it_and_its_committed_children_changed #2183
-horizon-client game::persist::sulfur_body_attribute_tests::a_bodiless_cube_keeps_its_command_knockback_resistance_effect #2185
-horizon-client game::persist::sulfur_body_attribute_tests::command_knockback_changes_reach_the_cache_without_archetype_values #2185
-horizon-client game::potions::mob_absorption_max_tests::absorption_follows_the_max_absorption_it_adds_and_leaves #2185
-horizon-client game::piston_push::order_tests::a_pushed_tnt_bounces_on_slime #2186
 
 # Deterministic CPU work at or over its 30 s deadline in the unoptimized shard (no deadlock); see the issue.
 horizon-client-lib vanillagen::lod::tests::decorated_lod_refines_real_seed_canopies_and_all_dimensions #2132 flaky
