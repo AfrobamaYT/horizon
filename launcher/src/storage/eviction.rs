@@ -45,6 +45,38 @@ pub fn request_cleanup() {
     });
 }
 
+/// After a build, inside its lease: what was freed goes to the build log, and each kept unit
+/// with its reason and size as a warning.
+pub(crate) fn after_build_logged(
+    cache: &Cache,
+    log: impl Fn(&str) -> Result<(), String>,
+    warn: impl Fn(&str),
+) {
+    match Storage::after_build(cache) {
+        Ok(report) => {
+            if let Some(message) = freed_message(&report) {
+                let _ = log(&message);
+            }
+            for kept in report.rows.iter().flat_map(|row| &row.kept) {
+                warn(&format!("{} ({} bytes)", kept.reason, kept.bytes));
+            }
+        }
+        Err(error) => warn(&crate::native_mods::cache_error(error)),
+    }
+}
+
+/// A minute after the launcher starts, once: the launch-time trigger, off the UI thread.
+pub fn cleanup_after_start() {
+    #[cfg(not(test))]
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_secs(60));
+        if let Err(error) = cleanup() {
+            // Busy is a refusal, not a retry loop. Keep the held build untouched.
+            eprintln!("{}", crate::native_mods::cache_error(error));
+        }
+    });
+}
+
 pub fn cleanup() -> Result<Report, Error> {
     Storage::open()?.evict()
 }

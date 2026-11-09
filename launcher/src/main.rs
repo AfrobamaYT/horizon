@@ -132,7 +132,7 @@ impl Page {
         };
         // The data folder did not open: start on Settings, where the message and the two
         // recoveries are (an explicit HORIZON_LAUNCHER_PAGE still wins, for screenshots).
-        page_after_startup(
+        location_page::page_after_startup(
             page,
             horizon_launcher::data_location::startup_error().is_some(),
         )
@@ -498,18 +498,7 @@ impl Launcher {
             }
         })
         .detach();
-        cx.spawn(async move |_, cx| {
-            cx.background_executor()
-                .timer(Duration::from_secs(60))
-                .await;
-            std::thread::spawn(|| {
-                if let Err(error) = horizon_launcher::storage::eviction::cleanup() {
-                    // Busy is a refusal, not a retry loop. Keep the held build untouched.
-                    eprintln!("{}", native_mods::cache_error(error));
-                }
-            });
-        })
-        .detach();
+        horizon_launcher::storage::eviction::cleanup_after_start();
         let mut settings = Settings::load();
         i18n::set(settings.language());
         if settings.minecraft_dir.is_none() {
@@ -5509,16 +5498,6 @@ fn key_bindings() -> Vec<KeyBinding> {
     Vec::new()
 }
 
-/// A data folder that did not open starts on Settings, where the message, Retry and
-/// "Use the default folder" are; an explicit page still wins.
-fn page_after_startup(page: Page, data_folder_failed: bool) -> Page {
-    if page == Page::Play && data_folder_failed {
-        Page::Settings
-    } else {
-        page
-    }
-}
-
 /// The menu bar on macOS, where "Quit" belongs to the app menu.
 fn menus() -> Vec<Menu> {
     vec![
@@ -5656,17 +5635,6 @@ fn closed_by_press(closed_at: Option<Point<Pixels>>, event: &ClickEvent) -> bool
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn an_unopenable_data_folder_starts_on_settings_instead_of_exiting() {
-        use super::{page_after_startup, Page};
-        assert!(matches!(
-            page_after_startup(Page::Play, true),
-            Page::Settings
-        ));
-        assert!(matches!(page_after_startup(Page::Play, false), Page::Play));
-        assert!(matches!(page_after_startup(Page::Mods, true), Page::Mods));
-    }
-
     #[test]
     fn a_menu_button_stays_closed_after_the_press_that_closed_its_menu() {
         use super::closed_by_press;

@@ -4505,8 +4505,7 @@ pub struct Settings {
     /// First-use native code permission for this launcher install, Unix seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native_mods_allowed_at: Option<u64>,
-    /// Managed launcher cache limit in GiB. Unset is 25; zero disables
-    /// automatic cleanup. Installed native versions and player data are not this cache.
+    /// Managed cache limit in GiB (unset: 25; zero: no automatic cleanup). Player data isn't cache.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_limit_gib: Option<u64>,
     /// Developer options (hidden: seven clicks on the sidebar's launcher version reveal them):
