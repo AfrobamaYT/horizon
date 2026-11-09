@@ -847,8 +847,7 @@ impl Game<'_> {
         self.riding == Some(id)
             || self.ridden_by_guest(id)
             || self
-                .mobs
-                .iter()
+                .mob_objects()
                 .any(|m| !m.removed && m.extra.mount == Some(id))
     }
     /// `OldMinecartBehavior.moveAlongTrack`.
@@ -1563,11 +1562,10 @@ impl Game<'_> {
                 if self.riding == Some(c.id) {
                     self.riding = None;
                 }
-                let y = c.position.y;
-                for m in self.mobs.iter_mut().filter(|m| m.extra.mount == Some(c.id)) {
-                    let at = Vec3::new(m.position.x, m.position.y.max(y), m.position.z);
-                    riders::stop_riding(m, Some(at));
-                    m.previous = at;
+                for (_, rider, player) in self.seated_passengers(c.id) {
+                    if !player {
+                        self.dismount_mob(rider);
+                    }
                 }
                 if c.hurt_time == 0 {
                     c.hurt_dir = -c.hurt_dir;
@@ -1849,9 +1847,7 @@ impl Game<'_> {
         let hitbox = self.carts[i].bounds().inflate(Vec3::new(reach, 0.0, reach));
         let mut near = std::mem::take(&mut index.near);
         let mounted = index.mobs_near(&self.mobs, id, hitbox, &mut near);
-        let mut occupied = self.riding == Some(id)
-            || self.ridden_by_guest(id)
-            || mounted.unwrap_or_else(|| self.mobs.iter().any(|m| m.extra.mount == Some(id)));
+        let mut occupied = self.cart_is_vehicle(id);
         if mounted.is_none() {
             near.clear();
             near.extend(0..self.mobs.len() as u32);
@@ -1945,16 +1941,27 @@ impl Game<'_> {
     /// `ejectPassengers` for the mobs in cart `i`.
     pub(super) fn eject_cart_mobs(&mut self, i: usize) {
         let (id, y) = (self.carts[i].id, self.carts[i].position.y);
-        let js: Vec<usize> = (0..self.mobs.len())
-            .filter(|&j| self.mobs[j].extra.mount == Some(id))
-            .collect();
-        for j in js {
-            let at = {
-                let m = &self.mobs[j];
-                Vec3::new(m.position.x, m.position.y.max(y), m.position.z)
+        for (_, rider, player) in self.seated_passengers(id) {
+            if player {
+                continue;
+            }
+            let Some(mob) = self.mob_object(rider) else {
+                continue;
             };
-            riders::stop_riding(&mut self.mobs[j], Some(at));
-            self.mobs[j].previous = at;
+            let at = self.removed_vehicle_dismount_point(
+                mob.position,
+                f64::from(mob.width()),
+                f64::from(mob.height()),
+                y,
+            );
+            self.dismount_mob(rider);
+            if let Some(mob) = self.mob_object_mut(rider)
+                && mob.extra.mount.is_none()
+            {
+                mob.position = at;
+                mob.previous = at;
+                self.snap_mob_passengers(rider);
+            }
         }
     }
     /// Refuse a removed target before carrying its owning slot into a tick clone.
@@ -2364,7 +2371,7 @@ impl Game<'_> {
             CartKind::Rideable => {
                 let id = self.carts[i].id;
                 // isVehicle: a mob already sits in it.
-                let has_mob = self.mobs.iter().any(|m| m.extra.mount == Some(id));
+                let has_mob = !self.seated_passengers(id).is_empty();
                 if sneaking || self.riding.is_some() || self.ridden_by_guest(id) || has_mob {
                     return false;
                 }
@@ -4136,5 +4143,112 @@ mod container_drop_tests {
                 assert_eq!(game.dropped.len(), 3, "boat: {boat}");
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod rejected_passenger_tests {
+    use super::*;
+    use crate::game::{commands::Target, native_entity_refs::tests::with_game};
+    use horizon_core::nbt::Tag;
+
+    fn pig(uuid: i32, children: Vec<Tag>) -> Tag {
+        Tag::compound([
+            ("id", Tag::String("minecraft:pig".into())),
+            ("UUID", Tag::IntArray(vec![0, 2175, 0, uuid])),
+            (
+                "Pos",
+                Tag::List(vec![
+                    Tag::Double(8.0f64.to_bits()),
+                    Tag::Double(64.0f64.to_bits()),
+                    Tag::Double(8.0f64.to_bits()),
+                ]),
+            ),
+            ("Passengers", Tag::List(children)),
+        ])
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn rejected_cart_passenger_occupies_capacity_physics_pickup_and_interaction() {
+        with_game(|game| {
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            let cart = 5000;
+            game.carts.push(Minecart::new(
+                cart,
+                CartKind::Rideable,
+                Vec3::new(8.0, 64.0, 8.0),
+            ));
+            game.load_mob(pig(1, vec![]), None).unwrap();
+            let ghost = game
+                .load_mob(pig(1, vec![pig(2, vec![])]), Some(cart))
+                .unwrap();
+            assert!(game.persist.off_level.contains_key(&ghost));
+            let candidate = game.load_mob(pig(3, vec![]), None).unwrap();
+            assert!(game.cart_is_vehicle(cart));
+            let mut copy = game.carts[0].clone();
+            copy.velocity = Vec3::new(1.0, 0.0, 0.0);
+            assert_eq!(
+                game.natural_slowdown(&mut copy, game.cart_is_vehicle(cart), 0.96)
+                    .x,
+                0.997
+            );
+            assert!(!game.start_riding_target(Target::Mob(candidate), Target::Cart(cart), false));
+            game.carts
+                .update(0, |c| c.velocity = Vec3::new(0.2, 0.0, 0.0));
+            game.pickup_from_cart(0, &mut CartIndex::default());
+            assert_eq!(game.mob_object(candidate).unwrap().extra.mount, None);
+            assert!(!game.interact_cart(Some(InteractTarget {
+                id: cart as i32,
+                location: [0.0; 3]
+            })));
+            assert_eq!(game.riding, None);
+            let mut camel = pig(4, vec![]);
+            if let Tag::Compound(c) = &mut camel {
+                c.insert("id".into(), Tag::String("minecraft:camel".into()));
+            }
+            let camel = game.load_mob(camel, None).unwrap();
+            game.load_mob(pig(1, vec![]), Some(camel)).unwrap();
+            game.load_mob(pig(1, vec![]), Some(camel)).unwrap();
+            game.load_mob(pig(1, vec![]), Some(camel)).unwrap();
+            assert_eq!(game.seated_passengers(camel).len(), 3);
+            assert!(!game.start_riding_target(Target::Mob(candidate), Target::Mob(camel), false));
+            let mut active = game.carts[0].clone();
+            game.activate_cart(&mut active, true);
+            assert_eq!(game.mob_object(ghost).unwrap().extra.mount, None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn cart_destruction_ejects_rejected_rider_and_snaps_frozen_descendant() {
+        with_game(|game| {
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            game.carts.push(Minecart::new(
+                5000,
+                CartKind::Rideable,
+                Vec3::new(8.0, 70.0, 8.0),
+            ));
+            game.load_mob(pig(1, vec![]), None).unwrap();
+            let ghost = game
+                .load_mob(pig(1, vec![pig(2, vec![])]), Some(5000))
+                .unwrap();
+            let leaf = game.mob_passenger_ids(ghost)[0];
+            assert!(game.mobs_below_off_level().contains(&leaf));
+            game.eject_cart_mobs(0);
+            let rider = game.mob_object(ghost).unwrap();
+            assert_eq!(rider.extra.mount, None);
+            assert!(!rider.extra.passenger);
+            assert_eq!(rider.position.y, 70.0);
+            assert_eq!(rider.position, rider.previous);
+            assert_eq!(game.mob_object(leaf).unwrap().extra.mount, Some(ghost));
+            assert!(game.mob_object(leaf).unwrap().position.y >= 70.0);
+        });
     }
 }

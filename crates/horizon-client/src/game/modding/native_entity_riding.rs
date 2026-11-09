@@ -415,10 +415,7 @@ impl Game<'_> {
                 if !self.carts.iter().any(|cart| cart.id == id)
                     || self.riding == Some(id)
                     || self.ridden_by_guest(id)
-                    || self
-                        .mobs
-                        .iter()
-                        .any(|m| !m.removed && m.extra.mount == Some(id))
+                    || !self.seated_passengers(id).is_empty()
                 {
                     return false;
                 }
@@ -427,14 +424,14 @@ impl Game<'_> {
                 let Some(mob) = self.mobs.iter().find(|m| m.id == id && m.alive()) else {
                     return false;
                 };
-                let players = self.boat_players(id).max(usize::from(mob.rider.is_some()));
-                let mobs = self
-                    .mobs
+                let seats = self.seated_passengers(id);
+                let players = seats
                     .iter()
-                    .filter(|m| !m.removed && m.alive() && m.extra.mount == Some(id))
+                    .filter(|(_, _, player)| *player)
                     .count()
-                    .max(usize::from(mob.extra.rider.is_some()));
-                if !force && !horizon_client::mobs::riders::can_add_passenger(mob, players + mobs) {
+                    .max(usize::from(mob.rider.is_some()));
+                let passengers = players + seats.iter().filter(|(_, _, player)| !*player).count();
+                if !force && !horizon_client::mobs::riders::can_add_passenger(mob, passengers) {
                     return false;
                 }
             }
