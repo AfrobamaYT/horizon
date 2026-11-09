@@ -693,7 +693,9 @@ mod tests {
             }
             assert_ne!(
                 game.standalone_geometry.generation(),
-                model.fields().generation
+                model.fields().generation,
+                "reload error: {:?}",
+                game.ui.options.resource_error
             );
             assert_eq!(fresh.set_len(game, 1), Err(GroupError::Stale));
             let after_reload: Vec<_> = (0..4)

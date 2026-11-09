@@ -262,7 +262,7 @@ impl Tag {
             text: Text::empty()
                 .append(Text::translate("chat.tag.modified", &[]))
                 .append(Text::literal("\n"))
-                .append(Text::literal(original_content).with_color(text::GRAY)),
+                .append(Text::untrusted(original_content).with_color(text::GRAY)),
         }
     }
 }
@@ -975,7 +975,9 @@ impl Chat {
     /// The hover text under a GUI-space cursor while chat is focused
     /// (ChatScreen.render's `renderComponentHoverEffect`).
     pub fn hover_at(&self, font: &crate::font::Font, height: i32, x: f64, y: f64) -> Option<Text> {
-        self.style_at(font, height, x, y)?.hover.map(|h| *h)
+        self.style_at(font, height, x, y)?
+            .hover
+            .map(std::sync::Arc::unwrap_or_clone)
     }
     /// The wrapped line under a GUI-space cursor while chat is focused, and
     /// the cursor's x within it (the text starts at 0).
@@ -1006,10 +1008,14 @@ impl Chat {
             return None;
         }
         let content = line.content.resolve_legacy();
-        for (c, style) in content.chars() {
-            x -= f64::from(font.advance(c, style));
-            if x < 0.0 {
-                return Some(style.clone());
+        for span in &content.spans {
+            for c in span.text.chars() {
+                x -= f64::from(font.advance(c, &span.style));
+                if x < 0.0 {
+                    let mut style = span.style.clone();
+                    style.click = span.click_event().cloned();
+                    return Some(style);
+                }
             }
         }
         None

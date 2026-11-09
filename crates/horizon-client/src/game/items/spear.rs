@@ -246,7 +246,7 @@ impl Game<'_> {
         let from = [p.position.x, p.position.y, p.position.z];
         // The enchantments' share, scaled by the attack strength unless the
         // weapon is in use.
-        let magic_boost = self.enchant_damage_bonus(&kind);
+        let magic_boost = self.enchant_damage_bonus(&kind, Some(id));
         let (base_damage, magic_boost) = if self.using.is_none() {
             let scale = self.attack_strength_scale();
             (
@@ -325,7 +325,7 @@ impl Game<'_> {
     pub(super) fn damage_stats_and_hearts(&mut self, actual: f32, feet: [f64; 3], height: f64) {
         self.award_custom_stat("damage_dealt", (actual * 10.0).round() as i32);
         if actual > 2.0 {
-            let indicator = mod_api::particles::ParticleOptions::simple(
+            let indicator = horizon_client::particles::ParticleOptions::simple(
                 horizon_client::particles::ParticleType::DamageIndicator,
             );
             self.particles.send_particles(

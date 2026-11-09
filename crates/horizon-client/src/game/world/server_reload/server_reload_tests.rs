@@ -318,7 +318,10 @@ fn missing_original_at_reload_preserves_the_published_data_and_reports_its_owner
     );
     let world = root.join("world");
     let function = world.join("datapacks/test/data/reload_test/function/keep.mcfunction");
-    write(&world.join("datapacks/test/pack.mcmeta"), "{}");
+    write(
+        &world.join("datapacks/test/pack.mcmeta"),
+        r#"{"pack":{"description":"Reload fixture"}}"#,
+    );
     write(&function, "say old");
     write(
         &world.join("datapacks.json"),
@@ -335,15 +338,15 @@ fn missing_original_at_reload_preserves_the_published_data_and_reports_its_owner
             .reload_datapacks(true, &game.level.enabled_features.clone())
             .err()
             .unwrap();
-        let ReloadStageError::OriginalJars(horizon_mod_package::manifest::JarInputsError::Missing(
-            missing,
-        )) = error
+        let ReloadStageError::OriginalJars(mod_api::JarInputsError::Missing(missing)) = error
         else {
             panic!("expected typed missing original, got {error:?}");
         };
         assert_eq!(missing.owners, ["reload_test"]);
-        assert_eq!(missing.jar, jar);
-        assert_eq!(missing.path, jar_file);
+        assert_eq!(missing.id, jar.id());
+        assert_eq!(missing.version, jar.version());
+        assert_eq!(missing.sha512, jar.sha512());
+        assert_eq!(missing.path, jar_file.display().to_string());
         let reported = game.cmd_reload().unwrap_err().message.plain();
         assert!(reported.contains("reload_test: original 1:"), "{reported}");
         assert!(reported.contains(jar.sha512()), "{reported}");
@@ -397,7 +400,10 @@ fn server_reload_delivers_mod_files_overrides_and_preserves_all_data_on_failure(
     );
     let world = root.join("world");
     let pack = world.join("datapacks/test");
-    write(&pack.join("pack.mcmeta"), "{}");
+    write(
+        &pack.join("pack.mcmeta"),
+        r#"{"pack":{"description":"Reload fixture"}}"#,
+    );
     let data = pack.join("data/reload_test/machines/value.json");
     write(&data, "2");
     // Other namespaces and subdirectories join the same directory listener.
@@ -576,7 +582,10 @@ fn server_reload_skips_unparsable_files_and_delivers_the_rest() {
     );
     let world = root.join("world");
     let pack = world.join("datapacks/test");
-    write(&pack.join("pack.mcmeta"), "{}");
+    write(
+        &pack.join("pack.mcmeta"),
+        r#"{"pack":{"description":"Reload fixture"}}"#,
+    );
     let malformed = pack.join("data/reload_test/machines/foo.json");
     write(&malformed, "{bad json");
     write(
@@ -777,7 +786,10 @@ fn server_reload_retains_listeners_for_other_hooks() {
     );
     let world = root.join("world");
     let pack = world.join("datapacks/test");
-    write(&pack.join("pack.mcmeta"), "{}");
+    write(
+        &pack.join("pack.mcmeta"),
+        r#"{"pack":{"description":"Reload fixture"}}"#,
+    );
     let data = pack.join("data/reload_test/machines/value.json");
     write(&data, "2");
     write(

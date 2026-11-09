@@ -41,6 +41,44 @@ fn stack_attack_bonus_preview(
 }
 
 impl Game<'_> {
+    /// Metadata backing ItemResource::damageable through the gameplay property path.
+    pub(in crate::game) fn item_resource_damageable(&self, stack: &ItemStack) -> bool {
+        horizon_client::stations::is_damageable(self.items(), stack)
+    }
+    /// Metadata backing ItemResource::foil through the gameplay property path.
+    pub(in crate::game) fn item_resource_foil(&self, stack: &ItemStack) -> bool {
+        stack.has_foil(
+            self.items()
+                .enchantments
+                .props(&stack.item)
+                .and_then(|p| p.glint),
+        )
+    }
+    /// Metadata backing ItemResource::repairable through the gameplay property path.
+    pub(in crate::game) fn item_resource_repairable(
+        &self,
+        stack: &ItemStack,
+        material: mod_api::ItemKey,
+    ) -> bool {
+        let Some(id) = mod_api::__private::item_key_id(material) else {
+            return false;
+        };
+        let Some(item) = self.items().get(id) else {
+            return false;
+        };
+        let material = ItemStack {
+            item: item.id.clone(),
+            count: 1,
+            damage: 0,
+            extra: None,
+        };
+        horizon_client::stations::is_valid_repair_item(
+            &self.items().enchantments,
+            self.items(),
+            stack,
+            &material,
+        )
+    }
     /// Item `item`'s default value of component `component`, in its prototype
     /// (`Item.components().get`): `minecraft:max_damage` on an iron sword is `250`, data
     /// packs' and native mods' changes included. Read from the item report's JSON, so a
@@ -60,13 +98,15 @@ impl Game<'_> {
     /// Item `item`'s cooking-fuel burn time in ticks (`FuelValues.burnDuration` of its `cooking_fuel`
     /// component, the data pack's context int provider resolved), None where it is no fuel. API
     /// @API:item_components@.
-    pub(super) fn item_burn_time(&self, item: &str) -> Option<i32> {
+    pub(super) fn item_burn_time(&self, item: mod_api::ItemKey) -> Option<i32> {
+        let item = mod_api::__private::item_key_id(item)?;
         let (time, _) = self.items().get(item)?.fuel.as_ref()?;
         Some(self.res.providers().int_value(time))
     }
     /// Item `item`'s chance to raise a composter's level (its `compostable` component's layers provider
     /// resolved), None where it is not compostable. API @API:item_components@.
-    pub(super) fn item_compost_chance(&self, item: &str) -> Option<f32> {
+    pub(super) fn item_compost_chance(&self, item: mod_api::ItemKey) -> Option<f32> {
+        let item = mod_api::__private::item_key_id(item)?;
         let layers = self.items().get(item)?.compostable.as_ref()?;
         Some(self.res.providers().layer_chance(layers))
     }
@@ -160,6 +200,8 @@ impl Game<'_> {
             .as_ref()
             .and_then(horizon_items::properties::component_int)?;
         horizon_items::properties::damage_bar(damage, max_damage)
+            .try_into_api()
+            .unwrap()
     }
     /// Actor state shared by detached stack queries, without swapping equipment or players.
     fn item_combat_actor(&self, actor: mod_api::LivingRef) -> Option<(bool, bool, f64, bool)> {
@@ -671,7 +713,7 @@ mod item_resource_property_tests {
         fs::create_dir(&root).unwrap();
         for entry in fs::read_dir(&resources).unwrap() {
             let entry = entry.unwrap();
-            if entry.file_name() != "items.json" {
+            if entry.file_name() != "items.json" && entry.file_name() != "command-registries.json" {
                 link_fixture_source(&entry.path(), &root.join(entry.file_name()));
             }
         }
@@ -680,6 +722,19 @@ mod item_resource_property_tests {
         defaults["minecraft:iron_sword"]["minecraft:damage"] = json!(75);
         defaults["minecraft:iron_sword"]["minecraft:enchantment_glint_override"] = json!(false);
         defaults["horizon:consumable_fixture"] = defaults["minecraft:stick"].clone();
+        // A mod item belongs to the registry as well as the component report.
+        let mut registries: Value =
+            serde_json::from_slice(&fs::read(resources.join("command-registries.json")).unwrap())
+                .unwrap();
+        registries["items"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!("horizon:consumable_fixture"));
+        fs::write(
+            root.join("command-registries.json"),
+            serde_json::to_vec(&registries).unwrap(),
+        )
+        .unwrap();
         defaults["minecraft:wooden_sword"]["minecraft:repairable"] = json!({"items":"#planks"});
         fs::write(
             root.join("items.json"),
@@ -809,6 +864,23 @@ mod item_resource_property_tests {
 }
 
 #[cfg(test)]
+mod hot_key_tests {
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn resolved_keys_select_fuel_and_compost_metadata() {
+        mod_api::testing::with_mods(Vec::new().into(), || {
+            crate::game::native_entity_refs::tests::with_game(|game| {
+                let key = |name| mod_api::__private::item_key(name).unwrap();
+                assert_eq!(game.item_burn_time(key("minecraft:coal")), Some(1600));
+                assert_eq!(game.item_burn_time(key("minecraft:stone")), None);
+                assert_eq!(game.item_compost_chance(key("minecraft:wheat")), Some(0.65));
+                assert_eq!(game.item_compost_chance(key("minecraft:stone")), None);
+            });
+        });
+    }
+}
+
+#[cfg(test)]
 mod combat_query_tests {
     use super::super::api_values::test_snapshot;
     use super::super::native_entity_refs::tests::with_game;
@@ -845,6 +917,7 @@ mod combat_query_tests {
         });
         let enchantments = Enchantments::default()
             .with_entries([("test:random_damage", &definition)])
+            .unwrap()
             .unwrap();
         let mut stack = ItemStack::new("minecraft:diamond_sword", 1);
         stack.enchant("test:random_damage", 1);
@@ -913,7 +986,7 @@ mod combat_query_tests {
                 enchanted
                     .attack_damage_bonus(game, attacker, target, 7.0)
                     .unwrap(),
-                game.enchanted_damage("minecraft:player", 7.0) - 7.0
+                game.enchanted_damage("minecraft:player", 7.0, Some(target.id())) - 7.0
             );
             patch(
                 &mut weapon,
@@ -1118,7 +1191,10 @@ mod combat_query_tests {
                 "minecraft:magic"
             );
             game.inventory[game.selected] = Some(sword.clone());
-            assert_eq!(game.enchanted_damage("minecraft:player", 7.0), 9.0);
+            assert_eq!(
+                game.enchanted_damage("minecraft:player", 7.0, Some(target.id())),
+                9.0
+            );
             assert_eq!(
                 super::super::creatures::source_damage_type(game.attack_source([0.0; 3])),
                 "minecraft:magic"
@@ -1139,7 +1215,10 @@ mod combat_query_tests {
                 "minecraft:player_attack"
             );
             game.inventory[game.selected] = Some(sword);
-            assert_eq!(game.enchanted_damage("minecraft:player", 7.0), 7.0);
+            assert_eq!(
+                game.enchanted_damage("minecraft:player", 7.0, Some(target.id())),
+                7.0
+            );
             assert_eq!(
                 super::super::creatures::source_damage_type(game.attack_source([0.0; 3])),
                 "minecraft:player_attack"

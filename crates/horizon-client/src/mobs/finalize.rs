@@ -19,7 +19,9 @@
 //! second part (horse markings, llama strength, panda hidden gene, tropical
 //! fish base colour), `variant3` the tropical fish pattern colour, and
 //! `sound_variant` the index in the species' sound variant registry.
-use super::{Mob, Species, farm::Climate, gear, spawn_rules::Reason, spawning::LocalDifficulty};
+use super::{
+    Mob, MobWorld, Species, farm::Climate, gear, spawn_rules::Reason, spawning::LocalDifficulty,
+};
 use crate::{enchant::Enchantments, items::Items};
 use horizon_core::{
     geometry::Aabb,
@@ -896,15 +898,18 @@ pub fn baby_start_age(s: Species) -> i32 {
 /// The age a non-ageable baby (zombies, piglins, zoglins) keeps.
 pub const NON_AGEABLE_BABY: i32 = i32::MIN / 2;
 
-/// `AgeableMob.setAge`, with each class's `ageBoundaryReached`.
-pub fn set_age(m: &mut Mob, age: i32) {
+/// `AgeableMob.setAge`, with each class's `ageBoundaryReached`. `w` is the
+/// ticking world where the age crosses; the spawn and load paths pass none,
+/// and no happy ghast grows up there (a hatch is the baby setup, a spawn was
+/// never a ghastling), so the ghastling's brain stop needs no deferral.
+pub fn set_age(m: &mut Mob, age: i32, w: Option<&MobWorld<'_>>) {
     let old = m.extra.age;
     m.extra.age = age;
     if (old < 0) != (age < 0) {
-        age_boundary_reached(m);
+        age_boundary_reached(m, w);
     }
 }
-fn age_boundary_reached(m: &mut Mob) {
+fn age_boundary_reached(m: &mut Mob, w: Option<&MobWorld<'_>>) {
     let baby = m.is_baby();
     match m.species() {
         Species::Goat => set_base(m, Attr::AttackDamage, if baby { 1.0 } else { 2.0 }),
@@ -914,7 +919,7 @@ fn age_boundary_reached(m: &mut Mob) {
         // then Animal's no-op. A hatched ghastling needs it before it is in
         // the level (DriedGhastBlock.spawnGhastling sets the baby age before
         // addFreshEntity), or its first tick flies the adult goals.
-        Species::HappyGhast => super::happy_ghast::ensure_setup(m),
+        Species::HappyGhast => super::happy_ghast::ensure_setup(m, w),
         _ => {}
     }
 }
@@ -933,7 +938,7 @@ pub fn goat_spawn(m: &mut Mob) {
         .unwrap_or(600);
     set_memory(m, "ram_cooldown_ticks", i64::from(ram), i64::MAX);
     m.extra.screaming = m.random.next_double() < 0.02;
-    age_boundary_reached(m);
+    age_boundary_reached(m, None);
     if !m.is_baby() && m.random.next_float() < 0.1 {
         let left = m.random.next_boolean();
         m.extra.lost_horns[usize::from(!left)] = true;
@@ -963,7 +968,7 @@ pub fn spawn_egg_offspring(child: &mut Mob, species: Species, variant: u8, color
 pub fn set_baby(m: &mut Mob, baby: bool) {
     let s = m.species();
     if ageable(s) {
-        set_age(m, if baby { baby_start_age(s) } else { 0 });
+        set_age(m, if baby { baby_start_age(s) } else { 0 }, None);
         return;
     }
     match s {
@@ -1126,10 +1131,9 @@ pub fn equip_stack(
         let trim = stack
             .components
             .iter()
+            .rev()
             .find(|(id, _)| id == "minecraft:trim")
-            .and_then(|(_, v)| {
-                crate::item_data::trim::from_nbt(&horizon_client_core::scoreboard::json_to_tag(v))
-            });
+            .and_then(|(_, v)| v.as_ref().and_then(crate::item_data::trim::from_nbt));
         gear::set_trim(m, gear_slot(slot), trim);
     }
     if let Some(chance) = drop_chance {
@@ -1212,7 +1216,7 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
             let (should, size, chance) = (a.should_spawn_baby, a.size, a.baby_chance);
             if should && size > 0 && self.float() <= chance {
                 let start = baby_start_age(m.species());
-                set_age(m, start);
+                set_age(m, start, None);
             }
             if let Some(a) = g.ageable() {
                 a.size += 1;
@@ -1689,7 +1693,7 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
             }
         } else if self.int(10) == 0 {
             if let Some(mut jockey) = self.create("minecraft:strider", Reason::Jockey, m) {
-                set_age(&mut jockey, -24000);
+                set_age(&mut jockey, -24000, None);
                 if !self.rider_kept(&mut jockey, Reason::Jockey, None) {
                     return self.ageable(m, Some(Group::Ageable(Ageable::chance(0.0))));
                 }
@@ -1904,7 +1908,7 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
                 let mut g = g;
                 if s == S::TraderLlama {
                     if reason == Reason::Event {
-                        set_age(m, 0);
+                        set_age(m, 0, None);
                     }
                     if g.is_none() {
                         g = Some(Group::Ageable(Ageable::babies(false)));
@@ -1946,7 +1950,7 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
             S::Goat => {
                 goat_init_memories(m, self.random);
                 m.extra.screaming = self.random.next_double() < 0.02;
-                age_boundary_reached(m);
+                age_boundary_reached(m, None);
                 if !m.is_baby() && self.float() < 0.1 {
                     let left = self.random.next_boolean();
                     m.extra.lost_horns[usize::from(!left)] = true;
@@ -1978,7 +1982,7 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
                 };
                 m.extra.variant = variant;
                 if baby {
-                    set_age(m, -24000);
+                    set_age(m, -24000, None);
                 }
                 self.populate(m);
                 self.ageable(m, Some(g))
@@ -2007,7 +2011,7 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
                     m.extra.variant = types[self.int(2) as usize];
                 }
                 if baby {
-                    set_age(m, -24000);
+                    set_age(m, -24000, None);
                 }
                 self.ageable(m, Some(g))
             }

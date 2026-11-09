@@ -108,8 +108,7 @@ pub struct Parts {
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct HookParts {
     pub(crate) blocks: HashMap<Box<str>, Vec<Attached<dyn BlockPart>>>,
-    pub(crate) block_states: Vec<Option<NonZeroU32>>,
-    pub(crate) block_slices: Vec<Arc<[Attached<dyn BlockPart>]>>,
+    pub(crate) block_keys: HashMap<crate::BlockKey, Vec<Attached<dyn BlockPart>>>,
     pub(crate) block_entities: HashMap<Box<str>, Vec<Attached<dyn BlockEntityPart>>>,
     pub(crate) block_entity_kinds: HashMap<Box<str>, Vec<Attached<dyn BlockEntityPart>>>,
     pub(crate) items: HashMap<Box<str>, Vec<Attached<dyn ItemPart>>>,
@@ -145,15 +144,17 @@ pub(crate) struct Installed {
     pub(crate) tags: TagParts,
     pub(crate) block_entity_types: Vec<BlockEntityTypeDecl>,
     pub(crate) entity_attributes: Vec<EntityAttributeDeclaration>,
-    pub(crate) world_fluids: Vec<horizon_mod_package::content::FluidLook>,
+    pub(crate) world_fluids: Vec<(String, crate::WorldFluid)>,
     pub(crate) entity_attribute_modifications: Vec<EntityAttributeModification>,
+    pub(crate) attributes: Vec<super::attributes::AttributeDeclaration>,
     pub(crate) spawn_placements: Vec<SpawnPlacementDeclaration>,
     pub(crate) registry_keys: horizon_mod_runtime::registry_keys::Requests,
     pub(crate) effects: OnceLock<horizon_mod_runtime::registry_keys::Effects>,
     pub(crate) resolved_block_entity_types: OnceLock<horizon_mod_runtime::registry_keys::Names>,
     pub(crate) fluids: OnceLock<horizon_mod_runtime::registry_keys::Names>,
     pub(crate) resolved_items: OnceLock<horizon_mod_runtime::registry_keys::Names>,
-    pub(crate) resolved_blocks: OnceLock<horizon_mod_runtime::registry_keys::Names>,
+    pub(crate) resolved_blocks: OnceLock<horizon_mod_runtime::block_definitions::Blocks>,
+    pub(crate) particles: OnceLock<horizon_mod_runtime::registry_keys::Particles>,
     /// The ticket controllers the mods registered; a [`TicketController`]'s slot indexes it.
     pub(crate) controllers: Vec<ControllerInfo>,
     pub(crate) structure_types: Vec<crate::structure_type::StructureTypeInfo>,
@@ -307,7 +308,7 @@ pub fn mark_game_thread() {
 pub enum ResolvePartsError {
     /// An item key names no loaded item.
     ItemKeys(Vec<ItemKeyError>),
-    /// Legacy block or item Part registration refusals.
+    /// Block or item Part resolution refusals, including unavailable block metadata.
     Parts(Vec<String>),
 }
 
@@ -318,10 +319,6 @@ pub struct KnownIds<'a> {
     pub block: &'a dyn Fn(&str) -> bool,
     /// Whether an item id is known.
     pub item: &'a dyn Fn(&str) -> bool,
-    /// How many block states the game has.
-    pub state_count: usize,
-    /// The block id of a block state, by state index.
-    pub state_block: &'a dyn Fn(usize) -> &'a str,
 }
 
 /// Resolve this thread's game's parts against its tags (`block_tags`, `item_tags`: flattened,
@@ -365,17 +362,19 @@ pub fn prepare_parts(
         if table.blocks.is_empty() {
             continue;
         }
-        let mut names = HashMap::with_capacity(table.blocks.len());
-        for (name, attached) in &table.blocks {
-            names.insert(
-                name.as_ref(),
-                NonZeroU32::new(table.block_slices.len() as u32 + 1).unwrap(),
-            );
-            table.block_slices.push(Arc::from(attached.clone()));
-        }
-        table.block_states = (0..known.state_count)
-            .map(|state| names.get((known.state_block)(state)).copied())
-            .collect();
+        table.block_keys = table
+            .blocks
+            .iter()
+            .map(|(name, attached)| {
+                crate::registry_keys::block_key(name)
+                    .map(|key| (key, attached.clone()))
+                    .ok_or_else(|| {
+                        ResolvePartsError::Parts(vec![format!(
+                            "block metadata unavailable for {name}"
+                        )])
+                    })
+            })
+            .collect::<Result<_, _>>()?;
     }
     Ok(Some(parts))
 }
@@ -530,14 +529,16 @@ pub struct PartRegistrar {
     pub(crate) tags: TagParts,
     pub(crate) block_entity_types: Vec<BlockEntityTypeDecl>,
     pub(crate) entity_attributes: Vec<EntityAttributeDeclaration>,
-    pub(crate) world_fluids: Vec<horizon_mod_package::content::FluidLook>,
+    pub(crate) world_fluids: Vec<(String, crate::WorldFluid)>,
     pub(crate) entity_attribute_modifications: Vec<EntityAttributeModification>,
+    pub(crate) attributes: Vec<super::attributes::AttributeDeclaration>,
     pub(crate) spawn_placements: Vec<SpawnPlacementDeclaration>,
     pub(crate) registry_keys: Rc<RefCell<horizon_mod_runtime::registry_keys::Requests>>,
     pub(crate) effects: OnceLock<horizon_mod_runtime::registry_keys::Effects>,
     pub(crate) controllers: Vec<ControllerInfo>,
     pub(crate) structure_types: Vec<crate::structure_type::StructureTypeInfo>,
     pub(crate) dimensions: Vec<crate::dimension::DimensionInfo>,
+    pub(crate) dimension_shape: fn(&crate::DimensionSettings) -> bool,
     pub(crate) chunk_generators: Vec<crate::chunk_generator::ChunkGeneratorInfo>,
     pub(crate) refused: Vec<String>,
 }
@@ -556,12 +557,14 @@ impl PartRegistrar {
             entity_attributes: Vec::new(),
             world_fluids: Vec::new(),
             entity_attribute_modifications: Vec::new(),
+            attributes: Vec::new(),
             spawn_placements: Vec::new(),
             registry_keys: Default::default(),
             effects: OnceLock::new(),
             controllers: Vec::new(),
             structure_types: Vec::new(),
             dimensions: Vec::new(),
+            dimension_shape: |_| false,
             chunk_generators: Vec::new(),
             refused: Vec::new(),
         }
@@ -639,8 +642,12 @@ pub(crate) fn namespaced(id: &str) -> bool {
 }
 
 /// Every mod's [`Hooks::register`](crate::Hooks::register) run against one registrar, in dispatch order.
-pub(crate) fn register_all(mods: &[ModEntry]) -> PartRegistrar {
+pub(crate) fn register_all(
+    mods: &[ModEntry],
+    dimension_shape: fn(&crate::DimensionSettings) -> bool,
+) -> PartRegistrar {
     let mut registrar = PartRegistrar::new(mods.first().map_or("horizon", |entry| entry.id));
+    registrar.dimension_shape = dimension_shape;
     struct RestoreKeys(Option<Rc<RefCell<horizon_mod_runtime::registry_keys::Requests>>>);
     impl Drop for RestoreKeys {
         fn drop(&mut self) {
@@ -664,8 +671,9 @@ pub(crate) fn register_all(mods: &[ModEntry]) -> PartRegistrar {
 pub fn install_parts(
     mods: &[ModEntry],
     schema: &crate::declarations::RuleSchema<'_>,
+    dimension_shape: fn(&crate::DimensionSettings) -> bool,
 ) -> Result<(), Vec<String>> {
-    install_registrar(register_all(mods), schema)
+    install_registrar(register_all(mods, dimension_shape), schema)
 }
 
 pub(crate) fn install_registrar(
@@ -689,6 +697,7 @@ pub(crate) fn install_registrar(
         block_entity_types: registrar.block_entity_types,
         entity_attributes: registrar.entity_attributes,
         world_fluids: registrar.world_fluids,
+        attributes: registrar.attributes,
         entity_attribute_modifications: registrar.entity_attribute_modifications,
         spawn_placements: registrar.spawn_placements,
         resolved_block_entity_types: OnceLock::new(),
@@ -699,6 +708,7 @@ pub(crate) fn install_registrar(
         fluids: OnceLock::new(),
         resolved_items: OnceLock::new(),
         resolved_blocks: OnceLock::new(),
+        particles: OnceLock::new(),
         controllers: registrar.controllers,
         structure_types: registrar.structure_types,
         dimensions: registrar.dimensions,
@@ -741,7 +751,9 @@ pub mod tests {
 
     /// Install fixture parts with the test rule schema.
     pub fn install_parts_fixture(mods: &[ModEntry]) -> Result<(), Vec<String>> {
-        install_parts(mods, &rule_schema())
+        // This API-only fixture has no engine dimension codec. Dimension integration tests
+        // use the game's installer, which supplies its real shape validator.
+        install_parts(mods, &rule_schema(), |_| false)
     }
     /// A small independent vanilla-schema fixture for tests without a game.
     pub fn rule_schema() -> crate::__private::RuleSchema<'static> {
@@ -757,32 +769,33 @@ pub mod tests {
     pub fn register_game_keys(
         ids: impl IntoIterator<Item = String>,
         schema: &crate::declarations::RuleSchema<'_>,
+        dimension_shape: fn(&crate::DimensionSettings) -> bool,
     ) {
-        let mut registrar = super::register_all(crate::mods());
+        let mut registrar = super::register_all(crate::mods(), dimension_shape);
         registrar.mod_id = "horizon";
         registrar.declare_fluid("definition_test");
         for id in ids {
             registrar.block_key(&id);
         }
         super::install_registrar(registrar, schema).unwrap();
-        crate::registry_keys::resolve_effects(
-            horizon_client_core::potions::all_effects()
-                .map(|def| horizon_client_core::potions::namespaced(def.id)),
-            |id| horizon_client_core::potions::effect(id).map(|def| def.index),
+        crate::registry_keys::resolve_fluids(
+            &[
+                "minecraft:empty",
+                "minecraft:water",
+                "minecraft:flowing_water",
+                "minecraft:lava",
+                "minecraft:flowing_lava",
+            ],
+            // The engine's world fluids in vanilla registry order, as the game resolves them.
+            &[
+                "minecraft:empty",
+                "minecraft:flowing_water",
+                "minecraft:water",
+                "minecraft:flowing_lava",
+                "minecraft:lava",
+            ],
         )
         .unwrap();
-        crate::registry_keys::resolve_fluids(&[
-            "minecraft:empty",
-            "minecraft:water",
-            "minecraft:flowing_water",
-            "minecraft:lava",
-            "minecraft:flowing_lava",
-        ])
-        .unwrap();
-        if let Some(types) = horizon_client_core::block_entity_types::current() {
-            crate::registry_keys::resolve_block_entity_types(types.names(), |id| types.key(id))
-                .unwrap();
-        }
     }
 
     /// A previously requested block in the game fixture. Unknown names are a fixture error.
@@ -803,10 +816,20 @@ pub mod tests {
 
     /// A registered effect exposed by the real load-owned mapping, also for unrequested vanilla entries.
     pub fn effect_key(id: &str) -> EffectKey {
-        let index = horizon_client_core::potions::effect(id)
-            .expect("fixture registered this effect")
-            .index;
-        crate::registry_keys::effect_key_by_index(index).expect("fixture resolved effect keys")
+        let canonical = if id.contains(':') {
+            id.to_owned()
+        } else {
+            format!("minecraft:{id}")
+        };
+        EffectKey(
+            *super::resolved_effects()
+                .get()
+                .expect("fixture resolved effects")
+                .names
+                .slots
+                .get(&canonical)
+                .expect("fixture registered this effect"),
+        )
     }
 
     #[cfg(test)]
@@ -847,19 +870,16 @@ pub mod tests {
         install_parts(
             &[ModEntry::new("lookup", Box::new(Unknown))],
             &crate::parts::tests::rule_schema(),
+            |_| false,
         )
         .unwrap();
         assert_eq!(
-            crate::registry_keys::resolve_blocks(|_| None).unwrap_err(),
+            crate::registry_keys::resolve_block_keys(std::iter::empty(), |_| unreachable!())
+                .unwrap_err(),
             ["mod lookup requested unknown block absent:block"]
         );
         assert_eq!(
-            crate::registry_keys::resolve_effects(
-                horizon_client_core::potions::all_effects()
-                    .map(|def| horizon_client_core::potions::namespaced(def.id)),
-                |id| horizon_client_core::potions::effect(id).map(|def| def.index)
-            )
-            .unwrap_err(),
+            crate::registry_keys::resolve_effects(std::iter::empty(), |_| None).unwrap_err(),
             ["mod lookup requested unknown effect absent:effect"]
         );
     }
@@ -878,6 +898,7 @@ pub mod tests {
         let errors = install_parts(
             &[ModEntry::new("lookup", Box::new(Invalid))],
             &crate::parts::tests::rule_schema(),
+            |_| false,
         )
         .unwrap_err();
         assert_eq!(errors.len(), 3);
@@ -1030,16 +1051,23 @@ pub mod tests {
     pub(crate) struct Level;
     #[cfg(test)]
     impl LevelHost for Level {
-        fn block_state(&self, _: [i32; 3]) -> BlockStateId {
-            unimplemented!()
-        }
-        fn state_with_property(&self, _: BlockStateId, _: &str, _: &str) -> Option<BlockStateId> {
+        fn block_state(&self, _: [i32; 3]) -> Option<crate::BlockState> {
             None
         }
-        fn state_block(&self, state: BlockStateId) -> Option<&str> {
-            ["test:gauge", "test:other"]
-                .get(state.0 as usize - 1)
-                .copied()
+        fn state_with_property(&self, _: BlockState, _: &str, _: &str) -> Option<BlockState> {
+            None
+        }
+        fn state_block(&self, state: BlockState) -> Option<&str> {
+            let metadata = crate::__private::block_definitions()?;
+            let slot = state.block().0 as usize;
+            if u32::from(state.ordinal()) >= metadata.definitions.get(slot)?.state_count() {
+                return None;
+            }
+            metadata
+                .names
+                .entries
+                .get(slot)
+                .map(|entry| entry.id.as_str())
         }
     }
 
@@ -1059,11 +1087,7 @@ pub mod tests {
                 ["gauge", "connector", "press", "hoard"]
                     .into_iter()
                     .chain(CAPABILITY_TYPES.iter().copied())
-                    .map(|id| horizon_mod_package::content::Block {
-                        id: format!("test:{id}"),
-                        template: "minecraft:stone".into(),
-                        ..Default::default()
-                    }),
+                    .map(|id| mod_api::Block::new(format!("test:{id}"), "minecraft:stone")),
             );
         }
     }
@@ -1077,14 +1101,35 @@ pub mod tests {
         ]
         .into();
         crate::install(mods.clone());
-        install_parts(&mods, &crate::parts::tests::rule_schema()).unwrap();
-        crate::registry_keys::resolve_fluids(&[
-            "minecraft:water",
-            "minecraft:lava",
-            "minecraft:flowing_water",
-            "minecraft:flowing_lava",
-            "minecraft:empty",
-        ])
+        install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
+        crate::registry_keys::resolve_fluids(
+            &[
+                "minecraft:water",
+                "minecraft:lava",
+                "minecraft:flowing_water",
+                "minecraft:flowing_lava",
+                "minecraft:empty",
+            ],
+            &[],
+        )
+        .unwrap();
+        crate::registry_keys::resolve_block_keys(
+            [
+                "minecraft:air",
+                "minecraft:granite",
+                "test:gauge",
+                "test:other",
+                "test:connector",
+                "test:press",
+            ],
+            |_| {
+                horizon_mod_runtime::block_definitions::BlockDefinition::new(
+                    &[&Default::default()],
+                    0,
+                )
+                .map_err(|e| format!("{e:?}"))
+            },
+        )
         .unwrap();
         mark_game_thread();
         mods

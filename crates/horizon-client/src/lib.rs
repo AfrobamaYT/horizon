@@ -5,7 +5,6 @@
 extern crate self as horizon_client;
 pub use horizon_client_lib::*;
 #[doc(hidden)]
-pub mod __internals;
 pub mod entry;
 
 // The game's allocator lives in the library, not the executable: the prebuilt game (#589) is this crate as a

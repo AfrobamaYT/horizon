@@ -2,6 +2,8 @@
 //! lists the expansion finds in `mod_points`, declared here in place of the crate's. The raw
 //! records and listener types are written out as the staging pass declares them beside each
 //! function.
+// Generated fixtures exercise every shape; TODO(#2273): make the generator emit clippy-clean code.
+#![allow(clippy::all, unused_comparisons, unreachable_patterns, dead_code)]
 use horizon_mod_api_macros::point;
 use mod_api::ServerHost;
 use std::sync::atomic::Ordering;
@@ -33,11 +35,8 @@ mod mod_points {
     }
 
     impl AddArgs {
-        pub fn __new(step: usize) -> Self {
-            Self {
-                step: step as u64,
-                result: None,
-            }
+        pub fn __new(step: u64) -> Self {
+            Self { step, result: None }
         }
     }
 
@@ -59,14 +58,19 @@ mod mod_points {
         }
     }
 
-    pub struct PenLabelArgs<'a> {
-        pub name: std::borrow::Cow<'a, str>,
+    /// Text and a written place: copies in the record.
+    pub struct ShoutArgs<'a> {
+        pub text: std::borrow::Cow<'a, str>,
+        pub count: u32,
+        pub cancel: bool,
     }
 
-    impl<'a> PenLabelArgs<'a> {
-        pub fn __new(name: &'a str) -> Self {
+    impl<'a> ShoutArgs<'a> {
+        pub fn __new(text: std::borrow::Cow<'a, str>, count: u32) -> Self {
             Self {
-                name: std::borrow::Cow::Borrowed(name),
+                text,
+                count,
+                cancel: false,
             }
         }
     }
@@ -94,6 +98,8 @@ mod mod_points {
         PenLabelReturn,
         Double,
         DoubleReturn,
+        Shout,
+        ShoutReturn,
     }
 
     pub mod dispatch {
@@ -122,12 +128,21 @@ mod mod_points {
         pub fn slot(_: &mut dyn ServerHost, _: &mut SlotArgs) {
             heard("slot");
         }
-        pub fn pen_label(args: &mut PenLabelArgs<'_>) {
-            heard("pen_label");
-            args.name = format!("{}!", args.name).into();
+        pub fn shout(args: &mut ShoutArgs<'_>) {
+            heard("shout");
+            match args.count {
+                0 => args.cancel = true,
+                _ => {
+                    args.text = format!("{}!", args.text).into();
+                    args.count += 10;
+                }
+            }
         }
-        pub fn pen_label_return(_: &mut PenLabelArgs<'_>) {
-            heard("pen_label_return");
+        pub fn shout_return(args: &mut ShoutArgs<'_>) {
+            heard("shout_return");
+            // The text the body read, and the place it wrote.
+            assert_eq!(args.text, "ab!");
+            args.count *= 2;
         }
         pub fn double(_: &mut DoubleArgs) {
             heard("double");
@@ -144,7 +159,7 @@ mod mod_points {
         use super::*;
         pub use ::mod_points::__private::RawKind;
 
-        pub static POINTS: [AtomicBool; 10] = [const { AtomicBool::new(false) }; 10];
+        pub static POINTS: [AtomicBool; 12] = [const { AtomicBool::new(false) }; 12];
 
         pub fn fire_raw(place: PointId, name: &'static str, call: &mut dyn FnMut(RawKind)) {
             let functions: Vec<_> = RAW
@@ -230,10 +245,8 @@ pub struct __PenLabelRaw<'r, T0, T1, R> {
     pub tags: &'r mut T1,
     pub result: &'r mut Option<R>,
 }
-pub type __PenLabelListener = for<'r> fn(
-    &'r Pen,
-    &'r mut __PenLabelRaw<'r, std::borrow::Cow<'_, str>, Vec<String>, Vec<String>>,
-);
+pub type __PenLabelListener =
+    for<'r> fn(&'r Pen, &'r mut __PenLabelRaw<'r, &'_ str, Vec<String>, Vec<String>>);
 pub type __PenLabelReturnListener = for<'r> fn(&'r Pen, &'r mut Vec<String>);
 
 #[point(name = "double", raw, free)]
@@ -244,6 +257,12 @@ fn double(x: i64) -> i64 {
 #[point(name = "double", raw_only, free)]
 fn double_raw_only(x: i64) -> i64 {
     x * 2
+}
+
+/// No raw form: API listeners only, with a copy of the text and of the written place.
+#[point(name = "shout", free)]
+fn shout(text: &str, count: &mut u32) {
+    *count += text.len() as u32;
 }
 
 // What the staging pass declares after `fn double`.
@@ -269,10 +288,7 @@ fn raw_slot_return(slot: &mut &mut usize) {
 }
 
 /// An internal-typed argument changed at the head.
-fn raw_label(
-    pen: &Pen,
-    raw: &mut __PenLabelRaw<'_, std::borrow::Cow<'_, str>, Vec<String>, Vec<String>>,
-) {
+fn raw_label(pen: &Pen, raw: &mut __PenLabelRaw<'_, &str, Vec<String>, Vec<String>>) {
     raw.tags.push(format!("{} tags", pen.tags.len()));
 }
 
@@ -330,8 +346,7 @@ unsafe fn erased_label(place: usize, receiver: *mut (), raw: *mut ()) {
     let (pen, raw) = unsafe {
         (
             &*receiver.cast::<Pen>(),
-            &mut *raw
-                .cast::<__PenLabelRaw<'_, std::borrow::Cow<'_, str>, Vec<String>, Vec<String>>>(),
+            &mut *raw.cast::<__PenLabelRaw<'_, &str, Vec<String>, Vec<String>>>(),
         )
     };
     raw.tags.push(format!("{} erased tags", pen.tags.len()));
@@ -359,6 +374,9 @@ fn slots_change_arguments_stop_the_function_and_change_its_value() {
     *counter.slot() = 0;
     assert_eq!(pen.label("a", Vec::new()), ["a", "own"]);
     assert_eq!(double(4), 8);
+    let mut count = 1;
+    shout("ab", &mut count);
+    assert_eq!(count, 3);
     assert!(HEARD.lock().unwrap().is_empty());
 
     counter.total = 2;
@@ -394,6 +412,8 @@ fn slots_change_arguments_stop_the_function_and_change_its_value() {
         PointId::PenLabel,
         PointId::PenLabelReturn,
         PointId::Double,
+        PointId::Shout,
+        PointId::ShoutReturn,
     ] {
         POINTS[id as usize].store(true, Ordering::Release);
     }
@@ -411,12 +431,21 @@ fn slots_change_arguments_stop_the_function_and_change_its_value() {
     // The borrowed return reaches its raw listener as itself.
     *counter.slot() += 1;
     assert_eq!(counter.total, 74);
-    // Off `Game`: the API listener changes the text, the raw one an internal argument at the
-    // head and the value the API can't carry at the return.
+    // Off `Game` there is no API handle, so no API record: the raw listeners change an
+    // internal argument at the head and the value the API can't carry at the return.
     assert_eq!(
         pen.label("b", Vec::new()),
-        ["1 tags", "1 erased tags", "b!", "own", "returned"]
+        ["1 tags", "1 erased tags", "b", "own", "returned"]
     );
+    // The body reads the head listener's text (3 bytes) and writes the place it copied in (11);
+    // the return listener's copy of that place (14) is written back doubled.
+    let mut count = 1;
+    shout("ab", &mut count);
+    assert_eq!(count, 28);
+    // A head cancel skips the body and the return place, leaving the place as copied out.
+    let mut count = 0;
+    shout("ab", &mut count);
+    assert_eq!(count, 0);
     // A free function: a raw head result skips the body.
     assert_eq!(double(-5), 0);
     assert_eq!(double(5), 12);
@@ -433,9 +462,10 @@ fn slots_change_arguments_stop_the_function_and_change_its_value() {
             "slot",
             "slot_return",
             "pen_label",
-            "pen_label",
             "pen_label_return",
-            "pen_label_return",
+            "shout",
+            "shout_return",
+            "shout",
             "double",
             "double",
             "double",

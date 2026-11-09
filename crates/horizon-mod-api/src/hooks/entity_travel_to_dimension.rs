@@ -15,10 +15,10 @@ pub trait Hooks {
     /// Asked for server players, and for the other entities that cross a
     /// portal or a command's teleport: items, mobs, boats, minecarts, arrows
     /// and other projectiles, experience orbs, primed TNT, tridents,
-    /// fireworks and falling blocks. A vehicle takes its riders along, so a
-    /// ridden vehicle and each server player riding it are asked, and a
-    /// cancel from any of them keeps them all in place; the other riders
-    /// are not asked. A falling block is held out of the level while it
+    /// fireworks and falling blocks. A vehicle and its passengers are asked
+    /// recursively. A refused passenger stays in the source level, dismounted,
+    /// with its own passengers; it does not veto the vehicle's travel. An entity
+    /// discarded during a callback never travels. A falling block is held out of the level while it
     /// ticks, so its handle reads nothing yet. A respawn and a world's join
     /// are not travel; the return from the End credits is `end_portal`.
     /// Server-side. Diverges

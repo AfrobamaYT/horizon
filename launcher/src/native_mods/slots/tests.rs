@@ -124,6 +124,41 @@ fn every_native_kind_and_access_registers_or_refuses_by_name() {
 }
 
 #[test]
+fn an_api_listener_at_a_point_without_an_api_record_is_refused_naming_the_type() {
+    let (mut manifest, mut catalog) = fixture();
+    catalog.points[0].api_refusal =
+        Some("argument 1 `batch` (`&mut HudBatch`) has no API type yet".into());
+    let inject = |access| Inject {
+        id: "test".into(),
+        at: "game::run".into(),
+        kind: Kind::Head,
+        with: "listen".into(),
+        access,
+        priority: 0,
+        hash: "signature".into(),
+        call: None,
+        nth: None,
+        ctx: None,
+    };
+    manifest.inject.push(inject(Access::Api));
+    match check(&catalog, &manifest) {
+        Err(
+            error @ InjectError::NoSlot {
+                reason: NoSlotReason::NoApiRecord,
+                ..
+            },
+        ) => assert!(
+            error.to_string().contains("`batch` (`&mut HudBatch`)"),
+            "{error}"
+        ),
+        other => panic!("{other:?}"),
+    }
+    // The native internals tier still listens there.
+    manifest.inject[0] = inject(Access::Internals);
+    check(&catalog, &manifest).unwrap();
+}
+
+#[test]
 fn unified_route_checks_freshness_and_selects_native_function_source() {
     let (mut manifest, mut catalog) = fixture();
     manifest.inject.push(Inject {

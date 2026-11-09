@@ -15,11 +15,12 @@ use super::api_values::TryIntoEngine;
 use super::living_attributes::{AttributeWrite, collect_equipment, write_unspawned_attribute};
 use horizon_client::mobs::finalize::{Ageable, Group};
 use horizon_client::mobs::{Mob, equine, llama, render, tame};
+use horizon_client::text::Text;
 use horizon_world::attribute_map::ValueKind;
 use horizon_world::attributes::Operation;
 use mod_api::{
     AttributeModifier, AttributeOperation, EntityRef, EquipmentSlot, Identifier, ItemStack,
-    NativeAgeableGroup, NativeSpawnGroup, NativeTropicalVariant, NativeWorldEpoch, Text,
+    NativeAgeableGroup, NativeSpawnGroup, NativeTropicalVariant, NativeWorldEpoch,
     UnspawnedMobEdits, UnspawnedMobError, UnspawnedMobRef,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -547,8 +548,9 @@ impl UnspawnedMobEdits for Edits<'_, '_> {
     fn set_custom_name(
         &self,
         mob: UnspawnedMobRef,
-        name: Option<Text>,
+        name: Option<mod_api::Text>,
     ) -> Result<(), UnspawnedMobError> {
+        let name = name.try_into_engine(&())?;
         self.game.edit_lent_mob(mob, |_, m| {
             m.custom_name = name.as_ref().map(Text::plain);
             m.custom_name_text = name;
@@ -666,7 +668,7 @@ mod tests {
                 edits.set_attribute_base(mob, &max_health, 20.0).unwrap();
                 assert_eq!(edits.add_tag(mob, "test:tagged"), Ok(true));
                 edits
-                    .set_custom_name(mob, Some(Text::literal("Bacon")))
+                    .set_custom_name(mob, Some(mod_api::Text::literal("Bacon")))
                     .unwrap();
                 *saw.lock().unwrap() = Some((
                     mob.kind(host),
@@ -847,9 +849,8 @@ mod tests {
     fn a_panicking_listener_still_ends_the_lend() {
         let installed = || vec![mod_api::ModEntry::new("kept-goal", Box::new(KeptGoalMod))];
         mod_api::testing::with_mods(installed().into(), || {
+            super::super::api_values::install_parts(&installed()).unwrap();
             with_game(|game| {
-                super::super::api_values::install_parts(&installed()).unwrap();
-                game.resolve_parts().unwrap();
                 let kind = game
                     .res
                     .mob_types()
@@ -887,9 +888,8 @@ mod tests {
                     "the mod goal keeps its goal: {back:?}"
                 );
                 assert!(!back.contains(&"ModGoal"), "no copied mod goal: {back:?}");
-                super::super::api_values::install_parts(&[]).unwrap();
-                game.resolve_parts().unwrap();
             });
+            super::super::api_values::install_parts(&[]).unwrap();
         });
     }
 

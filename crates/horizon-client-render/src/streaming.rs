@@ -328,7 +328,7 @@ enum Job {
     Decorate(i32, i32, Box<[Proto; 9]>, Vec<(usize, Chunk)>),
     Finish(Proto),
     Light(i32, i32, Box<Region>, u64, bool),
-    Mesh(i32, i32, i32, Box<Region>, u64, MeshSettings),
+    Mesh(i32, i32, i32, Arc<Region>, u64, MeshSettings),
     /// Proto chunks checked out to be saved (`ChunkGenerator::save_protos`),
     /// off the main thread like vanilla's IOWorker.
     Save(Vec<ProtoSave>),
@@ -1629,7 +1629,7 @@ impl Streaming {
             z,
         )
     }
-    fn region(world: &World, x: i32, z: i32) -> Option<Box<Region>> {
+    fn region(world: &World, x: i32, z: i32) -> Option<Arc<Region>> {
         let mut region: Region = Default::default();
         for dz in 0..3 {
             for dx in 0..3 {
@@ -1641,7 +1641,7 @@ impl Streaming {
                 );
             }
         }
-        Some(Box::new(region))
+        Some(Arc::new(region))
     }
     pub fn is_lit(&self, x: i32, z: i32) -> bool {
         self.lit.contains(&(x, z))
@@ -3703,7 +3703,7 @@ mod tests {
         let facts = BlockFacts::load(&root, assets.registry).unwrap();
         let visibility = models::load_visibility(&root, assets.registry).unwrap();
         let context = Arc::new(WorkerContext {
-            tables: Arc::new(MeshTables::new(&assets, &render, &facts, visibility).unwrap()),
+            tables: Arc::new(MeshTables::new(&assets, &render, &facts, visibility, None).unwrap()),
             light: Arc::new(LightTables::load(&root, assets.registry, &facts).unwrap()),
             biomes: Arc::new(
                 Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(

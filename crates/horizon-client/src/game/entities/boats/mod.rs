@@ -26,7 +26,7 @@ use horizon_core::nbt::Tag;
 use horizon_core::{
     geometry::{Aabb, ShapeOp, Vec3, VoxelShape},
     position::BlockPos,
-    random::RandomSource,
+    random::{LegacyRandom, RandomSource},
 };
 use horizon_world::collision_context::CollisionContext;
 use std::{collections::HashMap, f32::consts::PI, sync::Arc};
@@ -112,6 +112,7 @@ pub(super) struct Boat {
     pub leash_spin: f64,
     /// `Entity.tickCount`, for the 100 ticks a saved holder is waited for.
     pub age: i32,
+    pub random: LegacyRandom,
 }
 /// `ChestBoat.CONTAINER_SIZE`.
 pub(super) const CHEST_SLOTS: usize = 27;
@@ -224,6 +225,7 @@ impl Boat {
             leash_pending: None,
             leash_spin: 0.0,
             age: 0,
+            random: horizon_client::random_source::entity(),
         }
     }
     /// A chest boat or chest raft.
@@ -829,15 +831,11 @@ impl Game<'_> {
             None,
         );
         b.velocity = horizon_world::entity_move::scale_by_block_speed(b.velocity, factor);
-        Self::tick_boat_paddles(&mut b, &mut self.audio, &mut self.world.random);
+        Self::tick_boat_paddles(&mut b, &mut self.audio);
         b
     }
     /// `AbstractBoat.tick` advances the oars even when this client does not move the hull.
-    pub(super) fn tick_boat_paddles(
-        b: &mut Boat,
-        audio: &mut super::Audio,
-        random: &mut horizon_core::random::LegacyRandom,
-    ) {
+    pub(super) fn tick_boat_paddles(b: &mut Boat, audio: &mut super::Audio) {
         // Paddle sounds at the top of each stroke.
         for i in 0..2 {
             if b.paddle_state(i) {
@@ -853,7 +851,7 @@ impl Game<'_> {
                     if let Some(sound) = sound {
                         let v = view_vector(b.yaw, 0.0);
                         let (dx, dz) = if i == 1 { (-v[2], v[0]) } else { (v[2], -v[0]) };
-                        let pitch = 0.8 + 0.4 * random.next_float();
+                        let pitch = 0.8 + 0.4 * b.random.next_float();
                         audio.play(
                             sound,
                             Some([b.position.x + dx, b.position.y, b.position.z + dz]),
@@ -1661,7 +1659,7 @@ impl Game<'_> {
         let area = self.boats[i].bounds();
         // Player.attack's full damage against the boat's entity type.
         let (kind, id) = (self.boats[i].entity_type(), self.boats[i].id as i32);
-        let (damage, scale, _, magic) = self.melee_damage(&kind, false);
+        let (damage, scale, _, magic) = self.melee_damage(&kind, false, Some(id as u32));
         let sweep = self.sweep_before_hit(&kind, false);
         let chest = self.boats[i].chest;
         let hurt = self.hurt_boat_result(i, damage, self.creative);

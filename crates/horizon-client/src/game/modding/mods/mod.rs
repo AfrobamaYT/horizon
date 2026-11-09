@@ -225,6 +225,7 @@ pub(super) fn freeze_declarations() {
 }
 
 struct NativeDeclared {
+    errors: Vec<String>,
     blocks: Vec<horizon_mod_package::content::Block>,
     items: Vec<horizon_mod_package::content::Item>,
     types: Vec<horizon_mod_package::content::BlockEntityType>,
@@ -239,10 +240,42 @@ fn native_declared() -> &'static NativeDeclared {
         Game::native_blocks(&RegistrationContext::new(), &mut blocks);
         Game::native_items(&RegistrationContext::new(), &mut items);
         let types = super::api_values::block_entity_declarations();
-        let fluids = mod_api::__private::declared_world_fluids().to_vec();
+        use super::api_values::TryIntoEngine;
+        let mut errors = Vec::new();
+        let mut blocks: Vec<horizon_mod_package::content::Block> = blocks
+            .iter()
+            .filter_map(|v| {
+                v.try_into_engine(&())
+                    .map_err(|e| {
+                        errors.push(format!(
+                            "native blocks and items of {}: {e}",
+                            v.id.split(':').next().unwrap_or("")
+                        ))
+                    })
+                    .ok()
+            })
+            .collect();
+        let mut items: Vec<horizon_mod_package::content::Item> = items
+            .iter()
+            .filter_map(|v| {
+                v.try_into_engine(&())
+                    .map_err(|e| {
+                        errors.push(format!(
+                            "native blocks and items of {}: {e}",
+                            v.id.split(':').next().unwrap_or("")
+                        ))
+                    })
+                    .ok()
+            })
+            .collect();
+        let fluids: Vec<_> = mod_api::__private::declared_world_fluids()
+            .iter()
+            .map(|draft| draft.try_into_engine(&()).unwrap())
+            .collect();
         blocks.extend(fluids.iter().filter_map(|f| f.world_block()));
         items.extend(fluids.iter().filter_map(|f| f.world_bucket()));
         NativeDeclared {
+            errors,
             blocks,
             items,
             types,
@@ -392,6 +425,17 @@ pub(super) fn register_dimension_transition_screens(role: ExecutionRole) {
     horizon_client_render::dimension_transition::register(screens);
 }
 
+/// The native mods' colour resolvers (`native_register_color_resolvers`), kept once at start,
+/// before the block tint sources that read them and before resources load.
+pub(super) fn register_color_resolvers(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut registry = mod_api::ColorResolverRegistry::default();
+    Game::native_register_color_resolvers(&RegistrationContext::new(), &mut registry);
+    horizon_client::mesher::register_color_resolvers(registry.into_resolvers());
+}
+
 /// The native mods' block tint sources (`native_register_block_tint_sources`), kept once at
 /// start, before resources load; every resource load applies them to its mesh tables.
 pub(super) fn register_block_tint_sources(role: ExecutionRole) {
@@ -401,6 +445,16 @@ pub(super) fn register_block_tint_sources(role: ExecutionRole) {
     let mut registry = mod_api::BlockTintRegistry::default();
     Game::native_register_block_tint_sources(&RegistrationContext::new(), &mut registry);
     horizon_client::mesher::register_block_tint_sources(registry.into_layers());
+}
+/// The native mods' particle providers (`native_register_particle_providers`), kept once at
+/// start, before resources load; every particle sprite-set load resolves each type's provider.
+pub(super) fn register_particle_providers(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut registry = mod_api::ParticleProviderRegistry::default();
+    Game::native_register_particle_providers(&RegistrationContext::new(), &mut registry);
+    horizon_client::particles::register_particle_providers(registry.into_providers());
 }
 
 /// `root` with the content mods that are on layered over it
@@ -555,11 +609,15 @@ pub(super) fn content_overlay(
         }
     }
     let NativeDeclared {
+        errors,
         blocks,
         items,
         types,
         fluids,
     } = native_declared();
+    if !errors.is_empty() {
+        return Err(errors.join("\n").into());
+    }
     if !blocks.is_empty() || !items.is_empty() || !types.is_empty() {
         let known = match &mut known {
             Some(types) => types,
@@ -606,6 +664,88 @@ pub(super) fn content_overlay(
     })
 }
 
+fn resolve_particle_providers(
+    source: &horizon_assets::resource_source::ResourceSource,
+) -> Result<(), String> {
+    if mod_api::__private::particles_resolved() {
+        return Ok(());
+    }
+    // Resolve all particle providers once, alongside the other load-owned registries.
+    let mut particles: Vec<String> = horizon_client::particles::ParticleType::ALL
+        .iter()
+        .map(|ty| format!("minecraft:{}", ty.name()))
+        .collect();
+    particles.extend(
+        source
+            .list_under("assets", &["particles"])
+            .into_iter()
+            .filter_map(|path| {
+                let path = path.strip_prefix("assets/")?;
+                let (namespace, path) = path.split_once("/particles/")?;
+                let path = path.strip_suffix(".json")?;
+                let id = format!("{namespace}:{path}");
+                mod_api::Identifier::parse_namespaced(&id)?;
+                // A vanilla-namespace file the game has no particle for is a leftover of an
+                // older resource extraction, not a mod's declaration: skip it, never refuse startup.
+                if namespace == "minecraft"
+                    && horizon_client::particles::ParticleType::from_name(&id).is_none()
+                {
+                    log::warn!("Horizon: ignoring {id}: no such vanilla particle in this version");
+                    return None;
+                }
+                Some(id)
+            }),
+    );
+    mod_api::__private::resolve_particles(particles.iter().map(String::as_str), |id| {
+        horizon_client::particles::ParticleType::from_name(id)
+            .map(|ty| mod_api::__private::ParticleKind::Vanilla(ty as u32))
+            .or_else(|| {
+                (!id.starts_with("minecraft:")).then_some(mod_api::__private::ParticleKind::Custom)
+            })
+    })
+    .map_err(|errors| errors.join("\n"))?;
+    Ok(())
+}
+#[cfg(test)]
+mod particle_registry_reload_tests {
+    #[test]
+    fn an_unlisted_vanilla_provider_file_does_not_refuse_startup() {
+        mod_api::__private::part_tests::install_parts_fixture(&[]).unwrap();
+        let source = horizon_assets::resource_source::ResourceSource::indexed(
+            [(
+                "assets/minecraft/particles/ambient_entity_effect.json".into(),
+                horizon_assets::resource_source::Resource::bytes(Vec::new()),
+            )]
+            .into(),
+        );
+        super::resolve_particle_providers(&source).unwrap();
+    }
+
+    #[test]
+    fn repeated_particle_content_load_keeps_the_published_keys() {
+        mod_api::__private::part_tests::install_parts_fixture(&[]).unwrap();
+        let source = horizon_assets::resource_source::ResourceSource::indexed(
+            [(
+                "assets/invalid namespace/particles/bad name.json".into(),
+                horizon_assets::resource_source::Resource::bytes(Vec::new()),
+            )]
+            .into(),
+        );
+        super::resolve_particle_providers(&source).unwrap();
+        let first = mod_api::__private::particle_vanilla_key(
+            horizon_client::particles::ParticleType::Smoke as u32,
+        )
+        .unwrap();
+        super::resolve_particle_providers(&source).unwrap();
+        assert_eq!(
+            mod_api::__private::particle_vanilla_key(
+                horizon_client::particles::ParticleType::Smoke as u32
+            ),
+            Some(first)
+        );
+    }
+}
+
 /// The content root with everything the mods declare registered against the
 /// process: block entities, mob effects, entity and menu types, fluid looks,
 /// and the protocol's local mod list, each set once.
@@ -628,6 +768,7 @@ pub(super) fn content_root(
         );
     }
     register_mob_effects(&overlay.mods);
+    resolve_particle_providers(overlay.root.source())?;
     mod_api::__private::resolve_effects(
         horizon_client_core::potions::all_effects()
             .map(|def| horizon_client_core::potions::namespaced(def.id)),
@@ -644,7 +785,11 @@ pub(super) fn content_root(
         .map(|value| value.as_str().ok_or("invalid fluid registry entry"))
         .collect::<Result<Vec<_>, _>>()?;
     fluids.extend(world_fluids.iter().map(String::as_str));
-    mod_api::__private::resolve_fluids(&fluids).map_err(|errors| {
+    mod_api::__private::resolve_fluids(
+        &fluids,
+        &horizon_world::fluid::FluidKind::ALL.map(|kind| kind.name()),
+    )
+    .map_err(|errors| {
         errors
             .into_iter()
             .map(|error| error.to_string())
@@ -1067,9 +1212,7 @@ impl Game<'_> {
                     }
                 };
                 let m = &package.manifest;
-                let refused = horizon_mod_wasm::refused()
-                    .iter()
-                    .find(|(id, _)| *id == m.id);
+                let refused = horizon_mod_wasm::refusal(&m.id);
                 live_switch_of(path, &package, &mut content_ids, &mut live_ids);
                 info.insert(
                     m.id.clone(),
@@ -1079,7 +1222,7 @@ impl Game<'_> {
                     id: m.id.clone(),
                     title: format!("{} {}", m.name, m.version),
                     description: m.description.clone(),
-                    problem: refused.map(|(_, why)| format!("Not loaded: {why}")),
+                    problem: refused.map(|why| format!("Not loaded: {why}")),
                     dev: self.mods.dev.contains(path),
                     native: None,
                 }
@@ -1130,6 +1273,7 @@ impl Game<'_> {
         // worldgen keeps the state it loaded with until a restart.
         let content = &self.mods.content_ids;
         let mut next = wanted.clone();
+
         let mut waiting = Vec::new();
         for id in applied.symmetric_difference(&wanted) {
             if !content.contains(id) || self.mods.live_ids.contains(id) {
@@ -1257,6 +1401,29 @@ pub(super) fn living_mod_types()
         .into_iter()
         .map(|(id, t)| (id, std::sync::Arc::new(t)))
         .collect()
+}
+
+/// Registered callbacks indexed directly by the slots resolved in enchantment content.
+pub(in crate::game) static ENCHANTMENT_DAMAGE_EFFECTS: std::sync::OnceLock<
+    Vec<std::sync::Arc<dyn mod_api::EnchantmentDamageEffect>>,
+> = std::sync::OnceLock::new();
+
+pub(super) fn register_enchantment_damage_effects() {
+    let mut effects = mod_api::EnchantmentDamageRegistry::default();
+    Game::native_register_enchantment_damage_effects(
+        &mod_api::RegistrationContext::new(),
+        &mut effects,
+    );
+    let (ids, callbacks): (Vec<_>, Vec<_>) = effects
+        .into_entries()
+        .into_iter()
+        .map(|(id, effect)| (id.to_string(), effect))
+        .unzip();
+    horizon_items::enchant::register_damage_effects(ids);
+    assert!(
+        ENCHANTMENT_DAMAGE_EFFECTS.set(callbacks).is_ok(),
+        "damage effects already registered"
+    );
 }
 
 #[cfg(test)]
@@ -1466,6 +1633,151 @@ mod tests {
             Some(&55.0),
             "the finalize defaults read the declared value"
         );
+    }
+
+    /// #812: a mod's declared attribute type joins the catalog before the
+    /// rows resolve (a mod entity's set names its own new attribute), and
+    /// the live map, an item's modifier, the saves and the sync set carry it
+    /// by string id — a guest's catalog built from the same mods decodes the
+    /// same network id.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mods_declared_attribute_reaches_rows_the_live_map_saves_and_sync() {
+        use horizon_client::lan;
+        use horizon_client::living_attributes::{self, LivingAttributes};
+        use horizon_core::nbt::Tag;
+        use horizon_world::attribute_map::ValueKind;
+        use horizon_world::attributes::{
+            Definition, Sentiment,
+            entity::{AddedAttribute, Catalog},
+        };
+
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let catalog = Catalog::from_json(
+            &horizon_world::json_file::read(&root.join("attributes.json")).unwrap(),
+        )
+        .unwrap();
+        let vanilla = catalog.attributes().count();
+        // Two mods' attributes, declared in an order that is not the sorted
+        // one; one syncable, one not.
+        let declared = |mod_id: &str, id: &str, default, syncable, sentiment| AddedAttribute {
+            mod_id: mod_id.into(),
+            id: id.into(),
+            definition: Definition::ranged(default, 0.0, 100.0).unwrap(),
+            syncable,
+            sentiment,
+        };
+        let grown = catalog
+            .with_attributes(&[
+                declared("zeta", "zeta:fury", 15.0, false, Sentiment::default()),
+                declared("ruby", "ruby:mana", 10.0, true, Sentiment::Negative),
+            ])
+            .unwrap();
+        // After every vanilla attribute, sorted by mod id: ruby's first
+        // though zeta's declared first, and vanilla ids never shift.
+        let (mana, fury) = (
+            grown.id("ruby:mana").unwrap(),
+            grown.id("zeta:fury").unwrap(),
+        );
+        assert_eq!(mana.registry_id() as usize, vanilla);
+        assert_eq!(fury.registry_id() as usize, vanilla + 1);
+        assert_eq!(
+            grown.id("minecraft:max_health"),
+            catalog.id("minecraft:max_health")
+        );
+        // A mod entity's row names its own new attribute (#845's rows
+        // resolve after the attributes join).
+        let merged = grown
+            .with_entity_row(
+                "ruby:ghoul",
+                "minecraft:zombie",
+                &[("ruby:mana".into(), 42.0), ("zeta:fury".into(), 7.0)],
+            )
+            .unwrap();
+        let live = LivingAttributes::default();
+        assert_eq!(
+            live.read(
+                &std::sync::Arc::new(merged.clone()),
+                "ruby:ghoul",
+                "ruby:mana",
+                ValueKind::Computed,
+                Vec::new
+            ),
+            Some(42.0)
+        );
+        // An item's `attribute_modifiers` entry naming the mod attribute
+        // reaches the live map (the worn-stack path's own write).
+        let mut map =
+            living_attributes::new_live(&std::sync::Arc::new(merged.clone()), "ruby:ghoul")
+                .unwrap();
+        assert_eq!(map_value(&mut map, mana), 42.0);
+        living_attributes::set_modifier(&mut map, "ruby:mana", "ruby:ring", 8.0, "add_value", true)
+            .unwrap();
+        assert_eq!(map_value(&mut map, mana), 50.0);
+        // The sync set: a syncable attribute joins it, a non-syncable one
+        // never does (`AttributeMap.getSyncableAttributes`).
+        living_attributes::set_modifier(&mut map, "zeta:fury", "zeta:mark", 1.0, "add_value", true)
+            .unwrap();
+        let synced: std::collections::HashSet<i32> = lan::attributes::syncable(&map)
+            .iter()
+            .map(|s| s.attribute)
+            .collect();
+        assert!(synced.contains(&mana.registry_id()));
+        assert!(!synced.contains(&fury.registry_id()));
+        // Save → load round trip by string id.
+        let saved = Tag::List(living_attributes::pack(&map, true));
+        let mut again =
+            living_attributes::new_live(&std::sync::Arc::new(merged.clone()), "ruby:ghoul")
+                .unwrap();
+        living_attributes::apply_saved(&mut again, Some(&saved)).unwrap();
+        // The saved base; the ring's transient modifier is equipment, not
+        // saved — as vanilla's `AttributeInstance.Packed` keeps permanent
+        // modifiers only.
+        assert_eq!(map_value(&mut again, mana), 42.0);
+        // A save whose attribute the loaded catalog does not know is
+        // skipped, as vanilla warns and skips: no panic, the map whole.
+        let mut vanilla_map =
+            living_attributes::new_live(&std::sync::Arc::new(catalog.clone()), "minecraft:zombie")
+                .unwrap();
+        living_attributes::apply_saved(&mut vanilla_map, Some(&saved)).unwrap();
+        assert!(lan::attributes::syncable(&vanilla_map).is_empty());
+        // The network id decodes on a guest's catalog built from the same
+        // mods declaring in another order: the snapshot's numbers find the
+        // same attributes.
+        let guest_catalog = catalog
+            .with_attributes(&[
+                declared("ruby", "ruby:mana", 10.0, true, Sentiment::Negative),
+                declared("zeta", "zeta:fury", 15.0, false, Sentiment::default()),
+            ])
+            .unwrap()
+            .with_entity_row(
+                "ruby:ghoul",
+                "minecraft:zombie",
+                &[("ruby:mana".into(), 42.0), ("zeta:fury".into(), 7.0)],
+            )
+            .unwrap();
+        let snapshots = lan::attributes::syncable(&map);
+        let mut guest =
+            living_attributes::new_live(&std::sync::Arc::new(guest_catalog), "ruby:ghoul").unwrap();
+        lan::attributes::apply(&mut guest, &snapshots);
+        assert_eq!(map_value(&mut guest, mana), 50.0);
+
+        fn map_value(
+            map: &mut horizon_client::living_attributes::Live,
+            id: horizon_world::attributes::entity::AttributeId,
+        ) -> f64 {
+            // The first read creates the instance, as `getInstance` does.
+            let key = map
+                .keys()
+                .iter()
+                .find(|key| key.attribute() == id)
+                .cloned()
+                .unwrap();
+            let Ok(Some(handle)) = map.get_instance(Some(key)) else {
+                panic!("the type has the attribute")
+            };
+            map.instance(&handle).unwrap().value()
+        }
     }
 
     /// A declared set's merged row — the template's with the declared set on

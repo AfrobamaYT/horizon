@@ -458,10 +458,7 @@ pub fn game_architecture_launch_error(tag: &str) -> Option<String> {
     let selected = label(target);
     Some(crate::i18n::trf(
         "This version has a {installed} game build, but Settings selects {selected}. Install the selected build from Versions before launching.",
-        &[
-            ("installed", &installed),
-            ("selected", &selected),
-        ],
+        &[("installed", &installed), ("selected", &selected)],
     ))
 }
 
@@ -1288,6 +1285,9 @@ pub(crate) fn install_as(
 }
 
 pub fn remove(tag: &str) -> Result<(), String> {
+    crate::cache_cleanup::Access::UninstrumentedGame
+        .check()
+        .map_err(crate::native_mods::cache_error)?;
     let dir = version_dir(tag);
     remove_in(&dir)
 }
@@ -2886,8 +2886,7 @@ pub fn client_command(tag: &str) -> Command {
     let home = game_home();
     let _ = fs::create_dir_all(&home);
     let mut cmd = Command::new(client_program(tag));
-    #[cfg(windows)]
-    crate::windows_runtime::mark(&mut cmd, &version_dir(tag));
+    crate::run_leases::mark(&mut cmd, &version_dir(tag));
     strip_launcher_render_env(&mut cmd);
     cmd.current_dir(&home)
         .env("HORIZON_HOME", &home)
@@ -2924,6 +2923,7 @@ fn client_program(tag: &str) -> PathBuf {
 
 pub fn server_command(tag: &str, folder: &Path) -> Command {
     let mut cmd = Command::new(version_dir(tag).join(CLIENT));
+    crate::run_leases::mark(&mut cmd, &version_dir(tag));
     cmd.current_dir(folder)
         .arg("--resources")
         .arg(resources(tag))
@@ -3064,7 +3064,11 @@ pub(crate) fn in_use(_tag: &str) -> bool {
 /// is logged and the rest still go. Returns the versions deleted. They install again from GitHub.
 pub fn prune_old_versions() -> Vec<String> {
     let settings = Settings::load();
-    if !settings.auto_prune() {
+    if !settings.auto_prune()
+        || crate::cache_cleanup::Access::UninstrumentedGame
+            .check()
+            .is_err()
+    {
         return Vec::new();
     }
     let mut protected: Vec<String> = settings.selected.iter().cloned().collect();
@@ -4249,13 +4253,15 @@ impl Running {
     }
 }
 
-/// Prepare a command's Windows runtime and keep its guard alive through process exit.
+/// Launcher-owned tree-lock primitives and optional Windows runtime state.
 pub struct RuntimeGuard {
-    pub(crate) _slot: fs::File,
-    pub(crate) _source: fs::File,
+    _leases: Vec<crate::run_leases::Claim>,
+    #[cfg(windows)]
+    _windows: Option<crate::windows_runtime::Guard>,
 }
 
-pub fn prepare_command(cmd: Command) -> Result<(Command, Option<RuntimeGuard>), String> {
+pub fn prepare_command(cmd: Command) -> Result<(Command, RuntimeGuard), String> {
+    let leases = crate::run_leases::shared(&cmd).map_err(crate::native_mods::cache_error)?;
     #[cfg(windows)]
     let cmd = crate::windows_runtime::redirect(cmd);
     #[cfg(windows)]
@@ -4268,9 +4274,14 @@ pub fn prepare_command(cmd: Command) -> Result<(Command, Option<RuntimeGuard>), 
             ],
         )
     })?;
-    #[cfg(not(windows))]
-    let guard = None;
-    Ok((cmd, guard))
+    Ok((
+        cmd,
+        RuntimeGuard {
+            _leases: leases,
+            #[cfg(windows)]
+            _windows: guard,
+        },
+    ))
 }
 
 pub fn spawn(job: Job, cmd: Command, tx: Sender<Msg>) -> Result<Running, String> {
@@ -5213,11 +5224,15 @@ pub fn {f}("
     fn native_mod_builds_report_when_the_selected_game_has_no_matching_compiler() {
         assert_eq!(
             native_mod_architecture_message(GameArchitecture::X64, GameArchitecture::Arm64),
-            Some("Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only.")
+            Some(
+                "Native mods cannot build for the selected ARM64 game yet. The available compiler builds x64 only."
+            )
         );
         assert_eq!(
             native_mod_architecture_message(GameArchitecture::Arm64, GameArchitecture::X64),
-            Some("Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler.")
+            Some(
+                "Native mods cannot build for the selected x64 game yet. This ARM64 launcher has no matching compiler."
+            )
         );
         assert_eq!(
             native_mod_architecture_message(GameArchitecture::Arm64, GameArchitecture::Arm64),
@@ -5298,9 +5313,10 @@ pub fn {f}("
             .get_envs()
             .find(|(k, _)| *k == "PIPEWIRE_PROPS")
             .and_then(|(_, v)| v);
-        assert!(props.is_some_and(|v| v
-            .to_string_lossy()
-            .contains("application.name = \"Horizon\"")));
+        assert!(props.is_some_and(|v| {
+            v.to_string_lossy()
+                .contains("application.name = \"Horizon\"")
+        }));
     }
 
     #[test]

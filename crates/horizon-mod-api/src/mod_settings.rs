@@ -278,27 +278,78 @@ mod tests {
 
     #[test]
     fn a_setting_that_cannot_work_is_refused_with_its_reason() {
-        let range = |min, max, step, default| SettingSpec::range("speed", "l", min, max, step, default);
-        assert_eq!(range(1.0, 1.0, 0.1, 1.0).check(), Err(SettingError::EmptyRange));
-        assert_eq!(range(2.0, 1.0, 0.1, 1.5).check(), Err(SettingError::EmptyRange));
-        assert_eq!(range(0.0, f64::INFINITY, 1.0, 0.0).check(), Err(SettingError::EmptyRange));
-        assert_eq!(range(0.0, 1.0, 0.0, 0.5).check(), Err(SettingError::InvalidStep));
-        assert_eq!(range(0.0, 1.0, -0.5, 0.5).check(), Err(SettingError::InvalidStep));
-        assert_eq!(range(0.0, 1.0, 5.0, 0.5).check(), Err(SettingError::InvalidStep));
+        let range =
+            |min, max, step, default| SettingSpec::range("speed", "l", min, max, step, default);
+        assert_eq!(
+            range(1.0, 1.0, 0.1, 1.0).check(),
+            Err(SettingError::EmptyRange)
+        );
+        assert_eq!(
+            range(2.0, 1.0, 0.1, 1.5).check(),
+            Err(SettingError::EmptyRange)
+        );
+        assert_eq!(
+            range(0.0, f64::INFINITY, 1.0, 0.0).check(),
+            Err(SettingError::EmptyRange)
+        );
+        assert_eq!(
+            range(0.0, 1.0, 0.0, 0.5).check(),
+            Err(SettingError::InvalidStep)
+        );
+        assert_eq!(
+            range(0.0, 1.0, -0.5, 0.5).check(),
+            Err(SettingError::InvalidStep)
+        );
+        assert_eq!(
+            range(0.0, 1.0, 5.0, 0.5).check(),
+            Err(SettingError::InvalidStep)
+        );
         assert_eq!(range(0.0, 1.0, 1.0, 0.5).check(), Ok(()));
-        assert_eq!(range(0.0, 1.0, 0.1, 1.5).check(), Err(SettingError::DefaultOutOfRange));
+        assert_eq!(
+            range(0.0, 1.0, 0.1, 1.5).check(),
+            Err(SettingError::DefaultOutOfRange)
+        );
         assert_eq!(range(0.0, 1.0, 0.1, 1.0).check(), Ok(()));
-        assert_eq!(SettingSpec::color("c", "l", 0xFF00_0000).check(), Err(SettingError::ColorAlpha));
+        assert_eq!(
+            SettingSpec::color("c", "l", 0xFF00_0000).check(),
+            Err(SettingError::ColorAlpha)
+        );
         assert_eq!(SettingSpec::color("c", "l", 0xFF_FFFF).check(), Ok(()));
-        assert_eq!(SettingSpec::choice("m", "l", ["a", "b"], 2).check(), Err(SettingError::InvalidChoice));
-        assert_eq!(SettingSpec::choice("m", "l", Vec::<String>::new(), 0).check(), Err(SettingError::InvalidChoice));
-        assert_eq!(SettingSpec::choice("m", "l", ["a", ""], 0).check(), Err(SettingError::EmptyLabel));
-        assert_eq!(SettingSpec::toggle("on", "", true).check(), Err(SettingError::EmptyLabel));
-        for key in ["", ".hidden", "../up", "Zoom", "a/b", &"k".repeat(SETTING_KEY_MAX + 1)] {
+        assert_eq!(
+            SettingSpec::choice("m", "l", ["a", "b"], 2).check(),
+            Err(SettingError::InvalidChoice)
+        );
+        assert_eq!(
+            SettingSpec::choice("m", "l", Vec::<String>::new(), 0).check(),
+            Err(SettingError::InvalidChoice)
+        );
+        assert_eq!(
+            SettingSpec::choice("m", "l", ["a", ""], 0).check(),
+            Err(SettingError::EmptyLabel)
+        );
+        assert_eq!(
+            SettingSpec::toggle("on", "", true).check(),
+            Err(SettingError::EmptyLabel)
+        );
+        for key in [
+            "",
+            ".hidden",
+            "../up",
+            "Zoom",
+            "a/b",
+            &"k".repeat(SETTING_KEY_MAX + 1),
+        ] {
             let refused = SettingSpec::toggle(key, "l", true).check();
-            assert_eq!(refused, Err(SettingError::InvalidKey(key.to_string())), "{key:?}");
+            assert_eq!(
+                refused,
+                Err(SettingError::InvalidKey(key.to_string())),
+                "{key:?}"
+            );
         }
-        assert_eq!(SettingSpec::toggle("zoom_speed-2.x", "l", true).check(), Ok(()));
+        assert_eq!(
+            SettingSpec::toggle("zoom_speed-2.x", "l", true).check(),
+            Ok(())
+        );
     }
 
     #[test]

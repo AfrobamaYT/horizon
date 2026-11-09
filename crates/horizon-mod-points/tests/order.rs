@@ -1,3 +1,5 @@
+// Generated fixtures exercise every shape; TODO(#2273): make the generator emit clippy-clean code.
+#![allow(clippy::all, unused_comparisons, unreachable_patterns, dead_code)]
 use mod_points::register;
 use mod_points::{
     __private::{RawKind, SlotListener, fire_raw, seal},
@@ -86,7 +88,7 @@ fn point_priority_preserves_dependency_order_and_orders_injects_within_a_mod() {
             heard.push(if row.one_owner {
                 match kind {
                     RawKind::Typed(_) => "native",
-                    RawKind::Erased(_) | RawKind::Indexed(..) => "wasm",
+                    RawKind::Erased(_) => "wasm",
                 }
             } else {
                 mod_api::crash::current_native_mod().unwrap()

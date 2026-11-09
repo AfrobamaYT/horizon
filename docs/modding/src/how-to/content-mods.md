@@ -1,5 +1,17 @@
 # Making a content mod
 
+Trait mods declare content through `BlocksEvent` and `ItemsEvent`, using API-owned
+`mod_api::Block` and `mod_api::Item` records. Start with `Block::new(id, template)` or
+`Item::new(id, template)`, passing identifier strings, then set the overrides. The drafts are unvalidated; admission reports malformed values with the content loader's refusal messages.
+These are load-time declaration drafts, not live registry entries. The game admits them
+with the content-file checks, atomically for each namespace, before resources load.
+A block's `item` defaults to false in code.
+
+Code declarations carry component patches as ordered `Vec<(String, Option<Tag>)>`:
+`Some(tag)` sets the named component and `None` removes it (without a `!` prefix).
+The game converts this opaque NBT data at load; file declarations below still use JSON.
+No declaration conversion runs per tick.
+
 ## Making a content mod
 
 ```sh
@@ -287,6 +299,11 @@ table can be used without an outline override, and overrides `thickness` collisi
 
 ### Entity-context shape declarations
 
+Native declarations use the same fields on `mod_api::Block`, with API-owned
+`ShapeEntityKind::{Item, Player, Living, Other}` keys and `BlockShapes` values.
+`interaction_shapes` is an optional `BlockShapes`. The game validates these drafts
+at content admission, just like their JSON counterparts.
+
 `outline_context_shapes` and `collision_context_shapes` independently override
 `shapes` and `collision_shapes` for a captured entity class. Their keys are
 `item`, `player`, `living` (a non-player living entity) and `other`; each value
@@ -472,6 +489,19 @@ only for attributes the template has; one it lacks stops the content root's buil
 ```json
 { "template": "minecraft:zombie", "attributes": { "minecraft:max_health": 40.0, "minecraft:movement_speed": 0.3 } }
 ```
+
+A code mod can also register an attribute type of its own with `Registrar::declare_attribute(path, default,
+min, max, syncable, sentiment)` (vanilla's `RangedAttribute` in the attribute registry). Only both-side
+packages may declare attributes; client-only and server-only packages refuse with `WrongSide` so extra
+client mods cannot shift packet IDs. `mod_api::Sentiment` is `Positive`, `Negative`, or `Neutral`.
+The id lands in the
+mod's namespace, the bounds and default follow `RangedAttribute`'s own checks, `syncable` decides whether the
+value syncs to clients, and `sentiment` (POSITIVE by default) colors the attribute's tooltip lines. The declared
+attributes append after the vanilla ones in the attribute catalog — sorted by declaring mod id, then attribute
+id, so the network ids are the same on every side running the same mods — before entity attribute rows resolve,
+so a mod's entity set may name its own new attribute. Values sanitize through the definition (NaN maps to the
+minimum, everything else clamps), and saves, item modifiers and the sync set carry the attribute by its string
+id.
 
 A code mod can also use `Registrar::declare_entity_attributes(path, template, attributes)` during registration.
 That declaration starts from the vanilla template's attribute row, replacing the content row's overrides.

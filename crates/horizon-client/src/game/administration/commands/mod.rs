@@ -4412,11 +4412,7 @@ impl Game<'_> {
         let Some(Arg::Resource(s)) = ctx.get("structure").cloned() else {
             return Ok(0);
         };
-        // LocateCommand.locateStructure: an id or a #tag of structures.
-        let names = match s.strip_prefix('#') {
-            Some(tag) => self.structure_tag(tag),
-            None => vec![s.clone()],
-        };
+        let names = self.structure_names(&s);
         let from = origin.map(|v| v.floor() as i32);
         let found = self.end.locator().and_then(|t| t.locate(&names, from, 100));
         let Some((name, p)) = found else {
@@ -4442,6 +4438,14 @@ impl Game<'_> {
             ],
         ));
         Ok(distance)
+    }
+    /// The structures `LocateCommand.locateStructure` searches for: an id, or
+    /// a `#tag`'s members.
+    pub(super) fn structure_names(&self, structure: &str) -> Vec<String> {
+        match structure.strip_prefix('#') {
+            Some(tag) => self.structure_tag(tag),
+            None => vec![structure.to_owned()],
+        }
     }
     /// The structures of a `worldgen/structure` tag, nested tags expanded.
     pub(super) fn structure_tag(&self, tag: &str) -> Vec<String> {
@@ -5898,6 +5902,11 @@ mod effective_presence_tests {
                     .components
                     .iter()
                     .any(|k| k == key)
+            );
+            // Supply the synthetic chunk before forceload's synchronous load barrier.
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
             );
             assert!(game.run_command("forceload add 0 0 15 15"));
             assert!(game.world.loaded(4, 4));

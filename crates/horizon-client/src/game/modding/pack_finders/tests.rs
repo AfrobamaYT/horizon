@@ -1,6 +1,7 @@
 use super::*;
 use horizon_client::datapack::{DataStore, FunctionLine};
-use mod_api::{AddPackFindersEvent, Hooks, Identifier, ModEntry, Text, testing::with_mods};
+use horizon_client::text::Text;
+use mod_api::{AddPackFindersEvent, Hooks, Identifier, ModEntry, testing::with_mods};
 use std::{fs, io::Write, path::PathBuf};
 
 const ASSET_PACK: &str = "assets/packmod/resourcepacks/optional";
@@ -125,7 +126,7 @@ impl Hooks for Finder {
             let mut pack = PackRegistration::new(
                 Identifier::parse(&format!("packmod:{path}")).unwrap(),
                 kind,
-                Text::translate("packmod.optional.title", &[]),
+                mod_api::Text::translate("packmod.optional.title", vec![]),
             );
             pack.always_active = self.required;
             pack.position = self.position;
@@ -244,11 +245,22 @@ fn refused_registrations_leave_the_repository_unchanged() {
         PackRegistration::new(
             Identifier::parse(path).unwrap(),
             PackType::ClientResources,
-            Text::translate("packmod.optional.title", &[]),
+            mod_api::Text::translate("packmod.optional.title", vec![]),
         )
     };
     let valid = format!("packmod:{ASSET_PACK}");
     registry.add_pack_finders(entry(&valid)).unwrap();
+    let mut refused = entry("packmod:missing");
+    let mut title = mod_api::Text::literal("leaf");
+    for _ in 1..513 {
+        title = mod_api::Text::literal("parent").append(title);
+    }
+    refused.title = title;
+    assert_eq!(
+        registry.add_pack_finders(refused),
+        Err(PackFinderError::Text(mod_api::TextFormError::TooDeep))
+    );
+    assert_eq!(registry.packs.len(), 1);
     for (path, error) in [
         (valid.as_str(), PackFinderError::Duplicate),
         ("packmod:../outside", PackFinderError::InvalidPath),
@@ -378,7 +390,11 @@ fn registered_data_commands_respect_flags_required_packs_and_default_priority() 
                 let world = fixture.root.join("world");
                 let user = world.join("datapacks/user");
                 fs::create_dir_all(user.join("data/packmod/function")).unwrap();
-                fs::write(user.join("pack.mcmeta"), b"{}").unwrap();
+                fs::write(
+                    user.join("pack.mcmeta"),
+                    br#"{"pack":{"description":"User override fixture"}}"#,
+                )
+                .unwrap();
                 fs::write(
                     user.join("data/packmod/function/probe.mcfunction"),
                     b"say from-user\n",

@@ -1438,11 +1438,7 @@ impl Game<'_> {
         let mut guest_events = Vec::new();
         let mut player_credit = std::mem::take(&mut self.last_hurt_by_player);
         // The block writes since the last tick: mobs re-path around them.
-        let path_writes = self
-            .world
-            .path_writes
-            .get_or_insert_with(Vec::new)
-            .split_off(0);
+        let path_writes = std::mem::take(self.world.path_writes.get_or_insert_with(Vec::new));
         // The mobs whose bodies go this tick: (id, feet, width, height, split).
         // 🤖 Agent: the last field is the grown slime, magma cube or sulfur
         // cube the body leaves behind (`AbstractCubeMob.remove`), captured as
@@ -1582,7 +1578,7 @@ impl Game<'_> {
     }
     /// `LivingEntity.makePoofParticles` (entity event 60) about a mob's box.
     pub(super) fn death_poof(&mut self, at: [f64; 3], width: f64, height: f64) {
-        let options = mod_api::particles::ParticleOptions::simple(
+        let options = horizon_client::particles::ParticleOptions::simple(
             horizon_client::particles::ParticleType::Poof,
         );
         for _ in 0..20 {
@@ -2555,7 +2551,7 @@ impl Game<'_> {
                     count,
                 } => {
                     if let Some(ty) = horizon_client::particles::ParticleType::from_name(kind) {
-                        let options = mod_api::particles::ParticleOptions::simple(ty);
+                        let options = horizon_client::particles::ParticleOptions::simple(ty);
                         self.particles
                             .send_particles(&options, at, spread, speed, count);
                         self.lan_level_particles(&options, at, spread, speed, count, None);
@@ -3100,6 +3096,10 @@ impl Game<'_> {
                     mut arrow,
                 } => {
                     self.mob_bow_ammo(mob, &weapon, &mut arrow);
+                    if let Some(state) = arrow.arrow.as_mut() {
+                        state.fired_from_weapon = Some(weapon);
+                        arrow.bonus.damage = 0.0;
+                    }
                     self.launch_mob_projectile(arrow);
                 }
                 MobEvent::CrossbowShot { ammo, mut arrow } => {
@@ -3387,27 +3387,6 @@ impl Game<'_> {
                         broke.push(mob);
                     }
                     let old = self.world.block(pos[0], pos[1], pos[2]);
-                    if drop
-                        && self
-                            .res
-                            .facts()
-                            .get(old)
-                            .name
-                            .starts_with("minecraft:infested_")
-                        && self
-                            .ui
-                            .rules
-                            .bool_at(horizon_client::gamerules::vanilla::BLOCK_DROPS)
-                    {
-                        let at = [
-                            f64::from(pos[0]) + 0.5,
-                            f64::from(pos[1]),
-                            f64::from(pos[2]) + 0.5,
-                        ];
-                        if let Some(id) = self.spawn_mob_raw("minecraft:silverfish", at, false) {
-                            self.mob_poof(id);
-                        }
-                    }
                     // Block.spawnDestroyParticles: fire breaks leave nothing.
                     if !self.res.facts().get(old).has_class("BaseFireBlock") {
                         self.level_event_at(2001, pos, old.0 as i32);
@@ -3468,7 +3447,7 @@ impl Game<'_> {
                         if kind.starts_with("item_") {
                             self.ensure_item_particle_sprites();
                         }
-                        let options = mod_api::particles::ParticleOptions::simple(ty);
+                        let options = horizon_client::particles::ParticleOptions::simple(ty);
                         if ty == horizon_client::particles::ParticleType::SonicBoom {
                             self.lan_sonic_boom(&options, at);
                         }
@@ -3506,7 +3485,7 @@ impl Game<'_> {
                 }
                 MobEvent::ParticleAt { kind, at, velocity } => {
                     if let Some(ty) = horizon_client::particles::ParticleType::from_name(kind) {
-                        let options = mod_api::particles::ParticleOptions::simple(ty);
+                        let options = horizon_client::particles::ParticleOptions::simple(ty);
                         self.particles.add(&options, at, velocity);
                     }
                 }
@@ -3514,7 +3493,7 @@ impl Game<'_> {
                     at,
                     color: [r, g, b],
                 } => {
-                    let options = mod_api::particles::ParticleOptions::colored(
+                    let options = horizon_client::particles::ParticleOptions::colored(
                         horizon_client::particles::ParticleType::EntityEffect,
                         [r, g, b, 1.0],
                     );
@@ -5100,28 +5079,86 @@ impl Game<'_> {
     /// for (`AbstractArrow.onHitEntity`, `ThrownTrident.onHitEntity`): a
     /// trident's 8 through `EnchantmentHelper.modifyDamage` of the trident
     /// (Impaling's `minecraft:damage` on `#sensitive_to_impaling`).
-    fn shot_damage(&mut self, shot: &mut Projectile, victim: Option<&str>) -> f32 {
-        if !matches!(shot.kind, ProjectileKind::Trident) {
-            return shot.arrow_damage() + shot.bonus.damage;
-        }
-        let Some(trident) = shot.arrow.as_ref().map(|a| a.pickup_item.clone()) else {
-            return 8.0;
+    pub(in crate::game) fn shot_damage(
+        &mut self,
+        shot: &mut Projectile,
+        victim: Option<&str>,
+        who: Who,
+    ) -> f32 {
+        let trident = matches!(shot.kind, ProjectileKind::Trident);
+        let base = match shot.kind {
+            ProjectileKind::Arrow { base_damage, .. } => base_damage as f32,
+            _ => 8.0,
+        };
+        let weapon = shot.arrow.as_ref().and_then(|a| {
+            if trident {
+                Some(a.pickup_item.clone())
+            } else {
+                a.fired_from_weapon.clone()
+            }
+        });
+        let Some(weapon) = weapon else {
+            return if trident {
+                base
+            } else {
+                shot.arrow_damage() + shot.bonus.damage
+            };
+        };
+        let attacker_kind = match shot.owner {
+            Some(Who::Player) => Some("minecraft:player".to_owned()),
+            Some(Who::Mob(id)) => self
+                .mobs
+                .iter()
+                .find(|m| m.id == id)
+                .map(|m| m.kind.id.clone()),
+            None => None,
         };
         let ctx = horizon_client::enchant::EffectContext {
             this: victim,
-            attacker: (shot.owner == Some(Who::Player)).then_some("minecraft:player"),
-            direct_attacker: Some("minecraft:trident"),
-            damage_type: Some("minecraft:trident"),
-            items: Some(world_items!(self)),
+            attacker: attacker_kind.as_deref(),
+            direct_attacker: Some(if trident {
+                "minecraft:trident"
+            } else if shot.is_spectral_arrow() {
+                "minecraft:spectral_arrow"
+            } else {
+                "minecraft:arrow"
+            }),
+            damage_type: Some(if trident {
+                "minecraft:trident"
+            } else {
+                "minecraft:arrow"
+            }),
             ..Default::default()
         };
-        world_stations!(self).enchantments.modify_value(
-            Some(&trident),
-            "minecraft:damage",
-            &ctx,
-            &mut self.world.random,
-            8.0,
-        )
+        let player = self.own_entity_id() as u32;
+        let attacker = shot.owner.map(|owner| match owner {
+            Who::Player => self
+                .combat
+                .enchantment_projectile_attacker
+                .or_else(|| self.player_attacker(shot.guest).map(|s| s.0))
+                .unwrap_or(player),
+            Who::Mob(id) => id,
+        });
+        let victim = match who {
+            Who::Player => player,
+            Who::Mob(id) => id,
+        };
+        let victim = if (super::dragon::SPECIAL..super::dragon::CRYSTAL_IDS).contains(&victim) {
+            self.dragon.as_ref().map_or(victim, |dragon| dragon.id)
+        } else if victim >= super::dragon::CRYSTAL_IDS {
+            self.crystals
+                .get((victim - super::dragon::CRYSTAL_IDS) as usize)
+                .map_or(victim, |crystal| crystal.id)
+        } else {
+            victim
+        };
+        let enchanted =
+            self.evaluate_weapon_damage(&weapon, attacker.map(|id| (id, victim)), ctx, base);
+        if trident {
+            enchanted
+        } else {
+            shot.arrow_damage_with_base(f64::from(enchanted)) + shot.bonus.damage
+        }
     }
     /// A projectile's hurt of `amount` on the boat or minecart `id`
     /// (`VehicleEntity.hurtServer`): even 0 shakes it (`Snowball`, `ThrownEgg`,
@@ -5553,7 +5590,15 @@ impl Game<'_> {
                 // AbstractArrow.onHitEntity: spent if the part or crystal took
                 // it, else turned back (a perched dragon sets it alight first).
                 let mut arrow = p.clone();
-                let amount = self.shot_damage(&mut arrow, None);
+                let amount = self.shot_damage(
+                    &mut arrow,
+                    Some(if id >= super::dragon::CRYSTAL_IDS {
+                        "minecraft:end_crystal"
+                    } else {
+                        "minecraft:ender_dragon"
+                    }),
+                    Who::Mob(id),
+                );
                 let outcome = match self.hit_special(
                     id,
                     amount,
@@ -5611,7 +5656,8 @@ impl Game<'_> {
         {
             // AbstractArrow.onHitEntity on a minecart.
             let mut arrow = p.clone();
-            let amount = self.shot_damage(&mut arrow, None);
+            let victim_type = self.carts[i].kind.id().to_owned();
+            let amount = self.shot_damage(&mut arrow, Some(&victim_type), Who::Mob(id));
             let burning = p.arrow.as_ref().is_some_and(|a| a.on_fire());
             let creative = p.owner == Some(Who::Player) && self.creative;
             self.arrow_hits_cart(i, amount, p.velocity, burning, creative);
@@ -5627,7 +5673,8 @@ impl Game<'_> {
             // AbstractArrow.onHitEntity on a boat: VehicleEntity.hurtServer
             // takes the arrow's damage, and the arrow is spent.
             let mut arrow = p.clone();
-            let amount = self.shot_damage(&mut arrow, None);
+            let victim_type = self.boats[i].entity_type();
+            let amount = self.shot_damage(&mut arrow, Some(&victim_type), Who::Mob(id));
             let creative = p.owner == Some(Who::Player) && self.creative;
             self.hurt_boat(i, amount, creative);
             self.finish_arrow_hit(arrow, EntityHit::Hurt);
@@ -5667,7 +5714,7 @@ impl Game<'_> {
                         .map(|m| m.kind.id.clone()),
                     Who::Player => Some("minecraft:player".to_owned()),
                 };
-                let amount = self.shot_damage(&mut trident, victim.as_deref());
+                let amount = self.shot_damage(&mut trident, victim.as_deref(), who);
                 let hurt = match who {
                     Who::Player => self.mob_hits_player(
                         amount,
@@ -5711,7 +5758,15 @@ impl Game<'_> {
             }
             (ProjectileKind::Arrow { .. }, Hit::Entity { who, .. }) => {
                 let mut arrow = p.clone();
-                let amount = arrow.arrow_damage() + p.bonus.damage;
+                let victim = match who {
+                    Who::Player => Some("minecraft:player".to_owned()),
+                    Who::Mob(id) => self
+                        .mobs
+                        .iter()
+                        .find(|m| m.id == id)
+                        .map(|m| m.kind.id.clone()),
+                };
+                let amount = self.shot_damage(&mut arrow, victim.as_deref(), who);
                 let player_fire = self.player.as_ref().map(|pl| pl.fire_ticks);
                 // AbstractArrow.onHitEntity saves the fire, ignites, then puts
                 // it back when hurtOrSimulate fails and the target still takes
@@ -6372,7 +6427,7 @@ impl Game<'_> {
                 self.audio
                     .play("minecraft:entity.shulker_bullet.hit", Some(atp), 1.0, 1.0);
                 if let Some(ty) = horizon_client::particles::ParticleType::from_name("explosion") {
-                    let options = mod_api::particles::ParticleOptions::simple(ty);
+                    let options = horizon_client::particles::ParticleOptions::simple(ty);
                     for _ in 0..2 {
                         let r = &mut self.world.random;
                         let at = [
@@ -8676,11 +8731,9 @@ fn to_loot(stack: &ItemStack) -> horizon_world::loot::LootStack {
     let components = stack
         .custom_data()
         .map(|data| {
-            let snbt =
-                horizon_world::snbt_text::to_snbt(&horizon_core::nbt::Tag::Compound(data.clone()));
             (
                 "minecraft:custom_data".to_owned(),
-                serde_json::Value::String(snbt),
+                Some(horizon_core::nbt::Tag::Compound(data.clone())),
             )
         })
         .into_iter()
@@ -12248,6 +12301,8 @@ mod chorus_projectile_drop_tests {
             None,
         )
         .unwrap();
+        game.native_lifecycle
+            .begin_open(mod_api::NativeAuthority::IntegratedServer);
         game.build_registries();
         game.set_allow_commands(true);
 
@@ -12964,6 +13019,11 @@ mod loaded_mob_arrow_permission_tests {
             game.block_ticks
                 .add_empty_chunk(BlockPos::new(0, 0, 0).chunk())
                 .unwrap();
+            // Supply the synthetic chunk before forceload's synchronous load barrier.
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
             assert!(game.run_command("forceload add 0 0"));
             assert!(game.run_command("fill 0 199 0 15 199 15 stone"));
             assert!(game.world.loaded(3, 1));
