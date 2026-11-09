@@ -37,6 +37,40 @@ struct Target {
     src_path: PathBuf,
 }
 
+fn resolved_features(
+    root: &Path,
+    owner: &Package,
+    package: &Package,
+) -> Result<Vec<String>, String> {
+    // Metadata enables defaults on all workspace members; tree selects our mod.
+    let bytes = output(
+        crate::wasm::pinned("cargo")
+            .args([
+                "tree",
+                "--package",
+                &owner.id,
+                "--invert",
+                &package.id,
+                "--depth",
+                "0",
+                "--prefix",
+                "none",
+                "--format",
+                "{f}",
+                "--edges",
+                "normal,build",
+            ])
+            .current_dir(root),
+    )?;
+    let text = String::from_utf8(bytes).map_err(|e| e.to_string())?;
+    Ok(text
+        .trim()
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .collect())
+}
+
 fn output(command: &mut Command) -> Result<Vec<u8>, String> {
     let result = command.output().map_err(|e| e.to_string())?;
     if !result.status.success() {
@@ -77,7 +111,7 @@ pub fn build(root: &Path) -> Result<(), String> {
     {
         let destination = root.join("layouts.json");
         if destination.exists() {
-            fs::remove_file(destination).map_err(|e| e.to_string())?;
+            return Err("layouts: existing layouts.json would lose all recorded types; remove it explicitly after reviewing the public API change".into());
         }
         return Ok(());
     }
@@ -130,7 +164,7 @@ pub fn build(root: &Path) -> Result<(), String> {
     let destination = root.join("layouts.json");
     if declarations.is_empty() {
         if destination.exists() {
-            fs::remove_file(destination).map_err(|e| e.to_string())?;
+            return Err("layouts: existing layouts.json would lose all recorded types; remove it explicitly after reviewing the public API change".into());
         }
         return Ok(());
     }
@@ -146,6 +180,16 @@ pub fn build(root: &Path) -> Result<(), String> {
     );
     let mut api_dependency = toml::map::Map::new();
     api_dependency.insert("package".into(), api.name.clone().into());
+    api_dependency.insert("default-features".into(), false.into());
+    api_dependency.insert(
+        "features".into(),
+        toml::Value::Array(
+            resolved_features(&root, owner, api)?
+                .into_iter()
+                .map(toml::Value::String)
+                .collect(),
+        ),
+    );
     match api.source.as_deref() {
         Some(source) if source.starts_with("git+") => {
             let (url, rev) = source[4..]
@@ -186,8 +230,9 @@ pub fn build(root: &Path) -> Result<(), String> {
     for (index, (package, id, types)) in declarations.iter().enumerate() {
         let alias = format!("library_{index}");
         manifest.push_str(&format!(
-            "{alias} = {{ package = {:?}, path = {:?} }}\n",
+            "{alias} = {{ package = {:?}, default-features = false, features = {:?}, path = {:?} }}\n",
             package.name,
+            resolved_features(&root, owner, package)?,
             package
                 .manifest_path
                 .parent()
@@ -268,8 +313,12 @@ mod tests {
         build(&root).unwrap();
         assert_ne!(before, fs::read(root.join("layouts.json")).unwrap());
         fs::write(root.join("src/lib.rs"), "pub struct Local;\n").unwrap();
-        build(&root).unwrap();
-        assert!(!root.join("layouts.json").exists());
+        assert!(
+            build(&root)
+                .unwrap_err()
+                .contains("lose all recorded types")
+        );
+        fs::remove_file(root.join("layouts.json")).unwrap();
         let library = root.join("library");
         fs::create_dir_all(library.join("src")).unwrap();
         fs::write(library.join("Cargo.toml"), format!("[package]\nname = \"library\"\nversion = \"0.1.0\"\nedition = \"2024\"\n[dependencies]\nhorizon-mod-api = {{ path = {:?} }}\n", api.to_string_lossy())).unwrap();
@@ -290,5 +339,35 @@ mod tests {
             serde_json::from_slice(&fs::read(root.join("layouts.json")).unwrap()).unwrap();
         assert!(recorded["library"]["library::Shared"].as_str().is_some());
         assert!(recorded.get("fixture").is_none());
+        let lib_manifest = library.join("Cargo.toml");
+        let mut text = fs::read_to_string(&lib_manifest).unwrap();
+        text.push_str("\n[features]\ndefault = [\"wide\"]\nwide = []\n");
+        fs::write(&lib_manifest, text).unwrap();
+        fs::write(library.join("src/lib.rs"), "#[derive(mod_api::Wire)] pub struct Shared { pub value: u16, #[cfg(feature = \"wide\")] pub extra: u64 }").unwrap();
+        build(&root).unwrap();
+        let wide = fs::read(root.join("layouts.json")).unwrap();
+        let manifest_path = root.join("Cargo.toml");
+        let text = fs::read_to_string(&manifest_path).unwrap().replace(
+            "path = \"library\"",
+            "path = \"library\", default-features = false",
+        );
+        fs::write(&manifest_path, text).unwrap();
+        build(&root).unwrap();
+        assert_ne!(wide, fs::read(root.join("layouts.json")).unwrap());
+        let text = fs::read_to_string(&manifest_path).unwrap().replace(
+            "default-features = false",
+            "default-features = false, features = [\"wide\"]",
+        );
+        fs::write(&manifest_path, text).unwrap();
+        build(&root).unwrap();
+        assert_eq!(wide, fs::read(root.join("layouts.json")).unwrap());
+        let recorded = fs::read(root.join("layouts.json")).unwrap();
+        fs::write(
+            library.join("src/lib.rs"),
+            "#[cfg(unix)] #[derive(mod_api::Wire)] pub struct Shared;",
+        )
+        .unwrap();
+        assert!(build(&root).unwrap_err().contains("library::Shared"));
+        assert_eq!(recorded, fs::read(root.join("layouts.json")).unwrap());
     }
 }
