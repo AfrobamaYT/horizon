@@ -1578,6 +1578,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::register_range_select_item_model_property` | crosses | Wire call |
 | `Hooks::register_runtime_sprites` | crosses | Wire call |
 | `Hooks::register_select_item_model_property` | crosses | Wire call |
+| `Hooks::register_texture_atlases` | crosses | Wire call |
 | `Hooks::render_arm` | crosses | Wire call |
 | `Hooks::render_frame_post` | crosses | Wire call |
 | `Hooks::render_frame_pre` | crosses | Wire call |

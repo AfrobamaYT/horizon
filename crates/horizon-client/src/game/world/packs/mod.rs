@@ -374,6 +374,7 @@ impl Game<'_> {
         // registering mod for crash attribution.
         let client_listeners = self.register_client_reload_listeners();
         let runtime_sprites = super::client_reload::collect_runtime_sprites();
+        let texture_atlases = super::client_reload::collect_texture_atlases();
         super::mods::register_fluid_models(self.options.execution_role);
         let stage = move |progress: &crate::game::Progress| {
             stage_pack(
@@ -383,6 +384,7 @@ impl Game<'_> {
                 &mod_sources,
                 client_listeners,
                 &runtime_sprites,
+                &texture_atlases,
                 &assets,
                 &res,
                 &context,
@@ -617,6 +619,7 @@ pub(super) fn stage_pack(
     mod_sources: &super::mods::ModsState,
     client_listeners: mod_api::ClientListenerRegistry,
     runtime_sprites: &[mod_api::RuntimeSprite],
+    texture_atlases: &[mod_api::TextureAtlasRegistration],
     assets: &Arc<Assets>,
     res: &Resources,
     context: &WorkerContext,
@@ -626,6 +629,7 @@ pub(super) fn stage_pack(
 ) -> horizon_client::Result<StagedPack> {
     let resource_root = startup_root(vanilla_root, selected, server, mod_sources)?;
     let resource_root = super::client_reload::stage_runtime_sprites(resource_root, runtime_sprites);
+    let resource_root = super::client_reload::stage_texture_atlases(resource_root, texture_atlases);
     let root = resource_root.prepared().to_path_buf();
     let source = resource_root.source().clone();
     progress.set(1);
