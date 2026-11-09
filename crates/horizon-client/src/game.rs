@@ -911,18 +911,6 @@ fn server_only_block_use(
         .iter()
         .any(|class| block.has_class(class))
 }
-/// An entity's box (`EntityDimensions.makeBoundingBox`): `width` wide and
-/// `height` tall, standing on `feet`.
-fn point_box(feet: [f64; 3], width: f64, height: f64) -> Aabb {
-    Aabb::new(
-        Vec3::new(feet[0] - width / 2.0, feet[1], feet[2] - width / 2.0),
-        Vec3::new(
-            feet[0] + width / 2.0,
-            feet[1] + height,
-            feet[2] + width / 2.0,
-        ),
-    )
-}
 impl GameLevel<'_> {
     /// `LilyPadBlock.entityInside`: the boxes of the boats that can break a pad.
     fn boat_trigger_boxes(&self) -> impl Iterator<Item = Aabb> + '_ {
@@ -1133,6 +1121,13 @@ impl LevelAccess for GameLevel<'_> {
             );
         }
         (!cancel).then_some(new_state)
+    }
+    fn allow_fluid_tick(&self, pos: BlockPos, fluid: &'static str) -> bool {
+        let mut cancel = false;
+        if self.native_authoritative {
+            self.native_fluid_tick(self.dimension, pos, fluid, &mut cancel);
+        }
+        !cancel
     }
     fn allow_fluid_level_change(
         &self,
@@ -5621,7 +5616,10 @@ impl Game<'_> {
         let trigger_extras: Vec<Aabb> = self
             .bolts
             .iter()
-            .map(|b| point_box(b.at, 0.0, 0.0))
+            .map(|b| {
+                let at = Vec3::new(b.at[0], b.at[1], b.at[2]);
+                Aabb::new(at, at)
+            })
             .collect();
         // `ContainerOpenersCounter.getEntitiesWithContainerOpen`: the players
         // whose menu still holds a container of the block at a position. A
