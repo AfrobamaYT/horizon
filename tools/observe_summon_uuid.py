@@ -24,7 +24,17 @@ def main():
     parser.add_argument('--root-type', choices=('pig', 'oak_boat', 'minecart'), default='pig')
     parser.add_argument('--action', choices=('all', 'kill', 'travel', 'same_dimension'),
                         default='all', help='observe one lifecycle without dismounting first')
+    parser.add_argument('--final-restart', action='store_true',
+                        help='save/restart again after the chosen lifecycle action')
+    parser.add_argument('--cycle-chunk', action='store_true',
+                        help='probe hidden-section UUID ownership after kill/travel (root_child only)')
+    parser.add_argument('--raise-root-before-kill', action='store_true',
+                        help='load root Pos at y 210 without moving its frozen passengers')
     args = parser.parse_args()
+    if args.raise_root_before_kill and args.action != 'kill':
+        parser.error('--raise-root-before-kill requires --action kill')
+    if args.cycle_chunk and (args.cases != ['root_child'] or args.action not in ('kill', 'travel')):
+        parser.error('--cycle-chunk requires --cases root_child and --action kill or travel')
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=False)
     lock, jars, libraries = base.verify_artifacts()
@@ -79,6 +89,42 @@ def main():
         else:
             raise AssertionError('summon chunk not loaded')
 
+    def checkpoint(label, dimension=None):
+        prefix = f'execute in minecraft:{dimension} run ' if dimension else ''
+        if args.cycle_chunk:
+            records.append({'checkpoint': f'{label}_before_unload'})
+            reply('setworldspawn 1024 200 1024')
+            reply(prefix + 'forceload add 1600 1600')
+            reply(prefix + 'forceload remove 0 0')
+            for _ in range(12):
+                advance(100)
+                if not any('Test passed' in line for line in reply(prefix + 'execute if loaded 0 200 0')):
+                    break
+            else:
+                raise AssertionError('old chunk did not unload')
+            records.append({'checkpoint': f'{label}_hidden'})
+            observe(dimension)
+            # u is the current case's UUID namespace; only root_child supports this probe.
+            reply(prefix + 'summon pig 1601 200 1601 ' + entity('uuid_probe', u + 2))
+            reply(prefix + 'forceload add 0 0')
+            for _ in range(300):
+                if any('Test passed' in line for line in reply(prefix + 'execute if loaded 0 200 0')):
+                    break
+            else:
+                raise AssertionError('old chunk did not reload')
+            records.append({'checkpoint': f'{label}_visible_again'})
+            observe(dimension)
+            reply(prefix + 'data get entity @e[tag=uuid_probe,distance=0..,limit=1]')
+        if not args.final_restart:
+            return
+        reply('save-all flush')
+        server.stop()
+        start(label)
+        records.append({'checkpoint': label})
+        observe(dimension)
+        if dimension:
+            observe()
+
     def entity(tag, uuid, passengers=''):
         return ('{id:"minecraft:pig",UUID:[I;0,0,0,' + str(uuid) + '],Tags:["' + tag
                 + '"],NoAI:1b,NoGravity:1b,Age:-1000'
@@ -110,16 +156,21 @@ def main():
             start(f'reload_{kind}')
             observe()
             if args.action == 'kill':
+                if args.raise_root_before_kill:
+                    reply('data merge entity @e[tag=root,limit=1] {Pos:[1.0d,210.0d,1.0d]}')
+                    observe()
                 reply('kill @e[tag=root,distance=0..]')
                 observe()
                 advance(25)
                 observe()
+                checkpoint(f'after_kill_{kind}')
                 continue
             if args.action == 'same_dimension':
                 reply('teleport @e[tag=root,distance=0..] 4 200 4')
                 observe()
                 advance(5)
                 observe()
+                checkpoint(f'after_same_dimension_{kind}')
                 continue
             if args.action == 'all':
                 reply('execute as @e[tag=grandchild] run ride @s dismount')
@@ -137,6 +188,7 @@ def main():
             observe()
             advance(5)
             observe('the_nether')
+            checkpoint(f'after_travel_{kind}', 'the_nether')
             reply('execute in minecraft:the_nether run kill @e[tag=root,distance=0..]')
             reply('kill @e[tag=root]')
             observe()

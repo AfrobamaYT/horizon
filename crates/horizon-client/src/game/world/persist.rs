@@ -87,7 +87,41 @@ pub struct EntityMemory {
     pub(super) removals: Vec<super::commands::Target>,
 }
 
-#[derive(Clone, Copy)]
+/// Runtime ownership paired with the serialized tree out of band. UUIDs are
+/// admission identities, not keys for matching these distinct object states.
+#[derive(Debug)]
+pub(super) struct TransferredVehicleTree {
+    source_id: u32,
+    kind: VehicleTreeKind,
+    name: String,
+    state: super::entity_initialization::TransferredEntityState,
+    passengers: Vec<TransferredVehicleTree>,
+}
+
+pub(super) struct RestoredVehicleTree {
+    pub(super) root: u32,
+    pub(super) by_source: HashMap<u32, u32>,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum VehicleTreeKind {
+    Mob,
+    Boat,
+    Cart,
+}
+
+/// The boundary has paired each modeled NBT node with exactly one captured
+/// object state before any destination object or attachment map is installed.
+struct PreparedVehicleTransfer {
+    source_id: u32,
+    tag: Tag,
+    kind: VehicleTreeKind,
+    name: String,
+    state: super::entity_initialization::TransferredEntityState,
+    passengers: Vec<PreparedVehicleTransfer>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum MobObject {
     Resident(usize),
     OffLevel(u32),
@@ -1434,6 +1468,7 @@ impl Game<'_> {
             self.target_with_uuid(uuid)
                 .is_some_and(|target| target != super::commands::Target::Player)
         });
+
         if let Some(state) = transferred {
             self.adopt_transferred_entity_state(id, state);
         }
@@ -1508,7 +1543,7 @@ impl Game<'_> {
     /// `Entity.shouldBeSaved`: the mobs riding entity `id` under `tag`'s
     /// `Passengers`, after the passengers it kept from loading. Discarded
     /// passengers cannot save even before their list entry is swept.
-    pub(super) fn put_mob_passengers(&mut self, tag: &mut Tag, id: u32) {
+    fn mob_passenger_objects(&self, id: u32) -> Vec<MobObject> {
         let mut riders: Vec<(i64, u32, MobObject)> = self
             .mobs
             .iter()
@@ -1537,12 +1572,164 @@ impl Game<'_> {
             let driver = riders.remove(position);
             riders.insert(0, driver);
         }
-        let riders = riders
+        riders.into_iter().map(|(_, _, object)| object).collect()
+    }
+
+    pub(super) fn put_mob_passengers(&mut self, tag: &mut Tag, id: u32) {
+        let riders = self
+            .mob_passenger_objects(id)
             .into_iter()
-            .map(|(_, _, object)| self.mob_object_tree_nbt(object))
+            .map(|object| self.mob_object_tree_nbt(object))
             .collect();
         add_passengers(tag, riders);
     }
+    pub(super) fn mob_passenger_ids(&self, root: u32) -> Vec<u32> {
+        self.mob_passenger_objects(root)
+            .into_iter()
+            .map(|object| self.mob_at(object).id)
+            .collect()
+    }
+
+    /// Capture after tree serialization and before source removal. This consumes
+    /// each object's runtime ownership once, independently of duplicate UUIDs.
+    pub(super) fn capture_vehicle_tree_state(
+        &mut self,
+        root: u32,
+    ) -> Option<TransferredVehicleTree> {
+        let (kind, name) = if let Some(mob) = self.mob_object(root) {
+            (VehicleTreeKind::Mob, super::native_hooks::mob_kind(mob))
+        } else if let Some(boat) = self.boats.iter().find(|boat| boat.id == root) {
+            (VehicleTreeKind::Boat, boat.entity_type())
+        } else {
+            let cart = self.carts.iter().find(|cart| cart.id == root)?;
+            (VehicleTreeKind::Cart, cart.kind.id().to_owned())
+        };
+        let children: Vec<_> = self
+            .mob_passenger_objects(root)
+            .into_iter()
+            .map(|object| self.mob_at(object).id)
+            .collect();
+        let passengers = children
+            .into_iter()
+            .map(|id| self.capture_vehicle_tree_state(id))
+            .collect::<Option<Vec<_>>>()?;
+        Some(TransferredVehicleTree {
+            source_id: root,
+            kind,
+            name,
+            state: self.take_transferred_entity_state(root),
+            passengers,
+        })
+    }
+
+    fn prepare_vehicle_transfer(
+        &mut self,
+        mut tag: Tag,
+        tree: TransferredVehicleTree,
+    ) -> Option<PreparedVehicleTransfer> {
+        if entity_nbt::kind(&tag).as_deref() != Some(tree.name.as_str()) {
+            log::warn!(
+                "Horizon: transferred vehicle type does not match its captured object state"
+            );
+            return None;
+        }
+        let tags = self.take_mob_passengers(&mut tag);
+        if tags.len() != tree.passengers.len() {
+            log::warn!(
+                "Horizon: transferred vehicle topology does not match its captured object state"
+            );
+            return None;
+        }
+        let passengers = tags
+            .into_iter()
+            .zip(tree.passengers)
+            .map(|(tag, child)| self.prepare_vehicle_transfer(tag, child))
+            .collect::<Option<Vec<_>>>()?;
+        Some(PreparedVehicleTransfer {
+            source_id: tree.source_id,
+            tag,
+            kind: tree.kind,
+            name: tree.name,
+            state: tree.state,
+            passengers,
+        })
+    }
+
+    /// Reconstruct using actual object IDs, even when the copied root is refused
+    /// residency. Mob roots follow passenger-first vanilla dimension admission;
+    /// boat/cart roots retain their existing admission until the #2419 repair.
+    pub(super) fn restore_vehicle_tree_state(
+        &mut self,
+        tag: Tag,
+        tree: TransferredVehicleTree,
+    ) -> Option<RestoredVehicleTree> {
+        let passenger_first = matches!(tree.kind, VehicleTreeKind::Mob);
+        let prepared = self.prepare_vehicle_transfer(tag, tree)?;
+        let mut by_source = HashMap::new();
+        let root = self.restore_vehicle_transfer(prepared, passenger_first, &mut by_source)?;
+        Some(RestoredVehicleTree { root, by_source })
+    }
+
+    fn restore_vehicle_transfer(
+        &mut self,
+        tree: PreparedVehicleTransfer,
+        passenger_first: bool,
+        by_source: &mut HashMap<u32, u32>,
+    ) -> Option<u32> {
+        let PreparedVehicleTransfer {
+            source_id,
+            tag,
+            kind,
+            name,
+            state,
+            passengers,
+        } = tree;
+        let (root, riders) = if passenger_first {
+            let riders = passengers
+                .into_iter()
+                .map(|child| self.restore_vehicle_transfer(child, true, by_source))
+                .collect::<Option<Vec<_>>>()?;
+            (
+                self.restore_vehicle_object(tag, kind, &name, state)?,
+                riders,
+            )
+        } else {
+            let root = self.restore_vehicle_object(tag, kind, &name, state)?;
+            let riders = passengers
+                .into_iter()
+                .map(|child| self.restore_vehicle_transfer(child, false, by_source))
+                .collect::<Option<Vec<_>>>()?;
+            (root, riders)
+        };
+        for (order, &id) in riders.iter().enumerate() {
+            if let Some(mob) = self.mob_object_mut(id) {
+                mob.extra.mount = Some(root);
+                mob.extra.passenger = true;
+                mob.extra.vehicle_order = order as i64;
+            }
+        }
+        if let Some(mob) = self.mob_object_mut(root) {
+            mob.extra.rider = riders.first().copied();
+        }
+        by_source.insert(source_id, root);
+        Some(root)
+    }
+
+    fn restore_vehicle_object(
+        &mut self,
+        tag: Tag,
+        kind: VehicleTreeKind,
+        name: &str,
+        state: super::entity_initialization::TransferredEntityState,
+    ) -> Option<u32> {
+        let uuid = entity_nbt::uuid(&tag);
+        match kind {
+            VehicleTreeKind::Mob => self.load_mob_transferred(tag, None, Some(state)),
+            VehicleTreeKind::Boat => self.load_boat_transferred(tag, uuid, name, Some(state)),
+            VehicleTreeKind::Cart => self.load_cart_transferred(tag, uuid, name, Some(state)),
+        }
+    }
+
     /// Read an unsimulated entity without assigning it a new identity.
     pub(super) fn other_from_nbt(
         tag: &Tag,
@@ -1647,17 +1834,40 @@ impl Game<'_> {
         tag
     }
     /// The root of a stack of riders (`Entity.getRootVehicle`).
-    fn mob_root(&self, mut i: usize) -> usize {
-        for _ in 0..8 {
-            let Some(v) = self.mobs[i].extra.mount else {
+    fn mob_root(&self, mut object: MobObject) -> MobObject {
+        for _ in 0..self.mobs.len() + self.persist.off_level.len() {
+            let Some(vehicle) = self.mob_at(object).extra.mount else {
                 break;
             };
-            let Some(j) = self.mobs.iter().position(|m| m.id == v) else {
+            let Some(parent) = self.mob_object_slot(vehicle) else {
                 break;
             };
-            i = j;
+            object = parent;
         }
-        i
+        object
+    }
+
+    fn mob_object_slot(&self, id: u32) -> Option<MobObject> {
+        self.mobs
+            .iter()
+            .position(|mob| mob.id == id)
+            .map(MobObject::Resident)
+            .or_else(|| {
+                self.persist
+                    .off_level
+                    .get(&id)
+                    .and_then(OffLevel::as_mob)
+                    .map(|_| MobObject::OffLevel(id))
+            })
+    }
+
+    fn mob_object_slots(&self) -> impl Iterator<Item = MobObject> + '_ {
+        (0..self.mobs.len()).map(MobObject::Resident).chain(
+            self.persist
+                .off_level
+                .iter()
+                .filter_map(|(&id, object)| object.as_mob().map(|_| MobObject::OffLevel(id))),
+        )
     }
     /// `Entity.getVehicle` of entity `id`: the mob, boat or minecart a mob
     /// rides (only a mob rides another entity here).
@@ -1670,8 +1880,8 @@ impl Game<'_> {
     }
     /// The root vehicle `root` with its passengers (`Entity.save`).
     pub(super) fn vehicle_tree_nbt(&mut self, root: u32) -> Option<Tag> {
-        if let Some(i) = self.mobs.iter().position(|m| m.id == root) {
-            return Some(self.mob_tree_nbt(i));
+        if let Some(object) = self.mob_object_slot(root) {
+            return Some(self.mob_object_tree_nbt(object));
         }
         if self.boats.iter().any(|b| b.id == root) {
             let uuid = self.uuid_for(root);
@@ -1711,13 +1921,13 @@ impl Game<'_> {
     pub(super) fn remove_vehicle_tree(&mut self, root: u32) {
         // The mobs `put_mob_passengers` saves under each vehicle of the tree.
         let mounts: Vec<(u32, Option<u32>)> = self
-            .mobs
-            .iter()
+            .mob_objects()
             .filter(|m| m.alive())
             .map(|m| (m.id, m.extra.mount))
             .collect();
         let gone = vehicle_tree(root, &mounts);
         self.mobs.retain(|m| !gone.contains(&m.id));
+        self.persist.off_level.retain(|id, _| !gone.contains(id));
         for &id in &gone {
             self.release_vehicle_container(id);
         }
@@ -1729,16 +1939,13 @@ impl Game<'_> {
     }
     /// The vehicle with this UUID, among the ones in the world.
     pub(super) fn vehicle_by_uuid(&self, uuid: [i32; 4]) -> Option<u32> {
-        let id = *self
-            .persist
-            .uuids
-            .iter()
-            .find(|(_, u)| **u == uuid)
-            .map(|(id, _)| id)?;
-        let there = self.mobs.iter().any(|m| m.id == id && m.alive())
-            || self.boats.iter().any(|b| b.id == id)
-            || self.carts.iter().any(|c| c.id == id);
-        there.then_some(id)
+        self.persist.uuids.iter().find_map(|(&id, &found)| {
+            (found == uuid
+                && (self.mobs.iter().any(|mob| mob.id == id && mob.alive())
+                    || self.boats.iter().any(|boat| boat.id == id)
+                    || self.carts.iter().any(|cart| cart.id == id)))
+            .then_some(id)
+        })
     }
     /// A vehicle already in the world that was restored from the player's file
     /// during this load (not any entity whose UUID is remembered).
@@ -1809,6 +2016,13 @@ impl Game<'_> {
     }
 
     fn mob_object_tree_nbt(&mut self, object: MobObject) -> Tag {
+        let id = self.mob_at(object).id;
+        let mut tag = self.mob_object_nbt(object);
+        self.put_mob_passengers(&mut tag, id);
+        tag
+    }
+
+    fn mob_object_nbt(&mut self, object: MobObject) -> Tag {
         let id = self.mob_at(object).id;
         let uuid = self.uuid_for(id);
         // A warden's anger names each suspect by UUID. A mob that has never been
@@ -1888,7 +2102,7 @@ impl Game<'_> {
             c.insert("LastPoseTick".into(), Tag::Long(tick));
         }
         self.write_leash(&mut tag, id);
-        self.put_mob_passengers(&mut tag, id);
+        write_attachments(&mut tag, id, &self.entity_attachments);
         tag
     }
     /// Forget an entity that left the world (its UUID and loaded compound).
@@ -2283,21 +2497,29 @@ impl Game<'_> {
                 keep
             });
             // Riders leave with their root vehicle, a boat's with the boat.
-            let leaving: HashSet<u32> = (0..self.mobs.len())
-                .filter(|&i| {
-                    let r = self.mob_root(i);
-                    match self.mobs[r].extra.mount {
+            let leaving: HashSet<u32> = self
+                .mob_object_slots()
+                .filter(|&object| {
+                    let root = self.mob_at(self.mob_root(object));
+                    match root.extra.mount {
                         Some(v) if removed.contains(&v) => true,
                         Some(v) if self.boats.iter().any(|b| b.id == v) => false,
-                        _ => gone(self.mobs[r].position),
+                        _ => gone(root.position),
                     }
                 })
-                .map(|i| self.mobs[i].id)
+                .map(|object| self.mob_at(object).id)
                 .collect();
             self.mobs.retain(|m| {
                 let keep = !leaving.contains(&m.id);
                 if !keep {
                     removed.push(m.id);
+                }
+                keep
+            });
+            self.persist.off_level.retain(|id, _| {
+                let keep = !leaving.contains(id);
+                if !keep {
+                    removed.push(*id);
                 }
                 keep
             });
@@ -2384,7 +2606,10 @@ impl Game<'_> {
     }
     pub(super) fn prune_entity_memory(&mut self) {
         // Forget entities that no longer exist.
-        let alive = self.live_entity_ids();
+        let mut alive = self.live_entity_ids();
+        if !self.persist.off_level.is_empty() {
+            self.retain_off_level_objects(&mut alive);
+        }
         for id in self.persist.uuids.keys() {
             if !alive.contains(id) {
                 self.entity_attachments.remove(id);
@@ -2394,6 +2619,54 @@ impl Game<'_> {
         self.persist.uuids.retain(|id, _| alive.contains(id));
         self.persist.raw.retain(|id, _| alive.contains(id));
     }
+    /// Trace only edges touching off-level objects. A rejected leaf is owned
+    /// by its resident vehicle; an orphaned rejected ancestor can instead be
+    /// owned by a resident descendant or a player riding it.
+    fn retain_off_level_objects(&mut self, retained: &mut HashSet<u32>) {
+        let mut links: HashMap<u32, Vec<u32>> = HashMap::new();
+        for mob in self.mob_objects() {
+            if let Some(vehicle) = mob.extra.mount
+                && (self.persist.off_level.contains_key(&mob.id)
+                    || self.persist.off_level.contains_key(&vehicle))
+            {
+                links.entry(mob.id).or_default().push(vehicle);
+                links.entry(vehicle).or_default().push(mob.id);
+            }
+        }
+        for vehicle in self.riding.into_iter().chain(
+            self.lan
+                .iter()
+                .flat_map(|host| host.hub.guests.iter().filter_map(|guest| guest.vehicle)),
+        ) {
+            if self.persist.off_level.contains_key(&vehicle) {
+                retained.insert(vehicle);
+            }
+        }
+        let mut pending: Vec<_> = links
+            .keys()
+            .copied()
+            .filter(|id| retained.contains(id))
+            .collect();
+        while let Some(id) = pending.pop() {
+            for &neighbor in links.get(&id).into_iter().flatten() {
+                if self.persist.off_level.contains_key(&neighbor) && retained.insert(neighbor) {
+                    pending.push(neighbor);
+                }
+            }
+        }
+        let gone: Vec<_> = self
+            .persist
+            .off_level
+            .keys()
+            .copied()
+            .filter(|id| !retained.contains(id))
+            .collect();
+        for id in gone {
+            self.persist.off_level.remove(&id);
+            self.forget_entity(id);
+        }
+    }
+
     /// A loaded projectile's `Owner`: living hit credit and vehicle collision identity.
     fn claim_owner(&self, p: &mut horizon_client::projectiles::Projectile) {
         let Some(uuid) = p.owner_uuid else {
@@ -2448,7 +2721,7 @@ impl Game<'_> {
         keys: &HashSet<ChunkKey>,
     ) -> Option<(ChunkKey, Tag)> {
         let m = &self.mobs[i];
-        let saves = self.mob_root(i) == i
+        let saves = self.mob_root(MobObject::Resident(i)) == MobObject::Resident(i)
             && m.extra.mount.is_none_or(|v| {
                 self.boats.iter().all(|b| b.id != v) && self.carts.iter().all(|c| c.id != v)
             })
@@ -5329,6 +5602,57 @@ mod summon_uuid_conflict_tests {
 
     #[test]
     #[ignore = "needs prepared resources"]
+    fn pruning_keeps_graph_owned_objects_without_aliasing_duplicate_owners() {
+        with_game(|game, _| {
+            assert!(summon(
+                game,
+                "gc_root",
+                177,
+                &riders(&[
+                    pig("gc_parent", 177, &riders(&[pig("gc_leaf", 178, "")])),
+                    pig("gc_rejected_leaf", 177, ""),
+                ])
+            ));
+            let root = mob_tagged(game, "gc_root")[0];
+            let leaf = mob_tagged(game, "gc_leaf")[0];
+            let parent = mount(game, leaf).unwrap();
+            let rejected_leaf = *game
+                .persist
+                .off_level
+                .keys()
+                .find(|&&id| id != parent)
+                .unwrap();
+            game.prune_entity_memory();
+            assert_eq!(
+                saved_riders(game, root),
+                vec![
+                    ("gc_parent".into(), uuid(177)),
+                    ("gc_rejected_leaf".into(), uuid(177))
+                ]
+            );
+
+            game.dismount_mob(rejected_leaf);
+            game.prune_entity_memory();
+            assert!(!game.persist.off_level.contains_key(&rejected_leaf));
+            assert_eq!(live(game, 177), vec![root]);
+            assert_eq!(game.vehicle_by_uuid([160, 0, 0, 177]), Some(root));
+
+            game.dismount_mob(parent);
+            game.mobs.retain(|mob| mob.id != root);
+            game.prune_entity_memory();
+            assert!(game.persist.off_level.contains_key(&parent));
+            assert_eq!(game.persist.uuids.get(&parent), Some(&[160, 0, 0, 177]));
+            assert!(live(game, 177).is_empty());
+            game.dismount_mob(leaf);
+            game.prune_entity_memory();
+            assert!(game.persist.off_level.is_empty());
+            assert!(!game.persist.uuids.contains_key(&parent));
+            assert!(!game.persist.raw.contains_key(&parent));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
     fn data_load_keeps_passenger_links_on_both_sides_of_an_offlevel_object() {
         with_game(|game, _| {
             assert!(summon(
@@ -5634,14 +5958,63 @@ mod summon_uuid_conflict_tests {
         });
     }
 
+    /// Official 26.3 retains the removed root long enough to dismount its
+    /// rejected child at max(child.y, root.y), then seats the frozen grandchild.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    fn removed_root_retains_its_geometry_until_offlevel_passengers_dismount() {
+        with_game(|game, _| {
+            game.options.execution_role =
+                crate::game::execution_role::ExecutionRole::IntegratedServer;
+            let baby = |tag: &str, n: i32, passengers: &str| {
+                pig(tag, n, passengers).replace("NoAI:1b", "Age:-1000,NoAI:1b")
+            };
+            let leaf = baby("raised_grandchild", 232, "");
+            let child = baby("raised_rejected", 230, &riders(&[leaf]));
+            let root = baby("raised_root", 230, &riders(&[child]));
+            assert!(game.run_command(&format!("summon minecraft:pig 4.5 200 4.5 {root}")));
+            for _ in 0..5 {
+                game.tick_world(true).unwrap();
+            }
+            let chunks = game.entity_chunks(&HashSet::from([(0, 0)]), true);
+            game.world.loaded_entities.extend(chunks);
+            game.spawn_loaded_entities();
+            assert!(game.run_command(
+                "data merge entity @e[tag=raised_root,limit=1] {Pos:[4.5d,210.0d,4.5d]}"
+            ));
+            let leaf = mob_tagged(game, "raised_grandchild")[0];
+            assert_eq!(game.mob_object(leaf).unwrap().position.y, 200.0);
+            assert!(game.run_command("kill @e[tag=raised_root]"));
+            for _ in 0..25 {
+                game.tick_world(true).unwrap();
+            }
+            assert!(mob_tagged(game, "raised_root").is_empty());
+            assert_eq!(game.mob_object(leaf).unwrap().position.y, 210.5);
+            assert_eq!(
+                game.command_target_nbt(Target::Mob(leaf))
+                    .unwrap()
+                    .get("Age"),
+                Some(&Tag::Int(-1000))
+            );
+            let chunks = game.entity_chunks(&HashSet::from([(0, 0)]), true);
+            game.world.loaded_entities.extend(chunks);
+            game.spawn_loaded_entities();
+            assert!(mob_tagged(game, "raised_grandchild").is_empty());
+            assert!(game.persist.off_level.is_empty());
+        });
+    }
+
     /// Official 26.3 teleports passengers before their copied vehicle. The
     /// previously rejected child takes the UUID, so the copied root is off-level.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
     fn dimension_travel_admits_the_duplicate_child_before_the_copied_root() {
         with_game(|game, _| {
+            game.options.execution_role =
+                crate::game::execution_role::ExecutionRole::IntegratedServer;
             game.world_root = game.save.root.clone();
             game.enter_level(super::super::Dim::Nether).unwrap();
+            assert_eq!(game.dim, super::super::Dim::Nether);
             game.world
                 .chunks
                 .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
@@ -5650,6 +6023,7 @@ mod summon_uuid_conflict_tests {
                 .unwrap();
             assert!(game.run_command("forceload add 0 0"));
             game.enter_level(super::super::Dim::Overworld).unwrap();
+            assert_eq!(game.dim, super::super::Dim::Overworld);
             let baby = |tag: &str, n: i32, passengers: &str| {
                 pig(tag, n, passengers).replace("NoAI:1b", "Age:-1000,NoAI:1b")
             };
@@ -5660,7 +6034,18 @@ mod summon_uuid_conflict_tests {
             for _ in 0..5 {
                 game.tick_world(true).unwrap();
             }
-            assert!(game.run_command("execute as @e[tag=h160_travel_root,limit=1] in minecraft:the_nether run teleport @s 4.5 200 4.5"));
+
+            let root_id = mob_tagged(game, "h160_travel_root")[0];
+            assert!(
+                game.teleport_vehicle_across(
+                    crate::game::commands::Target::Mob(root_id),
+                    super::super::Dim::Nether,
+                    [4.5, 200.0, 4.5],
+                    None,
+                    false,
+                )
+                .unwrap()
+            );
             assert!(mob_tagged(game, "h160_travel_root").is_empty());
             assert!(mob_tagged(game, "h160_travel_rejected").is_empty());
             assert!(mob_tagged(game, "h160_travel_grandchild").is_empty());
@@ -5683,6 +6068,14 @@ mod summon_uuid_conflict_tests {
                     Some(&Tag::Int(-1000))
                 );
             }
+            // A ghost root is not independently saved by the level. Its resident
+            // descendants must not be promoted to chunk roots on unload/reload.
+            let chunks = game.entity_chunks(&HashSet::from([(0, 0)]), true);
+            game.world.loaded_entities.extend(chunks);
+            game.spawn_loaded_entities();
+            assert!(mob_tagged(game, "h160_travel_rejected").is_empty());
+            assert!(mob_tagged(game, "h160_travel_grandchild").is_empty());
+            assert!(game.persist.off_level.is_empty());
         });
     }
 
