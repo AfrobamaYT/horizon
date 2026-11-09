@@ -45,9 +45,9 @@ impl Table {
             return false;
         };
         let slot = &sealed.slots[place];
-        slot.entries[..slot.api_end]
-            .last()
-            .is_some_and(|entry| entry.replace && sealed.listeners[entry.listener as usize].active())
+        slot.entries[..slot.api_end].last().is_some_and(|entry| {
+            entry.replace && sealed.listeners[entry.listener as usize].active()
+        })
     }
 
     /// Runs the API functions and forwarding endpoints at point `place`, each under its owner's
@@ -606,4 +606,33 @@ pub fn seal() {
         );
         table.table.seal(listeners, slots, &stopped);
     }
+}
+
+/// Adapts a replacement listener to a point's ordinary typed listener without registry values.
+// hidden: generated mod-point adapters share replacement semantics without exposing registry types.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! replacement_listener {
+    (cancel, host, $listener:path) => {
+        |host, args| {
+            $listener(host, args);
+            args.cancel = true;
+        }
+    };
+    (cancel, none, $listener:path) => {
+        |args| {
+            $listener(args);
+            args.cancel = true;
+        }
+    };
+    (result, host, $listener:path) => {
+        |host, args| {
+            args.result = ::core::option::Option::Some($listener(host, args));
+        }
+    };
+    (result, none, $listener:path) => {
+        |args| {
+            args.result = ::core::option::Option::Some($listener(args));
+        }
+    };
 }

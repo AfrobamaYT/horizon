@@ -506,6 +506,35 @@ impl WasmMod {
                 .map_err(load)?;
             exports.push((name, input, hook));
         }
+        // Register through the library's exported bridge, then seal every member's private
+        // registry. No hook or mod initialization runs until the entire group is ready.
+        for (_, instance) in group.members.clone() {
+            if instance
+                .get_func(&mut group.store, "horizon_mod_points_register")
+                .is_some()
+            {
+                let accepted = instance
+                    .get_typed_func::<(), u32>(&mut group.store, "horizon_mod_points_register")
+                    .and_then(|function| function.call(&mut group.store, ()))
+                    .map_err(|e| Refusal::Runtime(format!("mod point registration: {e:#}")))?;
+                if accepted != 1 {
+                    return Err(Refusal::Runtime(
+                        "mod point registration refused by library registry".into(),
+                    ));
+                }
+            }
+        }
+        for (_, instance) in group.members.clone() {
+            if instance
+                .get_func(&mut group.store, "horizon_mod_points_seal")
+                .is_some()
+            {
+                instance
+                    .get_typed_func::<(), ()>(&mut group.store, "horizon_mod_points_seal")
+                    .and_then(|function| function.call(&mut group.store, ()))
+                    .map_err(|e| Refusal::Runtime(format!("mod point seal: {e:#}")))?;
+            }
+        }
         let lending = group.store.data().lending.clone();
         let running = Arc::new(Running {
             lending,

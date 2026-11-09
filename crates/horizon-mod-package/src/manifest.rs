@@ -224,14 +224,23 @@ impl Internal {
 }
 
 impl Manifest {
+    /// The declared dependency whose normalized crate namespace owns a mod-point target.
+    /// Targets outside these namespaces belong to the engine catalog.
+    pub fn mod_point_dependency(&self, at: &str) -> Option<&str> {
+        self.dependencies
+            .keys()
+            .find(|id| at.split("::").next() == Some(id.replace('-', "_").as_str()))
+            .map(String::as_str)
+    }
+
     pub fn parse(text: &str) -> Result<Self, String> {
         let m: Manifest = toml::from_str(text).map_err(|e| format!("{MANIFEST}: {e}"))?;
         Internal::check_all(&m.internals)?;
         if m.wasm.is_some()
             && m.internals.is_empty()
-            && m.inject
-                .iter()
-                .any(|i| i.access == inject::Access::Internals)
+            && m.inject.iter().any(|i| {
+                i.access == inject::Access::Internals && m.mod_point_dependency(&i.at).is_none()
+            })
         {
             return Err(format!(
                 "{MANIFEST}: a wasm internals listener needs declared internals"
@@ -1590,6 +1599,16 @@ issues = \"http://example.org/issues\"
                 "{wrong}"
             );
         }
+        let mod_injection = injection.replace("Game::break_block", "chem_lib::transfer");
+        Manifest::parse(&format!(
+            "{wasm}{mod_injection}[dependencies]\nchem_lib='^1.0'\n"
+        ))
+        .unwrap();
+        assert!(
+            Manifest::parse(&format!("{wasm}{mod_injection}"))
+                .unwrap_err()
+                .contains("needs declared internals")
+        );
         assert!(
             Manifest::parse(&format!("{wasm}{injection}"))
                 .unwrap_err()

@@ -345,6 +345,7 @@ functions, inherent methods and functions of inline modules (trait impl methods 
 build compiles a staged copy with a point on each, in a slot table of the mod's own
 (`<crate>::__horizon_points`); the author's source is never edited. A point is named by its path
 from the crate root, snake-cased: `tanks_tank_fill` for `chemlib::tanks::Tank::fill`.
+A library's crate name is its mod id with `-` as `_`.
 
 - **Opting out.** `#[mod_api::no_point]` on a function gives it no point. An addon declaring a
   listener there is refused: `chemlib::audit has no point (opted out with #[mod_api::no_point])`.
@@ -359,7 +360,10 @@ from the crate root, snake-cased: `tanks_tank_fill` for `chemlib::tanks::Tank::f
   `self` has no handle), as on the game.
 - **`access = "internals"`.** The listener gets the receiver and every parameter by reference, in
   their own types, through the raw form declared beside the function. It works from the library's
-  own target: the same binary on native, the same dependency group on wasm.
+  own target: the same binary on native, the same dependency group on wasm. A wasm listener
+  at a declared dependency's point needs no engine internals declaration. The group registers
+  listeners through typed functions exported by the library, then seals every library registry
+  before initialization; each member keeps its own `mod_api` copy.
 - **The signature check.** Each mod point's hash covers its path, its signature as written and its
   record's field types. When the library's function changes, the addon is refused at load:
   `E_INJECT_CHANGED: addon:double_rate: chemlib 1.1.0 changed chemlib::transfer: pinned …, installed …
