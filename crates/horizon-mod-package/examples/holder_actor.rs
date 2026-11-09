@@ -23,6 +23,14 @@ fn main() {
         assert_eq!(unsafe { libc::atexit(delayed_exit) }, 0);
     }
     match std::env::var("HOLDER_TEST_MODE").as_deref() {
+        Ok("direct") => {
+            let _ = holder::bootstrap();
+            let ready = PathBuf::from(std::env::var_os("READY").unwrap());
+            std::fs::write(&ready, b"direct ready").unwrap();
+            let stop = PathBuf::from(std::env::var_os("STOP").unwrap());
+            scene::until(|| stop.is_file());
+            return;
+        }
         Ok("copy-image") => {
             let destination = std::env::var_os("HOLDER_TEST_IMAGE").unwrap();
             std::fs::copy(std::env::current_exe().unwrap(), destination).unwrap();

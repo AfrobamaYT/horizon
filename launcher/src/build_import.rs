@@ -320,6 +320,8 @@ fn finish(
         fs::set_permissions(partial.join(CLIENT), fs::Permissions::from_mode(0o755))?;
     }
     fs::write(partial.join(RECORD), record.to_string())?;
+    crate::run_leases::publish(partial)
+        .map_err(|error| std::io::Error::other(crate::native_mods::cache_error(error)))?;
     fs::write(partial.join(".installed"), "")?;
     retried(|| match fs::rename(partial, dir) {
         Err(_) if dir.join(".installed").exists() => Ok(()),

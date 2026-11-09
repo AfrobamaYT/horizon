@@ -269,6 +269,7 @@ pub(super) fn fetch(
     check_identity(&unpacked, revision, host.target, target)?;
     let _ = fs::remove_dir_all(&dir);
     fs::rename(&unpacked, &dir).map_err(|e| e.to_string())?;
+    crate::run_leases::publish(&dir).map_err(super::cache_error)?;
     let _ = fs::remove_dir_all(&partial);
     Ok(Ok(dir))
 }

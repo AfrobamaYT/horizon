@@ -1277,6 +1277,7 @@ pub(crate) fn install_as(
     let target = version_dir(tag);
     let _ = fs::remove_dir_all(&target);
     fs::rename(&top, &target).map_err(|e| e.to_string())?;
+    crate::run_leases::publish(&target).map_err(crate::native_mods::cache_error)?;
     fs::write(target.join(COMPLETE), "").map_err(|e| e.to_string())?;
     let _ = fs::remove_dir_all(&partial);
     reuse_prepared_for(tag);
@@ -4260,6 +4261,11 @@ pub struct RuntimeGuard {
     _windows: Option<crate::windows_runtime::Guard>,
 }
 
+/// Register installations made before the lifetime protocol before cleanup is available.
+pub fn register_runtime_units() -> Result<(), String> {
+    crate::run_leases::publish_existing().map_err(crate::native_mods::cache_error)
+}
+
 pub fn prepare_command(cmd: Command) -> Result<(Command, RuntimeGuard), String> {
     let leases = crate::run_leases::shared(&cmd).map_err(crate::native_mods::cache_error)?;
     #[cfg(windows)]
@@ -4284,14 +4290,18 @@ pub fn prepare_command(cmd: Command) -> Result<(Command, RuntimeGuard), String> 
     ))
 }
 
+/// Spawn a terminal-attached game through the same lifetime protocol as GUI launches.
+pub fn spawn_attached(cmd: &mut Command) -> std::io::Result<std::process::Child> {
+    crate::run_leases::spawn(cmd, false)
+}
+
 pub fn spawn(job: Job, cmd: Command, tx: Sender<Msg>) -> Result<Running, String> {
     let (mut cmd, runtime) = prepare_command(cmd)?;
     crate::process::hide_console(&mut cmd);
-    let mut child = cmd
-        .stdin(Stdio::piped())
+    cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+        .stderr(Stdio::piped());
+    let mut child = crate::run_leases::spawn(&mut cmd, true)
         .map_err(|e| format!("Could not start {:?}: {e}", cmd.get_program()))?;
     let stdin = child.stdin.take();
     let mut readers = Vec::new();
