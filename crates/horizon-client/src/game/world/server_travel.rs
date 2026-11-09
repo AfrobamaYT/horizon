@@ -1194,12 +1194,17 @@ impl Game<'_> {
         } else {
             return;
         }
+        // Entity.restoreFrom copies PortalCooldown from the source entity.
+        // Its first passenger may not have arrived in this level yet.
+        let cooldown = self
+            .levels
+            .parked_mut(source)
+            .and_then(|p| p.portal_states.remove(&id))
+            .map_or(0, |s| s.cooldown);
         // Its memory (its UUID and the compound it was loaded with) moves
         // with it, so it is saved in this level as it was in the other.
         self.move_entity_memory(source, id);
-        // The vehicle that came through a portal does not go back through it
-        // for a while (`Entity.setPortalCooldown`).
-        self.set_portal_cooldown(id);
+        self.portals.entities.entry(id).or_default().cooldown = cooldown;
     }
 
     /// Tells the mods of the teleports a command made inside a level, with
@@ -1447,6 +1452,7 @@ mod tests {
                     minecarts::CartKind::Rideable,
                     Vec3::ZERO,
                 ));
+                game.portals.entities.entry(base + 1).or_default().cooldown = 10;
                 let source = game.dim;
                 game.enter_level(Dim::Nether).unwrap();
                 game.carts.push(minecarts::Minecart::new(
@@ -1456,6 +1462,15 @@ mod tests {
                 ));
                 game.native_joins_flush(false, 0);
                 game.arrive_vehicle(source, base + 1, Vec3::ZERO, 0.0);
+                assert_eq!(game.portals.entities[&(base + 1)].cooldown, 10);
+                assert!(
+                    !game
+                        .levels
+                        .parked_mut(source)
+                        .unwrap()
+                        .portal_states
+                        .contains_key(&(base + 1))
+                );
                 game.native_joins_flush(false, 0);
                 game.native_joins_flush(false, 0);
                 assert_eq!(*joins.lock().unwrap(), vec![base + 2, base + 1]);
