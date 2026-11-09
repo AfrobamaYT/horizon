@@ -2837,6 +2837,7 @@ name = "horizon-mod-api-gen"
 version = "0.1.0"
 dependencies = [
  "heck 0.5.0",
+ "horizon-mod-package",
  "horizon-mod-point-shape",
  "prettyplease",
  "proc-macro2",

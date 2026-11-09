@@ -17,6 +17,9 @@ struct Catalog {
     #[serde(default)]
     points: Vec<Point>,
     sites: Vec<Call>,
+    /// The `mod_api` types a mod point's `api` record may hold.
+    #[serde(default)]
+    wire: std::collections::BTreeSet<String>,
 }
 /// A function's point, as `points.json` lists it: whether its API listeners have a record.
 #[derive(serde::Deserialize)]
@@ -109,6 +112,12 @@ fn add(dir: &Path, args: &[String]) -> Result<(), String> {
     let catalog: Catalog =
         serde_json::from_str(&crate::bounded::read(&points, crate::bounded::MAX_CATALOG)?)
             .map_err(|e| format!("{}: {e}", points.display()))?;
+    if let Some(library) = library(dir, request.at, &catalog.wire)? {
+        let candidate = append_mod_point(&original, &manifest, &request, &library)?;
+        crate::internals::atomic_write_manifest(&path, candidate)?;
+        println!("{}", mod_availability(&library, &request));
+        return Ok(());
+    }
     let candidate = append(&original, &manifest, &request, &internals, &catalog)?;
     crate::internals::atomic_write_manifest(&path, candidate)?;
     println!("{}", availability(&catalog, &request));
@@ -142,6 +151,123 @@ fn availability(catalog: &Catalog, request: &Request<'_>) -> String {
         }
     };
     format!("api: {api}\ninternals: native only")
+}
+
+/// The points of the dependency whose crate owns `at` (#2339), listed from its source as its
+/// build lists them; none when `at` is not another mod's function.
+fn library(
+    dir: &Path,
+    at: &str,
+    wire: &std::collections::BTreeSet<String>,
+) -> Result<Option<ModPoints>, String> {
+    let krate = at.split("::").next().unwrap_or_default();
+    let mut command = crate::wasm::pinned("cargo");
+    command
+        .args(["metadata", "--format-version", "1"])
+        .current_dir(dir);
+    let metadata: serde_json::Value =
+        serde_json::from_str(&crate::wasm::output(command)?).map_err(|e| e.to_string())?;
+    let owner = metadata["packages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|package| {
+            package["targets"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|target| {
+                    target["kind"]
+                        .as_array()
+                        .is_some_and(|kinds| kinds.iter().any(|kind| kind == "lib"))
+                        && target["name"].as_str().map(|name| name.replace('-', "_"))
+                            == Some(krate.to_owned())
+                })
+        });
+    let Some(manifest) = owner.and_then(|package| package["manifest_path"].as_str()) else {
+        return Ok(None);
+    };
+    let root = Path::new(manifest)
+        .parent()
+        .ok_or("a manifest has a folder")?;
+    if !root.join(MANIFEST).is_file() {
+        return Ok(None);
+    }
+    horizon_mod_api_gen::points::mod_crate::mod_points(root, wire).map(Some)
+}
+
+type ModPoints = horizon_mod_package::manifest::inject::mod_points::Catalog;
+
+/// The `[[inject]]` for a mod point: its head or return, pinned to the function's hash.
+fn append_mod_point(
+    text: &str,
+    manifest: &Manifest,
+    request: &Request<'_>,
+    library: &ModPoints,
+) -> Result<String, String> {
+    use horizon_mod_package::manifest::inject::mod_points::Refusal;
+    let id = format!("{}:{}", manifest.id, request.with);
+    if !matches!(
+        request.kind,
+        Kind::Head | Kind::Return | Kind::ModifyArg | Kind::Replace
+    ) || request.call.is_some()
+        || request.nth.is_some()
+    {
+        return Err(format!(
+            "{id}: a mod point has head and return places only (--kind head, return, modify_arg or replace)"
+        ));
+    }
+    let Some(point) = library
+        .points
+        .iter()
+        .find(|point| point.target == request.at)
+    else {
+        return Err(if library.opted_out.iter().any(|path| path == request.at) {
+            Refusal::OptedOut {
+                id,
+                at: request.at.into(),
+            }
+            .to_string()
+        } else {
+            InjectError::Missing {
+                id,
+                at: request.at.into(),
+            }
+            .to_string()
+        });
+    };
+    let mut doc: DocumentMut = text.parse().map_err(|e| format!("{MANIFEST}: {e}"))?;
+    if doc.get("inject").is_none() {
+        doc["inject"] = toml_edit::Item::ArrayOfTables(toml_edit::ArrayOfTables::new());
+    }
+    let mut table = Table::new();
+    table["id"] = value(request.with);
+    table["at"] = value(&point.target);
+    table["kind"] = value(request.kind_name);
+    table["with"] = value(request.with);
+    table["hash"] = value(&point.hash);
+    doc["inject"]
+        .as_array_of_tables_mut()
+        .ok_or("inject add requires [[inject]] tables")?
+        .push(table);
+    let result = doc.to_string();
+    Manifest::parse(&result)?;
+    Ok(result)
+}
+
+/// Which access tiers can listen at a mod point: `api` when every parameter has a `Wire` form,
+/// `internals` from the library's own target.
+fn mod_availability(library: &ModPoints, request: &Request<'_>) -> String {
+    let api = match library
+        .points
+        .iter()
+        .find(|point| point.target == request.at)
+        .and_then(|point| point.api_refusal.as_ref())
+    {
+        None => "available".to_owned(),
+        Some(why) => format!("refused, {why}"),
+    };
+    format!("api: {api}\ninternals: from the library's own target")
 }
 
 fn append(

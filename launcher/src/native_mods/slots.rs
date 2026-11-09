@@ -52,6 +52,14 @@ fn selected<'a>(sites: &'a [Site], entry: &Inject) -> Option<&'a Site> {
     })
 }
 
+/// `manifest`'s injections at the game's own functions: not another mod's points.
+fn engine<'a>(catalog: &'a Catalog, manifest: &'a Manifest) -> impl Iterator<Item = &'a Inject> {
+    manifest
+        .inject
+        .iter()
+        .filter(|inject| catalog.mod_owner(&inject.at).is_none())
+}
+
 pub(super) fn check(catalog: &Catalog, manifest: &Manifest) -> Result<(), InjectError> {
     routes(catalog, manifest).map(|_| ())
 }
@@ -106,7 +114,8 @@ pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<Route
         })
         .collect::<Vec<_>>();
     let mut decisions = Vec::new();
-    for inject in &manifest.inject {
+    // Injections at another mod's points route through that mod's table (`mod_points`).
+    for inject in engine(catalog, manifest) {
         // An API listener needs the point's record: every parameter with an API type.
         let refusal = catalog
             .points
@@ -189,9 +198,7 @@ pub(super) fn report<'a>(
     catalog: &'a Catalog,
     manifest: &'a Manifest,
 ) -> impl Iterator<Item = String> + 'a {
-    manifest
-        .inject
-        .iter()
+    engine(catalog, manifest)
         .zip(routes(catalog, manifest).expect("checked routes"))
         .map(|(entry, route)| {
             if let Route::Source(reason) = route {

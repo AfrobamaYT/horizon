@@ -10,7 +10,8 @@
 //! hand-written `impl Wire`). Nothing adds the derive: any other parameter makes the point's API
 //! listeners refuse, naming it, and leaves its `internals` form.
 use super::{Found, GamePoint, WireTypes, file_functions, imports, module_files, unraw};
-use quote::{ToTokens, quote};
+pub use horizon_mod_package::manifest::inject::mod_points::Catalog;
+use quote::quote;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -156,6 +157,13 @@ fn api_types(
                 }
             }
         };
+        // A path relative to the module (`use tanks::Tank` in the crate root) names a child.
+        let relative = format!("{}::{full}", found.module);
+        let full = if own.contains(&relative) {
+            relative
+        } else {
+            full
+        };
         if own.contains(&full) {
             let local = full.strip_prefix(krate).unwrap_or(&full);
             keys.push((written, format!("crate{local}")));
@@ -275,29 +283,77 @@ fn listed<'a>(files: &'a [File], krate: &str, wire: &WireTypes) -> Result<Vec<Li
     Ok(out)
 }
 
+/// The functions `#[mod_api::no_point]` opted out, by path: eligible but for the attribute.
+fn opted_out(files: &[File]) -> Vec<String> {
+    let no_point = |attr: &syn::Attribute| {
+        attr.path()
+            .segments
+            .last()
+            .is_some_and(|segment| segment.ident == "no_point")
+    };
+    let mut found = Vec::new();
+    for file in files {
+        file_functions(
+            &file.module,
+            &file.parsed.items,
+            &|_| true,
+            &|attrs, sig| {
+                let rest: Vec<_> = attrs.iter().filter(|a| !no_point(a)).cloned().collect();
+                rest.len() < attrs.len() && point_shape::eligible(&rest, sig)
+            },
+            &mut found,
+        );
+    }
+    let mut paths: Vec<_> = found.iter().map(Found::target).collect();
+    paths.sort();
+    paths
+}
+
+/// `points` as the mod's `points.json` lists them.
+fn catalog(krate: String, files: &[File], mut points: Vec<GamePoint>) -> Catalog {
+    points.sort_by(|a, b| a.name.cmp(&b.name));
+    Catalog {
+        krate,
+        table: TABLE.to_owned(),
+        opted_out: opted_out(files),
+        points: points
+            .into_iter()
+            .map(
+                |point| horizon_mod_package::manifest::inject::mod_points::Point {
+                    hash: point.hash.unwrap_or_default(),
+                    signature: point.signature.unwrap_or_default(),
+                    raw: point.raw,
+                    at_return: point.at_return,
+                    api_refusal: point.api_refusal,
+                    returns: point.returns.to_owned(),
+                    host: point.host.to_owned(),
+                    return_ty: point.return_ty,
+                    listener: point.listener,
+                    return_listener: point.return_listener,
+                    name: point.name,
+                    target: point.target,
+                },
+            )
+            .collect(),
+    }
+}
+
 /// The mod crate at `dir`'s points, as its `points.json` lists them, sorted by name. `wire` is
-/// the `mod_api` types with a `Wire` layout ([`api_wire_types`]).
-pub fn mod_points(dir: &Path, wire: &WireTypes) -> Result<Vec<GamePoint>, String> {
+/// the `mod_api` types with a `Wire` layout (the game's `points.json` lists them).
+pub fn mod_points(dir: &Path, wire: &WireTypes) -> Result<Catalog, String> {
     let (krate, _, files) = files(dir)?;
-    let mut points: Vec<_> = listed(&files, &krate, wire)?
+    let points = listed(&files, &krate, wire)?
         .into_iter()
         .map(|listed| listed.point)
         .collect();
-    points.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(points)
-}
-
-/// The `mod_api` types a record may hold, read from the game's source at `root` (the checkout
-/// the mod API comes from).
-pub fn api_wire_types(root: &Path) -> Result<WireTypes, String> {
-    crate::build::wire_types(root)
+    Ok(catalog(krate, &files, points))
 }
 
 /// The staging pass for a mod crate: in the copy at `dir`, in place, puts `#[point]` on every
 /// point function, declares each raw form's types after the item that holds it, and writes the
 /// crate's slot table module at its root. Run on a copy, never on the author's source. Returns
 /// the points, as [`mod_points`] lists them.
-pub fn stage_mod(dir: &Path, wire: &WireTypes) -> Result<Vec<GamePoint>, String> {
+pub fn stage_mod(dir: &Path, wire: &WireTypes) -> Result<Catalog, String> {
     let (krate, root, files) = files(dir)?;
     let listed = listed(&files, &krate, wire)?;
     for (index, file) in files.iter().enumerate() {
@@ -349,6 +405,7 @@ pub fn stage_mod(dir: &Path, wire: &WireTypes) -> Result<Vec<GamePoint>, String>
     let mut points: Vec<GamePoint> = listed.into_iter().map(|listed| listed.point).collect();
     points.sort_by(|a, b| a.name.cmp(&b.name));
     let module = table(&points);
+    let catalog = catalog(krate, &files, points);
     let folder = root.parent().ok_or("a library root has a folder")?;
     fs::write(folder.join(format!("{TABLE}.rs")), module).map_err(|e| e.to_string())?;
     let mut text = fs::read_to_string(&root).map_err(|e| e.to_string())?;
@@ -356,7 +413,7 @@ pub fn stage_mod(dir: &Path, wire: &WireTypes) -> Result<Vec<GamePoint>, String>
         "\n// hidden: the mod's generated injection point table, reached by addons' listeners\n#[doc(hidden)]\n#[path = \"{TABLE}.rs\"]\npub mod {TABLE};\n"
     ));
     fs::write(&root, text).map_err(|e| format!("{}: {e}", root.display()))?;
-    Ok(points)
+    Ok(catalog)
 }
 
 /// The slot table module: each point's record, `PointId`, the table, typed API listener

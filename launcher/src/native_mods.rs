@@ -36,6 +36,7 @@ mod inject_text;
 mod internals;
 mod internals_sync;
 mod isolate;
+mod mod_points;
 mod package;
 mod picker;
 mod prebuilt;
@@ -2132,6 +2133,7 @@ fn pipeline(
         source::stage(&pending, &catalog_dir, &ordered)
             .map_err(|error| discard(&pending, &catalog_dir, error))?;
         let catalog = internals::Catalog::read(&catalog_dir)
+            .and_then(|catalog| catalog.with_mods(mods.iter()))
             .map_err(|error| discard(&pending, &catalog_dir, error))?;
         mods.iter()
             .try_for_each(|bundle| catalog.check(&bundle.manifest))
@@ -2154,7 +2156,7 @@ fn pipeline(
             fetch.arg("--locked");
             run(fetch, "Downloading Horizon's crates", |_| {})?;
         }
-        let catalog = internals::Catalog::read(&real)?;
+        let catalog = internals::Catalog::read(&real)?.with_mods(mods.iter())?;
         let has_api = api::stage(&fresh, &projects, &declared, &resolution, &catalog)?;
         for project in &projects {
             catalog.log_raw(&project.bundle.manifest)?;

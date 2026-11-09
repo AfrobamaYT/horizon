@@ -37,17 +37,22 @@ pub fn stage(
         .extend(crate::crossing::foreign_internals());
     write(internals_json, &internals.entries)?;
     let sites = sites::stage(root, &internals.entries).map_err(|e| e.to_string())?;
-    let points = points::stage(root)?;
+    let wire = crate::build::wire_types(root)?;
+    let points = points::stage_with(root, &wire)?;
     #[derive(serde::Serialize)]
     struct Manifest {
         points: Vec<points::GamePoint>,
         sites: Vec<sites::Site>,
+        /// The `mod_api` types with a `Wire` layout: what a mod point's `api` record may hold
+        /// beside the mod's own derived types (#2339).
+        wire: std::collections::BTreeSet<String>,
     }
     write(
         points_json,
         &Manifest {
-            points: points::game_points(root)?,
+            points: points::points_with(root, &wire)?,
             sites,
+            wire,
         },
     )?;
     Ok(Staged { points, internals })

@@ -27,7 +27,9 @@ pub use registry::{RegisterError, stop};
 /// place's other API head listeners whatever its priority (they may change its inputs, not its
 /// outcome), and the point keeps its outcome through the internals listeners after it.
 ///
-/// `replace!(place, returns, host, mod_id, priority, inject_id, listener)`. `returns` is the
+/// `replace!(constructor, returns, host, mod_id, priority, inject_id, listener)`: `constructor`
+/// is the place's typed listener constructor in its table (`mod_points::listeners::tick`, or a mod
+/// point's `<mod>::__horizon_points::listeners::…`). `returns` is the
 /// point's `returns` in `points.json`: at a `cancel` point the listener returns `()` and the cancel
 /// is forced; at a `result` point it returns the record's `result` type, which the function
 /// returns. A point whose return has no API form (`none`) has no replace listener. `host` is `host`
@@ -38,28 +40,28 @@ pub use registry::{RegisterError, stop};
 /// and wasm mods share one contract.
 #[macro_export]
 macro_rules! replace {
-    ($place:ident, cancel, host, $id:expr, $priority:expr, $inject:expr, $listener:path) => {
-        $crate::listeners::$place($id, $priority, $inject, |host, args| {
+    ($constructor:path, cancel, host, $id:expr, $priority:expr, $inject:expr, $listener:path) => {
+        $constructor($id, $priority, $inject, |host, args| {
             $listener(host, args);
             args.cancel = true;
         })
         .replacing()
     };
-    ($place:ident, cancel, none, $id:expr, $priority:expr, $inject:expr, $listener:path) => {
-        $crate::listeners::$place($id, $priority, $inject, |args| {
+    ($constructor:path, cancel, none, $id:expr, $priority:expr, $inject:expr, $listener:path) => {
+        $constructor($id, $priority, $inject, |args| {
             $listener(args);
             args.cancel = true;
         })
         .replacing()
     };
-    ($place:ident, result, host, $id:expr, $priority:expr, $inject:expr, $listener:path) => {
-        $crate::listeners::$place($id, $priority, $inject, |host, args| {
+    ($constructor:path, result, host, $id:expr, $priority:expr, $inject:expr, $listener:path) => {
+        $constructor($id, $priority, $inject, |host, args| {
             args.result = ::core::option::Option::Some($listener(host, args));
         })
         .replacing()
     };
-    ($place:ident, result, none, $id:expr, $priority:expr, $inject:expr, $listener:path) => {
-        $crate::listeners::$place($id, $priority, $inject, |args| {
+    ($constructor:path, result, none, $id:expr, $priority:expr, $inject:expr, $listener:path) => {
+        $constructor($id, $priority, $inject, |args| {
             args.result = ::core::option::Option::Some($listener(args));
         })
         .replacing()

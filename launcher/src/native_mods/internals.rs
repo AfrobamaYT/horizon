@@ -16,6 +16,10 @@ pub(super) struct Catalog {
     pub(super) points: Vec<inject::ListedPoint>,
     pub(super) sites: Vec<sites::Site>,
     pub(super) discovery: bool,
+    /// The `mod_api` types a mod point's `api` record may hold, as the game's build lists them.
+    pub(super) wire: BTreeSet<String>,
+    /// Every code mod's own points (#2339), listed from its source.
+    pub(super) mods: Vec<super::mod_points::ModLibrary>,
 }
 
 pub(super) struct Facade {
@@ -51,12 +55,15 @@ pub(super) enum Error {
     Path {
         path: String,
     },
+    /// An injection at another mod's point that doesn't load (#2339).
+    ModPoint(horizon_mod_package::manifest::inject::mod_points::Refusal),
 }
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let message = match self {
             Self::Inject(error) => super::inject_text::inject_error(error),
+            Self::ModPoint(refusal) => super::mod_points::refusal(refusal),
             Self::Missing { mod_id, path } => trf(
                 "E_INTERNAL_MISSING: {mod} uses {path}, which this game doesn't have; run cargo horizon-mod internals sync to discover this pin's used internals.",
                 &[("mod", mod_id), ("path", path)],
@@ -149,11 +156,14 @@ impl Catalog {
             points,
             sites,
             discovery: false,
+            wire: listed.wire,
+            mods: Vec::new(),
         })
     }
 
     pub(super) fn check(&self, manifest: &horizon_mod_package::Manifest) -> Result<(), Error> {
         super::slots::check(self, manifest).map_err(Error::Inject)?;
+        super::mod_points::routes(self, manifest).map_err(Error::ModPoint)?;
         if manifest.native.is_none() {
             return Ok(());
         }
@@ -466,6 +476,8 @@ mod tests {
         let catalog = Catalog {
             discovery: false,
             sites: Vec::new(),
+            wire: Default::default(),
+            mods: Vec::new(),
             internals: serde_json::from_value(serde_json::json!([
                 { "path": "horizon_client::game::Game", "kind": "struct", "signature": "struct Game<'a> { world: World }", "hash": "1234" },
                 { "path": "horizon_client::game::maps::dimension_id", "kind": "fn", "signature": "fn dimension_id() -> u8", "hash": "5678" },
@@ -534,8 +546,7 @@ pub mod raw {
         let main = api::main_rs(
             include_str!("../../../crates/horizon-client/src/native_main.rs.template"),
             &[&bundle.manifest],
-            &catalog.points,
-            &catalog.sites,
+            &catalog,
         );
         assert!(main.contains("#![forbid(unsafe_code)]"));
         assert!(main.contains(
@@ -695,12 +706,7 @@ pub mod raw {
             text.contains("pub const fn tick_return(id: &'static str, f: __TickReturnListener)")
         );
         assert!(text.contains("PointId::TickReturn"));
-        let main = api::main_rs(
-            "/* MOD_SLOTS */",
-            &[&bundle.manifest],
-            &catalog.points,
-            &catalog.sites,
-        );
+        let main = api::main_rs("/* MOD_SLOTS */", &[&bundle.manifest], &catalog);
         assert!(main.contains(
             "mod_0_internals::raw::tick_return(\"example\", mod_0::count).ordered(0, \"count\")"
         ));

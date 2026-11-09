@@ -358,12 +358,7 @@ fn private_source_stage_exports_and_registers_priorities() {
     assert!(catalog.points[0].private);
     let facade = catalog.facade(&bundle.manifest).unwrap();
     assert!(facade.source.contains("Raw as __HiddenRaw;"));
-    let main = api::main_rs(
-        "/* MOD_SLOTS */",
-        &[&bundle.manifest],
-        &catalog.points,
-        &catalog.sites,
-    );
+    let main = api::main_rs("/* MOD_SLOTS */", &[&bundle.manifest], &catalog);
     assert_eq!(main.matches("mod_0::callback").count(), 2);
     for registration in [".ordered(17, \"high\")", ".ordered(-3, \"low\")"] {
         assert!(main.contains(registration), "{main}");
@@ -441,12 +436,7 @@ fn private_calls_use_ctx_shared_ids_and_real_registration_priorities() {
         .unwrap()
         .iter()
         .all(|route| matches!(route, Route::Source(_))));
-    let main = api::main_rs(
-        "/* MOD_SLOTS */",
-        &[&bundle.manifest],
-        &catalog.points,
-        &catalog.sites,
-    );
+    let main = api::main_rs("/* MOD_SLOTS */", &[&bundle.manifest], &catalog);
     for registration in ["(\"one\", 17, \"high\",", "(\"one\", -3, \"low\","] {
         assert!(main.contains(registration), "{main}");
     }

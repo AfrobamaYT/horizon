@@ -1,4 +1,6 @@
 use super::*;
+use horizon_mod_package::manifest::inject::mod_points::Point;
+use quote::ToTokens;
 
 /// A mod crate `chemlib` in a fresh folder, with `lib.rs` and `tanks.rs`.
 fn crate_with(name: &str, lib: &str, tanks: &str) -> PathBuf {
@@ -17,12 +19,14 @@ fn crate_with(name: &str, lib: &str, tanks: &str) -> PathBuf {
 
 const LIB: &str = r#"
 pub mod tanks;
+pub use tanks::Tank;
 #[derive(mod_api::Wire)]
 pub struct Chemical { pub id: u32 }
 pub struct Opaque;
 #[derive(mod_api::Wire)]
 struct Hidden;
 pub fn transfer(from: &mut u32, to: &mut u32, chemical: Chemical) {}
+pub fn fill(tank: &mut Tank) {}
 fn private_helper(amount: u32) -> u32 { amount }
 pub fn opaque(value: Opaque) {}
 fn hidden(value: Hidden) {}
@@ -39,6 +43,7 @@ impl Reactor for Opaque { fn react(&self) {} }
 
 const TANKS: &str = r#"
 use crate::Chemical;
+#[derive(Clone, mod_api::Wire)]
 pub struct Tank { pub amount: u32 }
 impl Tank {
     pub fn fill(&mut self, chemical: &Chemical, amount: u32) -> u32 { amount }
@@ -46,7 +51,7 @@ impl Tank {
 pub fn drain(tank: &mut Tank) {}
 "#;
 
-fn by_name<'a>(points: &'a [GamePoint], name: &str) -> &'a GamePoint {
+fn by_name<'a>(points: &'a [Point], name: &str) -> &'a Point {
     points
         .iter()
         .find(|point| point.name == name)
@@ -56,11 +61,18 @@ fn by_name<'a>(points: &'a [GamePoint], name: &str) -> &'a GamePoint {
 #[test]
 fn every_eligible_function_public_and_private_gets_a_point_by_the_engine_rules() {
     let dir = crate_with("list", LIB, TANKS);
-    let points = mod_points(&dir, &WireTypes::new()).unwrap();
+    let catalog = mod_points(&dir, &WireTypes::new()).unwrap();
+    assert_eq!(catalog.krate, "chemlib");
+    assert_eq!(
+        catalog.opted_out,
+        ["chemlib::opted_out", "chemlib::opted_out_short"]
+    );
+    let points = catalog.points;
     let names: Vec<_> = points.iter().map(|point| point.name.as_str()).collect();
     assert_eq!(
         names,
         [
+            "fill",
             "hidden",
             "opaque",
             "private_helper",
@@ -102,6 +114,11 @@ fn every_eligible_function_public_and_private_gets_a_point_by_the_engine_rules()
         "a private type can't be in a record addons read"
     );
     assert_eq!(by_name(&points, "private_helper").returns, "result");
+    assert_eq!(
+        by_name(&points, "fill").api_refusal,
+        None,
+        "a re-exported child module's type resolves relative to the module"
+    );
     let _ = fs::remove_dir_all(dir);
 }
 
@@ -109,9 +126,9 @@ fn every_eligible_function_public_and_private_gets_a_point_by_the_engine_rules()
 fn the_hash_changes_with_the_signature_and_only_with_it() {
     let hash = |name: &str, lib: &str| {
         let dir = crate_with(name, lib, TANKS);
-        let points = mod_points(&dir, &WireTypes::new()).unwrap();
+        let points = mod_points(&dir, &WireTypes::new()).unwrap().points;
         let _ = fs::remove_dir_all(dir);
-        by_name(&points, "transfer").hash.clone().unwrap()
+        by_name(&points, "transfer").hash.clone()
     };
     let base = hash("hash-base", LIB);
     assert_eq!(base.len(), 16);
@@ -160,8 +177,8 @@ fn two_points_with_one_name_fail_the_build_naming_both() {
 #[test]
 fn staging_marks_each_point_and_writes_the_table_beside_the_crate_root() {
     let dir = crate_with("stage", LIB, TANKS);
-    let points = stage_mod(&dir, &WireTypes::new()).unwrap();
-    assert_eq!(points.len(), 6);
+    let points = stage_mod(&dir, &WireTypes::new()).unwrap().points;
+    assert_eq!(points.len(), 7);
     let lib = fs::read_to_string(dir.join("src/lib.rs")).unwrap();
     assert!(lib.contains(
         "#[::mod_api::__point(name = \"transfer\", table = \"crate::__horizon_points\", raw, free, api(Chemical = \"crate::Chemical\"))] pub fn transfer"

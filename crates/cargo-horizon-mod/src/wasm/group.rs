@@ -296,11 +296,36 @@ pub(super) fn build(
     for member in &members {
         std::fs::create_dir_all(&member.stage).map_err(|e| e.to_string())?;
     }
+    // The `mod_api` types a mod point's `api` record may hold, as the game's catalog lists them.
+    let wire: std::collections::BTreeSet<String> = match catalog {
+        Some(path) => {
+            let text =
+                std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+            let json: Value =
+                serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+            match json.get("wire") {
+                // No list: a mod point record holds no `mod_api` type.
+                None => Default::default(),
+                Some(wire) => serde_json::from_value(wire.clone())
+                    .map_err(|e| format!("{}: wire: {e}", path.display()))?,
+            }
+        }
+        None => Default::default(),
+    };
     let mut configs = serde_json::Map::new();
     let mut features = Vec::new();
     let mut point_names = std::collections::BTreeSet::<String>::new();
     for member in &members {
         copy(&member.root, &member.stage)?;
+        // Every member crate gets its own points (#2339), listed in the package it builds.
+        let points = horizon_mod_api_gen::points::mod_crate::stage_mod(&member.stage, &wire)?;
+        std::fs::write(
+            member
+                .root
+                .join(horizon_mod_package::manifest::inject::mod_points::FILE),
+            serde_json::to_string_pretty(&points).map_err(|e| e.to_string())? + "\n",
+        )
+        .map_err(|e| e.to_string())?;
         let path = member.stage.join("Cargo.toml");
         let mut cargo: toml_edit::DocumentMut = std::fs::read_to_string(&path)
             .map_err(|e| e.to_string())?

@@ -61,7 +61,7 @@ fn uncancel_shutdown(args: &mut mod_points::GameServerLifecycleRememberShutdownA
 #[test]
 fn a_replace_owns_the_function_and_only_one_may() {
     register(&mod_points::replace!(
-        game_server_lifecycle_remember_shutdown,
+        mod_points::listeners::game_server_lifecycle_remember_shutdown,
         cancel,
         none,
         "owner",
@@ -71,7 +71,7 @@ fn a_replace_owns_the_function_and_only_one_may() {
     ))
     .unwrap();
     register(&mod_points::replace!(
-        game_beacon_average,
+        mod_points::listeners::game_beacon_average,
         result,
         none,
         "owner",
@@ -82,7 +82,7 @@ fn a_replace_owns_the_function_and_only_one_may() {
     .unwrap();
     assert_eq!(
         register(&mod_points::replace!(
-            game_beacon_average,
+            mod_points::listeners::game_beacon_average,
             result,
             none,
             "rival",

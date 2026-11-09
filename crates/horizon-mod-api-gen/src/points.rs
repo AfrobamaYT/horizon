@@ -685,7 +685,7 @@ struct Scanned {
 }
 
 /// The `mod_api` types a record may hold ([`crate::build::wire_types`]), by path.
-type WireTypes = std::collections::BTreeSet<String>;
+pub type WireTypes = std::collections::BTreeSet<String>;
 
 /// Every file with points: the game module's, then each listed lower crate's. Fails on a listed
 /// path that names no point function, or a crate the points' own crate is built on.
@@ -909,7 +909,7 @@ pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
 }
 
 /// [`game_points`] with the `mod_api` types a record may hold.
-fn points_with(root: &Path, wire: &WireTypes) -> Result<Vec<GamePoint>, String> {
+pub(crate) fn points_with(root: &Path, wire: &WireTypes) -> Result<Vec<GamePoint>, String> {
     let private = source::read(root)?
         .into_iter()
         .map(|point| plain_path(&point.target))
@@ -959,7 +959,7 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
 }
 
 /// [`stage`] with the `mod_api` types a record may hold.
-fn stage_with(root: &Path, wire: &WireTypes) -> Result<Staged, String> {
+pub(crate) fn stage_with(root: &Path, wire: &WireTypes) -> Result<Staged, String> {
     let (scanned, list) = scan(root)?;
     let points = all_points(&scanned, &list, wire)?;
     let mut staged = Staged::default();

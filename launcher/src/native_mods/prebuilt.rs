@@ -93,7 +93,8 @@ pub(super) fn source_refusal(
     game: &Path,
     projects: &[api::Project<'_>],
 ) -> Result<Option<SourceReason>, String> {
-    let catalog = internals::Catalog::read(game)?;
+    let catalog =
+        internals::Catalog::read(game)?.with_mods(projects.iter().map(|project| project.bundle))?;
     for (_, route) in slot_routes(&catalog, projects) {
         match route {
             super::Route::Game { reason } => return Ok(Some(reason)),
@@ -511,7 +512,8 @@ pub(super) fn compile(
     declared: &[Vec<dependencies::Dependency>],
     resolution: &dependencies::Resolution,
 ) -> Result<(PathBuf, Vec<PathBuf>), String> {
-    let catalog = internals::Catalog::read(game)?;
+    let catalog =
+        internals::Catalog::read(game)?.with_mods(projects.iter().map(|project| project.bundle))?;
     let generated = catalog
         .prepare(projects.iter().map(|project| &project.bundle.manifest))
         .map_err(|e| e.to_string())?;
@@ -545,7 +547,11 @@ pub(super) fn compile(
             .and_then(|l| l.get("name"))
             .and_then(toml::Value::as_str)
             .map_or_else(|| project.package.replace('-', "_"), str::to_owned);
-        let source = project.bundle.dir.join(
+        // Compiled from a staged copy: the crate with its own points (#2339).
+        let staged = out.join("staged").join(id);
+        super::copy_bundle(project.bundle, &staged)?;
+        super::mod_points::stage(&staged, &catalog.wire)?;
+        let source = staged.join(
             lib.and_then(|l| l.get("path"))
                 .and_then(toml::Value::as_str)
                 .unwrap_or("src/lib.rs"),
@@ -622,11 +628,7 @@ pub(super) fn compile(
         .map(|&i| &projects[i].bundle.manifest)
         .collect();
     let main = out.join("main.rs");
-    fs::write(
-        &main,
-        api::main_rs(&template, &manifests, &catalog.points, &catalog.sites),
-    )
-    .map_err(|e| e.to_string())?;
+    fs::write(&main, api::main_rs(&template, &manifests, &catalog)).map_err(|e| e.to_string())?;
     let binary = out.join(crate::backend::CLIENT);
     let mut cmd = rustc(rust, game, out, "2024");
     cmd.args(["--crate-type", "bin", "--crate-name", "horizon_native_game"])

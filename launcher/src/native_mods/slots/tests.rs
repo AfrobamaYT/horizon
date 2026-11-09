@@ -5,6 +5,8 @@ fn fixture() -> (Manifest, Catalog) {
     let pin = "a".repeat(40);
     let manifest = Manifest::parse(&format!("id='example'\nname='Example'\nversion='1.0.0'\napi='0.2'\ncapabilities=['registries']\n[native]\ngame='26.3'\nhorizon='{pin}'\nmixins='{pin}'\n")).unwrap();
     let catalog = Catalog {
+        wire: Default::default(),
+        mods: Vec::new(),
         internals: serde_json::from_value(serde_json::json!([{
             "path":"game::run", "kind":"fn", "signature":"fn run()", "hash":"signature", "cfg":"", "shape_only":false
         }])).unwrap(),
@@ -81,19 +83,14 @@ fn every_native_kind_and_access_registers_or_refuses_by_name() {
             }
             check(&catalog, &manifest).unwrap();
             let facade = catalog.facade(&manifest).unwrap();
-            let main = api::main_rs(
-                "/* MOD_SLOTS */",
-                &[&manifest],
-                &catalog.points,
-                &catalog.sites,
-            );
+            let main = api::main_rs("/* MOD_SLOTS */", &[&manifest], &catalog);
             if access == Access::Api {
                 assert!(
                     main.contains(match kind {
                         Kind::Return =>
                             "mod_points::listeners::run_return(\"example\", 7, \"test\",",
                         Kind::Replace =>
-                            "mod_points::replace!(run, cancel, none, \"example\", 7, \"test\",",
+                            "mod_points::replace!(mod_points::listeners::run, cancel, none, \"example\", 7, \"test\",",
                         _ => "mod_points::listeners::run(\"example\", 7, \"test\",",
                     }),
                     "{main}"

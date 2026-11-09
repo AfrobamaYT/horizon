@@ -37,7 +37,7 @@ fn the_shared_listener_source_answers_natively_as_in_wasm() {
     )
     .unwrap();
     mod_points::register(&mod_points::replace!(
-        game_beacon_average,
+        mod_points::listeners::game_beacon_average,
         result,
         none,
         "native",
