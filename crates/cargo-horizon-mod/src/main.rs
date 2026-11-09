@@ -41,7 +41,7 @@ fn main() -> ExitCode {
         // `rustc`, or `rustc.exe` on Windows.
         && args
             .first()
-            .is_some_and(|a| Path::new(a).file_stem().is_some_and(|s| s == "rustc"))
+            .is_some_and(|a| a.strip_suffix(".exe").unwrap_or(a).ends_with("rustc"))
     {
         return match wasm::rustc(args) {
             Ok(()) => ExitCode::SUCCESS,
@@ -605,5 +605,15 @@ mod tests {
         ]);
         assert_eq!(newest_prebuilt(&releases).as_deref(), Some(old));
         assert_eq!(newest_prebuilt(&serde_json::json!([])), None);
+    }
+}
+
+#[cfg(test)]
+mod wrapper_suffix_tests {
+    #[test]
+    fn compiler_names_keep_suffix_contract() {
+        for (name, expected) in [("diagnostic-rustc", true), ("xrustc", true), ("rustc", true), ("/path/to/rustc", true), ("rustc.exe", true), ("diagnostic-rustc.exe", true), ("rustc.custom", false), ("rustc-wrapper", false), ("cargo-horizon-mod", false), ("/rustc/tool", false)] {
+            assert_eq!(name.strip_suffix(".exe").unwrap_or(name).ends_with("rustc"), expected, "{name}");
+        }
     }
 }
