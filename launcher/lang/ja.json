@@ -1235,5 +1235,12 @@
   "NATIVE": "NATIVE",
   "{mod} is a native mod. Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.": "{mod} is a native mod. Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.",
   "Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.": "Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.",
-  "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here."
+  "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
+  "Mods: {mods}": "Mod：{mods}",
+  "Native builds may download Rust and other build tools. Source builds compile the game on this computer.": "Native builds may download Rust and other build tools. Source builds compile the game on this computer.",
+  "Native mods aren't sandboxed: they run with full access to your computer, like any program. Install only mods whose authors you trust. To play with one, build the game on the Mods page; a build may download Rust and other build tools.": "Native mods aren't sandboxed: they run with full access to your computer, like any program. Install only mods whose authors you trust. To play with one, build the game on the Mods page; a build may download Rust and other build tools.",
+  "These mods will run with full access to your computer": "これらのModはコンピューターへのフルアクセス権限を持って実行されます",
+  "They can read, change or delete your files, and use your accounts and network, like any program you run. Build them only if you trust their authors: the Mods page names them.": "実行する他のプログラムと同様に、ファイルの読み取り・変更・削除や、アカウント・ネットワークの利用が可能です。作者を信頼できる場合のみビルドしてください。Modsページに作者名が記載されています。",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }

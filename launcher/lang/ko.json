@@ -1235,5 +1235,12 @@
   "NATIVE": "NATIVE",
   "{mod} is a native mod. Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.": "{mod} is a native mod. Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.",
   "Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.": "Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.",
-  "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here."
+  "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
+  "Mods: {mods}": "모드: {mods}",
+  "Native builds may download Rust and other build tools. Source builds compile the game on this computer.": "Native builds may download Rust and other build tools. Source builds compile the game on this computer.",
+  "Native mods aren't sandboxed: they run with full access to your computer, like any program. Install only mods whose authors you trust. To play with one, build the game on the Mods page; a build may download Rust and other build tools.": "Native mods aren't sandboxed: they run with full access to your computer, like any program. Install only mods whose authors you trust. To play with one, build the game on the Mods page; a build may download Rust and other build tools.",
+  "These mods will run with full access to your computer": "이 모드는 컴퓨터에 대한 전체 권한을 가지고 실행됩니다.",
+  "They can read, change or delete your files, and use your accounts and network, like any program you run. Build them only if you trust their authors: the Mods page names them.": "일반 프로그램과 마찬가지로 파일 읽기, 수정, 삭제 및 계정과 네트워크를 사용할 수 있습니다. 신뢰할 수 있는 제작자의 모드만 빌드하세요. 제작자 정보는 모드 페이지에서 확인할 수 있습니다.",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }
