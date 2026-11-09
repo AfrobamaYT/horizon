@@ -425,6 +425,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 dependencies = [
  "foldhash 0.2.0",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -451,6 +453,7 @@ version = "0.1.0"
 dependencies = [
  "libm",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -467,6 +470,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "toml",
+ "wasmparser",
  "zip",
 ]
 
@@ -479,6 +483,7 @@ dependencies = [
  "getrandom 0.3.4",
  "hmac",
  "horizon-mod-package",
+ "horizon-release-sign",
  "http-body-util",
  "rusqlite",
  "serde",
@@ -489,6 +494,14 @@ dependencies = [
  "tower",
  "ureq",
  "zip",
+]
+
+[[package]]
+name = "horizon-release-sign"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "ring",
 ]
 
 [[package]]
@@ -696,6 +709,8 @@ checksum = "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855"
 dependencies = [
  "equivalent",
  "hashbrown 0.17.1",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -1520,6 +1535,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23f0c9c52aa7cd7d77769a4cfe2a9adb1b331f489a41d912ce14513d5ab995c6"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "wasmparser"
+version = "0.261.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f20f20e44f7e8aeb6744823ea9d869ede51e51be4fdaedede2852282e54d2d8"
+dependencies = [
+ "bitflags",
+ "hashbrown 0.17.1",
+ "indexmap",
+ "semver",
+ "serde",
 ]
 
 [[package]]

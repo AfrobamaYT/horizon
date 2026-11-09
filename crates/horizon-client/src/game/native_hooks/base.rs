@@ -1870,24 +1870,24 @@ impl Game<'_> {
     ) {
         self.fire_player_command(player, name, command, canceled, replies);
     }
-    /// A server player's ender pearl landed and is about to teleport them
-    /// (NeoForge's `EntityTeleportEvent.EnderPearl`, vanilla's
-    /// `ThrownEnderpearl.onHit` for a player owner): `pearl` is the pearl's
-    /// entity id, `from` their feet now, `target` where the pearl started
-    /// its last tick and `damage` the fall damage they then take (5). A mod
-    /// may move `target` (a value that is not a number is ignored) or change
-    /// `damage` (0 or less: none). Canceling
-    /// keeps the player where they are: no endermite roll, no teleport, no
-    /// damage and no sound; the pearl is used up either way. The player's
-    /// state is swapped in (`native_acting_player`). The hit itself is
-    /// heard by `native_projectile_impact`.
+    /// A server player's or mob's ender pearl is about to teleport its `owner`
+    /// (`EntityTeleportEvent.EnderPearl`, `ThrownEnderpearl.onHit`). `owner` is
+    /// the live entity handle, `pearl` its projectile id, `from` the owner's feet
+    /// and `target` the pearl's previous position. A mod may move the target;
+    /// non-finite changes keep the original spot. Canceling leaves the owner
+    /// in place with no teleport sound, damage or endermite roll; the pearl is
+    /// used up. Player owners keep their acting-player context and mutable fall
+    /// `damage` (5; nonpositive is none). Mob owners take no fall damage and
+    /// make no endermite draw; their `damage` starts at zero and is player-only.
+    /// An owner moved, removed, killed or put to sleep by a listener is not moved
+    /// again using the old decision. The impact hook still hears the hit.
     pub(in crate::game) fn native_ender_pearl_teleport(
         &mut self,
         call: mod_api::__private::EnderPearlTeleportCall<'_>,
     ) {
         self.fire_ender_pearl_teleport(call);
     }
-    /// A server player who ate chorus fruit (or another item with the
+    /// A server player or fox that ate chorus fruit (or another item with the
     /// `teleport_randomly` consume effect) is about to try a random spot
     /// (NeoForge's `EntityTeleportEvent.ItemConsumption`, vanilla's
     /// `TeleportRandomlyConsumeEffect.apply`): once per attempt (up to 16),
@@ -1895,17 +1895,19 @@ impl Game<'_> {
     /// drawn; a mod may move it (its y kept inside the level's height, a
     /// value that is not a number ignored), and the game still looks down
     /// from it for ground it may land on. Canceling ends the effect: no teleport and no
-    /// more attempts. The player's state is swapped in
-    /// (`native_acting_player`). Foxes are not heard.
+    /// more attempts. `consumed` is the stack captured before use, including its
+    /// count and components. The player's state is swapped in
+    /// (`native_acting_player`); a fox's full-host callback runs at its inline
+    /// consumption boundary, before living AI and movement.
     pub(in crate::game) fn native_item_consumption_teleport(
         &mut self,
-        player: u128,
-        name: &str,
+        consumer: mod_api::LivingRef,
+        consumed: &mod_api::ItemStack,
         from: [f64; 3],
         target: &mut [f64; 3],
         cancel: &mut bool,
     ) {
-        self.fire_item_consumption_teleport(player, name, from, target, cancel);
+        self.fire_item_consumption_teleport(consumer, consumed, from, target, cancel);
     }
     /// A server player a command teleported (NeoForge's
     /// `EntityTeleportEvent`, for a player): `/tp` and `/teleport`, inside
@@ -2941,7 +2943,8 @@ impl Game<'_> {
         thundering: bool,
         cancel: &mut bool,
     ) {
-        self.fire_weather_change(dimension, raining, thundering, cancel);
+        crate::game::level_control_hooks::LevelControl::Weather
+            .hear(|| self.fire_weather_change(dimension, raining, thundering, cancel));
     }
 
     /// The server changed its thunder state through `/weather`. Set `cancel`
@@ -2952,7 +2955,8 @@ impl Game<'_> {
         thundering: bool,
         cancel: &mut bool,
     ) {
-        self.fire_thunder_change(dimension, thundering, cancel);
+        crate::game::level_control_hooks::LevelControl::Weather
+            .hear(|| self.fire_thunder_change(dimension, thundering, cancel));
     }
 
     /// A server lightning bolt is about to be created. `cause` is `weather`,
@@ -3012,12 +3016,14 @@ impl Game<'_> {
     /// The server world's border bounds changed, either immediately or when
     /// its timed size change was requested.
     pub(in crate::game) fn native_world_border_bounds_changed(&mut self) {
-        self.fire_world_border_bounds_changed();
+        crate::game::level_control_hooks::LevelControl::BorderBounds
+            .hear(|| self.fire_world_border_bounds_changed());
     }
 
     /// The server world's border center changed.
     pub(in crate::game) fn native_world_border_center_changed(&mut self) {
-        self.fire_world_border_center_changed();
+        crate::game::level_control_hooks::LevelControl::BorderCenter
+            .hear(|| self.fire_world_border_center_changed());
     }
 
     /// A Nether portal was built for a dimension travel, or an End platform
@@ -3458,7 +3464,9 @@ impl Game<'_> {
     }
     /// `DispenserBlock.getDispenseMethod`: choose a behaviour for any item,
     /// including vanilla items, on the authoritative server (not droppers).
-    /// Leave answer None for vanilla. Otherwise answer `(remainder, event)`:
+    /// The block the dispenser faces is asked first (`dispense_method`), and
+    /// its answer keeps this part from being asked. Leave answer None for
+    /// vanilla. Otherwise answer `(remainder, event)`:
     /// a remainder of None empties the slot, `Some(stack)` replaces it (the hook
     /// owns consumption: no extra item is removed afterwards). `event` is the
     /// level event the dispenser plays with its smoke: 1000 the click, 1001 the
@@ -4209,8 +4217,8 @@ impl Game<'_> {
         dimension: &str,
         into: u32,
         from: u32,
-        into_value: u32,
-        from_value: u32,
+        into_value: i32,
+        from_value: i32,
         can_merge: &mut bool,
     ) {
         self.fire_experience_orb_can_merge(
@@ -4226,7 +4234,7 @@ impl Game<'_> {
         dimension: &str,
         into: u32,
         from: u32,
-        from_value: u32,
+        from_value: i32,
         canceled: &mut bool,
     ) {
         self.fire_experience_orb_merge(dimension, into, from, from_value, canceled);
@@ -4370,15 +4378,15 @@ impl Game<'_> {
         self.fire_food_level_changed(player, name, from, to, cancel);
     }
     /// Before `player` picks up orb `orb` in `dimension`. Mutations to `value`
-    /// and `count` take effect only when not canceled; value is clamped to
-    /// 1..=i32::MAX and count to at least one.
+    /// and `count` take effect only when not canceled. Value keeps vanilla
+    /// signed integer semantics; count is kept at least one.
     /// Canceling leaves the orb and pickup delay unchanged. Server-side.
     pub(in crate::game) fn native_pickup_xp(
         &mut self,
         player: u128,
         dimension: &str,
         orb: u32,
-        value: &mut u32,
+        value: &mut i32,
         count: &mut u32,
         canceled: &mut bool,
     ) {

@@ -203,8 +203,7 @@ impl Game<'_> {
                     self.remember_mob_player_credit(id);
                 }
                 if hurt {
-                    let charge = "minecraft:wind_charge";
-                    self.shot_post_attack(p, who, charge, charge);
+                    self.shot_post_attack(p, who, p.kind.id(), "minecraft:wind_charge");
                 }
             }
         }
