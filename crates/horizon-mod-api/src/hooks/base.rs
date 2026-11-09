@@ -254,23 +254,15 @@ pub trait Hooks {
         neoforge = "none (Horizon-only; NeoForge has no counterpart)"
     )]
     fn minimap();
-    /// The buttons of mod `mod_id`'s settings page: push
-    /// their labels when it is yours. Asked again each time the page opens
-    /// and after each click.
-    #[hook(
-        side = "both",
-        contract = "collect",
-        out = "buttons",
-        neoforge = "none (Horizon's own settings page; NeoForge's per-mod screen is IConfigScreenFactory, not an event)"
-    )]
-    fn settings();
-    /// Button `button` of mod `mod_id`'s settings page was clicked.
+    /// The player changed setting `key` of mod `mod_id` on its page in Options > Mods
+    /// (`Registrar::register_setting`); the new value is kept already, so read it with
+    /// `setting_bool` and its siblings. Only the setting owner's listeners receive this event.
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "none (Horizon's own settings page; NeoForge's per-mod screen is IConfigScreenFactory, not an event)"
+        neoforge = "ModConfigEvent.Reloading (a ModConfigSpec value set on the config screen)"
     )]
-    fn settings_click();
+    fn setting_changed();
     /// The player did `event` on mod `mod_id`'s panel (`native_panel_items`):
     /// act on it when it is yours.
     #[hook(

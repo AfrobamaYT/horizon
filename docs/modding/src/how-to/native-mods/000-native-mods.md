@@ -19,7 +19,11 @@ beside `server.properties`), as Fabric and NeoForge mods' do: the mod picks its 
 bound to the calling mod and refuses any other mod's files. A mod that lists its files with
 `native_register_configs` gets them read for it, written from their defaults when missing, and handed over again
 when edited (`native_config_loading`, `native_config_reloading`, as NeoForge's `ModConfigEvent`), and a world can
-keep its own server config in `serverconfig/` ([native mods](../native-mods.md)). Settings kept with `set_setting` stay where they were, in `horizon-mods/.horizon-mod-data/<id>/`.
+keep its own server config in `serverconfig/` ([native mods](../native-mods.md)). Settings kept with `set_setting` stay in `horizon-mods/.horizon-mod-data/<id>/`.
+`setting` and `set_setting` are bound to the calling mod: naming another mod's ID never reads or changes its settings.
+Reads use the load's settings snapshot plus successful writes, rather than opening a file on each call.
+Register typed settings with `Registrar::register_setting` to put them on Options > Mods; edits persist before
+`setting_changed` runs, and only the owning mod receives that event.
 8c838a6b381b93150deaeed2057acd1
 
 For a client HUD's session information, use the read-only
