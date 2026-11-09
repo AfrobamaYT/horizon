@@ -594,6 +594,9 @@ fn local_source_stage_keeps_real_binding_and_registers_each_listener() {
         manifest,
         dir: root.clone(),
     };
+    // Production runs horizon-stage before private-source staging. Preserve that
+    // order here so local rewriting is exercised on ordinary point-marked source.
+    horizon_mod_api_gen::points::stage(&root).unwrap();
     stage(&root, &dir, std::slice::from_ref(&bundle)).unwrap();
     let catalog = Catalog::read(&dir).unwrap();
     assert_eq!(catalog.sites.len(), 1);
