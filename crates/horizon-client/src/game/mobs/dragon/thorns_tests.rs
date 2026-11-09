@@ -217,7 +217,12 @@ fn dragon_takes_player_thorns_through_its_body() {
                 Some(("minecraft:thorns", Some(77), Some(77)))
             );
             assert_eq!(d.hurt_by_player, Some((FightWho::Host, 0)));
-            assert_eq!(g.armor[1].as_ref().unwrap().damage, 2);
+            // Player.hurtArmor adds floor(max(1, damage / 4)) before
+            // Thorns' two durability: 10-point head hit = 4, 5-point wing = 3.
+            assert_eq!(
+                g.armor[1].as_ref().unwrap().damage,
+                if wing { 3 } else { 4 }
+            );
             assert_eq!(
                 g.audio
                     .capture
@@ -235,10 +240,12 @@ fn dragon_takes_player_thorns_through_its_body() {
         let health = g.player.as_ref().unwrap().health.health();
         g.dragon_hurts_player("minecraft:mob_attack", 1.0);
         assert_eq!(g.player.as_ref().unwrap().health.health(), health);
-        assert_eq!(g.armor[1].as_ref().unwrap().damage, 4);
+        // The refused head hit adds only Thorns wear to the wing's 3;
+        // the refused breath hit adds neither ordinary armor wear nor Thorns.
+        assert_eq!(g.armor[1].as_ref().unwrap().damage, 5);
         let before = g.dragon.as_ref().unwrap().health;
         g.dragon_hurts_player("minecraft:indirect_magic", 1.0);
         assert_eq!(g.dragon.as_ref().unwrap().health, before);
-        assert_eq!(g.armor[1].as_ref().unwrap().damage, 4);
+        assert_eq!(g.armor[1].as_ref().unwrap().damage, 5);
     });
 }

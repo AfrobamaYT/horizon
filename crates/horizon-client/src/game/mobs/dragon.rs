@@ -3423,26 +3423,23 @@ impl Game<'_> {
         if hurts {
             self.note_dragon_attacker("minecraft:mob_attack");
         }
-        let (health, rules) = (&self.health_resources, self.world.health_rules);
-        let id = health.damage.id("minecraft:mob_attack");
-        let mut canceled = false;
-        if let Some(p) = self.player.as_mut() {
-            push_seen_with_hurt(p, push, |p| {
-                if let Some(id) = id.filter(|_| hurts)
-                    && let Ok(o) = p.hurt_blocking(
-                        crate::game::entity::damage_level_of!(self),
-                        health,
-                        rules,
-                        id,
-                        5.0,
-                        None,
-                    )
-                {
-                    canceled = o.canceled;
-                }
-            });
+        let before = self.player.as_mut().map(|p| {
+            let before = (p.velocity, std::mem::take(&mut p.health.sync_velocity));
+            p.velocity = p.velocity.add_vector(push);
+            before
+        });
+        if hurts {
+            // Run the equipment continuation on the real host, just like head damage.
+            self.hurt_player_by("minecraft:mob_attack", 5.0);
         }
-        self.combat.forget_noted(canceled);
+        if let Some((velocity, marked)) = before
+            && let Some(p) = self.player.as_mut()
+        {
+            if !p.health.sync_velocity {
+                p.velocity = velocity;
+            }
+            p.health.sync_velocity |= marked;
+        }
         if !sitting
             && !hurt_lately
             && let Some(id) = self.dragon.as_ref().map(|d| d.id)
@@ -5294,6 +5291,7 @@ fn dragon_rays(base: glam::Mat4, t: f32, white: horizon_client::hud::Rect, out: 
 /// reaches the players tracking them, not them. So the push moves the player
 /// only together with a hurt that lands outside the hurt cooldown, and is
 /// dropped otherwise.
+#[cfg(test)]
 fn push_seen_with_hurt(
     p: &mut horizon_client::motion::PlayerMotion,
     push: Vec3,
