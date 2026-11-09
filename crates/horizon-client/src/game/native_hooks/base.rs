@@ -625,8 +625,7 @@ impl Game<'_> {
     /// merged, load conditions held — to every Horizon client when it joins
     /// and again after each `/reload`; a vanilla client is sent nothing new.
     /// Asked once per load, when the server's data tables are built, and the
-    /// same types go to every player: unlike NeoForge, which asks again for
-    /// each joining player, it can't differ between players. Push nothing and
+    /// same types go to every player: it can't differ between players. Push nothing and
     /// nothing is sent; push nothing after a load that pushed some and the
     /// clients go back to their own recipes. Server-side (the single
     /// player's integrated server included).
@@ -1549,8 +1548,7 @@ impl Game<'_> {
     /// leaves none to hear its character, where vanilla's closed screen hears
     /// nothing, and one that moves the focus types into the box it moved to.
     /// They fire even when `native_screen_key_pressed_pre` cancelled the press
-    /// that carried the text, as NeoForge delivers `CharacterTyped.Pre` for a
-    /// cancelled `KeyPressed.Pre`: the characters left reach the text box
+    /// that carried the text: the characters left reach the text box
     /// without the key's own effects. Cancelling one character drops only that
     /// one. The control socket's `type` fires it too, but not for its `\b`
     /// backspace. Same screens as the key press, and it fires with no text box
