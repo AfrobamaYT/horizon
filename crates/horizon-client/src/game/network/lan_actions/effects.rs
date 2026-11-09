@@ -183,15 +183,20 @@ impl Game<'_> {
         });
     }
 
-    /// The guests' items in use, for the players around (`LivingEntity.startUsingItem`
-    /// and `stopUsingItem` set DATA_LIVING_ENTITY_FLAGS).
+    /// The guests' items in use and Riptide spins, for the players around
+    /// (`LivingEntity.startUsingItem`, `stopUsingItem` and `startAutoSpinAttack`
+    /// set DATA_LIVING_ENTITY_FLAGS).
     pub(in crate::game) fn lan_living_flags(&mut self) {
         let Some(host) = self.lan.as_mut() else {
             return;
         };
         host.hub.guests.update_all(|g| {
             let using = host.play.get(&g.conn).and_then(GuestPlay::using);
-            g.living_flags = crate::game::lan::living_flags(using);
+            let spinning = g
+                .motion
+                .as_ref()
+                .is_some_and(|m| m.auto_spin_attack_ticks > 0);
+            g.living_flags = crate::game::lan::living_flags(using, spinning);
         });
     }
 

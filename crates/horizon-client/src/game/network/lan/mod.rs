@@ -23,7 +23,7 @@ use horizon_client::{
         chunks::ChunkEncoder,
         data::{BIOME_REGISTRY, FrozenDamage, SyncData},
         entity::{EntityState, States},
-        hub::{HostEvent, Hub, HubConfig, TickCtx},
+        hub::{HostEvent, Hub, HubConfig, TickCtx, stuck_meta},
         playerdata,
     },
     mobs::{Mob, Species, Who, leash::Holder},
@@ -776,6 +776,12 @@ pub(super) fn mob_meta(
     }
     defaults.push((10, serializer::PARTICLES, Value::Particles(Vec::new())));
     defaults.push((11, serializer::BOOLEAN, Value::Bool(false)));
+    // LivingEntity.DATA_ARROW_COUNT_ID and DATA_STINGER_COUNT_ID.
+    stuck_meta(
+        meta,
+        defaults,
+        (m.extra.stuck.arrows, m.extra.stuck.stingers),
+    );
     // Mob.DATA_MOB_FLAGS_ID: no AI 1, left-handed 2, aggressive 4 (what
     // draws a vindicator's axe, a skeleton's drawn bow, a piglin's raised
     // weapon).
@@ -4009,11 +4015,13 @@ impl Game<'_> {
 }
 
 /// `LivingEntity.DATA_LIVING_ENTITY_FLAGS` for an item in use: 1, and 2 when
-/// it is the off hand's. A stop is 0 here; vanilla leaves bit 1 set, so its
-/// stop of an off-hand use is 2. Both mean "not using" (bit 0 is clear), and
-/// nothing reads bit 1 without bit 0.
-pub(super) fn living_flags(using: Option<(usize, u32)>) -> i8 {
+/// it is the off hand's, and 4 for a Riptide spin (`isAutoSpinAttack`). A stop
+/// is 0 here; vanilla leaves bit 1 set, so its stop of an off-hand use is 2.
+/// Both mean "not using" (bit 0 is clear), and nothing reads bit 1 without
+/// bit 0.
+pub(super) fn living_flags(using: Option<(usize, u32)>, spinning: bool) -> i8 {
     using.map_or(0, |(slot, _)| if slot == OFFHAND_SLOT { 3 } else { 1 })
+        | if spinning { 4 } else { 0 }
 }
 
 /// The name a mod hears for an equipment slot (the armor stand hook's names, plus
@@ -4875,6 +4883,43 @@ mod tests {
         );
     }
 
+    /// What is stuck in a mob goes out through the tracker's metadata
+    /// (`LivingEntity.DATA_ARROW_COUNT_ID`, `DATA_STINGER_COUNT_ID`): the
+    /// counts that are set, and zero as the default so a count that falls
+    /// back to none is sent.
+    #[test]
+    fn a_mobs_stuck_counts_are_sent_by_mob_meta() {
+        let types = super::super::mods::living_mod_types();
+        let hub = meta_hub("StuckMetaTest");
+        let mut mob = Mob::new(
+            1,
+            types["minecraft:zombie"].clone(),
+            horizon_core::geometry::Vec3::ZERO,
+            0.0,
+        );
+        let meta_of = |m: &Mob| {
+            let (mut meta, mut defaults) = (Vec::new(), Vec::new());
+            super::mob_meta(m, &hub, None, 0, &mut meta, &mut defaults);
+            (meta, defaults)
+        };
+        let count = |index| (index, serializer::INT, Value::Int(0));
+
+        let (meta, defaults) = meta_of(&mob);
+        assert!(meta.iter().all(|e| e.0 != 12 && e.0 != 13), "{meta:?}");
+        assert!(defaults.contains(&count(12)) && defaults.contains(&count(13)));
+        mob.extra.stuck.arrows = 4;
+        mob.extra.stuck.stingers = 2;
+        let (meta, _) = meta_of(&mob);
+        assert!(
+            meta.contains(&(12, serializer::INT, Value::Int(4))),
+            "{meta:?}"
+        );
+        assert!(
+            meta.contains(&(13, serializer::INT, Value::Int(2))),
+            "{meta:?}"
+        );
+    }
+
     /// A mod's custom name and its visibility reach the tracking players
     /// (`Entity.DATA_CUSTOM_NAME`, `DATA_CUSTOM_NAME_VISIBLE`), and taking
     /// them away is sent as none / false.
@@ -5031,9 +5076,19 @@ mod tests {
     /// `isUsingItem` and bit 1 as `getUsedItemHand`.
     #[test]
     fn an_off_hand_use_flags_both_the_use_and_the_hand() {
-        assert_eq!(living_flags(None), 0);
-        assert_eq!(living_flags(Some((0, 12))), 1);
-        assert_eq!(living_flags(Some((OFFHAND_SLOT, 12))), 3);
+        assert_eq!(living_flags(None, false), 0);
+        assert_eq!(living_flags(Some((0, 12)), false), 1);
+        assert_eq!(living_flags(Some((OFFHAND_SLOT, 12)), false), 3);
+    }
+
+    /// `LivingEntity.startAutoSpinAttack` sets flag 4, which a use of an item
+    /// leaves as it is (a trident is charged before it launches, and a
+    /// spinning player can use another item).
+    #[test]
+    fn a_riptide_spin_flags_bit_four() {
+        assert_eq!(living_flags(None, true), 4);
+        assert_eq!(living_flags(Some((0, 12)), true), 5);
+        assert_eq!(living_flags(Some((OFFHAND_SLOT, 12)), true), 7);
     }
 
     /// `ComposterBlock.useItemOn` calls `levelEvent(1500, pos, data)`, the
