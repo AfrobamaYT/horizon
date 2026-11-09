@@ -9,6 +9,7 @@
 
 // exhaustive: wasm boundary plumbing that generated code builds field by field
 /// A resource's id: generation in the high half, slot in the low.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Id(pub u64);
 

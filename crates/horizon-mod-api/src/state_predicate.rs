@@ -3,6 +3,7 @@ use crate::{BlockKey, BlockMetadata, BlockState, BlockStateError, StateConstrain
 
 /// A block or tag filter, with unspecified properties left as wildcards.
 /// An unknown or missing property on a tag member never matches.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct StatePredicate {

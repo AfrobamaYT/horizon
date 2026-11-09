@@ -17,6 +17,7 @@ pub trait Component {
 }
 
 /// An owned component patch, independent of the engine's component representation.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Components {
@@ -51,6 +52,7 @@ impl From<&Components> for Compound {
 /// A refused hook output retains its captured engine value. The clicked-slot bridge also
 /// stages the slot, cursor and cancellation flags together. Independent host effects,
 /// including storage writes, commands and messages, are not undone by output validation.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ItemStack {

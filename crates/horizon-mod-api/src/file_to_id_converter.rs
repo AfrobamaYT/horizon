@@ -25,6 +25,7 @@ impl std::error::Error for FileToIdConverterError {}
 /// preserving subdirectories. Any namespace may add entries for a listener.
 /// The same converter can be used for client assets.
 // exhaustive: its fields are private, so mods cannot build or destructure it
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 pub struct FileToIdConverter {
     directory: String,
     prefix: String,

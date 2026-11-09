@@ -3,6 +3,7 @@ use crate::BlockEntityTypeKey;
 use std::fmt;
 
 /// A native Part cannot be attached to this type during registration.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum BlockEntityPartError {

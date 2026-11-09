@@ -17,6 +17,7 @@ use super::{
 use std::{collections::HashSet, fmt::Debug, marker::PhantomData, sync::Mutex};
 
 /// Where a stack lives.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ItemPlace {

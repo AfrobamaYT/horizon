@@ -7,6 +7,7 @@ use horizon_mod_runtime::attachments::{self as runtime, index};
 /// unswept entities may appear, and stale writes fail. Native acquisition neither
 /// clones values nor decodes saved payloads; iteration decodes lazily.
 /// Codec-less attachment types are native-only; their rows do not cross to wasm.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct AttachmentBatch(runtime::AttachmentBatch<AttachmentHolder>);
@@ -34,6 +35,7 @@ impl AttachmentBatch {
 pub type AttachmentQuery<'key, T> = runtime::AttachmentQuery<'key, AttachmentHolder, T>;
 
 /// A private-field scoped residency identity, not an access authorization token.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct AttachmentWriteToken(index::AttachmentOwner<AttachmentHolder>);

@@ -7,12 +7,14 @@ use super::ServerHost;
 /// makes: a mod opens and closes transactions through it alone, so its drop guard closes every
 /// one a mod opens.
 // exhaustive: its fields are private, so mods cannot build or destructure it
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 pub struct TransactionSeal(pub(crate) ());
 
 /// An open transaction, as NeoForge's `TransactionContext`: what every write of a handler or a
 /// place takes, so none happens outside one. Only `host.transaction` makes one, and lends it to
 /// its closure alone.
 // exhaustive: its fields are private, so mods cannot build or destructure it
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 pub struct Transaction(pub(crate) ());
 
 /// Transactions are available only on the logical server and preserve the receiver type.

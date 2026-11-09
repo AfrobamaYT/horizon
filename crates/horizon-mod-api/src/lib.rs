@@ -10,17 +10,20 @@
 extern crate self as mod_api;
 
 /// A saved fluid name retained for the lifetime of the process.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: only trusted engine boundaries create handles
 pub struct UnresolvedFluid(u64);
 
 /// A block requested once through [`Registrar::block_key`](BlocksRegistrar::block_key). Its load-owned slot survives reload.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its field is private, so only registration creates a key
 pub struct BlockKey(u32);
 
 /// A baked standalone model resolved through [`RenderAssets::model`].
 /// Retain it between frames; reacquire it after a successful resource reload.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: private fields; only the engine resolves model handles
 pub struct ModelRef(u64, u32);
@@ -54,6 +57,7 @@ pub struct BlockStateId(pub u32);
 
 /// A dimension (`minecraft:the_nether`), as the game's table numbers it: a `LevelRef`'s identity.
 /// A key stays the same dimension until the game exits; `key.id(host)` gives the name.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its field is private, so only the game's table creates a key
 pub struct DimensionKey(u32);
@@ -124,25 +128,30 @@ pub enum Sentiment {
 }
 
 /// A boolean game rule declared by a mod.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: only the registration table creates keys
 pub struct BoolGameRuleKey(u32);
 /// A load-owned fluid identity requested through [`Registrar::fluid_key`](FluidsRegistrar::fluid_key) or resolved through
 /// [`DataLoadContext::fluid_key`].
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: only the registration table creates keys
 pub struct FluidKey(u32);
 /// An item requested at registration; its load-owned slot identifies the canonical name.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: only registration creates a key
 pub struct ItemKey(u32);
 
 /// An effect requested once through [`Registrar::effect_key`](EffectsRegistrar::effect_key). The registry is fixed until restart.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its field is private, so only registration creates a key
 pub struct EffectKey(u32);
 
 /// A block entity type requested at registration. Its slot remains stable for the process.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: only the load-owned table creates keys
 pub struct BlockEntityTypeKey(u32);
@@ -1167,6 +1176,7 @@ impl SoundPlay {
 /// Dropping or overwriting the handle doesn't stop the sound: keep a looping sound's handle while
 /// it plays (stop it before starting another in its place), or nothing can stop it until the
 /// player leaves the level.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its field is private, so mods cannot build or destructure it
 pub struct SoundRef {
@@ -1598,6 +1608,7 @@ pub enum NativeAuthority {
 }
 
 /// Supported vanilla `Block.UPDATE_*` flags for a level block write.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct NativeBlockUpdateFlags(i32);
@@ -1638,6 +1649,7 @@ impl std::ops::BitOr for NativeBlockUpdateFlags {
 }
 
 /// One server world open or client level; it rejects a previous world's handles.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct NativeWorldEpoch(u64);
@@ -1664,6 +1676,7 @@ impl NativeWorldEpoch {
 /// of an entity that is gone, or used on a client. `Host::entity` makes a server
 /// handle from an event's entity id; `ClientHost::crosshair_target` supplies a
 /// client handle for an entity hit.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct EntityRef {
@@ -1706,6 +1719,7 @@ pub enum LeashHolder {
 /// [`EntityRef`] of such an entity, and [`LivingRef::entity`] goes back, so the
 /// entity's methods work on it too. Stale handles read as `None`, as an
 /// `EntityRef`'s do.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct LivingRef(EntityRef);
@@ -1787,6 +1801,7 @@ pub enum ModifierLifetime {
 
 /// The slots an item's attribute modifier applies in (vanilla's
 /// `EquipmentSlotGroup`).
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EquipmentSlotGroup {
@@ -1817,6 +1832,7 @@ pub enum EquipmentSlotGroup {
 /// One attribute modifier an item stack grants (vanilla's
 /// `ItemAttributeModifiers.Entry`): the attribute (`minecraft:armor`), the
 /// modifier, and the slots it applies in.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq)]
 pub struct ItemAttributeModifier {
@@ -1847,6 +1863,7 @@ impl ItemAttributeModifier {
 /// edits them (`ItemAttributeModifierEvent`'s list). It starts as the
 /// stack's own `minecraft:attribute_modifiers`, or its item's, in order.
 // exhaustive: its fields are private, so mods only edit it through its methods
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ItemAttributeModifiers {
     entries: Vec<ItemAttributeModifier>,
@@ -1938,6 +1955,7 @@ impl ItemAttributeModifiers {
 /// (`minecraft:sharpness`) with its level, in order. Private fields, edited
 /// through methods, so the game knows whether a mod changed them.
 // exhaustive: its fields are private, so mods only edit it through its methods
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ItemEnchantments {
     entries: Vec<(Identifier, u32)>,
@@ -2052,6 +2070,7 @@ pub enum EffectApplicable {
 }
 
 /// A vanilla `Mob`, narrowed from an entity with `host.mob(entity)`.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct MobRef(EntityRef);
@@ -2079,6 +2098,7 @@ impl MobRef {
 /// (`mob.kind(host)`); where a hook hands out an [`UnspawnedMobEdits`] with it, that makes the
 /// edits. Every read and edit after the hook returns, or with another lend's handle,
 /// is refused with [`UnspawnedMobError::Expired`], so a copy kept past the call changes nothing.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct UnspawnedMobRef {
@@ -2292,6 +2312,7 @@ impl NativeGoal {
 }
 
 /// One goal of a mob's selector, as `goals` and `target_goals` read it.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeMobGoalEntry {
@@ -2305,6 +2326,7 @@ pub struct NativeMobGoalEntry {
 
 /// The ender dragon of the open world, narrowed with `host.dragon(entity)`.
 /// It is also a [`MobRef`] and a [`LivingRef`].
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct DragonRef(EntityRef);
@@ -2384,6 +2406,7 @@ impl NativeDragonPhase {
 }
 
 /// A dropped item entity of the open world, narrowed with `host.item_entity`.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ItemEntityRef(EntityRef);
@@ -2403,6 +2426,7 @@ impl ItemEntityRef {
 
 /// A display entity of the open world (`block_display`, `item_display` or
 /// `text_display`), narrowed with `host.display`.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct DisplayRef(EntityRef);
@@ -2424,6 +2448,7 @@ impl DisplayRef {
 /// `host.projectile`: arrows, tridents (a player's too), firework rockets,
 /// thrown items, fireballs, wind charges, skulls, shulker bullets and mods'
 /// thrown types.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ProjectileRef(EntityRef);
@@ -2444,6 +2469,7 @@ impl ProjectileRef {
 /// A cast fishing hook of the open world (vanilla's `FishingHook`), narrowed
 /// from an entity with `host.fishing_hook(entity)`. It does not narrow to a
 /// [`ProjectileRef`]: a hook's owner is always the player who cast it.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct FishingHookRef(EntityRef);
@@ -2465,6 +2491,7 @@ impl FishingHookRef {
 /// narrowed from an entity with `host.merchant(entity)`. If a villager's saved
 /// profession is unresolved, offers read empty and merchant mutations are
 /// refused until its profession is available again; saved offers are retained.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct MerchantRef(EntityRef);
@@ -2704,6 +2731,7 @@ impl NoBackend for PierceLevelError {
 }
 
 /// A vanilla `AbstractMinecart`, narrowed from an entity with `host.minecart(entity)`.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct MinecartRef(EntityRef);
@@ -2745,6 +2773,7 @@ pub enum NativeMinecartKind {
 /// A block in a dimension, vanilla's `GlobalPos`: the dimension's key
 /// (`minecraft:the_nether`) and the block. The dimension is data, so it need
 /// not be open; `host.level(&pos.dimension().to_string())` gives its level when it is.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Debug, PartialEq, Eq)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct GlobalPos {
@@ -2793,6 +2822,7 @@ pub struct PlayerRespawnConfig {
 
 /// A level of the open world, by its dimension (`minecraft:the_nether`).
 /// `Host::level` makes one, and `entity.level(host)` gives an entity's.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct LevelRef {
@@ -2841,6 +2871,7 @@ impl LevelRef {
 /// again on each call: it reads as `None` or `false` once the raid is gone,
 /// for a handle of an earlier open, for a closed level, and on a client.
 /// Reads and writes reach parked server levels without moving them into place.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct RaidRef {
@@ -2882,6 +2913,7 @@ pub enum NativeRaidStatus {
 
 /// A chunk position in an open level. A handle may be kept after unloading;
 /// reads resolve it again, returning `false` or `None` when it is no longer loaded.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ChunkRef {
@@ -2956,6 +2988,7 @@ pub enum LightLayer {
 /// as its id (`minecraft:vanilla`, `minecraft:redstone_experiments`), shared with the world.
 /// A world that names none enables `minecraft:vanilla` alone, as vanilla's default does.
 /// Getting and reading it allocates nothing.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Debug, PartialEq, Eq)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct FeatureFlags(Arc<[String]>);
@@ -3622,6 +3655,7 @@ pub struct NativeItemCooldown {
 /// An online player in one open server world, keyed by UUID.
 /// A nested guest turn cannot re-enter a player active in an outer turn;
 /// operations requiring that player's swapped state report them unavailable.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct PlayerRef {
@@ -3651,6 +3685,7 @@ impl From<PlayerRef> for EntityRef {
 /// that was removed (even if its id was added again) or a handle from an
 /// earlier open reads as `None` and changes nothing. Mob and raid bars are not
 /// custom boss events and have no handle.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct BossBarRef {
@@ -3794,6 +3829,7 @@ pub struct ClientBossBar {
 ///     menu.click(host, &[]);
 /// }
 /// ```
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct MenuRef {
@@ -3894,6 +3930,7 @@ pub struct NativePlayerAbilities {
 /// Removal, replacement or chunk reload invalidates the handle, even at the same
 /// position. In-place data edits and temporary tick take/put preserve identity.
 /// Stale handles read as `None`; Result-returning methods report `Stale`.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct BlockEntityRef {
@@ -3918,6 +3955,7 @@ impl NoBackend for BlockEntityError {
 }
 
 /// Non-paused authoritative server ticks since open (not game or frame time).
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct NativeTickId(u64);

@@ -17,6 +17,7 @@ pub(crate) struct ControllerInfo {
 /// handle `chunk.set_mod_forced` and `level.mod_forced_chunks` take. Only the registrar makes
 /// one, resolved once there, and it is `Copy`: keep it from `register`, for example in a
 /// `OnceLock`. Another mod's controller does not work.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct TicketController {

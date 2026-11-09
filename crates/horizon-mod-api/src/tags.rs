@@ -3,6 +3,7 @@ use crate::{BlockKey, FluidKey, Identifier, ItemKey};
 
 /// A process-lifetime tag name resolved once through [`Tags::key`].
 /// Membership belongs to the current authoritative data reload, not to the key.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: the runtime alone creates name slots
 pub struct TagKey(pub(crate) u32);

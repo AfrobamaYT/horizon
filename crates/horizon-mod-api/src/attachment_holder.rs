@@ -8,6 +8,7 @@ use crate::{BlockEntityRef, ChunkRef, EntityRef, LevelRef, PlayerRef};
 /// host currently has in place. Keep the ordinary handle rules when using a retained
 /// identity: a removed entity, unloaded chunk or closed world may no longer resolve.
 /// Copying the identity never extends the holder's lifetime.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum AttachmentHolder {

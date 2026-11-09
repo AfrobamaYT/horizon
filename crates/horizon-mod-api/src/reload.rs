@@ -9,6 +9,7 @@ use super::{
 use std::{collections::BTreeMap, sync::Arc};
 
 /// An error loading a resource, including the resource that caused it.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Debug)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ReloadResourceError {
@@ -391,6 +392,7 @@ pub fn apply_listeners<V>(
 /// sides' contexts; each side keeps its own context type so a wrong-side read
 /// does not compile.
 // exhaustive: its fields are private, so mods cannot build or destructure it
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 pub struct ReloadFiles(pub(crate) BTreeMap<Identifier, Vec<u8>>);
 impl ReloadFiles {
     pub(crate) fn new(files: BTreeMap<Identifier, Vec<u8>>) -> Self {

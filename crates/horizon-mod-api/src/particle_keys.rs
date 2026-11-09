@@ -3,6 +3,7 @@ use horizon_mod_runtime::registry_keys::{ParticleKind, Particles};
 use std::sync::OnceLock;
 
 /// A particle requested at registration, resolved once when providers load.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: only the load-owned table creates keys
 pub struct ParticleKey(pub(crate) u32);

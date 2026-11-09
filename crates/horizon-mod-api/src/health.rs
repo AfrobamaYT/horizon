@@ -1,6 +1,7 @@
 //! API-owned health and damage values.
 /// How a modifier changes what a reduction took (NeoForge's `IReductionsModifier`, as plain
 /// data so it also crosses into a wasm mod).
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum ReductionChange {
@@ -17,6 +18,7 @@ pub enum ReductionChange {
 use crate::*;
 /// What took a share of a hit before the health, as NeoForge's `DamageContainer.Reduction`
 /// names it.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Reduction {
@@ -75,6 +77,7 @@ impl DamageValues {
     }
 }
 /// A plain snapshot of one hit. Sequencing and normalization remain owned by the game.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: its wrapped values are private; mods use constructors and accessors
 pub struct DamageContainer(DamageValues);

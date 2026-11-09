@@ -23,6 +23,7 @@ pub(crate) struct CapabilityPart<P> {
 /// publishes), erased: only mods linked with that crate know its handler type.
 // hidden: the registrar's erased provider, not part of the mod surface
 // exhaustive: its fields are private, so mods cannot build or destructure it
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[doc(hidden)]
 #[derive(Clone)]
 pub struct OwnProvider {

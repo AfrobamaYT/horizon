@@ -4,6 +4,7 @@ use crate::*;
 
 /// The listener of a vibration signal (`VibrationParticleOption`), independent
 /// of its resolved rendering destination and of the network protocol.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum PositionSource {
@@ -19,6 +20,7 @@ pub enum PositionSource {
 }
 
 /// `ParticleOptions` with the parameters of the option classes used here.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods use the constructors
 pub struct ParticleOptions {

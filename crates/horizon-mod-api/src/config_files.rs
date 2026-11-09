@@ -30,6 +30,7 @@ pub trait ConfigFiles {
 /// A path inside `config/`: relative, `/`-separated, with no empty, `.` or
 /// `..` part, no `\`, `:` or NUL. Checked once here; the service checks only
 /// that it is the calling mod's.
+// no wire: the manual Wire codec owns the explicit byte layout and checked reconstruction, rather than a structural derive.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ConfigPath(String);
