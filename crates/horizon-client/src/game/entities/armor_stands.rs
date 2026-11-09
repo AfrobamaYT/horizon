@@ -848,7 +848,7 @@ impl Game<'_> {
             extra: None,
         };
         self.spawn_item(stand, center, [0.0; 3], 10);
-        self.armor_stand_death_drops(a.id, "minecraft:player_attack", self.own_entity_id() as u32);
+        self.armor_stand_death_drops(&a, "minecraft:player_attack", self.own_entity_id() as u32);
         for stack in a.equipment.into_iter().flatten() {
             let r = &mut self.world.random;
             let v = [
@@ -1171,21 +1171,54 @@ impl Game<'_> {
         }
         Ok(())
     }
-    /// `ArmorStand.brokenByAnything`'s `dropAllDeathLoot`: the stand has no
-    /// loot of its own, so the list is empty and a mod may add to it or hear
-    /// that the stand broke (`native_living_drops`). The stand item and the
-    /// equipment pop outside the list, as in vanilla.
-    fn armor_stand_death_drops(&mut self, id: u32, damage_type: &str, causing: u32) {
+    /// Roll the stand's entity loot before dispatching `native_living_drops`.
+    /// The stand item and equipment pop outside this list, as in vanilla.
+    fn armor_stand_death_drops(&mut self, stand: &ArmorStand, damage_type: &str, causing: u32) {
+        const TABLE: &str = "minecraft:entities/armor_stand";
+        let mut stacks = Vec::new();
+        if !stand.small
+            && self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::MOB_DROPS)
+            && let Some(loot) = horizon_client::structure_blocks::loot_data(
+                &self.options.resources,
+                &self.pack_files(),
+                self.res.item_defaults(),
+            )
+            && loot.has_table(TABLE)
+        {
+            let params = horizon_world::loot::EntityLootParams {
+                this: horizon_world::loot::LootEntity {
+                    on_fire: stand.fire_ticks > 0,
+                    baby: false,
+                    ..horizon_world::loot::LootEntity::new("minecraft:armor_stand")
+                },
+                ..horizon_world::loot::EntityLootParams::default()
+            };
+            let rolled = match loot.random_sequence(TABLE) {
+                Some(id) => {
+                    loot.roll_entity(TABLE, self.rand_sequences.get(id, self.level.seed), &params)
+                }
+                None => loot.roll_entity(TABLE, &mut self.world.random, &params),
+            };
+            let at = [stand.position.x, stand.position.y, stand.position.z];
+            stacks = rolled
+                .iter()
+                .filter(|stack| !stack.is_empty())
+                .map(|stack| (super::creatures::from_loot(stack), at))
+                .collect();
+        }
         let source = (!mod_api::__private::mods().is_empty())
             .then(|| super::creatures::death_hurt_source(damage_type, causing));
         let dying = super::creatures::DyingDrops {
-            entity: id,
+            entity: stand.id,
             kind: "minecraft:armor_stand",
             player: None,
             source,
             recently_hit: false,
         };
-        self.drop_death_items(&dying, Vec::new(), 10, |_| None);
+        self.drop_death_items(&dying, stacks, 10, |_| None);
     }
     /// `ArmorStand.brokenByAnything`, then `kill`, as burning out or a blast
     /// breaks a stand: its equipment pops above its block, the stand item does
@@ -1198,7 +1231,7 @@ impl Game<'_> {
     ) {
         let a = self.armor_stands.remove(i);
         let at = [a.position.x, a.position.y, a.position.z];
-        self.armor_stand_death_drops(a.id, damage_type, causing);
+        self.armor_stand_death_drops(&a, damage_type, causing);
         let source = self
             .level_entity(causing as i32)
             .or(Some(super::commands::Target::Stand(a.id)));
