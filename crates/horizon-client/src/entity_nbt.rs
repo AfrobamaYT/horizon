@@ -17,6 +17,8 @@ use crate::{
 };
 use horizon_core::geometry::Vec3;
 use std::{collections::HashMap, sync::Arc};
+mod saved_attributes;
+
 use {
     horizon_core::nbt::{Compound, Tag},
     horizon_world::{
@@ -1134,7 +1136,6 @@ pub fn mob_to_nbt(
         }
         "minecraft:zombie_villager" => {
             map.insert("VillagerData".into(), villager_data(m));
-            map.insert("VillagerDataFinalized".into(), Tag::Byte(1));
             let xp = m.extra.trade.as_deref().map_or(0, |t| t.xp);
             map.insert("Xp".into(), Tag::Int(xp));
             put_offers(map, m);
@@ -1448,6 +1449,9 @@ pub fn mob_to_nbt(
         }
         _ => {}
     }
+    if m.species() == S::Frog {
+        crate::mobs::brain::write_frog(m, map);
+    }
     // Bogged.addAdditionalSaveData: whether its mushrooms were sheared.
     if m.species() == S::Bogged {
         map.insert("sheared".into(), Tag::Byte(i8::from(m.extra.sheared)));
@@ -1688,6 +1692,17 @@ fn put_attributes(map: &mut Compound, m: &Mob) {
         Some(Tag::List(l)) => l.clone(),
         _ => Vec::new(),
     };
+    if let Some(attributes) = m.extra.attributes.as_deref() {
+        for attr in crate::mobs::finalize::Attr::ALL {
+            if !attributes
+                .modifiers
+                .iter()
+                .any(|modifier| modifier.attr == attr)
+            {
+                saved_attributes::forget_stale_modifiers(&mut list, attr);
+            }
+        }
+    }
     for (id, entry) in attribute_entries(m) {
         match list
             .iter_mut()
@@ -1762,42 +1777,6 @@ fn put_sulfur_attributes(map: &mut Compound, m: &Mob) {
     }
 }
 /// `Brain.Packed`: the memories finalizeSpawn set, over the saved ones.
-pub fn put_brain(map: &mut Compound, m: &Mob, dimension: &str) {
-    if m.extra.memories.is_empty() {
-        return;
-    }
-    let mut memories = match map.get(&"Brain".into()).and_then(|b| b.get("memories")) {
-        Some(Tag::Compound(c)) => c.clone(),
-        _ => Compound::new(),
-    };
-    for &(name, value, ttl) in &m.extra.memories {
-        let value = match name {
-            "hunted_recently" => Tag::Byte(value as i8),
-            // `Unit` memories save an empty compound.
-            "is_pregnant" => Tag::Compound(Compound::new()),
-            "home" => match m.extra.home {
-                Some(p) => Tag::compound([
-                    ("dimension", string(dimension)),
-                    ("pos", Tag::IntArray(p.to_vec())),
-                ]),
-                None => continue,
-            },
-            _ => Tag::Int(value as i32),
-        };
-        let mut memory = vec![("value", value)];
-        if ttl != i64::MAX {
-            memory.push(("ttl", Tag::Long(ttl)));
-        }
-        memories.insert(
-            format!("minecraft:{name}").as_str().into(),
-            Tag::compound(memory),
-        );
-    }
-    map.insert(
-        "Brain".into(),
-        Tag::compound([("memories", Tag::Compound(memories))]),
-    );
-}
 /// `CustomName`: a text component saved as a string or a `{text: ..}` compound.
 fn custom_name(tag: &Tag) -> Option<String> {
     match tag.get("CustomName")? {
@@ -1810,23 +1789,6 @@ fn custom_name(tag: &Tag) -> Option<String> {
     }
 }
 pub use horizon_client_core::component::name_text;
-/// Mob.finalizeSpawn's follow range bonus in the saved attributes.
-#[cfg(test)]
-pub(crate) fn spawn_bonus(tag: &Tag) -> Option<f64> {
-    let Some(Tag::List(attrs)) = tag.get("attributes") else {
-        return None;
-    };
-    let range = attrs
-        .iter()
-        .find(|a| text(a.get("id")).as_deref() == Some("minecraft:follow_range"))?;
-    let Some(Tag::List(modifiers)) = range.get("modifiers") else {
-        return None;
-    };
-    let bonus = modifiers
-        .iter()
-        .find(|x| text(x.get("id")).as_deref() == Some("minecraft:random_spawn_bonus"))?;
-    float(bonus.get("amount"))
-}
 /// `Mob.readAdditionalSaveData`: negative radii retain the live homePosition.
 /// Used after the command adapter restores runtime AI, as well as fresh load.
 pub fn read_mob_home(m: &mut Mob, tag: &Tag) {
@@ -1979,31 +1941,9 @@ pub fn mob_from_nbt_with_random(
     // `AttributeMap.apply`: the saved permanent modifiers of the attributes the
     // game models (the follow range bonus finalizeSpawn made among them), and
     // the other saved attributes for the live map.
-    if let Some(Tag::List(attrs)) = tag.get("attributes") {
-        use crate::mobs::finalize::{Attr, Op, add_modifier};
-        for a in attrs {
-            let Some(attr) = text(a.get("id")).and_then(|id| {
-                Attr::ALL
-                    .into_iter()
-                    .find(|x| *x != Attr::Armor && x.id() == id)
-            }) else {
-                continue;
-            };
-            let Some(Tag::List(modifiers)) = a.get("modifiers") else {
-                continue;
-            };
-            for x in modifiers {
-                let op = match text(x.get("operation")).as_deref() {
-                    Some("add_value") => Op::AddValue,
-                    Some("add_multiplied_base") => Op::AddMultipliedBase,
-                    Some("add_multiplied_total") => Op::AddMultipliedTotal,
-                    _ => continue,
-                };
-                if let (Some(id), Some(amount)) = (text(x.get("id")), float(x.get("amount"))) {
-                    add_modifier(&mut m, attr, id, amount, op);
-                }
-            }
-        }
+    if let Some(Tag::List(_)) = tag.get("attributes") {
+        use crate::mobs::finalize::Attr;
+        saved_attributes::read_attribute_modifiers(&mut m, tag);
         // An attribute the type lacks is skipped (`AttributeMap.apply`).
         let kind = m.kind.clone();
         m.extra.live.load(tag.get("attributes"), |id| {
@@ -2727,9 +2667,9 @@ pub fn mob_from_nbt_with_random(
         m.extra.left_handed = false;
         m.no_ai = false;
     }
-    // A mob saved mid-death finishes dying; one saved dead is dropped.
-    if m.health <= 0.0 && m.death_time == 0 {
-        return None;
+    // setHealth clamps a negative health to 0; a dead mob keeps its body (tickDeath).
+    if m.health < 0.0 {
+        m.health = 0.0;
     }
     Some(m)
 }

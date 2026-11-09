@@ -426,6 +426,9 @@ pub struct Ext {
     /// `CanContinueSleepingEvent.mayContinueSleeping`, set by the game before the tick
     /// when a native mod may overwrite the bed check; empty means vanilla's.
     pub may_continue_sleeping: Option<bool>,
+    /// `ZombieVillager.villagerDataFinalized`: only a save with
+    /// `VillagerDataFinalized` or `VillagerData` sets it.
+    pub data_finalized: bool,
     /// The villager's brain, built at its first tick.
     pub brain: Option<Box<super::villager_brain::Brain>>,
     /// Saved memories awaiting the first brain initialization.
