@@ -331,3 +331,12 @@ fn allocation(path: &Path, _meta: &fs::Metadata) -> Result<((u64, u64), u64), Er
 #[cfg(test)]
 #[path = "storage/tests.rs"]
 mod tests;
+
+// Turning native mods off is the Storage page's last row.
+impl crate::backend::Settings {
+    /// Revoke consent before attempting to disable installed native packages.
+    pub fn revoke_native_mods(&mut self) -> Result<(), String> {
+        self.native_mods_allowed_at = None;
+        self.save()
+    }
+}
