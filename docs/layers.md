@@ -323,8 +323,13 @@ controllers and replay recording are not extras: they are platform ([above](#con
 
 A Rust file over 3000 lines may not grow compared with the base of the branch. `game.rs` (~21,700 lines),
 `game/remote.rs` (~10,900) and `gfx.rs` (~10,100) are the worst; they slow incremental builds. Smaller files may
-grow to 3000 lines, and a big file may shrink or stay as it is. There is no list of files, so no check breaks on
-an unrelated edit. Generated files and `third_party/` are not checked. Test code doesn't count either, since a normal
+grow to 3000 lines, and a big file may shrink or stay as it is. The fork records restored upstream growth in
+`tools/file_size_baseline.txt`, at each file's exact size in that sync. A changed
+`# sync-baseline: <full upstream SHA>` header declares an upstream sync; without a changed declaration,
+adding or raising an entry fails against `--base`. A listed file must stay within its cap, and a cap above
+the current size (or naming a deleted file) fails: lower or remove the entry when the file shrinks. Sync
+PRs list every entry and its growth. This records restoration debt, not permission for other PRs to grow it.
+Generated files and `third_party/` are not checked. Test code doesn't count either, since a normal
 build doesn't compile it: inline `#[cfg(test)] mod name { ... }` modules, and files named `tests.rs` or
 `<name>_tests.rs`. Other `#[cfg(test)]` items count.
 
