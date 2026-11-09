@@ -1237,12 +1237,16 @@ mod tests {
     fn a_block_entity_removing_itself_in_its_tick_is_not_asked() {
         use horizon_client::chunk::Chunk;
         use horizon_client::containers::{ModBlockEntity, ModBlockEntityFields, ModContainer};
-        use mod_api::__private::part_tests::{HOARD, HOARD_ASKED, game_thread};
+        use mod_api::__private::part_tests::{HOARD, HOARD_ASKED};
         use mod_api::Holder;
         use std::sync::Arc;
         use std::sync::atomic::Ordering;
-        crate::game::native_entity_refs::tests::with_game(|game| {
-            let _mods = game_thread();
+        let Some(root) = crate::game::native_entity_refs::tests::declared_part_root(
+            "game::spill::tests::a_block_entity_removing_itself_in_its_tick_is_not_asked",
+        ) else {
+            return;
+        };
+        crate::game::native_entity_refs::tests::with_game_at(root, |game| {
             game.options.dedicated = Some(Vec::new());
             game.world
                 .chunks
