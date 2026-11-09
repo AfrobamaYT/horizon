@@ -441,9 +441,12 @@ mod off_level_tests {
                     0.0,
                 );
                 m.extra.set_body(Some("minecraft:tnt".into()));
-                sulfur_cube::adopt_body(&mut m);
                 m.extra.mount = mount;
                 game.mobs.push(m);
+            }
+            game.init_sulfur_attribute_maps();
+            for mob in &mut game.mobs {
+                sulfur_cube::adopt_body(mob);
             }
             let ghost = horizon_client::mobs::Mob::new(72, kind, Vec3::ZERO, 0.0);
             game.persist

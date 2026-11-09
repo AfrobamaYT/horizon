@@ -1497,9 +1497,6 @@ impl Game<'_> {
         {
             return Some(id);
         }
-        if uuid.is_some_and(|u| self.target_with_uuid(u).is_some()) {
-            return None;
-        }
         self.next_entity += 1;
         // Structure mobs that generation left to finish: saves from before
         // they were finalized at placement, or a placement that could not.
