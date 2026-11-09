@@ -391,9 +391,6 @@ impl Storage {
                 }
             }
         }
-        for entry in &entries {
-            entry.last_used()?;
-        }
         Ok(entries)
     }
 
@@ -435,6 +432,9 @@ impl Storage {
     pub(super) fn evict_inventory(&self, now: std::time::SystemTime) -> Result<Report, Error> {
         use super::policy::{self, Tier, Unit};
         let entries = self.entries()?;
+        for entry in &entries {
+            entry.last_used()?;
+        }
         let settings = backend::Settings::load();
         let mut revisions = HashSet::new();
         let mut unknown_revision = false;
@@ -641,6 +641,11 @@ impl Storage {
                             bytes: allocated_bytes(&entry.path)?,
                             reason: native_mods::cache_error(error),
                         });
+                        // A busy build may be using subsequent build-tool units too. Stop
+                        // this clear attempt rather than deleting more after contention.
+                        if matches!(entry.access(), Access::BuildTools) {
+                            break;
+                        }
                     }
                     Err(error) => return Err(error),
                 }

@@ -1308,6 +1308,11 @@ fn execute(command: Cmd, as_json: bool) -> Result<i32, String> {
             };
             let report = storage.report(row, all).map_err(native_mods::cache_error)?;
             println!("{}", serde_json::to_string_pretty(&report).unwrap());
+            if row.is_some() || all {
+                if let Some(kept) = report.rows.iter().flat_map(|row| &row.kept).next() {
+                    return Err(kept.reason.clone());
+                }
+            }
         }
         Cmd::NativeBuild {
             sync_internals,

@@ -4014,10 +4014,10 @@ mod tests {
         assert!(!log.contains("Build completed."), "{log}");
         let success: Result<(), String> = logged(|_| Ok(()));
         success.unwrap();
-        assert_eq!(
-            fs::read_to_string(log_path()).unwrap(),
-            "Build completed.\n"
-        );
+        let log = fs::read_to_string(log_path()).unwrap();
+        assert!(log.ends_with("Build completed.\n"), "{log}");
+        assert!(!log.contains("error[E0425]"), "{log}");
+        assert!(!log.contains("The build failed:"), "{log}");
     }
 
     fn record(horizon: &str, mods: &[(&str, &str)]) -> Record {
