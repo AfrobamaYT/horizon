@@ -918,6 +918,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `menu::SlotView::allow_modification` | crosses | Wire call |
 | `menu::SlotView::safe_insert` | crosses | Wire call |
 | `menu::SlotView::safe_take` | crosses | Wire call |
+| `Registrar::declare_attribute` | crosses | Wire call |
 | `Registrar::block_entity_type_key` | crosses | Wire call |
 | `Registrar::declare_block_entity_type` | crosses | Wire call |
 | `Registrar::attach_block_entity_part` | crosses | Wire call |
@@ -1025,6 +1026,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `PackFinders::pack_type` | crosses | Wire call |
 | `PackFinders::add_pack_finders` | crosses | Wire call |
 | `BlockTintSources::register` | crosses | Wire call |
+| `ParticleProviders::register` | crosses | Wire call |
 | `EnchantmentDamageEffects::register` | crosses | Wire call |
 | `BlockAndTintGetter::block_state` | crosses | Wire call |
 | `BlockAndTintGetter::fluid_state` | crosses | Wire call |
@@ -1546,6 +1548,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::register_game_tests` | crosses | Wire call |
 | `Hooks::register_gui_layers` | crosses | Wire call |
 | `Hooks::register_item_tint_sources` | crosses | Wire call |
+| `Hooks::register_particle_providers` | crosses | Wire call |
 | `Hooks::register_range_select_item_model_property` | crosses | Wire call |
 | `Hooks::register_runtime_sprites` | crosses | Wire call |
 | `Hooks::register_select_item_model_property` | crosses | Wire call |
@@ -1687,6 +1690,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `BlockTintSource::color_in_world` | crosses | Wire call |
 | `BlockTintSource::color_as_terrain_particle` | crosses | Wire call |
 | `BlockTintSource::relevant_properties` | crosses | Wire call |
+| `ParticleProvider::tick` | crosses | Wire call |
 | `EnchantmentDamageEffect::apply` | crosses | Wire call |
 | `GroundStateProvider::state_at` | crosses | Wire call |
 | `PlaceProvider::stack` | crosses | Wire call |

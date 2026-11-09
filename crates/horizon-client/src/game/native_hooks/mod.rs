@@ -76,8 +76,9 @@ use mod_api::{
     EnchantmentDamageEffects, EnchantmentInfo, EntityRef, GameRuleActor, InteractionAttempt,
     InteractionKey, LayerDefinition, LivingRef, NativeCamera, NativeCommand, NativeDispensed,
     NativeHandRender, NativeKeyMapping, NativeLifecycleContext, NativeNoteBlockChange,
-    PathComputationType, Placement, PlayerRef, RecipeBookCategory, ScreenId, ScreenOpening,
-    ScreenshotImage, ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
+    ParticleProviders, PathComputationType, Placement, PlayerRef, RecipeBookCategory, ScreenId,
+    ScreenOpening, ScreenshotImage, ServerReloadListeners, ServerTickPhase, TicketController,
+    ToolUse, WorldPhase,
 };
 use mod_api::{
     AttachmentStore, BonemealSource, ChunkRef, FluidStack, LevelRef, LogicalSide,

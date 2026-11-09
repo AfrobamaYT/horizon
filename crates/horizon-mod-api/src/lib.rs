@@ -44,6 +44,12 @@ pub enum ModelError {
     StaleModel,
 }
 
+/// A block state as the game's state table numbers it (`Block.BLOCK_STATE_REGISTRY`'s id): what
+/// worldgen providers and fluid queries answer. Valid for the running game only; never save it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+// exhaustive: a state id is its number
+pub struct BlockStateId(pub u32);
+
 /// A dimension (`minecraft:the_nether`), as the game's table numbers it: a `LevelRef`'s identity.
 /// A key stays the same dimension until the game exits; `key.id(host)` gives the name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -77,6 +83,37 @@ pub enum EntityAttributeError {
     NotFinite,
     /// Another declaration already covers the entity type.
     Duplicate,
+}
+
+/// Why a mod's attribute type declaration was refused
+/// ([`Registrar::declare_attribute`](AttributesRegistrar::declare_attribute)).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum AttributeRegistrationError {
+    /// Only both-side packages may change the attribute registry.
+    WrongSide,
+    /// The attribute's id is malformed, empty or in a namespace the
+    /// declaring mod does not own (a vanilla attribute's included).
+    InvalidId,
+    /// Another declaration already covers the attribute.
+    Duplicate,
+    /// The default or a bound is not finite.
+    NotFinite,
+    /// `min > max`, or the default is not inside `[min, max]`
+    /// (`RangedAttribute`'s own checks).
+    InvalidBounds,
+}
+
+/// Tooltip color semantics for an attribute change.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Sentiment {
+    /// Increasing values are beneficial.
+    #[default]
+    Positive,
+    /// Increasing values are harmful.
+    Negative,
+    /// Changes are neutral.
+    Neutral,
 }
 
 /// A boolean game rule declared by a mod.

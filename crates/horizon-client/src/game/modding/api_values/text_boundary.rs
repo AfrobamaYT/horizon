@@ -905,6 +905,7 @@ fn discard_api_text(root: Text) {
             }) => nbt::discard_tag(tag),
             _ => {}
         }
+        #[allow(clippy::single_match)] // TODO(#2273): rewrite as `if let`.
         match text.style.click {
             Some(
                 TextClick::ShowDialog(tag)
@@ -958,6 +959,7 @@ impl<'a> Payloads<'a> {
                     keep(&p.metadata)?;
                 }
             }
+            #[allow(clippy::single_match)] // TODO(#2273): rewrite as `if let`.
             match &text.style.click {
                 Some(
                     TextClick::ShowDialog(tag)
