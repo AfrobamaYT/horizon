@@ -359,3 +359,5 @@ pub(crate) fn publish_existing() -> Result<(), Error> {
     }
     Ok(())
 }
+
+pub(crate) mod control;

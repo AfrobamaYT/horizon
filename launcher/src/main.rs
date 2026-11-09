@@ -5552,10 +5552,7 @@ fn main() {
     }
     #[cfg(windows)]
     backend::remove_replaced_binaries();
-    if let Err(error) = backend::register_runtime_units() {
-        eprintln!("{error}");
-    }
-    backend::cleanup_launcher_updates();
+    backend::startup_cleanup();
     // What the launcher downloads goes through the player's proxy, if they set one: the parts
     // that build their own agents (`horizon-port-pack`) are told before anything starts.
     horizon_launcher::proxy::announce(horizon_launcher::backend::Settings::load().proxy);

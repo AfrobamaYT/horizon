@@ -4275,29 +4275,6 @@ pub struct Running {
     pub stdin: Option<ChildStdin>,
 }
 
-impl Running {
-    pub fn send(&mut self, line: &str) {
-        if let Some(stdin) = &mut self.stdin {
-            let _ = writeln!(stdin, "{line}");
-            let _ = stdin.flush();
-        }
-    }
-    pub fn kill(&self) {
-        let mut child = self.child.lock().unwrap();
-        #[cfg(unix)]
-        {
-            // GUI children own their group. Never signal a cached, already-reaped PID.
-            if matches!(child.try_wait(), Ok(None)) {
-                unsafe {
-                    libc::kill(-(child.id() as i32), libc::SIGKILL);
-                }
-            }
-        }
-        #[cfg(not(unix))]
-        let _ = child.kill();
-    }
-}
-
 /// Launcher-owned tree-lock primitives and optional Windows runtime state.
 pub struct RuntimeGuard {
     _leases: Vec<crate::run_leases::Claim>,
@@ -4305,10 +4282,7 @@ pub struct RuntimeGuard {
     _windows: Option<crate::windows_runtime::Guard>,
 }
 
-/// Register installations made before the lifetime protocol before cleanup is available.
-pub fn register_runtime_units() -> Result<(), String> {
-    crate::run_leases::publish_existing().map_err(crate::native_mods::cache_error)
-}
+pub use crate::run_leases::control::startup_cleanup;
 
 pub fn prepare_command(cmd: Command) -> Result<(Command, RuntimeGuard), String> {
     let leases = crate::run_leases::shared(&cmd).map_err(crate::native_mods::cache_error)?;
