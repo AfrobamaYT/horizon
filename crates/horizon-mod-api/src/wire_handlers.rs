@@ -54,6 +54,7 @@ handler!(dyn BiomeColorResolver, "BiomeColorResolver");
 handler!(dyn BlockTintSource, "BlockTintSource");
 handler!(dyn ParticleProvider, "ParticleProvider");
 handler!(dyn EnchantmentDamageEffect, "EnchantmentDamageEffect");
+handler!(dyn CommandArgumentType, "CommandArgumentType");
 handler!(dyn GroundStateProvider, "GroundStateProvider");
 handler!(dyn PlaceProvider, "PlaceProvider");
 handler!(dyn TooltipAppender, "TooltipAppender");
