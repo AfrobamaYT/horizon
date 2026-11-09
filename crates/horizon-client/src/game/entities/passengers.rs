@@ -575,3 +575,18 @@ impl Game<'_> {
         Some(id)
     }
 }
+
+#[cfg(test)]
+mod content_seat_tests {
+    use super::*;
+
+    #[test]
+    fn content_seats_keep_independent_offsets() {
+        use std::sync::Arc;
+        let mut kind = horizon_client::mobs::sensor_scan_tests::kind();
+        Arc::make_mut(&mut kind).passenger_attachments = vec![[1.0, 2.0, 3.0], [-1.0, 4.0, 5.0]];
+        let vehicle = horizon_client::mobs::Mob::new(1, kind, Vec3::ZERO, 0.0);
+        assert_eq!(riders::passenger_attachment_at(&vehicle, 0), [1.0, 2.0, 3.0]);
+        assert_eq!(riders::passenger_attachment_at(&vehicle, 1), [-1.0, 4.0, 5.0]);
+    }
+}
