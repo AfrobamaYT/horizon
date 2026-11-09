@@ -2522,7 +2522,7 @@ impl Game<'_> {
                     let sender = message.sender;
                     let raw = message.content.clone();
                     // `PlayerChatMessage.decoratedContent`: the text as a literal.
-                    let original = Text::literal(raw.clone());
+                    let original = Text::untrusted(raw.clone());
                     let mut text = original.clone();
                     let mut cancel = false;
                     let mut replies = Vec::new();
@@ -4004,7 +4004,7 @@ impl Game<'_> {
             // too): the host's Chat option decides, as `ChatListener` does
             // for the guests' packets. Command feedback is a system message
             // and takes the system-message permission instead.
-            HostEvent::Chat { line, .. } => self.player_message(Text::literal(line)),
+            HostEvent::Chat { line, .. } => self.player_message(Text::untrusted(line)),
             HostEvent::Warn(line) if dedicated => super::dedicated::log("WARN", &line),
             HostEvent::Warn(line) => log::warn!("{line}"),
             HostEvent::Error(line) if dedicated => super::dedicated::log("ERROR", &line),

@@ -1382,12 +1382,7 @@ pub fn lore_texts(stack: &ItemStack) -> Vec<crate::text::Text> {
     };
     lines
         .into_iter()
-        .map(|mut text| {
-            for span in &mut text.spans {
-                span.style.inherit(&base);
-            }
-            text
-        })
+        .map(|text| text.map_styles(|style| style.inherit(&base)))
         .collect()
 }
 
@@ -1406,7 +1401,7 @@ pub fn styled_name(stack: &ItemStack, fallback: impl FnOnce() -> String) -> crat
     {
         return crate::entity_nbt::name_text(component);
     }
-    crate::text::Text::legacy(&fallback())
+    crate::text::Text::untrusted_legacy(&fallback())
 }
 
 #[cfg(test)]

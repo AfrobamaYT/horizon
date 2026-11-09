@@ -2069,7 +2069,7 @@ impl Game<'_> {
         let source = horizon_client::chat::ChatSource::Player;
         let shown = self.signed_chat_line(line, source, signature, trust);
         if shown && error {
-            self.say_system_chat_queued(&horizon_client::text::Text::literal(&narration));
+            self.say_system_chat_queued(&horizon_client::text::Text::untrusted(&narration));
         } else if shown {
             self.say_chat_queued(&narration);
         }
@@ -11513,7 +11513,7 @@ impl Game<'_> {
             }
         });
         let atlas = &self.gui.atlas;
-        let status = horizon_client::text::Text::literal(r.status.as_str());
+        let status = horizon_client::text::Text::untrusted(r.status.as_str());
         horizon_client::level_loading::draw_connecting(batch, atlas, &status, self.cursor, cancel);
         true
     }
