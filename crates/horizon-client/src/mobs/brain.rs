@@ -70,7 +70,7 @@ pub fn living_near(m: &Mob, w: &MobWorld) -> Vec<Who> {
             found.push((Who::Mob(o.id), m.distance_sqr(o.position)));
         }
     }
-    if let Some(p) = &w.player
+    if let Some(p) = w.selected_player()
         && p.alive
         && p.bounds.intersects(area)
     {

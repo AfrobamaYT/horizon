@@ -19,7 +19,7 @@ fn turned_view_vector(yaw: f32, pitch: f32, pitch_offset: f32) -> [f64; 3] {
 
 /// `Entity.getOnPos()`: the supporting block when there is one, else the block `1.0E-5F`
 /// under the feet at `position`.
-fn on_block_position(support: Option<BlockPos>, position: Vec3) -> [i32; 3] {
+pub(super) fn on_block_position(support: Option<BlockPos>, position: Vec3) -> [i32; 3] {
     match support {
         Some(p) => [p.x, p.y, p.z],
         None => [
