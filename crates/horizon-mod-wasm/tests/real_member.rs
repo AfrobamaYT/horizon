@@ -1,6 +1,10 @@
 //! The build-tool fixture is a real shared module, not a component.
 // Generated fixtures exercise every shape; TODO(#2273): make the generator emit clippy-clean code.
 #![allow(clippy::all, unused_comparisons, unreachable_patterns, dead_code)]
+#[path = "fixture/src/matrix.rs"]
+mod matrix;
+#[path = "fixture/checks.rs"]
+mod matrix_checks;
 #[path = "fixture/src/replace.rs"]
 mod replace;
 #[path = "fixture/src/shutdown.rs"]
@@ -59,6 +63,7 @@ fn real_member() {
             "HORIZON_WASM_FIXTURE and HORIZON_WASM_STD must be set: run with the wasm-mods workflow's environment"
         );
     };
+    matrix_checks::baseline();
     let path = std::path::Path::new(&fixture);
     let manifest = Package::read(path).unwrap().manifest;
     let info = mod_api::PackageInfo::new(
@@ -103,6 +108,7 @@ fn real_member() {
         );
     });
     mod_points::__private::seal();
+    matrix_checks::check();
     let mut args = mod_points::TickArgs::__new();
     mod_points::dispatch::tick(mod_api::HostSide::Server(&mut Quiet), &mut args);
     assert!(
