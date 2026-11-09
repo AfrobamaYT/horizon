@@ -23,6 +23,11 @@ fn main() {
         assert_eq!(unsafe { libc::atexit(delayed_exit) }, 0);
     }
     match std::env::var("HOLDER_TEST_MODE").as_deref() {
+        Ok("copy-image") => {
+            let destination = std::env::var_os("HOLDER_TEST_IMAGE").unwrap();
+            std::fs::copy(std::env::current_exe().unwrap(), destination).unwrap();
+            return;
+        }
         Ok("gui-capture") => {
             let root = PathBuf::from(std::env::var_os("HOLDER_TEST_ROOT").unwrap());
             let holder::Started::Holder { child } = scene::start(&root, "capture") else {
