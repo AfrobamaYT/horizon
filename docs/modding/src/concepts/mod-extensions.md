@@ -41,6 +41,8 @@ The derive implements the existing trait (`crates/horizon-mod-api/src/wire.rs:55
 - `put_owned` moves each field with `out.put_owned`, as the generator does, so resource fields hand over ownership.
 - On a `#[non_exhaustive]` type the derive emits the same `_ => unreachable!` arm under `#[allow(unreachable_patterns)]`. Within the defining crate, `non_exhaustive` adds no case.
 
+**Names.** Type names in this section are as of `54bee0f608`. D1, D2 and the golden test use the names as of D2's base. The restructure drops the `Native` prefix (106 renames, among them `NativeWorldEpoch`→`WorldEpoch`, `NativeTickId`→`TickId`, `NativeGoal`→`GoalSpec`, `NativeHeldItem`→`HeldItemSlot`, `NativeSpawner`→`SpawnSource`; table in `/box/shared/api-scaffold/move-table.md`).
+
 **Golden bytes.** These were taken from the current generated and hand-written impls at `54bee0f608` with a throwaway test, which was not committed:
 
 | Value | Shape | `MIN` | Bytes |
@@ -69,6 +71,8 @@ The first derive PR commits these as a golden test, plus one case per shape and 
 - The constructors for borrowed records (`__wire_record_N`, 463 of them), and the `Put` impls with checked write-back for records that take appends, projections or views (3). These describe how a call's borrowed arguments cross and come back. That is a call-table concern.
 - The guest and host call glue, `wasm-coverage.md`, and `index.rs`. The index stays only to read trait signatures for the call tables. It no longer resolves type definitions.
 
+The kept constructors and `Put` impls are generated at the API root, so after the restructure a field private to its module is invisible to them. The crate-visible-fields rule (`ty.rs:635`) therefore stays for those borrowed records and goes away only for value impls.
+
 ### Trait path, generics, borrowed types
 
 - **Path.** The derive emits `::mod_api::wire::Wire`. Inside `mod_api` this resolves through the existing `extern crate self as mod_api`, so one expansion serves both. There is no `crate =` option.
@@ -82,12 +86,12 @@ The first derive PR commits these as a golden test, plus one case per shape and 
 ### Layout hash and versioning
 
 - **A layout const on the trait.** `Wire` gains `const LAYOUT: u64`. The derive computes it as a `const fn` FNV-1a over:
-  - the type's path;
+  - the type's **unqualified** name (not `module_path!`, so the restructure's moves change nothing and only a rename changes it);
   - its shape (record, tuple, unit, enum);
   - its field and case names in order;
   - each field's `<F as Wire>::LAYOUT`.
 
-  The std impls get fixed constants. A field whose type is the type itself, or a container of it, hashes a fixed marker in place of its own `LAYOUT`, which keeps `Tag` from forming a const cycle.
+  The std impls get fixed constants. A field whose type is the type itself, or a container of it, hashes a fixed marker in place of its own `LAYOUT`, which keeps `Tag` from forming a const cycle. Golden tests pin **bytes only**, never `LAYOUT` values: those are free to change when a type is renamed.
 - **`WIRE_LAYOUT`.** It becomes the hash of the call tables' signatures (as now) plus the `LAYOUT` of every type in them. This replaces hashing the generator's `Def` debug strings. Any field change in any crossing type still changes it, and a mod built against another layout is still refused with `Refusal::Layout`.
 - **A layout per mod.** `cargo horizon-mod build` folds the `LAYOUT` of each type the mod declares as crossing (its hook events and registry values) into one hash. It records that hash in the package's build metadata next to the existing build identity. A dependent on the other target that was built against another layout is refused at load, naming the mod and the first type whose `LAYOUT` differs.
 - **No versioning inside the encoding.** There are no optional fields, defaults or version tags. A change means a rebuild, and the hash refuses a stale build at load. This is the clean-break rule applied to bytes.
@@ -150,7 +154,7 @@ The first PR classifies every impl in a table in its description, with the golde
 | PR | What | Size (estimate) | Depends on |
 |---|---|---|---|
 | D1 | The derive in `horizon-mod-api-macros` (shapes, `MIN`, `put_owned`, `non_exhaustive`, generic bounds, `via`, `LAYOUT`) and `LAYOUT` on the trait with the std constants. The golden test against the generated impls. `on_unimplemented`. Nothing switched yet. | ~700 | #2242 merged |
-| D2 | Switch `mod_api`: `#[derive(Wire)]` on the 528 types, the hand-impl migration above, the generator stripped to call tables, `WIRE_LAYOUT` from `LAYOUT`. The golden test passes unchanged. | ~1,500 changed, mostly one-line attributes; generator −1,000 | D1. Lands **before or with** api-scaffold's restructure, so each type moves once, carrying its derive. If they are stacked, D2 goes first. |
+| D2 | Switch `mod_api` (ordered before the restructure, confirmed by api-scaffold: the mover carries `#[derive(mod_api::Wire)]` with each item, and `::mod_api::wire::Wire` still resolves after `wire.rs` becomes `wire/mod.rs`): `#[derive(Wire)]` on the 528 types, the hand-impl migration above, the generator stripped to call tables, `WIRE_LAYOUT` from `LAYOUT`. The golden test passes unchanged. | ~1,500 changed, mostly one-line attributes; generator −1,000 | D1. Lands **before or with** api-scaffold's restructure, so each type moves once, carrying its derive. If they are stacked, D2 goes first. |
 | D3 | Mods: documented `wire` API, per-mod layout in `cargo horizon-mod build` metadata, load refusal naming the type, a book page. | ~400 | D2 |
 
 The restructure can be stacked on D2, or D2's attribute edits can be done inside the restructure's moves; api-scaffold and fork-lead decide which. Stages 2–6 of the plan below assume D2 has landed.
