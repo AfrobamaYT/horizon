@@ -725,7 +725,8 @@ impl Game<'_> {
         let is_mob = self.res.mob_types().contains_key(kind.as_str());
         drop_unleashable_leash(&mut tag, &kind, is_mob);
         let uuid = entity_nbt::uuid(&tag);
-        if uuid.is_some_and(|u| self.restored_vehicle(u).is_some()) {
+        // This shortcut deduplicates disk copies, never explicit runtime ownership.
+        if transferred.is_none() && uuid.is_some_and(|u| self.restored_vehicle(u).is_some()) {
             return;
         }
         if (matches!(
@@ -1414,7 +1415,11 @@ impl Game<'_> {
         transferred: Option<super::entity_initialization::TransferredEntityState>,
     ) -> Option<u32> {
         let uuid = entity_nbt::uuid(&tag);
-        if let Some(id) = uuid.and_then(|u| self.restored_vehicle(u)) {
+        // Only disk reconstruction coalesces the player's saved copy with a
+        // chunk copy. An explicit runtime token owns a distinct live object.
+        if transferred.is_none()
+            && let Some(id) = uuid.and_then(|u| self.restored_vehicle(u))
+        {
             return Some(id);
         }
         self.next_entity += 1;
@@ -7280,6 +7285,159 @@ mod mob_hurt_cooldown_tests {
             assert!(game.run_command(&format!("damage {armored} 8 minecraft:cactus")));
             check(&mut failures, "armor 8", pig(game, 2), (34.56, 20, 8.0));
             assert!(failures.is_empty(), "hurt cooldown: {failures:#?}");
+        });
+    }
+}
+
+#[cfg(test)]
+mod restored_vehicle_transfer_tests {
+    use super::*;
+    use horizon_mod_runtime::attachments::{AttachmentCodec, AttachmentType, Attachments, Holder};
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn runtime_transfers_do_not_alias_a_saved_player_vehicle_with_the_same_uuid() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            let runtime = AttachmentType {
+                namespace: "test",
+                name: "runtime",
+                default: || 0,
+                codec: None,
+                copy_on_death: false,
+                sync: false,
+            };
+            let saved = AttachmentType {
+                namespace: "test",
+                name: "saved",
+                default: || 0,
+                codec: Some(AttachmentCodec {
+                    encode: |n: &i32| Ok([("value".into(), Tag::Int(*n))].into()),
+                    decode: |c| {
+                        Ok(match c.get(&"value".into()) {
+                            Some(Tag::Int(n)) => *n,
+                            _ => {
+                                return Err(
+                                    horizon_mod_runtime::attachments::AttachmentError::Decode,
+                                );
+                            }
+                        })
+                    },
+                }),
+                copy_on_death: false,
+                sync: false,
+            };
+            let tag = |kind: &str, n: i32| {
+                Tag::compound([
+                    ("id", Tag::String(kind.into())),
+                    ("UUID", Tag::IntArray(vec![n, 2, 3, 4])),
+                    (
+                        "Pos",
+                        Tag::List(vec![
+                            Tag::Double(1.0f64.to_bits()),
+                            Tag::Double(70.0f64.to_bits()),
+                            Tag::Double(1.0f64.to_bits()),
+                        ]),
+                    ),
+                ])
+            };
+            for generic in [false, true] {
+                let n = if generic { 720 } else { 710 };
+                let uuid = [n, 2, 3, 4];
+                // Capture a real source before loading the destination's saved vehicle.
+                let source = game.load_mob(tag("minecraft:cow", n), None).unwrap();
+                let source_child = (!generic).then(|| {
+                    game.load_mob(tag("minecraft:pig", n + 1), Some(source))
+                        .unwrap()
+                });
+                let mut map = Attachments::default();
+                runtime.set(&mut map, Holder::Level, 41).unwrap();
+                saved.set(&mut map, Holder::Level, 51).unwrap();
+                game.entity_attachments.insert(source, map);
+                let index = game.mobs.iter().position(|m| m.id == source).unwrap();
+                let incoming = game.mob_tree_nbt(index);
+                let tree = (!generic).then(|| game.capture_vehicle_tree_state(source).unwrap());
+                let state = generic.then(|| game.take_transferred_entity_state(source));
+                game.mobs
+                    .retain(|m| m.id != source && Some(m.id) != source_child);
+                game.detach_entity(source);
+                if let Some(child) = source_child {
+                    game.detach_entity(child);
+                }
+
+                let mut destination_tag = tag("minecraft:camel", n);
+                if let Tag::Compound(c) = &mut destination_tag {
+                    c.insert(
+                        "Passengers".into(),
+                        Tag::List(vec![tag("minecraft:sheep", n + 2)]),
+                    );
+                }
+                let wrapper = Tag::compound([(
+                    "RootVehicle",
+                    Tag::compound([("Entity", destination_tag.clone())]),
+                )]);
+                let destination = game.restore_saved_vehicle(uuid, Some(&wrapper)).unwrap();
+                assert_eq!(game.restored_vehicle(uuid), Some(destination));
+                let destination_child = game.mob_passenger_ids(destination)[0];
+                let original_rider = game.mob_object(destination).unwrap().extra.rider;
+                let mut map = Attachments::default();
+                runtime.set(&mut map, Holder::Level, 42).unwrap();
+                saved.set(&mut map, Holder::Level, 52).unwrap();
+                game.entity_attachments.insert(destination, map);
+                // The ordinary saved-player/chunk disk duplicate still coalesces.
+                assert_eq!(
+                    game.load_mob(destination_tag.clone(), None),
+                    Some(destination)
+                );
+                let before = game.next_entity;
+                game.spawn_loaded_entity((0, 0), destination_tag, None);
+                assert_eq!(game.next_entity, before);
+
+                let arrived = if generic {
+                    game.spawn_loaded_entity((0, 0), incoming, state);
+                    game.persist
+                        .off_level
+                        .iter()
+                        .find_map(|(&id, _)| (game.persist.uuid_of(id) == Some(uuid)).then_some(id))
+                        .unwrap()
+                } else {
+                    let restored = game
+                        .restore_vehicle_tree_state(incoming, tree.unwrap())
+                        .unwrap();
+                    assert_ne!(restored.by_source[&source], destination);
+                    assert_eq!(restored.by_source[&source], restored.root);
+                    let child = restored.by_source[&source_child.unwrap()];
+                    assert_eq!(
+                        game.mob_object(child).unwrap().extra.mount,
+                        Some(restored.root)
+                    );
+                    restored.root
+                };
+                assert_ne!(arrived, destination);
+                assert_ne!(arrived, source);
+                assert!(
+                    game.entity(arrived).is_none(),
+                    "ordinary duplicate UUID admission still refuses residency"
+                );
+                assert!(game.entity(destination).is_some());
+                assert_eq!(
+                    game.mob_object(arrived).unwrap().species(),
+                    horizon_client::mobs::Species::Cow
+                );
+                assert_eq!(
+                    game.mob_object(destination).unwrap().extra.rider,
+                    original_rider
+                );
+                assert_eq!(
+                    game.mob_object(destination_child).unwrap().extra.mount,
+                    Some(destination)
+                );
+                assert_eq!(game.mob_passenger_ids(destination), vec![destination_child]);
+                for (id, r, s) in [(arrived, 41, 51), (destination, 42, 52)] {
+                    let map = game.entity_attachments.get_mut(&id).unwrap();
+                    assert_eq!(runtime.get(map, Holder::Level), Ok(r));
+                    assert_eq!(saved.get(map, Holder::Level), Ok(s));
+                }
+            }
         });
     }
 }
