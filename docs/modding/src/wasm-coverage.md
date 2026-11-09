@@ -1569,6 +1569,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::register_debug_renderers` | crosses | Wire call |
 | `Hooks::register_dimension_transition_screen` | crosses | Wire call |
 | `Hooks::register_enchantment_damage_effects` | crosses | Wire call |
+| `Hooks::register_entity_spectator_shaders` | crosses | Wire call |
 | `Hooks::register_fluid_models` | crosses | Wire call |
 | `Hooks::register_game_tests` | crosses | Wire call |
 | `Hooks::register_gui_layers` | crosses | Wire call |

@@ -12560,7 +12560,7 @@ impl Renderer {
                 &self.device,
                 &self.queue,
                 frame.post_effects.root,
-                &crate::post_chain::SPECTATOR_CHAINS,
+                crate::spectator_shaders::chains(),
                 target_texture.format(),
             );
             post.apply(

@@ -109,6 +109,7 @@ pub mod preedit;
 pub mod providers;
 pub mod pvp;
 pub mod pvp_hud;
+pub mod spectator_shaders;
 pub use horizon_assets::resource_source;
 pub mod api_context;
 pub mod random_source;
