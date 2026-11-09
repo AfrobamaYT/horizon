@@ -83,10 +83,10 @@ mod while_playing;
 mod worlds_page;
 
 use gpui::{
-    actions, div, ease_out_quint, prelude::*, px, relative, size, Animation, AnimationExt,
-    AnyElement, App, Bounds, ClickEvent, Context, Div, ElementId, FocusHandle, FontWeight, Hsla,
-    KeyBinding, KeyDownEvent, Menu, MenuItem, MouseDownEvent, PathPromptOptions, Pixels, Point,
-    SharedString, Stateful, Subscription, Window, WindowBounds, WindowOptions,
+    Animation, AnimationExt, AnyElement, App, Bounds, ClickEvent, Context, Div, ElementId,
+    FocusHandle, FontWeight, Hsla, KeyBinding, KeyDownEvent, Menu, MenuItem, MouseDownEvent,
+    PathPromptOptions, Pixels, Point, SharedString, Stateful, Subscription, Window, WindowBounds,
+    WindowOptions, actions, div, ease_out_quint, prelude::*, px, relative, size,
 };
 use horizon_launcher::account::{self, Accounts, SignIn, SignInState};
 use horizon_launcher::backend::{self, Job, Msg, Release, Running, Settings, Updates};
@@ -98,9 +98,9 @@ use horizon_launcher::native_status;
 use scrollbar::Scrollbar;
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::Ordering;
-use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Mutex;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 use theme::Theme;
 
@@ -213,6 +213,8 @@ struct Launcher {
     content_scroll: Scrollbar,
     /// The glass Settings page's own scroll: its sections beside their list.
     settings_pane: gpui::ScrollHandle,
+    /// The glass Home's patch log scroll, for its wheel to chain to the page.
+    patch_scroll: Scrollbar,
     /// The section the glass Settings list marked when last drawn (`glass_settings`).
     settings_marked: usize,
     /// The Mods page's project card, kept in view beside its list.
@@ -480,15 +482,17 @@ impl Launcher {
             cx.notify();
         });
         let window_handle = window.window_handle();
-        cx.spawn(async move |this, cx| loop {
-            cx.background_executor()
-                .timer(Duration::from_millis(80))
-                .await;
-            if this
-                .update(cx, |this, cx| this.drain(window_handle, cx))
-                .is_err()
-            {
-                break;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(80))
+                    .await;
+                if this
+                    .update(cx, |this, cx| this.drain(window_handle, cx))
+                    .is_err()
+                {
+                    break;
+                }
             }
         })
         .detach();
@@ -526,6 +530,7 @@ impl Launcher {
             switches: 0,
             content_scroll: Scrollbar::default(),
             settings_pane: gpui::ScrollHandle::new(),
+            patch_scroll: Scrollbar::default(),
             settings_marked: 0,
             mods_sticky: sticky::Sticky::default(),
             long_list: cull::Cull::default(),
@@ -1816,12 +1821,17 @@ impl Launcher {
         });
     }
 
-    fn load_profile_heads(&mut self) {
-        let resources = self
-            .selected()
+    /// The prepared game files of the selected version (else the first installed): where the
+    /// default skins are.
+    fn game_resources(&self) -> std::path::PathBuf {
+        self.selected()
             .or_else(|| self.installed.first())
             .map(|tag| backend::resources(tag))
-            .unwrap_or_default();
+            .unwrap_or_default()
+    }
+
+    fn load_profile_heads(&mut self) {
+        let resources = self.game_resources();
         // Offline names wear their own skin's face, or the default skin of their offline UUID.
         let offline: Vec<String> = self
             .players()
@@ -5594,7 +5604,7 @@ fn closed_by_press(closed_at: Option<Point<Pixels>>, event: &ClickEvent) -> bool
 mod tests {
     #[test]
     fn an_unopenable_data_folder_starts_on_settings_instead_of_exiting() {
-        use super::{page_after_startup, Page};
+        use super::{Page, page_after_startup};
         assert!(matches!(
             page_after_startup(Page::Play, true),
             Page::Settings
@@ -5606,7 +5616,7 @@ mod tests {
     #[test]
     fn a_menu_button_stays_closed_after_the_press_that_closed_its_menu() {
         use super::closed_by_press;
-        use gpui::{point, px, ClickEvent, KeyboardClickEvent, MouseClickEvent, MouseDownEvent};
+        use gpui::{ClickEvent, KeyboardClickEvent, MouseClickEvent, MouseDownEvent, point, px};
         let click = |x: f32| {
             ClickEvent::Mouse(MouseClickEvent {
                 down: MouseDownEvent {
@@ -5629,7 +5639,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn cmd_q_quits_and_cmd_w_closes_the_window() {
-        use super::{key_bindings, CloseWindow, Quit};
+        use super::{CloseWindow, Quit, key_bindings};
         use gpui::{Keymap, Keystroke};
         let keymap = Keymap::new(key_bindings());
         let key = |s: &'static str| [Keystroke::parse(s).unwrap()];
@@ -5695,7 +5705,7 @@ mod tests {
     /// it stays off: signing in comes first.
     #[test]
     fn play_prepares_first_for_an_owner() {
-        use super::{play_press, PlayPress};
+        use super::{PlayPress, play_press};
         assert_eq!(play_press(true, Some(true), false), PlayPress::Play);
         assert_eq!(play_press(true, None, false), PlayPress::Play);
         assert_eq!(
@@ -5725,7 +5735,7 @@ mod tests {
 
     #[test]
     fn a_completed_sign_in_is_handled_once_across_ui_polls() {
-        use super::{sign_in_change, SignInState};
+        use super::{SignInState, sign_in_change};
         let mut shown = None;
         let completed = SignInState::Done(Ok(horizon_launcher::account::Account {
             uuid: "11111111111111111111111111111111".into(),

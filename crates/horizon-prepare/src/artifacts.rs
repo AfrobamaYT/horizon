@@ -5,7 +5,7 @@
 //! (tools/test_rust_parity.py's `verify_artifacts`).
 
 use crate::pyjson::{self, Value};
-use crate::{digest, read_json, relative_display, write_json, Log};
+use crate::{Log, digest, read_json, relative_display, write_json};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -359,6 +359,10 @@ fn prism_manifest(root: &Path, instance: Option<&Path>, version: &str) -> Option
         ]);
     candidates
         .map(|dir| dir.join(format!("{version}.json")))
+        // Prism Launcher's own layout: its Minecraft component is `meta/net.minecraft/<version>.json`.
+        .chain([root
+            .join("meta/net.minecraft")
+            .join(format!("{version}.json"))])
         .find(|path| path.is_file())
 }
 
@@ -1745,6 +1749,39 @@ mod tests {
         fs::remove_dir_all(&root).unwrap();
     }
 
+    /// Prism Launcher keeps its Minecraft component as `meta/net.minecraft/<version>.json`, not
+    /// in a folder of that version. Both are read; the folder's file wins when both exist.
+    #[test]
+    fn the_prism_version_file_is_found_flat_or_in_its_folder() {
+        let root = std::env::temp_dir().join(format!("horizon-prism-meta-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let put = |path: &str, data: &[u8]| {
+            let path = root.join(path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, data).unwrap();
+        };
+        let version_file =
+            br#"{"mainJar":{"name":"com.mojang:minecraft:9.9:client"},"uid":"net.minecraft"}"#;
+        put(
+            "libraries/com/mojang/minecraft/9.9/minecraft-9.9-client.jar",
+            b"client",
+        );
+        put("assets/indexes/1.json", b"{}");
+        let flat = root.join("meta/net.minecraft/9.9.json");
+        let nested = root.join("meta/net.minecraft/9.9/9.9.json");
+
+        put("meta/net.minecraft/9.9.json", version_file);
+        assert_eq!(prism_game_files(&root, "9.9").unwrap().manifest, flat);
+        assert_eq!(game_files(Some(&root), "9.9").manifest, flat);
+
+        put("meta/net.minecraft/9.9/9.9.json", version_file);
+        assert_eq!(prism_game_files(&root, "9.9").unwrap().manifest, nested);
+
+        fs::remove_file(&flat).unwrap();
+        assert_eq!(prism_game_files(&root, "9.9").unwrap().manifest, nested);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
     /// scanfee's Prism Launcher 26.3 install on a Mac (#1487): Prism keeps natives under its own
     /// names and never downloads Netty's native transport, which the game runs without. Preparing
     /// still checks every other library, and the transport whenever the launcher has it.
@@ -2071,17 +2108,21 @@ mod tests {
             "libraries/net/minecraft/client/9.9/client-9.9.jar",
             b"other",
         );
-        assert!(prepare(&atlauncher)
-            .unwrap_err()
-            .contains("is not the pinned file"));
+        assert!(
+            prepare(&atlauncher)
+                .unwrap_err()
+                .contains("is not the pinned file")
+        );
         put("libraries/net/minecraft/client/9.9/client-9.9.jar", &client);
         put(
             "configs/json/minecraft/9.9.json",
             manifest.replace(',', ", ").as_bytes(),
         );
-        assert!(prepare(&atlauncher)
-            .unwrap_err()
-            .contains("may have rewritten it"));
+        assert!(
+            prepare(&atlauncher)
+                .unwrap_err()
+                .contains("may have rewritten it")
+        );
     }
 
     /// A launcher with a layout of its own names each file (`--version-json`, `--client-jar`,
@@ -2138,13 +2179,17 @@ mod tests {
             1
         );
         // Without them the empty folder has nothing; a wrong jar fails its pin.
-        assert!(prepare(&Inputs::default())
-            .unwrap_err()
-            .starts_with("Missing "));
+        assert!(
+            prepare(&Inputs::default())
+                .unwrap_err()
+                .starts_with("Missing ")
+        );
         put("instance/minecraft.jar", b"other");
-        assert!(prepare(&inputs)
-            .unwrap_err()
-            .contains("is not the pinned file"));
+        assert!(
+            prepare(&inputs)
+                .unwrap_err()
+                .contains("is not the pinned file")
+        );
     }
 
     /// With no launcher's files in the chosen folder, the error names where Horizon looked and

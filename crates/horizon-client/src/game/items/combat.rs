@@ -205,6 +205,18 @@ impl CombatTracker {
     pub(super) fn attack(&self) -> &Attack {
         &self.attack
     }
+
+    /// The newest damage of this fight for `events`: when it landed (game
+    /// time), its damage type, the amount and the name of what dealt it.
+    pub(super) fn last_hit(&self) -> Option<(i64, String, Option<f32>, Option<String>)> {
+        let e = self.entries.last()?;
+        let by = e
+            .attacker
+            .as_ref()
+            .map(|(_, t)| t.plain())
+            .or_else(|| e.direct.as_ref().map(Text::plain));
+        Some((self.last_damage, e.damage_type.clone(), Some(e.damage), by))
+    }
     /// The last blow taken: its damage type and the causing entity's id (0
     /// for none), for `LivingDeathEvent`.
     pub(super) fn last_blow(&self) -> Option<(&str, u32)> {

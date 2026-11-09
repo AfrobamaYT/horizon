@@ -23,9 +23,9 @@ mod sounds;
 mod survival;
 mod worker;
 
-pub use check::{check, missing_extras, STAMP};
+pub use check::{STAMP, check, missing_extras};
 pub use files::clone_or_copy;
-pub use sounds::{add_assets, fonts, languages, packs, panorama, sounds, BUILT_IN_PACKS};
+pub use sounds::{BUILT_IN_PACKS, add_assets, fonts, languages, packs, panorama, sounds};
 
 use pyjson::Value;
 use sha2::Digest;
@@ -42,7 +42,7 @@ pub type Log<'a> = &'a dyn Fn(&str);
 pub type Progress<'a> = &'a dyn Fn(f32);
 
 /// The stages of `steps`, each opened by `Run::stage`: what the fraction counts.
-const STAGES: u32 = 18;
+const STAGES: u32 = 19;
 
 /// The exporter bundle side, and the worker index that runs it (a Prism install has no server
 /// jar, so the client jar is the server side; the sides still compile and run separately).
@@ -1056,6 +1056,20 @@ fn steps(
             &[],
             "behaviour-export.log",
         )?;
+        // The id tables of the 1.13-era data fixers, for upgrading saves made before 1.13
+        // (horizon-world's datafix/tables.rs and block_state_data.rs).
+        run.stage();
+        let datafix = single(
+            "datafix tables",
+            "datafix-tables.json",
+            &["VanillaDataFixTablesExporter.java"],
+            "datafix_exporters_sha256",
+            "server_sha256",
+            "datafix-tables/classes",
+            "1G",
+            &[],
+            "datafix-export.log",
+        )?;
         if !split_blocks {
             worldgen_blocks(run, 0)?;
         }
@@ -1064,6 +1078,7 @@ fn steps(
             ("gameplay_exporters_sha256", gameplay),
             ("entity_types_exporters_sha256", entity_types),
             ("behaviour_exporters_sha256", behaviour),
+            ("datafix_exporters_sha256", datafix),
         ])
     });
 
@@ -1302,6 +1317,10 @@ fn steps(
         (
             "behaviour_exporters_sha256".into(),
             entry("behaviour_exporters_sha256"),
+        ),
+        (
+            "datafix_exporters_sha256".into(),
+            entry("datafix_exporters_sha256"),
         ),
         (
             "command_registries_exporters_sha256".into(),
@@ -1749,10 +1768,12 @@ mod tests {
                 read(&reports.join(name)).unwrap()
             );
         }
-        assert!(read_json(&root.join("items.json"))
-            .unwrap()
-            .get("minecraft:stone")
-            .is_some());
+        assert!(
+            read_json(&root.join("items.json"))
+                .unwrap()
+                .get("minecraft:stone")
+                .is_some()
+        );
         assert!(root.join("biome-parameters/overworld.json").is_file());
         for name in ["registries.json", "commands.json", "items.json"] {
             fs::remove_file(root.join(name)).unwrap();

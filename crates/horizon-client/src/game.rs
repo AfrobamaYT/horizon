@@ -2261,6 +2261,8 @@ pub struct PackResources {
     /// The overworld's, Nether's and End's attribute stacks with the packs' Polytone biome and
     /// dimension modifiers (#11486), when a pack has some: what the frame draws.
     environments: Option<Arc<[Environment; 3]>>,
+    /// The packs' Polytone custom particles and block emitters (#11486), when a pack has some.
+    polytone_particles: Option<Arc<horizon_client::particles::polytone::Registry>>,
 }
 
 /// A quick craft drag as the screen draws it: each dragged slot's count and
@@ -3277,6 +3279,8 @@ struct Game<'a> {
     /// The world was saved for the application ending (`save_for_exit`).
     saved_for_exit: bool,
     pending_save: Option<saving::ClosingSave>,
+    /// Scheduled end of the server tick (`MinecraftServer.haveTime`).
+    server_tick_deadline: Option<Instant>,
     /// The last world frame reached the swap chain. A window the compositor
     /// stops showing gets no frames, and the event loop must not spin on it.
     frame_drawn: bool,
@@ -5811,6 +5815,7 @@ impl Game<'_> {
         laps = horizon_client::spans::laps();
         let sent = self.lan_broadcast_changes();
         laps.lap("tb_broadcast");
+        self.save_chunks_eagerly();
         self.with_level(|b, level, ticks| {
             b.run_block_events(level, ticks);
         });
@@ -6553,7 +6558,10 @@ impl Game<'_> {
                 );
                 self.container_edge_sound(key, true);
             }
-        } else if &*name == "minecraft:beacon" && self.open_station(pos, &name) {
+        } else if matches!(&*name, "minecraft:beacon" | "minecraft:enchanting_table")
+            && self.open_station(pos, &name)
+        {
+            // Station menus whose block has a block entity, not a container.
             self.world.block_entities.get_or_insert_with(key, || {
                 BlockEntity::for_block(&name).unwrap_or(BlockEntity::Chest(Vec::new()))
             });
@@ -8389,6 +8397,10 @@ impl Game<'_> {
             // keep their own packet cutoff (`ordered.announced`, #10063).
             self.ticked_entities_through = self.next_entity;
         }
+        // ChunkMap still ticks while /tick freeze holds block/entity ticks.
+        if !running {
+            self.save_chunks_eagerly();
+        }
         self.begin_ordered_ticks();
         if running {
             horizon_client::spans::time("tick_paintings", || self.tick_paintings());
@@ -9089,6 +9101,8 @@ impl Game<'_> {
                 | BlockEntity::Skull(_)
                 | BlockEntity::DaylightDetector
                 | BlockEntity::Bell
+                | BlockEntity::Conduit(_)
+                | BlockEntity::EnchantingTable
                 | BlockEntity::Campfire(_)
                 | BlockEntity::ChiseledBookshelf(_)
                 | BlockEntity::Brushable(_)
@@ -9153,6 +9167,8 @@ impl Game<'_> {
                 | BlockEntity::Skull(_)
                 | BlockEntity::DaylightDetector
                 | BlockEntity::Bell
+                | BlockEntity::Conduit(_)
+                | BlockEntity::EnchantingTable
                 | BlockEntity::Campfire(_)
                 | BlockEntity::ChiseledBookshelf(_)
                 | BlockEntity::Brushable(_)
@@ -9289,6 +9305,8 @@ impl Game<'_> {
                     | BlockEntity::Skull(_)
                     | BlockEntity::DaylightDetector
                     | BlockEntity::Bell
+                    | BlockEntity::Conduit(_)
+                    | BlockEntity::EnchantingTable
                     | BlockEntity::Campfire(_)
                     | BlockEntity::ChiseledBookshelf(_)
                     | BlockEntity::Brushable(_)
@@ -13263,7 +13281,8 @@ impl Game<'_> {
                 if !o.bounds().intersects(area) {
                     continue;
                 }
-                let (id, orb_value, vanilla) = (o.id, o.value, o.can_merge(merge_id as u32, value));
+                let vanilla = o.can_merge(merge_id as u32, value as i32);
+                let (id, orb_value) = (o.id, o.points());
                 if self.orb_merges(id, orb_value, 0, value, vanilla) {
                     target = Some(i);
                     break;
@@ -13406,7 +13425,8 @@ impl Game<'_> {
             position: p,
             previous: p,
             velocity,
-            value,
+            // `getExperienceValue` sizes: 1 to 2477.
+            value: value as i32,
             age: 0,
             on_ground: false,
             count: 1,
@@ -13561,7 +13581,7 @@ impl Game<'_> {
                     // ExperienceOrb.playerTouch: one orb every 2 ticks; a
                     // merged orb gives its value once per count.
                     self.xp_delay = 2;
-                    gained += o.value;
+                    gained += o.points();
                     taken.push(o.clone());
                     o.count -= 1;
                     return o.count > 0;
@@ -14889,6 +14909,9 @@ impl Game<'_> {
         self.save
             .save_later(&chunks, self.pack.assets.registry, world_biomes!(self))?;
         // Prepare entities while the chunk writer runs, then use one barrier.
+        if !wait {
+            self.world.modified.autosaved(&keys, now);
+        }
         self.save_entities(false)?;
         self.save_raids();
         if wait {
@@ -14898,6 +14921,51 @@ impl Game<'_> {
             self.native_level_save(self.dim.id());
         }
         Ok(())
+    }
+    /// `ChunkMap.saveChunksEagerly`: snapshot only while the tick and writer
+    /// have room. NBT encoding, compression and durable writes stay on workers.
+    fn save_chunks_eagerly(&mut self) {
+        // No world open (`world_root` is set by `finish_open_world`): the save
+        // is `Game::new`'s placeholder under the working directory.
+        if self.remote.is_some()
+            || self.world_root.as_os_str().is_empty()
+            || self.agent.hold_server
+            || self.clock.sprinting()
+            || self
+                .server_lists
+                .as_ref()
+                .is_some_and(|lists| !lists.lock().unwrap().autosave)
+        {
+            return;
+        }
+        let deadline = self
+            .server_tick_deadline
+            .unwrap_or_else(|| Instant::now() + self.clock.tick_duration());
+        let mut modified = std::mem::take(&mut self.world.modified);
+        modified.save_eagerly(
+            Instant::now(),
+            || Instant::now() < deadline && self.save.active_chunk_writes() < 128,
+            |key| self.world.chunks.contains_key(&key),
+            |key| {
+                // `saveChunkIfNeeded` saves only a LevelChunk, so a lit one; a
+                // column still waiting for its light keeps its queue entry.
+                let Some(chunk) = self.world.chunks.get(&key).filter(|c| c.lit) else {
+                    return false;
+                };
+                let chunks = self.with_entities([chunk]);
+                match self
+                    .save
+                    .save_later(&chunks, self.pack.assets.registry, world_biomes!(self))
+                {
+                    Ok(_) => true,
+                    Err(e) => {
+                        log::warn!("Horizon: failed to save changed chunks: {e}");
+                        false
+                    }
+                }
+            },
+        );
+        self.world.modified = modified;
     }
     /// `GameRenderer.tryTakeScreenshotIfNeeded`: while a local world without a
     /// saved icon is on the screen, grab the rendered frame once a second until
@@ -15256,9 +15324,9 @@ impl Game<'_> {
         }
         let (rain, thunder) = self.view_weather(alpha as f32);
         // What the packs' attribute expressions read (only a pack's stack has any).
-        if self.pack.environments.is_some() {
+        if self.pack.environments.is_some() || self.pack.polytone_particles.is_some() {
             let light = self.world.light(block[0], block[1], block[2]);
-            environment.set_frame(horizon_client::environment::Frame {
+            let frame = horizon_client::environment::Frame {
                 rain,
                 thunder,
                 game_time: self.world.game_time,
@@ -15273,13 +15341,25 @@ impl Game<'_> {
                 player: self.player.as_ref().map_or(camera.to_array(), |p| {
                     [p.position.x, p.position.y, p.position.z]
                 }),
+                player_velocity: self
+                    .player
+                    .as_ref()
+                    .map_or([0.0; 3], |p| [p.velocity.x, p.velocity.y, p.velocity.z]),
+                player_on_ground: self.player.as_ref().is_some_and(|p| p.ground.on_ground),
                 in_water: underwater,
                 camera: camera.to_array(),
                 sky_light: i32::from(light >> 4),
                 block_light: i32::from(light & 15),
+                biome: biomes.get(biome).name.clone(),
                 temperature: biomes.get(biome).temperature,
                 downfall: biomes.get(biome).downfall,
-            });
+            };
+            if let Some(particles) = &self.pack.polytone_particles
+                && let Ok(mut f) = particles.frame.write()
+            {
+                f.clone_from(&frame);
+            }
+            environment.set_frame(frame);
         }
         let mut sky = environment.sample(&horizon_client::environment::Sample {
             day_time: self.view_day_time(),
@@ -15550,7 +15630,9 @@ impl Game<'_> {
         } else {
             self.bolt_instances(camera)
         };
-        let mut additive = Vec::new();
+        // Particles blended additively (resource packs' Polytone ones, #11486), from the
+        // render that built `entities`.
+        let mut additive = self.particles.take_additive();
         // The dragon is drawn in every dimension, as any entity: a dragon
         // summoned outside the End (the server's AddEntity) is shown too.
         if !title {
@@ -16137,6 +16219,15 @@ impl Game<'_> {
                 }
             });
         }
+        for chunk in &unloaded {
+            self.world.modified.unloaded(&(chunk.x, chunk.z));
+        }
+        let dirty: Vec<_> = unloaded
+            .iter()
+            .filter(|c| self.world.modified.remove(&(c.x, c.z)))
+            .cloned()
+            .collect();
+        let modified = horizon_client::spans::time("with_entities", || self.with_entities(&dirty));
         horizon_client::spans::time("unload_entities", || self.unload_entities(&unloaded));
         if !unloaded.is_empty() {
             let gone: horizon_client::fast_hash::FxHashSet<(i32, i32)> =
@@ -16917,6 +17008,7 @@ impl<'a> Game<'a> {
             text_selection: Default::default(),
             saved_for_exit: false,
             pending_save: None,
+            server_tick_deadline: None,
             frame_drawn: true,
             world_icon: None,
             forced_hit: None,
@@ -17656,6 +17748,10 @@ pub fn run_with(
     }
     horizon_client::spans::enable(options.spikes.is_some());
     let vanilla_root = options.resources.clone();
+    // Saves from before 1.13 upgrade with vanilla's tables, prepared from the player's jar.
+    horizon_world::datafix::set_resources(
+        &std::path::absolute(&vanilla_root).unwrap_or_else(|_| vanilla_root.clone()),
+    );
     if let Some(error) = missing_resources(&vanilla_root) {
         // The game build started by hand (the release's zip), not by the
         // launcher: a window says where to get it. Scripts and servers get

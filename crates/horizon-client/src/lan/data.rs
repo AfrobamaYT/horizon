@@ -321,7 +321,32 @@ impl SyncData {
         defaults: &horizon_world::item_defaults::ItemDefaults,
         sources: &crate::crafting::ResolvedSources,
     ) -> Result<Self, String> {
-        Self::load_with_frozen(resources, overlay, biomes, kept, None, defaults, sources)
+        Self::load_with_frozen(
+            resources, overlay, biomes, kept, None, false, defaults, sources,
+        )
+    }
+
+    /// [`Self::load_with_kept`] over the packs `kept` was itself loaded with (a world's own
+    /// biomes or flags over the data its packs gave): the recipes and advancements, read
+    /// from the same files, are `kept`'s rather than read again (~0.7 s with a large modpack).
+    pub fn load_over(
+        resources: &Path,
+        overlay: &horizon_world::loot::PackOverlay,
+        biomes: Option<&crate::biome::Biomes>,
+        kept: &Self,
+        defaults: &horizon_world::item_defaults::ItemDefaults,
+        sources: &crate::crafting::ResolvedSources,
+    ) -> Result<Self, String> {
+        Self::load_with_frozen(
+            resources,
+            overlay,
+            biomes,
+            Some(kept),
+            None,
+            true,
+            defaults,
+            sources,
+        )
     }
 
     /// First lazy load after world entry: damage definitions are the same
@@ -339,6 +364,7 @@ impl SyncData {
             None,
             None,
             Some(damage),
+            false,
             defaults,
             sources,
         )
@@ -352,6 +378,7 @@ impl SyncData {
         damage: Option<&FrozenDamage>,
         defaults: &horizon_world::item_defaults::ItemDefaults,
         sources: &crate::crafting::ResolvedSources,
+        same_files: bool,
     ) -> Result<Self, String> {
         use crate::spans::startup;
         // The recipe book, the recipe sync and the advancements read the
@@ -525,15 +552,18 @@ impl SyncData {
                 super::commands::CommandTree::load(resources)
             }),
             recipes: Vec::new(),
-            advancements: {
-                let (recipes, groups) = startup::time("sync.network_recipes", || {
-                    super::recipes::network_recipes(resources, overlay, defaults, sources)
-                });
-                startup::time("sync.advancements", || {
-                    super::advancements::ServerAdvancements::load(
-                        resources, overlay, recipes, groups,
-                    )
-                })
+            advancements: match kept.filter(|_| same_files) {
+                Some(kept) => kept.advancements.clone(),
+                None => {
+                    let (recipes, groups) = startup::time("sync.network_recipes", || {
+                        super::recipes::network_recipes(resources, overlay, defaults, sources)
+                    });
+                    startup::time("sync.advancements", || {
+                        super::advancements::ServerAdvancements::load(
+                            resources, overlay, recipes, groups,
+                        )
+                    })
+                }
             },
         };
         sync.recipes = startup::time("sync.update_recipes", || {

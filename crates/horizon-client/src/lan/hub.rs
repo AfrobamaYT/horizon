@@ -6271,6 +6271,60 @@ mod tests {
         );
     }
 
+    /// `ClientboundRespawnPacket.KEEP_ALL_DATA`: a level change keeps the client's copy of the
+    /// player's shared flags, so one that clears afterwards still reaches it. (A creative player
+    /// who leaves lava through a dimension change kept the fire on its screen.)
+    #[test]
+    fn a_shared_flag_cleared_after_a_level_change_reaches_the_player() {
+        let (mut hub, rx) = hub_with_a_guest();
+        let shared_flags_sent = |rx: &std::sync::mpsc::Receiver<crate::lan::Out>| {
+            let mut sent = Vec::new();
+            while let Ok(out) = rx.try_recv() {
+                let crate::lan::Out::Packet(body) = out else {
+                    continue;
+                };
+                let mut r = horizon_protocol::buf::Reader::new(&body);
+                let id = r.varint().unwrap();
+                if let Ok(C::SetEntityData(packet)) = C::decode(id, r.rest()) {
+                    sent.extend(packet.values.iter().filter_map(|(index, _, value)| {
+                        match (index, value) {
+                            (0, Value::Byte(flags)) => Some(*flags),
+                            _ => None,
+                        }
+                    }));
+                }
+            }
+            sent
+        };
+        hub.guests[0].sneaking = true;
+        hub.sync_player_state(0);
+        assert_eq!(shared_flags_sent(&rx), [0x02]);
+        let mut world = World::new(horizon_world::registry::BlockStateId(0), 0);
+        let mut next_entity = 2;
+        let border = crate::worldborder::WorldBorder::default();
+        let ctx = TickCtx {
+            world: &mut world,
+            entities: &[],
+            next_entity: &mut next_entity,
+            spawn: [0.5, 64.0, 0.5],
+            spawn_angle: [0.0; 2],
+            difficulty: 2,
+            difficulty_locked: false,
+            clock_rate: 1.0,
+            tick_rate: 20.0,
+            tick_frozen: false,
+            tick_steps: Default::default(),
+            collision: None,
+            border: &border,
+            streaming: None,
+        };
+        hub.change_level(0, [100.5, 49.0, 0.5], 0.0, None, false, 0, &ctx);
+        let _ = shared_flags_sent(&rx);
+        hub.guests[0].sneaking = false;
+        hub.sync_player_state(0);
+        assert_eq!(shared_flags_sent(&rx), [0]);
+    }
+
     /// `ServerGamePacketListenerImpl.forceSendPlayerSupportBlocks`: a client that says it stands
     /// while the last move the server resolved came down onto nothing is sent the blocks under
     /// its box again (its four corners, each once), so a client that missed a block change cannot
