@@ -2270,6 +2270,22 @@ mod stack_limit_tests {
         items
     }
 
+    /// Vanilla stores damage above the maximum; only writes refuse it. Reads see the stack.
+    #[test]
+    fn a_write_refuses_damage_over_the_maximum_a_read_takes() {
+        let items = catalog();
+        let mut over = ApiStack::of(mod_api::__private::item_key("minecraft:iron_sword").unwrap());
+        over.set_damage(1000);
+        assert_eq!(
+            over.try_into_engine(&items),
+            Err(StackWriteError::DamageExceeded { maximum: 10 })
+        );
+        let read = stack_value(&over).unwrap();
+        let definition = items.items.get("minecraft:iron_sword");
+        assert_eq!(read.effective_damage(definition), 1000);
+        assert!(horizon_client::stations::is_damageable(&items, &read));
+    }
+
     #[test]
     fn strict_damage_limits_include_zero_inheritance_removal_and_nbt_int_range() {
         let mut items = catalog();
