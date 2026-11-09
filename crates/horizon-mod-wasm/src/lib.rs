@@ -787,8 +787,17 @@ mod mixed_install_tests {
         let header = |id| {
             format!("id='{id}'\nname='{id}'\nversion='1'\napi='0.2'\ncapabilities=['registries']\n")
         };
-        std::fs::write(addon.join("mod.wasm"), b"\0asm\x01\0\0\0").unwrap();
-        std::fs::write(addon.join("horizon-mod.toml"), format!("{}[dependencies]\nlib='*'\n[wasm]\nsha512='e20ed12e5a7e3bdee30a3a4f26c2813edb79b8fbead058d15688f104f6039a5a3de349e9cbbdd5d9a68f306d0804914e45124f0dedc0bcbefa7b30dd778aa6c0'\ntoolchain='t'\nbuilt_with='t'\n", header("addon"))).unwrap();
+        let module = b"\x00\x61\x73\x6d\x01\x00\x00\x00\x00\x0f\x08\x64\x79\x6c\x69\x6e\x6b\x2e\x30\x01\x04\x00\x00\x00\x00\x01\x04\x01\x60\x00\x00\x03\x02\x01\x00\x07\x2e\x03\x0e\x68\x6f\x72\x69\x7a\x6f\x6e\x5f\x6c\x61\x79\x6f\x75\x74\x00\x00\x0a\x68\x6f\x72\x69\x7a\x6f\x6e\x5f\x69\x6e\x00\x00\x0c\x68\x6f\x72\x69\x7a\x6f\x6e\x5f\x68\x6f\x6f\x6b\x00\x00\x0a\x04\x01\x02\x00\x0b";
+        std::fs::write(addon.join("mod.wasm"), module).unwrap();
+        std::fs::write(
+            addon.join("horizon-mod.toml"),
+            format!(
+                "{}[dependencies]\nlib='*'\n[wasm]\nsha512='{}'\ntoolchain='t'\nbuilt_with='t'\n",
+                header("addon"),
+                horizon_mod_package::manifest::sha512_of(module)
+            ),
+        )
+        .unwrap();
         std::fs::write(
             library.join("horizon-mod.toml"),
             format!(
