@@ -39,12 +39,11 @@ class ProblemsTests(unittest.TestCase):
         self.assertEqual(check_file_size.problems([entry("third_party/naga/src/x.rs", 8000, 9000),
                                                    entry("a.rs", 4000, 4100, generated=True)]), [])
 
-    def test_test_files_are_not_checked(self):
-        self.assertEqual(check_file_size.problems([entry("crates/a/src/mod_content_tests.rs", 5268, 5300),
-                                                   entry("crates/b/src/level/tests.rs", 4175, 4200),
-                                                   entry("tests.rs", 0, 3500)]), [])
-        for path in ("crates/a/src/contests.rs", "crates/a/src/tests_util.rs", "crates/a/src/tests.rs.in"):
+    def test_a_test_filename_does_not_exempt_non_inline_code(self):
+        for path in ("feature_tests.rs", "crates/a/src/mod_content_tests.rs",
+                     "crates/b/src/level/tests.rs", "tests.rs"):
             self.assertEqual(len(check_file_size.problems([entry(path, 3100, 3101)])), 1, path)
+        self.assertEqual(len(check_file_size.problems([entry("tests.rs", 0, 3500)])), 1)
 
 
 TEST_MODULE = """#[cfg(test)]
@@ -189,6 +188,57 @@ class SyncBaselineTests(unittest.TestCase):
             check_file_size.parse_baseline("# sync-baseline: not-a-sha")
         with self.assertRaises(ValueError):
             check_file_size.parse_baseline("a.rs 3200\na.rs 3300")
+
+
+class SyncProvenanceTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self.run_git("init", "-q", "-b", "main")
+        self.run_git("config", "user.name", "Fixture")
+        self.run_git("config", "user.email", "fixture@example.invalid")
+        self.commit("base")
+        self.base = self.run_git("rev-parse", "HEAD").strip()
+        self.run_git("checkout", "-q", "-b", "upstream")
+        self.commit("upstream")
+        self.upstream = self.run_git("rev-parse", "HEAD").strip()
+        self.run_git("checkout", "-q", "-b", "work", self.base)
+        self.commit("fork")
+        patch = mock.patch.object(check_file_size, "ROOT", self.root)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def run_git(self, *args):
+        return subprocess.run(["git", *args], cwd=self.root, check=True,
+                              capture_output=True, text=True).stdout
+
+    def commit(self, name):
+        (self.root / name).write_text(name)
+        self.run_git("add", name)
+        self.run_git("commit", "-q", "-m", name)
+
+    def test_real_sync_parent_passes(self):
+        self.run_git("merge", "-q", "--no-edit", "upstream")
+        self.assertEqual(check_file_size.sync_provenance(self.upstream, self.base), [])
+
+    def test_fake_sha_missing_header_and_base_ancestor_fail(self):
+        for marker in ["b" * 40, None, self.base]:
+            with self.subTest(marker=marker):
+                self.assertTrue(check_file_size.sync_provenance(marker, self.base))
+
+    def test_ancestor_without_merge_parent_is_not_a_sync(self):
+        self.run_git("checkout", "-q", "upstream")
+        self.commit("child")
+        self.assertTrue(check_file_size.sync_provenance(self.upstream, self.base))
+
+    def test_shallow_history_is_an_explicit_failure(self):
+        self.run_git("merge", "-q", "--no-edit", "upstream")
+        with tempfile.TemporaryDirectory() as clone:
+            subprocess.run(["git", "clone", "-q", "--depth", "1", self.root.as_uri(), clone], check=True)
+            with mock.patch.object(check_file_size, "ROOT", Path(clone)):
+                result = check_file_size.sync_provenance(self.upstream, self.base)
+                self.assertIn("unshallow", result[0])
 
 if __name__ == "__main__":
     unittest.main()

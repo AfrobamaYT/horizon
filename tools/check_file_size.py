@@ -20,9 +20,6 @@ end must agree:
 Unformatted code, or a lexer mistake, makes them disagree, and the module counts. The two start lines must begin in
 code too, so Rust source quoted in a string is no module.
 
-Test files, named `tests.rs` or `<name>_tests.rs`, aren't checked for the same reason: they hold the tests moved out
-of a file, `#[cfg(test)] mod tests;`.
-
     python3 tools/check_file_size.py --base origin/main
 """
 
@@ -36,7 +33,6 @@ ROOT = Path(__file__).resolve().parent.parent
 LIMIT = 3000
 DOC = "docs/layers.md#file-size"
 EXEMPT_PREFIXES = ("third_party/",)
-TEST_FILE = re.compile(r"(?:^|/)(?:tests|\w+_tests)\.rs$")
 CFG_TEST = re.compile(r"([ \t]*)#\[cfg\(test\)\]\s*")
 TEST_MOD = re.compile(r"([ \t]*)(?:pub(?:\([a-z]+\))? )?mod \w+ \{\s*")
 # Where code may stop: a newline, a comment, a raw string (with its b or c prefix), a string, a quote.
@@ -186,11 +182,32 @@ def baseline_problems(sizes, previous, counts, sync):
     return out
 
 
+def sync_provenance(marker, base, head="HEAD"):
+    """Verify ancestry, not a claimed SHA: the sync must merge this exact parent."""
+    shallow = git("rev-parse", "--is-shallow-repository").strip()
+    if shallow == "true":
+        return ["sync baseline provenance needs full history; fetch --unshallow before checking"]
+    if marker is None:
+        return ["sync baseline provenance needs a sync-baseline header"]
+    commit = subprocess.run(["git", "cat-file", "-t", marker], cwd=ROOT,
+                            capture_output=True, text=True)
+    if commit.returncode != 0 or commit.stdout.strip() != "commit":
+        return [f"sync baseline SHA {marker} is not an available commit"]
+    ancestor = subprocess.run(["git", "merge-base", "--is-ancestor", marker, base], cwd=ROOT,
+                              capture_output=True)
+    if ancestor.returncode == 0:
+        return ["sync baseline SHA is already an ancestor of the base"]
+    merges = git("rev-list", "--merges", "--parents", f"{base}..{head}")
+    if not any(marker in row.split()[1:] for row in merges.splitlines()):
+        return ["sync baseline SHA must be a parent of a merge commit in base..HEAD"]
+    return []
+
+
 def problems(entries, limit=LIMIT, baseline=None):
     """entries: (path, base line count, line count now, generated). The problem lines."""
     out = []
     for path, before, now, is_generated in entries:
-        if path.startswith(EXEMPT_PREFIXES) or is_generated or TEST_FILE.search(path):
+        if path.startswith(EXEMPT_PREFIXES) or is_generated:
             continue
         if baseline is not None and path in baseline:
             if now > baseline[path]:
@@ -212,6 +229,9 @@ def main(argv=None):
     if not args.base:
         print("File size: no base to compare with, nothing checked.")
         return 0
+    if git("rev-parse", "--is-shallow-repository").strip() == "true":
+        print("File size check failed: provenance needs full history; fetch --unshallow before checking.")
+        return 1
     merge_base, changed = changes(args.base)
     entries = []
     for path, old in changed:
@@ -228,8 +248,10 @@ def main(argv=None):
                          capture_output=True, encoding="utf-8")
     previous_marker, previous = parse_baseline(old.stdout if old.returncode == 0 else "")
     counts = {path: code_lines((ROOT / path).read_text()) for path in sizes if (ROOT / path).is_file()}
-    sync = marker is not None and marker != previous_marker
-    found = baseline_problems(sizes, previous, counts, sync)
+    declared_sync = marker is not None and marker != previous_marker
+    provenance = sync_provenance(marker, merge_base) if declared_sync else []
+    sync = declared_sync and not provenance
+    found = provenance + baseline_problems(sizes, previous, counts, sync)
     found.extend(problems(entries, baseline=sizes))
     if found:
         print(f"File size check failed ({DOC}):")
@@ -237,7 +259,7 @@ def main(argv=None):
             print(f"  {problem}")
         return 1
     print(f"File size check passed: {len(entries)} changed Rust files, {len(sizes)} sync baselines; none over {LIMIT} lines grew beyond their cap "
-          f"(test modules and test files not counted).")
+          f"(inline test modules not counted).")
     return 0
 
 
