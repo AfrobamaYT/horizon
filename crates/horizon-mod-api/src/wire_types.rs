@@ -144,6 +144,7 @@ mod resource_wire_tests {
             vec!["test".into()],
             vec!["other".into()],
         );
+        let mut out = Writer::new();
         out.put(&package);
         let decoded: crate::PackageInfo = Reader::new(out.bytes()).take().unwrap();
         assert_eq!(decoded.id(), "test");

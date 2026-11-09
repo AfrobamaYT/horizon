@@ -1365,7 +1365,6 @@ mod tests {
         // A transaction decoded from bytes, which the game never handed out, names no open
         // transaction (#2424): a write given it changes nothing, and a close given it ends
         // nothing, so the game's own transaction still puts back everything at its abort.
-        use mod_api::prelude::ModStateServerHost as _;
         let forged: mod_api::Transaction =
             mod_api::wire::Reader::decode(&0u64.to_le_bytes()).unwrap();
         let host: &mut dyn ServerHost = &mut game;

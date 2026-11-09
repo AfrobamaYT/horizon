@@ -115,7 +115,6 @@ mod tests {
 
     #[test]
     fn a_transaction_decoded_from_bytes_ends_no_transaction() {
-        use crate::prelude::ModStateServerHost as _;
         assert!(
             crate::wire::Reader::decode::<Transaction>(&[]).is_err(),
             "no transaction from zero bytes"
@@ -130,7 +129,7 @@ mod tests {
                 host.transaction_close(&forged, true);
                 Ok::<_, ()>(())
             })?;
-            Err(())
+            Err::<(), ()>(())
         });
         assert_eq!(outer, Err(()));
         assert_eq!(
