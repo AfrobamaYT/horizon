@@ -95,3 +95,48 @@ fn copy_files(to: &Path, files: impl IntoIterator<Item = (String, Vec<u8>)>) -> 
     }
     Ok(())
 }
+
+/// Check target-crossing edges before the native-only dependency resolver.
+pub(super) fn checked_bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
+    let found = super::scan_bundles(folder)?;
+    let wasm: Vec<_> = horizon_mod_package::find(folder)
+        .into_iter()
+        .chain(horizon_mod_package::find(
+            &folder
+                .parent()
+                .unwrap_or(folder)
+                .join(horizon_mod_package::mod_list::DIR),
+        ))
+        .filter_map(|path| horizon_mod_package::Package::read(&path).ok())
+        .filter(|package| package.manifest.wasm.is_some())
+        .collect();
+    for bundle in &found {
+        let dependent = horizon_mod_package::Package::read(&bundle.dir)?;
+        for library in &wasm {
+            if !dependent
+                .manifest
+                .dependencies
+                .contains_key(&library.manifest.id)
+            {
+                continue;
+            }
+            let reason = if let Some(name) = dependent
+                .layouts
+                .first_difference(&library.manifest.id, &library.layouts)
+            {
+                crate::i18n::trf(
+                    "{mod}: layout mismatch in library {library} for type {type}",
+                    &[
+                        ("mod", &dependent.manifest.id),
+                        ("library", &library.manifest.id),
+                        ("type", name),
+                    ],
+                )
+            } else {
+                crate::i18n::trf("{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet", &[("library", &library.manifest.id), ("mod", &dependent.manifest.id)])
+            };
+            return Err(reason);
+        }
+    }
+    Ok(found)
+}

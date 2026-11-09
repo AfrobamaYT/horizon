@@ -340,11 +340,32 @@ pub fn refusal(id: &str) -> Option<Refusal> {
 pub fn load_installed(game_dir: &Path, dev: &[PathBuf]) -> Loaded {
     let enabled = horizon_mod_package::mod_list::ModList::load(game_dir).enabled;
     let mut refused = Vec::new();
+    let native: Vec<_> =
+        horizon_mod_package::find(&game_dir.join(horizon_mod_package::mod_list::NATIVE_DIR))
+            .into_iter()
+            .chain(horizon_mod_package::find(
+                &game_dir.join(horizon_mod_package::mod_list::DIR),
+            ))
+            .chain(std::env::current_exe().ok().into_iter().flat_map(|exe| {
+                horizon_mod_package::find(
+                    &exe.with_file_name(horizon_mod_package::mod_list::NATIVE_DIR),
+                )
+            }))
+            .chain(dev.iter().cloned())
+            .filter_map(|path| horizon_mod_package::Package::read(&path).ok())
+            .filter(|package| package.is_native())
+            .collect();
     let packages: Vec<WasmPackage> =
         horizon_mod_package::selection::content_packages(game_dir, &enabled, dev)
             .filter(|selected| selected.package.manifest.wasm.is_some())
-            .filter_map(
-                |selected| match horizon_mod_package::Package::read_wasm(&selected.path) {
+            .filter_map(|selected| {
+                if let Some(reason) = native.iter().find_map(|library| {
+                    horizon_mod_package::layouts::mixed_refusal(&selected.package, library)
+                }) {
+                    refused.push((selected.package.manifest.id, Refusal::Package(reason)));
+                    return None;
+                }
+                match horizon_mod_package::Package::read_wasm(&selected.path) {
                     Ok(module) => Some(WasmPackage {
                         manifest: selected.package.manifest,
                         module,
@@ -353,8 +374,8 @@ pub fn load_installed(game_dir: &Path, dev: &[PathBuf]) -> Loaded {
                         refused.push((selected.package.manifest.id, Refusal::Package(why)));
                         None
                     }
-                },
-            )
+                }
+            })
             .collect();
     let mut loaded = match std::env::current_exe()
         .ok()
