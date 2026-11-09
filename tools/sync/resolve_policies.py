@@ -31,6 +31,19 @@ def area(path):
 
 
 def main(target):
+    # Workspace membership belongs to the fork. Only import upstream's two
+    # new, non-component-runtime crates; let Cargo refresh the fork lockfile.
+    unmerged = git('diff', '--name-only', '--diff-filter=U').splitlines()
+    if 'Cargo.toml' in unmerged:
+        manifest = git('show', 'HEAD:Cargo.toml')
+        for member in ('crates/horizon-addresses', 'crates/horizon-platform'):
+            if member not in manifest:
+                manifest = manifest.replace('members = [', f'members = [\n    "{member}",', 1)
+        Path('Cargo.toml').write_text(manifest)
+        subprocess.run(['git', 'add', 'Cargo.toml'], check=True)
+    if 'Cargo.lock' in unmerged:
+        subprocess.run(['git', 'checkout', 'HEAD', '--', 'Cargo.lock'], check=True)
+        print('Kept fork Cargo.lock; cargo check must refresh it.')
     removed = patterns('fork-removed.txt')
     upstream = patterns('upstream-owned.txt')
     generated = [line.split('\t')[0] for line in patterns('generated.txt')]
