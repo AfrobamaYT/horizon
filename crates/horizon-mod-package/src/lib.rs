@@ -10,6 +10,8 @@ pub mod icon;
 pub mod index;
 pub mod install_lock;
 pub mod internals;
+#[cfg(feature = "runtime-process")]
+pub mod locks;
 pub mod manifest;
 pub mod mod_list;
 #[cfg(not(target_arch = "wasm32"))]
@@ -18,6 +20,8 @@ pub mod modpack;
 pub mod output;
 pub mod packages;
 pub mod runtime;
+#[cfg(feature = "runtime-process")]
+pub mod runtime_leases;
 pub mod selection;
 
 pub use content::Content;
