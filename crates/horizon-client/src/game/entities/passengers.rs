@@ -1081,4 +1081,230 @@ mod nested_vehicle_discard_tests {
     fn nested_vehicle_discard_notifies_a_cart_dismount_once() {
         discard_during_dismount(true);
     }
+    fn with_vehicle_tree(cart: bool, rejected: bool, test: impl FnOnce(&mut Game<'_>)) {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.options.game_dir = Some(
+                std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap())
+                    .join(format!("guard-{:?}", std::thread::current().id())),
+            );
+            let at = Vec3::new(10.0, 200.0, 20.0);
+            if cart {
+                game.carts.push(super::super::minecarts::Minecart::new(
+                    71,
+                    super::super::minecarts::CartKind::Rideable,
+                    at,
+                ));
+            } else {
+                game.boats
+                    .push(super::super::boats::Boat::new(71, "oak".into(), at, 0.0));
+            }
+            let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            let mut rider = Mob::new(72, kind.clone(), Vec3::new(2.0, 190.0, 3.0), 0.0);
+            rider.extra.mount = Some(71);
+            if rejected {
+                game.persist
+                    .off_level
+                    .insert(72, super::super::persist::OffLevel::Mob(rider));
+            } else {
+                game.mobs.push(rider);
+            }
+            let mut child = Mob::new(73, kind, Vec3::ZERO, 0.0);
+            child.extra.mount = Some(72);
+            child.age = 19;
+            game.mobs.push(child);
+            test(game);
+        });
+    }
+    struct CancelLive {
+        count: Arc<AtomicUsize>,
+        cross_level: bool,
+    }
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for CancelLive {
+        fn entity_mount(
+            &self,
+            host: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::EntityMountEvent<'_>,
+        ) -> mod_api::Flow {
+            assert!(!event.mounting);
+            assert_eq!(event.entity, 72);
+            let n = self.count.fetch_add(1, Ordering::Relaxed);
+            if self.cross_level {
+                assert!(host.commands().run_command(&format!(
+                    "execute in minecraft:the_nether run worldborder set {}",
+                    37 + n
+                )));
+                assert!(
+                    host.entity(72).is_some(),
+                    "the source level is restored inside the callback"
+                );
+            }
+            mod_api::Flow::Cancel
+        }
+    }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn kill_and_discard_notify_rejected_edges_once_without_changing_membership() {
+        for cart in [false, true] {
+            for discard in [false, true] {
+                let count = Arc::new(AtomicUsize::new(0));
+                let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+                    "cancel_cleanup",
+                    Box::new(CancelLive {
+                        count: count.clone(),
+                        cross_level: false,
+                    }),
+                )]
+                .into();
+                mod_api::testing::with_mods(mods, || {
+                    with_vehicle_tree(cart, true, |game| {
+                        if discard {
+                            assert!(game.entity(71).unwrap().discard(game));
+                        } else {
+                            game.kill_target_in_level(if cart {
+                                super::super::commands::Target::Cart(71)
+                            } else {
+                                super::super::commands::Target::Boat(71)
+                            });
+                        }
+                        game.native_removals_flush();
+                        assert_eq!(count.load(Ordering::Relaxed), 1);
+                        assert!(game.entity(71).is_none());
+                        assert_eq!(game.mob_object(72).unwrap().extra.mount, None);
+                        assert_eq!(
+                            game.mob_object(72).unwrap().position,
+                            Vec3::new(2.0, 200.0, 3.0)
+                        );
+                        assert!(game.entity(72).is_none());
+                        assert!(game.persist.off_level.contains_key(&72));
+                        let child = game.mob_object(73).unwrap();
+                        assert_eq!(child.extra.mount, Some(72));
+                        assert_eq!(child.position.x, 2.0);
+                        assert_eq!(child.position.z, 3.0);
+                        assert!(child.position.y >= 200.0);
+                        assert_eq!(child.age, 19);
+                        assert!(game.entity(73).is_some());
+                        assert!(game.persist.mount_notifications.is_empty());
+                        game.native_removals_flush();
+                        assert_eq!(count.load(Ordering::Relaxed), 1);
+                    });
+                });
+            }
+        }
+    }
+    struct ReparentLater(Arc<AtomicUsize>);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for ReparentLater {
+        fn entity_mount(
+            &self,
+            host: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::EntityMountEvent<'_>,
+        ) -> mod_api::Flow {
+            if !event.mounting && event.entity == 73 {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+            if !event.mounting && event.entity == 72 {
+                let later = host.entity(73).unwrap();
+                let replacement = host.entity(74).unwrap();
+                assert!(later.start_riding(host, replacement, true));
+                return mod_api::Flow::Cancel;
+            }
+            mod_api::Flow::Continue
+        }
+    }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn destruction_preserves_later_rider_reparenting_without_an_extra_notification() {
+        for cart in [false, true] {
+            let count = Arc::new(AtomicUsize::new(0));
+            let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+                "reparent_cleanup",
+                Box::new(ReparentLater(count.clone())),
+            )]
+            .into();
+            mod_api::testing::with_mods(mods, || {
+                with_vehicle_tree(cart, false, |game| {
+                    game.mob_object_mut(72).unwrap().extra.vehicle_order = 1;
+                    let later = game.mob_object_mut(73).unwrap();
+                    later.extra.mount = Some(71);
+                    later.extra.vehicle_order = 2;
+                    let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
+                    game.mobs.push(Mob::new(74, kind, Vec3::ZERO, 0.0));
+                    game.kill_target_in_level(if cart {
+                        super::super::commands::Target::Cart(71)
+                    } else {
+                        super::super::commands::Target::Boat(71)
+                    });
+                    assert_eq!(game.mob_object(72).unwrap().extra.mount, None);
+                    assert_eq!(game.mob_object(73).unwrap().extra.mount, Some(74));
+                    assert_eq!(
+                        count.load(Ordering::Relaxed),
+                        1,
+                        "only deliberate reparenting dismounts the later rider"
+                    );
+                    game.native_removals_flush();
+                    assert_eq!(game.mob_object(73).unwrap().extra.mount, Some(74));
+                    assert_eq!(count.load(Ordering::Relaxed), 1);
+                    assert!(game.persist.mount_notifications.is_empty());
+                });
+            });
+        }
+    }
+    fn live_cancels(cross_level: bool) {
+        let count = Arc::new(AtomicUsize::new(0));
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "live_cancel",
+            Box::new(CancelLive {
+                count: count.clone(),
+                cross_level,
+            }),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_vehicle_tree(false, false, |game| {
+                if cross_level {
+                    game.build_registries();
+                    game.set_allow_commands(true);
+                    assert!(game.run_command("worldborder set 1000"));
+                }
+                let rider = game.entity(72).unwrap();
+                for n in 1..=2 {
+                    assert!(!game.entity_stop_riding(rider));
+                    assert_eq!(count.load(Ordering::Relaxed), n);
+                    assert_eq!(game.mob_object(72).unwrap().extra.mount, Some(71));
+                    assert_eq!(
+                        game.mob_object(72).unwrap().position,
+                        Vec3::new(2.0, 190.0, 3.0)
+                    );
+                    assert!(game.persist.mount_notifications.is_empty());
+                    assert_eq!(game.dim, super::super::Dim::Overworld);
+                }
+                if cross_level {
+                    assert_eq!(game.border.size(), 1000.0);
+                    assert_eq!(
+                        game.levels
+                            .parked_border(super::super::Dim::Nether)
+                            .unwrap()
+                            .size(),
+                        38.0
+                    );
+                    game.enter_level(super::super::Dim::Nether).unwrap();
+                    assert!(game.persist.mount_notifications.is_empty());
+                    game.enter_level(super::super::Dim::Overworld).unwrap();
+                    assert!(game.persist.mount_notifications.is_empty());
+                }
+            });
+        });
+    }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn independent_live_cancellations_both_notify_and_retain_the_relationship() {
+        live_cancels(false);
+    }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn scoped_cross_level_callbacks_restore_context_and_clear_notification_keys() {
+        live_cancels(true);
+    }
 }
