@@ -500,6 +500,363 @@ impl fmt::Display for FirstUseError {
     }
 }
 
+/// The registry-backed state validator: a state image is known exactly
+/// when the block registry resolves it — the name exists and every
+/// property with this value is declared on that block. This is part B's
+/// replacement of part A's all-accepted seam.
+pub(crate) struct RegistryStates<'a> {
+    registry: &'a horizon_world::registry::BlockRegistry,
+}
+impl<'a> RegistryStates<'a> {
+    /// Wraps the live block registry.
+    pub(crate) fn new(registry: &'a horizon_world::registry::BlockRegistry) -> Self {
+        Self { registry }
+    }
+}
+impl StateValidator for RegistryStates<'_> {
+    fn known(&self, name: &str, properties: &[(String, String)]) -> bool {
+        let descriptor = horizon_world::chunk::BlockState {
+            name: name.to_string(),
+            properties: properties.iter().cloned().collect(),
+        };
+        self.registry.resolve(&descriptor).is_ok()
+    }
+}
+
+/// The longest state the registry declares, serialized the way an
+/// operation file spells it (name plus every `key=value`). Computed once
+/// at load; a registry whose states cannot fit the operation envelope
+/// refuses preflight, never a half-stored transfer.
+pub(crate) fn longest_state_bytes(registry: &horizon_world::registry::BlockRegistry) -> usize {
+    let mut longest = 0_usize;
+    for id in 0..registry.len() {
+        let Some(state) = registry.state(horizon_world::registry::BlockStateId(id as u32)) else {
+            continue;
+        };
+        let mut size = state.name.len();
+        for (key, value) in &state.properties {
+            size += key.len() + value.len() + 4;
+        }
+        longest = longest.max(size);
+    }
+    longest
+}
+
+/// Whether a whole operation's worst shape fits the envelope: two images
+/// per cell at the registry's longest state, the full 16 MiB of
+/// block-entity data, and framing. Refused at preflight, before any
+/// block is lifted, when the registry's own declarations outgrow the
+/// envelope.
+pub(crate) fn envelope_preflight(
+    registry: &horizon_world::registry::BlockRegistry,
+) -> Result<(), OpError> {
+    let worst = 2 * 4096 * longest_state_bytes(registry) + MAX_OP_ENTITIES + 1024 * 1024;
+    if worst > MAX_OP_DECODED {
+        return Err(OpError::Malformed(
+            "the block registry's longest state exceeds the operation envelope",
+        ));
+    }
+    Ok(())
+}
+
+/// Whether a rotation is one of the cube's symmetries — a multiple of
+/// ninety degrees about a single coordinate axis. Disassembly without a
+/// state-rotation adapter (slice 4's `StructureCellPart`) refuses
+/// anything else rather than silently rewriting facing properties: at
+/// most two components are nonzero, the angle cosine is 0 or ±√½ or ±1,
+/// and the sine rides exactly one axis.
+pub(crate) fn cube_symmetry_rotation(components: [f64; 4]) -> bool {
+    let [w, x, y, z] = components;
+    if w == 0.0 && x == 0.0 && y == 0.0 && z == 0.0 {
+        return false;
+    }
+    for value in [w, x, y, z] {
+        if !value.is_finite() {
+            return false;
+        }
+        let magnitude = value.abs();
+        let on_axis = (magnitude - 1.0).abs() < 1.0e-12 || magnitude < 1.0e-12;
+        let on_half = (magnitude - std::f64::consts::FRAC_1_SQRT_2).abs() < 1.0e-12;
+        if !on_axis && !on_half {
+            return false;
+        }
+    }
+    // At most one of the vector components may be nonzero alongside the
+    // angle cosine: a quarter turn about exactly one axis.
+    [x, y, z].iter().filter(|v| v.abs() >= 1.0e-12).count() <= 1
+}
+
+/// What a recovery pass found and did.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Recovered {
+    /// Chunks whose cells still held their before-images and were taken
+    /// to the after-images.
+    pub(crate) applied: usize,
+    /// Chunks that already held their after-images untouched.
+    pub(crate) verified: usize,
+}
+
+/// Why a recovery refused. Every variant but `NothingToDo` stops the
+/// world's load: recovery never guesses, and never generates content.
+#[derive(Debug)]
+pub(crate) enum RecoveryRefused {
+    /// The store itself refused to open.
+    Store(Refusal),
+    /// An in-progress operation's file is gone, or does not decode: the
+    /// carrier is quarantined, its data neither replayed nor deleted.
+    Quarantine(String),
+    /// An affected chunk did not strictly read — damage, never absence.
+    Region {
+        /// The chunk's position.
+        chunk: (i32, i32),
+        /// Why it refused.
+        why: horizon_world::carrier::region_strict::Strict,
+    },
+    /// A cell holds neither its before-image nor its after-image.
+    CellMismatch {
+        /// The cell's world position.
+        pos: [i32; 3],
+        /// What the cell actually holds, serialized.
+        found: String,
+    },
+    /// The chunk NBT did not parse after a strict read.
+    Chunk(String),
+    /// Plain I/O.
+    Io(String),
+}
+impl fmt::Display for RecoveryRefused {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Store(refusal) => write!(f, "{refusal}"),
+            Self::Quarantine(why) => write!(f, "carrier quarantined: {why}"),
+            Self::Region { chunk, why } => {
+                write!(f, "chunk ({},{}) refuses: {why}", chunk.0, chunk.1)
+            }
+            Self::CellMismatch { pos, found } => write!(
+                f,
+                "cell ({},{},{}) holds {found}, neither its before nor its after image",
+                pos[0], pos[1], pos[2]
+            ),
+            Self::Chunk(why) => write!(f, "chunk data: {why}"),
+            Self::Io(why) => write!(f, "recovery I/O: {why}"),
+        }
+    }
+}
+
+/// Replays the in-progress operation at world open, before chunks tick
+/// and before players join: every affected chunk is strictly read, each
+/// cell must hold either its before-image (apply the after-image) or its
+/// after-image (leave it), and only when every write-back is synced does
+/// the journal record `committed` and drop the operation file.
+/// Roll-forward only — nothing is ever written back into a cell.
+pub(crate) fn recover(
+    store: &mut Store,
+    region_dir: &Path,
+    states: &dyn StateValidator,
+) -> Result<Recovered, RecoveryRefused> {
+    let Some(op) = store.journal().in_progress else {
+        return Ok(Recovered::default());
+    };
+    let op_path = store.operation_path(op.op_id);
+    let bytes = fs::read(&op_path).map_err(|error| {
+        RecoveryRefused::Quarantine(format!("operation file does not read: {error}"))
+    })?;
+    let operation =
+        decode_operation(&bytes, states).map_err(|e| RecoveryRefused::Quarantine(e.to_string()))?;
+    let mut chunks: Vec<[i32; 2]> = Vec::new();
+    for cell in &operation.cells {
+        let key = [cell.world[0] >> 4, cell.world[2] >> 4];
+        if !chunks.contains(&key) {
+            chunks.push(key);
+        }
+    }
+    let mut recovered = Recovered::default();
+    for chunk in chunks {
+        let root = horizon_world::carrier::region_strict::read_chunk(
+            region_dir,
+            horizon_core::position::ChunkPos::new(chunk[0], chunk[1]),
+        )
+        .map_err(|why| RecoveryRefused::Region {
+            chunk: (chunk[0], chunk[1]),
+            why,
+        })?
+        .ok_or(RecoveryRefused::Region {
+            chunk: (chunk[0], chunk[1]),
+            why: horizon_world::carrier::region_strict::Strict::Missing,
+        })?;
+        if replay_chunk(&operation, root, chunk, region_dir)? {
+            recovered.applied += 1;
+        } else {
+            recovered.verified += 1;
+        }
+    }
+    store
+        .commit()
+        .map_err(|e| RecoveryRefused::Io(e.to_string()))?;
+    Ok(recovered)
+}
+
+/// Applies one chunk's cells: strict compare against the images, the
+/// after-image written through the storage-level chunk (no block
+/// behavior, exactly what a replay may do), then a synced write-back.
+fn replay_chunk(
+    operation: &Operation,
+    root: horizon_core::nbt::NamedTag,
+    chunk: [i32; 2],
+    region_dir: &Path,
+) -> Result<bool, RecoveryRefused> {
+    let mut data = horizon_world::chunk::ChunkData::new(root).map_err(|e| {
+        RecoveryRefused::Chunk(format!(
+            "chunk ({},{}) does not parse: {e}",
+            chunk[0], chunk[1]
+        ))
+    })?;
+    let mut touched = false;
+    for cell in &operation.cells {
+        if [cell.world[0] >> 4, cell.world[2] >> 4] != chunk {
+            continue;
+        }
+        let pos =
+            horizon_core::position::BlockPos::new(cell.world[0], cell.world[1], cell.world[2]);
+        let found = data.block(pos).map_err(|e| {
+            RecoveryRefused::Chunk(format!(
+                "cell ({},{},{}) does not read: {e}",
+                pos.x, pos.y, pos.z
+            ))
+        })?;
+        let matches = |image: &CellImage| match &found {
+            None => image.name == "minecraft:air" && image.properties.is_empty(),
+            Some(state) => {
+                state.name == image.name
+                    && state.properties.len() == image.properties.len()
+                    && image
+                        .properties
+                        .iter()
+                        .all(|(key, value)| state.properties.get(key).is_some_and(|v| v == value))
+            }
+        };
+        if matches(&cell.after) {
+            continue;
+        }
+        if !matches(&cell.before) {
+            let found = found
+                .map(|state| {
+                    let mut text = state.name.clone();
+                    for (key, value) in &state.properties {
+                        text.push_str(&format!(",{key}={value}"));
+                    }
+                    text
+                })
+                .unwrap_or_else(|| "minecraft:air".to_string());
+            return Err(RecoveryRefused::CellMismatch {
+                pos: [pos.x, pos.y, pos.z],
+                found,
+            });
+        }
+        let after = horizon_world::chunk::BlockState {
+            name: cell.after.name.clone(),
+            properties: cell.after.properties.iter().cloned().collect(),
+        };
+        data.set_block_data(pos, after).map_err(|e| {
+            RecoveryRefused::Chunk(format!(
+                "cell ({},{},{}) does not write: {e}",
+                pos.x, pos.y, pos.z
+            ))
+        })?;
+        touched = true;
+    }
+    if !touched {
+        return Ok(false);
+    }
+    // Block entities ride the root's own list: the after-image's entity
+    // is installed, the before-image's position cleared, by plain NBT
+    // edits so nothing else in the chunk moves.
+    let root = data.into_nbt();
+    let root = edit_block_entities(root, operation, chunk)?;
+    write_chunk_back(region_dir, root, chunk)?;
+    Ok(true)
+}
+
+/// Installs the after-images' block entities and clears the before
+/// positions' in the chunk root, by NBT edits.
+fn edit_block_entities(
+    mut root: horizon_core::nbt::NamedTag,
+    operation: &Operation,
+    chunk: [i32; 2],
+) -> Result<horizon_core::nbt::NamedTag, RecoveryRefused> {
+    use horizon_core::nbt::Tag;
+    let Tag::Compound(map) = &mut root.tag else {
+        return Err(RecoveryRefused::Chunk(
+            "chunk root is not a compound".into(),
+        ));
+    };
+    let mut entities = match map.get(&"block_entities".into()) {
+        Some(Tag::List(list)) => list.clone(),
+        _ => Vec::new(),
+    };
+    for cell in &operation.cells {
+        if [cell.world[0] >> 4, cell.world[2] >> 4] != chunk {
+            continue;
+        }
+        let (x, y, z) = (cell.world[0], cell.world[1], cell.world[2]);
+        let at = |tag: &Tag| -> bool {
+            let read = |name: &str| match tag.get(name) {
+                Some(Tag::Int(v)) => Some(*v),
+                _ => None,
+            };
+            read("x") == Some(x) && read("y") == Some(y) && read("z") == Some(z)
+        };
+        entities.retain(|tag| !at(tag));
+        if let Some(entity) = &cell.after.entity {
+            let Tag::Compound(mut entity_map) = entity.clone() else {
+                return Err(RecoveryRefused::Chunk(
+                    "after-image entity is not a compound".into(),
+                ));
+            };
+            for (key, value) in [("x", x), ("y", y), ("z", z)] {
+                entity_map.insert(key.into(), Tag::Int(value));
+            }
+            entities.push(Tag::Compound(entity_map));
+        }
+    }
+    if entities.is_empty() {
+        map.remove(&"block_entities".into());
+    } else {
+        map.insert("block_entities".into(), Tag::List(entities));
+    }
+    Ok(root)
+}
+
+/// Writes the replayed chunk back through the region file, synced: the
+/// write must be on disk before the journal says `committed`.
+fn write_chunk_back(
+    region_dir: &Path,
+    root: horizon_core::nbt::NamedTag,
+    chunk: [i32; 2],
+) -> Result<(), RecoveryRefused> {
+    use horizon_world::region::ChunkRecord;
+    let position = horizon_core::position::ChunkPos::new(chunk[0], chunk[1]);
+    let record = ChunkRecord::from_nbt(
+        &root,
+        Compression::Zlib,
+        0,
+        horizon_core::nbt::Limits::saved(),
+    )
+    .map_err(|e| RecoveryRefused::Chunk(e.to_string()))?;
+    let path = region_dir.join(format!("r.{}.{}.mca", position.x >> 5, position.z >> 5));
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| RecoveryRefused::Io(e.to_string()))?;
+    }
+    let mut region = horizon_world::region::RegionFile::open_writable(&path, true)
+        .map_err(|e| RecoveryRefused::Io(e.to_string()))?;
+    region
+        .write(position, &record)
+        .map_err(|e| RecoveryRefused::Io(e.to_string()))?;
+    region
+        .sync()
+        .map_err(|e| RecoveryRefused::Io(e.to_string()))?;
+    Ok(())
+}
 /// A store-level I/O failure, with the operation's text.
 #[derive(Debug)]
 pub(crate) struct StoreIoError(pub(crate) String);

@@ -132,6 +132,8 @@ pub mod reconnect;
 pub mod save;
 // Slice 2 part A lands unwired: the transfers that call it are part B, so
 // nothing outside its own tests reaches it yet.
+#[cfg(test)]
+mod carrier_recover_tests;
 #[allow(dead_code)]
 pub(crate) mod carrier_store;
 #[cfg(test)]

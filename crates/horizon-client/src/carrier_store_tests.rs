@@ -149,6 +149,51 @@ fn flag_round_trips_through_level_dat() {
 }
 
 #[test]
+fn only_cube_symmetry_rotations_pass() {
+    let quarter_y = [
+        std::f64::consts::FRAC_1_SQRT_2,
+        0.0,
+        std::f64::consts::FRAC_1_SQRT_2,
+        0.0,
+    ];
+    assert!(crate::carrier_store::cube_symmetry_rotation([
+        1.0, 0.0, 0.0, 0.0
+    ]));
+    assert!(crate::carrier_store::cube_symmetry_rotation(quarter_y));
+    assert!(crate::carrier_store::cube_symmetry_rotation([
+        -1.0, 0.0, 0.0, 0.0
+    ]));
+    // A 180-degree turn about Y, a 90-degree turn about X.
+    assert!(crate::carrier_store::cube_symmetry_rotation([
+        0.0, 0.0, 1.0, 0.0
+    ]));
+    assert!(crate::carrier_store::cube_symmetry_rotation([
+        std::f64::consts::FRAC_1_SQRT_2,
+        std::f64::consts::FRAC_1_SQRT_2,
+        0.0,
+        0.0
+    ]));
+    // Anything not a cube symmetry refuses: a sixth of a turn about Y,
+    // a diagonal axis, a zero quaternion, a non-finite value.
+    assert!(!crate::carrier_store::cube_symmetry_rotation([
+        0.5_f64.sqrt(),
+        0.0,
+        0.5_f64.sqrt() / 6.0,
+        0.0
+    ]));
+    assert!(!crate::carrier_store::cube_symmetry_rotation([
+        0.5, 0.5, 0.5, 0.5
+    ]));
+    assert!(!crate::carrier_store::cube_symmetry_rotation([0.0; 4]));
+    assert!(!crate::carrier_store::cube_symmetry_rotation([
+        f64::NAN,
+        0.0,
+        0.0,
+        0.0
+    ]));
+}
+
+#[test]
 fn crc32_matches_the_ieee_vector() {
     assert_eq!(crc32fast::hash(b"123456789"), 0xcbf4_3926);
 }
