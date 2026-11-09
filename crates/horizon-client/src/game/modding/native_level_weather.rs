@@ -4,6 +4,7 @@
 //! the command, they act on the level in place; a parked level, a stale handle or a client
 //! returns false. The players see the change on the next host sync.
 use super::Game;
+use crate::game::level_control_hooks::LevelControl;
 use mod_api::LevelRef;
 
 impl Game<'_> {
@@ -54,7 +55,8 @@ impl Game<'_> {
         }
     }
     /// `set_weather_parameters` through a handle of the level in place. False for a negative
-    /// time, a parked level, a stale handle or a client.
+    /// time, inside the `weather_change` or `thunder_change` hook, a parked level, a stale
+    /// handle or a client.
     pub(super) fn level_set_weather(
         &mut self,
         level: LevelRef,
@@ -63,7 +65,11 @@ impl Game<'_> {
         raining: bool,
         thundering: bool,
     ) -> bool {
-        if !self.level_in_place(level) || clear_ticks < 0 || weather_ticks < 0 {
+        if !self.level_in_place(level)
+            || clear_ticks < 0
+            || weather_ticks < 0
+            || LevelControl::Weather.is_heard()
+        {
             return false;
         }
         self.set_weather_parameters(clear_ticks, weather_ticks, raining, thundering);
@@ -166,6 +172,102 @@ mod tests {
             assert!(!game.set_tick_rate(0.5));
             assert!(!game.set_tick_rate(f32::NAN));
             assert_eq!(game.clock.rate(), 40.0, "refusals change nothing");
+        });
+    }
+    type Log = std::sync::Arc<std::sync::Mutex<Vec<(&'static str, bool)>>>;
+
+    /// A mod that enforces its own weather, border and tick rate from inside the hooks those
+    /// writes fire, the loop the setters refuse.
+    struct Enforcer(Log);
+
+    impl Enforcer {
+        fn log(&self, what: &'static str, ok: bool) {
+            self.0.lock().unwrap().push((what, ok));
+        }
+    }
+
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Enforcer {
+        fn weather_change(
+            &self,
+            host: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::WeatherChangeEvent<'_>,
+        ) -> mod_api::Flow {
+            let level = host.level(event.dimension).unwrap();
+            self.log("weather", level.set_weather(host, 0, 100, false, false));
+            mod_api::Flow::Continue
+        }
+        fn world_border_center_changed(
+            &self,
+            host: &mut dyn mod_api::ServerHost,
+            _: &mut mod_api::WorldBorderCenterChangedEvent,
+        ) {
+            let level = host.level("minecraft:overworld").unwrap();
+            self.log("center", level.set_world_border_center(host, [7.0, 7.0]));
+            let size = level.set_world_border_size(host, 300.0, 0);
+            self.log("size from center", size);
+        }
+        fn world_border_bounds_changed(
+            &self,
+            host: &mut dyn mod_api::ServerHost,
+            _: &mut mod_api::WorldBorderBoundsChangedEvent,
+        ) {
+            let level = host.level("minecraft:overworld").unwrap();
+            self.log("size", level.set_world_border_size(host, 400.0, 0));
+            let center = level.set_world_border_center(host, [9.0, 9.0]);
+            self.log("center from size", center);
+        }
+        fn server_tick_rate_changed(
+            &self,
+            host: &mut dyn mod_api::ServerHost,
+            _: &mut mod_api::ServerTickRateChangedEvent,
+        ) {
+            self.log("tick", host.set_tick_rate(30.0));
+        }
+    }
+
+    /// A listener calling the setter of the hook it hears is refused, so the hook doesn't fire
+    /// again without end; another control's setter runs once, and its own hook can't come back
+    /// to the first. The outer writes stand, and a write of the value already there is heard
+    /// by nobody.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_listener_calling_its_own_setter_is_refused() {
+        let log = Log::default();
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "enforcer",
+            Box::new(Enforcer(log.clone())),
+        )]
+        .into();
+        let take = || std::mem::take(&mut *log.lock().unwrap());
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let level = game.level(game.dim.id()).unwrap();
+
+                assert!(level.set_weather(game, 0, 6000, true, false));
+                assert_eq!(take(), [("weather", false)]);
+                assert!(game.world.weather.raining, "the outer write stands");
+
+                assert!(level.set_world_border_center(game, [100.0, -50.0]));
+                assert_eq!(
+                    take(),
+                    [
+                        ("center", false),
+                        ("size", false),
+                        ("center from size", false),
+                        ("size from center", true),
+                    ]
+                );
+                assert_eq!(game.border.center(), [100.0, -50.0]);
+                assert_eq!(game.border.size(), 300.0);
+                assert!(level.set_world_border_center(game, [100.0, -50.0]));
+                assert!(level.set_world_border_size(game, 300.0, 0));
+                assert!(take().is_empty(), "an unchanged border is heard by nobody");
+
+                assert!(game.set_tick_rate(40.0));
+                assert_eq!(take(), [("tick", false)]);
+                assert_eq!(game.clock.rate(), 40.0);
+            });
         });
     }
 }

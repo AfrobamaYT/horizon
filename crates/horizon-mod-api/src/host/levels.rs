@@ -752,16 +752,20 @@ pub trait LevelsBackendMut {
     /// Side: server.
     /// Moves the world border's centre (`WorldBorder.setCenter`), as `/worldborder center`
     /// does. Horizon keeps one border for every level, so this moves it everywhere; the
-    /// players see it after the next sync. False for a centre that isn't finite or lies past
-    /// 2.9999984E7 on x or z, a stale handle, a level the server has not opened or a client.
+    /// players see it after the next sync. The centre it already has is true, with nothing
+    /// heard. False for a centre that isn't finite or lies past 2.9999984E7 on x or z, a call
+    /// from inside `world_border_center_changed`, a stale handle, a level the server has not
+    /// opened or a client.
     #[access(WorldOnly)]
     fn level_set_world_border_center(&mut self, level: LevelRef, center: [f64; 2]) -> bool;
     /// Side: server.
     /// Sets the world border's size, as `/worldborder set`: at once when `ticks` is 0
     /// (`setSize`), otherwise growing or shrinking in a straight line over `ticks` game ticks
-    /// from its size now (`lerpSizeBetween`). The one border every level shares. False for a
-    /// size outside 1 to 5.9999968E7, a negative `ticks`, a stale handle, a level the server
-    /// has not opened or a client.
+    /// from its size now (`lerpSizeBetween`). The one border every level shares. A still
+    /// border set to the size it has at once is true, with nothing heard. False for a size
+    /// outside 1 to 5.9999968E7, a negative `ticks`, a call from inside
+    /// `world_border_bounds_changed`, a stale handle, a level the server has not opened or a
+    /// client.
     #[access(WorldOnly)]
     fn level_set_world_border_size(&mut self, level: LevelRef, size: f64, ticks: i64) -> bool;
     /// Side: server.
@@ -795,7 +799,8 @@ pub trait LevelsBackendMut {
     /// weather cycle goes on as usual. Rain and thunder then fade in or out as vanilla's do;
     /// `set_weather_levels` sets their strength at once. The `weather_change` hook may cancel
     /// all of it and `thunder_change` the thunder. The players see it after the next sync.
-    /// False for a negative time, a parked level, a stale handle or a client.
+    /// False for a negative time, a call from inside `weather_change` or `thunder_change`, a
+    /// parked level, a stale handle or a client.
     #[access(WorldOnly)]
     fn level_set_weather(
         &mut self,

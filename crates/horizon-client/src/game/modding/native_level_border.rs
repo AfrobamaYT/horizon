@@ -4,13 +4,15 @@
 //! level, so a write through any level the server has opened moves it everywhere. The players
 //! are told on the next host sync, as for the command.
 use super::Game;
+use crate::game::level_control_hooks::LevelControl;
 use horizon_client::worldborder::{MAX_CENTER, MAX_SIZE};
 use mod_api::LevelRef;
 
 impl Game<'_> {
-    /// `WorldBorder.setCenter(x, z)`; the border-center hook hears it. False for a centre
-    /// that isn't finite or lies past 2.9999984E7 on x or z, and for a stale handle, a level
-    /// the server has not opened or a client.
+    /// `WorldBorder.setCenter(x, z)`; the border-center hook hears it. The centre it already
+    /// has is true with nothing heard, as `/worldborder center` changes nothing. False for a
+    /// centre that isn't finite or lies past 2.9999984E7 on x or z, inside the border-center
+    /// hook, and for a stale handle, a level the server has not opened or a client.
     pub(super) fn level_set_world_border_center(
         &mut self,
         level: LevelRef,
@@ -20,16 +22,21 @@ impl Game<'_> {
             || !center
                 .iter()
                 .all(|v| v.is_finite() && v.abs() <= MAX_CENTER)
+            || LevelControl::BorderCenter.is_heard()
         {
             return false;
+        }
+        if self.border.center() == center {
+            return true;
         }
         self.border.set_center(center);
         self.native_world_border_center_changed();
         true
     }
     /// `setSize(size)` when `ticks` is 0, otherwise `lerpSizeBetween(current, size, ticks)`; the
-    /// border-bounds hook hears it. False for a size outside 1 to 5.9999968E7, a negative
-    /// `ticks`, a stale handle, a level the server has not opened or a client.
+    /// border-bounds hook hears it. A still border set to the size it has is true with nothing
+    /// heard. False for a size outside 1 to 5.9999968E7, a negative `ticks`, inside the
+    /// border-bounds hook, a stale handle, a level the server has not opened or a client.
     pub(super) fn level_set_world_border_size(
         &mut self,
         level: LevelRef,
@@ -39,8 +46,12 @@ impl Game<'_> {
         if self.native_level_world(level).is_none()
             || !(1.0..=MAX_SIZE).contains(&size)
             || ticks < 0
+            || LevelControl::BorderBounds.is_heard()
         {
             return false;
+        }
+        if ticks == 0 && self.border.remaining_ticks() == 0 && self.border.size() == size {
+            return true;
         }
         self.border.lerp_to(size, ticks);
         self.native_world_border_bounds_changed();

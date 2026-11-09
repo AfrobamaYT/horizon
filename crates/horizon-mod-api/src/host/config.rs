@@ -64,7 +64,9 @@ pub trait ConfigServerHost {
     /// the game ticks `rate` times a second from the next tick on, an autosave wait already
     /// running is shortened when the new rate asks for less, and `server_tick_rate_changed`
     /// fires. The players' clients follow on the next sync. False, with nothing changed, for a
-    /// rate outside 1 to 10000 (the command's range), one that isn't finite, or on a client.
+    /// rate outside 1 to 10000 (the command's range), one that isn't finite, a call from
+    /// inside `server_tick_rate_changed` (which would hear itself again without end), or on a
+    /// client.
     #[access(WorldOnly)]
     fn set_tick_rate(&mut self, rate: f32) -> bool;
     /// Side: server.
