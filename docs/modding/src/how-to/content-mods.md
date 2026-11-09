@@ -382,6 +382,17 @@ This uses the block's placement state and survival rules and consumes the item o
 `minecraft:villager_plantable_seeds` for farmers to plant them. The mapping does not change what the block drops or
 what Pick Block gives.
 
+An item whose template is `minecraft:fishing_rod` (and no `block`) is a fishing rod, as a NeoForge mod's
+`new FishingRodItem(...)` is: it casts, floats, bites, reels in and wears as vanilla's rod, its item model's
+`minecraft:fishing_rod/cast` is true while its bobber is out, and `native_player_fish` hears it. List it in
+`#minecraft:enchantable/fishing` for Lure and Luck of the Sea, as vanilla's rod is. Other behaviour that vanilla ties
+to an item's class, such as a bow's draw or a shield's block, still belongs to vanilla's item alone; components
+(`minecraft:tool`, `minecraft:consumable`, `minecraft:equippable` and the others) carry over for every template.
+
+```json
+{ "template": "minecraft:fishing_rod", "components": { "minecraft:max_damage": 128 } }
+```
+
 Native mods can register component types before content loads. A content item
 can set a registered type with a JSON value, such as `"sample:charge": {"charge": 42}`.
 JSON values become NBT values. Values must fit the network NBT limits and
