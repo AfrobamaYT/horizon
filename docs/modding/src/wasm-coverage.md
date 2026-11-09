@@ -433,6 +433,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Backend::living_owner` | crosses | Wire call |
 | `Backend::living_item_use_remaining` | crosses | Wire call |
 | `Backend::living_used_item_hand` | crosses | Wire call |
+| `Backend::living_is_blocking` | crosses | Wire call |
 | `Backend::living_dimensions_for_pose` | crosses | Wire call |
 | `Backend::living_can_use_portal` | crosses | Wire call |
 | `Backend::living_in_melee_range` | crosses | Wire call |
