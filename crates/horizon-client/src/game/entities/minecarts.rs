@@ -2042,14 +2042,11 @@ impl Game<'_> {
     }
     /// Refuse a removed target before carrying its owning slot into a tick clone.
     pub(super) fn store_cart_back(&mut self, index: usize, cart: Minecart) -> bool {
-        if self
+        !self
             .persist
             .removals
             .contains(&super::commands::Target::Cart(cart.id))
-        {
-            return false;
-        }
-        self.carts.store_back(index, cart)
+            && self.carts.store_back(index, cart)
     }
 
     /// Every cart but the ridden one (which ticks with its rider).

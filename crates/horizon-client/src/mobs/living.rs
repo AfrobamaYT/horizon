@@ -3625,7 +3625,7 @@ mod farmland_event_tests {
 
 /// `DeathProtection.TOTEM_EFFECTS`: clear, then regeneration II, absorption II
 /// and fire resistance.
-fn totem_death_effects() -> Vec<crate::items::ConsumeEffect> {
+pub(super) fn totem_death_effects() -> Vec<crate::items::ConsumeEffect> {
     use crate::items::{ConsumeEffect, ConsumeEffectSpec};
     let spec = |id: &str, duration, amplifier| ConsumeEffectSpec {
         id: id.to_owned(),

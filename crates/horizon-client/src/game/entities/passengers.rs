@@ -1412,38 +1412,38 @@ mod nested_vehicle_discard_tests {
 
 impl Game<'_> {
     pub(super) fn dismount_killed_boat(&mut self, id: u32) {
-                if let Some(y) = self.boats.iter().find(|b| b.id == id).map(|b| b.position.y) {
-                    self.dismount_destroyed_vehicle_mobs(id, y);
-                }
+        if let Some(y) = self.boats.iter().find(|b| b.id == id).map(|b| b.position.y) {
+            self.dismount_destroyed_vehicle_mobs(id, y);
+        }
     }
 }
 
 impl Game<'_> {
     pub(super) fn dismount_killed_cart(&mut self, id: u32) {
-                if let Some(y) = self.carts.iter().find(|c| c.id == id).map(|c| c.position.y) {
-                    self.dismount_destroyed_vehicle_mobs(id, y);
-                }
+        if let Some(y) = self.carts.iter().find(|c| c.id == id).map(|c| c.position.y) {
+            self.dismount_destroyed_vehicle_mobs(id, y);
+        }
     }
 }
 
 impl Game<'_> {
     pub(super) fn dismount_cart_mob_at(&mut self, rider: u32, y: f64) {
-            let Some(mob) = self.mob_object(rider) else {
-                continue;
-            };
-            let at = self.removed_vehicle_dismount_point(
-                mob.position,
-                f64::from(mob.width()),
-                f64::from(mob.height()),
-                y,
-            );
-            self.dismount_mob(rider);
-            if let Some(mob) = self.mob_object_mut(rider)
-                && mob.extra.mount.is_none()
-            {
-                mob.position = at;
-                mob.previous = at;
-                self.snap_mob_passengers(rider);
-            }
+        let Some(mob) = self.mob_object(rider) else {
+            return;
+        };
+        let at = self.removed_vehicle_dismount_point(
+            mob.position,
+            f64::from(mob.width()),
+            f64::from(mob.height()),
+            y,
+        );
+        self.dismount_mob(rider);
+        if let Some(mob) = self.mob_object_mut(rider)
+            && mob.extra.mount.is_none()
+        {
+            mob.position = at;
+            mob.previous = at;
+            self.snap_mob_passengers(rider);
+        }
     }
 }

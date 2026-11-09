@@ -776,7 +776,7 @@ mod off_level_tests {
 impl Game<'_> {
     /// The killing blow of a mob as the death hooks name it: its damage
     /// type and the causing entity's id (0 for none).
-    fn mob_damage_source(&self, m: &Mob) -> (&'static str, u32) {
+    pub(super) fn mob_damage_source(&self, m: &Mob) -> (&'static str, u32) {
         let (damage_type, attacker) = match m.last_damage {
             Some((d, _)) => (source_damage_type(d), d.attacker),
             None => ("minecraft:generic", None),
@@ -797,17 +797,16 @@ impl Game<'_> {
 
 impl Game<'_> {
     pub(super) fn retained_passenger_snapshot(&self, uuid: u128) -> Vec<Seen> {
-        let passenger_objects: Vec<_> = if self.persist.off_level.is_empty() {
+        if self.persist.off_level.is_empty() {
             Vec::new()
         } else {
             self.persist
                 .off_level
                 .values()
                 .map(|object| match object {
-                    super::persist::OffLevel::Mob(m) => seen(m, uuid),
+                    crate::game::persist::OffLevel::Mob(m) => seen(m, uuid),
                 })
                 .collect()
-        };
-        passenger_objects
+        }
     }
 }

@@ -1702,7 +1702,6 @@ impl Extra {
     }
 }
 
-
 /// How far the boxes of a set of mobs reach from their positions: the widest reach sideways, below
 /// and above among them, worked out from each mob's real box ([`Mob::bounds`]: a shulker's grows
 /// toward its open lid, sideways or below its position). A box query over many mobs (a vehicle's,

@@ -167,14 +167,14 @@ impl Game<'_> {
 
 impl Game<'_> {
     pub(super) fn forget_remote_entity_construction(&mut self, id: i32) {
-                    self.forget_entity_initialization(Holder::Entity(id as u32));
-                    if let Some(uuid) = self
-                        .remote
-                        .as_ref()
-                        .and_then(|r| r.level_players.get(&id))
-                        .copied()
-                    {
-                        self.forget_entity_initialization(Holder::Player(uuid));
-                    }
+        self.forget_entity_initialization(Holder::Entity(id as u32));
+        if let Some(uuid) = self
+            .remote
+            .as_ref()
+            .and_then(|r| r.level_players.get(&id))
+            .copied()
+        {
+            self.forget_entity_initialization(Holder::Player(uuid));
+        }
     }
 }
