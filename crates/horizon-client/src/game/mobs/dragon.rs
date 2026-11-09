@@ -8,6 +8,8 @@
 //! exit portal, the egg and the next gateway; and its rendering and boss bar.
 #[path = "dragon/rays.rs"]
 mod rays;
+#[path = "dragon/residency.rs"]
+mod residency;
 #[path = "dragon/save_lending.rs"]
 mod save_lending;
 use super::api_values::TryIntoApi;
