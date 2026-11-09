@@ -126,7 +126,7 @@ impl Game<'_> {
     ) -> Result<&mut mod_api::Attachments, mod_api::AttachmentError> {
         use mod_api::AttachmentError;
         if let mod_api::Holder::Entity(id) = holder {
-            if access == AttachmentAccess::Store {
+            {
                 use super::entity_residency::SlotAccess;
                 use horizon_client::join_seq::residency::Kind;
                 let id = std::num::NonZeroU32::new(id).ok_or(AttachmentError::MissingHolder)?;
@@ -134,7 +134,7 @@ impl Game<'_> {
                     SlotAccess::Done(()) => {}
                     SlotAccess::Taken => return Err(AttachmentError::HolderBusy),
                     SlotAccess::Missing => return Err(AttachmentError::MissingHolder),
-                    SlotAccess::UnsupportedKind(kind) => {
+                    SlotAccess::UnsupportedKind(kind) if access == AttachmentAccess::Store => {
                         let name = match kind {
                             Kind::Mob => "mob",
                             Kind::Item => "item",
@@ -160,6 +160,7 @@ impl Game<'_> {
                         };
                         return Err(AttachmentError::UnsupportedHolder(name));
                     }
+                    SlotAccess::UnsupportedKind(_) => {}
                 }
             }
             if self.entity_initialization.active != Some(holder)
