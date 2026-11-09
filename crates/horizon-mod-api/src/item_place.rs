@@ -407,7 +407,7 @@ impl ItemPlace {
             return 0;
         }
         // Through index `slot` of `handler`, then for an insert that `spills` the whole handler,
-        // each in passes while one moves something (`Inventory.add`'s and NeoForge's loops: a
+        // each in passes while one moves something (`Inventory.add`'s loop: a
         // handler may move less per call than it could): what `slot` doesn't take goes to the
         // other indices (`forHandlerIndex`).
         let through = |handler: Capability<dyn ResourceHandler<ItemResource>>,
