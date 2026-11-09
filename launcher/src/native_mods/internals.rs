@@ -56,7 +56,7 @@ pub(super) enum Error {
         path: String,
     },
     /// An injection at another mod's point that doesn't load (#2339).
-    ModPoint(horizon_mod_package::manifest::inject::mod_points::Refusal),
+    ModPoint(Box<horizon_mod_package::manifest::inject::mod_points::Refusal>),
 }
 
 impl std::fmt::Display for Error {

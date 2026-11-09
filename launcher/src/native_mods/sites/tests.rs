@@ -100,6 +100,7 @@ fn unchanged_callback_compiles_against_both_canonical_facades() {
             extern crate self as horizon_client;
             extern crate self as mod_points;
             #[derive(Debug, PartialEq)] pub enum SiteId {{ {physical} }}
+            impl SiteId {{ pub const fn place(self) -> Self {{ self }} }}
             pub mod __private {{ pub struct SlotListener {{ pub place: super::SiteId, pub f: *const () }} impl SlotListener {{ pub const unsafe fn site(_: &'static str, place: super::SiteId, _: i32, _: &'static str, f: *const ()) -> Self {{ Self {{ place, f }} }} }} }}
             pub mod game {{
                 pub struct __{physical}Args {{ pub value: u32 }}

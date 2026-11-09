@@ -56,7 +56,7 @@ pub(super) fn stage(dir: &Path, wire: &BTreeSet<String>) -> Result<(), String> {
 pub(super) fn routes<'a>(
     catalog: &'a Catalog,
     manifest: &'a Manifest,
-) -> Result<Vec<(&'a ModLibrary, Routed<'a>, &'a Inject)>, Refusal> {
+) -> Result<Vec<(&'a ModLibrary, Routed<'a>, &'a Inject)>, Box<Refusal>> {
     manifest
         .inject
         .iter()
@@ -74,7 +74,8 @@ pub(super) fn routes<'a>(
                     version: &library.version,
                     catalog: &library.points,
                 },
-            )?;
+            )
+            .map_err(Box::new)?;
             Ok((library, routed, inject))
         })
         .collect()

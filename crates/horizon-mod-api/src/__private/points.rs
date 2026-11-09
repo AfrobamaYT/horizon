@@ -19,6 +19,8 @@ pub fn cold<R>(path: impl FnOnce() -> R) -> R {
 }
 
 /// One injection point table: its point slots, then its call-site slots.
+// no wire: point registry machinery runs in its owning process; listeners cross through their records, never this.
+// exhaustive: generated point code builds and matches it in full.
 pub struct Table {
     points: &'static [AtomicBool],
     sites: &'static [AtomicBool],
@@ -185,6 +187,8 @@ impl Table {
 
 /// A place in a table: a point's head or return, or a call site after the table's points.
 #[derive(Clone, Copy)]
+// no wire: point registry machinery runs in its owning process; listeners cross through their records, never this.
+// exhaustive: generated point code builds and matches it in full.
 pub struct Place {
     table: &'static Table,
     index: usize,
@@ -224,6 +228,8 @@ impl Owner {
 
 /// How a slot calls an internals listener.
 #[derive(Clone, Copy)]
+// no wire: point registry machinery runs in its owning process; listeners cross through their records, never this.
+// exhaustive: generated point code builds and matches it in full.
 pub enum RawKind {
     /// A function of the place's listener type, cast back by the slot before calling it.
     Typed(*const ()),
@@ -244,6 +250,8 @@ unsafe impl Send for RawKind {}
 unsafe impl Sync for RawKind {}
 
 /// The host available to a point's hook call; frame objects never cross as data.
+// no wire: point registry machinery runs in its owning process; listeners cross through their records, never this.
+// exhaustive: generated point code builds and matches it in full.
 pub enum PointHost<'a> {
     /// A read-only point.
     Read(&'a dyn crate::Host),
@@ -265,6 +273,8 @@ pub trait Forward: Send + Sync {
 
 /// A typed API function.
 #[derive(Clone, Copy)]
+// no wire: point registry machinery runs in its owning process; listeners cross through their records, never this.
+// exhaustive: generated point code builds and matches it in full.
 pub enum ApiKind {
     /// A function checked by the generated typed constructor before erasure.
     Typed(*const ()),
@@ -339,6 +349,7 @@ fn lock() -> std::sync::MutexGuard<'static, Open> {
 /// Why a listener wasn't registered.
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
+// no wire: point registry machinery runs in its owning process; listeners cross through their records, never this.
 pub enum RegisterError {
     /// The list was sealed: listeners register while the game loads, before its points are set.
     Sealed,
@@ -372,6 +383,8 @@ impl std::fmt::Display for RegisterError {
 impl std::error::Error for RegisterError {}
 
 /// A function or checked endpoint at an API, internals or site slot.
+// no wire: point registry machinery runs in its owning process; listeners cross through their records, never this.
+// exhaustive: generated point code builds and matches it in full.
 pub struct SlotListener {
     id: &'static str,
     place: Place,

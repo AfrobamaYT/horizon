@@ -492,7 +492,7 @@ pub(super) fn stage(
         .collect();
     fs::write(
         game.join("src/main.rs"),
-        main_rs(&template, &manifests, &catalog),
+        main_rs(&template, &manifests, catalog),
     )
     .map_err(|e| e.to_string())?;
     let root = stage.join("Cargo.toml");
