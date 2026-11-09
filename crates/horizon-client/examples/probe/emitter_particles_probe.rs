@@ -98,7 +98,8 @@ pub fn main() -> Result<()> {
         collision: &collision,
         player: None,
     };
-    let mut engine = ParticleEngine::new(&root, &Default::default(), &Default::default());
+    let source = horizon_client::resource_source::ResourceSource::directory(root);
+    let mut engine = ParticleEngine::new(&source, &Default::default(), &Default::default());
     let mut out = BufWriter::new(File::create(&args[2])?);
     for (n, line) in BufReader::new(File::open(&args[1])?).lines().enumerate() {
         let c: Value = serde_json::from_str(&line?)?;
