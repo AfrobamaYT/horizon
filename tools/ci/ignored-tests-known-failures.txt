@@ -44,7 +44,6 @@ horizon-client-render gfx::pack_post::destination_tests::clear_budget_tests::siz
 horizon-client-render gfx::pack_post::destination_tests::clear_budget_tests::sized_hdr_clear_respects_byte_budget horizon-rust/horizon#9303 flaky
 
 # Client failures exposed after enforcing target completion (#2137).
-horizon-client game::commands::execute::passenger_relation_tests::h150_actual_registered_passengers_select_direct_live_mob_and_boat_children #2175
 horizon-client game::persist::summon_uuid_conflict_tests::summon_skips_a_uuid_taken_earlier_in_the_same_tree #2175
 horizon-client game::explosion::tests::explosion_and_mob_breaks_apply_block_drops #2176
 horizon-client game::explosion::tests::explosion_items_parity_fixture #2177 harness
@@ -52,22 +51,13 @@ horizon-client game::native_live_holder_tests::thousand_live_block_entity_ticks 
 horizon-client game::remote_vehicles::tests::steering_mount_control_matches_vanilla #2177 harness
 horizon-client game::native_damage_tests::arrow_hits_name_the_projectile_on_players_mobs_and_the_dragon #2178
 horizon-client game::native_player_modes::tests::one_player_may_harm_another_by_the_pvp_rule_and_their_teams #2178
-horizon-client game::item_contact_tests::the_active_stack_survives_a_partial_contact_and_consumption_removes_the_entity #2180
-horizon-client game::item_interact_mob_tests::actual_item_interact_mob_fallback_priority_and_filters #2180
 horizon-client game::spill::tests::a_block_entity_removing_itself_in_its_tick_is_not_asked #2180
-horizon-client game::lan::tests::datapack_damage_lazy_wire_load_caches_after_all_packs_are_removed #2181
-horizon-client game::lan::world_spawn_sync_tests::setworldspawn_reaches_guests_in_other_dimensions_and_keeps_compass_overrides #2181
-horizon-client game::lan_actions::crack_feedback_tests::crack_packets_follow_start_clock_and_strict_observer_radius #2181
-horizon-client game::remote::level_sound_tests::packets_ask_client_level_before_playback_not_ui #2181
 horizon-client game::native_components::item_resource_property_tests::item_resource_changed_defaults_and_consumption #2183
 horizon-client game::transactions::tests::an_aborted_transaction_puts_back_what_it_and_its_committed_children_changed #2183
-horizon-client game::native_hooks::base::screen_open_tests::client_gui_state_matches_screen_init_hook #2184
-horizon-client game::options::resize_state_tests::viewport_resize_notifications_follow_each_player #2184
 horizon-client game::persist::sulfur_body_attribute_tests::a_bodiless_cube_keeps_its_command_knockback_resistance_effect #2185
 horizon-client game::persist::sulfur_body_attribute_tests::command_knockback_changes_reach_the_cache_without_archetype_values #2185
 horizon-client game::potions::mob_absorption_max_tests::absorption_follows_the_max_absorption_it_adds_and_leaves #2185
 horizon-client game::piston_push::order_tests::a_pushed_tnt_bounces_on_slime #2186
-horizon-client game::potions::tests::lifecycle_cloud_commands_and_parked_owners #2186
 
 # Deterministic CPU work at or over its 30 s deadline in the unoptimized shard (no deadlock); see the issue.
 horizon-client-lib vanillagen::lod::tests::decorated_lod_refines_real_seed_canopies_and_all_dimensions #2132 flaky

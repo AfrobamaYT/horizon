@@ -15444,6 +15444,14 @@ mod tests {
             horizon_mod_package::Side::Both,
         )]);
         build(&base, std::path::Path::new(""), &mods, &root, &inventory).unwrap();
+        let (registry, _) = horizon_world::level::data::load_registry_with_flags(&root).unwrap();
+        crate::game::api_values::register_game_keys((0..registry.len()).map(|id| {
+            registry
+                .state(horizon_world::registry::BlockStateId(id as u32))
+                .unwrap()
+                .name
+                .clone()
+        }));
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
