@@ -1709,7 +1709,7 @@ mod tests {
     #[test]
     fn a_scripted_clock_drives_time_frame_index_and_eased_values() {
         use crate::gfx::pack_uniforms::FrameTiming;
-        let Some((device, _)) = device() else {
+        let Some((device, _)) = device(false) else {
             return;
         };
         let hud = crate::hud::HudBatch::scratch([4, 4]);
@@ -1758,7 +1758,7 @@ mod tests {
     #[test]
     fn a_reset_frame_gives_a_fresh_pack_s_inputs() {
         use crate::gfx::pack_uniforms::FrameTiming;
-        let Some((device, _)) = device() else {
+        let Some((device, _)) = device(false) else {
             return;
         };
         let hud = crate::hud::HudBatch::new(
@@ -1806,7 +1806,7 @@ mod tests {
     /// `fb`, which a pass reads before the pass that writes it, so it holds last frame's.
     #[test]
     fn a_reset_post_reads_its_own_targets_blank() {
-        let Some((device, queue)) = device() else {
+        let Some((device, queue)) = device(true) else {
             return;
         };
         let manifest = "schema = 1
@@ -1905,10 +1905,12 @@ file = \"c.wgsl\"
         assert!(near(got, 64), "{got} after the reset: fb kept last frame's");
     }
 
-    fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
-        let instance = crate::gfx::test_gpu::instance();
-        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
-        pollster::block_on(adapter.request_device(&Default::default())).ok()
+    fn device(needs_depth_load: bool) -> Option<(wgpu::Device, wgpu::Queue)> {
+        let adapter = crate::gfx::test_gpu::adapter()?;
+        if needs_depth_load && !crate::gfx::test_gpu::supports_depth_load(&adapter) {
+            return None;
+        }
+        Some(crate::gfx::test_gpu::device(&adapter))
     }
 
     fn texture(
@@ -1936,7 +1938,7 @@ file = \"c.wgsl\"
     /// must keep it) times an option, the second halves it and writes the depth as alpha.
     #[test]
     fn passes_chain_through_half_float_targets_with_options_and_depth() {
-        let Some((device, queue)) = device() else {
+        let Some((device, queue)) = device(true) else {
             return;
         };
         let manifest = "schema = 1\nid = \"t\"\nname = \"T\"\nversion = \"1\"\napi = \"0.1\"\n\
@@ -2055,7 +2057,7 @@ file = \"c.wgsl\"
     /// frame before.
     #[test]
     fn the_last_pass_reads_last_frames_input_as_history() {
-        let Some((device, queue)) = device() else {
+        let Some((device, queue)) = device(true) else {
             return;
         };
         let manifest = "schema = 1
@@ -2183,7 +2185,7 @@ file = \"b.wgsl\"
             super::super::native_material::SURFACE_FORMAT.sample_type(None, None),
             Some(wgpu::TextureSampleType::Uint)
         );
-        let Some((device, queue)) = device() else {
+        let Some((device, queue)) = device(true) else {
             return;
         };
         let manifest = "schema = 1\nid = \"t\"\nname = \"T\"\nversion = \"1\"\napi = \"0.1\"\n\
@@ -2355,7 +2357,7 @@ file = \"b.wgsl\"
     /// signs and denormals included.
     #[test]
     fn the_surface_keeps_every_bit_of_the_floats_written_through_the_material_stage_bitcast() {
-        let Some((device, queue)) = device() else {
+        let Some((device, queue)) = device(false) else {
             return;
         };
         let cases: [[u32; 4]; 4] = [
@@ -2491,7 +2493,7 @@ file = \"b.wgsl\"
     #[test]
     fn a_0_2_world_comes_back_through_decode_tonemap_and_encode() {
         assert!(tonemap_entries().contains("horizon_encode(min(horizon_sanitize(out)"));
-        let Some((device, queue)) = device() else {
+        let Some((device, queue)) = device(true) else {
             return;
         };
         let post = "[[post]]\nfile = \"a.wgsl\"\n[[post]]\nfile = \"b.wgsl\"\n";
