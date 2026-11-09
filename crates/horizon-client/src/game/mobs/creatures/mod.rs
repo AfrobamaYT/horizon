@@ -1491,6 +1491,7 @@ impl Game<'_> {
         // Its steps as spans for `horizon-report` (nothing is read while spans are off).
         let mut laps = horizon_client::spans::laps();
         let level_id = self.dim.id();
+        let primable = self.sulfur_cubes_adopted_explosive();
         if let Some(pending) = self.creatures.pending.get_mut(level_id)
             && (pending.refusal_logged || pending.retained_passes >= MAX_PENDING_MOB_PASSES)
         {
@@ -1505,7 +1506,7 @@ impl Game<'_> {
             // phases still advance; mob-specific follow-up must not reuse old ticks.
             self.creatures.ticked.clear();
             self.deliver_pending_mob_actions(level_id)?;
-            return self.finish_creature_entities(&mut laps);
+            return self.finish_creature_entities(&mut laps, &primable);
         }
         // `EntityEvent.Size` for the sizes that changed outside the mob ticks (spawns,
         // commands, a player's interaction), before the ticks move by them.
@@ -1561,7 +1562,6 @@ impl Game<'_> {
         snapshot.extend(self.mobs.iter().map(|m| seen(m, uuid)));
         let mut events = std::mem::take(&mut self.creatures.event_buf);
         events.clear();
-        let primable = self.sulfur_cubes_adopted_explosive();
         let mut pending = self.creatures.pending.remove(level_id).unwrap_or_default();
         let mut mobs = self.mobs.lift();
         #[cfg(test)]
@@ -1720,7 +1720,7 @@ impl Game<'_> {
             self.effects_on_death(&names, bounds, false, Some(m.id), Some(&mut m.random));
         }
         self.deliver_pending_mob_actions(level_id)?;
-        self.finish_creature_entities(&mut laps)
+        self.finish_creature_entities(&mut laps, &primable)
     }
 
     fn deliver_pending_mob_actions(&mut self, level_id: &'static str) -> Result<()> {
@@ -1759,7 +1759,11 @@ impl Game<'_> {
         }
     }
 
-    fn finish_creature_entities(&mut self, laps: &mut horizon_client::spans::Laps) -> Result<()> {
+    fn finish_creature_entities(
+        &mut self,
+        laps: &mut horizon_client::spans::Laps,
+        primable: &[(u32, i32)],
+    ) -> Result<()> {
         self.drain_entity_inside();
         laps.lap("creature_events");
         self.ordered_before(super::ordered_tick::Batch::Projectiles)?;
@@ -1776,7 +1780,7 @@ impl Game<'_> {
         self.tick_sniffer_effects();
         self.piglin_pickups();
         self.sulfur_cube_pickups();
-        self.sulfur_cube_power_priming(&primable);
+        self.sulfur_cube_power_priming(primable);
         laps.lap("creature_systems");
         // Hurt and death sounds of damage dealt outside the mob ticks.
         let mut queued = Vec::new();
@@ -2755,7 +2759,7 @@ impl Game<'_> {
                         self.handle_mob_events(vec![event])?;
                     } else if let Some(conn) = conn {
                         if let Some(mob) = actor {
-                            self.lan_guest_mob_events(vec![(conn, mob, event)]);
+                            self.lan_guest_mob_events(&mut vec![(conn, mob, event)]);
                         } else {
                             // No nested block-break actor is in scope. A
                             // missing guest must not redirect to another player.
