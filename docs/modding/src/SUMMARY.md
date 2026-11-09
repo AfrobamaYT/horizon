@@ -18,6 +18,7 @@
 - [Design: transactional block-entity removal](concepts/block-entity-removal.md)
 - [Design: client action pipeline](concepts/client-action-pipeline.md)
 - [Design: multi-block placement](concepts/multi-block-placement.md)
+- [Design: mod datapack registries](concepts/mod-datapack-registries.md)
 - [Design: moving structures](concepts/moving-structures.md)
 - [Design: custom recipe-book settings](concepts/recipe-book-types.md)
 - [Design: section meshing](concepts/section-meshing.md)
