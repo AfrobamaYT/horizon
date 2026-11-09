@@ -1103,7 +1103,6 @@
   "optimization": "optimalisasi",
   "played by {names}": "dimainkan oleh {names}",
   "realistic": "realistis",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "runs {command} after": "menjalankan {command} setelahnya",
   "runs {command} first": "menjalankan {command} terlebih dahulu",
   "simplistic": "sederhana",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} tidak diinstal",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (atau .mcp.json di dalam proyek)",
   "← All servers": "← Semua server",
-  "← Newer": "← Lebih baru"
+  "← Newer": "← Lebih baru",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }

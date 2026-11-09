@@ -1103,7 +1103,6 @@
   "optimization": "оптималдаштыруу",
   "played by {names}": "ойногон {names}",
   "realistic": "реалдуу",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "runs {command} after": "{command} кийин иштейт",
   "runs {command} first": "биринчи {command} иштейт",
   "simplistic": "жөнөкөйлөтүлгөн",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} орнотулган эмес",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (же .mcp.json долбоордо)",
   "← All servers": "← Бардык серверлер",
-  "← Newer": "← Жаңыраак"
+  "← Newer": "← Жаңыраак",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }

@@ -1103,7 +1103,6 @@
   "optimization": "最適化",
   "played by {names}": "{names} がプレイ中",
   "realistic": "リアル",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "runs {command} after": "後に{command}を実行",
   "runs {command} first": "先に{command}を実行",
   "simplistic": "シンプル",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} はインストールされていません",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json（またはプロジェクト内の.mcp.json）",
   "← All servers": "← すべてのサーバー",
-  "← Newer": "← 新しい"
+  "← Newer": "← 新しい",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }

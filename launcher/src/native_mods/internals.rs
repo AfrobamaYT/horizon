@@ -130,6 +130,7 @@ impl Catalog {
                 returns: "none".into(),
                 host: "none".into(),
                 raw_shape: None,
+                return_ty: None,
                 listener: Some(format!("{}::__{name}Listener", point.module)),
                 return_listener: Some(format!("{}::__{name}ReturnListener", point.module)),
                 private: true,

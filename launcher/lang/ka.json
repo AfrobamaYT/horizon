@@ -1103,7 +1103,6 @@
   "optimization": "ოპტიმიზაცია",
   "played by {names}": "ითამაშა {names}",
   "realistic": "რეალისტური",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "runs {command} after": "გადის {command} შემდეგ",
   "runs {command} first": "გადის {command} ჯერ",
   "simplistic": "გამარტივებული",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} არ არის დაინსტალირებული",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ან .mcp.json პროექტში)",
   "← All servers": "← ყველა სერვერი",
-  "← Newer": "← უფრო ახალი"
+  "← Newer": "← უფრო ახალი",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }

@@ -35,6 +35,9 @@ pub struct GamePoint {
     /// What its listeners may do with the return: `cancel`, `result` (an API-typed value they
     /// may set at the head or change at the return) or `none`.
     pub returns: &'static str,
+    /// The function's return type as written (`()` when it has none). A `cancel` point that
+    /// returns `Result<(), E>` has no `replace` listener, which would have to produce it.
+    pub return_ty: String,
     /// Whether its API listeners run at the return: not when the value returned borrows.
     pub at_return: bool,
     /// Whether it has a raw form: native listeners with the receiver and every parameter by its
@@ -885,6 +888,10 @@ fn points_with(root: &Path, wire: &WireTypes) -> Result<Vec<GamePoint>, String> 
                 (point_shape::Returns::Value(_), true) => "result",
                 (point_shape::Returns::Opaque, true) => "none",
             },
+            return_ty: match &found.sig.output {
+                syn::ReturnType::Default => "()".to_owned(),
+                syn::ReturnType::Type(_, ty) => point_shape::spelling(ty),
+            },
             name: shape.name,
         });
     }
@@ -1281,6 +1288,7 @@ mod tests {
                 record: shape.record().to_string(),
                 args: vec![],
                 returns: "cancel",
+                return_ty: "()".into(),
                 at_return: true,
                 raw: false,
                 raw_shape: None,

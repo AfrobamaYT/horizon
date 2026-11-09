@@ -1103,7 +1103,6 @@
   "optimization": "अनुकूलन",
   "played by {names}": "{names} खेलते हैं",
   "realistic": "यथार्थवादी",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "runs {command} after": "बाद में {command} चलाता है",
   "runs {command} first": "पहले {command} चलाता है",
   "simplistic": "सरल",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} इंस्टॉल नहीं है",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (या किसी प्रोजेक्ट में .mcp.json)",
   "← All servers": "← सभी सर्वर",
-  "← Newer": "← नया"
+  "← Newer": "← नया",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }

@@ -28,6 +28,10 @@ pub struct Point {
     /// Its raw form, read for the return type a refused `replace` names.
     #[serde(default)]
     pub raw_shape: Option<RawReturn>,
+    /// The function's return type as written: a `cancel` point takes a `replace` only when it
+    /// is `()`.
+    #[serde(default)]
+    pub return_ty: Option<String>,
 }
 
 /// The part of a point's raw contract a `replace` refusal names.
@@ -141,22 +145,33 @@ fn resolve<'a, 'p>(
 }
 
 /// A `replace` listener produces the function's outcome, so its point must return `()` (the
-/// cancel is forced) or a value the API carries. The refusal names the point and its return type.
+/// cancel is forced) or a value the API carries. A `cancel` point returning anything else
+/// (`Result<(), E>`, whose cancel would answer `Ok(())`) is refused, and so is a catalog that
+/// doesn't say. The refusal names the point and its return type.
 pub fn replaceable(id: &str, at: &str, point: &Point) -> Result<(), String> {
     if point.host.is_empty() {
         return Err(format!(
             "{id}: the point catalog lists no listener host for {at}; rebuild it"
         ));
     }
-    if matches!(point.returns.as_str(), "cancel" | "result") {
-        return Ok(());
-    }
-    let ty = point
-        .raw_shape
-        .as_ref()
-        .map_or("its return type".to_owned(), |raw| {
-            format!("`{}`", raw.return_ty)
-        });
+    let ty = match point.returns.as_str() {
+        "result" => return Ok(()),
+        "cancel" => match point.return_ty.as_deref() {
+            Some("()") => return Ok(()),
+            Some(ty) => format!("`{ty}`"),
+            None => {
+                return Err(format!(
+                    "{id}: the point catalog lists no return type for {at}; rebuild it"
+                ));
+            }
+        },
+        _ => point
+            .raw_shape
+            .as_ref()
+            .map_or("its return type".to_owned(), |raw| {
+                format!("`{}`", raw.return_ty)
+            }),
+    };
     Err(format!(
         "{id}: no replace listener at {at}: a replace returns the function's value, and {ty} \
          has no API form"
@@ -207,6 +222,7 @@ hash = "pin"
             returns: "cancel".into(),
             host: "both".into(),
             raw_shape: None,
+            return_ty: Some("()".into()),
         }];
         let native = api(&manifest, &points, "mod_3::")
             .unwrap()
@@ -252,6 +268,16 @@ hash = "pin"
         let mut unlisted = points[0].clone();
         unlisted.host = String::new();
         assert!(api(&replace, &[unlisted], "mod_3::").is_err());
+        // A `Result<(), E>` point cancels with `Ok(())`: a replace there couldn't produce `Err`.
+        let mut fallible = points[0].clone();
+        fallible.return_ty = Some("Result<(),String>".into());
+        assert_eq!(
+            api(&replace, &[fallible], "mod_3::").unwrap_err(),
+            "before: no replace listener at horizon_client::game::Game<'_>::tick: a replace returns the function's value, and `Result<(),String>` has no API form"
+        );
+        let mut untyped = points[0].clone();
+        untyped.return_ty = None;
+        assert!(api(&replace, &[untyped], "mod_3::").is_err());
         let wasm = api(&manifest, &points, "original_mod::").unwrap();
         assert_eq!(
             wasm[0],

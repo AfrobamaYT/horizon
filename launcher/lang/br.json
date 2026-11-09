@@ -1103,7 +1103,6 @@
   "optimization": "gwellaat",
   "played by {names}": "c'hoariet gant {names}",
   "realistic": "gwirvoudel",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "runs {command} after": "redek {command} goude",
   "runs {command} first": "redek {command} da gentañ",
   "simplistic": "simpl",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} n'eo ket staliet",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (pe .mcp.json en ur raktres)",
   "← All servers": "← An holl servijerioù",
-  "← Newer": "← Nevesoc'h"
+  "← Newer": "← Nevesoc'h",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }

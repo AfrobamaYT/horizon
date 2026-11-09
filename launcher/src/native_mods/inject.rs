@@ -35,6 +35,9 @@ pub(super) struct ListedPoint {
     /// Its raw form's return type, named when a `replace` is refused.
     #[serde(default)]
     pub(super) raw_shape: Option<horizon_mod_point_emit::RawReturn>,
+    /// The function's return type as written, which a `replace` at a `cancel` point needs `()`.
+    #[serde(default)]
+    pub(super) return_ty: Option<String>,
     pub(super) listener: Option<String>,
     pub(super) return_listener: Option<String>,
 }
@@ -51,6 +54,7 @@ impl ListedPoint {
             returns: self.returns.clone(),
             host: self.host.clone(),
             raw_shape: self.raw_shape.clone(),
+            return_ty: self.return_ty.clone(),
         }
     }
 

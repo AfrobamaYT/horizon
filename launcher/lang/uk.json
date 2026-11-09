@@ -1103,7 +1103,6 @@
   "optimization": "Оптимізація",
   "played by {names}": "грає {names}",
   "realistic": "Реалістичний",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "runs {command} after": "потім виконує {command}",
   "runs {command} first": "спочатку виконує {command}",
   "simplistic": "Спрощений",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} не встановлено",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (or .mcp.json in a project)",
   "← All servers": "← Усі сервери",
-  "← Newer": "← Новіші"
+  "← Newer": "← Новіші",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }

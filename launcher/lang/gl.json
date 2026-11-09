@@ -1103,7 +1103,6 @@
   "optimization": "optimización",
   "played by {names}": "interpretado por {names}",
   "realistic": "realista",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "runs {command} after": "corre {command} despois",
   "runs {command} first": "corre {command} primeiro",
   "simplistic": "simplista",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} non está instalado",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ou .mcp.json nun proxecto)",
   "← All servers": "← Todos os servidores",
-  "← Newer": "← Máis recente"
+  "← Newer": "← Máis recente",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }

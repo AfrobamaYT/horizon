@@ -1103,7 +1103,6 @@
   "optimization": "ipsum",
   "played by {names}": "played by{names}",
   "realistic": "realistica",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "runs {command} after": "fugit{command}post",
   "runs {command} first": "fugit{command}primum",
   "simplistic": "infans",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version}non installed",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (vel .mcp.json in project)",
   "← All servers": "Omnes servers",
-  "← Newer": "Recentior"
+  "← Newer": "Recentior",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }

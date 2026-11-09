@@ -1103,7 +1103,6 @@
   "optimization": "การเพิ่มประสิทธิภาพ",
   "played by {names}": "เล่นโดย {names}",
   "realistic": "เหมือนจริง",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "runs {command} after": "รัน {command} ทีหลัง",
   "runs {command} first": "รัน {command} ก่อน",
   "simplistic": "เรียบง่าย",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} ยังไม่ได้ติดตั้ง",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (หรือ .mcp.json ในโปรเจ็กต์)",
   "← All servers": "← เซิร์ฟเวอร์ทั้งหมด",
-  "← Newer": "← ใหม่กว่า"
+  "← Newer": "← ใหม่กว่า",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }

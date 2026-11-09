@@ -1103,7 +1103,6 @@
   "optimization": "optimalisering",
   "played by {names}": "gespeel deur {names}",
   "realistic": "realisties",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "runs {command} after": "hardloop {command} na",
   "runs {command} first": "hardloop {command} eerste",
   "simplistic": "simplisties",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} is nie geïnstalleer nie",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (of .mcp.json in 'n projek)",
   "← All servers": "← Alle bedieners",
-  "← Newer": "← Nuwer"
+  "← Newer": "← Nuwer",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }

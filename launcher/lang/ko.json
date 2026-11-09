@@ -1103,7 +1103,6 @@
   "optimization": "최적화",
   "played by {names}": "{names}에서 사용",
   "realistic": "현실적",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "runs {command} after": "완료 후 {command} 실행",
   "runs {command} first": "먼저 {command} 실행",
   "simplistic": "심플함",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version}이(가) 설치되지 않았습니다.",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (또는 프로젝트 내 .mcp.json)",
   "← All servers": "← 모든 서버",
-  "← Newer": "← 최신"
+  "← Newer": "← 최신",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }

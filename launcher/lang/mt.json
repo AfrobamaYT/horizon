@@ -1103,7 +1103,6 @@
   "optimization": "ottimizzazzjoni",
   "played by {names}": "lagħbu minn {names}",
   "realistic": "realistiku",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "runs {command} after": "tmur {command} wara",
   "runs {command} first": "runs {command} l-ewwel",
   "simplistic": "sempliċistiku",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} mhux installat",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (jew .mcp.json fi proġett)",
   "← All servers": "← Is-servers kollha",
-  "← Newer": "← Aktar ġodda"
+  "← Newer": "← Aktar ġodda",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }

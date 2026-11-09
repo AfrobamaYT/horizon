@@ -1227,6 +1227,7 @@
   "extension slots pending (I6)": "extension slots pending (I6)",
   "API site listeners pending (U4c)": "API site listeners pending (U4c)",
   "source injects pending (U5)": "source injects pending (U5)",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
-  "no API record: a parameter has no API type yet": "no API record: a parameter has no API type yet"
+  "no API record: a parameter has no API type yet": "no API record: a parameter has no API type yet",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }

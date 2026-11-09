@@ -1103,7 +1103,6 @@
   "optimization": "ಆಪ್ಟಿಮೈಸೇಶನ್",
   "played by {names}": "ಆಡಿದ್ದು {names}",
   "realistic": "ವಾಸ್ತವಿಕ",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "runs {command} after": "ನಂತರ {command} ರನ್ ಆಗುತ್ತದೆ",
   "runs {command} first": "ಮೊದಲು {command} ರನ್ ಆಗುತ್ತದೆ",
   "simplistic": "ಸರಳವಾದ",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} ಅನ್ನು ಸ್ಥಾಪಿಸಲಾಗಿಲ್ಲ",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ಅಥವಾ ಯೋಜನೆಯಲ್ಲಿ .mcp.json)",
   "← All servers": "← ಎಲ್ಲಾ ಸರ್ವರ್‌ಗಳು",
-  "← Newer": "← ಹೊಸದು"
+  "← Newer": "← ಹೊಸದು",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }

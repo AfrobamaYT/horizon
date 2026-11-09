@@ -1103,7 +1103,6 @@
   "optimization": "hoʻopono",
   "played by {names}": "hoʻokani ʻia e {names}",
   "realistic": "ʻoiaʻiʻo",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "runs {command} after": "holo {command} ma hope",
   "runs {command} first": "holo {command} mua",
   "simplistic": "maʻalahi",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "ʻAʻole hoʻokomo ʻia ʻo {version}",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (a i ʻole .mcp.json ma kahi papahana)",
   "← All servers": "← Nā kikowaena āpau",
-  "← Newer": "← Mea hou"
+  "← Newer": "← Mea hou",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }

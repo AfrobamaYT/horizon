@@ -409,14 +409,18 @@ pub fn seal() {
     }
     for (place, site) in raw.iter_mut().enumerate() {
         if place < POINT_COUNT {
+            // A place's one `replace` listener runs after its other API listeners, so its outcome
+            // is the one the function takes ([`replaced`] reads it there).
             site.sort_by_key(|entry| {
                 (
                     std::cmp::Reverse(entry.kind.is_api()),
+                    entry.replace,
                     std::cmp::Reverse(entry.priority),
                 )
             });
             for group in site.chunk_by_mut(|a, b| {
                 a.kind.is_api() == b.kind.is_api()
+                    && a.replace == b.replace
                     && a.priority == b.priority
                     && a.listener == b.listener
             }) {
@@ -463,6 +467,18 @@ pub fn seal() {
             Ordering::Release,
         );
     }
+}
+
+/// Whether an active `replace` listener owns `place`: the seal puts it last among the place's API
+/// listeners. A stopped or disabled owner no longer replaces, and the function runs as written.
+pub(crate) fn replaced(place: PointId) -> bool {
+    let Some(sealed) = SEALED.get() else {
+        return false;
+    };
+    let slot = &sealed.slots[place as usize];
+    slot.entries[..slot.api_end]
+        .last()
+        .is_some_and(|entry| entry.replace && active(&sealed.listeners[entry.listener as usize]))
 }
 
 fn active(listener: &Owner) -> bool {

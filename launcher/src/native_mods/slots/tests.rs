@@ -10,7 +10,7 @@ fn fixture() -> (Manifest, Catalog) {
         }])).unwrap(),
         points: serde_json::from_value(serde_json::json!([{
             "name":"run", "target":"game::run", "raw":true, "at_return":true,
-            "returns":"cancel", "host":"none",
+            "returns":"cancel", "host":"none", "return_ty":"()",
             "listener":"game::__RunListener", "return_listener":"game::__RunReturnListener"
         }])).unwrap(),
         sites: serde_json::from_value(serde_json::json!([{
@@ -192,6 +192,21 @@ fn a_replace_at_a_point_whose_return_has_no_api_form_is_refused_naming_it() {
                 "{text}"
             );
         }
+        other => panic!("{other:?}"),
+    }
+    // A `Result<(), E>` point cancels with `Ok(())`, so a replace there is refused by its type.
+    catalog.points[0].returns = "cancel".into();
+    catalog.points[0].return_ty = Some("Result<(),StoreError>".into());
+    match check(&catalog, &manifest) {
+        Err(
+            error @ InjectError::NoSlot {
+                reason: NoSlotReason::ReplaceWithoutValue,
+                ..
+            },
+        ) => assert!(
+            error.to_string().contains("`Result<(),StoreError>`"),
+            "{error}"
+        ),
         other => panic!("{other:?}"),
     }
     // A head listener at the same point is unaffected: it need not produce the value.

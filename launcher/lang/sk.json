@@ -1103,7 +1103,6 @@
   "optimization": "optimalizácia",
   "played by {names}": "hrá {names}",
   "realistic": "realistické",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "runs {command} after": "beží {command} po",
   "runs {command} first": "spustí {command} ako prvý",
   "simplistic": "zjednodušujúce",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} nie je nainštalovaný",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (alebo .mcp.json v projekte)",
   "← All servers": "← Všetky servery",
-  "← Newer": "← Novšie"
+  "← Newer": "← Novšie",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }

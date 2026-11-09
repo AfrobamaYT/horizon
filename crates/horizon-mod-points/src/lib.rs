@@ -23,7 +23,9 @@ pub use registry::register;
 pub use registry::{RegisterError, stop};
 
 /// A `replace` listener at a point's head: the function is the listener's, as with a mixin
-/// overwrite, so the body never runs and the listener produces the outcome.
+/// overwrite, so the body never runs and the listener produces the outcome. It runs after the
+/// place's other API head listeners whatever its priority (they may change its inputs, not its
+/// outcome), and the point keeps its outcome through the internals listeners after it.
 ///
 /// `replace!(place, returns, host, mod_id, priority, inject_id, listener)`. `returns` is the
 /// point's `returns` in `points.json`: at a `cancel` point the listener returns `()` and the cancel
@@ -74,6 +76,13 @@ pub mod __private {
     pub use crate::registry::{
         ApiKind, Forward, POINTS, PointHost, RawKind, SITES, SlotListener, seal, wrap,
     };
+
+    /// Whether an active `replace` listener owns `place`'s outcome. A point's head checks it
+    /// around its internals listeners, which run after the API ones and may not undo it.
+    #[inline]
+    pub fn replaced(place: PointId) -> bool {
+        crate::registry::replaced(place)
+    }
 
     /// Runs the checked API functions and forwarding endpoints under their owner guards.
     #[cold]

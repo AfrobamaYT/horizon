@@ -1103,7 +1103,6 @@
   "optimization": "优化",
   "played by {names}": "{names} 在使用",
   "realistic": "写实",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "runs {command} after": "退出后运行 {command}",
   "runs {command} first": "先运行 {command}",
   "simplistic": "简约",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} 未安装",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json（或项目中的 .mcp.json）",
   "← All servers": "← 所有服务器",
-  "← Newer": "← 较新"
+  "← Newer": "← 较新",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }

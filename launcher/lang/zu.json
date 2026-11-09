@@ -1103,7 +1103,6 @@
   "optimization": "ukwenza kahle",
   "played by {names}": "idlalwe ngu-{names}",
   "realistic": "namaqiniso",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "runs {command} after": "igijima {command} ngemva",
   "runs {command} first": "isebenzisa {command} kuqala",
   "simplistic": "elula",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} ayifakiwe",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (noma .mcp.json kuphrojekthi)",
   "← All servers": "← Wonke amaseva",
-  "← Newer": "← Okusha"
+  "← Newer": "← Okusha",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }

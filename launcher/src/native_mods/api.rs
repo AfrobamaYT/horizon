@@ -649,6 +649,7 @@ mod tests {
             returns: "cancel".into(),
             host: "both".into(),
             raw_shape: None,
+            return_ty: Some("()".into()),
             listener: None,
             return_listener: None,
         }];

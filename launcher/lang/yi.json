@@ -1103,7 +1103,6 @@
   "optimization": "אַפּטאַמאַזיישאַן",
   "played by {names}": "געשפילט דורך {names}",
   "realistic": "רעאַליסטיש",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "runs {command} after": "לויפט {command} נאָך",
   "runs {command} first": "לויפט {command} ערשטער",
   "simplistic": "סימפּליסטיק",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} איז נישט אינסטאַלירן",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (אָדער .mcp.json אין אַ פּרויעקט)",
   "← All servers": "← אַלע סערווערס",
-  "← Newer": "← נייַער"
+  "← Newer": "← נייַער",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }

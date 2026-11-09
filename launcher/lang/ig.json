@@ -1103,7 +1103,6 @@
   "optimization": "njikarịcha",
   "played by {names}": "nke {names} na-egwuri egwu",
   "realistic": "ezi uche",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "runs {command} after": "na-agba {command} mgbe",
   "runs {command} first": "na-agba ọsọ {command} mbụ",
   "simplistic": "dị mfe",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "Awụnyeghị {version}",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ma ọ bụ .mcp.json na oru ngo)",
   "← All servers": "← Sava niile",
-  "← Newer": "← Ọhụrụ"
+  "← Newer": "← Ọhụrụ",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }

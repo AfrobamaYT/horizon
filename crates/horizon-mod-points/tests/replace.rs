@@ -42,8 +42,21 @@ fn other_average(_: &mut mod_points::GameBeaconAverageArgs) -> u32 {
     0
 }
 
-/// An ordinary head listener: it may share the place with a replace.
-fn watch_average(_: &mut mod_points::GameBeaconAverageArgs) {}
+/// An ordinary head listener before the replace (higher priority): it may change the inputs,
+/// and the replace sees the change.
+fn raise_b(args: &mut mod_points::GameBeaconAverageArgs) {
+    args.b += 1;
+}
+
+/// Ordinary head listeners after the replace's priority, trying to undo it: the replace runs
+/// last whatever its priority, so they can't.
+fn clear_average(args: &mut mod_points::GameBeaconAverageArgs) {
+    args.result = None;
+}
+
+fn uncancel_shutdown(args: &mut mod_points::GameServerLifecycleRememberShutdownArgs) {
+    args.cancel = false;
+}
 
 #[test]
 fn a_replace_owns_the_function_and_only_one_may() {
@@ -92,11 +105,24 @@ fn a_replace_owns_the_function_and_only_one_may() {
          only one replace listener can own it"
     );
     register(&mod_points::listeners::game_beacon_average(
-        "watcher",
-        0,
-        "watch",
-        watch_average,
+        "raiser", 100, "raise", raise_b,
     ))
+    .unwrap();
+    register(&mod_points::listeners::game_beacon_average(
+        "clearer",
+        -100,
+        "clear",
+        clear_average,
+    ))
+    .unwrap();
+    register(
+        &mod_points::listeners::game_server_lifecycle_remember_shutdown(
+            "uncanceller",
+            -100,
+            "uncancel",
+            uncancel_shutdown,
+        ),
+    )
     .unwrap();
     mod_points::__private::seal();
 
@@ -110,7 +136,8 @@ fn a_replace_owns_the_function_and_only_one_may() {
     );
     assert_eq!(failure, None);
 
-    assert_eq!(average(3, 7), 70);
+    // b raised to 8 before the replace: 8 * 10, not the body's 5 nor a cleared result.
+    assert_eq!(average(3, 7), 80);
     assert_eq!(
         AVERAGE_BODY.load(Ordering::Relaxed),
         0,

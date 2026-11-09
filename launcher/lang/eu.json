@@ -1103,7 +1103,6 @@
   "optimization": "optimizazioa",
   "played by {names}": "{names}k jokatuta",
   "realistic": "errealista",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "runs {command} after": "korrika {command} ondoren",
   "runs {command} first": "{command} doa lehenengo",
   "simplistic": "sinplista",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} ez dago instalatuta",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (edo .mcp.json proiektu batean)",
   "← All servers": "← Zerbitzari guztiak",
-  "← Newer": "← Berriagoa"
+  "← Newer": "← Berriagoa",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }

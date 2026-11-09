@@ -1103,7 +1103,6 @@
   "optimization": "optimering",
   "played by {names}": "spælt av {names} .",
   "realistic": "realistiskt",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "runs {command} after": "koyrir {command} eftir",
   "runs {command} first": "rennur {command} fyrst",
   "simplistic": "einfalt",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} er ikki sett upp",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ella .mcp.json í verkætlan)",
   "← All servers": "← Allir ambætarar",
-  "← Newer": "← Nýggjari"
+  "← Newer": "← Nýggjari",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }

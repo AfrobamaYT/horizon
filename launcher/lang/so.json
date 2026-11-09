@@ -1103,7 +1103,6 @@
   "optimization": "tayeynta",
   "played by {names}": "waxaa ciyaaray {names}",
   "realistic": "waaqici ah",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "runs {command} after": "soconaya {command} kadib",
   "runs {command} first": "orda {command} marka hore",
   "simplistic": "fudud",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} lama rakibin",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ama .mcp.json mashruuc)",
   "← All servers": "← Dhammaan server-yada",
-  "← Newer": "← Ka cusub"
+  "← Newer": "← Ka cusub",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }

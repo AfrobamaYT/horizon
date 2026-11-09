@@ -1103,7 +1103,6 @@
   "optimization": "buorideapmi",
   "played by {names}": "čuojahuvvon {names}",
   "realistic": "realisttalaš",
-  "replace listeners pending (U9)": "replace listeners pending (U9)",
   "runs {command} after": "johtá {command} maŋŋel",
   "runs {command} first": "johtá {command} vuosttaš",
   "simplistic": "álkit",
@@ -1228,5 +1227,7 @@
   "{version} is not installed": "{version} ii leat installerejuvvon",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (dahje .mcp.json prošeavttas)",
   "← All servers": "← Buot bálvaleaddjit",
-  "← Newer": "← Ođđaseabbo"
+  "← Newer": "← Ođđaseabbo",
+  "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
+  "replace needs a return the API carries": "replace needs a return the API carries"
 }
