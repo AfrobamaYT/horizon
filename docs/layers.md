@@ -107,25 +107,34 @@ say) goes in its own module, never mixed into an engine module. Horizon code in 
 
 ## The check
 
-`python3 tools/check_layers.py` runs in CI's verify job and in `tools/pr_ready.py`. It reads the four workspaces'
-`cargo metadata` (no build, about a second) and [`tools/layers.json`](../tools/layers.json), which gives every
-crate its layer. It fails when:
+`python3 tools/check_layers.py` reads the `cargo metadata` of the three workspaces `tools/layers.json` lists (the
+game, `launcher/` and `crates/horizon-mod-registry/`; no build, about a second) and
+[`tools/layers.json`](../tools/layers.json), which gives every crate its layer. It fails when:
 
 - a crate has no layer;
-- a dependency goes up a layer and `allowed` doesn't list it;
-- a pull request adds an entry to `allowed` for a crate that already had a layer (a crate newly split out of another
-  may carry the old crate's exceptions);
+- a dependency goes up a layer and neither `allowed` lists it nor `optional` lists it as an optional dependency;
+- an `optional` entry's dependency is no longer optional (one mandatory declaration, for any target or as a build
+  dependency, is enough);
+- a pull request adds an entry to `allowed` or `optional` for a crate that already had a layer (a crate newly split
+  out of another may carry the old crate's exceptions, and an `allowed` entry may move to `optional`);
 - shipped code depends on a tool.
 
-Each failure names the section of this page that applies. An `allowed` entry that has no dependency left is only
-reported: take it out when you like. `--list` prints every crate's layer and the upward dependencies left.
+Each failure names the section of this page that applies. An `allowed` or `optional` entry that has no dependency
+left is only reported: take it out when you like. `--list` prints every crate's layer and the upward dependencies
+left.
 
 ### Today's exceptions
 
-The current dependency inventory is in `tools/layers.json`, with fork-specific classifications and reasons.
-It excludes removed services and records existing upward dependencies rather than reintroducing them.
-The portable mod-package subset excludes its optional registry index's shader validator; that exception is
-recorded explicitly and does not exempt mandatory dependencies.
+The current dependency inventory is in `tools/layers.json`, with fork-specific classifications and reasons in
+`_fork_baselines`. It excludes removed services and records existing upward dependencies rather than reintroducing
+them. The separate launcher and registry workspaces take two engine crates: `horizon-mod-package` (the launcher's
+package, modpack and index reads; the registry's index format) and `horizon-system` (the launcher's bug reports).
+Those three edges are `allowed` rows like the launcher's other engine dependencies.
+
+`horizon-mod-package`'s registry index validates shader packages with `horizon-shader-api`, behind the optional
+`index` feature (the portable crates take `horizon-mod-package` without it). That edge is the one `optional` row:
+it excuses the layer check and the portable check only while the dependency stays optional, so making it mandatory
+fails both.
 
 ## Built-in addresses
 

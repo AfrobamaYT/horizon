@@ -111,10 +111,8 @@ class CheckLayersTests(unittest.TestCase):
         self.assertIn("core -> wgpu: a portable crate takes no window, GPU", problems[1])
 
     def test_portable_baseline_only_exempts_the_recorded_optional_edge(self):
-        config = dict(CONFIG, portable={
-            "crates": ["core"], "forbidden": [],
-            "allowed": [{"edge": "core -> mod-api", "reason": "Nonportable optional feature"}],
-        })
+        config = dict(CONFIG, portable={"crates": ["core"], "forbidden": []},
+                      optional=[{"edge": "core -> mod-api", "reason": "Nonportable optional feature"}])
         dep = {"name": "mod-api", "kind": None, "path": "/x/mod-api", "optional": True}
         pkg = {"name": "core", "dependencies": [dep]}
         self.assertEqual(check_layers.portable(config, [pkg]), [])
@@ -129,6 +127,65 @@ class CheckLayersTests(unittest.TestCase):
             f"gone: listed as portable in {check_layers.CONFIG_PATH}, but not an engine crate there",
             f"mod-api: listed as portable in {check_layers.CONFIG_PATH}, but not an engine crate there",
         ])
+
+    def test_an_optional_exception_holds_only_while_the_dependency_is_optional(self):
+        config = dict(CONFIG, optional=[{"edge": "core -> mod-api", "reason": "behind a feature"}])
+        optional_dep = {"name": "mod-api", "kind": None, "path": "/x/mod-api", "optional": True}
+        packages = [{"name": "core", "dependencies": [optional_dep]}]
+        graph = check_layers.edges(packages)
+        self.assertEqual(check_layers.check(config, graph, None, check_layers.optional_edges(packages)), ([], []))
+        # The same dependency made mandatory (here by a build-dependency next to the optional one) fails.
+        packages[0]["dependencies"].append({"name": "mod-api", "kind": "build", "path": "/x/mod-api"})
+        problems, _ = check_layers.check(config, graph, None, check_layers.optional_edges(packages))
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("core -> mod-api: listed in 'optional'", problems[0])
+        self.assertIn("no longer optional", problems[0])
+
+    def test_an_optional_exception_excuses_no_other_edge(self):
+        config = dict(CONFIG, optional=[{"edge": "core -> mod-api", "reason": "behind a feature"}])
+        packages = [{"name": "game", "dependencies": [
+            {"name": "mod-api", "kind": None, "path": "/x/mod-api", "optional": True}]}]
+        problems, _ = check_layers.check(config, check_layers.edges(packages), None,
+                                         check_layers.optional_edges(packages))
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("game -> mod-api: engine may not depend on platform", problems[0])
+
+    def test_optional_edges_ignore_dev_and_registry_dependencies(self):
+        packages = [{"name": "core", "dependencies": [
+            {"name": "mod-api", "kind": None, "path": "/x/mod-api", "optional": True},
+            {"name": "mod-api", "kind": "dev", "path": "/x/mod-api"},
+            {"name": "serde", "kind": None, "path": None, "optional": True},
+        ]}]
+        self.assertEqual(check_layers.optional_edges(packages), {"core -> mod-api"})
+
+    def test_an_optional_exception_with_no_dependency_left_is_only_a_note(self):
+        config = dict(CONFIG, optional=[{"edge": "core -> mod-api", "reason": "behind a feature"}])
+        problems, notes = check_layers.check(config, check_layers.edges([package("core")]))
+        self.assertEqual(problems, [])
+        self.assertEqual(len(notes), 1)
+        self.assertIn("core -> mod-api: no longer a dependency; you can remove it from 'optional'", notes[0])
+
+    def test_a_branch_may_move_an_exception_to_optional_but_not_add_one(self):
+        packages = [{"name": "core", "dependencies": [
+            {"name": "mod-api", "kind": None, "path": "/x/mod-api", "optional": True}]}]
+        graph, optional = check_layers.edges(packages), check_layers.optional_edges(packages)
+        config = dict(CONFIG, optional=[{"edge": "core -> mod-api", "reason": "behind a feature"}])
+        moved = dict(CONFIG, allowed=["core -> mod-api"])
+        self.assertEqual(check_layers.check(config, graph, moved, optional), ([], []))
+        self.assertEqual(check_layers.check(config, graph, config, optional), ([], []))
+        problems, _ = check_layers.check(config, graph, CONFIG, optional)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("core -> mod-api: added to 'optional'", problems[0])
+
+    def test_the_repository_config_keeps_its_rows_apart(self):
+        config = check_layers.load_config()
+        allowed, optional = config["allowed"], check_layers.optional_rows(config)
+        self.assertEqual(len(allowed), len(set(allowed)), "an 'allowed' row is listed twice")
+        self.assertEqual(optional & set(allowed), set(), "an edge is in both 'allowed' and 'optional'")
+        for row in config.get("optional", []):
+            self.assertTrue(row.get("reason"), f"{row['edge']}: an 'optional' row needs a reason")
+        for workspace in config["workspaces"]:
+            self.assertTrue((check_layers.ROOT / workspace).is_file(), workspace)
 
     def test_registry_dependencies_are_not_edges(self):
         pkg = {"name": "game", "dependencies": [{"name": "cosmetics", "kind": None, "path": None}]}
