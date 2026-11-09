@@ -76,8 +76,9 @@ jobs:
           HORIZON_WASM_STD: ${{ github.workspace }}/target/horizon-wasm-std.wasm
         run: |
           cargo test -p horizon-mod-api --features wasm-guest --lib guest_pool_
-          cargo test -p horizon-mod-wasm --test real_member -- --ignored --nocapture
-          cargo test -p horizon-mod-wasm --lib guest_input_pool_stays_flat_for_100k_no_import_calls -- --ignored --nocapture
+          cargo test -p horizon-mod-wasm --features listener-fixture --test native_listener --test no_wire_registration
+          cargo test -p horizon-mod-wasm --features listener-fixture --test real_member -- --ignored --nocapture
+          cargo test -p horizon-mod-wasm --features listener-fixture --lib guest_input_pool_stays_flat_for_100k_no_import_calls -- --ignored --nocapture
       - name: Build independent library members
         run: |
           tool="$GITHUB_WORKSPACE/target/debug/cargo-horizon-mod"
@@ -110,4 +111,4 @@ jobs:
         env:
           HORIZON_WASM_FIXTURE: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/fixture/target/horizon-mod/wasm_fixture.hmod
           HORIZON_WASM_STD: ${{ github.workspace }}/target/horizon-wasm-std.wasm
-        run: cargo test --release -p horizon-mod-wasm --test bench block_entity_ticks -- --ignored --nocapture
+        run: cargo test --release -p horizon-mod-wasm --features listener-fixture --test bench block_entity_ticks -- --ignored --nocapture
