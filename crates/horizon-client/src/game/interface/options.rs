@@ -487,7 +487,7 @@ impl Game<'_> {
                     super::packs::open_folder(&dir);
                 }
                 Event::NativeSettings(i) => self.native_settings_refresh(i),
-                Event::NativeButton(i, b) => self.native_settings_event(i, b),
+                Event::NativeSetting(i, j) => self.native_setting_event(i, j),
                 Event::Credits => self.open_win_screen(false, super::win::Finish::Options),
                 Event::HudEditor => self.open_hud_editor(true),
                 // AccessibilityOptionsScreen's link button: ConfirmLinkScreen
