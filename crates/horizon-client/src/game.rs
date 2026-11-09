@@ -5119,11 +5119,6 @@ impl Game<'_> {
         self.award_custom_stat("drop", 1);
         Some(dropped)
     }
-    /// `Player.drop(stack, false)`, as `ItemUtils.createFilledResult` drops what no longer fits
-    /// in the inventory: thrown from the eyes, with no thrower, statistic or drop hook.
-    pub(super) fn drop_plain(&mut self, stack: ItemStack) -> Option<u32> {
-        self.drop_stack_from_eyes(stack, false)
-    }
     /// `Player.drop(stack, false, thrown_from_hand)`: the stack thrown from the eyes along the
     /// view, the main hand swinging for every drop (`LivingEntity.drop`; `PREDICTED` only keeps
     /// the swing from being sent back to the player who made it). `thrown_from_hand` names the

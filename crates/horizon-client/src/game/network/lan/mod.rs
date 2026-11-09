@@ -3016,13 +3016,6 @@ impl Game<'_> {
         }
     }
 
-    /// The start of a phase vanilla runs before ChunkMap.tick and Horizon
-    /// among the entities' ticks (ServerChunkCache.tickChunks' spawning and
-    /// thunder, the raids): the counter to give `lan_synced_since`.
-    pub(super) fn lan_synced_from(&mut self) -> Option<i32> {
-        self.lan_ids_so_far()
-    }
-
     /// The end of such a phase: what joined during it is first updated in
     /// this tick's pass too.
     pub(super) fn lan_synced_since(&mut self, from: Option<i32>) {

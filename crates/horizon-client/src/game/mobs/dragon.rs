@@ -1579,21 +1579,6 @@ impl Game<'_> {
         }
         out
     }
-    /// The box of the dragon part or end crystal guests know as entity `id`
-    /// (`EnderDragonPart`s follow the dragon's id).
-    pub(super) fn tracked_special_box(&self, id: i32) -> Option<Aabb> {
-        let id = u32::try_from(id).ok().filter(|&id| id != 0)?;
-        if let Some(d) = self.dragon.as_ref().filter(|d| d.alive() && d.id != 0)
-            && (d.id + 1..=d.id + 8).contains(&id)
-        {
-            return Some(d.part_box((id - d.id - 1) as usize));
-        }
-        let i = self.crystals.iter().position(|c| c.id == id)?;
-        self.special_targets()
-            .into_iter()
-            .find(|(s, _)| *s == CRYSTAL_IDS + i as u32)
-            .map(|(_, b)| b)
-    }
     /// `ServerLevel.dragonParts`: where the part with that entity id is
     /// and its box.
     pub(super) fn dragon_part(&self, id: u32) -> Option<(Vec3, Aabb)> {

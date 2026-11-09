@@ -509,10 +509,6 @@ enum OrbOrder {
 }
 
 impl Game<'_> {
-    pub(super) fn clear_pending_mob_actions(&mut self) {
-        self.creatures.pending.clear();
-    }
-
     /// The game's own player's uuid and entity id — the identity behind
     /// [`Self::player_view`], so a tick that lends no guest's view names its
     /// player (#1077). None where the view stands for nobody: no player of

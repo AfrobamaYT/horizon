@@ -6,3 +6,9 @@ impl Game<'_> {
         None
     }
 }
+
+impl Game<'_> {
+    pub(in crate::game) fn clear_pending_mob_actions(&mut self) {
+        self.creatures.pending.clear();
+    }
+}

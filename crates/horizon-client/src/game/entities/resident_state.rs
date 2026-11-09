@@ -17,3 +17,11 @@ impl Default for ResidentEntities {
         }
     }
 }
+
+impl Game<'_> {
+    /// `Player.drop(stack, false)`, as `ItemUtils.createFilledResult` drops what no longer fits
+    /// in the inventory: thrown from the eyes, with no thrower, statistic or drop hook.
+    pub(super) fn drop_plain(&mut self, stack: ItemStack) -> Option<u32> {
+        self.drop_stack_from_eyes(stack, false)
+    }
+}
