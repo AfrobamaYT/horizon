@@ -1012,7 +1012,7 @@ impl Game<'_> {
                 &mut self.world.random,
                 1.0,
             ) == 0.0;
-        (f64::from(power), infinity)
+        (power, infinity)
     }
     /// `EnchantmentHelper.onProjectileSpawned`, which `AbstractArrow`'s
     /// constructor runs for every arrow fired from a weapon, bow or crossbow:
