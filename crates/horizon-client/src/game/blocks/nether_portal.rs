@@ -696,10 +696,11 @@ impl Game<'_> {
             present.contains(id) || vehicle != vehicles
         });
         for (id, allowed) in ids {
+            let delay = self.dimension_changing_delay(id);
             let Some(state) = self.portals.entities.get_mut(&id) else {
                 continue;
             };
-            if let Some(entry) = state.handle(allowed, 0, ENTITY_DELAY) {
+            if let Some(entry) = state.handle(allowed, 0, delay) {
                 leaving.push((id, entry));
             }
             if state.cooldown == 0 && state.process.is_none() {
@@ -739,27 +740,39 @@ impl Game<'_> {
             );
         }
     }
+    /// `Entity.getDimensionChangingDelay`: only a first passenger that is a
+    /// server player supplies its own delay (`Player.getDimensionChangingDelay`).
+    fn dimension_changing_delay(&self, id: u32) -> i32 {
+        if self
+            .seated_passengers(id)
+            .first()
+            .is_some_and(|&(_, _, player)| player)
+        {
+            PLAYER_DELAY
+        } else {
+            ENTITY_DELAY
+        }
+    }
     /// `Entity.setAsInsidePortal` on an entity that is still on its portal
     /// cooldown, whatever the portal: the cooldown restarts and it stays.
     pub(super) fn restart_portal_cooldown(&mut self, id: u32) -> bool {
-        match self.portals.entities.get_mut(&id) {
-            Some(state) if state.cooldown > 0 => {
-                state.cooldown = ENTITY_DELAY;
-                true
-            }
-            _ => false,
+        if self
+            .portals
+            .entities
+            .get(&id)
+            .is_some_and(|state| state.cooldown > 0)
+        {
+            self.set_portal_cooldown(id);
+            true
+        } else {
+            false
         }
     }
-    /// `Entity.setPortalCooldown` on an entity that has just spawned in a
-    /// portal: it stands in the portal for 300 ticks without going through.
+    /// `Entity.setPortalCooldown`: assign the passenger-dependent delay,
+    /// leaving the existing portal process intact.
     pub(super) fn set_portal_cooldown(&mut self, id: u32) {
-        self.portals.entities.insert(
-            id,
-            PortalState {
-                cooldown: ENTITY_DELAY,
-                process: None,
-            },
-        );
+        let delay = self.dimension_changing_delay(id);
+        self.portals.entities.entry(id).or_default().cooldown = delay;
     }
     /// `LivingEntity.canUsePortal` over a player's body and its transport
     /// (#943): `Entity.canUsePortal(false)` (alive, nobody's passenger) and
@@ -915,11 +928,12 @@ impl Game<'_> {
         });
         self.portals.sections = portal_sections;
         for (id, pos) in inside {
+            let delay = self.dimension_changing_delay(id);
             self.portals
                 .entities
                 .entry(id)
                 .or_default()
-                .set_inside(pos, ENTITY_DELAY);
+                .set_inside(pos, delay);
         }
     }
     /// The first nether or End portal block an entity box swept through
@@ -1308,10 +1322,11 @@ impl Game<'_> {
         let mut sections = std::mem::take(&mut self.portals.sections);
         let entry = self.swept_portal(f.previous, f.position, 0.98, 0.98, &mut sections);
         self.portals.sections = sections;
+        let delay = self.dimension_changing_delay(f.id);
         if let Some(entry) = entry {
-            f.portal.set_inside(entry, ENTITY_DELAY);
+            f.portal.set_inside(entry, delay);
         }
-        let entry = f.portal.handle(true, 0, ENTITY_DELAY)?;
+        let entry = f.portal.handle(true, 0, delay)?;
         let plan = self.entity_plan(entry, f.position, 0.98, 0.98, false);
         // An untracked block (id 0) has no handle to ask about.
         let allowed = if f.id == 0 {
@@ -1345,7 +1360,7 @@ impl Game<'_> {
         );
         let mut tag = super::persist::with_raw(modelled, f.saved.as_ref().map(|s| &s.1));
         if let Tag::Compound(fields) = &mut tag {
-            fields.insert("PortalCooldown".into(), Tag::Int(ENTITY_DELAY));
+            fields.insert("PortalCooldown".into(), Tag::Int(f.portal.cooldown));
             if f.no_gravity {
                 fields.insert("NoGravity".into(), Tag::Byte(1));
             } else {
@@ -1507,6 +1522,66 @@ mod tests {
                 game.options.dedicated = Some(Vec::new());
                 test(game, &spare, &heard);
             });
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn vehicle_portal_cooldown_uses_only_the_first_passenger() {
+        crate::game::native_guest_turn_tests::with_guests(|game| {
+            game.boats.push(super::super::boats::Boat::new(
+                101,
+                Arc::from("oak"),
+                Vec3::ZERO,
+                0.0,
+            ));
+            let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
+            game.mobs
+                .push(horizon_client::mobs::Mob::new(102, kind, Vec3::ZERO, 0.0));
+            let entry = BlockPos::new(0, 64, 0);
+            // Empty, mob only, player first, then mob first with a player second.
+            for (player, mob_order, expected) in [
+                (false, None, 300),
+                (false, Some(20), 300),
+                (true, None, 10),
+                (true, Some(20), 10),
+                (true, Some(-10), 300),
+            ] {
+                game.lan.as_mut().unwrap().hub.update_guest(12, |g| {
+                    g.vehicle = player.then_some(101);
+                    g.vehicle_order = 0;
+                });
+                game.mobs[0].extra.mount = mob_order.map(|_| 101);
+                game.mobs[0].extra.vehicle_order = mob_order.unwrap_or_default();
+                assert_eq!(game.dimension_changing_delay(101), expected);
+                game.portals.entities.insert(
+                    101,
+                    PortalState {
+                        cooldown: 0,
+                        process: Some(horizon_client::nether_portal::Process {
+                            entry,
+                            time: 7,
+                            inside: true,
+                        }),
+                    },
+                );
+                game.set_portal_cooldown(101);
+                let state = game.portals.entities.get_mut(&101).unwrap();
+                assert_eq!(state.cooldown, expected);
+                let process = state.process.unwrap();
+                assert_eq!(process.entry, entry);
+                assert_eq!(process.time, 7);
+                assert!(process.inside);
+                state.cooldown = 1;
+                assert!(game.restart_portal_cooldown(101));
+                assert_eq!(game.portals.entities[&101].cooldown, expected);
+                let delay = game.dimension_changing_delay(101);
+                let state = game.portals.entities.get_mut(&101).unwrap();
+                assert_eq!(state.handle(true, 0, delay), Some(entry));
+                assert_eq!(state.cooldown, expected);
+                assert_eq!(state.handle(true, 0, delay), None);
+                assert_eq!(state.cooldown, expected - 1);
+            }
         });
     }
 
