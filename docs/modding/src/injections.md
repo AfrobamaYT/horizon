@@ -126,7 +126,7 @@ answer `Ok(())`; a wasm module built without `cargo horizon-mod` is held to the 
 loads. A second `replace` at one point is refused at registration, naming both mods. A replacing
 mod that stops or is disabled hands the function back: it runs as written again.
 Native and wasm share it through `mod_points::replace!`.
-API call sites are refused; internals `replace` and extension fields are also refused. Locals use the native source route described below.
+API call sites and internals `replace` are refused. Mutable locals and fields use the native source routes described below.
 The `native` table accepts only build pins and supporting modules; unknown fields are rejected.
 API head/return functions also load from wasm, with the same record.
 
@@ -146,9 +146,10 @@ Apply these rules in order and stop at the first that fits.
 | Field | Rule |
 | --- | --- |
 | `id` | unique, nonempty |
-| `at`, `hash` | canonical function path and its tool-written signature hash |
-| `kind`, `with` | lowercase kind and a crate-root callback function |
+| `at`, `hash` | canonical function or target struct path and its tool-written signature hash |
+| `kind`, `with` | lowercase kind and a crate-root callback function; `field` uses `with` as its member name |
 | `access` | `api` (default) or `internals` |
+| `type` | required Rust type for `field` and `modify_local`; forbidden for other kinds |
 | `priority` | descending; defaults to 0 |
 | `call`, `nth`, `ctx` | exact canonical callee, occurrence and statement context for a call kind |
 
@@ -452,8 +453,7 @@ call sites. Only reviewed call entries in `crates/horizon-mod-api-gen/slots/<mod
 horizon_client::game::Game<'_>::next_autosave_interval | autosave_interval | 0 | <ctx from points.json>
 ```
 
-Each slot list accepts a function path, `at | call | nth | ctx`, or `type <path>` (reserved for extension
-fields; not consumed yet). Files support `#` comments; identical declarations merge, and conflicting
+Each slot list accepts a function path, `at | call | nth | ctx`, or `type <path>` (a type listing; field declarations are source-only). Files support `#` comments; identical declarations merge, and conflicting
 contexts name both files. The stage reads their sorted union, evaluates the receiver once, and rewrites
 only the selected call expression in its copy of the game.
 
@@ -527,7 +527,7 @@ These call kinds are not available to wasm mods.
 
 `modify_local` requires `access = "internals"` and a rebuild from source. It uses the
 same pinned `call`, `nth` and `ctx` identity as other call-site injections, with three
-required fields that every other kind rejects:
+required fields. `local` and `position` belong only to this kind; `type` is also used by `field`:
 
 ```toml
 [[inject]]
@@ -564,3 +564,40 @@ bindings that Rust's borrow checker could otherwise accept.
 API access and wasm permanently refuse mutable locals; use native internals or request
 a hook. Wasm also permanently refuses call-site injections. Nothing is rewritten when
 no mod declares a local injection, so an unused local injection has zero runtime cost.
+
+### Transient native fields
+
+`kind = "field"` adds a real public Rust field during a native source rebuild:
+
+```toml
+[[inject]]
+id = "count"
+at = "horizon_client::game::Game"
+hash = "<target struct hash from internals.json>"
+kind = "field"
+access = "internals"
+with = "count"
+type = "u32"
+```
+
+The emitted member is `<mod_id>__<with>` (a mod id starting with a digit gets a leading underscore).
+Declare the target through the existing internals facade and access the member directly,
+for example `game.example__count`. A declaration colliding with an engine field is refused.
+There is no listener and no runtime registration for this kind.
+
+The field type must implement `Default` and, when the owner clones, `Clone`. Rust checks
+these bounds during the source build. Types must already be reachable from the target engine
+crate: standard-library types and visible engine types, using canonical engine paths.
+Mod-defined types are refused by name; use attachments for them.
+
+Struct literals initialize the member with `Default::default()`; struct update expressions
+retain the member from their base. Derived Default and Clone include the member automatically.
+Manual Default constructors initialize it, and manual Clone and clone_from copy it from the source.
+Exhaustive patterns, macro constructions, explicit representation layouts and unsupported codec
+derives refuse by target name rather than guessing how to extend them. Serde derives receive
+`#[serde(skip)]`; Wire and unknown derives refuse. Explicit save and sync field lists are untouched.
+The field is never saved or synced. Use attachments for persistence or synchronization.
+
+API access and wasm permanently refuse this kind and point to attachments. No declarations means
+no rewrite and zero runtime cost. A declared field adds its size (and layout alignment) to every
+instance; Default and Clone perform the field type's normal operations.

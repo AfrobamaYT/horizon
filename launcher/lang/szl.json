@@ -1056,7 +1056,7 @@
   "entities": "podmioty",
   "environment": "strzodowisko",
   "equipment": "sprzęt",
-  "extension slots pending (I6)": "extension slots pending (I6)",
+  "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync": "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync",
   "failed": "niy udało sie",
   "first build": "piyrszo budowa",
   "fonts": "czcionki",

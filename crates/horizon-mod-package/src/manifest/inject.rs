@@ -9,7 +9,7 @@ const RESERVED: &str = concat!(
     "override priv try typeof unsized virtual yield"
 );
 
-/// A listener in the mod's crate root. Freshness fields are written by the inject tool.
+/// A listener or transient source field. Freshness fields are written by the inject tool.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Inject {
@@ -26,6 +26,7 @@ pub struct Inject {
     pub nth: Option<usize>,
     pub ctx: Option<String>,
     pub local: Option<String>,
+    /// Rust type of the selected local or injected field.
     #[serde(rename = "type")]
     pub local_type: Option<String>,
     pub position: Option<Position>,
@@ -114,15 +115,20 @@ impl Inject {
             }
             for (field, present) in [
                 ("local", entry.local.is_some()),
-                ("type", entry.local_type.is_some()),
                 ("position", entry.position.is_some()),
             ] {
                 if present != (entry.kind == Kind::ModifyLocal) {
                     return Err(invalid(
                         field,
-                        "local, type and position are required only for modify_local",
+                        "local and position are required only for modify_local",
                     ));
                 }
+            }
+            if entry.local_type.is_some() != matches!(entry.kind, Kind::ModifyLocal | Kind::Field) {
+                return Err(invalid(
+                    "type",
+                    "type is required only for modify_local and field",
+                ));
             }
             if entry.local.as_ref().is_some_and(|name| {
                 name.is_empty()
@@ -137,7 +143,7 @@ impl Inject {
                 .as_ref()
                 .is_some_and(|ty| ty.trim().is_empty())
             {
-                return Err(invalid("type", "name the local's Rust type"));
+                return Err(invalid("type", "name the Rust type"));
             }
             let call = entry.call.as_ref().is_some_and(|s| !s.trim().is_empty());
             let ctx = entry.ctx.as_ref().is_some_and(|s| !s.trim().is_empty());
@@ -202,7 +208,7 @@ pub enum NoSlotReason {
     NativeOnly,
     WasmSitesUnsupported,
     LocalSourceOnly,
-    ExtensionSlotsPending,
+    FieldRequiresSource,
     ApiSitesUnsupported,
     SourcePending,
     ReplacePending,
@@ -220,7 +226,7 @@ impl fmt::Display for NoSlotReason {
                 "wasm does not support internals or call-site injections; use a hook"
             }
             Self::LocalSourceOnly => "modify_local requires native internals source rebuilding; use internals, or request a hook",
-            Self::ExtensionSlotsPending => "extension slots pending (I6)",
+            Self::FieldRequiresSource => "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync",
             Self::ApiSitesUnsupported => "API call-site injections require internals",
             Self::SourcePending => "source injects pending (U5)",
             Self::ReplacePending => "internals replace listeners pending (U9)",
@@ -320,13 +326,19 @@ pub fn route(entry: Entry<'_>, slots: &[Place]) -> Result<Route, InjectError> {
             new: place.hash.clone(),
         });
     }
+    if inject.kind == Kind::Field
+        && inject.access == Access::Internals
+        && entry.target == Target::Native
+    {
+        return Ok(Route::Source(NoSlotReason::FieldRequiresSource));
+    }
     if let Some(reason) = match inject.kind {
         Kind::ModifyLocal
             if entry.target != Target::Native || inject.access != Access::Internals =>
         {
             Some(NoSlotReason::LocalSourceOnly)
         }
-        Kind::Field => Some(NoSlotReason::ExtensionSlotsPending),
+        Kind::Field => Some(NoSlotReason::FieldRequiresSource),
         _ => None,
     } {
         return Err(InjectError::NoSlot {
@@ -582,10 +594,20 @@ mod tests {
                     }
                     if let Some(pending) = match kind {
                         Kind::ModifyLocal => Some(NoSlotReason::LocalSourceOnly),
-                        Kind::Field => Some(NoSlotReason::ExtensionSlotsPending),
+                        Kind::Field => Some(NoSlotReason::FieldRequiresSource),
                         _ => None,
                     } {
                         for target in [Target::Native, Target::Wasm] {
+                            if kind == Kind::Field
+                                && access == Access::Internals
+                                && target == Target::Native
+                            {
+                                assert_eq!(
+                                    run(&i, target, &[p.clone()]),
+                                    Ok(Route::Source(NoSlotReason::FieldRequiresSource))
+                                );
+                                continue;
+                            }
                             assert!(
                                 matches!(run(&i, target, &[p.clone()]), Err(InjectError::NoSlot { reason, .. }) if reason == pending)
                             );
@@ -658,7 +680,6 @@ mod tests {
             Kind::ModifyValue,
             Kind::WrapCall,
             Kind::WrapIf,
-            Kind::Field,
             Kind::Expression,
         ] {
             for field in ["local", "type", "position"] {
@@ -727,5 +748,143 @@ mod tests {
                 assert!(error.contains("sample:ground"));
             }
         }
+    }
+    #[test]
+    fn field_manifest_and_permanent_refusals() {
+        let native = format!(
+            "[native]\ngame='26.3'\nhorizon='{}'\nmixins='{}'",
+            "a".repeat(40),
+            "a".repeat(40)
+        );
+        let decl = DECL.replace(
+            "kind='head'",
+            "kind='field'\ntype='u32'\naccess='internals'",
+        );
+        assert!(parse(&decl, &native).is_ok());
+        let wasm = format!("[wasm]\nsha512='{}'\ntoolchain='nightly'", "a".repeat(128));
+        assert_eq!(
+            parse(&decl, &wasm).unwrap_err(),
+            "E_INJECT_NO_SLOT: sample:ground: field requires native internals source rebuild; use attachments for API, wasm, persistence or sync; slot declaration slots/sample.txt: type game::tick; access = \"api\" never rebuilds the game; use access = \"internals\" where supported or request a hook"
+        );
+
+        assert!(
+            parse(&decl.replace("type='u32'", ""), &native)
+                .unwrap_err()
+                .contains("type")
+        );
+        assert!(
+            parse(
+                &DECL.replace("kind='head'", "kind='head'\ntype='u32'"),
+                &native
+            )
+            .unwrap_err()
+            .contains("type")
+        );
+        let mut i = inject(Kind::Field);
+        i.at = "game::S".into();
+        i.local_type = Some("u32".into());
+        let mut p = place();
+        p.at = "game::S".into();
+        let expected = "E_INJECT_NO_SLOT: sample:ground: field requires native internals source rebuild; use attachments for API, wasm, persistence or sync; slot declaration slots/sample.txt: type game::S; access = \"api\" never rebuilds the game; use access = \"internals\" where supported or request a hook";
+        for target in [Target::Native, Target::Wasm] {
+            assert_eq!(
+                run(&i, target, &[p.clone()]).unwrap_err().to_string(),
+                expected
+            );
+        }
+        i.access = Access::Internals;
+        assert_eq!(
+            run(&i, Target::Wasm, &[p.clone()]).unwrap_err().to_string(),
+            expected
+        );
+        assert_eq!(
+            run(&i, Target::Native, &[p]),
+            Ok(Route::Source(NoSlotReason::FieldRequiresSource))
+        );
+    }
+    #[test]
+    fn kind_specific_fields_share_one_type_key() {
+        for kind in [
+            Kind::Head,
+            Kind::Return,
+            Kind::ModifyArg,
+            Kind::Replace,
+            Kind::BeforeCall,
+            Kind::AfterCall,
+            Kind::ModifyCallArg,
+            Kind::ModifyValue,
+            Kind::WrapCall,
+            Kind::WrapIf,
+            Kind::ModifyLocal,
+            Kind::Field,
+            Kind::Expression,
+        ] {
+            let mut valid = inject(kind);
+            valid.local_type =
+                matches!(kind, Kind::ModifyLocal | Kind::Field).then(|| "u32".into());
+            valid.local = (kind == Kind::ModifyLocal).then(|| "n".into());
+            valid.position = (kind == Kind::ModifyLocal).then_some(Position::Before);
+            Inject::check_all(&[valid.clone()], "sample", true).unwrap();
+            for field in ["local", "type", "position"] {
+                let mut invalid = valid.clone();
+                match field {
+                    "local" => {
+                        invalid.local = if valid.local.is_some() {
+                            None
+                        } else {
+                            Some("n".into())
+                        }
+                    }
+                    "type" => {
+                        invalid.local_type = if valid.local_type.is_some() {
+                            None
+                        } else {
+                            Some("u32".into())
+                        }
+                    }
+                    _ => {
+                        invalid.position = if valid.position.is_some() {
+                            None
+                        } else {
+                            Some(Position::Before)
+                        }
+                    }
+                }
+                assert!(
+                    matches!(Inject::check_all(&[invalid], "sample", true), Err(InjectError::Invalid { field: actual, .. }) if actual == field),
+                    "{kind:?}: {field}"
+                );
+            }
+            if valid.local_type.is_some() {
+                let serialized = toml::to_string(&valid).unwrap();
+                assert!(serialized.lines().any(|line| line == "type = \"u32\""));
+                assert!(!serialized.contains("field_type") && !serialized.contains("local_type"));
+                let mut empty = valid;
+                empty.local_type = Some(" ".into());
+                assert!(matches!(
+                    Inject::check_all(&[empty], "sample", true),
+                    Err(InjectError::Invalid { field: "type", .. })
+                ));
+            }
+        }
+        let native = format!(
+            "[native]\ngame='26.3'\nhorizon='{}'\nmixins='{}'",
+            "a".repeat(40),
+            "a".repeat(40)
+        );
+        let field = DECL.replace("kind='head'", "kind='field'\ntype='u32'");
+        assert!(
+            parse(&format!("{field}field_type='u32'\n"), &native)
+                .unwrap_err()
+                .contains("field_type")
+        );
+        let local = DECL.replace("id='ground'", "id='local'").replace("kind='head'", "kind='modify_local'\nlocal='n'\ntype='i32'\nposition='after'\ncall='sink'\nnth=0\nctx='context'");
+        assert_eq!(
+            parse(&format!("{field}{local}"), &native)
+                .unwrap()
+                .inject
+                .len(),
+            2
+        );
     }
 }

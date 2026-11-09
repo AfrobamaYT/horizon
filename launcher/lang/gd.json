@@ -1056,7 +1056,7 @@
   "entities": "buidhnean",
   "environment": "àrainneachd",
   "equipment": "uidheam",
-  "extension slots pending (I6)": "extension slots pending (I6)",
+  "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync": "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync",
   "failed": "dh'fhàillig",
   "first build": "chiad togail",
   "fonts": "fontan",

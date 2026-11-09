@@ -103,7 +103,8 @@ fn every_native_kind_and_access_registers_or_refuses_by_name() {
                 (Kind::ModifyCallArg, Access::Api) => Some(NoSlotReason::ApiSitesUnsupported),
                 (Kind::ModifyCallArg, _) => Some(NoSlotReason::SourcePending),
                 (Kind::ModifyLocal, Access::Api) => Some(NoSlotReason::LocalSourceOnly),
-                (Kind::Field, _) => Some(NoSlotReason::ExtensionSlotsPending),
+                (Kind::Field, Access::Api) => Some(NoSlotReason::FieldRequiresSource),
+                (Kind::Field, Access::Internals) => None,
                 (Kind::Expression, Access::Api) => Some(NoSlotReason::KindHasNoSlot),
                 (Kind::Expression, _) => Some(NoSlotReason::SourcePending),
                 (Kind::Replace, Access::Internals) => Some(NoSlotReason::ReplacePending),
@@ -118,6 +119,14 @@ fn every_native_kind_and_access_registers_or_refuses_by_name() {
                 continue;
             }
             check(&catalog, &manifest).unwrap();
+            if kind == Kind::Field {
+                assert!(points(&catalog.points, &manifest).next().is_none());
+                assert!(report(&catalog, &manifest)
+                    .next()
+                    .unwrap()
+                    .contains("source"));
+                continue;
+            }
             let facade = catalog.facade(&manifest).unwrap();
             let main = api::main_rs(
                 "/* MOD_SLOTS */",

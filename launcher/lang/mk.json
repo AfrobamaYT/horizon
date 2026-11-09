@@ -1056,7 +1056,7 @@
   "entities": "субјекти",
   "environment": "животната средина",
   "equipment": "опрема",
-  "extension slots pending (I6)": "extension slots pending (I6)",
+  "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync": "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync",
   "failed": "не успеа",
   "first build": "првата градба",
   "fonts": "фонтови",

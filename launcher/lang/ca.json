@@ -1056,7 +1056,7 @@
   "entities": "entitats",
   "environment": "medi ambient",
   "equipment": "equipament",
-  "extension slots pending (I6)": "extension slots pending (I6)",
+  "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync": "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync",
   "failed": "fracassat",
   "first build": "primera construcció",
   "fonts": "tipus de lletra",

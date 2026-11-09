@@ -105,6 +105,7 @@ pub(super) fn stage(
     };
     use syn::parse::Parser;
     let catalog = super::internals::Catalog::read(catalog_dir)?;
+    let mut fields = Vec::new();
     let mut points = std::collections::BTreeMap::new();
     let mut calls = std::collections::BTreeMap::new();
     let mut bundles = mods.iter().collect::<Vec<_>>();
@@ -117,6 +118,15 @@ pub(super) fn stage(
             .zip(super::slots::routes(&catalog, manifest).map_err(|error| error.to_string())?)
         {
             if !matches!(decision, Route::Source(_)) {
+                continue;
+            }
+            if inject.kind == Kind::Field {
+                fields.push(horizon_mod_api_gen::fields::Declaration {
+                    target: super::internals::plain_path(&inject.at),
+                    mod_id: manifest.id.clone(),
+                    name: inject.with.clone(),
+                    ty: inject.local_type.clone().expect("validated field type"),
+                });
                 continue;
             }
             if let Some(call) = &inject.call {
@@ -219,6 +229,7 @@ pub(super) fn stage(
                 .map_err(|error| error.to_string())?,
         )?
     };
+    horizon_mod_api_gen::fields::stage(root, &fields)?;
     call_source::stage(root, &entries, &calls)?;
     std::fs::copy(
         root.join(call_source::FILE),

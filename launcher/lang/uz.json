@@ -1056,7 +1056,7 @@
   "entities": "sub'ektlar",
   "environment": "muhit",
   "equipment": "uskunalar",
-  "extension slots pending (I6)": "extension slots pending (I6)",
+  "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync": "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync",
   "failed": "muvaffaqiyatsiz",
   "first build": "birinchi qurish",
   "fonts": "shriftlar",

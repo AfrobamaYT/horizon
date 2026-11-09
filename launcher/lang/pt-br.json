@@ -1217,7 +1217,7 @@
   "native-only place": "native-only place",
   "wasm does not support internals or call-site injections; use a hook": "wasm does not support internals or call-site injections; use a hook",
   "modify_local requires native internals source rebuilding; use internals, or request a hook": "modify_local requires native internals source rebuilding; use internals, or request a hook",
-  "extension slots pending (I6)": "extension slots pending (I6)",
+  "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync": "field requires native internals source rebuild; use attachments for API, wasm, persistence or sync",
   "API call-site injections require internals": "API call-site injections require internals",
   "source injects pending (U5)": "source injects pending (U5)",
   "no API record: a parameter has no API type yet": "no API record: a parameter has no API type yet",
