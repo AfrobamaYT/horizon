@@ -60,6 +60,7 @@ jobs:
         with:
           workspaces: .
           shared-key: runtime-leases-windows-check
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: "cargo test --release --locked -p horizon-mod-package --features runtime-process --lib runtime_leases::"
         working-directory: .
         shell: bash
