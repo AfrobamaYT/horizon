@@ -245,10 +245,13 @@ impl Limits {
     }
 }
 
-/// A compound entry that [`read_named_bounded`] reads under a budget of its own, wherever
-/// its key appears, without changing the limits of the rest of the file.
+/// A compound entry that [`read_named_bounded`] reads under a budget of its own, without
+/// changing the limits of the rest of the file: the entry keyed `key` directly inside a
+/// compound keyed `parent`.
 #[derive(Clone, Copy, Debug)]
 pub struct Bounded {
+    /// The key of the compound that holds the entry.
+    pub parent: &'static str,
     /// The entry's key.
     pub key: &'static str,
     /// The most bytes its payload may take.
@@ -285,6 +288,8 @@ struct Reader<'a, 's> {
     bounded: Option<Bounded>,
     /// Inside a bounded entry, where a repeated key is an error.
     strict: bool,
+    /// The compound about to be read is the value of a [`Bounded::parent`] key.
+    entering_parent: bool,
     /// Bounded entries left out.
     rejected: usize,
 }
@@ -379,10 +384,8 @@ impl<'a> Reader<'a, '_> {
                 if len > self.limits.max_nodes.saturating_sub(self.nodes) {
                     return Err(self.error("node limit exceeded"));
                 }
-                // At least one byte per valid non-End payload; do not allocate from an unchecked count.
-                if len > self.bytes.len().saturating_sub(self.offset) {
-                    return Err(self.error("truncated list"));
-                }
+                // Do not allocate from a count the input or the byte limit cannot hold.
+                self.list_fits(element_id, len)?;
                 let mut values = Vec::with_capacity(len);
                 for _ in 0..len {
                     let mut value = self.payload(element_id, depth + 1)?;
@@ -397,6 +400,7 @@ impl<'a> Reader<'a, '_> {
                 Tag::List(values)
             }
             10 => {
+                let parent = std::mem::take(&mut self.entering_parent);
                 let mut map = Compound::new();
                 loop {
                     let id = self.byte()?;
@@ -409,12 +413,13 @@ impl<'a> Reader<'a, '_> {
                     }
                     let value = if id == 9 && depth <= 1 && self.streams(&name) {
                         self.stream_list(depth + 1)?
-                    } else if !self.strict && self.bounds(&name) {
+                    } else if parent && !self.strict && self.bounds(&name) {
                         match self.bounded_payload(id, depth + 1)? {
                             Some(value) => value,
                             None => continue,
                         }
                     } else {
+                        self.entering_parent = id == 10 && !self.strict && self.parents(&name);
                         self.payload(id, depth + 1)?
                     };
                     map.insert(name, value); // Java maps retain the last duplicate key.
@@ -441,8 +446,30 @@ impl<'a> Reader<'a, '_> {
         })
     }
     fn bounds(&self, name: &JavaString) -> bool {
-        self.bounded
-            .is_some_and(|b| name.0.iter().copied().eq(b.key.encode_utf16()))
+        self.bounded.is_some_and(|b| is_key(name, b.key))
+    }
+    fn parents(&self, name: &JavaString) -> bool {
+        self.bounded.is_some_and(|b| is_key(name, b.parent))
+    }
+    /// Whether `len` elements of type `element_id` can fit in what is left of the input and of
+    /// the byte limit, each taking at least its type's smallest payload.
+    fn list_fits(&self, element_id: u8, len: usize) -> Result<(), Error> {
+        let least = match element_id {
+            1 | 10 => 1,
+            2 | 8 => 2,
+            3 | 5 | 7 | 11 | 12 => 4,
+            4 | 6 => 8,
+            9 => 5,
+            _ => 0,
+        };
+        let needs = len.saturating_mul(least);
+        if needs > self.bytes.len().saturating_sub(self.offset) {
+            return Err(self.error("truncated list"));
+        }
+        if needs > self.limits.max_bytes.saturating_sub(self.offset) {
+            return Err(self.error("byte limit exceeded"));
+        }
+        Ok(())
     }
     /// A bounded entry's payload, or `None` when it passes its budget or repeats a key: it is
     /// then read past without being built, under the file's own limits, so input the plain
@@ -494,9 +521,7 @@ impl<'a> Reader<'a, '_> {
                 if len > 0 && (element_id == 0 || element_id > 12) {
                     return Err(self.error("invalid list element type"));
                 }
-                if len > self.bytes.len().saturating_sub(self.offset) {
-                    return Err(self.error("truncated list"));
-                }
+                self.list_fits(element_id, len)?;
                 for _ in 0..len {
                     self.skip(element_id, depth + 1)?;
                 }
@@ -592,6 +617,10 @@ impl ListElements<'_, '_, '_> {
     }
 }
 
+fn is_key(name: &JavaString, key: &str) -> bool {
+    name.0.iter().copied().eq(key.encode_utf16())
+}
+
 /// `DataInput.readUTF`'s decoding, accepting its overlong sequences; `None`
 /// for bytes that aren't modified UTF-8.
 fn modified_utf8(bytes: &[u8]) -> Option<JavaString> {
@@ -637,6 +666,7 @@ pub fn read_named(bytes: &[u8], limits: Limits) -> Result<(NamedTag, usize), Err
         stream: None,
         bounded: None,
         strict: false,
+        entering_parent: false,
         rejected: 0,
     };
     let id = reader.byte()?;
@@ -649,8 +679,8 @@ pub fn read_named(bytes: &[u8], limits: Limits) -> Result<(NamedTag, usize), Err
     Ok((NamedTag { name, tag }, reader.offset))
 }
 
-/// [`read_named`], except that every compound entry keyed `bounded.key` is read under that
-/// budget and may repeat no key inside it. An entry that passes its budget or repeats a key
+/// [`read_named`], except that every compound entry keyed `bounded.key` directly inside a
+/// compound keyed `bounded.parent` is read under that budget and may repeat no key inside it. An entry that passes its budget or repeats a key
 /// is read past without being built and left out of its compound; the third value counts
 /// those. The rest of the file reads as [`read_named`] reads it.
 pub fn read_named_bounded(
@@ -666,6 +696,7 @@ pub fn read_named_bounded(
         stream: None,
         bounded: Some(bounded),
         strict: false,
+        entering_parent: false,
         rejected: 0,
     };
     let id = reader.byte()?;
@@ -697,6 +728,7 @@ pub fn read_named_streaming(
         stream: Some((key, visit)),
         bounded: None,
         strict: false,
+        entering_parent: false,
         rejected: 0,
     };
     let id = reader.byte()?;
@@ -719,6 +751,7 @@ pub fn read_network(bytes: &[u8], limits: Limits) -> Result<(Tag, usize), Error>
         stream: None,
         bounded: None,
         strict: false,
+        entering_parent: false,
         rejected: 0,
     };
     let id = reader.byte()?;
@@ -1549,32 +1582,74 @@ mod tests {
     }
 
     /// A bounded entry with a key twice or past its budget is left out unbuilt; the rest of
-    /// the file, and the same input read plainly, are as before.
+    /// the file, the same key under another parent, and the input read plainly are as before.
     #[test]
     fn a_bounded_entry_over_its_budget_or_with_a_repeated_key_is_left_out() {
         let budget = Bounded {
+            parent: "p",
             key: "b",
             max_bytes: 16,
             max_depth: 1,
         };
-        // {a:1b, b:{x:1b, x:2b}, c:3b}, then b with a 20-byte array.
-        let twice = [
-            10, 0, 0, 1, 0, 1, b'a', 1, 10, 0, 1, b'b', 1, 0, 1, b'x', 1, 1, 0, 1, b'x', 2, 0, 1,
-            0, 1, b'c', 3, 0,
-        ];
-        let mut big = vec![10, 0, 0, 10, 0, 1, b'b', 7, 0, 1, b'y', 0, 0, 0, 20];
-        big.extend([0; 20]);
-        big.extend([0, 1, 0, 1, b'c', 3, 0]);
-        for raw in [&twice[..], &big] {
+        let key = |out: &mut Vec<u8>, id: u8, name: &str| {
+            out.push(id);
+            out.extend((name.len() as u16).to_be_bytes());
+            out.extend(name.as_bytes());
+        };
+        // {<parent>:{a:1b, b:<b>, c:3b}}
+        let file = |parent: &str, b: &dyn Fn(&mut Vec<u8>)| {
+            let mut out = vec![10, 0, 0];
+            key(&mut out, 10, parent);
+            key(&mut out, 1, "a");
+            out.push(1);
+            b(&mut out);
+            key(&mut out, 1, "c");
+            out.extend([3, 0, 0]);
+            out
+        };
+        let twice = |out: &mut Vec<u8>| {
+            key(out, 10, "b");
+            out.extend([1, 0, 1, b'x', 1, 1, 0, 1, b'x', 2, 0]);
+        };
+        let big = |out: &mut Vec<u8>| {
+            key(out, 7, "b");
+            out.extend(20i32.to_be_bytes());
+            out.extend([0; 20]);
+        };
+        // A list whose count the whole file could hold, but its budget cannot.
+        let long_list = |out: &mut Vec<u8>| {
+            key(out, 9, "b");
+            out.push(1);
+            out.extend(64i32.to_be_bytes());
+            out.extend([0; 64]);
+        };
+        for b in [&twice as &dyn Fn(&mut Vec<u8>), &big, &long_list] {
+            let raw = file("p", b);
             let (named, used, rejected) =
-                read_named_bounded(raw, Limits::default(), budget).unwrap();
+                read_named_bounded(&raw, Limits::default(), budget).unwrap();
             assert_eq!((used, rejected), (raw.len(), 1));
-            assert_eq!(named.tag.get("b"), None);
-            assert_eq!(named.tag.get("c"), Some(&Tag::Byte(3)));
+            let p = named.tag.get("p").unwrap();
+            assert_eq!(p.get("b"), None);
+            assert_eq!(
+                (p.get("a"), p.get("c")),
+                (Some(&Tag::Byte(1)), Some(&Tag::Byte(3)))
+            );
+            assert!(read_named_bounded(&raw[..raw.len() - 3], Limits::default(), budget).is_err());
         }
-        let (plain, _) = read_named(&twice, Limits::default()).unwrap();
-        let x = plain.tag.get("b").and_then(|b| b.get("x"));
+        let elsewhere = file("q", &twice);
+        let (named, _, rejected) =
+            read_named_bounded(&elsewhere, Limits::default(), budget).unwrap();
+        let (plain, _) = read_named(&elsewhere, Limits::default()).unwrap();
+        assert_eq!(
+            (named, rejected),
+            (plain.clone(), 0),
+            "another parent's `b` reads as before"
+        );
+        let x = plain
+            .tag
+            .get("q")
+            .and_then(|q| q.get("b"))
+            .and_then(|b| b.get("x"));
         assert_eq!(x, Some(&Tag::Byte(2)), "Java keeps the last");
-        assert!(read_named_bounded(&big[..big.len() - 3], Limits::default(), budget).is_err());
     }
 }

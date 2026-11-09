@@ -116,7 +116,7 @@ fn a_book_without_the_extension_reads_empty() {
     assert!(Settings::read(Some(&saved(None))).custom.is_empty());
     assert!(Settings::read(None).custom.is_empty());
     assert!(
-        !matches!(Settings::default().write().get(EXTENSION), Some(_)),
+        Settings::default().write().get(EXTENSION).is_none(),
         "a vanilla-only book writes what it wrote before"
     );
 }
@@ -341,4 +341,27 @@ fn a_truncated_extension_still_fails_the_file() {
     let mut raw = raw_player(|out| raw_book(out, POT, 1));
     raw.truncate(raw.len() - 4);
     assert!(read_saved(&raw).is_err());
+}
+
+#[test]
+fn the_same_key_outside_recipe_book_reads_as_before() {
+    // {OtherData:{"horizon:book_settings":{x:1b, x:2b}}}: no recipe book here, so the plain
+    // reader's last-duplicate-wins stands.
+    let mut raw = vec![10, 0, 0];
+    key(&mut raw, 10, "OtherData");
+    key(&mut raw, 10, EXTENSION);
+    for value in [1, 2] {
+        key(&mut raw, 1, "x");
+        raw.push(value);
+    }
+    raw.extend([0, 0, 0]);
+    let (named, _) = read_saved(&raw).unwrap();
+    let (plain, _) = horizon_core::nbt::read_named(&raw, Limits::saved()).unwrap();
+    assert_eq!(named, plain);
+    let x = named
+        .tag
+        .get("OtherData")
+        .and_then(|d| d.get(EXTENSION))
+        .and_then(|e| e.get("x"));
+    assert_eq!(x, Some(&Tag::Byte(2)));
 }

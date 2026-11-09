@@ -15,9 +15,11 @@ pub const MAX_ID_BYTES: usize = 256;
 /// At most this many bytes of the saved extension, as NBT encodes it.
 pub const MAX_ENCODED_BYTES: usize = 512 * 1024;
 
-/// How the NBT reader reads [`EXTENSION`] in a saved file: at most [`MAX_ENCODED_BYTES`],
-/// two levels deep (the map and a book's flags), and no key twice.
+/// How the NBT reader reads [`EXTENSION`] in a saved file's `recipeBook`: at most
+/// [`MAX_ENCODED_BYTES`], two levels deep (the map and a book's flags), and no key twice. The
+/// same key under any other compound reads as the plain reader reads it.
 pub const READ_BUDGET: nbt::Bounded = nbt::Bounded {
+    parent: "recipeBook",
     key: EXTENSION,
     max_bytes: MAX_ENCODED_BYTES,
     max_depth: 2,
