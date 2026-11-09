@@ -3,6 +3,8 @@
 mod matrix;
 #[path = "support/checks.rs"]
 mod matrix_checks;
+#[path = "fixture/src/modify_arg.rs"]
+mod modify_arg;
 #[path = "support/no_hooks.rs"]
 mod no_hooks;
 #[path = "fixture/src/replace.rs"]
@@ -25,9 +27,25 @@ fn average(a: u32, b: u32) -> u32 {
     (a + b) / 2
 }
 
+/// `horizon_client::game::commands::wrap_degrees` (`Mth.wrapDegrees`), as the staging pass
+/// marks it.
+#[horizon_mod_api_macros::point(name = "game_commands_wrap_degrees", free)]
+fn wrap_degrees(angle: f32) -> f32 {
+    let wrapped = angle % 360.0;
+    if wrapped >= 180.0 {
+        wrapped - 360.0
+    } else if wrapped < -180.0 {
+        wrapped + 360.0
+    } else {
+        wrapped
+    }
+}
+
 #[test]
 fn the_shared_listener_source_answers_natively_as_in_wasm() {
     matrix_checks::baseline();
+    // Without a listener the body wraps the angle as given.
+    assert_eq!(wrap_degrees(10.0), 10.0);
     // Without a listener the body averages.
     assert_eq!(average(3, 7), 5);
     assert_eq!(
@@ -72,6 +90,14 @@ fn the_shared_listener_source_answers_natively_as_in_wasm() {
         matrix::mirrors,
     ))
     .unwrap();
+    // A `modify_arg` registers with the head's constructor, as the emitter writes it.
+    mod_points::register(&mod_points::listeners::game_commands_wrap_degrees(
+        "native",
+        0,
+        "turn",
+        modify_arg::turn_angle,
+    ))
+    .unwrap();
     mod_points::__private::seal();
     matrix_checks::check();
     for (before, message, after) in shutdown::CASES {
@@ -85,5 +111,8 @@ fn the_shared_listener_source_answers_natively_as_in_wasm() {
             replace::BODY_CALLS.load(std::sync::atomic::Ordering::SeqCst),
             0
         );
+    }
+    for (angle, wrapped) in modify_arg::CASES {
+        assert_eq!(wrap_degrees(angle), wrapped, "{angle}");
     }
 }
