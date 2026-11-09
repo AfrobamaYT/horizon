@@ -2,7 +2,7 @@
 use super::{Game, Vec3, Who};
 
 impl Game<'_> {
-    pub(super) fn hoglin_attack_target(&mut self, mob: u32, target: Who) {
+    pub(super) fn hoglin_attack_target(&mut self, mob: u32, target: Who, player: Option<u32>) {
         let places: Vec<(u32, Vec3)> = self
             .mobs
             .iter()
@@ -18,11 +18,6 @@ impl Game<'_> {
                 horizon_client::mobs::piglin::receive_attack_target(m, target, position)
             });
         if let Some(target) = proposal {
-            let player = self
-                .lan
-                .as_ref()
-                .and_then(|host| host.mob_players.get(&mob).copied())
-                .or(self.lan_acting);
             self.set_event_ai_target(mob, Some(target), player);
         }
     }

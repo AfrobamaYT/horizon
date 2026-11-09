@@ -246,7 +246,13 @@ fn the_sensed_receivers_are_visible_adult_hoglins() {
 
 #[derive(Default)]
 struct BroadcastTargetListener {
-    state: Arc<std::sync::Mutex<(usize, Option<mod_api::LivingRef>)>>,
+    state: Arc<
+        std::sync::Mutex<(
+            usize,
+            Option<mod_api::LivingRef>,
+            Option<mod_api::LivingRef>,
+        )>,
+    >,
 }
 
 #[mod_api::__subscriptions]
@@ -259,6 +265,7 @@ impl mod_api::Hooks for BroadcastTargetListener {
         assert!(event.is_brain, "hoglin targets use the brain event");
         let mut state = self.state.lock().unwrap();
         state.0 += 1;
+        state.2 = event.original_target;
         if let Some(redirect) = state.1 {
             *event.new_target = Some(redirect);
             mod_api::Flow::Continue
@@ -275,7 +282,7 @@ fn hoglin_broadcast_obeys_target_cancellation_and_redirection() {
     use horizon_client::mobs::{Mob, MobEvent, Who};
     use horizon_core::geometry::Vec3;
 
-    let state = Arc::new(std::sync::Mutex::new((0, None)));
+    let state = Arc::new(std::sync::Mutex::new((0, None, None)));
     let mods = vec![mod_api::ModEntry::new(
         "hoglin_target_listener",
         Box::new(BroadcastTargetListener {
@@ -300,6 +307,7 @@ fn hoglin_broadcast_obeys_target_cancellation_and_redirection() {
                 vec![MobEvent::HoglinAttackTarget {
                     mob: 9001,
                     target: Who::Mob(9002),
+                    player: None,
                 }]
             };
             game.handle_mob_events(broadcast()).unwrap();
@@ -330,6 +338,35 @@ fn hoglin_broadcast_obeys_target_cancellation_and_redirection() {
             game.handle_mob_events(broadcast()).unwrap();
             assert_eq!(state.lock().unwrap().0, 2);
             assert_eq!(game.mobs[0].ai.target, None);
+
+            use crate::game::native_item_places::tests::{guest, open_to_lan};
+            open_to_lan(game);
+            for conn in [12, 13] {
+                let mut placed = guest(conn);
+                placed.loaded = true;
+                game.lan.as_mut().unwrap().hub.guests.push(placed);
+            }
+            let attacker_id = game.guest_identity(12).unwrap().1;
+            let attacker = mod_api::LivingRef::new(mod_api::EntityRef::new(epoch, attacker_id));
+            game.mobs[0].extra.ints[0] = 0;
+            game.lan.as_mut().unwrap().mob_players.insert(9001, 13);
+            let broadcast_player = || {
+                vec![MobEvent::HoglinAttackTarget {
+                    mob: 9001,
+                    target: Who::Player,
+                    player: Some(12),
+                }]
+            };
+            state.lock().unwrap().1 = None;
+            game.handle_mob_events(broadcast_player()).unwrap();
+            assert_eq!(state.lock().unwrap().2, Some(attacker));
+            assert_eq!(game.mobs[0].ai.target, None);
+            assert_eq!(game.lan.as_ref().unwrap().mob_players[&9001], 13);
+            state.lock().unwrap().1 = Some(attacker);
+            game.handle_mob_events(broadcast_player()).unwrap();
+            assert_eq!(state.lock().unwrap().2, Some(attacker));
+            assert_eq!(game.mobs[0].ai.target, Some(Who::Player));
+            assert_eq!(game.lan.as_ref().unwrap().mob_players[&9001], 12);
         });
     });
 }
