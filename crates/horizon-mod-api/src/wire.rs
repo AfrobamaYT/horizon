@@ -1344,6 +1344,19 @@ mod tests {
     }
 
     #[test]
+    fn handwritten_seeds_do_not_depend_on_source_paths() {
+        assert_eq!(
+            layout_seed("Identifier"),
+            layout_seed("crate::text::Identifier")
+        );
+        assert_eq!(
+            layout_seed("Identifier"),
+            layout_seed("other :: Identifier")
+        );
+        assert_ne!(layout_seed("Identifier"), layout_seed("LevelKey"));
+    }
+
+    #[test]
     fn golden_value_bytes() {
         fn bytes<T: super::Wire>(value: T, expected: &[u8]) {
             let mut out = super::Writer::new();
