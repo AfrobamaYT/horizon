@@ -1,0 +1,2 @@
+# path<TAB>regeneration command
+docs/modding/src/wasm-coverage.md	HORIZON_UPDATE_WIRE_COVERAGE=1 cargo test -p horizon-mod-api-gen coverage_document_is_current
