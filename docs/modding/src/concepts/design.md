@@ -81,6 +81,7 @@ and [Parts](trait-mods.md#parts).
 | Block, block entity, item, entity and menu Parts | `Registrar::attach_block_part`, `attach_block_entity_part`, `attach_item_part`, `attach_entity_part`, `attach_menu_part` | Startup on the sides that load the mod | After resolution against the game's registries. Each Part method runs on the side declared for that hook. |
 | Capability providers | `provide_block_entity_capability`, `provide_item_capability`, `provide_entity_capability` on the registrar | Startup registration, server provider calls | After the game resolves the registrations. A capability query supplies the holder and a server host. |
 | Block entity types, default entity attributes and entity spawn placements | `declare_block_entity_type`, `declare_entity_attributes`, `modify_entity_attributes`, `declare_spawn_placement` | Startup declarations on the sides that load the mod | When the registered types, defaults and spawn rules are resolved against the content tables. |
+| New attribute types | `declare_attribute` | Startup declarations on the sides that load the mod | When the attribute catalog grows, before entity attribute rows resolve. The mod attributes append after the vanilla ones, sorted by mod id then attribute id — the network id order on every side running the same mods. |
 | Game rules and categories | `game_rule_bool`, `game_rule_category` | Startup, before the game validates and installs the rule schema | When the game uses the installed schema to load rule values and build the rule UI. |
 | Dimension and chunk generation code, structure types, ticket controllers | `register_dimension`, `register_chunk_generator`, `register_structure_type`, `register_ticket_controller` | Startup declarations, consumed by world setup and generation | When the world resolves its dimension, structure or ticket registrations. |
 | Controls bindings | `Registrar::register_key_mapping` | Startup registration, client consumer | When the client installs the bindings in Controls and restores saved bindings. |
@@ -89,7 +90,7 @@ and [Parts](trait-mods.md#parts).
 | Client commands | `Hooks::register_client_commands` collects `NativeCommand` usages | Client, at connection start and when the server sends its tree | After the client incorporates them into completion and local dispatch. |
 | HUD layers and F3 entries | `register_gui_layers` and `register_debug_entries` | Client startup | When the installed HUD order or debug entry list is used for drawing. |
 | World-space debug renderers | `register_debug_renderers` | Client, each refresh of the renderer list | The next debug draw uses the refreshed list. |
-| Model layers, block and item tints, numeric and categorical item model properties | `layer_definitions`, `register_block_tint_sources`, `register_item_tint_sources`, `register_range_select_item_model_property`, `register_select_item_model_property` | Client startup before resource loading | The client can resolve the declarations when it builds its models and rendering tables. |
+| Model layers, colour resolvers, block and item tints, numeric and categorical item model properties | `layer_definitions`, `register_color_resolvers`, `register_block_tint_sources`, `register_item_tint_sources`, `register_range_select_item_model_property`, `register_select_item_model_property` | Client startup before resource loading | The client can resolve the declarations when it builds its models and rendering tables. |
 | Data map types | `data_map_types` | Server, at world data load and each reload | After the server publishes the loaded data maps. |
 | Recipe property additions | `recipe_property_sets` | Server data load and client preload, after recipes resolve, and again on reload | When station slot checks use the published sets. |
 | Mod configs | `register_configs` | Config phase on the owning side, once at startup for Client/Common and per world for Server | After the file is read and the mod receives its config loading callback. |
@@ -155,6 +156,9 @@ them; the design is this:
   copies with the holder and is never kept in a mod's statics.
 - **The same kind twice on one thing is refused at load**, naming the mods, and a part's kind is its type.
   Parts attach by key or by tag, and the tags resolve against each game's own tags.
+  Block dispatch uses a load-prepared API key lookup, refreshed on tag reload. If no part subscribes
+  for that block, the game skips converting the event's state values and write collections. This
+  per-block filter does not restrict ordinary global hook listeners.
 
 Items, fluids and energy are Parts as well, as capabilities in NeoForge's transfer shape. A capability is a
 `CapabilityKey` (`ITEMS`, `FLUIDS`, `ENERGY`) for a block entity, and an `ItemCapabilityKey` (`ITEM_ITEMS`,

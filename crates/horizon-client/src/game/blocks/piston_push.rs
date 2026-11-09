@@ -561,16 +561,14 @@ impl Game<'_> {
                 self.mobs[i].on_ground = limited.y < 0.0 && limited.y != resolved.y;
             }
         }
-        // `Entity.move(MoverType.PISTON, …)` restitution, which runs whether or
-        // not the step is applied: so a primed TNT in a chunk that does not tick
-        // entities still loses its velocity into walls and ceilings and
-        // bounces on slime (#12022).
-        self.restitute_piston(target, limited, resolved);
         if resolved.length_squared() > 1.0e-7
             || limited.length_squared() - resolved.length_squared() < 1.0e-7
         {
             self.apply_push(target, resolved);
         }
+        // Restitution reads the block below the final position, as Entity.move
+        // does. Run it even when the collision prevented any position update.
+        self.restitute_piston(target, limited, resolved);
         if let Some((i, from, ..)) = tnt {
             self.finish_tnt_piston_move(i, from, resolved);
         }
@@ -911,10 +909,12 @@ mod order_tests {
             game.push_piston_entities(pushes);
             moved.push(game.tnts[0].position.x - before);
         }
-        // The near stone's box reaches x 5.5 into a TNT from x 5.01: 0.49 plus
-        // PUSH_OFFSET; the far stone's old box stops it at x 6.
+        // The near stone's box reaches the TNT's centre at x 5.5: half its
+        // vanilla EntityTypes.TNT width (0.98F, widened to double) plus
+        // PUSH_OFFSET. The far stone's old box stops it at x 6.
+        let expected = f64::from(0.98_f32) * 0.5 + 0.01;
         assert!(
-            (moved[0] - 0.5).abs() < 1e-9,
+            (moved[0] - expected).abs() < 1e-9,
             "far stone gone first: {}",
             moved[0]
         );

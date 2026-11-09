@@ -415,9 +415,10 @@ impl Game<'_> {
                             st.liked_player_ttl = was.liked_player_ttl;
                         }
                     }
-                    // Entity.load mutates the existing living entity; its
-                    // previous-hit amount is not read from saved NBT (its hurt
-                    // immunity is, as `invulnerable_time`).
+                    // LivingEntity's damage cooldown and previous-hit amount
+                    // are runtime state. Entity's separate immunity window is
+                    // loaded from the saved `invulnerable_time` key above.
+                    slot.invulnerable = old.invulnerable;
                     slot.last_hurt = old.last_hurt;
                     // Entity.load updates saved data on the existing entity;
                     // lastTradedPlayer is transient and survives a live NoAI edit.
@@ -1844,6 +1845,11 @@ mod boat_passenger_tree_tests {
         with_game(|game| {
             game.build_registries();
             game.set_allow_commands(true);
+            // Supply the synthetic chunk before forceload's synchronous load barrier.
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
             assert!(game.run_command("forceload add 0 0 15 15"));
             assert!(game.world.loaded(8, 8));
             assert!(game.run_command("setblock 8 199 8 stone"));

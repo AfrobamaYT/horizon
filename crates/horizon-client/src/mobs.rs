@@ -56,6 +56,7 @@ pub mod landing;
 pub mod leash;
 pub mod living;
 pub mod llama;
+pub mod mod_behaviors;
 pub mod model_layers;
 pub mod monster_brain;
 pub mod nautilus;
@@ -87,6 +88,7 @@ pub mod spawning;
 pub mod spear_use;
 pub mod species;
 pub mod strider;
+pub mod stuck;
 pub mod suffocation;
 pub mod sulfur_cube;
 pub mod sync;
@@ -1358,12 +1360,10 @@ pub struct Extra {
     pub synced_pose: u8,
     /// `LivingEntity.isAutoSpinAttack` (Riptide).
     pub auto_spin_attack: bool,
-    /// `LivingEntity.DATA_ARROW_COUNT_ID`: the arrows stuck in a player
-    /// (`ArrowLayer`).
-    pub arrow_count: i32,
-    /// `LivingEntity.DATA_STINGER_COUNT_ID`: the bee stingers stuck in a
-    /// player (`BeeStingerLayer`).
-    pub stinger_count: i32,
+    /// `LivingEntity.DATA_ARROW_COUNT_ID` and `DATA_STINGER_COUNT_ID`: the
+    /// arrows and bee stingers stuck in the body (`ArrowLayer`,
+    /// `BeeStingerLayer`), with the timers that pull them out.
+    pub stuck: stuck::Stuck,
     /// `Player.DATA_SHOULDER_PARROT_LEFT` and `_RIGHT`: the variant of the
     /// parrot on each shoulder (`ParrotOnShoulderLayer`).
     pub shoulder_parrots: [Option<i32>; 2],
@@ -3721,8 +3721,11 @@ impl Mob {
         let mut mob = Self::new_remote(id, kind, position, yaw);
         // The parts a mod attached to this entity type add their goals right
         // after the species' own (#1077): vanilla's `registerGoals` moment,
-        // which belongs to the authoritative construction.
+        // which belongs to the authoritative construction. A type with no
+        // brain is told so at the same moment (#824); a brain-driven type
+        // registers its behaviors at the brain's own construction.
         part_goals::attach(&mut mob);
+        mod_behaviors::attach_at_construction(&mob);
         mob
     }
     /// The same construction without the mod parts' goals: a client's copy of
@@ -4607,6 +4610,7 @@ impl Mob {
         // LivingEntity.tick: CombatTracker.recheckStatus.
         let alive = self.alive();
         self.combat.recheck(alive, self.age);
+        self.extra.stuck.tick();
         ai::tick(self, w, level, events)
     }
     /// The section the mob is in, noted when it changes (`EntitySection` lists).
@@ -4672,14 +4676,18 @@ impl Mob {
     pub fn retain_effects(&mut self, mut keep: impl FnMut(&StoredEffect) -> bool) -> bool {
         let before = self.extra.effects.len();
         let mut boost_removed = false;
+        let mut absorption_removed = false;
         self.extra.effects.retain(|e| {
             let keep = keep(e);
             boost_removed |= !keep && e.id == "minecraft:health_boost";
-            if !keep && e.id == "minecraft:absorption" {
-                self.absorption = (self.absorption - 4.0 * (e.amplifier + 1) as f32).max(0.0);
-            }
+            absorption_removed |= !keep && e.id == "minecraft:absorption";
             keep
         });
+        if absorption_removed {
+            // LivingEntity.onAttributeUpdated clamps to the remaining maximum;
+            // removing Absorption does not subtract the hearts it granted.
+            self.absorption = self.absorption.min(armor::max_absorption(self));
+        }
         let changed = self.extra.effects.len() != before;
         if changed {
             let effects = &self.extra.effects;
@@ -7656,7 +7664,7 @@ mod hidden_speed_mob_tick_tests {
         // Case 4: Base 0 mob with Absorption I (granting 4.0 absorption hearts, max_absorption 4.0).
         // On RemoveEffects(["minecraft:absorption"]), remaining max_absorption is 0.0,
         // so amount drops to 0.0.
-        let mut m0_remove = Mob::new(4, kind, Vec3::ZERO, 0.0);
+        let mut m0_remove = Mob::new(4, kind.clone(), Vec3::ZERO, 0.0);
         m0_remove.add_effect("absorption", 600, 0);
         assert_eq!(m0_remove.absorption, 4.0);
         m0_remove.apply_death_effect(
@@ -7667,5 +7675,28 @@ mod hidden_speed_mob_tick_tests {
             m0_remove.absorption, 0.0,
             "base 0 mob loses absorption on RemoveEffects"
         );
+
+        // The shared command/expiry removal path must obey the same contract.
+        for (base, amount, expected) in [(20.0, 8.0, 8.0), (20.0, 24.0, 20.0), (0.0, 4.0, 0.0)] {
+            let mut m = Mob::new(5, kind.clone(), Vec3::ZERO, 0.0);
+            let mut attrs = catalog.create("minecraft:pig").unwrap();
+            attrs.edit(key, |value, observer| {
+                value.set_base_value(base, observer).unwrap();
+            });
+            m.extra.armor_attributes = Some(Box::new(attrs));
+            m.add_effect("absorption", 600, 1);
+            m.absorption = amount;
+            m.effects_dirty = false;
+            assert!(!m.retain_effects(|_| true));
+            assert_eq!(
+                m.absorption, amount,
+                "retained effect leaves absorption alone"
+            );
+            assert!(!m.effects_dirty);
+            assert!(m.retain_effects(|e| e.id != "minecraft:absorption"));
+            assert_eq!(m.absorption, expected, "base {base}, amount {amount}");
+            assert!(m.effects_dirty);
+            assert!(!m.has_effect("minecraft:absorption"));
+        }
     }
 }

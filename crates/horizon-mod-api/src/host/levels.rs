@@ -36,6 +36,25 @@ pub trait LevelsBackend {
         biome: &str,
         parameters: BiomeSearch,
     ) -> Option<BiomeSearchResult>;
+    /// Side: server.
+    /// `ServerLevel.findNearestMapStructure` without skipping known starts: the
+    /// nearest start of `structure`, an id or a `#tag`, searched in this
+    /// level's generator as `/locate structure` does. Random-spread structure
+    /// sets are searched in squares of placement cells out to
+    /// [`StructureSearch::radius`]; concentric rings (strongholds) check every
+    /// ring position whatever the radius. Starts are built as the search needs
+    /// them, without loading or generating chunks or switching parked levels.
+    /// None for no start, a structure that does not generate in this level,
+    /// a world without structures, a stale level, a client, a negative radius,
+    /// one above [`StructureSearch::MAX_RADIUS`], and an origin outside the
+    /// world's 30,000,000-block bound.
+    #[access(WorldOnly)]
+    fn level_find_nearest_structure(
+        &self,
+        level: LevelRef,
+        structure: &str,
+        parameters: StructureSearch,
+    ) -> Option<StructureSearchResult>;
     /// Side: both.
     /// `Level.getSkyDarken`: the sky-light reduction from dimension, time and weather.
     /// Reads any loaded server level, including parked levels, or the current client level.
@@ -111,19 +130,31 @@ pub trait LevelsBackend {
     #[access(WorldOnly)]
     fn chunk_status(&self, chunk: ChunkRef) -> Option<ChunkStatus>;
     /// Side: server.
-    /// `RecipeManager.getRecipeFor(CRAFTING, CraftingInput.of(width, height, items), level)`,
-    /// then the recipe's `assemble` and `getRemainingItems`: what a `width` by `height` grid
-    /// (each 1 to 3, `items` row by row) makes, through the crafting table's matcher, with the
-    /// world's data packs' recipes and the special recipes. None when no recipe matches or it
-    /// makes nothing, for a grid of another size, and off the server.
+    /// `ChunkMap.getPlayers(pos, false)`: the players watching this chunk, those
+    /// it is inside the view of and was sent to, in the order the server keeps
+    /// its players. A player watches it from its `chunk_watch` until it leaves
+    /// the view; Horizon's far-ring columns past the view distance are not
+    /// watched. Fake players watch nothing. Loaded or not, a chunk nobody
+    /// watches gives an empty list. None on a client and for a stale handle.
     #[access(WorldOnly)]
-    fn level_craft(
+    fn chunk_watchers(&self, chunk: ChunkRef) -> Option<Vec<PlayerRef>>;
+    /// Side: server.
+    /// Match and assemble through the engine's recipe matcher, without consuming inputs.
+    /// Covers minecraft:crafting, smelting, blasting, smoking, campfire_cooking,
+    /// stonecutting and smithing, including data-pack recipes of those types.
+    /// Mod-owned types return RecipeLookupError::NotMatchable: cache recipes_of_type once
+    /// per load/reload and match those in mod memory (no per-tick host crossing).
+    /// Dynamic custom outputs and contextual predicates remain mod-owned.
+    /// A valid input without a match returns Ok(None); invalid shapes/items and unavailable
+    /// levels are typed refusals. Crafting dimensions are 1 through 3, with row-major slots.
+
+    #[access(WorldOnly)]
+    fn level_recipe_for(
         &self,
         level: LevelRef,
-        width: u32,
-        height: u32,
-        items: &[Option<ItemStack>],
-    ) -> Option<CraftResult>;
+        recipe_type: &Identifier,
+        inputs: &RecipeInput,
+    ) -> Result<Option<RecipeMatch>, RecipeLookupError>;
     /// Side: server.
     /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
     /// Face-only contact does not intersect; spectator players are excluded.
@@ -142,12 +173,21 @@ pub trait LevelsBackend {
         min: [f64; 3],
         max: [f64; 3],
     ) -> Option<Vec<EntityRef>>;
+    /// Side: server.
+    /// `ServerLevel.players`: the online players in this level, parked or in
+    /// place, each once under their own UUID, also during a guest's turn. Fake
+    /// players are not listed, as vanilla's list leaves out connectionless
+    /// players; a player displaced by a nested guest turn is not listed either,
+    /// since its handle cannot resolve until that turn ends. None on a client
+    /// and for a stale handle.
+    #[access(WorldOnly)]
+    fn level_online_players(&self, level: LevelRef) -> Option<Vec<PlayerRef>>;
     /// Side: both.
     /// The block state ID at `pos` (`Level.getBlockState`), without formatting a string.
     /// None for a chunk that isn't loaded or a `y` outside the world. On a client, the
     /// state is the one the server sent for a chunk the client holds.
     #[access(WorldOnly)]
-    fn level_block_state(&self, level: LevelRef, pos: [i32; 3]) -> Option<BlockStateId>;
+    fn level_block_state(&self, level: LevelRef, pos: [i32; 3]) -> Option<BlockState>;
     /// Side: server.
     /// Preview a held tool's transformation without changing the block or stack. The existing
     /// block-tool hook fires with `simulated` true; listeners must not mutate the level in a
@@ -168,7 +208,7 @@ pub trait LevelsBackend {
     /// The block at `pos` without its properties: `minecraft:oak_stairs`.
     /// None as for `block_state`. API 381.
     #[access(WorldOnly)]
-    fn level_block(&self, level: LevelRef, pos: [i32; 3]) -> Option<String>;
+    fn level_block(&self, level: LevelRef, pos: [i32; 3]) -> Option<BlockKey>;
     /// Side: both.
     /// Property `key` of the block state at `pos` (`BlockState.getValue`):
     /// `east` for `facing`. None for a block without it, or as for
@@ -225,6 +265,13 @@ pub trait LevelsBackend {
     /// displayed dimension has a different default clock. API 381.
     #[access(WorldOnly)]
     fn level_day_time(&self, level: LevelRef) -> Option<i64>;
+    /// Side: server.
+    /// The time of the level's own clock in ticks: the clock its dimension type names as
+    /// `default_clock`, which its sky, spawning and beds go by and `/time` sets there. A mod's
+    /// level with a `day_cycle` clock of its own counts it apart from the Overworld's; a level
+    /// without a default clock, like the Nether, is None, as is a stale handle and a client.
+    #[access(WorldOnly)]
+    fn level_clock_time(&self, level: LevelRef) -> Option<i64>;
     /// Side: both.
     /// `FluidState.getFlow` at `pos`: the current that pushes an entity there, after the
     /// `fluid_flow` hook, as entities feel it. Zero where no fluid flows. None as for
@@ -312,6 +359,14 @@ pub trait LevelsBackend {
     #[access(WorldOnly)]
     fn level_dimension_type(&self, level: LevelRef) -> Option<LevelDimensionType>;
     /// Side: server.
+    /// `Level.getSeaLevel`: 63 in the Overworld, 32 in the Nether, 0 in the End; for a level of the
+    /// noise generator the `sea_level` of its noise settings (a data pack's too, when it replaces
+    /// them), for another level the `sea_level` its `DimensionSettings` gave, else 63. It is the sea
+    /// level the game uses for the level: terrain and aquifers, mob spawning and mob behaviour, rain
+    /// and snow, and maps. None for a stale handle and on a client.
+    #[access(WorldOnly)]
+    fn level_sea_level(&self, level: LevelRef) -> Option<i32>;
+    /// Side: server.
     /// The world's seed (`WorldOptions.seed`), as `/seed` shows it.
     #[access(WorldOnly)]
     fn level_seed(&self, level: LevelRef) -> Option<i64>;
@@ -326,15 +381,23 @@ pub trait LevelsBackend {
     fn level_game_rule_bool(&self, level: LevelRef, key: BoolGameRuleKey) -> Option<bool>;
     /// Side: server.
     /// Game rule `rule` (`minecraft:keep_inventory` or `keep_inventory`), as
-    /// `/gamerule` queries it: None for an unknown rule.
+    /// `/gamerule` queries it: `Ok(None)` for an unknown rule. A gone/reopened level
+    /// returns `Stale`; an unreadable side or phase returns `Unavailable`.
     #[access(WorldOnly)]
-    fn level_game_rule(&self, level: LevelRef, rule: &str) -> Option<GameRuleValue>;
+    fn level_game_rule(
+        &self,
+        level: LevelRef,
+        rule: &str,
+    ) -> Result<Option<GameRuleValue>, LevelReadError>;
     /// Side: server.
     /// Every game rule the world has (`GameRules`) with its current value, by `minecraft:` id
-    /// (`max_minecart_speed` only with minecart improvements): None for a stale handle and on
-    /// a client.
+    /// (`max_minecart_speed` only with minecart improvements). A gone/reopened level
+    /// returns `Stale`; an unreadable side or phase returns `Unavailable`.
     #[access(WorldOnly)]
-    fn level_game_rules(&self, level: LevelRef) -> Option<Vec<(String, GameRuleValue)>>;
+    fn level_game_rules(
+        &self,
+        level: LevelRef,
+    ) -> Result<Vec<(String, GameRuleValue)>, LevelReadError>;
     /// Side: both.
     /// The rain and thunder levels, each 0.0 to 1.0 (`Level.getRainLevel`,
     /// `getThunderLevel` at partial tick 1.0): both 0 in a level with no weather.
@@ -446,6 +509,46 @@ pub trait LevelsBackend {
     #[access(WorldOnly)]
     fn level_fluid_shape(&self, level: LevelRef, pos: [i32; 3]) -> Option<Vec<[f64; 6]>>;
     /// Side: server.
+    /// `Fluid.getTickDelay(level)`: the game ticks between a flow step of `fluid` at `pos` and the
+    /// next. Water is 5, lava 30 (10 in the Nether, where it flows fast) and the empty fluid 0; a
+    /// flowing form answers as its source. A mod's world fluid answers what it declared, as its
+    /// `fluid_rules` parts change it at `pos`, floored at 1. None for a stale handle, a client,
+    /// a level parked while the server ticks another, a position that isn't loaded or is outside
+    /// the world, and a fluid with no world form.
+    #[access(WorldOnly)]
+    fn level_fluid_tick_delay(
+        &self,
+        level: LevelRef,
+        fluid: FluidKey,
+        pos: [i32; 3],
+    ) -> Option<i32>;
+    /// Side: both.
+    /// `FluidState.getHeight(level, pos)` of the fluid at `pos`: 0 for none, a full block under
+    /// the same fluid, else the fluid's own height (`amount / 9`). None as for `block_state`.
+    /// An unloaded block above counts as no fluid there.
+    #[access(WorldOnly)]
+    fn level_fluid_height(&self, level: LevelRef, pos: [i32; 3]) -> Option<f32>;
+    /// Side: both.
+    /// The surface height of the fluid at `pos` that the camera's immersion test reads: a source
+    /// with a block above whose underside is sturdy fills its cell (1), anything else is
+    /// `fluid_height`. None as for `fluid_height`.
+    #[access(WorldOnly)]
+    fn level_fluid_height_for_camera(&self, level: LevelRef, pos: [i32; 3]) -> Option<f32>;
+    /// Side: both.
+    /// `FluidState.canBeReplacedWith(level, pos, fluid, direction)` for the fluid at `pos`: whether
+    /// `fluid` flowing in `direction` takes its place. The empty fluid yields to anything, water
+    /// only to a non-water fluid flowing down, lava to water once it stands 4/9 of a block high,
+    /// and a mod's world fluid to nothing. False for a `fluid` with no world form. None as for
+    /// `fluid_height`.
+    #[access(WorldOnly)]
+    fn level_fluid_can_be_replaced_with(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+        fluid: FluidKey,
+        direction: Direction,
+    ) -> Option<bool>;
+    /// Side: server.
     /// Every entity the segment from `from` to `to` passes through, nearest first: the test
     /// `ProjectileUtil.getEntityHitResult` makes on each candidate, each entity's box grown by
     /// `margin` on every side and clipped against the segment. A ray that starts inside a box
@@ -463,12 +566,68 @@ pub trait LevelsBackend {
         margin: f64,
         exclude: Option<EntityRef>,
     ) -> Option<Vec<EntityRayHit>>;
+    /// Side: server.
+    /// The level's natural spawning limits by category ([`SpawnLimits`]):
+    /// [`SpawnLimits::VANILLA`] until a mod sets others. Reads parked levels.
+    /// None on a client and for a stale handle.
+    #[access(WorldOnly)]
+    fn level_spawn_limits(&self, level: LevelRef) -> Option<SpawnLimits>;
+    /// Side: server.
+    /// Which categories the level's natural spawning may spawn ([`SpawnFlags`]):
+    /// both on until a mod turns one off. Reads parked levels. None on a
+    /// client and for a stale handle.
+    #[access(WorldOnly)]
+    fn level_spawn_flags(&self, level: LevelRef) -> Option<SpawnFlags>;
+    /// Side: server.
+    /// `ServerLevel.canSpawnEntitiesInChunk`: whether natural spawning may place
+    /// a mob in chunk `pos` (`[x, z]`), the question it asks of every spawn
+    /// position outside the chunk it started in. Horizon's answer is the one
+    /// its spawner uses: the chunk is loaded. Reads parked levels and loads
+    /// nothing. None on a client and for a stale handle.
+    #[access(WorldOnly)]
+    fn level_can_spawn_entities_in_chunk(&self, level: LevelRef, pos: [i32; 2]) -> Option<bool>;
 }
 /// The handles' writes of the `levels` area, implemented by the game and reached through [`BackendMut`].
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 #[horizon_mod_api_macros::host_area]
 pub trait LevelsBackendMut {
+    /// Side: server.
+    /// Spawns a mob of `kind` (`minecraft:zombie`) at `pos` in the level as
+    /// `EntityType.spawn` does with `reason`: the entity type creates it (its
+    /// Parts and attachments with it, and `entity_constructing`), with a random
+    /// yaw from the level random, then `finalize_spawn` and `finalizeSpawn`
+    /// with that reason (equipment, variants, jockeys), and it joins the level
+    /// (`entity_join_level`), not persistent, as a natural spawn joins. The
+    /// level's spawn limits, flags and spawn rules don't apply, as they don't
+    /// to `/summon`. The new mob as a handle. None, with nothing spawned, for a
+    /// kind that isn't a mob, a position that isn't finite or is outside the
+    /// spawnable bounds (`Level.isInSpawnableBounds`), an unloaded chunk, a
+    /// stale handle, a level not in place, a client, a `finalize_spawn` that
+    /// cancelled the spawn or a mob a mod kept out.
+    #[access(WorldOnly)]
+    fn level_spawn_mob(
+        &mut self,
+        level: LevelRef,
+        kind: &str,
+        pos: [f64; 3],
+        reason: NativeSpawnReason,
+    ) -> Option<EntityRef>;
+    /// Side: server.
+    /// Sets the level's natural spawning limits ([`SpawnLimits`]), from the next
+    /// spawn pass on. They hold until the world closes, while the level is
+    /// parked and across its closing and opening again, and are not saved: the
+    /// world opens with vanilla's, so a mod sets its own in `level_load`. Mobs
+    /// already in the level stay. False, with nothing set, on a client and for
+    /// a stale handle or a level that isn't open.
+    #[access(WorldOnly)]
+    fn level_set_spawn_limits(&mut self, level: LevelRef, limits: SpawnLimits) -> bool;
+    /// Side: server.
+    /// Sets which categories the level's natural spawning may spawn
+    /// ([`SpawnFlags`]), from the next spawn pass on. Kept and refused as
+    /// `set_spawn_limits`.
+    #[access(WorldOnly)]
+    fn level_set_spawn_flags(&mut self, level: LevelRef, flags: SpawnFlags) -> bool;
     /// Side: server.
     /// `/forceload add` or `remove` of one chunk (`ServerLevel.setChunkForced`):
     /// true when the forced set changed. A forced chunk is kept loaded and
@@ -510,17 +669,17 @@ pub trait LevelsBackendMut {
         natural_spawning: bool,
     ) -> bool;
     /// Side: server.
-    /// Set a block in the level in place (`Level.setBlock`). Parked levels,
-    /// stale handles, clients and unloaded or out-of-height positions return
-    /// false. Client notification follows the supplied update flags.
+    /// Set a block (`Level.setBlock`). Stale/unavailable levels and invalid states return
+    /// typed errors without mutation. Ok(false) means vanilla refused an unchanged,
+    /// unloaded or out-of-height write. Notification follows the supplied update flags.
     #[access(WorldOnly)]
     fn level_set_block(
         &mut self,
         level: LevelRef,
         pos: [i32; 3],
-        state: BlockStateId,
+        state: BlockState,
         flags: NativeBlockUpdateFlags,
-    ) -> bool;
+    ) -> Result<bool, LevelWriteError>;
     /// Side: server.
     /// Remove a block in place (`Level.removeBlock`), preserving its fluid.
     #[access(WorldOnly)]
@@ -573,11 +732,30 @@ pub trait LevelsBackendMut {
     #[access(WorldOnly)]
     fn level_block_tick(&mut self, level: LevelRef, pos: [i32; 3]) -> bool;
     /// Side: server.
+    /// Ask for the level to be saved: its level data, chunks and entities, as the autosave and
+    /// `/save-all` save a level, with its chunks on disk when it ends. The save runs at the start
+    /// of the next server tick, not inside the call, which may be in a hook of the very tick that
+    /// is saving; a level asked for twice before then is saved once. True when the request was
+    /// taken: the call cannot tell whether the save worked. `level_save` fires with the level's
+    /// dimension once it was written; a save that fails fires nothing and is logged. False for a
+    /// stale handle and on a client.
+    #[access(WorldOnly)]
+    fn level_request_save(&mut self, level: LevelRef) -> bool;
+    /// Side: server.
     /// Random-tick `pos` now, as `ServerLevel.tickChunk` does for a position it picked: the
     /// block's `randomTick` when it ticks randomly (its part first), then lava's fluid random
     /// tick, with the same random draws and level events. False as for `block_tick`.
     #[access(WorldOnly)]
     fn level_block_random_tick(&mut self, level: LevelRef, pos: [i32; 3]) -> bool;
+    /// Side: server.
+    /// Run the flow step of the fluid at `pos` now (`FluidState.tick`, which `ServerLevel.tickFluid`
+    /// calls for a due fluid tick): the fluid levels, spreads and schedules its next step with
+    /// the same random draws, hooks and level events as a queued one. Ticking the empty fluid does
+    /// nothing. The queue is not read or changed; `schedule_fluid_tick` queues one. False for a
+    /// refused write, a stale or parked handle, a client and an unloaded or out-of-height
+    /// position.
+    #[access(WorldOnly)]
+    fn level_fluid_tick(&mut self, level: LevelRef, pos: [i32; 3]) -> bool;
     /// Side: server.
     /// `ServerLevel.findLightningTargetAround`: the closest lightning rod near the column at
     /// `pos`'s `x` and `z`, else a living entity under open sky within 3 blocks of it, picked
@@ -643,7 +821,7 @@ pub trait LevelsBackendMut {
         &mut self,
         level: LevelRef,
         options: &ParticleOptions,
-        state: Option<BlockStateId>,
+        state: Option<BlockState>,
         at: [f64; 3],
         spread: [f64; 3],
         speed: f64,
@@ -665,6 +843,24 @@ pub trait LevelsBackendMut {
     /// doesn't have.
     #[access(WorldOnly)]
     fn level_game_event(&mut self, level: LevelRef, event: &str, at: [f64; 3]) -> bool;
+    /// Side: server.
+    /// Queues block event `a`, `b` for `block` at `pos`, as `ServerLevel.blockEvent(pos, block,
+    /// a, b)` does: after this tick's scheduled ticks the level runs the block's
+    /// `triggerEvent` with them (a powered piston's 0 extends it, a note block's plays its
+    /// note, a bell's 1 rings it) if `pos` still holds `block`, and a handled event reaches the
+    /// players' copy of the block. The same event queued twice runs once; one in a chunk
+    /// that isn't ticking waits for it. True means queued, not handled. False for a block
+    /// key no block has, a position outside the level's build height, a parked level, a stale
+    /// handle or a client.
+    #[access(WorldOnly)]
+    fn level_block_event(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        block: BlockKey,
+        a: i32,
+        b: i32,
+    ) -> bool;
     /// Side: server.
     /// Explodes at `center` with no source entity, as `Level.explode(null,
     /// x, y, z, radius, fire, interaction)` does (`native_explode`): `fire`
@@ -770,28 +966,28 @@ pub trait LevelsBackendMut {
     /// (`updateNeighborsAtExceptFromFacing`: a diode's front) or `OutputSignal`
     /// (`updateNeighbourForOutputSignal`: the comparators beside it, when its comparator output
     /// changes without its state changing). `source` is the state whose block vanilla passes as
-    /// the one that changed. False, with nothing done, off the level in place, for a position
-    /// that isn't loaded, or for a `source` that is no block state.
+    /// the one that changed. Typed errors refuse stale/unavailable levels or invalid states
+    /// without mutation; Ok(false) means an unloaded or out-of-height position.
     #[access(WorldOnly)]
     fn level_update_neighbors(
         &mut self,
         level: LevelRef,
         pos: [i32; 3],
-        source: BlockStateId,
+        source: BlockState,
         update: NeighbourUpdate,
-    ) -> bool;
+    ) -> Result<bool, LevelWriteError>;
     /// Side: server.
     /// Tell the block at `pos` that `source`'s block beside it changed (`Level.neighborChanged`),
-    /// as a diode tells the block in front of it before updating that block's neighbours. False,
-    /// with nothing done, as for `update_neighbors`: off the level in place, for a position that
-    /// isn't loaded, or for a `source` that is no block state.
+    /// as a diode tells the block in front of it before updating that block's neighbours.
+    /// Typed errors refuse stale/unavailable levels or invalid states; Ok(false) means an
+    /// unloaded or out-of-height position. Errors never mutate the level.
     #[access(WorldOnly)]
     fn level_neighbor_changed(
         &mut self,
         level: LevelRef,
         pos: [i32; 3],
-        source: BlockStateId,
-    ) -> bool;
+        source: BlockState,
+    ) -> Result<bool, LevelWriteError>;
     /// Side: server.
     /// Replace the random of the server level `level` names with `random`,
     /// a stream `native_level_random` gave and the mod drew from. False where

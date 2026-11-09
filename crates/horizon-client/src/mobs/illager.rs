@@ -591,7 +591,8 @@ impl Goal for CrossbowAttack {
                 }
             }
             Crossbow::Charging => {
-                m.extra.using_item += 1;
+                // A mod may have set the use's ticks left to anything.
+                m.extra.using_item = m.extra.using_item.saturating_add(1);
                 if m.extra.using_item >= charge_ticks(m) {
                     m.extra.using_item = 0;
                     m.extra.flag = false;
@@ -661,6 +662,18 @@ fn shoot_crossbow(m: &mut Mob, who: Who, cx: &mut Cx) {
         Some(Who::Mob(m.id)),
     );
     p.set_bonus(super::gear::arrow_bonus(m));
+    if let Some(state) = p.arrow.as_mut() {
+        state.fired_from_weapon = if m.extra.using_off_hand {
+            m.extra
+                .slot_stack(horizon_items::equipment::OFFHAND)
+                .cloned()
+        } else {
+            m.extra.main_hand_stack().cloned()
+        };
+        if state.fired_from_weapon.is_some() {
+            p.bonus.damage = 0.0;
+        }
+    }
     // rangedAttackUncertainty: 14 - 4 * difficulty.
     p.shoot(
         &mut crate::random_source::entity(),

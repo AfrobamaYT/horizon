@@ -226,9 +226,8 @@ pub struct LootStack {
     pub stew_effects: Vec<(String, i32)>,
     /// Set by set_name: (`custom_name` or `item_name`, the text component).
     pub names: Vec<(String, Value)>,
-    /// Set by set_components: (component id, its JSON value; null removes
-    /// it), a later patch of the same id replacing an earlier one.
-    pub components: Vec<(String, Value)>,
+    /// Ordered component patches. None removes a component; repeated IDs apply in order.
+    pub components: Vec<(String, Option<Tag>)>,
 }
 /// `ExplorationMapFunction`'s settings.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1246,6 +1245,39 @@ fn shuffle<T>(list: &mut [T], random: &mut impl RandomSource) {
         list.swap(i - 1, j);
     }
 }
+/// EnchantmentHelper's weighted selection over the eligible registry entries.
+fn weighted_enchantment(
+    data: &LootData,
+    random: &mut impl RandomSource,
+    list: &[(usize, i32)],
+) -> Option<(usize, i32)> {
+    let total: i64 = list
+        .iter()
+        .map(|&(i, _)| i64::from(data.enchantments[i].weight))
+        .sum();
+    if total <= 0 {
+        return None;
+    }
+    let mut selection = weight_draw(random, total);
+    for &entry in list {
+        selection -= i64::from(data.enchantments[entry.0].weight);
+        if selection < 0 {
+            return Some(entry);
+        }
+    }
+    None
+}
+
+// Preserve vanilla's int draw. Oversized pack totals use one unsigned long
+// modulo the total, a bounded, slightly biased fallback.
+fn weight_draw(random: &mut impl RandomSource, total: i64) -> i64 {
+    if total <= i64::from(i32::MAX) {
+        i64::from(random.next_int_bound(total as i32).unwrap_or(0))
+    } else {
+        ((random.next_long() as u64) % total as u64) as i64
+    }
+}
+
 /// Mth.nextInt.
 fn next_int(random: &mut impl RandomSource, min: i32, max: i32) -> i32 {
     if min >= max {
@@ -1692,12 +1724,9 @@ impl<R: RandomSource> Context<'_, R> {
                         .random
                         .next_int_bound(options.len() as i32)
                         .unwrap_or(0) as usize;
-                    stack
-                        .components
-                        .retain(|(k, _)| k != "minecraft:instrument");
                     stack.components.push((
                         "minecraft:instrument".to_owned(),
-                        Value::String(options[pick].clone()),
+                        Some(Tag::String(options[pick].as_str().into())),
                     ));
                 }
             }
@@ -1769,45 +1798,68 @@ impl<R: RandomSource> Context<'_, R> {
             // loot random), flags and strings as they are written.
             "minecraft:set_custom_model_data" => {
                 let id = "minecraft:custom_model_data";
-                let content = stack.components.iter().find(|(k, _)| k == id);
+                let content = stack.components.iter().rev().find(|(k, _)| k == id);
                 let mut content = content
-                    .map(|(_, v)| v.clone())
-                    .filter(Value::is_object)
-                    .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
-                let old = |key: &str| -> Vec<Value> {
-                    content[key].as_array().cloned().unwrap_or_default()
+                    .and_then(|(_, v)| match v {
+                        Some(Tag::Compound(map)) => Some(map.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                let old = |key: &str| -> Vec<Tag> {
+                    match content.get(&key.into()) {
+                        Some(Tag::List(values)) => values
+                            .iter()
+                            .map(|value| {
+                                let number = match value {
+                                    Tag::Byte(v) => Some(f64::from(*v)),
+                                    Tag::Short(v) => Some(f64::from(*v)),
+                                    Tag::Int(v) => Some(f64::from(*v)),
+                                    Tag::Long(v) => Some(*v as f64),
+                                    Tag::Float(v) => Some(f64::from(f32::from_bits(*v))),
+                                    Tag::Double(v) => Some(f64::from_bits(*v)),
+                                    _ => None,
+                                };
+                                match (key, number) {
+                                    ("floats", Some(v)) => Tag::Float((v as f32).to_bits()),
+                                    ("colors", Some(v)) => Tag::Int(v as i32),
+                                    _ => value.clone(),
+                                }
+                            })
+                            .collect(),
+                        _ => Vec::new(),
+                    }
                 };
-                let mut replaced: Vec<(&str, Vec<Value>)> = Vec::new();
+                let mut replaced: Vec<(&str, Vec<Tag>)> = Vec::new();
                 if f["floats"].is_object() {
-                    let list =
-                        list_operation(&f["floats"], old("floats"), |v| Value::from(self.float(v)));
+                    let list = list_operation(&f["floats"], old("floats"), |v| {
+                        Tag::Float(self.float(v).to_bits())
+                    });
                     replaced.push(("floats", list));
                 }
                 if f["flags"].is_object() {
                     let list = list_operation(&f["flags"], old("flags"), |v| {
-                        Value::Bool(v.as_bool().unwrap_or(false))
+                        Tag::Byte(i8::from(v.as_bool().unwrap_or(false)))
                     });
                     replaced.push(("flags", list));
                 }
                 if f["strings"].is_object() {
                     let list = list_operation(&f["strings"], old("strings"), |v| {
-                        Value::String(v.as_str().unwrap_or_default().to_owned())
+                        Tag::String(v.as_str().unwrap_or_default().into())
                     });
                     replaced.push(("strings", list));
                 }
                 if f["colors"].is_object() {
                     let list =
-                        list_operation(&f["colors"], old("colors"), |v| Value::from(self.int(v)));
+                        list_operation(&f["colors"], old("colors"), |v| Tag::Int(self.int(v)));
                     replaced.push(("colors", list));
                 }
-                let Value::Object(map) = &mut content else {
-                    unreachable!("an object above")
-                };
                 for (key, list) in replaced {
-                    map.insert(key.to_owned(), Value::Array(list));
+                    content.insert(key.into(), Tag::List(list));
                 }
                 stack.components.retain(|(k, _)| k != id);
-                stack.components.push((id.to_owned(), content));
+                stack
+                    .components
+                    .push((id.to_owned(), Some(Tag::Compound(content))));
             }
             // SetBannerPatternFunction: the layers a banner or shield gets,
             // replacing the component's own list or added to its end
@@ -1815,13 +1867,20 @@ impl<R: RandomSource> Context<'_, R> {
             // pattern id and a dye name, so the list is kept as it came.
             "minecraft:set_banner_pattern" => {
                 let id = "minecraft:banner_patterns";
-                let layers = f["patterns"].as_array().cloned().unwrap_or_default();
+                let Ok(Tag::List(layers)) = horizon_core::json_nbt::json_to_tag(&f["patterns"])
+                else {
+                    return stack;
+                };
                 let layers = if f["append"].as_bool() == Some(true) {
                     stack
                         .components
                         .iter()
+                        .rev()
                         .find(|(k, _)| k == id)
-                        .and_then(|(_, v)| v.as_array().cloned())
+                        .and_then(|(_, v)| match v {
+                            Some(Tag::List(values)) => Some(values.clone()),
+                            _ => None,
+                        })
                         .unwrap_or_default()
                         .into_iter()
                         .chain(layers)
@@ -1830,7 +1889,9 @@ impl<R: RandomSource> Context<'_, R> {
                     layers
                 };
                 stack.components.retain(|(k, _)| k != id);
-                stack.components.push((id.to_owned(), Value::Array(layers)));
+                stack
+                    .components
+                    .push((id.to_owned(), Some(Tag::List(layers))));
             }
             // SetBookCoverFunction: the written book's title, author and
             // generation, kept over the component the stack already carries (an
@@ -1843,32 +1904,54 @@ impl<R: RandomSource> Context<'_, R> {
                 let mut content = stack
                     .components
                     .iter()
+                    .rev()
                     .find(|(k, _)| k == id)
-                    .map(|(_, v)| v.clone())
-                    .filter(Value::is_object)
-                    .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
-                if let Value::Object(map) = &mut content {
+                    .and_then(|(_, v)| match v {
+                        Some(Tag::Compound(map)) => Some(map.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                {
+                    let map = &mut content;
                     for field in ["title", "author"] {
-                        if let Some(value) = f.get(field) {
-                            map.insert(field.to_owned(), value.clone());
+                        if let Some(value) = f.get(field)
+                            && let Ok(tag) = horizon_core::json_nbt::json_to_tag(value)
+                        {
+                            map.insert(field.into(), tag);
                         }
                     }
                     // `WrittenBookContent`'s generation is 0 to 3; the codec
                     // refuses the rest, so a table that asks for more is clamped
                     // as the item's own parse does.
                     if let Some(generation) = f["generation"].as_i64() {
-                        map.insert("generation".to_owned(), Value::from(generation.clamp(0, 3)));
+                        map.insert("generation".into(), Tag::Int(generation.clamp(0, 3) as i32));
                     }
                 }
                 stack.components.retain(|(k, _)| k != id);
-                stack.components.push((id.to_owned(), content));
+                stack
+                    .components
+                    .push((id.to_owned(), Some(Tag::Compound(content))));
             }
             // SetComponentsFunction: the patch's components, applied when the
             // stack becomes an item (trim on worn armour, see `mobs::finalize`).
             "minecraft:set_components" => {
                 for (id, value) in f["components"].as_object().into_iter().flatten() {
-                    stack.components.retain(|(k, _)| k != id);
-                    stack.components.push((id.clone(), value.clone()));
+                    let tag = if value.is_null() {
+                        None
+                    } else {
+                        // CustomData uses TagParser's lenient codec: an SNBT
+                        // string is a compound, not a literal string tag.
+                        let decoded = if id == "minecraft:custom_data" && value.is_string() {
+                            nbt_predicate_tag(value)
+                        } else {
+                            horizon_core::json_nbt::json_to_tag(value).ok()
+                        };
+                        let Some(tag) = decoded else {
+                            continue;
+                        };
+                        Some(tag)
+                    };
+                    stack.components.push((id.clone(), tag));
                 }
             }
             // A mod's own kind: the hook changes the stack.
@@ -1920,20 +2003,7 @@ impl<R: RandomSource> Context<'_, R> {
         if available.is_empty() {
             return results;
         }
-        let pick = |random: &mut R, list: &[(usize, i32)]| -> Option<(usize, i32)> {
-            let total: i32 = list.iter().map(|&(i, _)| data.enchantments[i].weight).sum();
-            if total <= 0 {
-                return None;
-            }
-            let mut selection = random.next_int_bound(total).unwrap_or(0);
-            for &entry in list {
-                selection -= data.enchantments[entry.0].weight;
-                if selection < 0 {
-                    return Some(entry);
-                }
-            }
-            None
-        };
+        let pick = |random: &mut R, list: &[(usize, i32)]| weighted_enchantment(data, random, list);
         results.extend(pick(&mut self.random, &available));
         while self.random.next_int_bound(50).unwrap_or(0) <= cost {
             if let Some(&(last, _)) = results.last() {
@@ -2000,16 +2070,16 @@ impl<R: RandomSource> Context<'_, R> {
                 + int_value(&e["quality"]).unwrap_or(0) as f32 * luck;
             w.floor().max(0.0) as i32
         };
-        let total: i32 = valid.iter().map(&weight).sum();
+        let total: i64 = valid.iter().map(|e| i64::from(weight(e))).sum();
         if total == 0 || valid.is_empty() {
             return;
         }
         let chosen = if valid.len() == 1 {
             valid.swap_remove(0)
         } else {
-            let mut index = self.random.next_int_bound(total).unwrap_or(0);
+            let mut index = weight_draw(&mut self.random, total);
             let Some(at) = valid.iter().position(|e| {
-                index -= weight(e);
+                index -= i64::from(weight(e));
                 index < 0
             }) else {
                 return;
@@ -2288,6 +2358,39 @@ mod namespace_tests {
         let _ = fs::remove_dir_all(&root);
     }
 
+    #[test]
+    fn component_functions_decode_json_to_ordered_nbt_patches() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-loot-patches-{}", std::process::id()));
+        let table = r#"{"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:stone","modifier":[
+            {"type":"minecraft:set_components","components":{"test:value":7}},
+            {"type":"minecraft:set_components","components":{"test:value":null}},
+            {"type":"minecraft:set_components","components":{"test:value":[7]}}
+        ]}]}]}"#;
+        for (name, text) in [
+            ("items.json", r#"{"minecraft:stone":{}}"#),
+            ("data/minecraft/loot_table/patches.json", table),
+        ] {
+            let path = root.join(name);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, text).unwrap();
+        }
+        let defaults = crate::item_defaults::read(&root).unwrap();
+        let data = LootData::load(&root, &PackOverlay::NONE, &defaults).unwrap();
+        let filled = data.fill("minecraft:patches", 7, 27, None);
+        let stack = filled.iter().flatten().next().unwrap();
+        assert_eq!(
+            stack.components,
+            vec![
+                ("test:value".into(), Some(Tag::Byte(7))),
+                ("test:value".into(), None),
+                ("test:value".into(), Some(Tag::List(vec![Tag::Byte(7)]))),
+            ]
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// `SetInstrumentFunction`: a goat horn from a loot table gets one of the options as its instrument.
     /// `SetCustomModelDataFunction`: each of the model data's four lists goes
     /// through its `ListOperation` over the component the stack already has -
     /// floats appended, flags and strings replaced, a colour inserted first -
@@ -2300,6 +2403,7 @@ mod namespace_tests {
         let table = r#"{"pools": [{"rolls": 1, "entries": [{"type": "minecraft:item", "name": "minecraft:stick",
             "modifier": [
                 {"type": "minecraft:set_components", "components": {"minecraft:custom_model_data": {"floats": [1.0], "strings": ["old"]}}},
+                {"type": "minecraft:set_components", "components": {"minecraft:custom_model_data": {"floats": [3.0], "strings": ["old"]}}},
                 {"type": "minecraft:set_custom_model_data",
                  "floats": {"mode": "append", "values": [{"type": "minecraft:constant", "value": 2.0}]},
                  "flags": {"mode": "replace_all", "values": [true]},
@@ -2329,9 +2433,22 @@ mod namespace_tests {
             .filter(|(k, _)| k == "minecraft:custom_model_data")
             .collect();
         assert_eq!(component.len(), 1, "{:?}", stack.components);
-        let component = &component[0].1;
-        assert_eq!(component["floats"], serde_json::json!([1.0, 2.0]));
-        assert_eq!(component["flags"], serde_json::json!([true]));
+        let component =
+            horizon_core::json_nbt::tag_to_json(component[0].1.as_ref().unwrap()).unwrap();
+        assert_eq!(component["floats"], serde_json::json!([3.0, 2.0]));
+        let Some(Tag::Compound(fields)) = &stack
+            .components
+            .iter()
+            .find(|(id, _)| id == "minecraft:custom_model_data")
+            .unwrap()
+            .1
+        else {
+            panic!("model data must be a compound")
+        };
+        assert_eq!(
+            fields.get(&"flags".into()),
+            Some(&Tag::List(vec![Tag::Byte(1)]))
+        );
         assert_eq!(component["strings"], serde_json::json!(["new"]));
         assert_eq!(component["colors"], serde_json::json!([16711680]));
         let _ = fs::remove_dir_all(&root);
@@ -2395,7 +2512,7 @@ mod namespace_tests {
             .collect();
         assert_eq!(component.len(), 1, "{:?}", banner.components);
         assert_eq!(
-            component[0].1,
+            horizon_core::json_nbt::tag_to_json(component[0].1.as_ref().unwrap()).unwrap(),
             serde_json::json!([
                 {"pattern": "minecraft:stripe_bottom", "color": "red"},
                 {"pattern": "minecraft:border", "color": "blue"},
@@ -2422,7 +2539,7 @@ mod namespace_tests {
             .filter(|(k, _)| k == "minecraft:banner_patterns")
             .collect();
         assert_eq!(
-            component[0].1,
+            horizon_core::json_nbt::tag_to_json(component[0].1.as_ref().unwrap()).unwrap(),
             serde_json::json!([{"pattern": "minecraft:border", "color": "blue"}])
         );
         let _ = fs::remove_dir_all(&root);
@@ -2463,7 +2580,7 @@ mod namespace_tests {
             .filter(|(k, _)| k == "minecraft:written_book_content")
             .collect();
         assert_eq!(content.len(), 1, "{:?}", book.components);
-        let content = &content[0].1;
+        let content = horizon_core::json_nbt::tag_to_json(content[0].1.as_ref().unwrap()).unwrap();
         assert_eq!(content["title"]["raw"], "A Guide");
         assert_eq!(content["author"], "Cartographer");
         assert_eq!(content["generation"], 2);
@@ -2500,7 +2617,10 @@ mod namespace_tests {
                 .filter(|(k, _)| k == "minecraft:instrument")
                 .collect();
             assert_eq!(instrument.len(), 1, "{:?}", horn.components);
-            seen.insert(instrument[0].1.as_str().unwrap().to_owned());
+            seen.insert(match &instrument[0].1 {
+                Some(Tag::String(id)) => id.to_string_lossy(),
+                _ => panic!("instrument"),
+            });
         }
         assert_eq!(
             seen.into_iter().collect::<Vec<_>>(),
@@ -2569,6 +2689,80 @@ mod namespace_tests {
 #[cfg(test)]
 mod native_kinds_tests {
     use super::*;
+
+    #[test]
+    fn weight_totals_pool_and_enchantments() {
+        for weights in [
+            [0, 0, 0],
+            [1, 2, 3],
+            [7, 0, 11],
+            // Exactly i32::MAX, with weights representable by loot's f32 calculation.
+            [1_073_741_760, 1_073_741_760, 127],
+            [i32::MAX; 3],
+        ] {
+            let entries: Vec<_> = weights.iter().enumerate().map(|(i,w)| serde_json::json!({"type":"minecraft:item", "name":format!("minecraft:item{i}"), "weight":w})).collect();
+            let mut data = table(
+                "weight_totals",
+                &serde_json::json!({"pools":[{"rolls":1,"entries":entries}]}).to_string(),
+            );
+            data.enchantments = weights
+                .iter()
+                .enumerate()
+                .map(|(i, &weight)| Enchantment {
+                    name: format!("test:{i}"),
+                    supported: Value::Null,
+                    primary: None,
+                    exclusive: Value::Null,
+                    max_level: 1,
+                    weight,
+                    min_cost: (0, 0),
+                    max_cost: (100, 0),
+                    slots: vec![],
+                    effects: Value::Null,
+                })
+                .collect();
+            let total: i64 = weights.iter().map(|&w| i64::from(w)).sum();
+            for seed in 0..64 {
+                let mut expected = LegacyRandom::new(seed);
+                let expected_pick = if total == 0 {
+                    None
+                } else {
+                    let mut at = if total <= i64::from(i32::MAX) {
+                        i64::from(expected.next_int_bound(total as i32).unwrap())
+                    } else {
+                        ((expected.next_long() as u64) % total as u64) as i64
+                    };
+                    weights.iter().position(|&w| {
+                        at -= i64::from(w);
+                        at < 0
+                    })
+                };
+                let mut random = LegacyRandom::new(seed);
+                assert_eq!(
+                    weighted_enchantment(&data, &mut random, &[(0, 1), (1, 1), (2, 1)])
+                        .map(|e| e.0),
+                    expected_pick
+                );
+                assert_eq!(random.next_long(), expected.next_long());
+                let mut random = LegacyRandom::new(seed);
+                let drops = data.roll("minecraft:test", &mut random, 0.0, None, None);
+                assert_eq!(
+                    drops.first().map(|s| s.item.clone()),
+                    expected_pick.map(|i| format!("minecraft:item{i}"))
+                );
+                let mut expected = LegacyRandom::new(seed);
+                if total > 0 {
+                    if total <= i64::from(i32::MAX) {
+                        expected.next_int_bound(total as i32).unwrap();
+                    } else {
+                        expected.next_long();
+                    }
+                }
+                assert_eq!(random.next_long(), expected.next_long());
+            }
+            assert!(weighted_enchantment(&data, &mut LegacyRandom::new(1), &[]).is_none());
+        }
+    }
 
     fn table(name: &str, json: &str) -> LootData {
         let root = std::env::temp_dir().join(format!("loot-{name}-{}", std::process::id()));
@@ -3063,7 +3257,7 @@ impl LootData {
                 .iter()
                 .rev()
                 .find(|(id, _)| id == "minecraft:custom_data")
-                .and_then(|(_, value)| nbt_predicate_tag(value));
+                .and_then(|(_, value)| value.clone());
             let data = match &data {
                 Some(Tag::Compound(c)) => Some(c),
                 _ => None,
@@ -3116,7 +3310,11 @@ mod custom_data_predicate_tests {
     /// One pool per pattern: its wool, given `data` by `set_components`,
     /// doubled by `filtered` when the pattern matches. The wools doubled.
     fn doubled(data: Option<&str>) -> Vec<&'static str> {
-        let set = data.map_or(String::new(), |d| {
+        doubled_component(data.map(|s| Value::String(s.to_owned())))
+    }
+
+    fn doubled_component(data: Option<Value>) -> Vec<&'static str> {
+        let set = data.as_ref().map_or(String::new(), |d| {
             let d = serde_json::to_string(d).unwrap();
             format!(r#"{{"type":"minecraft:set_components","components":{{"minecraft:custom_data":{d}}}}},"#)
         });
@@ -3128,10 +3326,12 @@ mod custom_data_predicate_tests {
                 )
             })
             .collect();
+        // One directory per call: tests run in parallel, and two payloads of the same length shared one.
+        static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let root = std::env::temp_dir().join(format!(
             "loot-custom-data-{}-{}",
             std::process::id(),
-            data.map_or(0, str::len)
+            CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         let _ = std::fs::remove_dir_all(&root);
         let dir = root.join("data/minecraft/loot_table");
@@ -3163,6 +3363,23 @@ mod custom_data_predicate_tests {
     /// by `loot give @s kill`, VanillaCommandExecOracle, #12196): a typed NBT
     /// subset (`NbtUtils.compareNbt`), lists matched element by element, no
     /// custom data read as `{}`, and a JSON pattern's whole numbers as bytes.
+    #[test]
+    fn object_custom_data_keeps_json_ops_numeric_typing() {
+        // JsonOps→NbtOps narrows 1 to Byte, unchanged from json_to_tag.
+        // The int-only orange predicate must not match this object.
+        assert_eq!(
+            doubled_component(Some(serde_json::json!({"h": 1}))),
+            ["white", "light_gray", "cyan"]
+        );
+    }
+
+    #[test]
+    fn data_file_custom_data_snbt_matches_a_nonempty_predicate() {
+        // doubled writes and loads a real loot-table data file, including
+        // set_components followed by filtered, rather than calling the matcher.
+        assert_eq!(doubled(Some("{nested:{k:7}}")), ["magenta", "light_gray"]);
+    }
+
     #[test]
     fn filtered_matches_custom_data_as_vanilla() {
         let rich = r#"{h:1b,nested:{k:7,extra:9},entries:[{k:1b,extra:2b},{k:2b}],wide:9007199254740993L,spare:"keep"}"#;

@@ -18,6 +18,17 @@ use horizon_core::{position::BlockPos, random::RandomSource};
 use horizon_world::{fluid::FluidKind, level::LevelAccess, registry::BlockStateId};
 use serde_json::Value;
 
+/// Shared weapon damage effects; callers choose live RNG for an attack or a snapshot for a read.
+pub(super) fn stack_enchanted_damage(
+    enchantments: &Enchantments,
+    stack: &ItemStack,
+    ctx: &EffectContext<'_>,
+    random: &mut horizon_core::random::LegacyRandom,
+    base: f32,
+) -> f32 {
+    enchantments.modify_value(Some(stack), "minecraft:damage", ctx, random, base)
+}
+
 /// `EquipmentSlot.getName` of each `mobs::finalize` slot (hands, feet to head).
 const MOB_SLOTS: [&str; 6] = ["mainhand", "offhand", "feet", "legs", "chest", "head"];
 
@@ -153,31 +164,120 @@ impl Game<'_> {
         loss
     }
     /// `getEnchantedDamage - base`: damage bonus of the held weapon against a mob type.
-    pub(super) fn enchant_damage_bonus(&mut self, target: &str) -> f32 {
-        self.enchanted_damage(target, 0.0)
+    pub(super) fn enchant_damage_bonus(&mut self, target: &str, victim: Option<u32>) -> f32 {
+        self.enchanted_damage(target, 0.0, victim)
     }
     /// `Player.getEnchantedDamage`: `base` run through the held weapon's
     /// damage effects against a mob type.
-    pub(super) fn enchanted_damage(&mut self, target: &str, base: f32) -> f32 {
-        let Some(held) = self.held().cloned() else {
+    pub(super) fn enchanted_damage(&mut self, target: &str, base: f32, victim: Option<u32>) -> f32 {
+        let Some(held) = self.held().map(|stack| self.item_combat_stack(stack)) else {
             return base;
         };
+        let actors = self
+            .player
+            .as_ref()
+            .and_then(|player| victim.map(|victim| (player.entity_id as u32, victim)));
+        self.weapon_enchanted_damage(
+            &held,
+            actors,
+            target,
+            &self.stack_melee_damage_type(
+                Some(&held),
+                self.player
+                    .as_ref()
+                    .map_or((0.0, false), |p| (p.fall_distance, p.fall_flying)),
+                true,
+            ),
+            base,
+            self.player
+                .as_ref()
+                .map(|p| (p.fall_distance, p.fall_flying)),
+        )
+    }
+
+    /// Evaluate a pre-hit weapon snapshot with actual actor identities supplied by the hit.
+    pub(super) fn weapon_enchanted_damage(
+        &mut self,
+        held: &ItemStack,
+        actors: Option<(u32, u32)>,
+        target: &str,
+        damage_type: &str,
+        base: f32,
+        direct_motion: Option<(f64, bool)>,
+    ) -> f32 {
         let ctx = EffectContext {
             this: Some(target),
             attacker: Some("minecraft:player"),
             direct_attacker: Some("minecraft:player"),
             is_direct: true,
-            damage_type: Some("minecraft:player_attack"),
-            items: Some(world_items!(self)),
+            damage_type: Some(damage_type),
+            direct_motion,
+            items: None,
             ..Default::default()
         };
-        world_stations!(self).enchantments.modify_value(
-            Some(&held),
-            "minecraft:damage",
+        self.evaluate_weapon_damage(held, actors, ctx, base)
+    }
+
+    pub(super) fn evaluate_weapon_damage(
+        &mut self,
+        held: &ItemStack,
+        actors: Option<(u32, u32)>,
+        ctx: EffectContext<'_>,
+        base: f32,
+    ) -> f32 {
+        let ctx = EffectContext {
+            items: Some(world_items!(self)),
+            ..ctx
+        };
+        // Read effective levels once: get_enchantment_level may itself be mod-provided.
+        let levels = held.all_enchantments();
+        let custom = self.remote.is_none()
+            && self.is_logical_server()
+            && world_stations!(self)
+                .enchantments
+                .has_custom_damage(&levels);
+        let actors = actors.filter(|_| custom).and_then(|(attacker, victim)| {
+            let epoch = self.native_lifecycle.epoch()?;
+            Some((
+                mod_api::EntityRef::new(epoch, attacker),
+                mod_api::EntityRef::new(epoch, victim),
+            ))
+        });
+        let weapon = actors.and_then(|_| {
+            use crate::game::api_values::TryIntoApi;
+            held.try_into_api().ok()
+        });
+        let mut random = self.world.random.clone();
+        let value = world_stations!(self).enchantments.modify_damage(
+            &levels,
             &ctx,
-            &mut self.world.random,
+            &mut random,
             base,
-        )
+            &mut |slot, config, level, value| {
+                let Some(((attacker, victim), weapon)) = actors.zip(weapon.as_ref()) else {
+                    return value;
+                };
+                let Some(effect) = super::mods::ENCHANTMENT_DAMAGE_EFFECTS
+                    .get()
+                    .and_then(|effects| effects.get(slot))
+                else {
+                    return value;
+                };
+                effect.apply(
+                    self,
+                    &mod_api::EnchantmentDamageContext {
+                        attacker: mod_api::LivingRef::new(attacker),
+                        victim,
+                        weapon,
+                        level,
+                        config,
+                    },
+                    value,
+                )
+            },
+        );
+        self.world.random = random;
+        value
     }
     /// `Player.attack`'s extra knockback: `getKnockback` (the weapon's knockback
     /// enchantment, halved) plus 0.5 for a sprinting full-strength hit, and
@@ -249,15 +349,17 @@ impl Game<'_> {
         // ignite (fire aspect) and apply_mob_effect (bane of arthropods).
         let mut ignite = 0.0f32;
         let mut mob_effects = Vec::new();
-        let mut hook_calls: Vec<(String, String, Value, u32)> = Vec::new();
+        let mut hook_calls: Vec<(String, String, std::sync::Arc<horizon_core::nbt::Tag>, u32)> =
+            Vec::new();
         for (id, level) in held.all_enchantments().iter() {
             let Some(def) = world_stations!(self).enchantments.get(id) else {
                 continue;
             };
-            for effect in def.effects["minecraft:post_attack"]
+            for (effect_index, effect) in def.effects["minecraft:post_attack"]
                 .as_array()
                 .into_iter()
                 .flatten()
+                .enumerate()
             {
                 let e = &effect["effect"];
                 if effect["enchanted"] != "attacker" || effect["affected"] != "victim" {
@@ -287,7 +389,9 @@ impl Game<'_> {
                 // A mod's own kind: its hook answers, after this loop (the
                 // stations borrow is held here).
                 if own {
-                    hook_calls.push((id.to_string(), kind_of, e.clone(), *level));
+                    if let Some(data) = def.native_post_attack.get(&effect_index) {
+                        hook_calls.push((id.to_string(), kind_of, data.clone(), *level));
+                    }
                 } else if kind_of == "minecraft:ignite" {
                     ignite =
                         ignite.max(horizon_client::enchant::level_value(&e["duration"], *level));
@@ -893,19 +997,8 @@ impl Game<'_> {
             return (0.0, false);
         };
         let e = &world_stations!(self).enchantments;
-        let ctx = EffectContext {
-            direct_attacker: Some("minecraft:arrow"),
-            attacker: Some("minecraft:player"),
-            items: Some(world_items!(self)),
-            ..Default::default()
-        };
-        let power = e.modify_value(
-            Some(&bow),
-            "minecraft:damage",
-            &ctx,
-            &mut self.world.random,
-            0.0,
-        );
+        // Damage is evaluated at impact, with the real victim (AbstractArrow.onHitEntity).
+        let power = 0.0;
         let ammo_ctx = EffectContext {
             tool: Some(ammo),
             items: Some(world_items!(self)),
@@ -919,7 +1012,7 @@ impl Game<'_> {
                 &mut self.world.random,
                 1.0,
             ) == 0.0;
-        (f64::from(power), infinity)
+        (power, infinity)
     }
     /// `EnchantmentHelper.onProjectileSpawned`, which `AbstractArrow`'s
     /// constructor runs for every arrow fired from a weapon, bow or crossbow:

@@ -5,10 +5,18 @@ impl Game<'_> {
     pub(in crate::game) fn fluid_tooltip_lines(&self, stack: &FluidStack) -> Vec<(Text, u32)> {
         let mut lines =
             horizon_client::fluid_tooltip::lines(stack, self.options_advanced_tooltips());
-        self.native_fluid_tooltip(mod_api::__private::FluidTooltipCall {
-            stack,
-            lines: &mut lines,
-        });
+        if mod_api::__private::listened(mod_api::HookId::FluidTooltip) {
+            use crate::game::api_values::{TryIntoApi, TryIntoEngine};
+            if let Ok(mut snapshot) = lines.try_into_api() {
+                self.native_fluid_tooltip(mod_api::__private::FluidTooltipCall {
+                    stack,
+                    lines: &mut snapshot,
+                });
+                if let Ok(replacement) = snapshot.try_into_engine(&()) {
+                    lines = replacement;
+                }
+            }
+        }
         lines
     }
     /// `stack`'s tooltip at `x`, `y`, laid out and drawn as every tooltip is.
@@ -78,7 +86,9 @@ mod tests {
     impl Hooks for Relabel {
         fn fluid_tooltip(&self, _: &dyn ClientHost, event: &mut FluidTooltipEvent<'_>) {
             event.lines.remove(0);
-            event.lines.push((Text::literal("Tank 3"), 0xff55ffff));
+            event
+                .lines
+                .push((mod_api::Text::literal("Tank 3"), 0xff55ffff));
         }
     }
 
@@ -87,10 +97,10 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_mod_edits_a_fluid_tooltip() {
-        mod_api::__private::part_tests::game_thread();
-        let water = mod_api::__private::fluid_key("minecraft:water").unwrap();
-        let stack = FluidStack::new(water, 750);
-        crate::game::native_entity_refs::tests::with_game(|game| {
+        // Load the real registries on the client side before resolving the fluid.
+        crate::game::native_entity_refs::tests::with_client_game(|game| {
+            let water = mod_api::__private::fluid_key("minecraft:water").unwrap();
+            let stack = FluidStack::new(water, 750);
             let plain = |lines: Vec<(Text, u32)>| -> Vec<(String, u32)> {
                 lines.into_iter().map(|(t, c)| (t.plain(), c)).collect()
             };

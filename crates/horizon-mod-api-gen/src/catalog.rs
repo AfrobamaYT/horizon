@@ -23,7 +23,8 @@ pub enum Side {
 pub enum Contract {
     /// Told about a moment; nothing comes back.
     Listen,
-    /// May veto it; the first listener to cancel stops the rest.
+    /// May veto it; once cancelled, later listeners run only if they receive cancelled events,
+    /// and those may undo it.
     Cancel,
     /// Every listener adds to, changes or removes from one output.
     Collect,
@@ -49,6 +50,8 @@ pub enum PhaseContext {
     DataLoad,
     /// A hook fired inside a menu, recipe or player-list loop of one side.
     Loop,
+    /// A hook fired while a feature generates, on a worldgen worker or the server thread.
+    Worldgen,
 }
 
 /// The kind of thing whose Parts a scoped hook calls.

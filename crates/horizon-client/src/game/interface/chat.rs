@@ -183,8 +183,11 @@ impl Game<'_> {
 /// The local player's name (offline single player).
 pub const PLAYER_NAME: &str = "Player";
 
-/// ServerClockManager.ServerClockInstance for the overworld clock (its
-/// total ticks are the world's day time).
+/// The Overworld's world clock.
+pub(in crate::game) const OVERWORLD_CLOCK: &str = "minecraft:overworld";
+
+/// ServerClockManager.ServerClockInstance (the total ticks of the one the level in place follows
+/// are the world's day time).
 #[derive(Clone, Copy, Debug)]
 pub struct WorldClock {
     pub partial: f32,
@@ -271,9 +274,13 @@ pub struct UiState {
     /// The server session command tree.
     pub dispatcher: SessionDispatcher,
     pub clock: WorldClock,
-    /// Command state for registered clocks other than Overworld. Overworld's
-    /// canonical ticks stay in World.day_time and its state stays in clock.
+    /// The totals and state of the clocks the world has met, the Overworld's total among them
+    /// while another clock is the one in `active_clock`. The active clock's total is
+    /// World.day_time; the Overworld's state stays in `clock`.
     pub command_clocks: BTreeMap<String, (i64, WorldClock)>,
+    /// The clock `World.day_time` follows: the default clock of the level in place, the
+    /// Overworld's while empty. The totals of the others are in `command_clocks`.
+    pub active_clock: String,
     /// Time markers and timelines of the overworld clock.
     pub markers: BTreeMap<String, TimeMarker>,
     pub timelines: BTreeMap<String, Option<i64>>,
@@ -285,6 +292,9 @@ pub struct UiState {
     pub show_hand_when_hidden: bool,
     /// Death message key set by the cause of death (e.g. /kill).
     pub death_cause: Option<String>,
+    /// What this frame's HUD shows that Horizon's overlays keep clear of (`Game::hud_room`),
+    /// set by `hud_layers` before anything draws.
+    pub room: horizon_client::hud_kit::room::Room,
     /// Path of an F2 screenshot waiting for its frame.
     pub screenshot_message: Option<std::path::PathBuf>,
     /// The options screens.
@@ -788,22 +798,17 @@ impl Game<'_> {
             .collect();
         self.sync_loot_table_ids();
         // ResourceOrIdArgument decodes an inline feature while the command is
-        // parsed, with the codec and blocks placement uses (the live features
-        // never change once installed).
-        self.ui.registries.inline_feature =
-            self.res
-                .behaviours()
-                .live_features()
-                .cloned()
-                .map(|features| {
-                    horizon_client_core::registries::InlineFeatureCheck::new(move |tag| {
-                        let json = horizon_client::scoreboard::tag_to_json(tag).to_string();
-                        features
-                            .decode_inline(&json)
-                            .map(drop)
-                            .map_err(|e| e.to_string())
-                    })
-                });
+        // parsed, with the codec and blocks placement uses (the world's live features,
+        // installed while it was prepared, before its registries are built).
+        self.ui.registries.inline_feature = self.res.behaviours().live_features().map(|features| {
+            horizon_client_core::registries::InlineFeatureCheck::new(move |tag| {
+                let json = horizon_client::scoreboard::tag_to_json(tag).to_string();
+                features
+                    .decode_inline(&json)
+                    .map(drop)
+                    .map_err(|e| e.to_string())
+            })
+        });
         self.ui.registries.templates = ids.templates.clone();
         self.ui.registries.sounds = self.audio.event_names();
         self.ui.registries.attributes = [
@@ -1150,11 +1155,24 @@ impl Game<'_> {
         // Connected to a server (single player's own included), the chat on
         // screen is the connection's: the game's own messages join it.
         if self.remote.is_some() {
-            self.chat_line(text, ChatSource::Server);
+            self.add_chat_line(text, ChatSource::Server);
             return;
         }
         // The Chat option's Hidden level takes the server's messages too.
         self.local_chat_line(text, Some(SYSTEM_INDICATOR), ChatSource::Server);
+    }
+    /// `ChatComponent.addClientSystemMessage`: a line the client adds itself.
+    /// It joins the connection's chat and its history, with the system
+    /// marker; the Chat option's server-message filter does not hide it
+    /// (`GuiMessageSource.SYSTEM_CLIENT`). Vanilla fires
+    /// `ClientChatReceivedEvent` from `ChatListener` for the lines the server
+    /// sent, so this path does not tell `client_chat_received`.
+    pub(super) fn chat_line(&mut self, text: Text) {
+        if self.remote.is_some() {
+            self.add_chat_line(text, ChatSource::Client);
+        } else {
+            self.local_chat_line(text, Some(SYSTEM_INDICATOR), ChatSource::Client);
+        }
     }
     /// A player's chat line on the window's own chat: a guest's message on
     /// the server's own chat (`HostEvent::Chat`). `ChatListener`
@@ -1358,7 +1376,10 @@ impl Game<'_> {
         } else {
             let line = Text::translate(
                 "chat.type.text",
-                &[self.player_display_name(), Text::literal(message.as_str())],
+                &[
+                    self.player_display_name(),
+                    Text::untrusted(message.as_str()),
+                ],
             );
             let focused = self.screen == Screen::Chat;
             self.ui.chat.add(
@@ -1484,7 +1505,9 @@ impl Game<'_> {
             // Screen.defaultHandleGameClickEvent: custom actions retain chat.
             Some(ClickEvent::Custom { id, payload }) => {
                 if let Some(remote) = &self.remote {
-                    remote.session.send_custom_click(&id, payload);
+                    remote
+                        .session
+                        .send_custom_click(&id, payload.map(std::sync::Arc::unwrap_or_clone));
                 }
             }
             // Screen.defaultHandleClickEvent: a page link means nothing in chat.
@@ -1728,7 +1751,6 @@ impl Game<'_> {
         // or the text of the message tag under the cursor.
         let height = batch.height as i32;
         let (cx, cy) = (f64::from(self.cursor.0), f64::from(self.cursor.1));
-        let wrap = (batch.width as i32 / 2).max(200);
         // handleTagIcon: the chat-modified icons over the cursor or its message.
         let (tag_tooltip, tag_icons) =
             self.ui
@@ -1743,30 +1765,74 @@ impl Game<'_> {
                     horizon_client::widgets::Cursor::PointingHand,
                 );
             }
-            if let Some(hover) = style.hover {
-                let lines = self.wrapped_rows(&hover, wrap);
-                self.draw_tooltip_lines(batch, &lines, self.cursor.0, self.cursor.1);
-            } else if let Some(stack) = style
-                .hover_item
-                .as_deref()
-                .and_then(horizon_client::item_data::stack_from_hover)
-                .filter(|s| self.items().get(&s.item).is_some())
-            {
-                self.draw_stack_tooltip(batch, &stack, self.cursor.0, self.cursor.1);
-            } else if let Some(entity) = style
-                .hover_entity
-                .as_deref()
-                .filter(|_| self.settings.file.bool("advancedItemTooltips"))
-            {
-                // ChatScreen: a ShowEntity tooltip only with advanced tooltips on.
-                let lines = Self::entity_tooltip_lines(entity);
-                self.draw_tooltip_lines(batch, &lines, self.cursor.0, self.cursor.1);
-            }
+            self.component_hover_effect(batch, &style, self.cursor);
         } else if let Some(tag) = &tag_tooltip {
             // The message tag's text, split at 210.
             let lines = self.wrapped_rows(tag, 210);
             self.draw_tooltip_lines(batch, &lines, self.cursor.0, self.cursor.1);
         }
+    }
+    /// `GuiGraphicsExtractor.componentHoverEffect`: the hover of the text component under the
+    /// cursor at `at`, as the chat, a book and a dialog draw it. `component_hover` is asked
+    /// first and may cancel it. Then a text hover is split at half the screen's width (at
+    /// least 200), an item hover draws its stack's tooltip, and an entity hover its name, type
+    /// and UUID while advanced tooltips are on.
+    pub(super) fn component_hover_effect(
+        &mut self,
+        batch: &mut HudBatch,
+        style: &horizon_client::text::Style,
+        at: (f32, f32),
+    ) {
+        if self.component_hover_canceled(batch, style, at) {
+            return;
+        }
+        if let Some(hover) = &style.hover {
+            let wrap = (batch.width as i32 / 2).max(200);
+            let lines = self.wrapped_rows(hover, wrap);
+            self.draw_tooltip_lines(batch, &lines, at.0, at.1);
+        } else if let Some(stack) = style
+            .hover_item
+            .as_deref()
+            .and_then(horizon_client::item_data::stack_from_hover)
+            .filter(|s| self.items().get(&s.item).is_some())
+        {
+            self.draw_stack_tooltip(batch, &stack, at.0, at.1);
+        } else if let Some(entity) = style
+            .hover_entity
+            .as_deref()
+            .filter(|_| self.settings.file.bool("advancedItemTooltips"))
+        {
+            // A ShowEntity tooltip only with advanced tooltips on.
+            let lines = Self::entity_tooltip_lines(entity);
+            self.draw_tooltip_lines(batch, &lines, at.0, at.1);
+        }
+    }
+    /// `component_hover`, only while a mod listens: true when a mod cancelled the hover.
+    fn component_hover_canceled(
+        &self,
+        batch: &mut HudBatch,
+        style: &horizon_client::text::Style,
+        at: (f32, f32),
+    ) -> bool {
+        if !mod_api::__private::listened(mod_api::HookId::ComponentHover) {
+            return false;
+        }
+        let Some(hover) = crate::game::api_values::style_hover(style) else {
+            return false;
+        };
+        let mut cancel = false;
+        let mut draw = super::host::draw::GameDrawContext {
+            game: self,
+            surface: batch,
+        };
+        self.native_component_hover(mod_api::__private::ComponentHoverCall {
+            draw: &mut draw,
+            hover: &hover,
+            x: at.0 as i32,
+            y: at.1 as i32,
+            cancel: &mut cancel,
+        });
+        cancel
     }
     /// `Font.split`: a tooltip text wrapped at `width`, one white row per line.
     pub(super) fn wrapped_rows(&self, text: &Text, width: i32) -> Vec<(Text, u32)> {
@@ -1777,22 +1843,125 @@ impl Game<'_> {
             .split(&text.resolve_legacy(), width as f32);
         split.into_iter().map(|row| (row, u32::MAX)).collect()
     }
-    /// Advance the overworld clock (ServerClockManager.tick) when
-    /// `advance_time` allows it.
+    /// Advance every clock the world has met (ServerClockManager.tick) when `advance_time` allows
+    /// it: each at its own rate, unless paused. The active clock's total is World.day_time.
     pub(super) fn advance_clock(&mut self) {
         if !self
             .ui
             .rules
             .bool_at(horizon_client::gamerules::vanilla::ADVANCE_TIME)
-            || self.ui.clock.paused
         {
+            // The rule may have just been turned off: tell the guests the clock stopped.
+            self.sync_hub_clocks();
             return;
         }
-        let c = &mut self.ui.clock;
-        c.partial += c.rate;
-        let whole = c.partial.floor();
-        c.partial -= whole;
-        self.world.day_time += whole as i64;
+        let mut names: Vec<String> = self.ui.command_clocks.keys().cloned().collect();
+        let active = self.active_clock().to_owned();
+        for name in [OVERWORLD_CLOCK.to_owned(), active] {
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+        for name in names {
+            let state = self.command_clock_state(&name);
+            if state.paused {
+                continue;
+            }
+            state.partial += state.rate;
+            let whole = state.partial.floor();
+            state.partial -= whole;
+            let total = self.command_clock_time(&name) + whole as i64;
+            self.set_command_clock_time(&name, total);
+        }
+        self.sync_hub_clocks();
+    }
+    /// The clock `World.day_time` follows (`UiState::active_clock`).
+    pub(in crate::game) fn active_clock(&self) -> &str {
+        if self.ui.active_clock.is_empty() {
+            OVERWORLD_CLOCK
+        } else {
+            &self.ui.active_clock
+        }
+    }
+    /// `ServerClockManager.getTotalTicks` of `clock`: the active one's is the world's day time,
+    /// another's the table's (0 for a clock the world has not met).
+    pub(in crate::game) fn command_clock_time(&self, clock: &str) -> i64 {
+        if clock == self.active_clock() {
+            self.world.day_time
+        } else {
+            self.ui.command_clocks.get(clock).map_or(0, |c| c.0)
+        }
+    }
+    pub(in crate::game) fn set_command_clock_time(&mut self, clock: &str, total: i64) {
+        if clock == self.active_clock() {
+            self.world.day_time = total;
+        } else {
+            self.ui
+                .command_clocks
+                .entry(clock.to_owned())
+                .or_default()
+                .0 = total;
+        }
+    }
+    /// `ServerClockManager.getInstance`: the rate, partial tick and pause of `clock`.
+    pub(in crate::game) fn command_clock_state(&mut self, clock: &str) -> &mut WorldClock {
+        if clock == OVERWORLD_CLOCK {
+            &mut self.ui.clock
+        } else {
+            &mut self
+                .ui
+                .command_clocks
+                .entry(clock.to_owned())
+                .or_default()
+                .1
+        }
+    }
+    /// The clock the day time of `dim`'s level follows: its dimension type's default clock, else
+    /// the Overworld's.
+    pub(in crate::game) fn level_clock_name(&self, dim: crate::game::Dim) -> String {
+        self.dimension_type_of(dim)
+            .default_clock
+            .clone()
+            .unwrap_or_else(|| OVERWORLD_CLOCK.to_owned())
+    }
+    /// What the LAN hub's time packets need: the Overworld's total while `World.day_time` follows
+    /// another clock, and that clock with its rate.
+    pub(in crate::game) fn sync_hub_clocks(&mut self) {
+        let active = self.active_clock().to_owned();
+        let overworld = self.command_clock_time(OVERWORLD_CLOCK);
+        let advancing = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::ADVANCE_TIME);
+        let state = *self.command_clock_state(&active);
+        // A paused clock, or `advance_time` off, is a rate of 0 to the guests, as for the Overworld's.
+        let rate = if advancing && !state.paused {
+            state.rate
+        } else {
+            0.0
+        };
+        if let Some(host) = self.lan.as_mut() {
+            if active == OVERWORLD_CLOCK {
+                host.hub.overworld_day = None;
+                host.hub.level_clock = None;
+            } else {
+                host.hub.overworld_day = Some(overworld);
+                host.hub.level_clock = Some((active, rate));
+            }
+        }
+    }
+    /// Makes `to` the clock `World.day_time` follows, as the level entered has it as its default
+    /// clock: the clock that was followed keeps its total in the table. Returns the total
+    /// `World.day_time` takes.
+    pub(in crate::game) fn switch_clock(&mut self, to: &str) -> i64 {
+        let from = self.active_clock().to_owned();
+        if from == to {
+            return self.world.day_time;
+        }
+        let total = self.world.day_time;
+        self.ui.command_clocks.entry(from).or_default().0 = total;
+        self.ui.active_clock = to.to_owned();
+        self.ui.command_clocks.entry(to.to_owned()).or_default().0
     }
     /// `ServerClockInstance.packNetworkState`: the rate players' clients
     /// advance the overworld clock at, 0 while it is paused (`/time pause`)
@@ -1884,26 +2053,41 @@ impl Game<'_> {
         self.ui.command_clocks.clear();
         // PrimaryLevelData: the difficulty comes back from level.dat's difficulty_settings.
         self.ui.difficulty = self.level.difficulty_id();
+        self.ui.active_clock = OVERWORLD_CLOCK.to_owned();
         if let Ok(bytes) = std::fs::read(self.world_root.join("data/minecraft/world_clocks.dat"))
             && let Ok(raw) = horizon_world::compression::Compression::Gzip.decode(&bytes, 1 << 20)
             && let Ok((root, _)) =
                 horizon_core::nbt::read_named(&raw, horizon_core::nbt::Limits::default())
-            && let Some(c) = root
-                .tag
-                .get("data")
-                .and_then(|d| d.get("minecraft:overworld"))
+            && let Some(horizon_core::nbt::Tag::Compound(clocks)) = root.tag.get("data")
         {
             use horizon_core::nbt::Tag;
-            if let Some(Tag::Float(r)) = c.get("rate") {
-                self.ui.clock.rate = f32::from_bits(*r);
-            }
-            if let Some(Tag::Float(p)) = c.get("partial_tick") {
-                self.ui.clock.partial = f32::from_bits(*p);
-            }
-            if let Some(Tag::Byte(p)) = c.get("paused") {
-                self.ui.clock.paused = *p != 0;
+            for (name, c) in clocks {
+                let mut state = WorldClock::default();
+                if let Some(Tag::Float(r)) = c.get("rate") {
+                    state.rate = f32::from_bits(*r);
+                }
+                if let Some(Tag::Float(p)) = c.get("partial_tick") {
+                    state.partial = f32::from_bits(*p);
+                }
+                if let Some(Tag::Byte(p)) = c.get("paused") {
+                    state.paused = *p != 0;
+                }
+                let total = match c.get("total_ticks") {
+                    Some(Tag::Long(t)) => *t,
+                    _ => 0,
+                };
+                let name = name.to_string_lossy();
+                if name == OVERWORLD_CLOCK {
+                    self.ui.clock = state;
+                } else {
+                    self.ui.command_clocks.insert(name, (total, state));
+                }
             }
         }
+        // The level the world opens in follows its own default clock; the Overworld's total
+        // (level.dat's day time, already in World.day_time) goes to the table.
+        let clock = self.level_clock_name(self.dim);
+        self.world.day_time = self.switch_clock(&clock);
         self.ui.chat.clear();
         self.build_registries();
         // The world opens with its test instances (`Registries.TEST_INSTANCE`).
@@ -1918,40 +2102,51 @@ impl Game<'_> {
             return;
         }
         use horizon_core::nbt::Tag;
-        let c = self.ui.clock;
-        // The other clocks stay as saved; the overworld one keeps the fields Horizon
-        // does not model, and (like vanilla's codec) omits rate, partial tick and
-        // pause while they have their defaults.
+        // Every clock the world has met is saved; the fields of a clock Horizon does not model
+        // stay as saved, and (like vanilla's codec) rate, partial tick and pause are omitted
+        // while they have their defaults.
         let path = self.world_root.join("data/minecraft/world_clocks.dat");
         let existing = horizon_client::save::read_dat(&path);
         let mut data = match existing.as_ref().and_then(|r| r.get("data")) {
             Some(d @ Tag::Compound(_)) => d.clone(),
             _ => Tag::Compound(Default::default()),
         };
-        let mut clock = match data.get("minecraft:overworld") {
-            Some(c @ Tag::Compound(_)) => c.clone(),
-            _ => Tag::Compound(Default::default()),
-        };
-        if let Tag::Compound(map) = &mut clock {
-            map.insert("total_ticks".into(), Tag::Long(self.world.day_time));
-            for (key, value, default) in [
-                (
-                    "partial_tick",
-                    Tag::Float(c.partial.to_bits()),
-                    c.partial == 0.0,
-                ),
-                ("rate", Tag::Float(c.rate.to_bits()), c.rate == 1.0),
-                ("paused", Tag::Byte(i8::from(c.paused)), !c.paused),
-            ] {
-                if default {
-                    map.remove(&key.into());
-                } else {
-                    map.insert(key.into(), value);
-                }
+        let mut clocks = vec![(
+            OVERWORLD_CLOCK.to_owned(),
+            self.command_clock_time(OVERWORLD_CLOCK),
+            self.ui.clock,
+        )];
+        for (name, (_, state)) in &self.ui.command_clocks {
+            if name != OVERWORLD_CLOCK {
+                clocks.push((name.clone(), self.command_clock_time(name), *state));
             }
         }
-        if let Tag::Compound(map) = &mut data {
-            map.insert("minecraft:overworld".into(), clock);
+        for (name, total, c) in clocks {
+            let mut clock = match data.get(&name) {
+                Some(c @ Tag::Compound(_)) => c.clone(),
+                _ => Tag::Compound(Default::default()),
+            };
+            if let Tag::Compound(map) = &mut clock {
+                map.insert("total_ticks".into(), Tag::Long(total));
+                for (key, value, default) in [
+                    (
+                        "partial_tick",
+                        Tag::Float(c.partial.to_bits()),
+                        c.partial == 0.0,
+                    ),
+                    ("rate", Tag::Float(c.rate.to_bits()), c.rate == 1.0),
+                    ("paused", Tag::Byte(i8::from(c.paused)), !c.paused),
+                ] {
+                    if default {
+                        map.remove(&key.into());
+                    } else {
+                        map.insert(key.into(), value);
+                    }
+                }
+            }
+            if let Tag::Compound(map) = &mut data {
+                map.insert(name.as_str().into(), clock);
+            }
         }
         let root = Tag::compound([
             ("data", data),
@@ -2710,7 +2905,11 @@ mod enchantment_snapshot_tests {
         let definition = serde_json::json!({"description":"H024 audit","supported_items":"minecraft:diamond_sword",
             "weight":1,"max_level":1,"min_cost":{"base":1,"per_level_above_first":0},
             "max_cost":{"base":1,"per_level_above_first":0},"anvil_cost":1,"slots":["mainhand"],"effects":{}});
-        let synced = std::sync::Arc::new(base.with_entries([("h024:audit", &definition)]).unwrap());
+        let synced = std::sync::Arc::new(
+            base.with_entries([("h024:audit", &definition)])
+                .unwrap()
+                .unwrap(),
+        );
         game.world_tables.as_mut().unwrap().stations.enchantments = synced.clone();
         game.world_tables.as_mut().unwrap().items.enchantments = synced;
         assert!(

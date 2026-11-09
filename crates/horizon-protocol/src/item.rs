@@ -80,10 +80,13 @@ pub mod component {
     pub const REPAIR_COST: i32 = 19;
     pub const CREATIVE_SLOT_LOCK: i32 = 20;
     pub const ENCHANTMENT_GLINT_OVERRIDE: i32 = 21;
+    /// `Consumable.STREAM_CODEC`: consumeSeconds first.
+    pub const CONSUMABLE: i32 = 24;
     /// `AttackRange`: six floats, in the record's field order.
     pub const ATTACK_RANGE: i32 = 30;
     pub const EQUIPPABLE: i32 = 32;
     pub const GLIDER: i32 = 34;
+    pub const BLOCKS_ATTACKS: i32 = 37;
     pub const KINETIC_WEAPON: i32 = 39;
     pub const STORED_ENCHANTMENTS: i32 = 45;
     pub const PROFILE: i32 = 72;
@@ -121,6 +124,16 @@ pub mod component {
     pub const SIGN_TEXT_FRONT: i32 = 118;
     pub const SIGN_TEXT_BACK: i32 = 119;
 }
+
+/// `EquipmentSlotGroup`'s serialized names by network id (`EquipmentSlotGroup.BY_ID`): the slot
+/// group an [`component::ATTRIBUTE_MODIFIERS`] entry applies in.
+pub const EQUIPMENT_SLOT_GROUPS: [&str; 11] = [
+    "any", "mainhand", "offhand", "hand", "feet", "legs", "chest", "head", "armor", "body",
+    "saddle",
+];
+/// `AttributeModifier.Operation`'s serialized names by network id (`Operation.BY_ID`).
+pub const ATTRIBUTE_OPERATIONS: [&str; 3] =
+    ["add_value", "add_multiplied_base", "add_multiplied_total"];
 
 /// A written book's content (`WrittenBookContent.STREAM_CODEC`). The raw title
 /// and pages are what a book shows; the filtered variants (`Filterable.filtered`,
