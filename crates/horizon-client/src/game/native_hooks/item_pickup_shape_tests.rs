@@ -53,8 +53,11 @@ fn indexed_pickup_keeps_bound_survivors_and_processes_shifted_tail() {
     with_mods(mods, || {
         let mut loaded = 0;
         for dimension in [crate::game::Dim::Overworld, crate::game::Dim::Nether] {
-            let scratch = std::env::temp_dir()
-                .join(format!("pickup-shape-{}-{dimension:?}", std::process::id()));
+            let scratch = std::path::PathBuf::from(
+                std::env::var_os("HORIZON_HOME")
+                    .expect("pickup fixture requires an isolated HORIZON_HOME"),
+            )
+            .join(format!("pickup-shape-{}-{dimension:?}", std::process::id()));
             crate::game::native_entity_refs::tests::with_game(|game| {
                 game.world_root = scratch.clone();
                 game.enter_level(dimension).unwrap();
