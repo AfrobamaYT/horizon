@@ -38,13 +38,14 @@ struct Target {
 }
 
 fn resolved_features(
+    tool: Tool,
     root: &Path,
     owner: &Package,
     package: &Package,
 ) -> Result<Vec<String>, String> {
     // Metadata enables defaults on all workspace members; tree selects our mod.
     let bytes = output(
-        crate::wasm::pinned("cargo")
+        tool("cargo")
             .args([
                 "tree",
                 "--package",
@@ -85,8 +86,16 @@ fn save(path: &Path, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-/// Computes layout identities using the mod's resolved dependencies on the host target.
+/// Runs a Rust tool (`cargo`, `rustc`): the launcher's pinned toolchain outside tests.
+type Tool<'a> = &'a dyn Fn(&str) -> Command;
+
+/// Computes layout identities using the mod's resolved dependencies on the host target, with the
+/// launcher's pinned toolchain.
 pub fn build(root: &Path) -> Result<(), String> {
+    build_with(&crate::wasm::pinned, root)
+}
+
+fn build_with(tool: Tool, root: &Path) -> Result<(), String> {
     if !root.join("Cargo.toml").is_file() {
         return Ok(());
     }
@@ -116,7 +125,7 @@ pub fn build(root: &Path) -> Result<(), String> {
         return Ok(());
     }
     let metadata: Metadata = serde_json::from_slice(&output(
-        crate::wasm::pinned("cargo")
+        tool("cargo")
             .args(["metadata", "--format-version", "1"])
             .current_dir(&root),
     )?)
@@ -184,7 +193,7 @@ pub fn build(root: &Path) -> Result<(), String> {
     api_dependency.insert(
         "features".into(),
         toml::Value::Array(
-            resolved_features(&root, owner, api)?
+            resolved_features(tool, &root, owner, api)?
                 .into_iter()
                 .map(toml::Value::String)
                 .collect(),
@@ -232,7 +241,7 @@ pub fn build(root: &Path) -> Result<(), String> {
         manifest.push_str(&format!(
             "{alias} = {{ package = {:?}, default-features = false, features = {:?}, path = {:?} }}\n",
             package.name,
-            resolved_features(&root, owner, package)?,
+            resolved_features(tool, &root, owner, package)?,
             package
                 .manifest_path
                 .parent()
@@ -256,14 +265,14 @@ pub fn build(root: &Path) -> Result<(), String> {
             &fs::read(lock).map_err(|e| e.to_string())?,
         )?;
     }
-    let rustc = output(crate::wasm::pinned("rustc").arg("-vV"))?;
+    let rustc = output(tool("rustc").arg("-vV"))?;
     let rustc = String::from_utf8(rustc).map_err(|e| e.to_string())?;
     let host = rustc
         .lines()
         .find_map(|line| line.strip_prefix("host: "))
         .ok_or("rustc did not report its host target")?;
     let bytes = output(
-        crate::wasm::pinned("cargo")
+        tool("cargo")
             .args(["run", "--quiet", "--target", host, "--manifest-path"])
             .arg(stage.join("Cargo.toml"))
             .arg("--target-dir")
@@ -281,7 +290,121 @@ pub fn build(root: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The toolchain running the tests: CI has no launcher-pinned toolchain installed.
+    fn build(root: &Path) -> Result<(), String> {
+        let tool = |name: &str| match name {
+            "cargo" => Command::new(env!("CARGO")),
+            other => Command::new(other),
+        };
+        build_with(&tool, root)
+    }
+
+    /// The probe manifest carries each dependency's resolved features, and a refusal keeps the
+    /// recorded layouts, without compiling the probe: `cargo run` is answered with fixed layouts,
+    /// every other cargo command runs for real.
+    #[cfg(unix)]
     #[test]
+    fn the_probe_builds_dependencies_with_their_resolved_features() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "../../target/layout-features-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let library = root.join("library");
+        fs::create_dir_all(library.join("src")).unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let api = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../horizon-mod-api")
+            .canonicalize()
+            .unwrap();
+        let stub = root.join("cargo-stub");
+        fs::write(
+            &stub,
+            format!(
+                "#!/bin/sh\nif [ \"$1\" = run ]; then echo '{{\"library\":{{\"library::Shared\":\"0000000000000001\"}}}}'; else exec {:?} \"$@\"; fi\n",
+                env!("CARGO")
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&stub, fs::Permissions::from_mode(0o755)).unwrap();
+        let tool = |name: &str| match name {
+            "cargo" => Command::new(&stub),
+            other => Command::new(other),
+        };
+        let header = |id: &str| {
+            format!(
+                "id = \"{id}\"\nname = \"{id}\"\nversion = \"0.1.0\"\napi = \"0.2\"\nside = \"both\"\ncapabilities = [\"registries\"]\n"
+            )
+        };
+        fs::write(library.join("Cargo.toml"), format!("[package]\nname = \"library\"\nversion = \"0.1.0\"\nedition = \"2024\"\n[dependencies]\nhorizon-mod-api = {{ path = {:?} }}\n[features]\ndefault = [\"wide\"]\nwide = []\nextra = []\n", api.to_string_lossy())).unwrap();
+        fs::write(library.join("horizon-mod.toml"), header("library")).unwrap();
+        fs::write(
+            library.join("src/lib.rs"),
+            "#[derive(mod_api::Wire)] pub struct Shared { pub value: u16 }\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("horizon-mod.toml"),
+            format!("{}[dependencies]\nlibrary = \"^0.1\"\n", header("addon")),
+        )
+        .unwrap();
+        fs::write(root.join("src/lib.rs"), "pub fn run() {}\n").unwrap();
+        let staged = |dependency: &str| {
+            fs::write(root.join("Cargo.toml"), format!("[package]\nname = \"addon\"\nversion = \"0.1.0\"\nedition = \"2024\"\n[workspace]\n[dependencies]\nhorizon-mod-api = {{ path = {:?} }}\nlibrary = {{ path = \"library\"{dependency} }}\n", api.to_string_lossy())).unwrap();
+            build_with(&tool, &root).unwrap();
+            let manifest =
+                fs::read_to_string(root.join("target/horizon-mod/layout-probe/Cargo.toml"))
+                    .unwrap();
+            manifest
+                .lines()
+                .find(|line| line.starts_with("library_0 = "))
+                .unwrap()
+                .split(", path")
+                .next()
+                .unwrap()
+                .to_owned()
+        };
+        assert_eq!(
+            staged(""),
+            r#"library_0 = { package = "library", default-features = false, features = ["default", "wide"]"#
+        );
+        assert_eq!(
+            staged(", default-features = false"),
+            r#"library_0 = { package = "library", default-features = false, features = []"#
+        );
+        assert_eq!(
+            staged(", default-features = false, features = [\"extra\"]"),
+            r#"library_0 = { package = "library", default-features = false, features = ["extra"]"#
+        );
+        let recorded = fs::read(root.join("layouts.json")).unwrap();
+        assert_eq!(
+            recorded,
+            br#"{"library":{"library::Shared":"0000000000000001"}}"#
+        );
+        fs::write(
+            library.join("src/lib.rs"),
+            "#[cfg(unix)] #[derive(mod_api::Wire)] pub struct Shared;\n",
+        )
+        .unwrap();
+        assert!(
+            build_with(&tool, &root)
+                .unwrap_err()
+                .contains("library::Shared")
+        );
+        assert_eq!(
+            recorded,
+            fs::read(root.join("layouts.json")).unwrap(),
+            "a refusal keeps the recorded layouts"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The real probe end to end: compiles `mod_api` and the mod's dependencies, so it runs outside
+    /// the fast checks.
+    #[test]
+    #[ignore = "compiles the real layout probe (minutes cold)"]
     fn field_changes_invalidate_the_cached_probe() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
             "../../target/layout-probe-test-{}",
