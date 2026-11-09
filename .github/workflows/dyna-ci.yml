@@ -53,6 +53,10 @@ jobs:
       self_hosted: ${{ steps.runner.outputs.self_hosted }}
       # Every ignored-tests shard on main pushes and dispatches; empty on pull requests.
       ignored_matrix: ${{ steps.matrix.outputs.matrix || '{"shard":[]}' }}
+      # Where lint and verify run when they don't go to Dyna's pool: boat-large for listed outside contributors
+      # while vars.BOAT_CI is on (boat refuses a public repository's run unless both its author and the user who
+      # started it are on boat's own list, so the same list lives in vars.BOAT_CI_USERS), else GitHub's runner.
+      hosted_label: ${{ steps.hosted.outputs.label }}
     steps:
       - uses: actions/checkout@v4
       # The pool's switch and lease are read live: `vars` is fixed when the run is created, and a main run
@@ -76,6 +80,19 @@ jobs:
           case "${ENABLED:-}" in true | false) ;; *) ENABLED= ;; esac
           echo "pool lease: live=${LEASE:-unreadable} snapshot=${VARS_LEASE:-none}"
           ENABLED=${ENABLED:-$VARS_ENABLED} LEASE=${LEASE:-$VARS_LEASE} bash tools/ci/dyna_ci_runner.sh >> "$GITHUB_OUTPUT"
+      - id: hosted
+        env:
+          BOAT_CI: ${{ vars.BOAT_CI }}
+          BOAT_USERS: ${{ vars.BOAT_CI_USERS }}
+          AUTHOR: ${{ github.event.pull_request.user.login || github.actor }}
+          ACTOR: ${{ github.triggering_actor }}
+        run: |
+          label=ubuntu-latest
+          if [ "$BOAT_CI" = on ]; then
+            case ",$BOAT_USERS," in *",$AUTHOR,"*) case ",$BOAT_USERS," in *",$ACTOR,"*) label=boat-large ;; esac ;; esac
+          fi
+          echo "hosted runner: $label (author $AUTHOR, started by $ACTOR)"
+          echo "label=$label" >> "$GITHUB_OUTPUT"
       - name: The ignored-tests shard matrix
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         id: matrix
@@ -103,12 +120,14 @@ jobs:
     # pool is down, stays on GitHub's runners with the snapshot cache below.
     needs: changes
     if: github.event_name != 'schedule'
-    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'dyna-large' || 'ubuntu-latest' }}
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'dyna-large' || needs.changes.outputs.hosted_label || 'ubuntu-latest' }}
     # A cold lint (two full clippy graphs) takes 40+ minutes on GitHub runners: room to finish, main to save its cache.
     timeout-minutes: ${{ github.event_name == 'pull_request' && 75 || 100 }}
     env:
+      # dyna (Dyna's pool: persistent build folder, no sudo), boat (a fresh VM like GitHub's, 16 GiB) or github.
+      RUNNER_KIND: ${{ needs.changes.outputs.self_hosted == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'dyna' || startsWith(needs.changes.outputs.hosted_label, 'boat') && 'boat' || 'github' }}
       # Like verify, avoid scheduling eight large rustc processes inside a 16 GiB slot.
-      JOBS: ${{ needs.changes.outputs.self_hosted == 'true' && '-j4' || '' }}
+      JOBS: ${{ (needs.changes.outputs.self_hosted == 'true' || startsWith(needs.changes.outputs.hosted_label, 'boat')) && '-j4' || '' }}
     steps:
       - uses: actions/checkout@v4
       # Only this commit's own history (rust_changes.py's merge base, check_public_tree.py's range and HEAD
@@ -124,12 +143,12 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: python3 tools/ci/rust_changes.py "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
       - name: Install Dyna runner dependencies without root
-        if: steps.rust.outputs.required != 'false' && runner.environment != 'github-hosted'
+        if: steps.rust.outputs.required != 'false' && env.RUNNER_KIND == 'dyna'
         run: bash tools/ci/dyna_ci_deps.sh
       - name: Install Rust toolchain and the ALSA and udev headers the client links against
         if: steps.rust.outputs.required != 'false'
         env:
-          HOSTED: ${{ runner.environment == 'github-hosted' }}
+          HOSTED: ${{ env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat' }}
         run: |
           if [ "$HOSTED" = true ]; then
             sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
@@ -146,16 +165,16 @@ jobs:
           fi
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy --target wasm32-unknown-unknown
       - name: Lint cache toolchain
-        if: steps.rust.outputs.required != 'false' && runner.environment == 'github-hosted'
+        if: steps.rust.outputs.required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
         id: toolchain
         run: |
           echo "hash=$(rustc +stable -vV | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
           # One snapshot every 6 hours: the repository's 10 GB cache budget can't hold one per main head.
           echo "slot=$(date -u +%Y%m%d)-$(( 10#$(date -u +%H) / 6 ))" >> "$GITHUB_OUTPUT"
       # rust-cache's default removes workspace artifacts. Those are the expensive part here,
-      # in two feature graphs; keep both, and publish a fresh snapshot from main every 6 hours.
+      # in two feature graphs; keep both. ci-cache.yml publishes a fresh snapshot from main every 6 hours.
       - uses: actions/cache/restore@v4
-        if: steps.rust.outputs.required != 'false' && runner.environment == 'github-hosted'
+        if: steps.rust.outputs.required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
         id: lint-cache
         with:
           path: |
@@ -169,7 +188,7 @@ jobs:
       # A restore-key hit can predate a profile or dependency change: a successful download
       # does not mean Cargo has artifacts for the requested graph (for example, #1190).
       - name: Report lint cache compatibility
-        if: steps.rust.outputs.required != 'false' && runner.environment == 'github-hosted'
+        if: steps.rust.outputs.required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
         env:
           REQUESTED_KEY: ${{ steps.lint-cache.outputs.cache-primary-key }}
           MATCHED_KEY: ${{ steps.lint-cache.outputs.cache-matched-key }}
@@ -200,11 +219,11 @@ jobs:
           find crates/horizon-mod-api/src -name '*.rs' -print0 | xargs -0 rustup run stable rustfmt --edition 2024 --check --config skip_children=true
           find crates/horizon-client/src/game -name '*.rs' -print0 | xargs -0 rustup run stable rustfmt --edition 2024 --config skip_children=true --check
           rustup run stable rustfmt --edition 2024 --check crates/horizon-mod-api-gen/dispatch-tests/src/fixtures/*.rs
-          cargo +stable clippy $JOBS --workspace --all-targets -- -D warnings
+          cargo +stable clippy $JOBS --keep-going --workspace --all-targets -- -D warnings
       - name: Lint the server build without sound or controllers
         if: steps.rust.outputs.required != 'false'
         id: server-lint
-        run: cargo +stable clippy $JOBS -p horizon-client --all-targets --no-default-features -- -D warnings
+        run: cargo +stable clippy $JOBS --keep-going -p horizon-client --all-targets --no-default-features -- -D warnings
       - name: The mod API builds for wasm32
         if: steps.rust.outputs.required != 'false'
         run: cargo +stable check $JOBS -p horizon-mod-api --target wasm32-unknown-unknown --locked
@@ -214,7 +233,7 @@ jobs:
       # Publish native work even if the independent wasm check fails. Pull requests only read
       # main's snapshots; they can never replace a cache subsequently consumed by main.
       - uses: actions/cache/save@v4
-        if: ${{ !cancelled() && runner.environment == 'github-hosted' && github.ref == 'refs/heads/main' && steps.native-lint.outcome == 'success' && steps.server-lint.outcome == 'success' && steps.lint-cache.outputs.cache-hit != 'true' }}
+        if: ${{ !cancelled() && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat') && github.ref == 'refs/heads/main' && steps.native-lint.outcome == 'success' && steps.server-lint.outcome == 'success' && steps.lint-cache.outputs.cache-hit != 'true' }}
         with:
           path: |
             ~/.cargo/registry
@@ -224,7 +243,7 @@ jobs:
 
   verify:
     needs: changes
-    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-large' || vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || 'ubuntu-latest' }}
+    runs-on: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna-large' || vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "linux", "playhorizon-ci"]') || needs.changes.outputs.hosted_label || 'ubuntu-latest' }}
     timeout-minutes: 45
     # Dyna's runner image now carries lavapipe, Mesa's software Vulkan driver, for ignored-tests' `gpu` tests.
     # verify's tests were written to skip GPU work when no adapter exists, and one of them
@@ -233,7 +252,8 @@ jobs:
     env:
       VK_ICD_FILENAMES: /nonexistent/no-vulkan-in-verify.json
       VK_DRIVER_FILES: /nonexistent/no-vulkan-in-verify.json
-      JOBS: ${{ needs.changes.outputs.self_hosted == 'true' && '-j4' || '' }}
+      JOBS: ${{ (needs.changes.outputs.self_hosted == 'true' || startsWith(needs.changes.outputs.hosted_label, 'boat')) && '-j4' || '' }}
+      RUNNER_KIND: ${{ needs.changes.outputs.self_hosted == 'true' && 'dyna' || vars.SELF_HOSTED_CI == 'all' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'other' || startsWith(needs.changes.outputs.hosted_label, 'boat') && 'boat' || 'github' }}
     steps:
       - uses: actions/checkout@v4
       # Only this commit's own history (rust_changes.py's merge base, check_public_tree.py's range and HEAD
@@ -241,7 +261,7 @@ jobs:
       - name: Fetch this commit's history
         run: git fetch -q --no-tags --unshallow origin "$(git rev-parse HEAD)"
       - uses: actions/setup-python@v5
-        if: runner.environment == 'github-hosted'
+        if: (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
         with:
           python-version: '3.12'
       - name: Does this pull request need Rust checks?
@@ -272,7 +292,7 @@ jobs:
       - name: Install Rust toolchain and the ALSA and udev headers the client links against
         if: steps.rust.outputs.required != 'false'
         env:
-          HOSTED: ${{ runner.environment == 'github-hosted' }}
+          HOSTED: ${{ env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat' }}
           DYNA: ${{ needs.changes.outputs.self_hosted }}
         run: |
           if [ "$HOSTED" = true ]; then
@@ -284,12 +304,15 @@ jobs:
             export PATH="$CARGO_HOME/bin:$PATH"
           fi
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy
-      # Dependency-only cache: a full workspace/test snapshot would compete with lint for the 10 GB budget.
+      # Workspace crates too: GitHub-hosted verify (outside contributors) otherwise rebuilt every workspace crate.
+      # ci-cache.yml publishes this snapshot from main every 6 hours; pull requests only read it.
       # Profile overrides in Cargo.toml are part of rust-cache's key; unchanged dependencies still restore.
       - uses: Swatinem/rust-cache@v2
-        if: steps.rust.outputs.required != 'false' && runner.environment == 'github-hosted'
+        if: steps.rust.outputs.required != 'false' && (env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat')
         with:
-          shared-key: verify
+          # A new key: the dependency-only snapshot under the old one blocked saving this one.
+          shared-key: verify-workspace
+          cache-workspace-crates: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # A dyna-large runner has a hard 16 GiB limit and 8 CPUs; horizon-client rustc processes take about 2.6 GB
       # each, so Dyna runs build four crates at a time. Formatting and lint run in parallel on GitHub's
