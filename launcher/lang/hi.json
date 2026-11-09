@@ -1236,5 +1236,10 @@
   "Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.": "Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.",
   "Native mods can't be built on this computer, so they can't be allowed here.": "Native mods can't be built on this computer, so they can't be allowed here.",
   "internals replace listeners pending (U9)": "internals replace listeners pending (U9)",
-  "replace needs a return the API carries": "replace needs a return the API carries"
+  "replace needs a return the API carries": "replace needs a return the API carries",
+  "E_INJECT_CHANGED: {id}: {library} {version} changed {at}: pinned {pinned}, installed {installed} ({signature}); update the declaration with `cargo horizon-mod inject update` and rebuild against it": "E_INJECT_CHANGED: {id}: {library} {version} changed {at}: pinned {pinned}, installed {installed} ({signature}); update the declaration with `cargo horizon-mod inject update` and rebuild against it",
+  "E_INJECT_MISSING: {id}: {at} has no point (opted out with #[mod_api::no_point])": "E_INJECT_MISSING: {id}: {at} has no point (opted out with #[mod_api::no_point])",
+  "{id}: internals access to {library} needs the same target: the same binary on native, the same dependency group on wasm": "{id}: internals access to {library} needs the same target: the same binary on native, the same dependency group on wasm",
+  "{id}: an api listener at {library} on the other target crosses through the game, and {reason}: add #[derive(mod_api::Wire)] to it": "{id}: an api listener at {library} on the other target crosses through the game, and {reason}: add #[derive(mod_api::Wire)] to it",
+  "{id}: {library} is on the other target: mixed native and wasm dependencies aren't supported yet": "{id}: {library} is on the other target: mixed native and wasm dependencies aren't supported yet"
 }
