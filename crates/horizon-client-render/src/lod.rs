@@ -4460,6 +4460,7 @@ mod tests {
         lod.ready
             .insert(parent, Arc::new(vec![Column::default(); 256]));
         lod.active = [parent].into_iter().collect();
+        lod.sync_sample(parent);
         lod.sample_jobs = SAMPLE_JOBS;
         lod.pending = (0..SAMPLE_JOBS - 1)
             .map(|i| TileKey {
