@@ -149,6 +149,9 @@ pub enum ProjectileKind {
     LargeFireball {
         power: i32,
     },
+    /// `DragonFireball`: an `AbstractHurtingProjectile` that bursts into
+    /// dragon's breath, does not burn and trails dragon breath.
+    DragonFireball,
     LlamaSpit,
     /// A player's `WindCharge` and a breeze's `BreezeWindCharge`: straight
     /// flight that bursts on whatever it meets.
@@ -225,7 +228,7 @@ impl ProjectileKind {
             | Self::BreezeWindCharge
             | Self::ShulkerBullet { .. }
             | Self::WitherSkull { .. } => 0.3125,
-            Self::LargeFireball { .. } => 1.0,
+            Self::LargeFireball { .. } | Self::DragonFireball => 1.0,
         }
     }
     /// Its entity type.
@@ -238,6 +241,7 @@ impl ProjectileKind {
             Self::EnderPearl => "minecraft:ender_pearl",
             Self::SmallFireball => "minecraft:small_fireball",
             Self::LargeFireball { .. } => "minecraft:fireball",
+            Self::DragonFireball => "minecraft:dragon_fireball",
             Self::LlamaSpit => "minecraft:llama_spit",
             Self::WindCharge => "minecraft:wind_charge",
             Self::BreezeWindCharge => "minecraft:breeze_wind_charge",
@@ -288,6 +292,10 @@ pub struct Projectile {
     pub previous_pitch: f32,
     pub age: u32,
     pub stuck: bool,
+    /// `Entity.stuckSpeedMultiplier`: set by a cobweb or powder snow its box
+    /// passed through on a block's push (`makeStuckInBlock`); the next push
+    /// (`Entity.move`) then stops it dead. Zero: not stuck.
+    pub stuck_speed: Vec3,
     /// Whether the projectile has left its owner's box (Projectile.leftOwner).
     pub left_owner: bool,
     /// Non-arrow Projectile.hasBeenShot, independent of entity age.
@@ -345,6 +353,15 @@ pub enum Hit {
 }
 /// The world a projectile flies through: block ray clipping, water, and
 /// the boxes of entities it could hit.
+/// The speed multiplier `makeStuckInBlock` gives an entity in block `name`
+/// (`WebBlock.entityInside`, `PowderSnowBlock.entityInside`), if any.
+pub fn stuck_speed_of(name: &str) -> Option<Vec3> {
+    match name {
+        "minecraft:cobweb" => Some(Vec3::new(0.25, f64::from(0.05_f32), 0.25)),
+        "minecraft:powder_snow" => Some(Vec3::new(f64::from(0.9_f32), 1.5, f64::from(0.9_f32))),
+        _ => None,
+    }
+}
 pub trait ProjectileWorld {
     fn clip(&self, from: Vec3, to: Vec3) -> Option<(Vec3, [i32; 3], [i32; 3])>;
     /// `Entity.isInWater` as `updateFluidInteraction` sets it: some water
@@ -373,6 +390,11 @@ pub trait ProjectileWorld {
     /// column's `drag`, and whether nothing is above it (its surface, where
     /// it throws harder); None for any other block.
     fn bubble_column(&self, _p: [i32; 3]) -> Option<(bool, bool)> {
+        None
+    }
+    /// `entityInside`'s `makeStuckInBlock` for the block at `p`: a cobweb's
+    /// or powder snow's speed multiplier, None for any other block.
+    fn stuck_speed(&self, _p: [i32; 3]) -> Option<Vec3> {
         None
     }
 }
@@ -433,6 +455,7 @@ impl crate::entity_rules::EntityRules for Projectile {
             ProjectileKind::Arrow { .. } | ProjectileKind::Trident => 0.05,
             ProjectileKind::SmallFireball
             | ProjectileKind::LargeFireball { .. }
+            | ProjectileKind::DragonFireball
             | ProjectileKind::WitherSkull { .. } => 0.0,
             ProjectileKind::LlamaSpit => 0.06,
             // `ThrownExperienceBottle.getDefaultGravity` is 0.07.
@@ -456,13 +479,20 @@ pub fn water_bubble_at(position: [f64; 3], movement: [f64; 3]) -> ([f64; 3], [f6
     )
 }
 impl Projectile {
-    /// `Entity.getBoundingBox`: its type's square box standing on its position.
+    /// `Entity.getBoundingBox`: its type's square box standing on its position,
+    /// a wind charge's 0.15 lower (`AbstractWindCharge.makeBoundingBox`).
     pub fn bounds(&self) -> Aabb {
         let (p, half) = (self.position, self.kind.size() / 2.0);
         let height = self.kind.size();
+        let bottom = match self.kind {
+            ProjectileKind::WindCharge | ProjectileKind::BreezeWindCharge => {
+                p.y - f64::from(0.15_f32)
+            }
+            _ => p.y,
+        };
         Aabb::new(
-            Vec3::new(p.x - half, p.y, p.z - half),
-            Vec3::new(p.x + half, p.y + height, p.z + half),
+            Vec3::new(p.x - half, bottom, p.z - half),
+            Vec3::new(p.x + half, bottom + height, p.z + half),
         )
     }
     /// The collision target of the owner, independent of living damage credit.
@@ -507,6 +537,7 @@ impl Projectile {
             previous_pitch: 0.0,
             age: 0,
             stuck: false,
+            stuck_speed: Vec3::ZERO,
             left_owner: false,
             has_been_shot: false,
             shoot_event: None,
@@ -523,18 +554,9 @@ impl Projectile {
             arrow: kind_is_arrow.then(|| Box::new(crate::arrows::ArrowState::new())),
         }
     }
-    /// Entity box from the feet (`EntityType.sized` cube of `kind.size()`).
+    /// Entity box (`EntityType.sized` cube of `kind.size()`), as `bounds`.
     pub fn aabb(&self) -> Aabb {
-        let s = self.kind.size();
-        let h = s * 0.5;
-        Aabb::new(
-            Vec3::new(self.position.x - h, self.position.y, self.position.z - h),
-            Vec3::new(
-                self.position.x + h,
-                self.position.y + s,
-                self.position.z + h,
-            ),
-        )
+        self.bounds()
     }
     /// `Entity.random`.
     pub fn entity_random(&mut self) -> &mut horizon_core::random::LegacyRandom {
@@ -762,6 +784,7 @@ impl Projectile {
             self.kind,
             ProjectileKind::SmallFireball
                 | ProjectileKind::LargeFireball { .. }
+                | ProjectileKind::DragonFireball
                 | ProjectileKind::WitherSkull { .. }
         )
     }
@@ -795,6 +818,7 @@ impl Projectile {
             self.kind,
             ProjectileKind::SmallFireball
                 | ProjectileKind::LargeFireball { .. }
+                | ProjectileKind::DragonFireball
                 | ProjectileKind::WitherSkull { .. }
                 | ProjectileKind::WindCharge
                 | ProjectileKind::BreezeWindCharge
@@ -1314,12 +1338,40 @@ impl Projectile {
         let result = self.tick_inner(w, impact);
         w.block_contacts(self.id as i32, from, self.position, self.bounds());
         self.fire_tick(w);
+        self.stuck_tick(w, from);
         if !base_first {
             self.tick_shoot_event();
         }
         // `WindCharge.tick`: counted down after the tick.
         self.no_deflect_ticks = self.no_deflect_ticks.saturating_sub(1);
         result
+    }
+    /// `applyEffectsFromBlocks` after the tick's move, for its cobwebs and
+    /// powder snow (`makeStuckInBlock`): the last such block its box (deflated
+    /// by 1e-5, `checkInsideBlocks`) met between `from` and where it is now
+    /// sets `stuck_speed`, which the next block's push (`Entity.move`) spends.
+    fn stuck_tick(&mut self, w: &impl ProjectileWorld, from: Vec3) {
+        let end = self.bounds();
+        let start = end.move_by(from.subtract(self.position));
+        let lo = Vec3::new(
+            start.min_position().x.min(end.min_position().x) + 1.0e-5,
+            start.min_position().y.min(end.min_position().y) + 1.0e-5,
+            start.min_position().z.min(end.min_position().z) + 1.0e-5,
+        );
+        let hi = Vec3::new(
+            start.max_position().x.max(end.max_position().x) - 1.0e-5,
+            start.max_position().y.max(end.max_position().y) - 1.0e-5,
+            start.max_position().z.max(end.max_position().z) - 1.0e-5,
+        );
+        for x in lo.x.floor() as i32..=hi.x.floor() as i32 {
+            for y in lo.y.floor() as i32..=hi.y.floor() as i32 {
+                for z in lo.z.floor() as i32..=hi.z.floor() as i32 {
+                    if let Some(stuck) = w.stuck_speed([x, y, z]) {
+                        self.stuck_speed = stuck;
+                    }
+                }
+            }
+        }
     }
     /// The first-tick notification branch of vanilla's base projectile tick.
     /// Arrows own this state in ArrowState and follow their separate tick path.
@@ -1359,6 +1411,7 @@ impl Projectile {
         match self.kind {
             ProjectileKind::SmallFireball
             | ProjectileKind::LargeFireball { .. }
+            | ProjectileKind::DragonFireball
             | ProjectileKind::WitherSkull { .. }
             | ProjectileKind::WindCharge
             | ProjectileKind::BreezeWindCharge => {
@@ -1417,6 +1470,21 @@ impl Projectile {
                 .map(|(_, b)| *b);
             self.left_owner = owner_box
                 .is_none_or(|b| !b.inflate(Vec3::new(1.0, 1.0, 1.0)).contains(self.position));
+        }
+        // DragonFireball.onHit does nothing for its own owner (`ownedBy`): the
+        // selected hit is not replaced by what lies behind it, nothing happens,
+        // and the fireball keeps its motion. AbstractHurtingProjectile.tick
+        // still moves it to the hit's location, as for any hit that is not a
+        // MISS, so it stops there this tick.
+        if impact
+            && self.kind == ProjectileKind::DragonFireball
+            && let Some((who, at, _)) = best
+            && self.owner == Some(who)
+        {
+            self.position = at;
+            self.touching_water = w.in_water(self.bounds());
+            let alive = self.position.y > -128.0 && self.age < 1200;
+            return (alive, Hit::None);
         }
         // LlamaSpit never discards on an entity: `onHitEntity` only hurts, so
         // the spit flies on through what it hit (its block hit discards).
@@ -1523,8 +1591,10 @@ impl Projectile {
             ProjectileKind::Potion(stack, _) => potion_sprite(&stack.item),
             ProjectileKind::ExperienceBottle => "item/experience_bottle",
             ProjectileKind::LlamaSpit => "entity/llama/llama_spit",
-            // Drawn as `WindChargeModel` and `ShulkerBulletModel` by the game.
-            ProjectileKind::WindCharge
+            // Drawn as `WindChargeModel` and `ShulkerBulletModel` by the game,
+            // a dragon fireball as `DragonFireballRenderer`'s billboard.
+            ProjectileKind::DragonFireball
+            | ProjectileKind::WindCharge
             | ProjectileKind::BreezeWindCharge
             | ProjectileKind::ShulkerBullet { .. } => return None,
             ProjectileKind::WitherSkull { dangerous: false } => "entity/wither/wither",
@@ -1893,6 +1963,78 @@ mod tests {
             }
         }
     }
+    // Controls added for the DragonFireball owner-hit adapter
+    // (`DragonFireball.onHit` ignores its own owner, `ownedBy`): a fireball
+    // that has left its owner and flies through the owner's box, with another
+    // mob and a wall at x = 1 behind it.
+    fn dragon_fireball_through(owner: Who) -> (Projectile, (bool, Hit)) {
+        let mut p = Projectile::new(
+            ProjectileKind::DragonFireball,
+            Vec3::new(0.0, 100.5, 0.5),
+            Some(owner),
+        );
+        p.velocity = Vec3::new(0.5, 0.0, 0.0);
+        p.left_owner = true;
+        let boxed = |x: f64| Aabb::new(Vec3::new(x, 100.0, 0.0), Vec3::new(x + 0.2, 101.0, 1.0));
+        let w = Wall(vec![(Who::Mob(7), boxed(0.4)), (Who::Mob(8), boxed(0.8))]);
+        let result = p.tick(&w);
+        (p, result)
+    }
+
+    #[test]
+    fn control_a_dragon_fireball_stops_at_its_owner_and_flies_on() {
+        let (p, (keep, hit)) = dragon_fireball_through(Who::Mob(7));
+        assert!(keep, "no discard");
+        assert_eq!(hit, Hit::None, "no impact");
+        // AbstractHurtingProjectile.tick: the position is the owner hit's
+        // location (the owner's box, at x = 0.4, less the margin), not the free
+        // step of (0.5 + 0.1) × 0.95F; the motion is kept for the next tick.
+        assert!(
+            p.position.x > 0.0 && p.position.x <= 0.4,
+            "{:?}",
+            p.position
+        );
+        assert_eq!((p.position.y, p.position.z), (100.5, 0.5));
+        assert!(p.velocity.x > 0.5, "{:?}", p.velocity);
+    }
+
+    #[test]
+    fn control_a_dragon_fireball_hits_an_entity_that_is_not_its_owner() {
+        let (_, (keep, hit)) = dragon_fireball_through(Who::Mob(9));
+        assert!(!keep);
+        assert!(
+            matches!(
+                hit,
+                Hit::Entity {
+                    who: Who::Mob(7),
+                    ..
+                }
+            ),
+            "{hit:?}"
+        );
+    }
+
+    #[test]
+    fn control_other_kinds_still_hit_their_owner_once_they_left_it() {
+        let mut p = Projectile::new(
+            ProjectileKind::LargeFireball { power: 1 },
+            Vec3::new(0.0, 100.5, 0.5),
+            Some(Who::Mob(7)),
+        );
+        p.velocity = Vec3::new(0.5, 0.0, 0.0);
+        p.left_owner = true;
+        let boxed = Aabb::new(Vec3::new(0.4, 100.0, 0.0), Vec3::new(0.6, 101.0, 1.0));
+        let (keep, hit) = p.tick(&Wall(vec![(Who::Mob(7), boxed)]));
+        assert!(!keep);
+        assert!(matches!(
+            hit,
+            Hit::Entity {
+                who: Who::Mob(7),
+                ..
+            }
+        ));
+    }
+
     /// A wall of blocks across x = 1.
     struct Wall(Vec<(Who, Aabb)>);
     impl ProjectileWorld for Wall {

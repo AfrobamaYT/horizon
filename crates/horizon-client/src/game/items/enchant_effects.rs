@@ -887,7 +887,7 @@ impl Game<'_> {
                     }
                     Who::Mob(id) => {
                         let source = horizon_client::mobs::Damage {
-                            kind: Self::damage_kind(&self.motion.health.damage, kind),
+                            kind: Self::damage_kind(&self.health_resources.damage, kind),
                             attacker: Some(Who::Mob(wearer)),
                             from: Some(from),
                             attacker_species: Some(m.species()),

@@ -41,6 +41,7 @@ impl Game<'_> {
             return false;
         };
         self.teleport_to(t, pos, rotation, true);
+        self.teleport_stops(t);
         true
     }
     /// Sends the entity to `pos` in the level `dimension`
@@ -320,6 +321,7 @@ mod tests {
             assert!(!stand.set_rotation(game, 30.0, 10.0));
             game.others.push(super::super::commands::OtherEntity {
                 knot_check: None,
+                eye: None,
                 join: Default::default(),
                 item_transformation: None,
                 interaction: None,

@@ -522,7 +522,7 @@ impl Game<'_> {
                 self.world.random.triangle(0.0, 1.1485),
             );
             if let Some(h) = self.mobs.iter_mut().find(|m| m.id == other) {
-                h.invulnerable = TRAP_INVULNERABLE;
+                h.invulnerable_time = TRAP_INVULNERABLE;
                 h.extra.tame = true;
                 h.extra.age = 0;
                 h.velocity = Vec3::new(h.velocity.x + dx, h.velocity.y, h.velocity.z + dz);

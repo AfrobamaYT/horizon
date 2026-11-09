@@ -48,6 +48,7 @@ pub(super) struct ThrownTrident {
     pub(super) no_gravity: bool,
     /// `Entity.remainingFireTicks`; on clients, the synchronized on-fire flag.
     pub(super) fire_ticks: i32,
+    pub(super) random: horizon_core::random::LegacyRandom,
     /// Water membership from the preceding `baseTick` (not updated while stuck).
     was_touching_water: bool,
     /// `Entity.random`, used for the extinguishing sound and a breeze's turn.
@@ -61,8 +62,6 @@ pub(super) struct ThrownTrident {
     pub(super) owner: u32,
     /// The guest that threw it (`Projectile.getOwner`); `None` for the host.
     pub(super) guest: Option<u32>,
-    /// `Entity.random`: what a mod's `Projectile.deflect` draws from.
-    pub(super) random: horizon_core::random::LegacyRandom,
 }
 /// A player a trident can return to (its owner) or that can pick it up: this
 /// game's own, or a server's guest in this level, which is all a server has.

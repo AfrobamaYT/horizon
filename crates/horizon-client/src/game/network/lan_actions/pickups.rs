@@ -239,14 +239,13 @@ impl Game<'_> {
             && mod_api::__private::listened(mod_api::HookId::PickupXp);
         if listened {
             let dimension = self.dim.id();
-            let mut value = orb.points();
             let called = self.as_guest(conn, |game| {
                 let player = game.native_acting_id();
                 game.native_pickup_xp(
                     player,
                     dimension,
                     orb.id,
-                    &mut value,
+                    &mut orb.value,
                     &mut orb.count,
                     &mut canceled,
                 );
@@ -254,7 +253,7 @@ impl Game<'_> {
             if called.is_none() || canceled {
                 return;
             }
-            orb.value = value.clamp(1, i32::MAX as u32) as i32;
+
             orb.count = orb.count.max(1);
             self.orbs[index].value = orb.value;
             self.orbs[index].count = orb.count;
@@ -280,7 +279,7 @@ impl Game<'_> {
             0.1,
             pitch,
         );
-        let value = orb.points();
+        let value = orb.value.max(0) as u32;
         self.as_guest(conn, |game| {
             let rest = game.mending(value);
             if rest > 0 {

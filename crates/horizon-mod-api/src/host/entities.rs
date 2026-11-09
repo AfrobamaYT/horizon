@@ -36,13 +36,13 @@ pub trait EntitiesServerHost {
     /// (orbs merged into it, each worth `value`) and `age` (ticks lived; an orb
     /// despawns at 6000); a `None` is left as it is.
     /// False, and nothing written, for an orb not in the server level `dimension`, a
-    /// `value` or `count` of 0, and on a client of a server.
+    /// a `count` of 0, and on a client of a server.
     #[access(WorldOnly)]
     fn set_experience_orb(
         &mut self,
         dimension: &str,
         id: u32,
-        value: Option<u32>,
+        value: Option<i32>,
         count: Option<u32>,
         age: Option<u32>,
     ) -> bool;

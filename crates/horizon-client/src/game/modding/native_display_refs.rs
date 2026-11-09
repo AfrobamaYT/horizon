@@ -584,6 +584,7 @@ mod tests {
         game.options.dedicated = Some(Vec::new());
         game.others.push(OtherEntity {
             knot_check: None,
+            eye: None,
             join: Default::default(),
             item_transformation: None,
             interaction: None,
@@ -610,6 +611,7 @@ mod tests {
             assert_eq!(text.entity(), game.entity(21).unwrap());
             game.others.push(OtherEntity {
                 knot_check: None,
+                eye: None,
                 join: Default::default(),
                 item_transformation: None,
                 interaction: None,

@@ -5525,9 +5525,12 @@ pub(super) mod particle_count_tests {
             // every group without a particle tick.
             game.particles.tracking_emitter(
                 ParticleOptions::simple(ParticleType::Crit),
-                [0.0; 3],
-                1.0,
-                1.0,
+                horizon_client::particles::TrackingTarget::Entity(0),
+                horizon_client::particles::TrackingBody {
+                    feet: [0.0; 3],
+                    width: 1.0,
+                    height: 1.0,
+                },
             );
             assert!(host_clear(game));
             let host: &dyn ClientHost = game;

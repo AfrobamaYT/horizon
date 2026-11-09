@@ -1199,13 +1199,16 @@ impl Game<'_> {
         let a = self.armor_stands.remove(i);
         let at = [a.position.x, a.position.y, a.position.z];
         self.armor_stand_death_drops(a.id, damage_type, causing);
+        let source = self
+            .level_entity(causing as i32)
+            .or(Some(super::commands::Target::Stand(a.id)));
         let (pos, drops) = broken_armor_stand_equipment(a);
         for stack in drops {
             self.pop_resource(pos, stack);
         }
         self.audio
             .play("minecraft:entity.armor_stand.break", Some(at), 1.0, 1.0);
-        self.entity_killed_event(at, false);
+        self.entity_killed_event_by(at, source);
         self.world.modified.insert((pos[0] >> 4, pos[2] >> 4));
     }
     /// `ArmorStand.hurtServer` for a command's damage of `damage_type` from the

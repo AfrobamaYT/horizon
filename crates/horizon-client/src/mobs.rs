@@ -899,6 +899,8 @@ pub enum DamageKind {
     Fireball,
     Explosion,
     Fall,
+    /// `fly_into_wall`: gliding into a horizontal collision.
+    FlyIntoWall,
     FallingBlock,
     FallingStalactite,
     OnFire,
@@ -1110,6 +1112,7 @@ impl Damage {
         matches!(
             self.kind,
             DamageKind::Fall
+                | DamageKind::FlyIntoWall
                 | DamageKind::OnFire
                 | DamageKind::Drown
                 | DamageKind::Magic
@@ -1151,6 +1154,7 @@ impl Damage {
             self.kind,
             DamageKind::Explosion
                 | DamageKind::Fall
+                | DamageKind::FlyIntoWall
                 | DamageKind::OnFire
                 | DamageKind::InFire
                 | DamageKind::Campfire
@@ -1763,6 +1767,9 @@ pub struct Mob {
     /// (`Entity.isTemporarilyInvulnerable`), decremented by the base tick.
     pub invulnerable_time: i32,
     pub death_time: i32,
+    /// `LivingEntity.currentImpulseContextResetGraceTime`: ticks left to keep
+    /// the impulse context after a wind charge or mace impulse.
+    pub impulse_grace_time: i32,
     pub age: u32,
     pub limb_position: f32,
     pub limb_speed: f32,
@@ -2310,6 +2317,12 @@ pub enum MobEvent {
     },
     /// Set another mob's attack target (HurtByTargetGoal alerts).
     SetTarget {
+        mob: u32,
+        target: Who,
+    },
+    /// `HoglinAi.broadcastAttackTarget` to one visible adult hoglin: its
+    /// `setAttackTargetIfCloserThanCurrent` (`piglin::receive_attack_target`).
+    HoglinAttackTarget {
         mob: u32,
         target: Who,
     },
@@ -3789,6 +3802,7 @@ impl Mob {
             invulnerable: 0,
             invulnerable_time: 0,
             death_time: 0,
+            impulse_grace_time: 0,
             age: 0,
             limb_position: 0.0,
             limb_speed: 0.0,
@@ -4079,7 +4093,7 @@ impl Mob {
         // dead enderman), its hurt sound's pitch included.
         let enderman = self.species() == Species::Enderman
             && !self.removed
-            && !(self.invulnerable_flag && !source.kind.bypasses_invulnerability());
+            && !(self.is_invulnerable() && !source.kind.bypasses_invulnerability());
         let hurt = self.hurt_server(level, amount, source, armor_effectiveness);
         if enderman {
             enderman::after_hurt(self, &source);
@@ -4477,7 +4491,7 @@ impl Mob {
         let cloud = self.species() == Species::Enderman
             && direct == "minecraft:area_effect_cloud"
             && !self.removed
-            && !(self.invulnerable_flag && !source.kind.bypasses_invulnerability());
+            && !(self.is_invulnerable() && !source.kind.bypasses_invulnerability());
         let hurt = self.damage(level, amount, source);
         if cloud {
             enderman::teleport_chance(self, &source);

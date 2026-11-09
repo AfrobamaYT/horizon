@@ -4206,8 +4206,8 @@ impl Game<'_> {
         dimension: &str,
         into: u32,
         from: u32,
-        into_value: u32,
-        from_value: u32,
+        into_value: i32,
+        from_value: i32,
         can_merge: &mut bool,
     ) {
         self.fire_experience_orb_can_merge(
@@ -4223,7 +4223,7 @@ impl Game<'_> {
         dimension: &str,
         into: u32,
         from: u32,
-        from_value: u32,
+        from_value: i32,
         canceled: &mut bool,
     ) {
         self.fire_experience_orb_merge(dimension, into, from, from_value, canceled);
@@ -4367,15 +4367,15 @@ impl Game<'_> {
         self.fire_food_level_changed(player, name, from, to, cancel);
     }
     /// Before `player` picks up orb `orb` in `dimension`. Mutations to `value`
-    /// and `count` take effect only when not canceled; value is clamped to
-    /// 1..=i32::MAX and count to at least one.
+    /// and `count` take effect only when not canceled. Value keeps vanilla
+    /// signed integer semantics; count is kept at least one.
     /// Canceling leaves the orb and pickup delay unchanged. Server-side.
     pub(in crate::game) fn native_pickup_xp(
         &mut self,
         player: u128,
         dimension: &str,
         orb: u32,
-        value: &mut u32,
+        value: &mut i32,
         count: &mut u32,
         canceled: &mut bool,
     ) {

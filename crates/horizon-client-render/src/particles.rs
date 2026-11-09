@@ -68,6 +68,8 @@ enum Light {
     AgeEmission4,
     /// `FireflyParticle.getLightCoords`: block light fading in and out, no sky.
     Firefly,
+    /// A Polytone particle's `light_level`: block light at least this level.
+    MinBlock(u8),
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Behaviour {
@@ -379,7 +381,7 @@ pub struct Particle {
     /// `Particle.random`: the particle's own generator (`RandomSource.create()`).
     random: LegacyRandom,
     controller: Option<Box<dyn native::Controller>>,
-    /// A resource pack's Polytone custom particle type, for its `limit`.
+    /// A resource pack's Polytone custom particle type, for its `limit` and `exclusion_radius`.
     polytone_type: Option<std::sync::Arc<str>>,
     /// How a Polytone custom particle's quad turns (`rotation_mode`).
     orientation: polytone_gpu::Orientation,
@@ -950,6 +952,7 @@ impl Particle {
                 let b = (b * b) * (b * b);
                 (sky, (block + (b.clamp(0.0, 1.0) * 240.0) as u32).min(240))
             }
+            Light::MinBlock(level) => (sky, block.max(u32::from(level) * 16)),
             Light::Firefly => (
                 0,
                 (255.0 * fade_amount(self.lifetime_progress(self.age as f32 + partial), 0.1, 0.3))
@@ -1041,6 +1044,27 @@ pub struct QuadSnapshot {
     pub uv: [f32; 4],
     /// `getLightCoords(0.5)` over full sky light and no block light.
     pub light: u32,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum TrackingTarget {
+    LocalPlayer,
+    Entity(i32),
+}
+
+/// The entity position and current dimensions that `getX/Y/Z(double)` use.
+#[derive(Clone, Copy)]
+pub struct TrackingBody {
+    pub feet: [f64; 3],
+    pub width: f64,
+    pub height: f64,
+}
+
+struct TrackingEmitter {
+    options: ParticleOptions,
+    target: Option<TrackingTarget>,
+    body: TrackingBody,
+    remaining: u32,
 }
 
 /// World access for particle physics.
@@ -1137,6 +1161,8 @@ impl PendingParticle {
 pub struct ParticleEngine {
     particles: Vec<Particle>,
     pending: Vec<PendingParticle>,
+    /// Particle spawns deferred until all live particles have ticked.
+    spawned_in_tick: Option<Vec<(ParticleOptions, [f64; 3], [f64; 3])>>,
     /// `ParticleEngine.random`, handed to every `ParticleProvider`.
     random: LegacyRandom,
     /// `ClientLevel.random` as particle constructors use it (`level.getRandom()`).
@@ -1173,8 +1199,7 @@ pub struct ParticleEngine {
     polytone_ticks: u64,
     /// The last frame's additively blended quads (`take_additive`).
     additive: std::sync::Mutex<Vec<Vertex>>,
-    /// `TrackingEmitter`s: particle type, entity feet position, width, height, ticks left.
-    emitters: Vec<(ParticleOptions, [f64; 3], f64, f64, u32)>,
+    emitters: Vec<TrackingEmitter>,
     /// Camera position for the 32-block spawn limiter.
     pub camera: [f64; 3],
     /// The Particles option (`ParticleStatus`): 0 all, 1 decreased, 2 minimal.
@@ -1360,6 +1385,7 @@ impl ParticleEngine {
         let mut engine = Self {
             particles: Vec::new(),
             pending: Vec::new(),
+            spawned_in_tick: None,
             random: LegacyRandom::new(0x7061_7274),
             level_random: LegacyRandom::new(0x6c65_7665),
             spell_random: LegacyRandom::new(0x7370_656c),
@@ -1808,27 +1834,51 @@ impl ParticleEngine {
     pub fn tracking_emitter(
         &mut self,
         options: ParticleOptions,
-        feet: [f64; 3],
-        width: f64,
-        height: f64,
+        target: TrackingTarget,
+        body: TrackingBody,
     ) {
-        self.tracking_emitter_for(options, feet, width, height, 3);
+        self.tracking_emitter_for(options, target, body, 3);
     }
     /// `createTrackingEmitter(entity, type, lifetime)`.
     pub fn tracking_emitter_for(
         &mut self,
         options: ParticleOptions,
-        feet: [f64; 3],
-        width: f64,
-        height: f64,
+        target: TrackingTarget,
+        body: TrackingBody,
         life: u32,
     ) {
-        self.emit(&options, feet, width, height);
+        self.emit(&options, body);
         if life > 1 {
-            self.emitters.push((options, feet, width, height, life - 1));
+            self.emitters.push(TrackingEmitter {
+                options,
+                target: Some(target),
+                body,
+                remaining: life - 1,
+            });
         }
     }
-    fn emit(&mut self, options: &ParticleOptions, feet: [f64; 3], width: f64, height: f64) {
+    /// Vanilla keeps the old entity reference until the emitter expires. Keep
+    /// its final body if it leaves the level, even when the id is paired again.
+    pub fn detach_tracking_target(
+        &mut self,
+        target: TrackingTarget,
+        mut last_body: impl FnMut() -> Option<TrackingBody>,
+    ) {
+        for emitter in &mut self.emitters {
+            if emitter.target == Some(target) {
+                emitter.body = last_body().unwrap_or(emitter.body);
+                emitter.target = None;
+            }
+        }
+    }
+    /// `TrackingEmitter.tick`: the spawn attempts use the tracked entity's
+    /// current feet and dimensions.
+    fn emit(&mut self, options: &ParticleOptions, body: TrackingBody) {
+        let TrackingBody {
+            feet,
+            width,
+            height,
+        } = body;
         for _ in 0..16 {
             let r = &mut self.random;
             let xa = f64::from(r.next_float() * 2.0 - 1.0);
@@ -1836,9 +1886,9 @@ impl ParticleEngine {
             let za = f64::from(r.next_float() * 2.0 - 1.0);
             if xa * xa + ya * ya + za * za <= 1.0 {
                 let p = [
-                    feet[0] + width * xa / 4.0,
+                    feet[0] + width * (xa / 4.0),
                     feet[1] + height * (0.5 + ya / 4.0),
-                    feet[2] + width * za / 4.0,
+                    feet[2] + width * (za / 4.0),
                 ];
                 self.add(options, p, [xa, ya + 0.2, za]);
             }
@@ -1891,8 +1941,18 @@ impl ParticleEngine {
             return;
         }
         let seed = self.seeds.next_long();
-        if let Some(particle) = self.make(options, p, v, seed) {
+        if let Some(mut particle) = self.make(options, p, v, seed) {
             *self.made.entry(options.ty.name()).or_default() += 1;
+            // Resource packs' Polytone particle modifiers (#11486), once as it spawns.
+            if let Some(registry) = &self.polytone
+                && registry.modifies_particles()
+            {
+                let id = match &options.mod_particle {
+                    Some(name) => name.clone(),
+                    None => format!("minecraft:{}", options.ty.name()).into(),
+                };
+                polytone::modify(registry, &id, &mut particle);
+            }
             // The provider has drawn, so rejecting here keeps vanilla's RNG order.
             // shortcut: counts live plus queued particles by scanning instead of
             // vanilla's counted map; use a counter if spore spawning shows in profiles.
@@ -3715,7 +3775,16 @@ impl ParticleEngine {
             }
         }
     }
+    /// A tick where no emitter follows an entity's live body (tests, fixtures, benches).
     pub fn tick(&mut self, level: &ParticleLevel) {
+        self.tick_tracking(level, |_| None);
+    }
+    /// A tick whose tracking emitters read each followed entity's live body.
+    pub fn tick_tracking(
+        &mut self,
+        level: &ParticleLevel,
+        mut tracking_body: impl FnMut(TrackingTarget) -> Option<TrackingBody>,
+    ) {
         self.elder_guardians.retain_mut(|left| {
             *left -= 1;
             *left >= 0
@@ -3730,18 +3799,29 @@ impl ParticleEngine {
         }
         self.tick_starters();
         self.tick_explosions(level);
-        for (options, feet, width, height, life) in std::mem::take(&mut self.emitters) {
-            self.emit(&options, feet, width, height);
-            if life > 1 {
-                self.emitters.push((options, feet, width, height, life - 1));
+        let mut emitters = std::mem::take(&mut self.emitters);
+        emitters.retain_mut(|emitter| {
+            if let Some(target) = emitter.target {
+                match tracking_body(target) {
+                    Some(body) => emitter.body = body,
+                    None => emitter.target = None,
+                }
             }
-        }
+            self.emit(&emitter.options, emitter.body);
+            emitter.remaining -= 1;
+            emitter.remaining > 0
+        });
+        self.emitters = emitters;
         let mut particles = std::mem::take(&mut self.particles);
+        self.spawned_in_tick = Some(Vec::new());
         for p in &mut particles {
             self.tick_particle(p, level);
         }
         particles.retain(|p| !p.removed);
         self.particles = particles;
+        for (options, pos, velocity) in self.spawned_in_tick.take().unwrap_or_default() {
+            self.add(&options, pos, velocity);
+        }
         for pending in std::mem::take(&mut self.pending) {
             match pending {
                 PendingParticle::Starter(starter) => {
@@ -3864,8 +3944,12 @@ impl ParticleEngine {
                     if let Some(frame) = update.frame {
                         self.set_sprite_frame(p, frame);
                     }
-                    for (options, pos, velocity) in update.spawned {
-                        self.add(&options, pos, velocity);
+                    if let Some(later) = &mut self.spawned_in_tick {
+                        later.extend(update.spawned);
+                    } else {
+                        for (options, pos, velocity) in update.spawned {
+                            self.add(&options, pos, velocity);
+                        }
                     }
                 } else {
                     p.remove();
@@ -4809,7 +4893,10 @@ impl ParticleEngine {
                 (pos.as_vec3(), p.quad_size(partial))
             });
             let rotation = if p.orientation != polytone_gpu::Orientation::Camera {
-                let velocity = FVec3::new(
+                // A custom particle's `movement_aligned` quad has its texture's top against
+                // its motion (measured in Java: a light ray rising toward the noon sun hangs
+                // below the leaves it starts at); a GPU particle's has it along its motion.
+                let velocity = -FVec3::new(
                     p.velocity[0] as f32,
                     p.velocity[1] as f32,
                     p.velocity[2] as f32,
@@ -4899,6 +4986,13 @@ impl ParticleEngine {
                 r.v0 + dv * p.uv[3],
             );
             let target: &mut Vec<Vertex> = if p.additive { &mut additive } else { &mut *out };
+            let overlay = if p.additive {
+                crate::gfx::ADDITIVE_PARTICLE_OVERLAY
+            } else if layer {
+                crate::gfx::TRANSLUCENT_PARTICLE_OVERLAY
+            } else {
+                0
+            };
             for rotation in rotations.into_iter().flatten() {
                 for (n, uv) in [
                     ((1.0, -1.0), [u1, v1]),
@@ -4911,11 +5005,7 @@ impl ParticleEngine {
                         normal: [0; 4],
                         pos: v.to_array(),
                         uv,
-                        layer: if layer {
-                            crate::gfx::TRANSLUCENT_PARTICLE_OVERLAY
-                        } else {
-                            0
-                        } | u32::from(hdr_tier(p.ty)) << 16,
+                        layer: overlay | u32::from(hdr_tier(p.ty)) << 16,
                         color,
                         light,
 
@@ -5003,6 +5093,8 @@ const CREEPER: [[f64; 2]; 12] = [
     [0.0, -0.4],
 ];
 
+#[cfg(test)]
+mod tick_bench;
 #[cfg(test)]
 mod tests {
     use super::*;

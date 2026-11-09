@@ -289,6 +289,7 @@ impl Game<'_> {
                         item_transformation: None,
                         interaction: None,
                         knot_check: None,
+                        eye: None,
                         position: horizon_core::geometry::Vec3::new(x, y, z),
                         yaw: 0.0,
                         pitch: 0.0,
@@ -1524,6 +1525,8 @@ impl Game<'_> {
             Some(Target::Other(id))
         } else if self.tnts.iter().any(|t| t.id == id) {
             Some(Target::Tnt(id))
+        } else if self.crystals.iter().any(|c| c.id == id) {
+            Some(Target::Crystal(id))
         } else if self.cushions.iter().any(|c| c.id == id) {
             Some(Target::Cushion(id))
         } else if self.falling.iter().any(|f| f.id == id) {
@@ -1648,6 +1651,7 @@ mod tests {
                 join: Default::default(),
                 item_transformation: None,
                 knot_check: None,
+                eye: None,
                 interaction: None,
                 id: 12,
                 kind: "minecraft:block_display".into(),

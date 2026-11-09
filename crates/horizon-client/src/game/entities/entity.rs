@@ -295,6 +295,9 @@ pub(super) trait Entity: EntityRules {
     /// `Entity.move`, for the kinds that keep the flag: on a server it runs
     /// for every push, sideways ones and those the collision turned away included.
     fn set_piston_on_ground(&mut self, _on_ground: bool) {}
+    /// `Entity.setOnGround` from outside the entity's own move (`/tp`'s
+    /// `TeleportCommand.performTeleport`); kinds that keep no ground flag ignore it.
+    fn set_on_ground(&mut self, _on_ground: bool) {}
     /// `PistonMovingBlockEntity.causeBounce`: a slime block sets the velocity
     /// along the movement axis.
     fn piston_slime_bounce(&mut self, movement: Direction) {
@@ -1153,6 +1156,9 @@ impl Entity for Mob {
         self.fall_distance = 0.0;
     }
 
+    fn set_on_ground(&mut self, on_ground: bool) {
+        self.on_ground = on_ground;
+    }
     /// `Entity.move(MoverType.PISTON, ...)` ends in `setPos`, which `Shulker`
     /// overrides to snap to the block centre.
     fn move_by_piston(&mut self, movement: Vec3) {
@@ -1280,6 +1286,10 @@ impl Entity for ItemEntity {
     fn reset_fall_distance(&mut self) {
         self.fall_distance = 0.0;
     }
+
+    fn set_on_ground(&mut self, on_ground: bool) {
+        self.on_ground = on_ground;
+    }
     fn rotation(&self) -> [f32; 2] {
         self.rotation
     }
@@ -1349,6 +1359,10 @@ impl Entity for ExperienceOrb {
     fn reset_fall_distance(&mut self) {
         // An orb keeps no fall distance here.
     }
+
+    fn set_on_ground(&mut self, on_ground: bool) {
+        self.on_ground = on_ground;
+    }
     fn rotation(&self) -> [f32; 2] {
         self.rotation
     }
@@ -1415,6 +1429,10 @@ impl Entity for ExperienceOrb {
 impl Entity for Boat {
     fn reset_fall_distance(&mut self) {
         // A boat keeps no fall distance here.
+    }
+
+    fn set_on_ground(&mut self, on_ground: bool) {
+        self.on_ground = on_ground;
     }
     fn rotation(&self) -> [f32; 2] {
         [self.yaw, self.pitch]
@@ -1487,6 +1505,10 @@ impl Entity for Boat {
 impl Entity for Minecart {
     fn reset_fall_distance(&mut self) {
         self.fall_distance = 0.0;
+    }
+
+    fn set_on_ground(&mut self, on_ground: bool) {
+        self.on_ground = on_ground;
     }
     fn rotation(&self) -> [f32; 2] {
         [self.yaw, self.pitch]
@@ -1569,6 +1591,10 @@ fn armor_stand_size(stand: &ArmorStand) -> (f64, f64) {
 impl Entity for ArmorStand {
     fn reset_fall_distance(&mut self) {
         self.enchantment_fall_distance = 0.0;
+    }
+
+    fn set_on_ground(&mut self, on_ground: bool) {
+        self.on_ground = on_ground;
     }
     fn rotation(&self) -> [f32; 2] {
         [self.yaw, self.pitch]
@@ -1679,6 +1705,10 @@ impl Entity for ArmorStand {
 impl Entity for PrimedTnt {
     fn reset_fall_distance(&mut self) {
         // Primed TNT keeps no fall distance here.
+    }
+
+    fn set_on_ground(&mut self, on_ground: bool) {
+        self.on_ground = on_ground;
     }
     fn rotation(&self) -> [f32; 2] {
         self.rotation
@@ -1844,6 +1874,7 @@ impl Entity for Projectile {
             }
             "minecraft:fireball"
             | "minecraft:small_fireball"
+            | "minecraft:dragon_fireball"
             | "minecraft:wind_charge"
             | "minecraft:breeze_wind_charge"
             | "minecraft:wither_skull" => game.load_fireball(tag, uuid, player_uuid),
@@ -1873,7 +1904,11 @@ impl Entity for Projectile {
             || horizon_client::entity_nbt::saved_with_chunk(self)
             || matches!(
                 self.kind,
-                K::LargeFireball { .. } | K::SmallFireball | K::WindCharge | K::BreezeWindCharge
+                K::LargeFireball { .. }
+                    | K::SmallFireball
+                    | K::DragonFireball
+                    | K::WindCharge
+                    | K::BreezeWindCharge
             );
         selectable.then_some(Target::Projectile(self.id))
     }

@@ -261,6 +261,7 @@ impl Game<'_> {
             }
             game.prepare_vehicle_transition(root);
             game.teleport_to_in_level(target, at, rotation, [false; 3], turn_riders);
+            game.teleport_stops(target);
             let mounts: Vec<_> = game.mobs.iter().map(|m| (m.id, m.extra.mount)).collect();
             let tree = super::persist::vehicle_tree(root, &mounts);
             let tag = game.vehicle_tree_nbt(root).ok_or("missing vehicle tree")?;

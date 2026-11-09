@@ -2048,6 +2048,7 @@ impl Game<'_> {
             }
             if !skip {
                 self.teleport_to(t, to, None, false);
+                self.teleport_stops(t);
             }
             let closest = points
                 .iter()
