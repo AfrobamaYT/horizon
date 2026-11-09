@@ -59,6 +59,8 @@ pub struct EntityMemory {
     /// Full rejected passenger objects, not resident entities or frozen NBT copies.
     /// Kept with the level while any live object graph still refers to them.
     pub(super) off_level: HashMap<u32, OffLevel>,
+    /// Destruction callbacks already consumed for geometry retained after removal.
+    score_destroyed: HashSet<u32>,
     /// Synched entity-data entries dirtied by forced writes since the last sync.
     pub(super) forced_meta: HashMap<u32, [u64; 4]>,
     /// Entities of types Horizon does not simulate, kept per chunk and
@@ -2114,12 +2116,14 @@ impl Game<'_> {
     /// Forget an entity that left the world (its UUID and loaded compound).
     pub(super) fn forget_entity(&mut self, id: u32) {
         self.persist.uuids.remove(&id);
+        self.persist.score_destroyed.remove(&id);
         self.forget_entity_initialization(mod_api::Holder::Entity(id));
         self.entity_attachments.remove(&id);
         self.persist.raw.remove(&id);
     }
     /// Detach a travelling entity without discarding its in-memory attachments.
     pub(super) fn detach_entity(&mut self, id: u32) {
+        self.persist.score_destroyed.remove(&id);
         self.persist.uuids.remove(&id);
         self.persist.raw.remove(&id);
     }
@@ -2581,6 +2585,16 @@ impl Game<'_> {
     /// tick, so a command in the same tick still sees them; nothing to do
     /// while no entity holds a score or a team.
     pub(super) fn score_destroyed_entities(&mut self) {
+        if !self.persist.off_level.is_empty() {
+            for (&id, object) in &self.persist.off_level {
+                if matches!(object, OffLevel::Mob(mob) if mob.removed)
+                    && self.persist.score_destroyed.insert(id)
+                    && let Some(uuid) = self.persist.uuids.get(&id)
+                {
+                    self.score.board.entity_removed(&uuid_text(*uuid));
+                }
+            }
+        }
         let board = &self.score.board;
         let held: HashSet<[i32; 4]> = board
             .scores
@@ -2597,7 +2611,9 @@ impl Game<'_> {
             .persist
             .uuids
             .iter()
-            .filter(|(_, uuid)| held.contains(*uuid))
+            .filter(|(id, uuid)| {
+                !self.persist.score_destroyed.contains(*id) && held.contains(*uuid)
+            })
             .map(|(&id, &uuid)| (id, uuid))
             .collect();
         if candidates.is_empty() {
@@ -2642,6 +2658,7 @@ impl Game<'_> {
         self.prune_entity_initializations(&alive);
         self.persist.uuids.retain(|id, _| alive.contains(id));
         self.persist.raw.retain(|id, _| alive.contains(id));
+        self.persist.score_destroyed.retain(|id| alive.contains(id));
     }
     /// Trace only edges touching off-level objects. A rejected leaf is owned
     /// by its resident vehicle; an orphaned rejected ancestor can instead be
@@ -5679,45 +5696,66 @@ mod summon_uuid_conflict_tests {
     #[test]
     #[ignore = "needs prepared resources"]
     fn rejected_passenger_does_not_destroy_its_resident_duplicates_scores() {
-        with_game(|game, _| {
-            assert!(summon(
-                game,
-                "score_root",
-                240,
-                &riders(&[pig(
-                    "score_rejected",
+        for score_at_destruction in [false, true] {
+            with_game(|game, _| {
+                assert!(summon(
+                    game,
+                    "score_root",
                     240,
-                    &riders(&[pig("score_leaf", 242, "")])
-                )])
-            ));
-            let root = mob_tagged(game, "score_root")[0];
-            let holder = super::uuid_text([160, 0, 0, 240]);
-            assert!(game.run_command("scoreboard objectives add retained_uuid dummy"));
-            assert!(game.run_command(&format!("scoreboard players set {holder} retained_uuid 7")));
-            assert!(game.run_command("team add retained_uuid"));
-            assert!(game.run_command(&format!("team join retained_uuid {holder}")));
-            game.score_destroyed_entities();
-            assert_eq!(
-                game.score
-                    .board
-                    .score(&holder, "retained_uuid")
-                    .map(|score| score.value),
-                Some(7)
-            );
-            assert!(game.score.board.players_team(&holder).is_some());
+                    &riders(&[pig(
+                        "score_rejected",
+                        240,
+                        &riders(&[pig("score_leaf", 242, "")])
+                    )])
+                ));
+                let root = mob_tagged(game, "score_root")[0];
+                let holder = super::uuid_text([160, 0, 0, 240]);
+                assert!(game.run_command("scoreboard objectives add retained_uuid dummy"));
+                assert!(
+                    game.run_command(&format!("scoreboard players set {holder} retained_uuid 7"))
+                );
+                assert!(game.run_command("team add retained_uuid"));
+                assert!(game.run_command(&format!("team join retained_uuid {holder}")));
+                game.score_destroyed_entities();
+                assert_eq!(
+                    game.score
+                        .board
+                        .score(&holder, "retained_uuid")
+                        .map(|score| score.value),
+                    Some(7)
+                );
+                assert!(game.score.board.players_team(&holder).is_some());
 
-            // The former resident's actual removal still clears its UUID even
-            // while its last geometry is retained for a canceled dismount.
-            let mut removed = game.mob_object(root).unwrap().clone();
-            removed.removed = true;
-            game.persist
-                .off_level
-                .insert(root, super::OffLevel::Mob(removed));
-            game.mobs.retain(|mob| mob.id != root);
-            game.prune_entity_memory();
-            assert!(game.score.board.score(&holder, "retained_uuid").is_none());
-            assert!(game.score.board.players_team(&holder).is_none());
-        });
+                if !score_at_destruction {
+                    game.score.board.entity_removed(&holder);
+                }
+                // The former resident's actual removal still clears its UUID even
+                // while its last geometry is retained for a canceled dismount.
+                let mut removed = game.mob_object(root).unwrap().clone();
+                removed.removed = true;
+                game.persist
+                    .off_level
+                    .insert(root, super::OffLevel::Mob(removed));
+                game.mobs.retain(|mob| mob.id != root);
+                game.prune_entity_memory();
+                assert!(game.score.board.score(&holder, "retained_uuid").is_none());
+                assert!(game.score.board.players_team(&holder).is_none());
+                assert!(
+                    game.run_command(&format!("scoreboard players set {holder} retained_uuid 11"))
+                );
+                assert!(game.run_command(&format!("team join retained_uuid {holder}")));
+                game.score_destroyed_entities();
+                game.prune_entity_memory();
+                assert_eq!(
+                    game.score
+                        .board
+                        .score(&holder, "retained_uuid")
+                        .map(|score| score.value),
+                    Some(11)
+                );
+                assert!(game.score.board.players_team(&holder).is_some());
+            });
+        }
     }
 
     #[test]
