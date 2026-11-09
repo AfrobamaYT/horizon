@@ -3597,6 +3597,8 @@ mod fake_action_tests {
                 "the count doesn't climb"
             );
 
+            let diamonds = Some(ItemStack::new("minecraft:diamond", 5));
+            game.ender_items[0] = diamonds.clone();
             let ender = [2, 64, 0];
             place(game, ender, "minecraft:ender_chest");
             assert_eq!(
@@ -3605,9 +3607,16 @@ mod fake_action_tests {
             );
             assert!(game.ender_open.is_none());
             let key = (ender[0], ender[1], ender[2]);
-            assert!(
-                game.world.block_entities.get(&key).is_none(),
-                "a stand-in chest stayed",
+            match game.world.block_entities.get(&key) {
+                Some(horizon_client::chunk::block_entity::BlockEntity::Chest(items)) => assert!(
+                    items.iter().all(Option::is_none),
+                    "the player's items stayed"
+                ),
+                other => panic!("the ender chest lost its block entity: {other:?}"),
+            }
+            assert_eq!(
+                game.ender_items[0], diamonds,
+                "the server's own ender items changed"
             );
             assert!(!game.lid_openers.contains_key(&key), "its lid stayed open");
         });

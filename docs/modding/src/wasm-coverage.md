@@ -433,6 +433,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Backend::living_owner` | crosses | Wire call |
 | `Backend::living_item_use_remaining` | crosses | Wire call |
 | `Backend::living_used_item_hand` | crosses | Wire call |
+| `Backend::living_is_blocking` | crosses | Wire call |
 | `Backend::living_dimensions_for_pose` | crosses | Wire call |
 | `Backend::living_can_use_portal` | crosses | Wire call |
 | `Backend::living_in_melee_range` | crosses | Wire call |
@@ -1092,8 +1093,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::register_client_commands` | crosses | Wire call |
 | `Hooks::zoom` | crosses | Wire call |
 | `Hooks::minimap` | crosses | Wire call |
-| `Hooks::settings` | crosses | Wire call |
-| `Hooks::settings_click` | crosses | Wire call |
+| `Hooks::setting_changed` | crosses | Wire call |
 | `Hooks::panel_event` | crosses | Wire call |
 | `Hooks::block_entity_container` | crosses | Wire call |
 | `Hooks::register_commands` | crosses | Wire call |

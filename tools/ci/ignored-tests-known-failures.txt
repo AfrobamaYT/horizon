@@ -6,6 +6,7 @@
 # graphics adapter: it runs, and must pass, only where the runner has a Vulkan driver.
 
 # Parity harness steps.
+horizon-client-lib mobs::villager_brain::poi_classification_tests::vanilla_bed_poi_states tools/test_bed_poi_parity.py harness
 horizon-client-lib arrows::client_tests::client_arrow_parity_fixture tools/test_client_arrow_parity.py harness
 horizon-client-lib mobs::shulker::space_tests::shulker_space_parity_fixture tools/test_shulker_space_parity.py harness
 horizon-client-lib save::loot_tests::opened_loot_parity_fixture tools/test_opened_loot_parity.py harness

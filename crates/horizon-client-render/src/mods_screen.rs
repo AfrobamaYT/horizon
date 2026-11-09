@@ -291,7 +291,7 @@ impl ModsScreen {
                 config: installed
                     .native
                     .as_ref()
-                    .is_some_and(|page| !page.buttons.is_empty()),
+                    .is_some_and(|page| !page.settings.is_empty()),
                 note,
             });
         }
@@ -1174,7 +1174,12 @@ mod tests {
         let atlas = atlas();
         let m = Measure(&atlas.font);
         let page = NativePage {
-            buttons: vec!["Open".into()],
+            settings: vec![crate::mod_list::NativeSetting {
+                key: "open".into(),
+                label: "Open".into(),
+                tooltip: None,
+                value: crate::mod_list::NativeSettingValue::Toggle(true),
+            }],
             ..NativePage::default()
         };
         let list = mods(&[

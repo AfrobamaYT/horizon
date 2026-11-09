@@ -262,6 +262,22 @@ impl PackResources {
             environments,
             polytone_particles,
             polytone_post,
+            polytone_colors: Arc::new(horizon_client::polytone_colors::PackColors::from_files(
+                root.source()
+                    .namespaces("assets")
+                    .into_iter()
+                    .map(|namespace| {
+                        let base = format!("assets/{namespace}/polytone");
+                        (
+                            root.source()
+                                .read_to_string(&format!("{base}/color.properties"))
+                                .ok(),
+                            root.source()
+                                .read_to_string(&format!("{base}/colors.json"))
+                                .ok(),
+                        )
+                    }),
+            )),
         }
     }
 }

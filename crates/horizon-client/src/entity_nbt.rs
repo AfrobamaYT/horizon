@@ -17,6 +17,8 @@ use crate::{
 };
 use horizon_core::geometry::Vec3;
 use std::{collections::HashMap, sync::Arc};
+mod saved_attributes;
+
 use {
     horizon_core::nbt::{Compound, Tag},
     horizon_world::{
@@ -772,6 +774,7 @@ pub fn mob_to_nbt(
         map.remove(&horizon_core::nbt::JavaString::from("active_effects"));
     } else {
         let effects = m.extra.effects.iter().map(|effect| {
+            let show_icon = effect.show_icon;
             let (effect, duration, amplifier) = (effect.id, effect.duration, effect.amplifier);
             let shown = !m.extra.hidden_effects.contains(&effect);
             let ambient = m.extra.ambient_effects.contains(&effect);
@@ -787,7 +790,7 @@ pub fn mob_to_nbt(
             if !shown {
                 e.push(("show_particles", Tag::Byte(0)));
             }
-            e.push(("show_icon", Tag::Byte(i8::from(shown))));
+            e.push(("show_icon", Tag::Byte(i8::from(show_icon))));
             if let Some(hidden) = m.extra.effect_chains.iter().find(|e| e.id == effect) {
                 e.push(("hidden_effect", hidden_effect_nbt(hidden)));
             }
@@ -1134,7 +1137,6 @@ pub fn mob_to_nbt(
         }
         "minecraft:zombie_villager" => {
             map.insert("VillagerData".into(), villager_data(m));
-            map.insert("VillagerDataFinalized".into(), Tag::Byte(1));
             let xp = m.extra.trade.as_deref().map_or(0, |t| t.xp);
             map.insert("Xp".into(), Tag::Int(xp));
             put_offers(map, m);
@@ -1448,6 +1450,9 @@ pub fn mob_to_nbt(
         }
         _ => {}
     }
+    if m.species() == S::Frog {
+        crate::mobs::brain::write_frog(m, map);
+    }
     // Bogged.addAdditionalSaveData: whether its mushrooms were sheared.
     if m.species() == S::Bogged {
         map.insert("sheared".into(), Tag::Byte(i8::from(m.extra.sheared)));
@@ -1688,6 +1693,17 @@ fn put_attributes(map: &mut Compound, m: &Mob) {
         Some(Tag::List(l)) => l.clone(),
         _ => Vec::new(),
     };
+    if let Some(attributes) = m.extra.attributes.as_deref() {
+        for attr in crate::mobs::finalize::Attr::ALL {
+            if !attributes
+                .modifiers
+                .iter()
+                .any(|modifier| modifier.attr == attr)
+            {
+                saved_attributes::forget_stale_modifiers(&mut list, attr);
+            }
+        }
+    }
     for (id, entry) in attribute_entries(m) {
         match list
             .iter_mut()
@@ -1762,42 +1778,6 @@ fn put_sulfur_attributes(map: &mut Compound, m: &Mob) {
     }
 }
 /// `Brain.Packed`: the memories finalizeSpawn set, over the saved ones.
-pub fn put_brain(map: &mut Compound, m: &Mob, dimension: &str) {
-    if m.extra.memories.is_empty() {
-        return;
-    }
-    let mut memories = match map.get(&"Brain".into()).and_then(|b| b.get("memories")) {
-        Some(Tag::Compound(c)) => c.clone(),
-        _ => Compound::new(),
-    };
-    for &(name, value, ttl) in &m.extra.memories {
-        let value = match name {
-            "hunted_recently" => Tag::Byte(value as i8),
-            // `Unit` memories save an empty compound.
-            "is_pregnant" => Tag::Compound(Compound::new()),
-            "home" => match m.extra.home {
-                Some(p) => Tag::compound([
-                    ("dimension", string(dimension)),
-                    ("pos", Tag::IntArray(p.to_vec())),
-                ]),
-                None => continue,
-            },
-            _ => Tag::Int(value as i32),
-        };
-        let mut memory = vec![("value", value)];
-        if ttl != i64::MAX {
-            memory.push(("ttl", Tag::Long(ttl)));
-        }
-        memories.insert(
-            format!("minecraft:{name}").as_str().into(),
-            Tag::compound(memory),
-        );
-    }
-    map.insert(
-        "Brain".into(),
-        Tag::compound([("memories", Tag::Compound(memories))]),
-    );
-}
 /// `CustomName`: a text component saved as a string or a `{text: ..}` compound.
 fn custom_name(tag: &Tag) -> Option<String> {
     match tag.get("CustomName")? {
@@ -1810,23 +1790,6 @@ fn custom_name(tag: &Tag) -> Option<String> {
     }
 }
 pub use horizon_client_core::component::name_text;
-/// Mob.finalizeSpawn's follow range bonus in the saved attributes.
-#[cfg(test)]
-pub(crate) fn spawn_bonus(tag: &Tag) -> Option<f64> {
-    let Some(Tag::List(attrs)) = tag.get("attributes") else {
-        return None;
-    };
-    let range = attrs
-        .iter()
-        .find(|a| text(a.get("id")).as_deref() == Some("minecraft:follow_range"))?;
-    let Some(Tag::List(modifiers)) = range.get("modifiers") else {
-        return None;
-    };
-    let bonus = modifiers
-        .iter()
-        .find(|x| text(x.get("id")).as_deref() == Some("minecraft:random_spawn_bonus"))?;
-    float(bonus.get("amount"))
-}
 /// `Mob.readAdditionalSaveData`: negative radii retain the live homePosition.
 /// Used after the command adapter restores runtime AI, as well as fresh load.
 pub fn read_mob_home(m: &mut Mob, tag: &Tag) {
@@ -1979,31 +1942,9 @@ pub fn mob_from_nbt_with_random(
     // `AttributeMap.apply`: the saved permanent modifiers of the attributes the
     // game models (the follow range bonus finalizeSpawn made among them), and
     // the other saved attributes for the live map.
-    if let Some(Tag::List(attrs)) = tag.get("attributes") {
-        use crate::mobs::finalize::{Attr, Op, add_modifier};
-        for a in attrs {
-            let Some(attr) = text(a.get("id")).and_then(|id| {
-                Attr::ALL
-                    .into_iter()
-                    .find(|x| *x != Attr::Armor && x.id() == id)
-            }) else {
-                continue;
-            };
-            let Some(Tag::List(modifiers)) = a.get("modifiers") else {
-                continue;
-            };
-            for x in modifiers {
-                let op = match text(x.get("operation")).as_deref() {
-                    Some("add_value") => Op::AddValue,
-                    Some("add_multiplied_base") => Op::AddMultipliedBase,
-                    Some("add_multiplied_total") => Op::AddMultipliedTotal,
-                    _ => continue,
-                };
-                if let (Some(id), Some(amount)) = (text(x.get("id")), float(x.get("amount"))) {
-                    add_modifier(&mut m, attr, id, amount, op);
-                }
-            }
-        }
+    if let Some(Tag::List(_)) = tag.get("attributes") {
+        use crate::mobs::finalize::Attr;
+        saved_attributes::read_attribute_modifiers(&mut m, tag);
         // An attribute the type lacks is skipped (`AttributeMap.apply`).
         let kind = m.kind.clone();
         m.extra.live.load(tag.get("attributes"), |id| {
@@ -2157,16 +2098,19 @@ pub fn mob_from_nbt_with_random(
                 .get("amplifier")
                 .and_then(horizon_world::datafix::dynamic::as_number)
                 .map_or(0, |n| i32::from(n.byte_value() as u8));
-            m.load_effect(effect, duration, amplifier);
+            // Details.CODEC: `show_particles` defaults to true, `show_icon` to `show_particles`.
+            let particles = number(e.get("show_particles")) != Some(0);
+            let mut stored = crate::mobs::StoredEffect::new(effect, duration, amplifier);
+            stored.show_icon = number(e.get("show_icon")).map_or(particles, |v| v != 0);
+            m.load_effect(stored);
             m.extra.effect_chains.retain(|e| e.id != effect);
             if let Some(hidden) = e.get("hidden_effect") {
                 m.extra
                     .effect_chains
                     .push(hidden_effect_from_nbt(effect, hidden));
             }
-            // Details.CODEC: `show_particles` defaults to true.
             m.extra.hidden_effects.retain(|h| *h != effect);
-            if number(e.get("show_particles")) == Some(0) {
+            if !particles {
                 m.extra.hidden_effects.push(effect);
             }
             // Details.CODEC: `ambient` defaults to false.
@@ -2727,9 +2671,9 @@ pub fn mob_from_nbt_with_random(
         m.extra.left_handed = false;
         m.no_ai = false;
     }
-    // A mob saved mid-death finishes dying; one saved dead is dropped.
-    if m.health <= 0.0 && m.death_time == 0 {
-        return None;
+    // setHealth clamps a negative health to 0; a dead mob keeps its body (tickDeath).
+    if m.health < 0.0 {
+        m.health = 0.0;
     }
     Some(m)
 }
@@ -10460,15 +10404,10 @@ mod mob_effect_amplifier_codec {
         for (value, expected) in cases {
             let raw = input(value.clone());
             let mob = mob_from_nbt(&raw, &types, 7, None).unwrap();
-            assert_eq!(
-                mob.extra.effects,
-                [crate::mobs::StoredEffect::new(
-                    "minecraft:night_vision",
-                    200,
-                    expected
-                )],
-                "{value:?}"
-            );
+            let mut loaded =
+                crate::mobs::StoredEffect::new("minecraft:night_vision", 200, expected);
+            loaded.show_icon = false;
+            assert_eq!(mob.extra.effects, [loaded], "{value:?}");
             for source in [None, Some(&raw)] {
                 let saved = mob_to_nbt(&mob, [158, 0, 0, 1], source, None, |_| None);
                 let effect = saved_effect(&saved);
@@ -10481,6 +10420,43 @@ mod mob_effect_amplifier_codec {
                 let back = mob_from_nbt(&saved, &types, 8, None).unwrap();
                 assert_eq!(back.extra.effects, mob.extra.effects);
             }
+        }
+    }
+
+    /// `MobEffectInstance.Details.CODEC`: `show_icon` is its own field, and a saved effect
+    /// without one takes `show_particles`.
+    #[test]
+    fn a_mobs_show_icon_roundtrips_apart_from_show_particles() {
+        let types = types();
+        let with = |fields: &[(&str, i8)]| {
+            let mut raw = input(None);
+            let mut effect = Tag::compound([
+                ("id", string("minecraft:night_vision")),
+                ("duration", Tag::Int(200)),
+            ]);
+            for (key, value) in fields {
+                put(&mut effect, key, Tag::Byte(*value));
+            }
+            put(&mut raw, "active_effects", Tag::List(vec![effect]));
+            raw
+        };
+        let cases: [(&[(&str, i8)], bool, Option<Tag>); 4] = [
+            (&[("show_icon", 0)], false, None),
+            (
+                &[("show_particles", 0), ("show_icon", 1)],
+                true,
+                Some(Tag::Byte(0)),
+            ),
+            (&[("show_particles", 0)], false, Some(Tag::Byte(0))),
+            (&[], true, None),
+        ];
+        for (fields, icon, particles) in cases {
+            let mob = mob_from_nbt(&with(fields), &types, 7, None).unwrap();
+            assert_eq!(mob.extra.effects[0].show_icon, icon, "{fields:?}");
+            let saved = mob_to_nbt(&mob, [158, 0, 0, 1], None, None, |_| None);
+            let effect = saved_effect(&saved);
+            assert_eq!(effect.get("show_icon"), Some(&Tag::Byte(i8::from(icon))));
+            assert_eq!(effect.get("show_particles"), particles.as_ref());
         }
     }
 
