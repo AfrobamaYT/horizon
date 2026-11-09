@@ -37,8 +37,10 @@ fn add_section_geometry(&self, _context: &RegistrationContext, event: &mut AddSe
 }
 ```
 
-Positions are in blocks from the section's lowest corner, UVs within the sprite, and the sprite a block atlas
-sprite's name. `level` reads the section's chunk and its eight neighbours, as a block tint source's does. The
+Positions are in blocks from the section's lowest corner, each 0 to 16, UVs within the sprite (0 to 1), and the
+sprite a block atlas sprite's name. A renderer's list for a section is taken whole or refused whole, with one log
+line: more than 262144 quads, a corner or UV out of range or not a number, or a sprite the atlas lacks refuses all
+of it, and the section keeps its own blocks. A renderer that panics is asked no more. `level` reads the section's chunk and its eight neighbours, as a block tint source's does. The
 renderer runs on the meshing workers, so it keeps no mutable state and gets no `Host`; it is asked for every
 section the client meshes, also one that holds only air, and returns quickly when it has nothing there. Its quads
 are shaded only by the colour and light it gives them. A section meshes again when its blocks change, when the

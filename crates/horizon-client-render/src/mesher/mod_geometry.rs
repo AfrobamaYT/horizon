@@ -61,9 +61,6 @@ pub(super) fn registered() -> Arc<[Renderer]> {
 /// The most quads one renderer may add to one section (the section-meshing design's per-section
 /// ceiling); a longer list is refused whole.
 const MAX_QUADS: usize = 262_144;
-/// How far outside its section a quad's corner may reach, in blocks: the one-block halo the
-/// section is meshed with.
-const HALO: f32 = 1.0;
 
 /// Asks every renderer for the quads of the section `tints` is set up for, and adds them to `out`
 /// after the section's own blocks. A renderer's list is taken whole or refused whole.
@@ -111,7 +108,8 @@ fn layers(mesher: &Mesher<'_>, quads: &[SectionQuad]) -> Result<Vec<u16>, String
     if quads.len() > MAX_QUADS {
         return Err(format!("{} quads, more than {MAX_QUADS}", quads.len()));
     }
-    let corner = |c: &f32| c.is_finite() && (-HALO..=16.0 + HALO).contains(c);
+    // Inside its own section, so its bounds, culling and unload stay that section's.
+    let corner = |c: &f32| c.is_finite() && (0.0..=16.0).contains(c);
     let uv = |c: &f32| c.is_finite() && (0.0..=1.0).contains(c);
     quads
         .iter()

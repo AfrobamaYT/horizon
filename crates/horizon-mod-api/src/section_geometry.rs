@@ -25,8 +25,8 @@ pub trait SectionGeometry: Send + Sync + 'static {
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: mods build quads with struct literals
 pub struct SectionQuad {
-    /// The corners, in blocks from the section's lowest corner: 0 to 16 inside the section, and at
-    /// most one block outside it.
+    /// The corners, in blocks from the section's lowest corner, each 0 to 16: a quad stays inside
+    /// its section.
     pub positions: [[f32; 3]; 4],
     /// Each corner's texture coordinate within the sprite, 0 to 1.
     pub uvs: [[f32; 2]; 4],
