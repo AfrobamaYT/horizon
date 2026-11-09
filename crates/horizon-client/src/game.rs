@@ -8577,7 +8577,7 @@ impl Game<'_> {
             }
         }
         if self.remote.is_some() {
-            return self.tick_remote();
+            return self.with_residency_tick(Self::tick_remote);
         }
         // Only a server ticks its own world from here: its players are guests, swapped in for
         // their turns (`as_guest`), and the window's player is a client of it.

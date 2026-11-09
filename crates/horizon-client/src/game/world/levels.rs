@@ -830,25 +830,7 @@ impl Game<'_> {
     /// run. The native server tick hook brackets it (`ServerTickStart` before
     /// the first level, `ServerTickEnd` after the last).
     pub(super) fn tick_server(&mut self, paused: bool) -> Result<()> {
-        use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
-        let result = catch_unwind(AssertUnwindSafe(|| self.tick_server_body(paused)));
-        // Expire markers even after an interrupted pass. Preserve the original
-        // native payload if the debug completion assertion also fires.
-        let finished = catch_unwind(AssertUnwindSafe(|| {
-            self.resident_entities.table.get_mut().end_tick()
-        }));
-        match result {
-            Err(payload) => resume_unwind(payload),
-            Ok(result) => {
-                let finished = match finished {
-                    Ok(finished) => finished,
-                    Err(payload) => resume_unwind(payload),
-                };
-                result?;
-                finished
-                    .map_err(|error| format!("unfinished entity residency pass: {error:?}").into())
-            }
-        }
+        self.with_residency_tick(|game| game.tick_server_body(paused))
     }
 
     fn tick_server_body(&mut self, paused: bool) -> Result<()> {
