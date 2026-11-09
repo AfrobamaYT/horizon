@@ -176,18 +176,18 @@ impl Game<'_> {
                 self.collision,
             );
             let tops = self.creatures.projectiles.update(i, |p| {
-            p.bubble_surfaces.clear();
-            p.bubble_columns_since(from, |at| {
-                horizon_client::motion::bubble_column_at(
-                    world,
-                    registry,
-                    facts,
-                    collision,
-                    BlockPos::new(at[0], at[1], at[2]),
-                )
-                .map(|c| (c.drag, c.surface))
-            });
-            std::mem::take(&mut p.bubble_surfaces)
+                p.bubble_surfaces.clear();
+                p.bubble_columns_since(from, |at| {
+                    horizon_client::motion::bubble_column_at(
+                        world,
+                        registry,
+                        facts,
+                        collision,
+                        BlockPos::new(at[0], at[1], at[2]),
+                    )
+                    .map(|c| (c.drag, c.surface))
+                });
+                std::mem::take(&mut p.bubble_surfaces)
             });
             for [x, y, z] in tops {
                 self.bubble_column_particles(BlockPos::new(x, y, z));

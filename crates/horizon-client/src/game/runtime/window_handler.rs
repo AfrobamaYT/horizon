@@ -1818,7 +1818,8 @@ impl Game<'_> {
                             && self.screen == Screen::Playing
                             && self.player.is_some()
                         {
-                            self.perf.frame(elapsed.as_secs_f32() * 1000.0, &frame_spans);
+                            self.perf
+                                .frame(elapsed.as_secs_f32() * 1000.0, &frame_spans);
                             if startup::filling() {
                                 let mut fill: Vec<(&'static str, usize)> =
                                     self.streaming.stages().to_vec();

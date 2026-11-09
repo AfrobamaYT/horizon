@@ -248,7 +248,11 @@ impl StartupMenu {
                 creative,
                 create: Some(Box::new(options)),
             },
-            Action::Connect { address, lan, realm } => PendingWorldEntry::Server {
+            Action::Connect {
+                address,
+                lan,
+                realm,
+            } => PendingWorldEntry::Server {
                 address,
                 name: player_name,
                 cookies: None,
