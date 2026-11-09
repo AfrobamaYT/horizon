@@ -204,6 +204,12 @@ pub(crate) struct Store {
     entry_no: u64,
     last_slot: usize,
     journal: Journal,
+    /// The tombstones whose carrier files were already absent when the
+    /// store opened. Only those may clear: a file deleted during this
+    /// session may not be durably deleted yet on Windows, where the
+    /// directory entry cannot be synced, so its tombstone holds until a
+    /// later open finds the file gone.
+    tombstones_absent_at_open: Vec<(u128, u32)>,
 }
 impl Store {
     /// Reads the world's store and applies the opening table: slot
@@ -247,11 +253,14 @@ impl Store {
             return Err(Refusal::NoValidSlot);
         };
         let slot = record.slot;
+        let journal = record.body.clone();
+        let tombstones_absent_at_open = tombstones_without_files(&data, &journal)?;
         Ok(Opened::Live(Self {
             data,
             entry_no,
             last_slot: slot,
-            journal: record.body.clone(),
+            journal,
+            tombstones_absent_at_open,
         }))
     }
 
@@ -342,7 +351,9 @@ impl Store {
                 self.journal
                     .carriers
                     .retain(|&c| c != (op.uuid, op.generation));
-                self.journal.tombstones.push((op.uuid, op.generation));
+                if !self.journal.tombstoned(op.uuid, op.generation) {
+                    self.journal.tombstones.push((op.uuid, op.generation));
+                }
             }
         }
         self.journal.in_progress = None;
@@ -393,20 +404,6 @@ impl Store {
             .filter_map(|entry| entry.file_name().into_string().ok())
             .collect::<Vec<_>>();
         let mut journal_changed = false;
-        // A tombstone whose file is already gone held a deletion that is
-        // plainly durable; it clears here, and the new slot records that.
-        let mut remaining_tombstones = self.journal.tombstones.clone();
-        for &(uuid, generation) in &self.journal.tombstones.clone() {
-            if !names
-                .iter()
-                .any(|name| parse_carrier_name(name) == Some((uuid, generation)))
-            {
-                remaining_tombstones.retain(|t| *t != (uuid, generation));
-                journal_changed = true;
-                report.resolved_tombstones += 1;
-            }
-        }
-        self.journal.tombstones = remaining_tombstones;
         for name in &names {
             if let Some(op_id) = parse_operation_name(name) {
                 let current = self.journal.in_progress.map(|op| op.op_id);
@@ -421,12 +418,19 @@ impl Store {
                 }
                 durable::remove(&self.data.join(name)).map_err(|e| StoreIoError(e.to_string()))?;
                 if self.journal.tombstoned(uuid, generation) {
-                    self.journal.tombstones.retain(|t| *t != (uuid, generation));
-                    journal_changed = true;
-                    report.resolved_tombstones += 1;
+                    // The deletion happened this session: on Windows it is
+                    // not provably durable yet, so the tombstone holds
+                    // until a later open finds the file gone.
                 } else {
                     report.orphan_carriers += 1;
                 }
+            }
+        }
+        for &(uuid, generation) in &self.tombstones_absent_at_open {
+            if self.journal.tombstoned(uuid, generation) {
+                self.journal.tombstones.retain(|t| *t != (uuid, generation));
+                journal_changed = true;
+                report.resolved_tombstones += 1;
             }
         }
         if journal_changed {
@@ -609,10 +613,6 @@ fn read_slot(slot: usize, bytes: &[u8]) -> SlotRecord {
     if bytes.len() < SLOT_HEADER || bytes[..4] != SLOT_MAGIC {
         return invalid(0);
     }
-    let version = u16::from_le_bytes([bytes[4], bytes[5]]);
-    if version > SLOT_VERSION {
-        return newer(version);
-    }
     let entry_no = u64::from_le_bytes(bytes[6..14].try_into().unwrap());
     let body_len = u32::from_le_bytes(bytes[14..18].try_into().unwrap()) as usize;
     let crc = u32::from_le_bytes(bytes[18..22].try_into().unwrap());
@@ -621,10 +621,18 @@ fn read_slot(slot: usize, bytes: &[u8]) -> SlotRecord {
     if body_len > MAX_SLOT_FILE - SLOT_HEADER || bytes.len() - SLOT_HEADER != body_len {
         return invalid(entry_no);
     }
-    let body = &bytes[SLOT_HEADER..];
-    if crc32fast::hash(body) != crc {
+    // The CRC covers everything after the magic: the version, the record
+    // number, the body length and the body. A single flipped bit anywhere
+    // makes the record invalid — an older record can never flip into
+    // looking newer, and a corrupted version byte is not a schema.
+    if slot_crc(bytes) != crc {
         return invalid(entry_no);
     }
+    let version = u16::from_le_bytes([bytes[4], bytes[5]]);
+    if version > SLOT_VERSION {
+        return newer(version);
+    }
+    let body = &bytes[SLOT_HEADER..];
     match decode_journal(body) {
         Some(journal) => SlotRecord {
             slot,
@@ -651,9 +659,34 @@ fn encode_slot(entry_no: u64, journal: &Journal) -> Result<Vec<u8>, String> {
     bytes.extend_from_slice(&SLOT_VERSION.to_le_bytes());
     bytes.extend_from_slice(&entry_no.to_le_bytes());
     bytes.extend_from_slice(&(body.len() as u32).to_le_bytes());
-    bytes.extend_from_slice(&crc32fast::hash(&body).to_le_bytes());
+    bytes.extend_from_slice(
+        &slot_crc_input(SLOT_VERSION, entry_no, body.len(), &body).to_le_bytes(),
+    );
     bytes.extend_from_slice(&body);
     Ok(bytes)
+}
+
+/// The slot CRC's input: everything after the magic — version, record
+/// number, body length — followed by the body itself.
+fn slot_crc_input(version: u16, entry_no: u64, body_len: usize, body: &[u8]) -> u32 {
+    let mut input = Vec::with_capacity(14 + body.len());
+    input.extend_from_slice(&version.to_le_bytes());
+    input.extend_from_slice(&entry_no.to_le_bytes());
+    input.extend_from_slice(&(body_len as u32).to_le_bytes());
+    input.extend_from_slice(body);
+    crc32fast::hash(&input)
+}
+
+/// The CRC of an encoded slot record, [`slot_crc_input`] over its own
+/// bytes.
+fn slot_crc(bytes: &[u8]) -> u32 {
+    let body_len = u32::from_le_bytes(bytes[14..18].try_into().unwrap()) as usize;
+    slot_crc_input(
+        u16::from_le_bytes([bytes[4], bytes[5]]),
+        u64::from_le_bytes(bytes[6..14].try_into().unwrap()),
+        body_len,
+        &bytes[SLOT_HEADER..SLOT_HEADER + body_len],
+    )
 }
 
 /// The body serializer: `next_op_id`, the in-progress operation, the
@@ -747,6 +780,27 @@ fn decode_journal(body: &[u8]) -> Option<Journal> {
         tombstones,
         carriers,
     })
+}
+
+/// The tombstones whose carrier files are not in `data/` right now.
+/// They are the ones a later cleanup may clear: their deletions predate
+/// this open.
+fn tombstones_without_files(data: &Path, journal: &Journal) -> Result<Vec<(u128, u32)>, Refusal> {
+    if journal.tombstones.is_empty() {
+        return Ok(Vec::new());
+    }
+    let present = fs::read_dir(data)
+        .map_err(|e| Refusal::Io(e.to_string()))?
+        .flatten()
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter_map(|name| parse_carrier_name(&name))
+        .collect::<Vec<_>>();
+    Ok(journal
+        .tombstones
+        .iter()
+        .filter(|tombstone| !present.contains(tombstone))
+        .copied()
+        .collect())
 }
 
 /// Whether `data/` holds any carrier file (operation or carrier), which

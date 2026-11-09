@@ -243,16 +243,11 @@ fn a_torn_newest_slot_falls_back_at_every_offset() {
             other => panic!("cut {cut} must fall back, got {other:?}"),
         }
     }
-    // A flipped byte is caught by the CRC at every offset; a flipped
-    // version byte is a newer schema, so the version field itself stays
-    // untouched by the flip pass.
+    // A flipped byte anywhere — magic, version, record number, length,
+    // CRC or body — makes the record invalid: the CRC covers every header
+    // field after the magic, so a flip can never forge a newer record or
+    // a newer schema.
     for at in 0..newest.len() {
-        // The version bytes flip into a newer schema and the record
-        // number is not covered by the body's CRC — a flip there can be a
-        // legitimate newer record — so both header fields stay untouched.
-        if (4..14).contains(&at) {
-            continue;
-        }
         let mut flipped = newest.clone();
         flipped[at] ^= 0x40;
         fs::write(world.slot_path(1), &flipped).unwrap();
@@ -311,8 +306,27 @@ fn leftover_files_without_slots_refuse_whatever_the_flag() {
 fn a_newer_slot_schema_refuses() {
     let world = WorldDir::new("newer-schema");
     world.first_use();
+    // A corrupted version byte is an invalid record, not a schema: the
+    // CRC covers the version, so the broken slot just loses.
     let mut newer = fs::read(world.slot_path(0)).unwrap();
     newer[4..6].copy_from_slice(&99_u16.to_le_bytes());
+    fs::write(world.slot_path(0), &newer).unwrap();
+    assert_eq!(Store::open(&world.root).unwrap_err(), Refusal::NoValidSlot);
+}
+
+#[test]
+fn a_valid_newer_schema_slot_refuses() {
+    let world = WorldDir::new("newer-valid-crc");
+    world.first_use();
+    // Patch the version to 99 and repair the CRC, so the record itself is
+    // intact and only its schema is newer.
+    let mut newer = fs::read(world.slot_path(0)).unwrap();
+    newer[4..6].copy_from_slice(&99_u16.to_le_bytes());
+    let body_len = u32::from_le_bytes(newer[14..18].try_into().unwrap()) as usize;
+    let mut crc_input = Vec::with_capacity(14 + body_len);
+    crc_input.extend_from_slice(&newer[4..18]);
+    crc_input.extend_from_slice(&newer[22..22 + body_len]);
+    newer[18..22].copy_from_slice(&crc32fast::hash(&crc_input).to_le_bytes());
     fs::write(world.slot_path(0), &newer).unwrap();
     assert_eq!(
         Store::open(&world.root).unwrap_err(),
@@ -371,26 +385,41 @@ fn cleanup_resolves_tombstones_and_deletes_orphans_and_stale_ops() {
     store.begin(OpKind::Disassemble, uuid, generation).unwrap();
     store.commit().unwrap();
     assert!(store.journal().tombstoned(uuid, generation));
-    // The cleanup interrupted by that crash: the tombstone holds while
-    // the file is still there, then clears once its deletion is durable.
+    // The cleanup interrupted by that crash deletes the file, but this
+    // session cannot prove the deletion durable (Windows has no directory
+    // fsync), so the tombstone holds.
     assert_eq!(
         store.cleanup().unwrap(),
+        Cleanup {
+            orphan_carriers: 0,
+            stale_operations: 0,
+            resolved_tombstones: 0,
+        }
+    );
+    assert!(store.journal().tombstoned(uuid, generation));
+    assert!(!world.carrier_path(uuid, generation).exists());
+    // A later open finds the file gone; only now the tombstone clears.
+    drop(store);
+    let Opened::Live(mut reopened) = Store::open(&world.root).unwrap() else {
+        panic!("must reopen");
+    };
+    assert_eq!(
+        reopened.cleanup().unwrap(),
         Cleanup {
             orphan_carriers: 0,
             stale_operations: 0,
             resolved_tombstones: 1,
         }
     );
-    assert!(!store.journal().tombstoned(uuid, generation));
-    assert!(!world.carrier_path(uuid, generation).exists());
+    assert!(!reopened.journal().tombstoned(uuid, generation));
     // A second pass has nothing to do.
-    assert_eq!(store.cleanup().unwrap(), Cleanup::default());
+    assert_eq!(reopened.cleanup().unwrap(), Cleanup::default());
 
     // An orphan carrier file, known to no index and no tombstone.
     let orphan = 0xdead_beef_u128;
     fs::write(world.carrier_path(orphan, 9), b"orphan").unwrap();
     assert_eq!(
-        store.cleanup().unwrap(),
+        reopened.cleanup().unwrap(),
         Cleanup {
             orphan_carriers: 1,
             stale_operations: 0,
@@ -399,11 +428,10 @@ fn cleanup_resolves_tombstones_and_deletes_orphans_and_stale_ops() {
     );
     assert!(!world.carrier_path(orphan, 9).exists());
     // The in-progress operation file survives every cleanup.
-    store.begin(OpKind::Assemble, 0x24, 1).unwrap();
-    store
-        .write_operation(store.journal().in_progress.unwrap().op_id, b"live")
-        .unwrap();
-    assert_eq!(store.cleanup().unwrap(), Cleanup::default());
+    reopened.begin(OpKind::Assemble, 0x24, 1).unwrap();
+    let live = reopened.journal().in_progress.unwrap().op_id;
+    reopened.write_operation(live, b"live").unwrap();
+    assert_eq!(reopened.cleanup().unwrap(), Cleanup::default());
 }
 
 /// `WorldDir` helpers used above.
@@ -579,7 +607,14 @@ fn a_thousand_operations_do_not_grow_the_store() {
             )
             .unwrap();
         store.commit().unwrap();
-        store.cleanup().unwrap();
+        // The tombstone outlives the session that deleted the file; the
+        // next open, like the next server session, is what clears it.
+        drop(store);
+        let Opened::Live(mut reopened) = Store::open(&world.root).unwrap() else {
+            panic!("must reopen after step {step}");
+        };
+        reopened.cleanup().unwrap();
+        store = reopened;
         if step == 1 {
             // By the second round both slots have held a settled, empty
             // journal; that fixed size is the no-growth baseline.
