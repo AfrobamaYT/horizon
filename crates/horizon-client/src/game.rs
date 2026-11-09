@@ -18143,7 +18143,7 @@ pub fn run_with(
     mods::register_map_decoration_types();
     mods::register_range_select_item_model_properties(options.execution_role);
     mods::register_select_item_model_properties(options.execution_role);
-    mods::register_item_tint_sources(options.execution_role);
+    mods::register_resource_sources(options.execution_role);
     mods::register_enchantment_damage_effects();
     mods::register_dimension_transition_screens(options.execution_role);
     mods::register_color_resolvers(options.execution_role);

@@ -1579,6 +1579,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::register_range_select_item_model_property` | crosses | Wire call |
 | `Hooks::register_runtime_sprites` | crosses | Wire call |
 | `Hooks::register_select_item_model_property` | crosses | Wire call |
+| `Hooks::register_sprite_sources` | crosses | Wire call |
 | `Hooks::register_texture_atlases` | crosses | Wire call |
 | `Hooks::render_arm` | crosses | Wire call |
 | `Hooks::render_frame_post` | crosses | Wire call |
@@ -1620,6 +1621,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::play_streaming_source` | crosses | Wire call |
 | `Hooks::sound_engine_load` | crosses | Wire call |
 | `Hooks::spread_players_teleport` | crosses | Wire call |
+| `Hooks::sprite_source` | crosses | Wire call |
 | `Hooks::submit_custom_geometry` | crosses | Wire call |
 | `Hooks::sweep_attack` | crosses | Wire call |
 | `Hooks::tags_updated` | crosses | Wire call |
