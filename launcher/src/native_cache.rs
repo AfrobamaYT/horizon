@@ -33,6 +33,11 @@ pub(crate) struct Cache {
 /// the lock taken through that copy: the next lease or cleanup would read Busy.
 pub(crate) struct Locked(File);
 
+pub(crate) enum LockMode {
+    Shared,
+    Exclusive,
+}
+
 impl Drop for Locked {
     fn drop(&mut self) {
         let _ = self.0.unlock();
@@ -78,11 +83,15 @@ fn lock(path: &Path) -> Result<Locked, Error> {
         .create(true)
         .truncate(false)
         .open(path)?;
-    locked(file)
+    locked(file, LockMode::Exclusive)
 }
 
-pub(crate) fn locked(file: File) -> Result<Locked, Error> {
-    file.try_lock().map_err(|error| match error {
+pub(crate) fn locked(file: File, mode: LockMode) -> Result<Locked, Error> {
+    match mode {
+        LockMode::Shared => file.try_lock_shared(),
+        LockMode::Exclusive => file.try_lock(),
+    }
+    .map_err(|error| match error {
         fs::TryLockError::WouldBlock => Error::Busy,
         fs::TryLockError::Error(error) => Error::Io(error),
     })?;

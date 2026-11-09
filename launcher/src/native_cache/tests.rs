@@ -149,6 +149,7 @@ fn an_active_release_build_prevents_any_deletion_in_the_fast_profile_too() {
     assert!(matches!(cache.clear(), Err(Error::Busy)));
     assert_eq!(fs::read(first).unwrap(), b"first");
     assert_eq!(fs::read(second).unwrap(), b"second");
+    active.unlock().unwrap(); // A parallel fork may still hold its pre-exec descriptor copy.
     drop(active);
     assert_eq!(cache.clear().unwrap(), 11);
     assert!(cargo_lock.exists());
