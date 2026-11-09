@@ -197,25 +197,36 @@ impl Game<'_> {
         let Some(vehicle) = self.mob_object(root) else {
             return;
         };
-        let (position, yaw, width, attachment, vehicle_box) = (
+        let (position, yaw, width, vehicle_box) = (
             vehicle.position,
             vehicle.yaw,
             vehicle.width(),
-            riders::passenger_attachment(vehicle),
             vehicle.bounds(),
         );
-        let children = self.mob_passenger_ids(root);
-        for &id in &children {
-            let Some(m) = self.mob_object_mut(id) else {
+        let children = self.seated_passengers(root);
+        for (seat, &(_, id, player)) in children.iter().enumerate() {
+            if player {
+                continue;
+            }
+            let Some(m) = self.mob_object(id) else {
                 continue;
             };
+            let attachment = Self::mob_passenger_attachment(
+                self.mob_object(root).unwrap(),
+                m,
+                seat,
+                children.len(),
+            );
             let offset = riders::vehicle_attachment(m, width);
+            let m = self.mob_object_mut(id).unwrap();
             m.seated(root, offset, vehicle_box);
             m.position = riders::seat(attachment, offset, position, yaw);
             m.previous = m.position;
         }
-        for child in children {
-            self.snap_mob_passengers(child);
+        for (_, child, player) in children {
+            if !player {
+                self.snap_mob_passengers(child);
+            }
         }
     }
 

@@ -181,6 +181,28 @@ impl Game<'_> {
         }
     }
 
+    /// The vehicle's attachment for this passenger's actual place in getPassengers.
+    /// Shared by ordinary positioning and Entity.teleportPassengers after dismount.
+    pub(super) fn mob_passenger_attachment(
+        vehicle: &horizon_client::mobs::Mob,
+        rider: &horizon_client::mobs::Mob,
+        seat: usize,
+        count: usize,
+    ) -> [f64; 3] {
+        if horizon_client::mobs::camel::is_camel(vehicle.species()) {
+            horizon_client::mobs::camel::passenger_attachment_at(
+                vehicle,
+                seat,
+                count,
+                horizon_client::mobs::drops::is_animal(rider.species()),
+            )
+        } else if vehicle.species() == Species::HappyGhast {
+            riders::happy_ghast_attachment(seat)
+        } else {
+            riders::passenger_attachment(vehicle)
+        }
+    }
+
     /// `Entity.positionRider` for every mob passenger: in its boat, then on
     /// its mob. A server's client places them itself too, as the server sends
     /// no passenger's position.
@@ -265,7 +287,7 @@ impl Game<'_> {
                     continue;
                 };
                 let vehicle = &self.mobs[j];
-                let mut attach = riders::passenger_attachment(vehicle);
+                let mut place = (0, 1);
                 if horizon_client::mobs::camel::is_camel(vehicle.species()) {
                     // Camel.getPassengerAttachmentPoint: the seat follows the
                     // rider's place in `getPassengers` (load order).
@@ -300,10 +322,7 @@ impl Game<'_> {
                             seats.len(),
                         )
                     };
-                    let animal = horizon_client::mobs::drops::is_animal(self.mobs[i].species());
-                    attach = horizon_client::mobs::camel::passenger_attachment_at(
-                        vehicle, seat, count, animal,
-                    );
+                    place = (seat, count);
                 }
                 if vehicle.species() == horizon_client::mobs::Species::HappyGhast {
                     // EntityType.HAPPY_GHAST: four seats, by the rider's place
@@ -320,8 +339,10 @@ impl Game<'_> {
                             .position(|&(_, id, _)| id == self.mobs[i].id)
                             .unwrap_or(seat)
                     };
-                    attach = riders::happy_ghast_attachment(seat);
+                    place = (seat, 1);
                 }
+                let attach =
+                    Self::mob_passenger_attachment(vehicle, &self.mobs[i], place.0, place.1);
                 let (pos, prev) = (vehicle.position, vehicle.previous);
                 let (yaw, prev_yaw) = (vehicle.yaw, vehicle.previous_yaw);
                 let (body, prev_body) = (vehicle.body_yaw, vehicle.previous_body_yaw);
@@ -684,6 +705,74 @@ impl Game<'_> {
 mod off_level_tests {
     use super::*;
     use horizon_client::mobs::Mob;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn dismounted_retained_multiseat_vehicle_snaps_each_frozen_passenger() {
+        for name in ["minecraft:camel", "minecraft:happy_ghast"] {
+            crate::game::native_entity_refs::tests::with_game(|game| {
+                let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+                let kind = game.res.mob_types().get(name).unwrap().clone();
+                let mut root = Mob::new(70, pig.clone(), Vec3::new(10.0, 200.0, 20.0), 0.0);
+                root.removed = true;
+                let mut vehicle = Mob::new(71, kind, root.position, 0.0);
+                vehicle.extra.mount = Some(70);
+                game.mobs.push(root);
+                game.persist
+                    .off_level
+                    .insert(71, crate::game::persist::OffLevel::Mob(vehicle));
+                // Camel.getPassengerAttachmentPoint: two Animals occupy z +0.7/-0.5.
+                // EntityTypes.HAPPY_GHAST: front, left, back, right, all at y +4.
+                let expected: &[(f64, f64)] = if name == "minecraft:camel" {
+                    &[(0.0, 0.7), (0.0, -0.5)]
+                } else {
+                    &[(0.0, 1.7), (-1.7, 0.0), (0.0, -1.7), (1.7, 0.0)]
+                };
+                // Reverse storage order: seats follow vehicle_order, not resident order.
+                for seat in (0..expected.len()).rev() {
+                    let id = 72 + seat as u32;
+                    let mut rider = Mob::new(id, pig.clone(), Vec3::ZERO, 0.0);
+                    rider.age = 19;
+                    rider.extra.mount = Some(71);
+                    rider.extra.vehicle_order = seat as i64;
+                    if name == "minecraft:happy_ghast" && seat == 2 {
+                        game.persist
+                            .off_level
+                            .insert(id, crate::game::persist::OffLevel::Mob(rider));
+                        let mut child = Mob::new(80, pig.clone(), Vec3::ZERO, 0.0);
+                        child.extra.mount = Some(id);
+                        child.age = 23;
+                        game.mobs.push(child);
+                    } else {
+                        game.mobs.push(rider);
+                    }
+                }
+                game.sync_riders();
+                // The normal pass must not overwrite the one-time snap of frozen descendants.
+                game.position_riders();
+                let vehicle = game.mob_object(71).unwrap();
+                assert_eq!(vehicle.extra.mount, None);
+                for (seat, &(x, z)) in expected.iter().enumerate() {
+                    let rider = game.mob_object(72 + seat as u32).unwrap();
+                    assert!((rider.position.x - vehicle.position.x - x).abs() < 1e-6);
+                    assert!((rider.position.z - vehicle.position.z - z).abs() < 1e-6);
+                    assert_eq!(rider.previous, rider.position);
+                    assert_eq!(rider.age, 19);
+                    if name == "minecraft:happy_ghast" {
+                        assert!((rider.position.y - vehicle.position.y - 4.0).abs() < 1e-6);
+                    }
+                }
+                if name == "minecraft:happy_ghast" {
+                    let parent = game.mob_object(74).unwrap();
+                    let child = game.mob_object(80).unwrap();
+                    assert_eq!(child.position.x, parent.position.x);
+                    assert_eq!(child.position.z, parent.position.z);
+                    assert!((child.position.y - parent.position.y - 0.86875).abs() < 1e-6);
+                    assert_eq!(child.age, 23);
+                }
+            });
+        }
+    }
 
     struct CancelDismount;
     #[mod_api::__subscriptions]
