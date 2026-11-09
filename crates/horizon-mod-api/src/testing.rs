@@ -46,12 +46,12 @@ pub use registries::FakeRegistries;
 pub use services::{FakeCommands, FakeMessages};
 
 use crate::item::transaction::{Transaction, TransactionSeal};
+use crate::runtime::Installed;
 use crate::world::ticket_controller::{ControllerInfo, TEST_CONTROLLERS};
 use crate::{
     Backend, BackendMut, BackendMutRef, BackendRef, BlockEntityRef, BlockEntityTypeKey, BlockSide,
-    ClientHost, Commands, EntityRef, FluidStack, Host, Installed, ItemPlace, ItemStack, LevelRef,
-    Messages, Mods, PlayerRef, Players, ServerHost, TEST_MODS, Tag, Text, TicketController,
-    WorldEpoch,
+    ClientHost, Commands, EntityRef, FluidStack, Host, ItemPlace, ItemStack, LevelRef, Messages,
+    Mods, PlayerRef, Players, ServerHost, TEST_MODS, Tag, Text, TicketController, WorldEpoch,
 };
 
 /// The world epoch of every fake's handles.
@@ -81,7 +81,7 @@ pub fn with_mods<R>(mods: Mods, f: impl FnOnce() -> R) -> R {
 /// Production installations are process-wide. Tests isolate them per thread; a worker
 /// using an owning thread's immutable resource graph must see that same installation.
 pub fn inherit_mods<A, R, F: FnOnce(&A) -> R + Send>(f: F) -> impl FnOnce(&A) -> R + Send {
-    let installed = crate::installed();
+    let installed = crate::runtime::installed();
     let parts = crate::parts::installed();
     move |argument| {
         struct Restore(

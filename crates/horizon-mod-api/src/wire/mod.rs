@@ -1226,7 +1226,7 @@ mod tests {
         macro_rules! pair {
             ($module:ident, $value:ty) => {
                 mod $module {
-                    use crate::Wire;
+                    use crate::wire::Wire;
                     #[derive(mod_api::Wire)]
                     struct Text {
                         content: Content,
@@ -1249,7 +1249,7 @@ mod tests {
         macro_rules! shape {
             ($module:ident, $($field:ident: $ty:ty),*) => {
                 mod $module {
-                    use crate::Wire;
+                    use crate::wire::Wire;
                     #[derive(mod_api::Wire)]
                     struct Node { $($field: $ty),* }
                     pub fn hash() -> u64 { Node::layout(&mut vec![]) }
