@@ -216,8 +216,7 @@ impl Game<'_> {
                                 | horizon_client::mobs::Species::Mannequin
                         )
                         && let Some(epoch) = self.native_lifecycle.epoch()
-                    {
-                        if let Err(payload) =
+                        && let Err(payload) =
                             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                                 self.native_mob_despawn(
                                     self.dim.id(),
@@ -227,11 +226,10 @@ impl Game<'_> {
                                     &mut m.despawn,
                                 );
                             }))
-                        {
-                            m.despawn = mod_api::NativeDespawn::default();
-                            dispatch_panic = Some(payload);
-                            break;
-                        }
+                    {
+                        m.despawn = mod_api::NativeDespawn::default();
+                        dispatch_panic = Some(payload);
+                        break;
                     }
                     // ServerLevel.tick: every loaded entity checks despawning, but
                     // only those in entity-ticking chunks (within the simulation

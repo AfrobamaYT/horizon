@@ -1215,6 +1215,7 @@ pub fn main() -> horizon_client::Result<()> {
                     controlling_player_movement: None,
                     nearest_player: player.as_ref().filter(|p| !p.spectator).map(|p| p.position),
                     others: $snapshot,
+                    live_mobs: None,
                     dragon: None,
                     leash_boats: &[],
                     who_lookup: None,
