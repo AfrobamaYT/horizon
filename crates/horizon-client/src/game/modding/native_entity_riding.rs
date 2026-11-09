@@ -399,105 +399,24 @@ impl Game<'_> {
                 })
                 .unwrap_or(false);
         }
-        let vehicle_id = match vehicle {
-            Target::Mob(id)
-            | Target::Boat(id)
-            | Target::Cart(id)
-            | Target::Stand(id)
-            | Target::Other(id) => id,
-            _ => return false,
+        let Some(vehicle_id) = self.native_riding_preconditions(rider, vehicle, force) else {
+            return false;
         };
-        if !matches!(rider, Target::Player | Target::Mob(_))
-            || rider == vehicle
-            || self.native_vehicle_id(rider) == Some(vehicle_id)
-        {
-            return false;
-        }
-        let mut current = Some(vehicle);
-        for _ in 0..64 {
-            let Some(target) = current else { break };
-            if target == rider {
-                return false;
-            }
-            current = self
-                .native_vehicle_id(target)
-                .and_then(|id| self.entity(id))
-                .and_then(|e| self.native_entity_target(e));
-        }
-        if current.is_some() {
-            return false;
-        }
-        if !force {
-            match rider {
-                Target::Player if self.keys.held(horizon_client::actions::Action::Sneak) => {
-                    return false;
-                }
-                Target::Mob(id)
-                    if self.mobs.iter().find(|m| m.id == id).is_none_or(|m| {
-                        m.extra.boarding_cooldown > 0
-                            || matches!(
-                                m.species(),
-                                horizon_client::mobs::Species::Warden
-                                    | horizon_client::mobs::Species::Wither
-                            )
-                    }) =>
-                {
-                    return false;
-                }
-                _ => {}
-            }
-        }
-        match vehicle {
-            Target::Boat(id) => {
-                let Some(index) = self.boats.iter().position(|b| b.id == id) else {
-                    return false;
-                };
-                if self.boat_passengers(id) >= self.boats[index].max_passengers()
-                    || (!force && !self.boat_has_room(index))
-                {
-                    return false;
-                }
-            }
-            Target::Cart(id) => {
-                if !self.carts.iter().any(|cart| cart.id == id)
-                    || self.riding == Some(id)
-                    || self.ridden_by_guest(id)
-                    || !self.seated_passengers(id).is_empty()
-                {
-                    return false;
-                }
-            }
-            Target::Mob(id) => {
-                let Some(mob) = self.mobs.iter().find(|m| m.id == id && m.alive()) else {
-                    return false;
-                };
-                let seats = self.seated_passengers(id);
-                let players = seats
-                    .iter()
-                    .filter(|(_, _, player)| *player)
-                    .count()
-                    .max(usize::from(mob.rider.is_some()));
-                let passengers = players + seats.iter().filter(|(_, _, player)| !*player).count();
-                if !force && !horizon_client::mobs::riders::can_add_passenger(mob, passengers) {
-                    return false;
-                }
-            }
-            Target::Stand(id) | Target::Other(id) => {
-                if self.seat(id).is_none() || (!force && !self.seated_passengers(id).is_empty()) {
-                    return false;
-                }
-            }
-            _ => return false,
-        }
+        let previous_vehicle = self.native_vehicle_id(rider);
         let allowed = match rider {
             Target::Player => self.native_may_board(vehicle_id),
             Target::Mob(id) => self.native_mob_may_ride(id, vehicle_id, true),
             _ => false,
         };
-        if !allowed {
+        if !allowed
+            || self.native_vehicle_id(rider) != previous_vehicle
+            || self
+                .native_riding_preconditions(rider, vehicle, force)
+                .is_none()
+        {
             return false;
         }
-        if self.native_vehicle_id(rider).is_some() {
+        if previous_vehicle.is_some() {
             match rider {
                 Target::Player => self.stop_riding(),
                 Target::Mob(id) => self.dismount_mob(id),
@@ -506,6 +425,13 @@ impl Game<'_> {
             if self.native_vehicle_id(rider).is_some() {
                 return false;
             }
+        }
+        // Dismount dispatch can also discard, remount or fill the target vehicle.
+        if self
+            .native_riding_preconditions(rider, vehicle, force)
+            .is_none()
+        {
+            return false;
         }
         match rider {
             Target::Player => {
@@ -544,6 +470,106 @@ impl Game<'_> {
             _ => return false,
         }
         self.native_vehicle_id(rider) == Some(vehicle_id)
+    }
+
+    /// Validate the captured relationship at each callback boundary.
+    fn native_riding_preconditions(
+        &self,
+        rider: Target,
+        vehicle: Target,
+        force: bool,
+    ) -> Option<u32> {
+        let vehicle_id = match vehicle {
+            Target::Mob(id)
+            | Target::Boat(id)
+            | Target::Cart(id)
+            | Target::Stand(id)
+            | Target::Other(id) => id,
+            _ => return None,
+        };
+        if self.entity(vehicle_id).is_none()
+            || matches!(rider, Target::Mob(id) if self.mobs.iter().all(|m| m.id != id || m.removed))
+            || !matches!(rider, Target::Player | Target::Mob(_))
+            || rider == vehicle
+            || self.native_vehicle_id(rider) == Some(vehicle_id)
+        {
+            return None;
+        }
+        // Intermediate vehicles can be retained objects, not ordinary handles.
+        let mut current = Some(vehicle_id);
+        for _ in 0..=self.mobs.len() + self.persist.off_level.len() + 1 {
+            let Some(id) = current else { break };
+            if rider == Target::Mob(id) {
+                return None;
+            }
+            current = self.native_vehicle_id(Target::Mob(id));
+        }
+        if current.is_some() {
+            return None;
+        }
+        if !force {
+            match rider {
+                Target::Player if self.keys.held(horizon_client::actions::Action::Sneak) => {
+                    return None;
+                }
+                Target::Mob(id)
+                    if self.mobs.iter().find(|m| m.id == id).is_none_or(|m| {
+                        m.extra.boarding_cooldown > 0
+                            || matches!(
+                                m.species(),
+                                horizon_client::mobs::Species::Warden
+                                    | horizon_client::mobs::Species::Wither
+                            )
+                    }) =>
+                {
+                    return None;
+                }
+                _ => {}
+            }
+        }
+        match vehicle {
+            Target::Boat(id) => {
+                let Some(index) = self.boats.iter().position(|b| b.id == id) else {
+                    return None;
+                };
+                if self.boat_passengers(id) >= self.boats[index].max_passengers()
+                    || (!force && !self.boat_has_room(index))
+                {
+                    return None;
+                }
+            }
+            Target::Cart(id) => {
+                if !self.carts.iter().any(|cart| cart.id == id)
+                    || self.riding == Some(id)
+                    || self.ridden_by_guest(id)
+                    || !self.seated_passengers(id).is_empty()
+                {
+                    return None;
+                }
+            }
+            Target::Mob(id) => {
+                let Some(mob) = self.mobs.iter().find(|m| m.id == id && m.alive()) else {
+                    return None;
+                };
+                let seats = self.seated_passengers(id);
+                let players = seats
+                    .iter()
+                    .filter(|(_, _, player)| *player)
+                    .count()
+                    .max(usize::from(mob.rider.is_some()));
+                let passengers = players + seats.iter().filter(|(_, _, player)| !*player).count();
+                if !force && !horizon_client::mobs::riders::can_add_passenger(mob, passengers) {
+                    return None;
+                }
+            }
+            Target::Stand(id) | Target::Other(id) => {
+                if self.seat(id).is_none() || (!force && !self.seated_passengers(id).is_empty()) {
+                    return None;
+                }
+            }
+            _ => return None,
+        }
+        Some(vehicle_id)
     }
 
     /// Attempts to board a vehicle through the shared server mount path.

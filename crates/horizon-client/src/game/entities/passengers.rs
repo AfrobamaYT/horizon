@@ -1328,6 +1328,51 @@ mod nested_vehicle_discard_tests {
             );
         });
     }
+    struct ReparentSelf(Arc<AtomicUsize>);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for ReparentSelf {
+        fn entity_mount(
+            &self,
+            host: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::EntityMountEvent<'_>,
+        ) -> mod_api::Flow {
+            if !event.mounting && event.entity == 72 && event.vehicle == 71 {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                host.entity(71).unwrap().discard(host);
+                let rider = host.entity(72).unwrap();
+                let replacement = host.entity(74).unwrap();
+                assert!(rider.start_riding(host, replacement, true));
+            }
+            mod_api::Flow::Continue
+        }
+    }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn dismount_preserves_its_own_riders_callback_replacement() {
+        let count = Arc::new(AtomicUsize::new(0));
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "reparent_self",
+            Box::new(ReparentSelf(count.clone())),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_vehicle_tree(false, false, |game| {
+                let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
+                game.mobs.push(Mob::new(74, kind, Vec3::ZERO, 0.0));
+                game.dismount_mob(72);
+                assert_eq!(game.mob_object(72).unwrap().extra.mount, Some(74));
+                assert_eq!(game.mob_passenger_ids(74), vec![72]);
+                assert!(
+                    !game
+                        .seated_passengers(71)
+                        .iter()
+                        .any(|(_, id, _)| *id == 72)
+                );
+                assert_eq!(count.load(Ordering::Relaxed), 1);
+                assert!(game.persist.mount_notifications.is_empty());
+            })
+        });
+    }
     struct ReviewKillOnMount;
     #[mod_api::__subscriptions]
     impl mod_api::Hooks for ReviewKillOnMount {

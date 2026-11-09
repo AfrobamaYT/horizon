@@ -21,7 +21,7 @@ impl Game<'_> {
         &mut self,
         key: ChunkKey,
         mut tag: Tag,
-        transferred: Option<super::entity_initialization::TransferredEntityState>,
+        transferred: Option<crate::game::entity_initialization::TransferredEntityState>,
     ) {
         let player_uuid = self.level.player_uuid;
         // A world older builds named by the offline profile names the player that
