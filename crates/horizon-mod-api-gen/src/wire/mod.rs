@@ -57,6 +57,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "PackFinders",
     "ColorResolvers",
     "BlockTintSources",
+    "ParticleProviders",
     "EnchantmentDamageEffects",
     "BlockAndTintGetter",
     "GroundLevel",
@@ -131,6 +132,7 @@ const EXPORTS: &[&str] = &[
     "ClientReloadListener",
     "BiomeColorResolver",
     "BlockTintSource",
+    "ParticleProvider",
     "EnchantmentDamageEffect",
     "GroundStateProvider",
     "PlaceProvider",
@@ -609,6 +611,7 @@ fn layout(surface: &Surface<'_>) -> u64 {
         "group state: 32 words in the std member's horizon_group_state; 0 handler table, 1 cache budget, 2 eviction guard, 3.. eviction callbacks; members allocate through an evicting global allocator",
     );
     feed("static replies: bounded acknowledged ids or uncached text");
+    feed("Hooks::subscribed: Vec<(hook name, i32 priority, bool receive_cancelled)>");
     for method in &surface.methods {
         feed(&format!("{method:?}"));
     }

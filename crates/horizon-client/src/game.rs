@@ -3246,6 +3246,9 @@ struct Game<'a> {
     /// `ServerChunkCache.lastSpawnState` of each level: its spawnable chunks
     /// and each `MobCategory`'s count.
     spawn_counts: HashMap<Dim, (i32, [i32; 8])>,
+    /// The natural spawning policy mods set on each level (`LevelRef::set_spawn_limits`,
+    /// `set_spawn_flags`); a level with none spawns as vanilla. Kept while the world is open.
+    spawn_policies: HashMap<mod_api::DimensionKey, natural_spawning::SpawnPolicy>,
     /// PauseScreen.showPauseMenu (false after F3+Escape).
     pause_menu: bool,
     pause_focus: Option<u8>,
@@ -16834,6 +16837,7 @@ impl<'a> Game<'a> {
             rendered_mobs: Default::default(),
             screen_blur_requested: Default::default(),
             spawn_counts: HashMap::new(),
+            spawn_policies: HashMap::new(),
             pause_menu: true,
             pause_focus: None,
             death_focus: None,
@@ -17655,6 +17659,7 @@ pub fn run_with(
     mods::register_dimension_transition_screens(options.execution_role);
     mods::register_color_resolvers(options.execution_role);
     mods::register_block_tint_sources(options.execution_role);
+    mods::register_particle_providers(options.execution_role);
     mods::freeze_declarations();
     mod_phase.advance(mod_api::__private::ModPhase::Setup)?;
     // Minecraft.<init>: read the last start's flag, then mark this one as not

@@ -72,7 +72,8 @@ jobs:
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: verify
+          # A new key: the dependency-only snapshot under the old one blocked saving this one.
+          shared-key: verify-workspace
           cache-workspace-crates: true
       # The same targets as dyna-ci.yml's verify, built and not run.
       - name: Build verify's test targets
