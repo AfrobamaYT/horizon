@@ -7,12 +7,13 @@ use std::fs::{self, File, Metadata};
 use std::io;
 use std::path::{Path, PathBuf};
 
-const PROFILES: [&str; 2] = ["fast", "release"];
+pub(crate) const PROFILES: [&str; 2] = ["fast", "release"];
 
 #[derive(Debug)]
 pub enum Error {
     Busy,
     UnprovenExclusion,
+    IncompleteUnit,
     UnsupportedFilesystem,
     Unsafe(PathBuf),
     Io(io::Error),
@@ -132,7 +133,7 @@ impl Cache {
         self.process(None, false)
     }
     pub(crate) fn clear(&self) -> Result<u64, Error> {
-        crate::cache_cleanup::Access::UninstrumentedGame.check()?;
+        crate::cache_cleanup::Access::IncompleteGame.check()?;
         self.process(None, true)
     }
     #[cfg(test)]
@@ -143,7 +144,7 @@ impl Cache {
         if self.bytes()? <= limit {
             return Ok(0);
         }
-        crate::cache_cleanup::Access::UninstrumentedGame.check()?;
+        crate::cache_cleanup::Access::IncompleteGame.check()?;
         self.process(Some(limit), true)
     }
 

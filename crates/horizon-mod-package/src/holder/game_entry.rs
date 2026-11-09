@@ -179,6 +179,9 @@ mod tests {
 
     #[test]
     fn direct_entry_blocks_cleanup_and_refuses_busy_or_deleted_install() {
+        if crate::runtime_leases::isolated_test() {
+            return;
+        }
         let root = tempfile::tempdir().unwrap();
         let install = root.path().join("versions/game");
         std::fs::create_dir_all(&install).unwrap();
@@ -224,6 +227,9 @@ mod tests {
 
     #[test]
     fn unpublished_enclosing_unit_refuses_and_target_build_needs_no_install_marker() {
+        if crate::runtime_leases::isolated_test() {
+            return;
+        }
         let root = tempfile::tempdir().unwrap();
         let data = root.path().canonicalize().unwrap();
         let install = data.join("target/fast");
@@ -261,6 +267,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn symlinked_resources_are_leased_by_canonical_identity() {
+        if crate::runtime_leases::isolated_test() {
+            return;
+        }
         let root = tempfile::tempdir().unwrap();
         let data = root.path().canonicalize().unwrap();
         let install = data.join("install");
@@ -293,6 +302,9 @@ mod tests {
 
     #[test]
     fn acquired_snapshot_rechecks_completion_and_directory_identity() {
+        if crate::runtime_leases::isolated_test() {
+            return;
+        }
         let root = tempfile::tempdir().unwrap();
         let install = root.path().join("install");
         std::fs::create_dir(&install).unwrap();

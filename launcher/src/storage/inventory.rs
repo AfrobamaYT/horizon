@@ -209,10 +209,10 @@ impl Entry {
     }
 
     /// The lease integration changes this classification, not policy or deletion code.
-    fn access(&self) -> Access {
+    fn access(&self) -> Result<Access, Error> {
         match self.category {
-            Category::RustCompiler => Access::BuildTools,
-            _ => Access::UninstrumentedGame,
+            Category::RustCompiler => Ok(Access::BuildTools),
+            _ => Access::for_unit(&self.path),
         }
     }
 
@@ -223,7 +223,11 @@ impl Entry {
         let Some(root) = &self.directory else {
             return Ok(());
         };
-        self.access().check()?;
+        let access = self.access()?;
+        if matches!(access, Access::LeasedGame) {
+            return crate::cache_cleanup::delete_game_unit(&self.path);
+        }
+        access.check()?;
         let mut parent = root.try_clone()?;
         for part in self.relative.parent().unwrap_or(Path::new("")).components() {
             parent = parent.open_dir_nofollow(part.as_os_str())?;
@@ -352,6 +356,27 @@ impl Storage {
                 )?;
             }
         }
+        // Interrupted removal deliberately loses completion. Keep the remaining unit
+        // visible for residual reporting and a safe retry, even though installed() omits it.
+        match fs::read_dir(data.path.join("versions")) {
+            Ok(children) => {
+                for child in children {
+                    let child = child?;
+                    if child.file_type()?.is_dir()
+                        && !child.path().join(".installed").is_file()
+                        && !child.file_name().to_string_lossy().starts_with(".trash-")
+                    {
+                        entries.push(Entry::fixed(
+                            &data,
+                            &Path::new("versions").join(child.file_name()),
+                            Category::SpareGameBuilds,
+                        )?);
+                    }
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
         for relative in ["cache/github", "mod-browser", "profile-heads"] {
             add(&mut entries, &data, relative, Category::OtherCaches)?;
         }
@@ -374,7 +399,11 @@ impl Storage {
         let parents: HashSet<_> = entries
             .iter()
             .filter_map(|entry| entry.path.parent().map(Path::to_owned))
-            .chain([self.root.clone(), data.path.clone()])
+            .chain([
+                self.root.clone(),
+                data.path.clone(),
+                data.path.join("versions"),
+            ])
             .collect();
         for parent in parents {
             let root = Root::open(&parent)?;
@@ -517,7 +546,7 @@ impl Storage {
                     Tier::Lru
                 };
                 Ok(Unit {
-                    eligible: entry.access().check().is_ok(),
+                    eligible: entry.access()?.check().is_ok(),
                     bytes: walk(&entry.path, &mut seen)?,
                     last_used,
                     tier,
@@ -550,7 +579,9 @@ impl Storage {
                 };
                 match result {
                     Ok(()) => {}
-                    Err(error @ (Error::Busy | Error::UnprovenExclusion)) => row.kept.push(Kept {
+                    Err(
+                        error @ (Error::Busy | Error::UnprovenExclusion | Error::IncompleteUnit),
+                    ) => row.kept.push(Kept {
                         bytes: allocated_bytes(&entry.path)?,
                         reason: native_mods::cache_error(error),
                     }),
@@ -562,7 +593,7 @@ impl Storage {
                 row.kept.push(Kept {
                     bytes: remaining,
                     reason: if !units[index].eligible {
-                        native_mods::cache_error(Error::UnprovenExclusion)
+                        native_mods::cache_error(entry.access()?.check().err().unwrap_or(Error::UnprovenExclusion))
                     } else {
                         crate::i18n::tr("Space it couldn't free: protected, recently used, or unknown last use.").into()
                     },
@@ -644,7 +675,9 @@ impl Storage {
                 };
                 match result {
                     Ok(()) => {}
-                    Err(error @ (Error::Busy | Error::UnprovenExclusion)) if retain => {
+                    Err(
+                        error @ (Error::Busy | Error::UnprovenExclusion | Error::IncompleteUnit),
+                    ) if retain => {
                         let row = rows
                             .iter_mut()
                             .find(|row| row.category == entry.category)
@@ -655,7 +688,7 @@ impl Storage {
                         });
                         // A busy build may be using subsequent build-tool units too. Stop
                         // this clear attempt rather than deleting more after contention.
-                        if matches!(entry.access(), Access::BuildTools) {
+                        if matches!(entry.access()?, Access::BuildTools) {
                             break;
                         }
                     }
@@ -854,10 +887,12 @@ mod eviction_tests {
         fs::create_dir_all(&path).unwrap();
         let home = crate::storage::tests::Home(path.canonicalize().unwrap());
         for (folder, gib) in [
-            ("rust/old", 16),
+            ("rust/old", 12),
             ("cargo", 12),
             ("tmp", 4),
-            ("native/patched/proof", 8),
+            ("native/patched/proof", 4),
+            ("versions/native-leased", 4),
+            ("versions/native-legacy", 4),
         ] {
             let file = home.seed(&format!("{folder}/payload"));
             assert!(std::process::Command::new("fallocate")
@@ -867,8 +902,29 @@ mod eviction_tests {
                 .unwrap()
                 .success());
         }
+        assert_eq!(backend::data_dir().canonicalize().unwrap(), home.0);
+        let leased = home.0.join("versions/native-leased");
+        let legacy = home.0.join("versions/native-legacy");
+        for directory in [&leased, &legacy] {
+            fs::write(directory.join(".installed"), b"").unwrap();
+        }
+        fs::write(
+            leased.join(backend::CLIENT),
+            horizon_mod_package::holder::CAPABILITY,
+        )
+        .unwrap();
+        fs::write(legacy.join(backend::CLIENT), b"pre-holder game").unwrap();
+        crate::run_leases::publish(&leased).unwrap();
+        let registry = horizon_mod_package::runtime_leases::Registry::existing(&home.0).unwrap();
+        let _game = registry
+            .lock(
+                &horizon_mod_package::runtime_leases::open_directory(&leased).unwrap(),
+                horizon_mod_package::locks::LockMode::Shared,
+            )
+            .unwrap();
         let storage = Storage::at(&home.0).unwrap();
         assert!(matches!(Cache::acquire(&home.0), Err(Error::Busy)));
+        let before = allocated_bytes(&home.0).unwrap();
         let now = std::time::SystemTime::now();
         let first = storage.evict_inventory(now).unwrap();
         let later = now + std::time::Duration::from_secs(8 * 86400);
@@ -879,18 +935,19 @@ mod eviction_tests {
             .chain(&second.rows)
             .map(|row| row.freed_bytes)
             .sum();
-        let residual: u64 = second.rows.iter().map(|row| row.remaining_bytes).sum();
-        println!(
-            "before={} freed={freed} residual={residual}",
-            first.total_bytes
-        );
-        assert!(freed >= 32 * (1 << 30));
-        assert!(residual >= 8 * (1 << 30));
+        let residual = allocated_bytes(&home.0).unwrap();
+        println!("allocated_before={before} inventoried_before={} freed={freed} allocated_residual={residual}", first.total_bytes);
+        assert!(before >= 40 * (1 << 30));
+        assert!(freed >= 28 * (1 << 30));
+        assert!(residual >= 12 * (1 << 30));
+        assert!(residual < 25 * (1 << 30));
+        assert!(leased.join("payload").exists());
+        assert!(legacy.join("payload").exists());
         assert!(home.0.join("native/patched/proof/payload").exists());
         assert!(second.rows.iter().any(|row| row
             .kept
             .iter()
-            .any(|kept| kept.bytes >= 8 * (1 << 30) && !kept.reason.is_empty())));
+            .any(|kept| kept.bytes >= 4 * (1 << 30) && !kept.reason.is_empty())));
         assert!(matches!(Cache::acquire(&home.0), Err(Error::Busy)));
     }
 }

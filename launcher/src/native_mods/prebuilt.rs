@@ -252,6 +252,7 @@ pub(super) fn fetch(
             &[("name", &name)],
         ));
     }
+    let _publication = crate::run_leases::installation().map_err(super::cache_error)?;
     let unpacked = partial.join("game");
     // `unpack_in` writes inside a folder that exists.
     fs::create_dir_all(&unpacked).map_err(|e| e.to_string())?;

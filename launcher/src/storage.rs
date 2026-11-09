@@ -125,10 +125,10 @@ impl BuildCache {
         }
     }
 
-    fn access(self) -> Access {
+    fn access(self, path: &Path) -> Result<Access, Error> {
         match self {
-            Self::Rust | Self::Cargo | Self::Scratch => Access::BuildTools,
-            _ => Access::UninstrumentedGame,
+            Self::Rust | Self::Cargo | Self::Scratch => Ok(Access::BuildTools),
+            _ => Access::for_unit(path),
         }
     }
 
@@ -187,7 +187,8 @@ impl Storage {
 
     /// Detach on the same volume before removal. Failed removals remain for the next sweep.
     pub fn clear(&self, cache: BuildCache) -> Result<u64, Error> {
-        self.trash(&self.path(cache)?, cache.access())
+        let path = self.path(cache)?;
+        self.trash(&path, cache.access(&path)?)
     }
 
     pub fn clear_targets(&self) -> Result<u64, Error> {
@@ -212,6 +213,10 @@ impl Storage {
         let bytes = allocated_bytes(path)?;
         if !path.try_exists()? {
             return Ok(0);
+        }
+        if matches!(access, Access::LeasedGame) {
+            crate::cache_cleanup::delete_game_unit(path)?;
+            return Ok(bytes.saturating_sub(allocated_bytes(path)?));
         }
         access.check()?;
         let relative = path
@@ -244,13 +249,8 @@ impl Storage {
         for entry in self.directory.entries()? {
             let entry = entry?;
             if entry.file_name().to_string_lossy().starts_with(".trash-") {
-                // Detached leftovers have lost their category; absence of a game is not proof.
-                Access::UninstrumentedGame.check()?;
-                Self::clear_entry(
-                    &self.directory,
-                    &self.directory,
-                    Path::new(&entry.file_name()),
-                )?;
+                // Detached leftovers still need capability proof and exclusive ownership.
+                crate::cache_cleanup::delete_game_unit(&self.root.join(entry.file_name()))?;
             }
         }
         Ok(())
