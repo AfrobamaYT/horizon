@@ -1448,6 +1448,7 @@ mod pickup_tests {
     }
 
     #[test]
+    #[ignore = "requires prepared entity resources in .local/horizon-client"]
     fn carry_crouch_advances_only_after_living_step() {
         assert!(crate::mobs::world::with_test_world(&[], |w, _| {
             let mut world = w.clone();
@@ -1465,6 +1466,7 @@ mod pickup_tests {
     }
 
     #[test]
+    #[ignore = "requires prepared entity resources in .local/horizon-client"]
     fn carry_no_ai_keeps_sleeping_in_water_and_animates() {
         assert!(crate::mobs::world::with_test_world(&[], |w, _| {
             let mut f = fox();
