@@ -5189,6 +5189,144 @@ mod summon_uuid_conflict_tests {
         });
     }
 
+    /// Official 26.3 observations from tools/observe_summon_uuid.py: the
+    /// unique grandchild is resident, but its rejected vehicle disconnects it
+    /// from level ticking. Saving retains the object graph, not a stale NBT copy.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    fn a_resident_below_an_offlevel_passenger_round_trips_and_resumes_after_dismount() {
+        with_game(|game, _| {
+            let baby = |tag: &str, n: i32, passengers: &str| {
+                pig(tag, n, passengers).replace("NoAI:1b", "Age:-1000,NoAI:1b")
+            };
+            let leaf = baby("h160_grandchild", 202, "");
+            let child = baby("h160_rejected", 200, &riders(&[leaf]));
+            let root = baby("h160_tick_root", 200, &riders(&[child]));
+            assert!(game.run_command(&format!("summon minecraft:pig 4.5 200 4.5 {root}")));
+            assert!(mob_tagged(game, "h160_rejected").is_empty());
+            assert_eq!(live(game, 200).len(), 1);
+            assert_eq!(live(game, 202).len(), 1);
+            for _ in 0..5 {
+                game.tick_world(true).unwrap();
+            }
+            let root = mob_tagged(game, "h160_tick_root")[0];
+            let grandchild = mob_tagged(game, "h160_grandchild")[0];
+            assert_eq!(
+                game.command_target_nbt(Target::Mob(root))
+                    .unwrap()
+                    .get("Age"),
+                Some(&Tag::Int(-995))
+            );
+            assert_eq!(
+                game.command_target_nbt(Target::Mob(grandchild))
+                    .unwrap()
+                    .get("Age"),
+                Some(&Tag::Int(-1000))
+            );
+            let vehicle = mount(game, grandchild).expect("off-level vehicle remains attached");
+            assert!(game.level_entity(vehicle as i32).is_none());
+
+            // The real chunk write/read path must reconstruct resident descendants
+            // without accidentally admitting their rejected parent.
+            let chunks = game.entity_chunks(&HashSet::from([(0, 0)]), true);
+            assert!(game.mobs.is_empty());
+            game.world.loaded_entities.extend(chunks);
+            game.spawn_loaded_entities();
+            assert!(mob_tagged(game, "h160_rejected").is_empty());
+            assert_eq!(live(game, 200).len(), 1);
+            assert_eq!(live(game, 202).len(), 1);
+            assert!(
+                game.run_command("data merge entity @e[tag=h160_grandchild,limit=1] {Health:7.0f}")
+            );
+            let root = mob_tagged(game, "h160_tick_root")[0];
+            let saved = game.command_target_nbt(Target::Mob(root)).unwrap();
+            let Some(Tag::List(children)) = saved.get("Passengers") else {
+                panic!("rejected passenger was lost")
+            };
+            assert_eq!(children.len(), 1);
+            assert_eq!(children[0].get("UUID"), uuid(200).as_ref());
+            let Some(Tag::List(grandchildren)) = children[0].get("Passengers") else {
+                panic!("resident descendant was lost")
+            };
+            assert_eq!(grandchildren.len(), 1);
+            assert_eq!(
+                grandchildren[0].get("Health"),
+                Some(&Tag::Float(7.0f32.to_bits()))
+            );
+            assert_eq!(grandchildren[0].get("Age"), Some(&Tag::Int(-1000)));
+
+            assert!(game.run_command("ride @e[tag=h160_grandchild,limit=1] dismount"));
+            for _ in 0..5 {
+                game.tick_world(true).unwrap();
+            }
+            let grandchild = mob_tagged(game, "h160_grandchild")[0];
+            assert_eq!(mount(game, grandchild), None);
+            assert_eq!(
+                game.command_target_nbt(Target::Mob(grandchild))
+                    .unwrap()
+                    .get("Age"),
+                Some(&Tag::Int(-995))
+            );
+            let saved = game.command_target_nbt(Target::Mob(root)).unwrap();
+            let Some(Tag::List(children)) = saved.get("Passengers") else {
+                panic!("rejected passenger was lost on dismount")
+            };
+            assert!(children[0].get("Passengers").is_none());
+        });
+    }
+
+    /// Official 26.3 teleports passengers before their copied vehicle. The
+    /// previously rejected child takes the UUID, so the copied root is off-level.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    fn dimension_travel_admits_the_duplicate_child_before_the_copied_root() {
+        with_game(|game, _| {
+            game.world_root = game.save.root.clone();
+            game.enter_level(super::super::Dim::Nether).unwrap();
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            game.block_ticks
+                .add_empty_chunk(ChunkPos::new(0, 0))
+                .unwrap();
+            assert!(game.run_command("forceload add 0 0"));
+            game.enter_level(super::super::Dim::Overworld).unwrap();
+            let baby = |tag: &str, n: i32, passengers: &str| {
+                pig(tag, n, passengers).replace("NoAI:1b", "Age:-1000,NoAI:1b")
+            };
+            let grandchild = baby("h160_travel_grandchild", 222, "");
+            let child = baby("h160_travel_rejected", 220, &riders(&[grandchild]));
+            let root = baby("h160_travel_root", 220, &riders(&[child]));
+            assert!(game.run_command(&format!("summon minecraft:pig 4.5 200 4.5 {root}")));
+            for _ in 0..5 {
+                game.tick_world(true).unwrap();
+            }
+            assert!(game.run_command("execute as @e[tag=h160_travel_root,limit=1] in minecraft:the_nether run teleport @s 4.5 200 4.5"));
+            assert!(mob_tagged(game, "h160_travel_root").is_empty());
+            assert!(mob_tagged(game, "h160_travel_rejected").is_empty());
+            assert!(mob_tagged(game, "h160_travel_grandchild").is_empty());
+            game.enter_level(super::super::Dim::Nether).unwrap();
+            assert!(mob_tagged(game, "h160_travel_root").is_empty());
+            let child = mob_tagged(game, "h160_travel_rejected");
+            let grandchild = mob_tagged(game, "h160_travel_grandchild");
+            assert_eq!(child.len(), 1);
+            assert_eq!(grandchild.len(), 1);
+            assert_eq!(live(game, 220), child);
+            assert_eq!(mount(game, grandchild[0]), Some(child[0]));
+            let copied_root = mount(game, child[0]).expect("copied root object remains attached");
+            assert!(game.level_entity(copied_root as i32).is_none());
+            for _ in 0..5 {
+                game.tick_world(true).unwrap();
+            }
+            for id in [child[0], grandchild[0]] {
+                assert_eq!(
+                    game.command_target_nbt(Target::Mob(id)).unwrap().get("Age"),
+                    Some(&Tag::Int(-1000))
+                );
+            }
+        });
+    }
+
     /// Known unfixed (#11807 is a partial repair): vanilla adds a tree's
     /// members in order and skips one whose UUID an earlier member took; that
     /// one still rides its vehicle and saves under its Passengers. Horizon has
