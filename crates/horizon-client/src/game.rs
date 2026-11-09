@@ -7008,8 +7008,8 @@ impl Game<'_> {
         );
         let on_ground = wanted.y < 0.0 && movement.y != wanted.y;
         f.on_ground = on_ground;
-        if next.y < f.position.y {
-            f.fall_distance += f.position.y - next.y;
+        if movement.y < 0.0 {
+            f.fall_distance -= f64::from(movement.y as f32);
         }
         let from = f.position;
         f.position = next;
