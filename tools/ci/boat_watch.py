@@ -8,6 +8,17 @@ from datetime import datetime, timezone
 from boat_health import api, health_reason
 
 
+def recovery_reason(jobs, now):
+    """Do not replace a run that has already reported a genuine failure."""
+    if any(job.get("conclusion") == "failure" and any(
+        step.get("started_at") and step.get("name") != "Set up job"
+        for step in job.get("steps", [])
+    ) for job in jobs):
+        return ""
+    targets = [job for job in jobs if job["name"] in ("lint", "verify")]
+    return health_reason(targets, now)
+
+
 def main():
     repo = os.environ["GITHUB_REPOSITORY"]
     run = os.environ["GITHUB_RUN_ID"]
@@ -16,7 +27,7 @@ def main():
     while time.monotonic() < deadline:
         jobs = api(f"repos/{repo}/actions/runs/{run}/attempts/{attempt}/jobs?per_page=100")["jobs"]
         targets = [job for job in jobs if job["name"] in ("lint", "verify")]
-        reason = health_reason(targets, datetime.now(timezone.utc))
+        reason = recovery_reason(jobs, datetime.now(timezone.utc))
         if reason:
             # Dispatch before cancelling: a refused dispatch must not destroy this run.
             subprocess.run([
