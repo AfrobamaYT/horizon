@@ -1284,15 +1284,18 @@ impl Game<'_> {
     /// window's player is drawn only in third person (and F5 front view); an
     /// invisible player is not asked. `draw` is the frame of `native_mob_submit`:
     /// at the player's feet, turned with the body. The name tag, shadow,
-    /// flames and glowing outline draw as before.
+    /// flames and glowing outline draw as before. `hidden.hide(part)` leaves only that part out of
+    /// the vanilla model this frame (after Skin Customization; its children go with it, its
+    /// armour, held items and other layers, the cape among them, keep theirs).
     pub(in crate::game) fn native_player_submit(
         &self,
         player: &NativeMobRender<'_>,
         who: &NativePlayerRender<'_>,
         draw: &mut BlockEntityDraw,
+        hidden: &mut HiddenParts,
         drawn: &mut bool,
     ) {
-        self.fire_player_submit(player, who, draw, drawn);
+        self.fire_player_submit(player, who, draw, hidden, drawn);
     }
     /// A layer on every mob and player in view, once a frame after its
     /// vanilla model and layers (`EntityRenderersEvent.AddLayers`, with

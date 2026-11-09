@@ -1,2 +1,2 @@
 mod posed_parts;
-pub use posed_parts::{HumanoidPart, PosedPart, PosedParts};
+pub use posed_parts::{HiddenParts, HumanoidPart, PosedPart, PosedParts};

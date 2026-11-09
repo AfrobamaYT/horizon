@@ -70,6 +70,40 @@ impl HumanoidPart {
     }
 }
 
+/// The humanoid parts a mod hid from the vanilla player model this frame (`player_submit`): a
+/// set over [`HumanoidPart::ALL`], nothing allocated. A hidden part takes its children with it
+/// (the hat goes with the head); the cape is a layer of its own and stays.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, horizon_mod_api_macros::Wire)]
+#[non_exhaustive]
+pub struct HiddenParts {
+    /// One bit per part, at its index in [`HumanoidPart::ALL`].
+    pub bits: u16,
+}
+
+impl HiddenParts {
+    /// Leaves `part` out of the vanilla model this frame.
+    pub fn hide(&mut self, part: HumanoidPart) {
+        self.bits |= 1 << part as u16;
+    }
+
+    /// Whether `part` is hidden.
+    pub fn contains(self, part: HumanoidPart) -> bool {
+        self.bits & (1 << part as u16) != 0
+    }
+
+    /// No part is hidden.
+    pub fn is_empty(self) -> bool {
+        self.bits == 0
+    }
+
+    /// The hidden parts, in [`HumanoidPart::ALL`]'s order.
+    pub fn iter(self) -> impl Iterator<Item = HumanoidPart> {
+        HumanoidPart::ALL
+            .into_iter()
+            .filter(move |part| self.contains(*part))
+    }
+}
+
 /// One humanoid part as posed this frame: its pose relative to its parent, and whether it draws
 /// (`ModelPart.visible`, after Skin Customization).
 #[derive(Clone, Copy, Debug, PartialEq, horizon_mod_api_macros::Wire)]

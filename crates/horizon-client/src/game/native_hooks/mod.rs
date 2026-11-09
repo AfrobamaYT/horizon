@@ -86,8 +86,8 @@ use mod_api::{
     NativeItemClick, NativeItemDrop, NativeTriState, NeighbourUpdate, TooltipElement, UsePhase,
 };
 use mod_api::{
-    BlockKey, DebugEntry, DebugRenderer, EffectKey, GuiLayer, MapDecorationType, PosedParts,
-    RuntimeSprite, TaskId,
+    BlockKey, DebugEntry, DebugRenderer, EffectKey, GuiLayer, HiddenParts, MapDecorationType,
+    PosedParts, RuntimeSprite, TaskId,
 };
 use mod_api::{
     CameraType, Identifier, MobRef, NativeDespawn, NativePermissionLevel, SoundPlay, SoundRef,
