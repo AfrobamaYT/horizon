@@ -1,6 +1,5 @@
 use super::*;
 use crate::Sentiment;
-use horizon_world::attributes::Definition;
 
 /// An attribute type a mod declares, as the game reads it when it grows the
 /// attribute catalog (`Catalog::with_attributes`, #812).
@@ -11,8 +10,12 @@ pub struct AttributeDeclaration {
     pub mod_id: String,
     /// The attribute's namespaced id (`mymod:mana`).
     pub id: String,
-    /// The attribute's definition: default and bounds.
-    pub definition: Definition,
+    /// The attribute's default value, inside `[min, max]`.
+    pub default: f64,
+    /// The attribute's lower bound.
+    pub min: f64,
+    /// The attribute's upper bound.
+    pub max: f64,
     /// Whether the attribute joins the sync set.
     pub syncable: bool,
     /// The tooltip sentiment of a rising or falling value.
@@ -24,7 +27,7 @@ pub fn attribute_declarations() -> &'static [AttributeDeclaration] {
     installed().map_or(&[], |installed| &installed.attributes)
 }
 
-/// Registration of new attribute types ([`Registrar::declare_attribute`]).
+/// Registration of new attribute types ([`Registrar::declare_attribute`](AttributesRegistrar::declare_attribute)).
 pub trait AttributesRegistrar {
     /// Declare an attribute type of the mod's own (vanilla's
     /// `RangedAttribute` in `BuiltInRegistries.ATTRIBUTE`, NeoForge's
@@ -82,14 +85,9 @@ impl AttributesRegistrar for PartRegistrar {
                 return Err(crate::AttributeRegistrationError::InvalidId);
             }
             let id = format!("{namespace}:{name}");
-            // Identifier normalization is shared with modifier and catalog ids.
-            if !horizon_world::attributes::Modifier::new(
-                &id,
-                0.0,
-                horizon_world::attributes::Operation::AddValue,
-            )
-            .is_ok_and(|canonical| canonical.id() == id)
-            {
+            // The characters modifier and catalog ids allow (`ResourceLocation`'s).
+            let valid = |c: u8| c.is_ascii_lowercase() || c.is_ascii_digit() || b"_.-".contains(&c);
+            if !namespace.bytes().all(valid) || !name.bytes().all(|c| valid(c) || c == b'/') {
                 return Err(crate::AttributeRegistrationError::InvalidId);
             }
             if self.attributes.iter().any(|declared| declared.id == id) {
@@ -98,12 +96,15 @@ impl AttributesRegistrar for PartRegistrar {
             if ![default, min, max].into_iter().all(f64::is_finite) {
                 return Err(crate::AttributeRegistrationError::NotFinite);
             }
-            let definition = Definition::ranged(default, min, max)
-                .map_err(|_| crate::AttributeRegistrationError::InvalidBounds)?;
+            if min > max || default < min || default > max {
+                return Err(crate::AttributeRegistrationError::InvalidBounds);
+            }
             self.attributes.push(AttributeDeclaration {
                 mod_id: self.mod_id.to_owned(),
                 id,
-                definition,
+                default,
+                min,
+                max,
                 syncable,
                 sentiment,
             });
@@ -183,9 +184,10 @@ mod tests {
             (declared.mod_id.as_str(), declared.id.as_str()),
             ("mymod", "mymod:mana")
         );
-        assert_eq!(declared.definition.default_value(), 10.0);
-        assert_eq!(declared.definition.sanitize(-5.0), 0.0);
-        assert_eq!(declared.definition.sanitize(500.0), 100.0);
+        assert_eq!(
+            (declared.default, declared.min, declared.max),
+            (10.0, 0.0, 100.0)
+        );
         assert!(declared.syncable);
         assert_eq!(declared.sentiment, Sentiment::Neutral);
         assert!(

@@ -1382,7 +1382,7 @@ pub fn lore_texts(stack: &ItemStack) -> Vec<crate::text::Text> {
     };
     lines
         .into_iter()
-        .map(|text| text.map_styles(|style| style.inherit(&base)))
+        .map(|text| text.with_style(&base))
         .collect()
 }
 
@@ -1458,6 +1458,33 @@ mod tests {
         assert_eq!(text.spans[1].style.color, Some(0x0000ff));
         assert!(!text.spans[0].style.is_italic());
         assert!(text.spans[1].style.is_italic());
+    }
+
+    #[test]
+    fn lore_retains_translation_component() {
+        let mut stack = ItemStack::new("minecraft:stick", 1);
+        stack.data_mut().set_other(
+            "minecraft:lore",
+            Some(Tag::List(vec![Tag::compound([
+                ("translate", Tag::String("example.lore".into())),
+                ("with", Tag::List(vec![Tag::String("argument".into())])),
+            ])])),
+        );
+        let lines = lore_texts(&stack);
+        // Decoding canonicalizes string arguments to literal text components.
+        assert_eq!(
+            lines[0].component(),
+            serde_json::json!({
+                "translate": "example.lore",
+                "with": [{"text": "argument"}],
+                "color": "dark_purple",
+                "italic": true
+            })
+        );
+        assert_eq!(
+            lines[0].spans.last().unwrap().style.color,
+            Some(crate::text::DARK_PURPLE)
+        );
     }
 
     #[test]

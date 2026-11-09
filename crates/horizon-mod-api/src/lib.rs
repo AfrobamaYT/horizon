@@ -44,6 +44,12 @@ pub enum ModelError {
     StaleModel,
 }
 
+/// A block state as the game's state table numbers it (`Block.BLOCK_STATE_REGISTRY`'s id): what
+/// worldgen providers and fluid queries answer. Valid for the running game only; never save it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+// exhaustive: a state id is its number
+pub struct BlockStateId(pub u32);
+
 /// A dimension (`minecraft:the_nether`), as the game's table numbers it: a `LevelRef`'s identity.
 /// A key stays the same dimension until the game exits; `key.id(host)` gives the name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -100,6 +106,7 @@ pub enum AttributeRegistrationError {
 
 /// Tooltip color semantics for an attribute change.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+// exhaustive: vanilla's `Attribute.Sentiment` has these three values, and the game matches them all
 pub enum Sentiment {
     /// Increasing values are beneficial.
     #[default]

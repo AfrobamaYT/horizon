@@ -709,6 +709,18 @@ impl Text {
             span.inherit_style(style);
         }
         let mut c = self.component();
+        let mut wrapper_style;
+        let style = if !c.is_object() {
+            let mut origins = BTreeMap::new();
+            self.copy_origins("/extra/0", &mut origins);
+            self.origins = origins.into();
+            c = json!({"text":"", "extra":[c]});
+            wrapper_style = style.clone();
+            wrapper_style.inline_object = None;
+            &wrapper_style
+        } else {
+            style
+        };
         let adds_hover = c.get("hover_event").is_none() && c.get("hoverEvent").is_none();
         if adds_hover && let Some(hover) = &style.hover {
             let mut origins = (*self.origins).clone();
@@ -1691,5 +1703,25 @@ mod tests {
         assert_eq!(resolved.plain(), "Steve");
         assert_eq!(resolved.rendered.spans[0].style.color, Some(RED));
         assert_eq!(resolved.rendered.spans[0].style.bold, Some(false));
+    }
+    #[test]
+    fn inherited_array_style_survives_refresh() {
+        let mut text = Text::from(json!([{"text":"one"}, {"text":"two","italic":false}]));
+        text.inherit_built_style(&Style {
+            color: Some(RED),
+            italic: Some(true),
+            ..Default::default()
+        });
+        assert_eq!(
+            text.component(),
+            json!({"text":"", "extra":[[{"text":"one"},{"text":"two","italic":false}]], "color":"red", "italic":true})
+        );
+        text.refresh();
+        assert_eq!(text.plain(), "onetwo");
+        assert_eq!(
+            text.rendered.spans.last().unwrap().style.italic,
+            Some(false)
+        );
+        assert_eq!(text.rendered.spans.last().unwrap().style.color, Some(RED));
     }
 }

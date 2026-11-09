@@ -1026,6 +1026,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `PackFinders::pack_type` | crosses | Wire call |
 | `PackFinders::add_pack_finders` | crosses | Wire call |
 | `BlockTintSources::register` | crosses | Wire call |
+| `ParticleProviders::register` | crosses | Wire call |
 | `EnchantmentDamageEffects::register` | crosses | Wire call |
 | `BlockAndTintGetter::block_state` | crosses | Wire call |
 | `BlockAndTintGetter::fluid_state` | crosses | Wire call |
@@ -1417,6 +1418,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::client_stopping` | crosses | Wire call |
 | `Hooks::client_tick_post` | crosses | Wire call |
 | `Hooks::client_tick_pre` | crosses | Wire call |
+| `Hooks::component_hover` | crosses | Wire call |
 | `Hooks::compute_fov_modifier` | crosses | Wire call |
 | `Hooks::create_fluid_source` | crosses | Wire call |
 | `Hooks::create_spawn_position` | crosses | Wire call |
@@ -1547,6 +1549,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::register_game_tests` | crosses | Wire call |
 | `Hooks::register_gui_layers` | crosses | Wire call |
 | `Hooks::register_item_tint_sources` | crosses | Wire call |
+| `Hooks::register_particle_providers` | crosses | Wire call |
 | `Hooks::register_range_select_item_model_property` | crosses | Wire call |
 | `Hooks::register_runtime_sprites` | crosses | Wire call |
 | `Hooks::register_select_item_model_property` | crosses | Wire call |
@@ -1688,6 +1691,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `BlockTintSource::color_in_world` | crosses | Wire call |
 | `BlockTintSource::color_as_terrain_particle` | crosses | Wire call |
 | `BlockTintSource::relevant_properties` | crosses | Wire call |
+| `ParticleProvider::tick` | crosses | Wire call |
 | `EnchantmentDamageEffect::apply` | crosses | Wire call |
 | `GroundStateProvider::state_at` | crosses | Wire call |
 | `PlaceProvider::stack` | crosses | Wire call |
