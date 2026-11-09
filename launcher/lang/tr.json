@@ -1241,5 +1241,7 @@
   "E_INJECT_MISSING: {id}: {at} has no point (opted out with #[mod_api::no_point])": "E_INJECT_MISSING: {id}: {at} has no point (opted out with #[mod_api::no_point])",
   "{id}: internals access to {library} needs the same target: the same binary on native, the same dependency group on wasm": "{id}: internals access to {library} needs the same target: the same binary on native, the same dependency group on wasm",
   "{id}: an api listener at {library} on the other target crosses through the game, and {reason}: add #[derive(mod_api::Wire)] to it": "{id}: an api listener at {library} on the other target crosses through the game, and {reason}: add #[derive(mod_api::Wire)] to it",
-  "{id}: {library} is on the other target: mixed native and wasm dependencies aren't supported yet": "{id}: {library} is on the other target: mixed native and wasm dependencies aren't supported yet"
+  "{id}: {library} is on the other target: mixed native and wasm dependencies aren't supported yet": "{id}: {library} is on the other target: mixed native and wasm dependencies aren't supported yet",
+  "{mod}: layout mismatch in library {library} for type {type}": "{mod}: layout mismatch in library {library} for type {type}",
+  "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet": "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet"
 }

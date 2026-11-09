@@ -9,6 +9,7 @@ pub use game_modules::materialize_game_modules;
 mod host;
 mod layout;
 mod parts;
+pub mod wire_types;
 pub use catalog::DECLARATIONS;
 use catalog::{Catalog, Contract, DrawContext, Hook, HostAccess, PartKind, PhaseContext, Side};
 use heck::ToSnakeCase;
