@@ -3573,7 +3573,7 @@ pub struct Vehicle {
     pub velocity: Vec3,
 }
 impl PlayerView {
-    /// `LivingEntity.getVisibilityPercent(level, looking)` before NeoForge's
+    /// `LivingEntity.getVisibilityPercent(level, looking)` before the visibility
     /// event and the clamp: sneaking, invisibility by armour cover, and the
     /// worn head's `mob_visibility` for the `looking` mob's type.
     pub fn visibility_percent(&self, looking: Species) -> f64 {
@@ -4860,8 +4860,7 @@ impl Mob {
         if creaking::is_creaking(self) && !creaking::can_move(self) {
             return;
         }
-        // The native hook runs first, on the raw strength (NeoForge's `LivingKnockBackEvent` fires
-        // at the start of `LivingEntity.knockback`), then the resistance scales what it left.
+        // The native hook runs first, on the raw strength, then the resistance scales what it left.
         let mut knock = crate::health::Knock {
             strength: power,
             x: xd,

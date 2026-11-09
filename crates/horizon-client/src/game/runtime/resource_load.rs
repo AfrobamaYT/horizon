@@ -755,8 +755,7 @@ pub(super) fn load_resources(
         (None, None)
     };
     // The client reload listeners register once before any prepare runs (no
-    // game exists yet, as NeoForge's construction-time event fires before
-    // resources load) and prepare here beside the rest of the load, against
+    // game exists yet) and prepare here beside the rest of the load, against
     // the same merged root; the game applies them at handoff. A dedicated
     // server never fires the client event. A failed prepare keeps the game
     // running without mod reload listeners, like the reload path's rollback.

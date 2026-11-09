@@ -59,7 +59,7 @@ impl GuiLayers {
     /// `RegisterGuiLayersEvent.register` for each layer in push order: below or above every
     /// layer, or right below or above one already in the list. An id that is not
     /// `<namespace>:<path>` in a mod's namespace, is in the list already, or is placed against
-    /// a layer that is not is logged and left out, where NeoForge throws.
+    /// a layer that is not is logged and left out.
     pub fn place(registered: Vec<GuiLayer>) -> Self {
         let mut layers: Vec<String> = VANILLA.iter().map(|&id| id.to_owned()).collect();
         let mut mods = false;

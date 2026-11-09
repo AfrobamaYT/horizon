@@ -3,7 +3,7 @@
 pub trait Hooks {
     /// May `entity` change the world? (NeoForge's `EntityMobGriefingEvent`,
     /// `EventHooks.canEntityGrief`.) `can_grief` starts as the `mob_griefing`
-    /// game rule; set it either way. Asked where NeoForge 26.3 asks it: a mob
+    /// game rule; set it either way. Asked for a mob
     /// explosion (`ExplosionInteraction.MOB`, for the creeper, wither, ghast
     /// fireball or wither skull), a mob picking up items, an enderman taking
     /// or placing a block, a sheep eating grass, a mob trampling

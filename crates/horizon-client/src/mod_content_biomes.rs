@@ -493,11 +493,9 @@ impl Selector {
 }
 
 /// Applies `modifiers` to the biome bundle `biomes` (id → the biome's text):
-/// every addition first, then every removal, each in mod and file order (as
-/// NeoForge's add phase runs before its remove phase). A modifier naming a
+/// every addition first, then every removal, each in mod and file order. A modifier naming a
 /// biome, feature, entity type or tag the root doesn't have (another mod's, a
-/// `#c:` convention tag) is skipped with a line in `warnings`, as NeoForge
-/// skips a holder set it can't resolve, instead of dropping every content mod.
+/// `#c:` convention tag) is skipped with a line in `warnings`, instead of dropping every content mod.
 pub(super) fn apply(
     biomes: &mut J,
     modifiers: &[Modifier],

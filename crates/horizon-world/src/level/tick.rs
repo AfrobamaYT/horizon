@@ -476,7 +476,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 Class::SweetBerryBush => {
                     let age = b.table.int(state, p.age);
                     if age < 3 {
-                        // Vanilla rolls before the light check; NeoForge after.
+                        // Vanilla rolls before the light check.
                         let roll = self.rand_int(5) == 0;
                         if self.raw_brightness(above(pos), 0) >= 9
                             && self.level.crop_grow_pre(pos, state, roll)
