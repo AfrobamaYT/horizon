@@ -51,6 +51,7 @@ pub trait SectionGeometryRenderers {
 /// The game's [`SectionGeometryRenderers`]: the renderers in registration order.
 #[derive(Default)]
 // exhaustive: its field is private; the game builds it
+// no wire: process-local renderer storage; renderers run on the meshing workers, not serialized.
 pub struct SectionGeometryRegistry {
     renderers: Vec<Arc<dyn SectionGeometry>>,
 }
