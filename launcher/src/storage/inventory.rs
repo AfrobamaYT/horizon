@@ -593,9 +593,15 @@ impl Storage {
                 row.kept.push(Kept {
                     bytes: remaining,
                     reason: if !units[index].eligible {
-                        native_mods::cache_error(entry.access()?.check().err().unwrap_or(Error::UnprovenExclusion))
+                        native_mods::cache_error(
+                            entry
+                                .access()?
+                                .check()
+                                .err()
+                                .unwrap_or(Error::UnprovenExclusion),
+                        )
                     } else {
-                        crate::i18n::tr("Space it couldn't free: protected, recently used, or unknown last use.").into()
+                        crate::i18n::tr("Protected, recently used, or last use unknown.").into()
                     },
                 });
             }
