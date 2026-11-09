@@ -361,6 +361,7 @@ impl Game<'_> {
                 cause.or(by),
                 from,
             ),
+            Target::Stand(id) => self.command_damage_stand(id, ty, cause.or(by)),
             _ => false,
         }
     }

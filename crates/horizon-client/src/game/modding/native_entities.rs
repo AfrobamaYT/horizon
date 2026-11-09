@@ -744,6 +744,7 @@ mod tests {
                     fixed: false,
                     invisible: false,
                     custom_name: None,
+                    random: horizon_core::random::LegacyRandom::new(0),
                     check_interval: 0,
                 });
                 let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
