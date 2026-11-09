@@ -44,6 +44,10 @@ impl From<&Components> for Compound {
 /// not by this record: item definitions and effective component overrides belong to the game.
 /// `Clone` deep-copies a nonempty component patch; an absent patch allocates nothing.
 ///
+/// An untouched mutable stack hook argument retains its engine value without
+/// write validation, even when the engine value exceeds effective maxima. Equality
+/// with the snapshot passed to the listener determines whether it changed; a changed
+/// argument is validated in full before committing any hook outputs.
 /// A refused hook output retains its captured engine value. The clicked-slot bridge also
 /// stages the slot, cursor and cancellation flags together. Independent host effects,
 /// including storage writes, commands and messages, are not undone by output validation.

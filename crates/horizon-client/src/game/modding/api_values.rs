@@ -1374,7 +1374,11 @@ impl super::Game<'_> {
         let Ok(mut api) = value.try_into_api() else {
             return;
         };
+        let original = api.clone();
         self.native_anvil_update(player, entity, pos, &mut api, cancel);
+        if api == original {
+            return;
+        }
         match api.try_into_engine(self.items()) {
             Ok(result) => *value = result,
             Err(_) => *cancel = true,
@@ -1391,7 +1395,11 @@ impl super::Game<'_> {
         let Ok(mut api) = value.try_into_api() else {
             return;
         };
+        let original = api.clone();
         self.native_grindstone_place(player, entity, pos, &mut api, cancel);
+        if api == original {
+            return;
+        }
         match api.try_into_engine(self.items()) {
             Ok(result) => *value = result,
             Err(_) => *cancel = true,
@@ -1408,7 +1416,11 @@ impl super::Game<'_> {
         let Ok(mut api) = value.try_into_api() else {
             return;
         };
+        let original = api.clone();
         self.native_grindstone_take(player, entity, pos, &mut api, cancel);
+        if api == original {
+            return;
+        }
         match api.try_into_engine(self.items()) {
             Ok(result) => *value = result,
             Err(_) => *cancel = true,
@@ -1973,11 +1985,17 @@ impl super::Game<'_> {
             return;
         };
         let revision = api.revision();
+        let original = cursor.clone();
         self.native_menu_button(context, &mut api, &mut cursor);
-        let cursor = cursor
-            .try_into_engine(self.items())
-            .map_err(|_| BlockEntitySnapshotError::InvalidStack);
-        if let Ok(cursor) = finish_block_entity_writeback(
+        let cursor = if cursor == original {
+            Ok(None)
+        } else {
+            cursor
+                .try_into_engine(self.items())
+                .map(Some)
+                .map_err(|_| BlockEntitySnapshotError::InvalidStack)
+        };
+        if let Ok(Some(cursor)) = finish_block_entity_writeback(
             entity,
             &api,
             revision,
@@ -2004,6 +2022,7 @@ impl super::Game<'_> {
             return;
         };
         let revision = api.revision();
+        let original = held.clone();
         let mut candidate_handled = *handled;
         self.native_menu_quick_move(
             pos,
@@ -2013,9 +2032,13 @@ impl super::Game<'_> {
             &mut held,
             &mut candidate_handled,
         );
-        let held = held
-            .try_into_engine(self.items())
-            .map_err(|_| BlockEntitySnapshotError::InvalidStack);
+        let held = if held == original {
+            Ok(None)
+        } else {
+            held.try_into_engine(self.items())
+                .map(Some)
+                .map_err(|_| BlockEntitySnapshotError::InvalidStack)
+        };
         if let Ok(held) = finish_block_entity_writeback(
             entity,
             &api,
@@ -2024,7 +2047,9 @@ impl super::Game<'_> {
             "menu_quick_move",
             held,
         ) {
-            *stack = held;
+            if let Some(held) = held {
+                *stack = held;
+            }
             *handled = candidate_handled;
         }
     }
@@ -2243,6 +2268,22 @@ mod stack_limit_tests {
             Items::catalog(&root, &horizon_world::loot::PackOverlay::NONE, &defaults).unwrap();
         std::fs::remove_dir_all(root).unwrap();
         items
+    }
+
+    /// Vanilla stores damage above the maximum; only writes refuse it. Reads see the stack.
+    #[test]
+    fn a_write_refuses_damage_over_the_maximum_a_read_takes() {
+        let items = catalog();
+        let mut over = ApiStack::of(mod_api::__private::item_key("minecraft:iron_sword").unwrap());
+        over.set_damage(1000);
+        assert_eq!(
+            over.try_into_engine(&items),
+            Err(StackWriteError::DamageExceeded { maximum: 10 })
+        );
+        let read = stack_value(&over).unwrap();
+        let definition = items.items.get("minecraft:iron_sword");
+        assert_eq!(read.effective_damage(definition), 1000);
+        assert!(horizon_client::stations::is_damageable(&items, &read));
     }
 
     #[test]

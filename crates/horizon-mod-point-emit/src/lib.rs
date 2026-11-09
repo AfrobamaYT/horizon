@@ -16,6 +16,9 @@ pub struct Point {
     pub private: bool,
     /// Whether an API return place exists (not a borrowed return).
     pub at_return: bool,
+    /// Why its API listeners are refused: the first parameter with no API type, named.
+    #[serde(default)]
+    pub api_refusal: Option<String>,
 }
 
 /// Remove type arguments and whitespace exactly as the native launcher resolves point paths.
@@ -83,6 +86,12 @@ fn resolve<'a>(
                 .iter()
                 .find(|point| plain_path(&point.target) == plain_path(&entry.at))
                 .ok_or_else(|| format!("{}: unknown API point {}", entry.id, entry.at))?;
+            if let Some(why) = &point.api_refusal {
+                return Err(format!(
+                    "{}: no API listener at {}: {why}",
+                    entry.id, entry.at
+                ));
+            }
             if point.private || entry.kind == Kind::Return && !point.at_return {
                 return Err(format!("{}: no public API place at {}", entry.id, entry.at));
             }
@@ -136,6 +145,7 @@ hash = "pin"
             target: "horizon_client::game::Game < '_ > :: tick".into(),
             private: false,
             at_return: true,
+            api_refusal: None,
         }];
         let native = api(&manifest, &points, "mod_3::")
             .unwrap()
@@ -166,5 +176,12 @@ hash = "pin"
         head_only.at_return = false;
         assert!(api(&manifest, &[head_only], "mod_3::").is_err());
         assert!(api(&manifest, &[], "mod_3::").is_err());
+        let mut refused = points[0].clone();
+        refused.api_refusal =
+            Some("argument 1 `batch` (`&mutHudBatch`) has no API type yet".into());
+        assert_eq!(
+            api(&manifest, &[refused], "mod_3::").unwrap_err(),
+            "before: no API listener at horizon_client::game::Game<'_>::tick: argument 1 `batch` (`&mutHudBatch`) has no API type yet"
+        );
     }
 }
