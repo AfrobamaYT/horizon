@@ -448,15 +448,20 @@ pub(super) fn register_select_item_model_properties(role: ExecutionRole) {
     Game::native_register_select_item_model_property(&RegistrationContext::new(), &mut properties);
     horizon_assets::item_model::register_select_properties(properties);
 }
-/// The native mods' item tint sources (`native_register_item_tint_sources`), kept once at
-/// start, before resources load, so `tints` entries on them read the mod's colour.
-pub(super) fn register_item_tint_sources(role: ExecutionRole) {
+/// The source types native mods register for resource definitions, kept once at start, before
+/// resources load: item tint sources (`native_register_item_tint_sources`), so `tints` entries on
+/// them read the mod's colour, and atlas sprite sources (`native_register_sprite_sources`), so
+/// atlas definitions' entries on them list the mod's sprites.
+pub(super) fn register_resource_sources(role: ExecutionRole) {
     if !role.is_client() {
         return;
     }
     let mut sources = Vec::new();
     Game::native_register_item_tint_sources(&RegistrationContext::new(), &mut sources);
     horizon_assets::item_model::register_tint_sources(sources);
+    let mut sources = Vec::new();
+    Game::native_register_sprite_sources(&RegistrationContext::new(), &mut sources);
+    horizon_client_render::mod_sprite_sources::register(sources);
 }
 /// Resolve client dimension-transition registrations once, before the first level opens.
 pub(super) fn register_dimension_transition_screens(role: ExecutionRole) {

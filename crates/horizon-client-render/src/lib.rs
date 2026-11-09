@@ -81,6 +81,7 @@ pub mod mipmap;
 pub mod mod_browser;
 pub mod mod_chunk_tickets;
 pub mod mod_list;
+pub mod mod_sprite_sources;
 pub mod model_library;
 pub mod models;
 pub mod mods_screen;
