@@ -126,7 +126,11 @@ mod resource_wire_tests {
     fn wire_tokens_and_package_inventory() {
         let mut out = Writer::new();
         out.put(&crate::Transaction(7));
-        assert_eq!(out.bytes().len(), 8, "a transaction crosses as its frame token");
+        assert_eq!(
+            out.bytes().len(),
+            8,
+            "a transaction crosses as its frame token"
+        );
         let mut input = Reader::new(out.bytes());
         let tx: crate::Transaction = input.take().unwrap();
         assert_eq!(tx, crate::Transaction(7));
