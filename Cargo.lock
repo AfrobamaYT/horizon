@@ -1870,7 +1870,6 @@ version = "0.1.0"
 dependencies = [
  "arboard",
  "horizon-client-core",
- "horizon-dualsense",
  "horizon-theme",
  "png",
  "winit",
@@ -2250,6 +2249,7 @@ dependencies = [
  "horizon-mod-package",
  "horizon-mod-point-emit",
  "horizon-mod-points",
+ "horizon-mod-runtime",
  "log",
  "serde_json",
  "wasmparser 0.261.0",

@@ -7,6 +7,10 @@ license.workspace = true
 publish = false
 description = "Build-time typed native mod API generation"
 
+[features]
+# Shared listener integration fixture only; never enabled by gameplay crates.
+listener-fixture = []
+
 [dependencies]
 horizon-mod-point-shape = { path = "../horizon-mod-point-shape" }
 horizon-mod-package = { path = "../horizon-mod-package", default-features = false }
@@ -27,3 +31,8 @@ path = "src/bin/horizon-stage.rs"
 
 [lints]
 workspace = true
+
+[[example]]
+name = "listener-fixture-catalog"
+path = "../horizon-mod-wasm/tests/support/catalog.rs"
+required-features = ["listener-fixture"]
