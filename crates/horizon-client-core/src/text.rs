@@ -552,6 +552,9 @@ impl Text {
         // content anew, in whatever language is current now (#2493).
         for span in &mut self.rendered.spans {
             span.inherit_style(style);
+            if style.inline_object.is_some() {
+                span.style.inline_object.clone_from(&style.inline_object);
+            }
         }
         self
     }
@@ -1809,4 +1812,17 @@ mod tests {
         );
         assert_eq!(text.rendered.spans.last().unwrap().style.color, Some(RED));
     }
+    #[test]
+    fn styling_installs_atlas_and_player_metadata() {
+        for object in [InlineObject::Atlas { atlas: "a".into(), sprite: "b".into(), fallback: "".into() }, InlineObject::Player { profile: std::sync::Arc::new(json!({})), hat: true, fallback: "".into() }] {
+            let text = Text::styled("\u{fffc}", Style { inline_object: Some(object), ..Style::default() });
+            assert!(text.spans[0].style.inline_object.is_some());
+        }
+    }
+    #[test]
+    fn styling_remote_span_drops_local_file_action() {
+        let text = Text::from(json!({"text":"remote"})).with_style(&Style { click: Some(ClickEvent::OpenFile("secret".into())), ..Style::default() });
+        assert!(text.spans[0].style.click.is_none());
+    }
+
 }
