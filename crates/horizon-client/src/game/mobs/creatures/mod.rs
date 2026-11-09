@@ -3403,7 +3403,9 @@ impl Game<'_> {
                         .or(self.lan_acting);
                     self.set_event_ai_target(mob, Some(target), player);
                 }
-                MobEvent::HoglinAttackTarget { mob, target } => self.hoglin_attack_target(mob, target),
+                MobEvent::HoglinAttackTarget { mob, target } => {
+                    self.hoglin_attack_target(mob, target)
+                }
                 MobEvent::HuntHoglin { mob, target, ticks } => {
                     let mut acquire = false;
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
