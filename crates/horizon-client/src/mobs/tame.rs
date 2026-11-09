@@ -84,11 +84,11 @@ pub fn register(m: &mut Mob) {
         .add(4, NearestTarget::player(true).when(angry_at_player));
     m.ai.targets.add(
         5,
-        NearestTarget::new(Prey::Filter(wolf_prey), false).gate(|m, _| !m.extra.tame),
+        NonTameTarget::new(NearestTarget::new(Prey::Filter(wolf_prey), false)),
     );
     m.ai.targets.add(
         6,
-        NearestTarget::new(Prey::Filter(baby_turtle_on_land), false).gate(|m, _| !m.extra.tame),
+        NonTameTarget::new(NearestTarget::new(Prey::Filter(baby_turtle_on_land), false)),
     );
     m.ai.targets.add(
         7,
@@ -139,20 +139,71 @@ impl Goal for LandOnOwnersShoulder {
             && is_owner(m, cx.w)
             && cx
                 .w
-                .player
-                .as_ref()
+                .selected_player()
                 .is_some_and(|p| m.bounds().intersects(p.bounds))
         {
-            cx.events.push(MobEvent::ParrotToShoulder { mob: m.id });
+            cx.events
+                .push(cx.w.route_player_event(MobEvent::ParrotToShoulder { mob: m.id }));
         }
     }
+}
+/// `NonTameRandomTargetGoal`: a tameable mob's prey target, only while it is
+/// wild. Vanilla re-tests the subclass selector while hunting, so a baby
+/// turtle that enters water stops being hunted.
+#[derive(Clone, Debug)]
+struct NonTameTarget(NearestTarget);
+impl NonTameTarget {
+    fn new(inner: NearestTarget) -> Self {
+        Self(inner.named("NonTameRandomTargetGoal"))
+    }
+    fn prey_matches(prey: &Prey, who: Who, w: &MobWorld) -> bool {
+        match prey {
+            Prey::Player => who == Who::Player,
+            Prey::Species(list) => match who {
+                Who::Player => false,
+                Who::Mob(id) => w.seen(id).is_some_and(|s| list.contains(&s.species)),
+            },
+            Prey::Filter(f) => match who {
+                Who::Player => false,
+                Who::Mob(id) => w.seen(id).is_some_and(f),
+            },
+        }
+    }
+}
+impl Goal for NonTameTarget {
+    goal_clone!();
+    fn flags(&self) -> u8 {
+        self.0.flags()
+    }
+    fn name(&self) -> &'static str {
+        "NonTameRandomTargetGoal"
+    }
+    fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
+        !m.extra.tame && self.0.can_use(m, cx)
+    }
+    fn can_continue(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
+        let Some(who) = m.ai.target else {
+            return false;
+        };
+        Self::prey_matches(&self.0.prey, who, cx.w) && self.0.can_continue(m, cx)
+    }
+    fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
+        self.0.start(m, cx)
+    }
+    fn stop(&mut self, m: &mut Mob, cx: &mut Cx) {
+        self.0.stop(m, cx)
+    }
+    fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
+        self.0.tick(m, cx)
+    }
+}
+/// `Turtle.BABY_ON_LAND_SELECTOR`: a baby turtle out of water.
+fn baby_turtle_on_land(s: &super::Seen) -> bool {
+    s.species == Species::Turtle && s.baby && !s.in_water
 }
 /// `Wolf.PREY_SELECTOR`: sheep, rabbits and foxes.
 fn wolf_prey(s: &super::Seen) -> bool {
     matches!(s.species, Species::Sheep | Species::Rabbit | Species::Fox)
-}
-fn baby_turtle_on_land(s: &super::Seen) -> bool {
-    s.species == Species::Turtle && s.baby
 }
 /// `NeutralMob.isAngryAt(player)`: the player the anger names, or, with the
 /// `universal_anger` rule on and no anger target left, any player. Creative and
@@ -182,7 +233,7 @@ fn owner_view<'a>(m: &Mob, w: &'a MobWorld) -> Option<&'a PlayerView> {
     if !m.extra.tame {
         return None;
     }
-    let p = w.player.as_ref()?;
+    let p = w.selected_player()?;
     (m.extra.owner == Some(p.uuid)).then_some(p)
 }
 /// The owner's position, eye height and spectator flag when tame.
@@ -193,8 +244,7 @@ fn owner(m: &Mob, w: &MobWorld) -> Option<(Vec3, f64, bool)> {
 /// Whether the player the mob sees is the one saved as its owner (with
 /// guests on, that player is whoever stands nearest).
 fn is_owner(m: &Mob, w: &MobWorld) -> bool {
-    w.player
-        .as_ref()
+    w.selected_player()
         .is_some_and(|p| owned_by(m.extra.owner, p.uuid))
 }
 /// Whether `uuid` is the saved owner. A host with no UUID yet owns what it
@@ -202,9 +252,15 @@ fn is_owner(m: &Mob, w: &MobWorld) -> bool {
 pub fn owned_by(owner: Option<[i32; 4]>, uuid: [i32; 4]) -> bool {
     owner.is_some_and(|o| o == uuid || (o == [0, 0, 0, 1] && uuid == [0; 4]))
 }
-/// `TamableAnimal.unableToMoveToOwner`.
+/// `TamableAnimal.unableToMoveToOwner`: ordered to sit, riding something
+/// (`isPassenger`), on a lead or holding one's data until it is found after
+/// loading (`mayBeLeashed`), or an owner who is a spectator.
 fn unable_to_move_to_owner(m: &Mob, w: &MobWorld) -> bool {
-    m.extra.sitting || owner_view(m, w).is_some_and(|p| p.spectator)
+    m.extra.sitting
+        || m.extra.passenger
+        || m.extra.leash.is_some()
+        || m.extra.leash_pending.is_some()
+        || owner_view(m, w).is_some_and(|p| p.spectator)
 }
 /// `TamableAnimal.tryToTeleportToOwner`: ten tries around the owner.
 fn teleport_to_owner(m: &mut Mob, w: &MobWorld) {
@@ -321,9 +377,11 @@ impl Goal for SitWhenOrdered {
     fn can_continue(&mut self, m: &mut Mob, _: &mut Cx) -> bool {
         m.extra.sitting
     }
+    /// `SitWhenOrderedToGoal.start`: stop and sit. A wolf's begging tilt is
+    /// `BegGoal`'s to end, and a cat lying down gets up when its relax goal
+    /// stops.
     fn start(&mut self, m: &mut Mob, _: &mut Cx) {
         m.nav_stop();
-        m.extra.flag = false;
     }
 }
 /// `Wolf.WolfAvoidEntityGoal`: untamed wolves flee llamas.
@@ -369,14 +427,14 @@ impl Goal for AvoidLlamas {
         self.0.can_continue(m, cx)
     }
     fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
-        m.ai.target = None;
+        m.set_ai_target(cx.w, None);
         self.0.start(m, cx)
     }
     fn stop(&mut self, m: &mut Mob, cx: &mut Cx) {
         self.0.stop(m, cx)
     }
     fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
-        m.ai.target = None;
+        m.set_ai_target(cx.w, None);
         self.0.tick(m, cx)
     }
 }
@@ -473,12 +531,12 @@ impl Goal for OwnerHurtBy {
     }
     fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
         if let Some((who, at)) = owner_view(m, cx.w).and_then(|p| p.hurt_by) {
-            m.ai.target = Some(who);
+            m.set_ai_target(cx.w, Some(who));
             self.timestamp = at;
         }
     }
-    fn stop(&mut self, m: &mut Mob, _: &mut Cx) {
-        m.ai.target = None;
+    fn stop(&mut self, m: &mut Mob, cx: &mut Cx) {
+        m.set_ai_target(cx.w, None);
     }
 }
 /// `OwnerHurtTargetGoal`: attack what the owner attacks.
@@ -507,12 +565,12 @@ impl Goal for OwnerHurt {
     }
     fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
         if let Some((who, at)) = owner_view(m, cx.w).and_then(|p| p.last_hurt) {
-            m.ai.target = Some(who);
+            m.set_ai_target(cx.w, Some(who));
             self.timestamp = at;
         }
     }
-    fn stop(&mut self, m: &mut Mob, _: &mut Cx) {
-        m.ai.target = None;
+    fn stop(&mut self, m: &mut Mob, cx: &mut Cx) {
+        m.set_ai_target(cx.w, None);
     }
 }
 /// `Wolf.wantsToAttack`: never creepers, ghasts, tame cats and parrots, or a
@@ -543,7 +601,7 @@ struct Beg {
 }
 impl Beg {
     fn interesting(&self, w: &MobWorld) -> bool {
-        let Some(p) = &w.player else {
+        let Some(p) = w.selected_player() else {
             return false;
         };
         let held = |i: &Option<std::sync::Arc<str>>| {
@@ -560,14 +618,12 @@ impl Goal for Beg {
         LOOK
     }
     fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        cx.w.player
-            .as_ref()
+        cx.w.selected_player()
             .is_some_and(|p| m.distance_sqr(p.position) <= 64.0)
             && self.interesting(cx.w)
     }
     fn can_continue(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        cx.w.player
-            .as_ref()
+        cx.w.selected_player()
             .is_some_and(|p| p.alive && m.distance_sqr(p.position) <= 64.0)
             && self.ticks > 0
             && self.interesting(cx.w)
@@ -580,7 +636,7 @@ impl Goal for Beg {
         m.extra.flag = false;
     }
     fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
-        if let Some(p) = &cx.w.player {
+        if let Some(p) = cx.w.selected_player() {
             let max = m.max_head_x_rot();
             m.look_at_speed([p.position.x, p.eye[1], p.position.z], 10.0, max);
         }
@@ -590,17 +646,24 @@ impl Goal for Beg {
 /// `NeutralMob.isValidPlayerTarget`: a player in survival or adventure, off
 /// peaceful.
 fn valid_player_target(w: &MobWorld) -> bool {
-    w.player
-        .as_ref()
+    w.selected_player()
         .is_some_and(|p| !p.creative && !p.spectator)
         && w.difficulty.id != 0
 }
 /// `NeutralMob.stopBeingAngry`.
 fn stop_being_angry(m: &mut Mob) {
+    stop_being_angry_with_world(m, None);
+}
+
+fn stop_being_angry_with_world(m: &mut Mob, world: Option<&MobWorld>) {
     // setLastHurtByMob(null) also stamps the time.
     m.ai.last_hurt_by = None;
     m.ai.last_hurt_by_time = m.age as i32;
-    m.ai.target = None;
+    if let Some(world) = world {
+        m.set_ai_target(world, None);
+    } else {
+        m.ai.target = None;
+    }
     m.extra.angry_at = None;
     m.extra.anger = 0;
 }
@@ -623,14 +686,13 @@ pub(super) fn update_persistent_anger(m: &mut Mob, w: &MobWorld) {
         && w.seen(id).is_none_or(|s| !s.alive)
         && angry_at == Some(target)
     {
-        stop_being_angry(m);
+        stop_being_angry_with_world(m, Some(w));
         return;
     }
     // Mob.getTarget: a player in creative or spectator mode is no target.
     let target = m.ai.target.filter(|t| {
         *t != Who::Player
-            || w.player
-                .as_ref()
+            || w.selected_player()
                 .is_some_and(|p| !p.creative && !p.spectator)
     });
     if let Some(target) = target {
@@ -644,17 +706,16 @@ pub(super) fn update_persistent_anger(m: &mut Mob, w: &MobWorld) {
         && m.extra.anger == 0
         && !(target == Some(Who::Player) && valid_player_target(w))
     {
-        stop_being_angry(m);
+        stop_being_angry_with_world(m, Some(w));
     }
     // The anger's target as it was when the tick began, once it is found: a
     // player who is not here yet (a reloaded wolf ticks before the player
     // joins) keeps the anger.
     if angry_at == Some(Who::Player)
-        && w.player
-            .as_ref()
+        && w.selected_player()
             .is_some_and(|p| p.creative || p.spectator || w.difficulty.id == 0)
     {
-        stop_being_angry(m);
+        stop_being_angry_with_world(m, Some(w));
     }
 }
 /// The part of `Wolf.tick` both sides run: `interestedAngle` eases toward 1
@@ -951,11 +1012,11 @@ pub fn register_cat(m: &mut Mob) {
     );
     m.ai.targets.add(
         1,
-        NearestTarget::species(&[Species::Rabbit], false).gate(|m, _| !m.extra.tame),
+        NonTameTarget::new(NearestTarget::species(&[Species::Rabbit], false)),
     );
     m.ai.targets.add(
         1,
-        NearestTarget::new(Prey::Filter(baby_turtle_on_land), false).gate(|m, _| !m.extra.tame),
+        NonTameTarget::new(NearestTarget::new(Prey::Filter(baby_turtle_on_land), false)),
     );
 }
 /// `Ocelot.registerGoals`, then `reassessTrustingGoals` adds the player
@@ -1087,7 +1148,7 @@ impl Goal for CatTempt {
             return false;
         }
         // CatTemptGoal.canScare: a selected player that is the tempter is not scared.
-        let picked = self.1.is_some() && self.1 == cx.w.player.as_ref().map(|p| p.uuid);
+        let picked = self.1.is_some() && self.1 == cx.w.selected_player().map(|p| p.uuid);
         let scare = self.0.can_scare;
         self.0.can_scare = scare && !picked;
         let go = self.0.can_continue(m, cx);
@@ -1118,7 +1179,7 @@ impl Goal for CatTempt {
         // CatTemptGoal.tick: pick the tempting player with a 1 in 600 chance a
         // tick while none is picked, else drop the pick with a 1 in 500 chance.
         if self.1.is_none() && m.random.next_int_bound(reduced(600)).unwrap_or(1) == 0 {
-            self.1 = cx.w.player.as_ref().map(|p| p.uuid);
+            self.1 = cx.w.selected_player().map(|p| p.uuid);
         } else if m.random.next_int_bound(reduced(500)).unwrap_or(1) == 0 {
             self.1 = None;
         }
@@ -1170,8 +1231,7 @@ impl CatRelaxOnOwner {
     /// The owner's sleeping state, when this cat may relax on them: the
     /// player it sees has to be its owner (`Cat.getOwner`).
     fn sleeping_owner<'w>(m: &Mob, w: &'w MobWorld) -> Option<&'w super::PlayerView> {
-        w.player
-            .as_ref()
+        w.selected_player()
             .filter(|p| m.extra.tame && !m.extra.sitting && p.sleeping && is_owner_of(m, p))
     }
 }
@@ -1235,8 +1295,7 @@ impl Goal for CatRelaxOnOwner {
             };
         if cx
             .w
-            .player
-            .as_ref()
+            .selected_player()
             .is_some_and(|p| is_owner_of(m, p) && p.sleep_timer >= 100)
             && m.random.next_float() < chance
         {
@@ -1247,7 +1306,7 @@ impl Goal for CatRelaxOnOwner {
         m.nav_stop();
     }
     fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
-        let (Some(p), Some(g)) = (cx.w.player.as_ref(), self.goal) else {
+        let (Some(p), Some(g)) = (cx.w.selected_player(), self.goal) else {
             return;
         };
         m.extra.flag2 = false;
@@ -1739,6 +1798,52 @@ mod tests {
         assert!(!action(&events), "a client's copy posts nothing");
     }
 
+    /// `TamableAnimal.unableToMoveToOwner` (#12939): a pet on a lead, with lead
+    /// data still to be found, or riding something neither follows nor
+    /// teleports to its owner.
+    #[test]
+    fn a_leashed_or_riding_pet_stays_put() {
+        let ran = crate::mobs::world::with_test_world(&[], |w, _| {
+            let mut m = wolf();
+            set_tame(&mut m, true);
+            assert!(!unable_to_move_to_owner(&m, w), "a free pet follows");
+            m.extra.leash = Some(super::super::leash::Holder::Knot([0, 64, 3]));
+            assert!(unable_to_move_to_owner(&m, w), "tied to a fence");
+            m.extra.leash = None;
+            m.extra.passenger = true;
+            assert!(unable_to_move_to_owner(&m, w), "in a boat");
+            m.extra.passenger = false;
+            m.extra.sitting = true;
+            assert!(unable_to_move_to_owner(&m, w), "ordered to sit");
+        });
+        if !ran {
+            eprintln!("skipped: no extracted vanilla data");
+        }
+    }
+    /// `SitWhenOrderedToGoal.start` only stops and sits: a wolf begging for the
+    /// bone its owner holds keeps its head tilt (`BegGoal` owns it).
+    #[test]
+    fn sitting_down_keeps_a_wolfs_begging_tilt() {
+        let ran = crate::mobs::world::with_test_world(&[], |w, _| {
+            let mut fixture = crate::health::TestLevel::new(0);
+            let mut events = Vec::new();
+            let mut cx = Cx {
+                w,
+                level: &mut fixture.level(),
+                events: &mut events,
+            };
+            let mut m = wolf();
+            set_tame(&mut m, true);
+            m.extra.flag = true;
+            m.extra.sitting = true;
+            SitWhenOrdered.start(&mut m, &mut cx);
+            assert!(m.extra.flag, "the begging tilt is BegGoal's to end");
+        });
+        if !ran {
+            eprintln!("skipped: no extracted vanilla data");
+        }
+    }
+
     const WHITE: u32 = 0xFFFF_FFFF;
 
     fn cat() -> Mob {
@@ -2171,5 +2276,69 @@ mod tamable_panic_tests {
         assert!(cat, "a cat hit by a player runs");
         assert!(frozen, "a freezing wolf runs");
         assert!(!hit, "a wolf hit by a player does not panic");
+    }
+}
+
+#[cfg(test)]
+mod non_tame_tests {
+    use super::*;
+    use crate::mobs::world::with_test_world;
+    use horizon_core::geometry::Vec3;
+    use std::sync::Arc;
+
+    /// `NonTameRandomTargetGoal.canContinueToUse` re-tests the subclass
+    /// selector: a baby turtle (`Turtle.BABY_ON_LAND_SELECTOR`) that enters
+    /// water is no longer a valid target.
+    #[test]
+    fn a_non_tame_target_stops_when_the_baby_turtle_enters_water() {
+        let mut kinds = None;
+        if !with_test_world(&[], |_, types| {
+            kinds = Some((
+                Arc::new(types.types["minecraft:cat"].clone()),
+                Arc::new(types.types["minecraft:turtle"].clone()),
+            ));
+        }) {
+            return;
+        }
+        let Some((cat, turtle)) = kinds else { return };
+        let mut turtle = Mob::new(2, turtle, Vec3::new(2.5, 64.0, 0.5), 0.0);
+        turtle.extra.age = -24000;
+        let mut m = Mob::new(1, cat, Vec3::new(0.5, 64.0, 0.5), 0.0);
+        m.ai.goals.add(
+            1,
+            NonTameTarget::new(
+                NearestTarget::new(Prey::Filter(baby_turtle_on_land), false).interval(0),
+            ),
+        );
+        let tick = |m: &mut Mob, w: &MobWorld| {
+            let mut lr = crate::health::TestLevel::new(0);
+            let mut events = Vec::new();
+            let mut cx = Cx {
+                w,
+                level: &mut lr.level(),
+                events: &mut events,
+            };
+            let mut goals = std::mem::take(&mut m.ai.goals);
+            goals.tick(m, &mut cx);
+            let running = goals.is_running("NonTameRandomTargetGoal");
+            m.ai.goals = goals;
+            running
+        };
+        let land = [turtle.seen(None)];
+        let mut started = None;
+        if !with_test_world(&land, |w, _| started = Some(tick(&mut m, w))) {
+            return;
+        }
+        turtle.fluids.in_water = true;
+        let water = [turtle.seen(None)];
+        let mut stopped = None;
+        if !with_test_world(&water, |w, _| stopped = Some(!tick(&mut m, w))) {
+            return;
+        }
+        assert_eq!(
+            (started, stopped),
+            (Some(true), Some(true)),
+            "a baby turtle on land is hunted and one in water is not"
+        );
     }
 }

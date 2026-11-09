@@ -12,6 +12,7 @@ use std::fmt;
 /// `DataComponentType`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct ComponentId(Box<str>);
 
 impl ComponentId {
@@ -28,6 +29,7 @@ impl ComponentId {
     }
 }
 
+// no wire: static registration identity; mod-local storage cannot be reconstructed from a wire string.
 /// An enchantment effect component type (`EnchantmentEffectComponents`): what an enchantment's
 /// `effects` are keyed by, and what [`ItemResource::has_enchantment_effect`] asks for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -55,6 +57,7 @@ pub const PREVENT_ARMOR_CHANGE: EnchantmentEffect =
 /// The effective rarity of an item stack, after its enchantment upgrade.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub enum ItemRarity {
     /// The ordinary rarity.
     Common,
@@ -90,6 +93,7 @@ impl ItemRarity {
 /// A visible item bar: its width out of thirteen pixels and its RGB colour.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: a plain drawing value, also constructed by the bundle calculation.
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct ItemBar {
     /// Width out of thirteen pixels.
     pub width: i32,
@@ -100,6 +104,7 @@ pub struct ItemBar {
 /// Effective attack range for an actor, including the component's hitbox margin.
 #[derive(Clone, Copy, Debug, PartialEq)]
 // exhaustive: a value record
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct ItemAttackRange {
     /// Minimum reach before the margin.
     pub min: f32,
@@ -119,6 +124,7 @@ impl ItemAttackRange {
 /// Owned damage source information for a stack attack or a source-specific item query.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: a value record
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct ItemDamageSource {
     /// Registry identifier of the damage type.
     pub damage_type: crate::Identifier,
@@ -462,6 +468,18 @@ impl fmt::Debug for ItemResource {
 /// the transaction `tx` a write runs in puts it back on an abort. Amounts never exceed what was
 /// asked; a handler answering more is a mod bug, and the move it was part of is aborted.
 pub trait ResourceHandler<R> {
+    /// Set the container limit transactionally, accepting 1..=99 (vanilla's upper bound).
+    /// Existing oversized stacks remain extractable. The game persists this with block entity data.
+    /// Unsupported handlers return false without mutation.
+    fn set_max_stack_size(
+        &self,
+        _host: &mut dyn ServerHost,
+        _tx: &Transaction,
+        _limit: u32,
+    ) -> bool {
+        false
+    }
+
     /// How many indices it has.
     fn size(&self, host: &mut dyn ServerHost) -> usize;
     /// What index `index` holds, if anything.
@@ -539,6 +557,7 @@ pub trait ResourceHandler<R> {
 /// neither end keeps any of it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct Overanswered {
     /// The mod whose handler answered, or "the game".
     pub owner: String,

@@ -1962,6 +1962,18 @@ fn posed_body(
     alpha: f32,
     data: &MobData,
 ) -> (std::sync::Arc<Part>, Poses, Vec<(String, String, [f32; 3])>) {
+    let mut poses = Poses::default();
+    let (model, anchors) = pose_body(m, alpha, data, &mut poses, true);
+    (model, poses, anchors)
+}
+/// [`posed_body`] into `poses`, which keeps its capacity; the anchors only when `anchors` asks.
+fn pose_body(
+    m: &Mob,
+    alpha: f32,
+    data: &MobData,
+    poses: &mut Poses,
+    anchors: bool,
+) -> (std::sync::Arc<Part>, Vec<(String, String, [f32; 3])>) {
     let s = anim::state(m, alpha);
     let (model_key, _) = body(m);
     let cem = data
@@ -1977,20 +1989,29 @@ fn posed_body(
             .cloned()
             .unwrap_or_else(|| m.kind.model.clone()),
     };
-    let mut poses = Poses::new(&model);
-    anim::setup(m, &s, &mut poses, &data.animations);
+    poses.reset(&model);
+    anim::setup(m, &s, poses, &data.animations);
     if let Some(c) = custom
         && let Some(animation) = &c.animation
     {
-        animation.run(m, &s, &mut poses);
+        animation.run(m, &s, poses);
     }
-    let anchors = custom.map_or(Vec::new(), |c| c.anchors.clone());
-    (model, poses, anchors)
+    let anchors = match (custom, anchors) {
+        (Some(c), true) => c.anchors.clone(),
+        _ => Vec::new(),
+    };
+    (model, anchors)
 }
 /// `m`'s humanoid parts as its model is posed this frame (`setupAnim`, a pack's custom
-/// animation included), for `mob_layer`; None for a model that isn't humanoid.
+/// animation included), for `mob_layer`; None for a mob whose renderer isn't a humanoid one
+/// (`HumanoidMobRenderer`'s families, as `anim::extracts_humanoid` names them), unposed. The
+/// poses go into a pooled map and the snapshot is fixed-size: nothing is allocated per mob.
 pub fn posed_parts(m: &Mob, alpha: f32, data: &MobData) -> Option<mod_api::PosedParts> {
-    let (_, poses, _) = posed_body(m, alpha, data);
+    if !anim::extracts_humanoid(m) {
+        return None;
+    }
+    let mut poses = Poses::pooled();
+    pose_body(m, alpha, data, &mut poses, false);
     mod_api::PosedParts::new(|part| {
         let name = part.model_name();
         Some((poses.pose_of(name)?, !poses.is_hidden_named(name)))
@@ -2894,14 +2915,27 @@ mod tests {
             "a zombie has no sleeves"
         );
 
+        // QuadrupedModel (a cow) has a head and a body too: its family, not its parts, says it
+        // isn't humanoid.
+        let quadruped = serde_json::json!({ "children": {
+            "head": cube(0.0), "body": cube(0.0), "right_hind_leg": cube(-2.0),
+            "left_hind_leg": cube(2.0), "right_front_leg": cube(-2.0), "left_front_leg": cube(2.0),
+        }});
+        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        kind.species = Species::Cow;
+        kind.anim = super::super::Anim::Quadruped;
+        kind.model = std::sync::Arc::new(Part::parse("root", &quadruped));
         let mut cow = Mob::new(
             2,
-            crate::mobs::sensor_scan_tests::kind(),
+            std::sync::Arc::new(kind),
             horizon_core::geometry::Vec3::ZERO,
             0.0,
         );
         cow.age = 37;
-        assert!(posed_parts(&cow, 0.5, &data).is_none(), "not a humanoid");
+        assert!(
+            posed_parts(&cow, 0.5, &data).is_none(),
+            "a cow is no humanoid"
+        );
     }
 
     /// A part `player_submit` hid leaves the body, after Skin Customization, while the armour
