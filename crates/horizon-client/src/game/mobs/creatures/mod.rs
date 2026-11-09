@@ -8,6 +8,7 @@ mod borrowed_tick;
 #[cfg(test)]
 mod mob_dispatch_panic_tests;
 mod pufferfish_player;
+mod residency;
 #[cfg(test)]
 mod retained_limits_tests;
 use super::api_values::{TryIntoApi, TryIntoEngine};
@@ -741,10 +742,7 @@ impl Game<'_> {
         match site {
             SpawnSite::Raw => return Some(mob),
             SpawnSite::Finalizing(reason) => match self.finalize_with(&mut mob, reason, None) {
-                Finalized::Cancelled => {
-                    self.forget_entity(mob.id);
-                    return None;
-                }
+                Finalized::Cancelled => return self.discard_unjoined_mob(mob.id),
                 Finalized::Skipped => return Some(mob),
                 Finalized::Done => {}
             },

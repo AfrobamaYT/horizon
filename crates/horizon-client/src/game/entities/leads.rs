@@ -168,7 +168,9 @@ impl Game<'_> {
     pub(super) fn forget_untied_knots(&mut self) {
         let fences = self.lead_fences();
         self.knot_ids.retain(|p, _| fences.contains(p));
-        self.knots.retain(|knot| fences.contains(&knot.fence));
+        self.resident_entities
+            .knots
+            .retain(|knot| fences.contains(&knot.fence));
     }
     /// `LeashFenceKnotEntity.notifyLeasheeRemoved`: only a knot losing a
     /// holder asks whether it still has another one. The departing entity may
@@ -189,7 +191,9 @@ impl Game<'_> {
             return;
         }
         self.knot_ids.remove(&fence);
-        self.knots.retain(|knot| knot.fence != fence);
+        self.resident_entities
+            .knots
+            .retain(|knot| knot.fence != fence);
     }
     /// `LeashFenceKnotEntity.getOrCreateKnot` → `createKnot`: the first lead
     /// tied to a fence makes its knot, a real entity with its own id (the
@@ -203,7 +207,7 @@ impl Game<'_> {
         self.next_entity += 1;
         let id = self.next_entity;
         self.knot_ids.insert(fence, id);
-        self.knots.push(Knot {
+        self.resident_entities.knots.push(Knot {
             attachment_lifetime: Default::default(),
             id,
             join: Default::default(),
@@ -225,13 +229,18 @@ impl Game<'_> {
         if location.owner.dimension != self.dim.key() {
             return None;
         }
-        let index = self.knots.locate(location.join)?;
-        Some(self.knots[index].fence)
+        let index = self.resident_entities.knots.locate(location.join)?;
+        Some(self.resident_entities.knots[index].fence)
     }
     /// The ids of the level's natural knots that a lead still holds, in the
     /// order they were made.
     pub(super) fn natural_knot_ids(&self) -> Vec<u32> {
-        let mut ids: Vec<u32> = self.knots.iter().map(|knot| knot.id).collect();
+        let mut ids: Vec<u32> = self
+            .resident_entities
+            .knots
+            .iter()
+            .map(|knot| knot.id)
+            .collect();
         ids.sort_unstable();
         ids
     }

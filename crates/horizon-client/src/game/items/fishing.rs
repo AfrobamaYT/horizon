@@ -1478,7 +1478,8 @@ impl Game<'_> {
             table::{EntityLookup, SourceEntity},
         };
         let found = self
-            .entity_residency
+            .resident_entities
+            .table
             .borrow_mut()
             .server_entity_lookup(id, |at| {
                 if at.owner.kind != Kind::Hook {
@@ -1511,7 +1512,8 @@ impl Game<'_> {
     pub(in crate::game) fn remove_fishing_hook(&mut self, id: u32) {
         use horizon_client::join_seq::residency::{Kind, Source, table::EntityLookup};
         let found = self
-            .entity_residency
+            .resident_entities
+            .table
             .borrow_mut()
             .server_entity_lookup(id, |at| self.locate_server_resident_owner(at));
         let EntityLookup::Found { location, .. } = found else {

@@ -294,9 +294,10 @@ fn actual_dragon_admits_exactly_eight_checked_parts_with_independent_uuids() {
         let parent = game
             .spawn_dragon_spawned([0.0; 3], crate::game::creatures::SpawnSite::Plain)
             .unwrap();
-        let uuids = game.dragon.as_ref().unwrap().part_uuids;
+        let uuids = game.dragon.as_ref().unwrap().residency.part_uuids;
         let parts: Vec<_> = game
-            .entity_residency
+            .resident_entities
+            .table
             .borrow_mut()
             .admitted_metadata()
             .filter(|(_, at, _)| at.owner.kind == Kind::DragonPart)

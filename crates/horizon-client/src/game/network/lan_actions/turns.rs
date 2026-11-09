@@ -248,7 +248,7 @@ impl Game<'_> {
                     guest.residency.extract();
                 }
             }
-            None => self.local_player_residency.extract(),
+            None => self.resident_entities.local_player.extract(),
         }
         std::mem::swap(&mut self.player, &mut player);
         let eye = (g.eye_height() as f32, self.eye);
@@ -1014,7 +1014,7 @@ impl Game<'_> {
                     guest.residency.put_back();
                 }
             }
-            None => self.local_player_residency.put_back(),
+            None => self.resident_entities.local_player.put_back(),
         }
         self.hook.finish_loan();
         self.bind_current_hook_residency();

@@ -177,7 +177,8 @@ impl Game<'_> {
     ) -> super::entity_residency::SlotAccess<R> {
         use super::entity_residency::SlotAccess;
         let resolved = {
-            self.entity_residency
+            self.resident_entities
+                .table
                 .borrow_mut()
                 .entity_lookup(dimension, id.get(), |at| {
                     self.locate_server_resident_owner(at)
@@ -188,7 +189,7 @@ impl Game<'_> {
             EntityLookup::Taken => return SlotAccess::Taken,
             EntityLookup::Missing => return SlotAccess::Missing,
         };
-        debug_assert!(self.entity_residency.try_borrow_mut().is_ok());
+        debug_assert!(self.resident_entities.table.try_borrow_mut().is_ok());
         if matches!(
             location.owner.kind,
             horizon_client::join_seq::residency::Kind::Player
@@ -227,7 +228,8 @@ impl Game<'_> {
 
     pub(super) fn server_resident_entity(&self, id: u32) -> EntityLookup<Target> {
         let found = self
-            .entity_residency
+            .resident_entities
+            .table
             .borrow_mut()
             .server_entity_lookup(id, |at| self.locate_server_resident_owner(at));
         match found {
@@ -267,7 +269,7 @@ impl Game<'_> {
 
     /// A new epoch invalidates every old producer before rebinding retained levels.
     pub(super) fn reset_entity_residency(&mut self) {
-        let table = self.entity_residency.get_mut();
+        let table = self.resident_entities.table.get_mut();
         table.reset();
         let journal = table.producer();
         self.bind_resident_owners(&journal, self.dim.key());
@@ -683,7 +685,10 @@ impl Game<'_> {
         swap(&mut self.hoppers, &mut p.hoppers);
         swap(&mut self.mobs, &mut p.mobs);
         swap(&mut self.knot_ids, &mut p.knot_ids);
-        swap(&mut self.knots, &mut p.knots);
+        swap(
+            &mut self.resident_entities.knots,
+            &mut p.resident_entities.knots,
+        );
         swap(&mut self.creatures.projectiles, &mut p.projectiles);
         swap(&mut self.dropped, &mut p.dropped);
         swap(&mut self.orbs, &mut p.orbs);
@@ -833,7 +838,7 @@ impl Game<'_> {
         // Expire markers even after an interrupted pass. Preserve the original
         // native payload if the debug completion assertion also fires.
         let finished = catch_unwind(AssertUnwindSafe(|| {
-            self.entity_residency.get_mut().end_tick()
+            self.resident_entities.table.get_mut().end_tick()
         }));
         match result {
             Err(payload) => resume_unwind(payload),
@@ -1188,7 +1193,7 @@ impl Game<'_> {
         {
             return;
         }
-        let journal = self.entity_residency.borrow().producer();
+        let journal = self.resident_entities.table.borrow().producer();
         if dim == self.dim {
             self.bind_resident_owners(&journal, dim.key());
         } else if let Some(parked) = self.levels.parked.get_mut(&dim) {

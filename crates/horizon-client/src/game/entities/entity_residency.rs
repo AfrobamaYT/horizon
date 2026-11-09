@@ -167,7 +167,7 @@ macro_rules! define_resident_access {
         pub(super) fn bind_resident_owners(&mut $this, journal: &Journal, dimension: DimensionKey) {
             $($crate::game::entity_residency::bind_resident_list!($kind, $this$(.$field)+, journal, Owner { dimension, kind: Kind::$kind });)*
             $this$(.$projectiles)+.bind_residency(journal, Owner { dimension, kind: Kind::Projectile }, |entity| (entity.id, entity.join_seq()));
-            $this.dragon.bind_residency_specialized(journal, Owner { dimension, kind: Kind::Dragon }, |entity| (entity.id, entity.join_seq()), horizon_client::join_seq::residency::Source::Ordinary, Some((Kind::DragonPart, 8, |dragon, offset| dragon.part_uuids.get(usize::from(offset)).copied())), None);
+            $this.dragon.bind_residency_specialized(journal, Owner { dimension, kind: Kind::Dragon }, |entity| (entity.id, entity.join_seq()), horizon_client::join_seq::residency::Source::Ordinary, Some((Kind::DragonPart, 8, |dragon, offset| dragon.residency.part_uuids.get(usize::from(offset)).copied())), None);
         }
         pub(super) fn with_resident_owner_slot<R>(
             &mut $this,
@@ -348,7 +348,7 @@ mod tests {
             let holder = game.entity(id.get()).unwrap();
             let index = Arc::new(Mutex::new(AttachmentIndex::default()));
             let mut values = Attachments::default();
-            let journal = game.entity_residency.borrow().producer();
+            let journal = game.resident_entities.table.borrow().producer();
             let result = game.with_resident_slot(&DimensionKey::OVERWORLD, id, |slot| {
                 // Reenter the same structural journal: a retained drain borrow panics.
                 journal.drain_into(&mut Vec::new());
@@ -377,7 +377,7 @@ mod tests {
                         .same_registration(&mob.attachment_lifetime().registration().unwrap())
                 )
             });
-            assert!(game.entity_residency.try_borrow_mut().is_ok());
+            assert!(game.resident_entities.table.try_borrow_mut().is_ok());
             game.enter_level(crate::game::Dim::Nether).unwrap();
             assert!(matches!(
                 game.with_resident_slot(&DimensionKey::OVERWORLD, id, |slot| slot.is_bound()),
@@ -419,7 +419,7 @@ mod tests {
                 game.server_resident_entity(411),
                 EntityLookup::Found { .. }
             ));
-            assert_eq!(game.entity_residency.get_mut().end_tick(), Ok(()));
+            assert_eq!(game.resident_entities.table.get_mut().end_tick(), Ok(()));
         });
     }
 
@@ -478,7 +478,7 @@ mod tests {
                 game.server_resident_entity(411),
                 EntityLookup::Found { .. }
             ));
-            assert_eq!(game.entity_residency.get_mut().end_tick(), Ok(()));
+            assert_eq!(game.resident_entities.table.get_mut().end_tick(), Ok(()));
         });
     }
 
@@ -508,7 +508,7 @@ mod tests {
                 EntityLookup::Found { .. }
             ));
             game.mobs.restore(taken, RestoreOrder::SurvivorsFirst);
-            assert_eq!(game.entity_residency.get_mut().end_tick(), Ok(()));
+            assert_eq!(game.resident_entities.table.get_mut().end_tick(), Ok(()));
         });
     }
 
@@ -532,7 +532,7 @@ mod tests {
             );
             game.lan_assign_ids();
             assert_eq!(game.tnts[0].id, id);
-            assert_eq!(game.entity_residency.get_mut().end_tick(), Ok(()));
+            assert_eq!(game.resident_entities.table.get_mut().end_tick(), Ok(()));
         });
     }
 }

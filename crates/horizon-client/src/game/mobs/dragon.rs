@@ -6,6 +6,8 @@
 //! the spikes, its parts (head and neck take full damage, the rest a quarter
 //! plus one), wing knockback, block breaking, the death flight and rays, the
 //! exit portal, the egg and the next gateway; and its rendering and boss bar.
+#[path = "dragon/residency.rs"]
+mod residency;
 #[path = "dragon/save_lending.rs"]
 mod save_lending;
 use super::api_values::TryIntoApi;
@@ -386,8 +388,7 @@ impl Phase {
     }
 }
 pub(in crate::game) struct Dragon {
-    /// Entity-owned registration metadata; content clones are detached.
-    pub(super) attachment_lifetime: horizon_mod_runtime::attachments::AttachmentLifetime,
+    pub(super) residency: residency::DragonResidency,
     pub join: horizon_client::join_seq::JoinSeq,
     /// `Entity.id` once tracked to guests (0 before); its parts take the
     /// eight ids after it (`EnderDragon`'s constructor reserves them).
@@ -439,7 +440,6 @@ pub(in crate::game) struct Dragon {
     head: usize,
     /// head, neck, body, tail1-3, wing1-2.
     pub parts: [(Vec3, Vec3); 8],
-    pub(super) part_uuids: [[i32; 4]; 8],
     nodes: Option<[[i32; 3]; 24]>,
     nearest_crystal: Option<usize>,
     /// The player a crystal destroyed while it held its pattern sends it
@@ -618,7 +618,7 @@ impl Dragon {
     /// spawn egg or a save without `DragonPhase` keeps hovering where it was put.
     pub(super) fn new(position: Vec3, yaw: f32, seed: i64) -> Self {
         Self {
-            attachment_lifetime: Default::default(),
+            residency: Default::default(),
             join: Default::default(),
             id: 0,
             position,
@@ -654,11 +654,6 @@ impl Dragon {
             // The parts are entities of their own, at the origin until the first
             // `aiStep` places them (`tickPart`).
             parts: [(Vec3::ZERO, Vec3::ZERO); 8],
-            // Parts construct their own entity random; these UUID draws never
-            // advance the level's or dragon's ongoing stream.
-            part_uuids: std::array::from_fn(|_| {
-                horizon_client::save::insecure_uuid(&mut random_source::entity())
-            }),
             nodes: None,
             nearest_crystal: None,
             strafe_request: None,
@@ -1419,12 +1414,7 @@ impl Game<'_> {
         }
         // The spikes' crystals too (EndCrystal's constructor): an id whether
         // or not a client has tracked them yet, to be aimed at by it.
-        super::entity_residency::assign_resident_ids!(
-            self.crystals,
-            c,
-            &mut self.next_entity,
-            None
-        );
+        self.assign_resident_crystal_ids();
     }
     /// EndSpikeFeature's crystals (with fire under them on the bedrock).
     fn place_spike_crystals(&mut self) {
@@ -1614,21 +1604,7 @@ impl Game<'_> {
     /// its part with that entity id, while the dragon is there, dying or
     /// not: a part is an entity for as long as its parent is.
     pub(super) fn resident_dragon_part(&self, id: u32) -> Option<(&Dragon, usize)> {
-        use horizon_client::join_seq::residency::{Source, table::EntityLookup};
-        let EntityLookup::Found {
-            location,
-            value: Target::DragonPart(_),
-        } = self.server_resident_entity(id)
-        else {
-            return None;
-        };
-        if location.owner.dimension != self.dim.key() {
-            return None;
-        }
-        let Source::DragonPart(offset) = location.source else {
-            return None;
-        };
-        Some((self.dragon.as_ref()?, usize::from(offset)))
+        self.resident_dragon_part_source(id)
     }
     /// Damage to a special id (from projectiles and melee): what the
     /// dragon part or crystal made of it. `direct` is the projectile that hit.
@@ -3667,7 +3643,7 @@ pub(super) struct Breath {
 }
 
 horizon_client::impl_joined!(Breath, Dragon);
-horizon_mod_runtime::impl_attachment_lifetime!(Breath, Dragon);
+horizon_mod_runtime::impl_attachment_lifetime!(Breath);
 
 impl Breath {
     /// `AreaEffectCloud.isWaiting`: before its wait time (20 ticks, 10 for a
