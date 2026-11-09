@@ -30,6 +30,7 @@ impl AttachmentBatch {
     }
 }
 /// A typed snapshot whose iterator borrows values from its captured bindings.
+// no wire: borrows a live attachment index.
 pub type AttachmentQuery<'key, T> = runtime::AttachmentQuery<'key, AttachmentHolder, T>;
 
 /// A private-field scoped residency identity, not an access authorization token.
@@ -54,6 +55,7 @@ impl AttachmentWriteToken {
 }
 
 impl crate::wire::Wire for AttachmentHolder {
+    crate::wire::layout_fields!("tag" => u32, "Entity" => crate::EntityRef, "Player" => crate::PlayerRef, "BlockEntity" => crate::BlockEntityRef, "Chunk" => crate::ChunkRef, "Level" => crate::LevelRef);
     const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(AttachmentHolder));
     const MIN: usize = 4;
     fn put(&self, out: &mut crate::wire::Writer) {
@@ -93,6 +95,7 @@ impl crate::wire::Wire for AttachmentHolder {
 }
 
 impl crate::wire::Wire for AttachmentWriteToken {
+    crate::wire::layout_fields!("holder" => crate::Holder, "generation" => u64);
     const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(AttachmentWriteToken));
     const MIN: usize = 12;
     fn put(&self, out: &mut crate::wire::Writer) {
@@ -109,6 +112,7 @@ impl crate::wire::Wire for AttachmentWriteToken {
 }
 
 impl crate::wire::Wire for AttachmentBatch {
+    crate::wire::layout_fields!("rows" => Vec<(crate::AttachmentWriteToken,Vec<u8>)>);
     const LAYOUT_SEED: u64 = crate::wire::layout_name(stringify!(AttachmentBatch));
     const MIN: usize = 4;
     fn put(&self, out: &mut crate::wire::Writer) {

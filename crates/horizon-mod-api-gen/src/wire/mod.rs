@@ -578,8 +578,9 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Generated, Str
     guest.push_str(&calls::dispatch(&surface.types, &surface.methods).0);
     let _ = writeln!(
         wire,
-        "#[doc(hidden)]\npub const WIRE_LAYOUT: u64 = {:#x};",
-        layout(&surface)
+        "#[doc(hidden)]\npub static WIRE_LAYOUT: ::std::sync::LazyLock<u64> = ::std::sync::LazyLock::new(|| {{ let mut hash = {:#x}; {layouts} hash }});",
+        layout(&surface),
+        layouts = surface.types.defs.iter().filter(|def| def.lifetimes == 0).map(|def| format!("hash = crate::wire::layout_mix(hash, <{} as crate::wire::Wire>::layout(&mut vec![]));", def.rust.replace("mod_api::", "crate::"))).collect::<String>()
     );
     let sources = surface.types.index.read.take();
     Ok(Generated {
@@ -637,6 +638,14 @@ fn layout(surface: &Surface<'_>) -> u64 {
         // Private borrowed descriptors also define bytes and checked writeback policy.
         // Hash the complete definition so a new transport shape cannot hide behind Opaque.
         feed(&format!("{def:?}"));
+        if let ty::Kind::Variant(cases) = &def.kind {
+            for case in cases {
+                if let ty::Payload::Record(fields) = &case.payload {
+                    // Named payload fields also define the transport's structural schema.
+                    feed(&format!("{fields:?}"));
+                }
+            }
+        }
     }
     feed(&format!("{:?}", surface.hooks));
     hash

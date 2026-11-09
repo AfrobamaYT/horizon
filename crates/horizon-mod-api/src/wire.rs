@@ -75,6 +75,7 @@ pub const MAX_DEPTH: u16 = 1040;
 /// Why a buffer is not a value of the type it was read as.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
+// no wire: decoder and encoder diagnostics are returned locally, not encoded as values.
 pub enum WireError {
     /// The buffer ends inside a value.
     Eof,
@@ -111,6 +112,7 @@ impl std::error::Error for WireError {}
 // exhaustive: wasm boundary plumbing that generated code builds field by field
 /// A buffer values are written to. Reuse one to keep the allocation.
 #[derive(Default)]
+// no wire: owns a live encoding buffer and resource context.
 pub struct Writer {
     bytes: Vec<u8>,
     error: Option<WireError>,
@@ -251,6 +253,7 @@ pub trait Record {
 // exhaustive: wasm boundary plumbing that generated code builds field by field
 /// A call record refused before it can be encoded, such as an oversized owned snapshot.
 /// It follows the normal Writer error path instead of sending a truncated call.
+// no wire: borrows names from an encoding diagnostic.
 pub struct Refused(pub WireError);
 impl Record for Refused {
     fn encode(&self, out: &mut Writer) {
@@ -279,10 +282,12 @@ impl<T: Wire> Record for T {
 // exhaustive: wasm boundary plumbing that generated code builds field by field
 /// A hook record's writable fields, in declaration order. Sharing these tuple codecs avoids
 /// generating and compiling a separate native codec for every named point record.
+// no wire: borrowed call-field projection, encoded only by the call table.
 pub struct Fields<T>(pub T);
 
 // exhaustive: wasm boundary plumbing that generated code builds field by field
 /// A field which crosses with a record but is not a declared writeback destination.
+// no wire: borrowed call-field projection, not an owned value.
 pub struct ReadOnly<T>(pub T);
 
 // hidden: wasm boundary plumbing used by generated code, not a mod's API
@@ -351,6 +356,7 @@ impl<T: FieldSet> Record for Fields<T> {
 // hidden: wasm boundary plumbing used by generated code, not a mod's API
 /// A checked append-only delta. Only the API's type-owned validation can create it.
 #[doc(hidden)]
+// no wire: writeback delta envelope, consumed by call-table validation rather than standalone decoding.
 pub struct Append<T>(Vec<T>);
 impl<T> Append<T> {
     pub(crate) fn new(values: Vec<T>) -> Self {
@@ -401,6 +407,7 @@ impl<T: Put> Put for [T] {
 
 // exhaustive: wasm boundary plumbing that generated code builds field by field
 /// A buffer values are read from.
+// no wire: borrows a live decoding buffer and resource context.
 pub struct Reader<'a> {
     data: &'a [u8],
     depth: u16,
@@ -1489,3 +1496,21 @@ mod tests {
         assert_eq!(dive(&mut reader, 3), Ok(()));
     }
 }
+
+// Checked encodings declare their written fields here rather than relying on the
+// Rust representation (which may contain caches or validated constructor state).
+macro_rules! layout_fields {
+    ($($field:literal => $ty:ty),* $(,)?) => {
+        fn layout(visiting: &mut Vec<&'static str>) -> u64 {
+            let identity = std::any::type_name::<Self>();
+            if visiting.contains(&identity) { return crate::wire::layout_name("recursive"); }
+            visiting.push(identity);
+            let hash = Self::LAYOUT_SEED;
+            $(let hash = crate::wire::layout_mix(crate::wire::layout_mix(hash, crate::wire::layout_name($field)), <$ty as $crate::wire::Wire>::layout(visiting));)*
+            visiting.pop();
+            hash
+        }
+    };
+}
+
+pub(crate) use layout_fields;

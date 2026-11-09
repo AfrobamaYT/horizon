@@ -14,7 +14,7 @@ pub struct StatePredicate {
 // exhaustive: the closed serialized block/tag selector vocabulary is a link contract.
 // hidden: selector used by the derived predicate codec, not a second public constructor.
 #[doc(hidden)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, horizon_mod_api_macros::Wire)]
 pub enum StatePredicateTarget {
     Block(BlockKey),
     Tag(TagKey),

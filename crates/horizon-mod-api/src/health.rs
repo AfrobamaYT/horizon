@@ -39,6 +39,7 @@ pub enum Reduction {
 /// the reduction accessors so future reduction kinds do not expose a fixed array layout.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct DamageValues {
     /// The damage sequence's `original` value.
     pub original: f32,

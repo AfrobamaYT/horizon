@@ -15,6 +15,7 @@ pub struct Id(pub u64);
 // exhaustive: wasm boundary plumbing that generated code builds field by field
 /// The id names no live value: it was freed, its call ended, or it was never given out.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// no wire: local slot-table lookup diagnostic.
 pub struct Stale;
 
 struct Slot<T> {
@@ -27,6 +28,7 @@ struct Slot<T> {
 // exhaustive: wasm boundary plumbing that generated code builds field by field
 /// A generational slot map. Generation zero is reserved for protocol control values;
 /// exhausted generations retire their slot rather than wrapping and reviving an old id.
+// no wire: process-local generational slot storage.
 pub struct Slots<T> {
     slots: Vec<Slot<T>>,
     free: Vec<u32>,

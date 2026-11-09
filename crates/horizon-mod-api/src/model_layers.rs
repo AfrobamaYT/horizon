@@ -363,6 +363,7 @@ struct PartNode {
 #[serde(try_from = "MeshDefinitionData")]
 // exhaustive: private fields; use the builder to create the tree
 #[derive(horizon_mod_api_macros::Wire)]
+#[wire(via = String)]
 pub struct MeshDefinition {
     parts: Vec<PartNode>,
 }
@@ -539,6 +540,7 @@ impl ModelPolygon {
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
 #[non_exhaustive]
 #[derive(horizon_mod_api_macros::Wire)]
+#[wire(via = String)]
 pub struct ModelPart {
     /// Where it sits in its parent, in texels.
     pub x: f32,
@@ -905,4 +907,20 @@ mod tests {
         empty["parts"] = serde_json::json!([]);
         assert!(serde_json::from_value::<MeshDefinition>(empty).is_err());
     }
+}
+
+impl From<&MeshDefinition> for String {
+ fn from(value: &MeshDefinition) -> Self { serde_json::to_string(value).unwrap_or_default() }
+}
+impl TryFrom<String> for MeshDefinition {
+ type Error = serde_json::Error;
+ fn try_from(value: String) -> Result<Self, Self::Error> { serde_json::from_str(&value) }
+}
+
+impl From<&ModelPart> for String {
+ fn from(value: &ModelPart) -> Self { serde_json::to_string(value).unwrap_or_default() }
+}
+impl TryFrom<String> for ModelPart {
+ type Error = serde_json::Error;
+ fn try_from(value: String) -> Result<Self, Self::Error> { serde_json::from_str(&value) }
 }
