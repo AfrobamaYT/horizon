@@ -4,12 +4,12 @@
 //! (feeding, shearing, milking, spawn eggs, throwing) and rendering.
 #[cfg(test)]
 mod borrowed_panic_tests;
-#[cfg(test)]
-mod retained_limits_tests;
 mod borrowed_tick;
 #[cfg(test)]
 mod mob_dispatch_panic_tests;
 mod pufferfish_player;
+#[cfg(test)]
+mod retained_limits_tests;
 use super::api_values::{TryIntoApi, TryIntoEngine};
 
 use super::level_sounds::LevelSound;
@@ -169,10 +169,14 @@ struct MobOutputBatch {
     normal: NormalMobActions,
     guests: Vec<(u32, u32, MobEvent)>,
 }
+// Backpressure applies only to retained failed passes, never to healthy mob counts.
+// Sixteen batches permit 0.8 seconds of failed production at the vanilla tick rate.
+const MAX_PENDING_MOB_BATCHES: usize = 16;
 #[derive(Default)]
 struct PendingMobBatch {
     batches: std::collections::VecDeque<MobOutputBatch>,
     pushes: horizon_client::mobs::PendingPushes,
+    refusal_logged: bool,
 }
 
 /// Remove the current action before dispatch; retain only the unentered tail on unwind.
@@ -1427,6 +1431,23 @@ impl Game<'_> {
     pub(super) fn tick_creature_entities(&mut self) -> Result<()> {
         // Its steps as spans for `horizon-report` (nothing is read while spans are off).
         let mut laps = horizon_client::spans::laps();
+        let level_id = self.dim.id();
+        if let Some(pending) = self.creatures.pending.get_mut(level_id)
+            && (pending.refusal_logged || pending.batches.len() >= MAX_PENDING_MOB_BATCHES)
+        {
+            if !pending.refusal_logged {
+                log::warn!(
+                    "Refusing mob production in {level_id}: {} retained batches (limit {MAX_PENDING_MOB_BATCHES}); draining before retry",
+                    pending.batches.len()
+                );
+                pending.refusal_logged = true;
+            }
+            // No new producer work until the backlog drains. Unrelated projectile
+            // phases still advance; mob-specific follow-up must not reuse old ticks.
+            self.creatures.ticked.clear();
+            self.deliver_pending_mob_actions(level_id)?;
+            return self.finish_creature_entities(&mut laps);
+        }
         // `EntityEvent.Size` for the sizes that changed outside the mob ticks (spawns,
         // commands, a player's interaction), before the ticks move by them.
         self.native_mob_sizes();
@@ -1465,7 +1486,6 @@ impl Game<'_> {
         }
         self.init_sulfur_attribute_maps();
         let uuid = self.level.player_uuid;
-        let level_id = self.dim.id();
         let mut snapshot = std::mem::take(&mut self.creatures.seen_buf);
         snapshot.extend(self.mobs.iter().map(|m| seen(m, uuid)));
         let mut events = std::mem::take(&mut self.creatures.event_buf);
@@ -1640,6 +1660,11 @@ impl Game<'_> {
             let bounds = m.bounds();
             self.effects_on_death(&names, bounds, false, Some(m.id), Some(&mut m.random));
         }
+        self.deliver_pending_mob_actions(level_id)?;
+        self.finish_creature_entities(&mut laps)
+    }
+
+    fn deliver_pending_mob_actions(&mut self, level_id: &'static str) -> Result<()> {
         let mut pending = self.creatures.pending.remove(level_id).unwrap_or_default();
         let delivery = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<()> {
             while let Some(batch) = pending.batches.front_mut() {
@@ -1656,11 +1681,17 @@ impl Game<'_> {
             }
             Ok(())
         }));
+        if pending.batches.is_empty() {
+            pending.refusal_logged = false;
+        }
         self.creatures.pending.insert(level_id, pending);
         match delivery {
-            Ok(result) => result?,
+            Ok(result) => result,
             Err(payload) => std::panic::resume_unwind(payload),
         }
+    }
+
+    fn finish_creature_entities(&mut self, laps: &mut horizon_client::spans::Laps) -> Result<()> {
         self.drain_entity_inside();
         laps.lap("creature_events");
         self.ordered_before(super::ordered_tick::Batch::Projectiles)?;
