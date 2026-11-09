@@ -1409,3 +1409,11 @@ mod nested_vehicle_discard_tests {
         });
     }
 }
+
+impl Game<'_> {
+    pub(super) fn dismount_killed_boat(&mut self, id: u32) {
+                if let Some(y) = self.boats.iter().find(|b| b.id == id).map(|b| b.position.y) {
+                    self.dismount_destroyed_vehicle_mobs(id, y);
+                }
+    }
+}
