@@ -163,7 +163,9 @@ fn visible(m: &mut Mob, w: &MobWorld, who: Who) -> bool {
     let range = m.attrs.follow_range;
     match who {
         Who::Player => {
-            let Some(p) = &w.player else { return false };
+            let Some(p) = w.selected_player() else {
+                return false;
+            };
             if !p.alive || p.spectator {
                 return false;
             }
@@ -233,8 +235,7 @@ fn piglin_sense(m: &mut Mob, w: &MobWorld) {
         match who {
             Who::Player => {
                 if !loved
-                    && w.player
-                        .as_ref()
+                    && w.selected_player()
                         .is_some_and(|p| !p.spectator && holds_loved(w, p))
                     && visible(m, w, who)
                 {
@@ -694,8 +695,10 @@ fn hunt_wait(lr: &mut LegacyRandom) -> i32 {
 }
 /// `HoglinAi.setAvoidTarget`: forget the attack target and the walk, and
 /// avoid `who`, standing at `at`, for a while.
-pub fn set_avoid_target(m: &mut Mob, lr: &mut LegacyRandom, who: Who, at: Vec3) {
-    m.ai.target = None;
+pub fn set_avoid_target(m: &mut Mob, w: &MobWorld, lr: &mut LegacyRandom, who: Who, at: Vec3) {
+    if let super::TargetChange::Set(target) = w.change_target(m, true, None) {
+        m.ai.target = target;
+    }
     m.nav_stop();
     let ticks = retreat_duration(lr);
     remember_avoid(m, who, at, ticks);
@@ -703,9 +706,15 @@ pub fn set_avoid_target(m: &mut Mob, lr: &mut LegacyRandom, who: Who, at: Vec3) 
 /// `PiglinAi.setAvoidTargetAndDontHuntForAWhile`: forget the anger, the
 /// attack target and the walk, avoid `who` for a while and start the
 /// `HUNTED_RECENTLY` wait (`dontKillAnyMoreHoglinsForAWhile`).
-pub fn set_avoid_target_and_dont_hunt(m: &mut Mob, lr: &mut LegacyRandom, who: Who, at: Vec3) {
+pub fn set_avoid_target_and_dont_hunt(
+    m: &mut Mob,
+    w: &MobWorld,
+    lr: &mut LegacyRandom,
+    who: Who,
+    at: Vec3,
+) {
     m.extra.anger = 0;
-    set_avoid_target(m, lr, who, at);
+    set_avoid_target(m, w, lr, who, at);
     m.extra.ints[0] = hunt_wait(lr);
 }
 /// `HoglinAi.retreatFromNearestTarget` and `PiglinAi.retreatFromNearestTarget`:
@@ -724,9 +733,9 @@ pub fn retreat_from_nearest(m: &mut Mob, w: &MobWorld, lr: &mut LegacyRandom, wh
         }
     }
     if m.species() == Species::Hoglin {
-        set_avoid_target(m, lr, nearest.0, nearest.1);
+        set_avoid_target(m, w, lr, nearest.0, nearest.1);
     } else {
-        set_avoid_target_and_dont_hunt(m, lr, nearest.0, nearest.1);
+        set_avoid_target_and_dont_hunt(m, w, lr, nearest.0, nearest.1);
     }
 }
 /// `HoglinAi.broadcastRetreat` and `PiglinAi.broadcastRetreat`: every adult
@@ -797,8 +806,15 @@ fn hoglin_retaliates(m: &mut Mob, w: &MobWorld, by: Who, at: Vec3) -> bool {
 /// `HoglinAi.wasHurtBy`, which `Hoglin.hurtServer` calls: a hit ends the
 /// pacified state; a baby retreats from the attacker, an adult retaliates
 /// when `maybeRetaliate` allows. The hurt-by goal does the retaliating, so a
-/// hit that does not get it is used up.
-fn hoglin_hurt(m: &mut Mob, w: &MobWorld, lr: &mut LegacyRandom, by: Who) {
+/// hit that does not get it is used up. A retaliation is broadcast to the
+/// visible adult hoglins (`broadcastAttackTarget`, `NEAREST_VISIBLE_ADULT_HOGLINS`).
+fn hoglin_hurt(
+    m: &mut Mob,
+    w: &MobWorld,
+    lr: &mut LegacyRandom,
+    events: &mut Vec<MobEvent>,
+    by: Who,
+) {
     m.extra.ints[0] = 0;
     let Some(at) = w.target_info(by).map(|t| t.position) else {
         return;
@@ -808,6 +824,39 @@ fn hoglin_hurt(m: &mut Mob, w: &MobWorld, lr: &mut LegacyRandom, by: Who) {
         m.ai.last_hurt_by = None;
     } else if !hoglin_retaliates(m, w, by, at) {
         m.ai.last_hurt_by = None;
+    } else {
+        for &mob in &m.extra.piglin.adults {
+            events.push(MobEvent::HoglinAttackTarget { mob, target: by });
+        }
+    }
+}
+/// `HoglinAi.setAttackTargetIfCloserThanCurrent` for a hoglin that received a
+/// broadcast: nothing while pacified; otherwise `BehaviorUtils.getNearestTarget`,
+/// the new target unless the current one is strictly nearer
+/// (`getTargetNearestMe`). `position` gives a live mob target's place; a
+/// current target it cannot place counts as absent. A player on either side
+/// is not compared (`Who::Player` is each mob's own player): the current
+/// target stays.
+pub fn receive_attack_target(m: &mut Mob, target: Who, position: impl Fn(Who) -> Option<Vec3>) {
+    if m.extra.ints[0] > 0 {
+        return;
+    }
+    let Some(current) = m.ai.target else {
+        m.ai.target = Some(target);
+        return;
+    };
+    if current == Who::Player || target == Who::Player {
+        return;
+    }
+    let Some(now) = position(current) else {
+        m.ai.target = Some(target);
+        return;
+    };
+    let Some(new) = position(target) else {
+        return;
+    };
+    if m.distance_sqr(now) >= m.distance_sqr(new) {
+        m.ai.target = Some(target);
     }
 }
 /// `PiglinAi.stopHoldingOffHandItem` without bartering (`wasHurtBy`): a gold
@@ -918,7 +967,7 @@ fn piglin_hurt(
         }
         m.ai.last_hurt_by = None;
     } else if species == Some(Species::Hoglin) && hoglins_outnumber_piglins(m) {
-        set_avoid_target_and_dont_hunt(m, lr, by, at);
+        set_avoid_target_and_dont_hunt(m, w, lr, by, at);
         broadcast_retreat(m, w, by, at, events);
         m.ai.last_hurt_by = None;
     } else if piglin_retaliates(m, w, by, at) {
@@ -941,7 +990,7 @@ pub fn before_goals(m: &mut Mob, w: &MobWorld, lr: &mut LegacyRandom, events: &m
     {
         m.extra.piglin.hurt_seen = m.ai.last_hurt_by_time;
         if m.species() == Species::Hoglin {
-            hoglin_hurt(m, w, lr, by);
+            hoglin_hurt(m, w, lr, events, by);
         } else {
             piglin_hurt(m, w, lr, events, by);
         }
@@ -1154,7 +1203,7 @@ fn hostile_to_player(m: &Mob, w: &MobWorld) -> bool {
         return false;
     }
     match m.species() {
-        Species::Piglin => m.extra.anger > 0 || w.player.as_ref().is_some_and(|p| !p.gold_armor),
+        Species::Piglin => m.extra.anger > 0 || w.selected_player().is_some_and(|p| !p.gold_armor),
         _ => true,
     }
 }
@@ -1304,8 +1353,14 @@ impl Goal for HuntHoglin {
     }
     fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
         let Some(hoglin) = self.found else { return };
-        m.ai.target = Some(Who::Mob(hoglin));
+        let super::TargetChange::Set(Some(target)) =
+            cx.w.change_target(m, true, Some(Who::Mob(hoglin)))
+        else {
+            return;
+        };
+        m.ai.target = Some(target);
         m.extra.ints[0] = time_between_hunts(m);
+        let Who::Mob(hoglin) = target else { return };
         let range = m.attrs.follow_range;
         let pos = Vec3::new(m.position.x, m.eye_y(), m.position.z);
         let id = m.id;
@@ -1324,8 +1379,10 @@ impl Goal for HuntHoglin {
             });
         }
     }
-    fn stop(&mut self, m: &mut Mob, _: &mut Cx) {
-        m.ai.target = None;
+    fn stop(&mut self, m: &mut Mob, cx: &mut Cx) {
+        if let super::TargetChange::Set(target) = cx.w.change_target(m, true, None) {
+            m.ai.target = target;
+        }
     }
 }
 pub fn register_brute(m: &mut Mob) {
@@ -1420,7 +1477,8 @@ pub fn register_hoglin(m: &mut Mob) {
     g.add(4, NotRetreating(super::goals::FollowParent::new(1.1)));
     g.add(5, Stroll::avoiding_water(0.4));
     g.add(6, LookAtPlayer::new(8.0));
-    m.ai.targets.add(1, HurtByTarget::new().alert());
+    // The retaliation's broadcast is `hoglin_hurt`'s (`HoglinAi.broadcastAttackTarget`), not an alert.
+    m.ai.targets.add(1, HurtByTarget::new());
     // `HoglinAi.findNearestValidAttackTarget`: nothing while pacified, and
     // `StartAttacking` is not in the retreat activity.
     m.ai.targets.add(
@@ -1562,7 +1620,7 @@ impl LookAtLoved {
             Activity::Ride => 64.0,
             _ => return None,
         };
-        let p = cx.w.player.as_ref()?;
+        let p = cx.w.selected_player()?;
         if !holds_loved(cx.w, p) || m.distance_sqr(p.position) > range_sqr {
             return None;
         }
@@ -1713,7 +1771,9 @@ fn hoglin_repellent(m: &mut Mob, w: &MobWorld) {
         && m.extra.piglin.activity != Activity::Avoid
     {
         m.extra.ints[0] = 200;
-        m.ai.target = None;
+        if let super::TargetChange::Set(target) = w.change_target(m, true, None) {
+            m.ai.target = target;
+        }
     }
 }
 /// `StartCelebratingIfTargetDead` for a piglin (`scratch[0]` dancing,
@@ -1781,8 +1841,9 @@ pub fn ai_step(
         if let Some(who @ Who::Mob(_)) = m.ai.target
             && w.target_info(who)
                 .is_none_or(|t| !t.alive || !t.can_be_seen_as_enemy)
+            && let super::TargetChange::Set(target) = w.change_target(m, true, None)
         {
-            m.ai.target = None;
+            m.ai.target = target;
         }
     }
     // `PiglinBrute.customServerAiStep`: `updateActivity`, then
@@ -1793,8 +1854,12 @@ pub fn ai_step(
     }
     if m.extra.anger > 0 {
         m.extra.anger -= 1;
-        if m.extra.anger == 0 && m.ai.target == Some(Who::Player) && !hostile_to_player(m, w) {
-            m.ai.target = None;
+        if m.extra.anger == 0
+            && m.ai.target == Some(Who::Player)
+            && !hostile_to_player(m, w)
+            && let super::TargetChange::Set(target) = w.change_target(m, true, None)
+        {
+            m.ai.target = target;
         }
     }
     // `Brain.forgetOutdatedMemories`: `ADMIRING_DISABLED`, `DISABLE_WALK_TO_ADMIRE_ITEM`
@@ -1925,9 +1990,14 @@ fn throw_target(m: &mut Mob, who: Who, cx: &mut Cx) {
     let scale = power * f64::from(m.random.next_float() * 0.5 + 0.2);
     let push = away.normalize().scale(scale).rotate_y(angle);
     let up = power * f64::from(m.random.next_float()) * 0.5;
-    cx.events.push(MobEvent::Push {
+    let event = MobEvent::Push {
         target: who,
         velocity: [push.x, up, push.z],
+    };
+    cx.events.push(if who == Who::Player {
+        cx.w.route_player_event(event)
+    } else {
+        event
     });
 }
 /// `HoglinAi.onHitTarget`: an adult that hits a piglin while piglins
@@ -1942,7 +2012,7 @@ fn on_hit_target(m: &mut Mob, who: Who, cx: &mut Cx) {
         return;
     };
     if species_of(cx.w, who) == Some(Species::Piglin) && piglins_outnumber_hoglins(m) {
-        set_avoid_target(m, cx.level.random(), who, at);
+        set_avoid_target(m, cx.w, cx.level.random(), who, at);
         broadcast_retreat(m, cx.w, who, at, cx.events);
     }
 }
@@ -1966,7 +2036,9 @@ pub fn hoglin_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
     };
     let from = [m.position.x, m.position.y, m.position.z];
     match who {
-        Who::Player => cx.events.push(MobEvent::AttackPlayer(amount, from)),
+        Who::Player => cx
+            .events
+            .push(cx.w.route_player_event(MobEvent::AttackPlayer(amount, from))),
         Who::Mob(id) => cx.events.push(MobEvent::AttackMob {
             target: id,
             amount,

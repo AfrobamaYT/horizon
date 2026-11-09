@@ -94,6 +94,9 @@ pub(super) struct Modifier {
     name: String,
     biomes: Selector,
     action: Action,
+    /// The mod, the file and its text, kept in the content root so the
+    /// modifier is applied again over a world's data packs (`over_packs`).
+    pub source: [String; 3],
 }
 
 /// A generation step's index from its name.
@@ -223,6 +226,7 @@ impl Modifier {
             biomes: Selector::read(field("biomes")?, true).map_err(at)?,
             action,
             name,
+            source: [mod_id.to_owned(), file.to_owned(), text.to_owned()],
         }))
     }
 }

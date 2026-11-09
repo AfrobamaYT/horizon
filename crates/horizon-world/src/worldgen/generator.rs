@@ -44,7 +44,7 @@ use crate::{
 };
 use horizon_core::{
     biome::{BiomeZoom, obfuscate_seed},
-    density::{DensitySampler, SamplerContext},
+    density::{DensitySampler, LatticeSamples, SamplerContext},
     noise::{DensityVolume, Noise},
     position::{BlockPos, ChunkPos},
     random::{LegacyRandom, PositionalRandom, RandomSource, XoroshiroRandom},
@@ -435,20 +435,9 @@ impl GeneratorData {
         };
         let motion = tag_set("minecraft:blocks_motion_in_heightmap")?;
         let no_leaves = tag_set("minecraft:blocks_motion_in_heightmap_no_leaves")?;
-        let mut values = BTreeMap::<(String, String), bool>::new();
         let states = (0..registry.len())
             .map(|i| {
                 let state = registry.state(BlockStateId(i as u32)).unwrap();
-                for (key, value) in &state.properties {
-                    let integer = !value.is_empty()
-                        && value
-                            .trim_start_matches('-')
-                            .bytes()
-                            .all(|b| b.is_ascii_digit());
-                    *values
-                        .entry((state.name.clone(), key.clone()))
-                        .or_insert(true) &= integer;
-                }
                 GenBlockState {
                     air: flags[i].0,
                     air_block: state.name == "minecraft:air",
@@ -458,10 +447,7 @@ impl GeneratorData {
                 }
             })
             .collect::<Vec<_>>();
-        let integers = values
-            .into_iter()
-            .filter_map(|(key, integer)| integer.then_some(key))
-            .collect();
+        let integers = super::block_feature::integer_properties(registry);
         let biomes = read_bundle(dir, ov, "biomes")?;
         let biome_tags = build_tags(
             &read_bundle(dir, ov, "biome_tags")?,
@@ -934,6 +920,9 @@ struct Pipeline<R: RandomSource> {
     picker: GlobalFluidPicker,
     zoom: BiomeZoom,
     biome_cache: BiomeCache,
+    /// The terrain density's cell lattice each biome chunk's climate volume
+    /// sampled, for the noise fill of this chunk and its -X/-Z neighbours.
+    lattice_cache: LatticeCache,
     biome_work: ChunkWork,
     carver_cache: Mutex<HashMap<(i32, i32), BiomeId>>,
     pub(super) decoration: Option<Arc<super::generator_decoration::Decoration>>,
@@ -1019,6 +1008,9 @@ impl ChunkWork {
 }
 
 type BiomeCache = Mutex<HashMap<(i32, i32), Arc<BiomeChunk<BiomeId>>>>;
+type LatticeCache = Mutex<HashMap<(i32, i32), Arc<Vec<LatticeSamples>>>>;
+/// ~33 KB a chunk in To The Max; misses only resample.
+const LATTICE_CACHE_LIMIT: usize = 1024;
 
 /// `NoiseGeneratorSettings`' `default_block` and `default_fluid`: a block state
 /// in 26.3's form, the id alone or `{"id", "properties"}`.
@@ -1222,6 +1214,7 @@ where
             extensions,
             picker,
             biome_cache: Mutex::new(HashMap::new()),
+            lattice_cache: Mutex::new(HashMap::new()),
             biome_work: ChunkWork::new(),
             carver_cache: Mutex::new(HashMap::new()),
             decoration: None,
@@ -1385,17 +1378,25 @@ where
             self.router.get(RouterField::Erosion).as_ref(),
         );
         let context = &mut worker.biome_context;
-        let volume = resolver
-            .prepare_volume(
-                context,
-                [
-                    pos.x.wrapping_shl(4) >> 2,
-                    min >> 2,
-                    pos.z.wrapping_shl(4) >> 2,
-                ],
-                [4, height >> 2, 4],
-            )
-            .map_err(stage("biomes"))?;
+        context.capture_lattice();
+        let volume = resolver.prepare_volume(
+            context,
+            [
+                pos.x.wrapping_shl(4) >> 2,
+                min >> 2,
+                pos.z.wrapping_shl(4) >> 2,
+            ],
+            [4, height >> 2, 4],
+        );
+        let lattice = context.take_lattice_capture();
+        let volume = volume.map_err(stage("biomes"))?;
+        if !lattice.is_empty() {
+            let mut cache = self.lattice_cache.lock().unwrap();
+            if cache.len() >= LATTICE_CACHE_LIMIT {
+                cache.clear();
+            }
+            cache.insert((pos.x, pos.z), Arc::new(lattice));
+        }
         let ids = &self.data.biome_ids;
         let blender = self.blender_at(pos);
         // Names point into the source's parameter list: neighbouring quarts
@@ -1719,15 +1720,27 @@ where
             )),
         };
         worker.timings.noise += lap(&mut clock);
-        fill_noise(
+        // The density cells this fill needs are mostly in the climate volumes
+        // of this chunk and its +X/+Z neighbours, sampled for their biomes.
+        let lattice = {
+            let cache = self.lattice_cache.lock().unwrap();
+            [(0, 0), (1, 0), (0, 1), (1, 1)]
+                .into_iter()
+                .filter_map(|(dx, dz)| cache.get(&(pos.x.wrapping_add(dx), pos.z.wrapping_add(dz))))
+                .flat_map(|samples| samples.iter().cloned())
+                .collect()
+        };
+        context.set_lattice(lattice);
+        let filled = fill_noise(
             &mut chunk,
             volume,
             self.router.get(RouterField::FinalDensity).as_ref(),
             context,
             aquifer.as_mut(),
             self.settings.default_block,
-        )
-        .map_err(stage("noise"))?;
+        );
+        context.clear_lattice();
+        filled.map_err(stage("noise"))?;
         let generation = self.generation();
         worker.timings.noise += lap(&mut clock);
         // The surface rule, compiled by this worker's first chunk.

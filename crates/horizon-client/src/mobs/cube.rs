@@ -35,8 +35,7 @@ pub fn register(m: &mut Mob) {
         NearestTarget::new(Prey::Player, true)
             .interval(10)
             .when(|m, w| {
-                w.player
-                    .as_ref()
+                w.selected_player()
                     .is_some_and(|p| (p.position.y - m.position.y).abs() <= 4.0)
             }),
     );
@@ -272,7 +271,7 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     if can_deal_damage(m)
         && !m.no_ai
         && m.alive()
-        && let Some(p) = &w.player
+        && let Some(p) = w.selected_player()
         && p.alive
         && !p.creative
         && crate::scoreboard::teams_allow_damage(
@@ -287,11 +286,11 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
             .is_some_and(|t| m.melee_reaches(w, t.hitbox))
             && m.sees(w, Who::Player)
         {
-            events.push(MobEvent::CubeHurtPlayer {
+            events.push(w.route_player_event(MobEvent::CubeHurtPlayer {
                 cube: m.id,
                 amount: attack_damage(m),
                 from: [m.position.x, m.position.y, m.position.z],
-            });
+            }));
         }
     }
     hurt_touching_golems(m, w, events);

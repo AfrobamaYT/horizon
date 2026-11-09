@@ -168,11 +168,12 @@ impl Goal for CopyOwnerTarget {
     }
     fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
         let owner = m.extra.counter2 as u32;
-        m.ai.target =
+        let target =
             cx.w.others
                 .iter()
                 .find(|s| s.id == owner)
                 .and_then(|s| s.target);
+        m.set_ai_target(cx.w, target);
     }
 }
 /// `VexMoveControl`: accelerate straight at the wanted point.

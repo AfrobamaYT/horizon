@@ -88,9 +88,11 @@ impl Game<'_> {
                     m.extra.owner = Some(acting);
                     m.persistent = true;
                     m.nav_stop();
-                    m.ai.target = None;
                 }
-                let sound = nautilus::eat_sound(m);
+                if tamed {
+                    self.set_event_ai_target(self.mobs[index].id, None, self.lan_acting);
+                }
+                let sound = nautilus::eat_sound(&self.mobs[index]);
                 // TamableAnimal.spawnTamingParticles (entity event 7 or 6).
                 self.mob_event_particles(self.mobs[index].id, if tamed { 7 } else { 6 });
                 self.nautilus_sound(index, sound);

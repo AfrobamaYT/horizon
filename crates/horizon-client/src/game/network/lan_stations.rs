@@ -23,7 +23,7 @@ pub(super) struct GuestStation {
     state: i32,
     pub(super) kind: StationKind,
     pub(super) pos: [i32; 3],
-    menu: Box<Menu>,
+    pub(super) menu: Box<Menu>,
     /// The data slots the client was last sent. `None` is not sent yet,
     /// which is not a cost: an anvil's signed cost may be `i32::MIN`.
     sent_data: Vec<Option<i32>>,
@@ -623,7 +623,7 @@ impl Game<'_> {
                 seed,
                 button,
                 gs.menu.data[button],
-                &item.item,
+                &item,
             )
         });
         // Player.onEnchantmentPerformed, and EnchantmentMenu's awardStat(ENCHANT_ITEM).

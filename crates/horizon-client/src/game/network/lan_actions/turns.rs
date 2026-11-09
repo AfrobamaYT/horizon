@@ -954,7 +954,7 @@ impl Game<'_> {
             let id = host.hub.guests[i].entity_id;
             host.hub.entity_event(id, crate::game::totem::TOTEM_EVENT);
             if self.player.is_some() {
-                self.totem_event(body, false);
+                self.totem_event(horizon_client::particles::TrackingTarget::Entity(id), body);
             }
         }
         let Some(host) = self.lan.as_mut() else {
