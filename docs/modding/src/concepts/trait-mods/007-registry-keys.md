@@ -187,7 +187,7 @@ The sample's `ProcessingRecipes::publish` retains these keys; `result` then chec
 | Package block entity type storage | `mod_api::BlockEntityTypeDecl` | Existing `r.block_entity_type(...).build()` registration is unchanged. The declaration snapshot no longer exposes the package parser's model; the game converts it once when declarations freeze. |
 | Component protocol vocabulary | `text::{TextContent, TextNbtSource, TextObject, TextClick, TextHover}` | Match these enums exhaustively: their serialized vocabulary is closed. Records remain `non_exhaustive`. |
 | Renderer GUI commands | `mod_api::GuiDraw` | `DrawContext::gui_paint` returns a typed text-conversion result; handle refusal before drawing. HUD hooks reject invalid writeback as a whole. |
-| File-opening click actions | Not in `text::TextClick` | Mods can neither produce nor round-trip `OpenFile`; untrusted file-opening action metadata is dropped. Part of [per-node origin tracking #1738](https://github.com/arismoko/horizon/issues/1738). |
+| File-opening click actions | Not in `text::TextClick` | Mods can neither produce nor round-trip `OpenFile`; untrusted file-opening action metadata is dropped. Core tracks local/remote origin per node, including mixed trees; exporting JSON or `TextForm` and decoding it makes every node remote. Adding API `OpenFile` remains a separate vocabulary/link-contract change. |
 
 `mod_api::GameRuleValue` owns the `Bool(bool)` and `Int(i32)` cases, in that order.
 `level.game_rule(host, id)` returns `Result<Option<GameRuleValue>, LevelReadError>`:
@@ -255,6 +255,11 @@ container path exceeds 512. Unavailable backends are distinct from invalid text 
 unrepresentable payloads.
 A refused hook capture does not dispatch; a refused writeback leaves every field unchanged.
 No subscriber means no conversion or snapshot allocation.
+Mutable stack arguments are compared using value equality with the snapshot passed to
+the listener. An unchanged argument retains the original engine value without strict
+write validation (including engine-legal stacks above effective count or damage maxima).
+A changed argument is validated in full; a refusal still commits no outputs. The same
+rule applies to anvil/grindstone records and menu cursor/quick-move stacks.
 
 Recursive `Clone`, `Eq` and `Drop` of a tree a mod itself built are ordinary Rust ownership,
 not part of the boundary guarantee.

@@ -4134,6 +4134,10 @@ mod baby_modifier_mutation_tests {
     /// amount, and the transient one the model reports.
     fn state(game: &Game<'_>, n: i32) -> (f64, Option<f64>, Option<f64>) {
         let m = &game.mobs[zombie(game, n)];
+        assert!(
+            close(m.movement_speed(), finalize::value(m, Attr::MovementSpeed)),
+            "gameplay speed must follow the effective movement attribute"
+        );
         (
             finalize::value(m, Attr::MovementSpeed),
             finalize::modifier_amount(m, Attr::MovementSpeed, "minecraft:baby"),
@@ -5714,6 +5718,45 @@ mod sulfur_body_attribute_tests {
             );
         });
     }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and a scratch HORIZON_HOME"]
+    fn a_readded_archetype_id_updates_the_bodiless_physics_cache() {
+        with_game(|game| {
+            assert!(game.run_command(
+                "summon minecraft:sulfur_cube 4.5 200 8.5 {UUID:[I;192,0,0,19],NoAI:1b,NoGravity:1b,Size:1}"
+            ));
+            let sel = "@e[type=minecraft:sulfur_cube,nbt={UUID:[I;192,0,0,19]},limit=1]";
+            let id = "minecraft:bouncy_add_knockback_resistance";
+            assert!(game.run_command(&format!(
+                "attribute {sel} minecraft:knockback_resistance modifier add {id} 0.2 add_value"
+            )));
+            let mob = game
+                .mobs
+                .iter_mut()
+                .find(|m| m.species() == horizon_client::mobs::Species::SulfurCube)
+                .unwrap();
+            mob.extra.set_body(Some("minecraft:oak_planks".into()));
+            horizon_client::mobs::sulfur_cube::adopt_body(mob);
+            mob.extra.set_body(None);
+            horizon_client::mobs::sulfur_cube::adopt_body(mob);
+            assert!(game.run_command(&format!(
+                "attribute {sel} minecraft:knockback_resistance modifier add {id} 0.6 add_value"
+            )));
+            assert_eq!(read(game, 19, "knockback_resistance"), 600);
+            // A genuine duplicate is still refused by the authoritative map.
+            game.run_command(&format!(
+                "attribute {sel} minecraft:knockback_resistance modifier add {id} 0.9 add_value"
+            ));
+            assert_eq!(read(game, 19, "knockback_resistance"), 600);
+            let mob = game
+                .mobs
+                .iter()
+                .find(|m| m.species() == horizon_client::mobs::Species::SulfurCube)
+                .unwrap();
+            assert!((mob.knockback_resistance() - 0.6).abs() < 1e-9);
+        });
+    }
+
     /// Added control (H192 routing mirror): base reset and modifier add/remove
     /// on a bodiless and a bodied cube reach the cached resistance, which never
     /// takes the body archetype's transient modifiers (bouncy: -2).

@@ -1,7 +1,7 @@
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; runs in an isolated scratch process"]
 fn stateful_creation_uses_actual_state_and_preserves_existing_entity() {
-    use crate::game::native_entity_refs::tests::{run_fresh_cases, with_game_at};
+    use crate::game::native_entity_refs::tests::{record_key, run_fresh_cases, with_game_at};
     use horizon_client::{chunk::Chunk, containers::BlockEntity};
     use mod_api::{self, *};
     use std::sync::{Arc, Mutex, OnceLock};
@@ -32,7 +32,7 @@ fn stateful_creation_uses_actual_state_and_preserves_existing_entity() {
                 .blocks(&[BLOCK])
                 .build();
             registrar.block_entity_part(&kind, self.clone()).unwrap();
-            self.0.kind.set(kind).unwrap();
+            record_key(&self.0.kind, kind);
         }
         fn blocks(&self, _: &mod_api::RegistrationContext, event: &mut BlocksEvent<'_>) {
             event

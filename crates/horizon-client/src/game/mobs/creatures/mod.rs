@@ -3370,27 +3370,6 @@ impl Game<'_> {
                         broke.push(mob);
                     }
                     let old = self.world.block(pos[0], pos[1], pos[2]);
-                    if drop
-                        && self
-                            .res
-                            .facts()
-                            .get(old)
-                            .name
-                            .starts_with("minecraft:infested_")
-                        && self
-                            .ui
-                            .rules
-                            .bool_at(horizon_client::gamerules::vanilla::BLOCK_DROPS)
-                    {
-                        let at = [
-                            f64::from(pos[0]) + 0.5,
-                            f64::from(pos[1]),
-                            f64::from(pos[2]) + 0.5,
-                        ];
-                        if let Some(id) = self.spawn_mob_raw("minecraft:silverfish", at, false) {
-                            self.mob_poof(id);
-                        }
-                    }
                     // Block.spawnDestroyParticles: fire breaks leave nothing.
                     if !self.res.facts().get(old).has_class("BaseFireBlock") {
                         self.level_event_at(2001, pos, old.0 as i32);
@@ -12305,6 +12284,8 @@ mod chorus_projectile_drop_tests {
             None,
         )
         .unwrap();
+        game.native_lifecycle
+            .begin_open(mod_api::NativeAuthority::IntegratedServer);
         game.build_registries();
         game.set_allow_commands(true);
 
@@ -13021,6 +13002,11 @@ mod loaded_mob_arrow_permission_tests {
             game.block_ticks
                 .add_empty_chunk(BlockPos::new(0, 0, 0).chunk())
                 .unwrap();
+            // Supply the synthetic chunk before forceload's synchronous load barrier.
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
             assert!(game.run_command("forceload add 0 0"));
             assert!(game.run_command("fill 0 199 0 15 199 15 stone"));
             assert!(game.world.loaded(3, 1));
