@@ -17,7 +17,7 @@ Verified current owners (repository-relative paths):
 | Residency installation and retirement | `crates/horizon-mod-runtime/src/attachments/resident.rs:26` and `:42`; index `:193` registers, `:344` unregisters, visiting that owner's keys. |
 | Saved entities, dimensions, players | `crates/horizon-client/src/game/modding/attachment_index/mod.rs:55`, `:80`, and `players.rs:7`: bind at lifecycle boundaries, never during query reads. |
 | Journaling and nesting | `crates/horizon-client/src/game/runtime/transactions.rs:191`, `:237`, `:302`: open, merge/rollback and capture attachment maps. This is a holder-map journal, not a need for simultaneous mutable entry references. |
-| Native/wasm boundary | `crates/horizon-mod-api/src/entity/attachment_query.rs:63` and `:80`: existing API-owned Wire token/batch conversion. Extend generated whole-batch operations, not per-row imports. |
+| Native/wasm boundary | `crates/horizon-mod-api/src/entity/attachment_query.rs:63` and `:80`: existing manual API-owned Wire token/batch conversion; evidence of the current route only, not a serialization pattern to extend. New crossing types must derive Wire. |
 
 These owners establish existing mechanics, not implementation of the contracts below. Before code, audit every #1606 residency producer, lifted-pass exit, world close, transfer, chunk unload and save gate against the same publication boundary; the exact #1606 owner integration remains a prerequisite.
 
@@ -63,9 +63,9 @@ The current dense bucket snapshots lack immutable per-key membership probes. Add
 
 No query or attachment/lifecycle mutation means zero extra index work per tick: at most an O(1) enabled-path branch, zero allocations, codecs, holder scans or all-mod scans. Unbound holders create no query memberships. Lifecycle work touches only that holder's attachment keys. Subscription/type keys resolve at registration. Benchmark against #1811's 10,000-holder baseline, reporting capture, traversal, codec, transport, retained-version copy time and allocations separately; no invented timings.
 
-Native and wasm share API-owned Wire query specs, scopes, filters, row errors and scoped apply payloads through the existing generator. One whole-batch capture import; one whole-batch apply import for submitted updates, never per-row imports. Validate the complete apply payload before executing row savepoints; an explicit enclosing transaction supplies whole-batch atomicity. Require the shared Wire capability for every boundary type and refuse registration with proposed `UnsupportedQueryWireCapability`, naming type and capability. No hand-written codec or guest pointer crosses the ABI.
+Native and wasm share API-owned Wire query specs, scopes, filters, row errors and scoped apply payloads through the existing generator. One whole-batch capture import; one whole-batch apply import for submitted updates, never per-row imports. Validate the complete apply payload before executing row savepoints; an explicit enclosing transaction supplies whole-batch atomicity. Every new public crossing type must carry an explicit `#[derive(Wire)]` (fully qualified as `#[derive(horizon_mod_api_macros::Wire)]` where needed). The generator builds only the host call tables; serialization belongs to the derive, never copied or extended manual token/batch Wire implementations. The derive entry point is `crates/horizon-mod-api-macros/src/lib.rs:6`; existing derived public types include `crates/horizon-mod-api/src/state_predicate.rs:6`. Require the shared Wire capability for every boundary type and refuse registration with proposed `UnsupportedQueryWireCapability`, naming type and capability. No hand-written codec or guest pointer crosses the ABI.
 
-Treat keys, scopes, tokens, lengths and replacements as untrusted. Proposed limits: 8 keys, 256 explicitly named dimensions, 64 KiB per encoded attachment, depth 64, and existing shared Wire message budgets; refuse oversize before mutation, never truncate or constrain vanilla storage capacity. AllLoaded over transport budget returns a capacity error, never partial silent results. Query reads preserve malformed saved bytes and report row errors without defaults. Native unwind or wasm trap aborts active savepoints and pending publications under runtime callback policy; process-aborting panics are unrecoverable. Disable/report the failing callback according to runtime policy. These limits require approval before implementation.
+Treat keys, scopes, tokens, lengths and replacements as untrusted. Proposed limits: 8 keys, 256 explicitly named dimensions, the existing shared NBT limits (64 MiB encoded bytes and depth 512), and existing shared Wire message budgets; refuse oversize before mutation, never truncate or constrain vanilla storage capacity. AllLoaded over transport budget returns a capacity error, never partial silent results. Query reads preserve malformed saved bytes and report row errors without defaults. Native unwind or wasm trap aborts active savepoints and pending publications under runtime callback policy; process-aborting panics are unrecoverable. Disable/report the failing callback according to runtime policy. Tuple and explicit-dimension limits require approval before implementation; payload limits reuse the shared boundary budgets. The current batch conversion calls `Limits::default()` for both encoding and decoding (`crates/horizon-mod-api/src/entity/attachment_query.rs:93` and `:108`); its defaults are defined at `crates/horizon-core/src/nbt.rs:202` and `:204`. Wire nesting has its own representation-aware depth budget, 1040 (`crates/horizon-mod-api/src/wire/mod.rs:73`), not an NBT depth override.
 
 ## Acceptance matrix
 
@@ -87,15 +87,16 @@ Expected future tests, not results from this documentation change:
 | Two keys with sizes 10,000 and 100, overlap 40 | 100 candidate visits, at most 100 other-key probes, 40 rows; never 10,000 candidates |
 | 10,000 unbound holders, 100 idle ticks | Zero new memberships, codecs, allocations and index work |
 | Duplicate key; 9 keys; 257 explicit dimensions | Refusal before capture; zero writes |
-| 65 KiB replacement under proposed 64 KiB cap | Refusal; A remains (7,20), zero payloads |
+| Valid 65 KiB replacement within shared budgets | Succeeds; no join-specific 64 KiB refusal |
+| Encoded NBT over 64 MiB or nesting beyond shared depth 512 | Refusal before mutation; A remains (7,20), zero payloads |
 | Native and wasm fixture A/B/C above | Both return A=(7,20), identical errors; zero per-row imports |
 | Missing Wire capability | Registration names failing type/capability before first query |
 
 ## Proposed stages
 
-File: none. First approve tuple access, atomic row apply, scope/filter and limits. Then audit #1606 lifted and parked ownership, retirement, cross-dimension journal keys and save refusal. Add snapshot-compatible probe maps and residency metadata; extend generated native/wasm capture/apply together. Finally implement the matrix and #1811 comparative benchmark before advertising support.
+File: none. First approve tuple access, atomic row apply, scope/filter and limits. Then audit #1606 lifted and parked ownership, retirement, cross-dimension journal keys and save refusal. Add snapshot-compatible probe maps and residency metadata; require explicit `#[derive(Wire)]` on every new public crossing type, with no copied or extended manual Wire implementations; extend generated native/wasm host call tables for capture/apply together. Finally implement the matrix and #1811 comparative benchmark before advertising support.
 
 ## Open questions
 
-- Resource budgets: recommend the explicit limits above and shared Wire caps; maintainer approval is required before code.
+- Resource budgets: reuse existing shared NBT and Wire budgets; approve only the tuple and explicit-dimension limits above; maintainer approval is required before code.
 - #1606 integration: recommend stable bindings through lifted passes and root-only publication; name and verify every concrete owner and save-gate route in the implementation PR. The current route audit does not establish those end-to-end guarantees.
