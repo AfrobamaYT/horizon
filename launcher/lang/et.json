@@ -1261,5 +1261,9 @@
   "Native mods are off.": "Natiivsed modifikatsioonid on välja lülitatud.",
   "A game is running. Files it may use are kept.": "Mäng töötab. Failid, mida see võib kasutada, säilitatakse.",
   "Clear all launcher caches? Up to {size} can be freed. Files a game or build uses are kept.": "Kas tühjendada kõik käivitaja vahemälud? Vabastada saab kuni {size}. Mängu või ehitamise kasutatavad failid säilitatakse.",
-  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "Kas tühjendada {category}? Vabastada saab kuni {size}. Mängu või ehitamise kasutatavad failid säilitatakse."
+  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "Kas tühjendada {category}? Vabastada saab kuni {size}. Mängu või ehitamise kasutatavad failid säilitatakse.",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
+  "Space it couldn't free: an older game build can use this cache without runtime leases.": "Space it couldn't free: an older game build can use this cache without runtime leases.",
+  "{mod}: layout mismatch in library {library} for type {type}": "{mod}: layout mismatch in library {library} for type {type}",
+  "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet": "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet"
 }

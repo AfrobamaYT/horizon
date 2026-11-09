@@ -1261,5 +1261,9 @@
   "Native mods are off.": "مقامی موڈز بند ہیں۔",
   "A game is running. Files it may use are kept.": "ایک کھیل چل رہا ہے۔ وہ فائلیں محفوظ رکھی جاتی ہیں جو یہ استعمال کر سکتا ہے۔",
   "Clear all launcher caches? Up to {size} can be freed. Files a game or build uses are kept.": "لانچر کے تمام کیش صاف کریں؟ {size} تک جگہ خالی ہو سکتی ہے۔ کھیل یا تعمیر کی زیر استعمال فائلیں محفوظ رکھی جاتی ہیں۔",
-  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "{category} صاف کریں؟ {size} تک جگہ خالی ہو سکتی ہے۔ کھیل یا تعمیر کی زیر استعمال فائلیں محفوظ رکھی جاتی ہیں۔"
+  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "{category} صاف کریں؟ {size} تک جگہ خالی ہو سکتی ہے۔ کھیل یا تعمیر کی زیر استعمال فائلیں محفوظ رکھی جاتی ہیں۔",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
+  "Space it couldn't free: an older game build can use this cache without runtime leases.": "Space it couldn't free: an older game build can use this cache without runtime leases.",
+  "{mod}: layout mismatch in library {library} for type {type}": "{mod}: layout mismatch in library {library} for type {type}",
+  "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet": "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet"
 }

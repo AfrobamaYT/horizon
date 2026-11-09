@@ -1261,5 +1261,9 @@
   "Native mods are off.": "Les mods natifs sont désactivés.",
   "A game is running. Files it may use are kept.": "Un jeu est en cours d’exécution. Les fichiers qu’il pourrait utiliser sont conservés.",
   "Clear all launcher caches? Up to {size} can be freed. Files a game or build uses are kept.": "Effacer tous les caches du lanceur ? Jusqu’à {size} peuvent être libérés. Les fichiers utilisés par un jeu ou une compilation sont conservés.",
-  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "Effacer {category} ? Jusqu’à {size} peuvent être libérés. Les fichiers utilisés par un jeu ou une compilation sont conservés."
+  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "Effacer {category} ? Jusqu’à {size} peuvent être libérés. Les fichiers utilisés par un jeu ou une compilation sont conservés.",
+  "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
+  "Space it couldn't free: an older game build can use this cache without runtime leases.": "Space it couldn't free: an older game build can use this cache without runtime leases.",
+  "{mod}: layout mismatch in library {library} for type {type}": "{mod}: layout mismatch in library {library} for type {type}",
+  "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet": "{library} is a wasm mod; native mod {mod} depends on it: mixed native and wasm dependencies aren't supported yet"
 }
