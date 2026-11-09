@@ -119,11 +119,9 @@ fn an_instances_own_java_wins_and_a_wrong_folder_says_so() {
     let own = fake_home(&dir.join("own"), "17.0.12");
     let picked = pick(&need(21), Some(&own), &[], &[]).unwrap().unwrap();
     assert_eq!((picked.home, picked.major), (own, 17));
-    assert!(
-        pick(&need(21), Some(&dir.join("nothing")), &[], &[])
-            .unwrap_err()
-            .contains("is not a Java home")
-    );
+    assert!(pick(&need(21), Some(&dir.join("nothing")), &[], &[])
+        .unwrap_err()
+        .contains("is not a Java home"));
     fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -131,11 +129,9 @@ fn an_instances_own_java_wins_and_a_wrong_folder_says_so() {
 fn a_typed_java_is_a_major_or_a_component() {
     assert_eq!(Need::named("21").unwrap().component, "java-runtime-delta");
     assert_eq!(Need::named(" jre-legacy ").unwrap().major, 8);
-    assert!(
-        Need::named("11")
-            .unwrap_err()
-            .contains("Known: 8 (jre-legacy)")
-    );
+    assert!(Need::named("11")
+        .unwrap_err()
+        .contains("Known: 8 (jre-legacy)"));
 }
 
 #[test]
