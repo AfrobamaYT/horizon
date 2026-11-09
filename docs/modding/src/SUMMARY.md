@@ -30,6 +30,7 @@
 - [Design: worldgen features and placers](concepts/worldgen-features.md)
 - [Design: moving structures](concepts/moving-structures.md)
 - [Design: custom recipe-book settings](concepts/recipe-book-types.md)
+- [Design: resource-backed special item renderers](concepts/resource-renderers.md)
 - [Design: section meshing](concepts/section-meshing.md)
 - [Design: section geometry](concepts/section-geometry.md)
 - [Design: mesh visibility](concepts/mesh-visibility.md)
