@@ -716,11 +716,18 @@ mod off_level_tests {
             let mut kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
             std::sync::Arc::make_mut(&mut kind).passenger_attachments =
                 vec![[1.0, 2.0, 3.0], [-1.0, 4.0, 5.0]];
-            game.mobs.push(Mob::new(101, kind.clone(), Vec3::new(10.0, 64.0, 20.0), 0.0));
+            game.mobs.push(Mob::new(
+                101,
+                kind.clone(),
+                Vec3::new(10.0, 64.0, 20.0),
+                0.0,
+            ));
             let mut held = Mob::new(102, kind.clone(), Vec3::ZERO, 0.0);
             held.extra.mount = Some(101);
             held.extra.vehicle_order = 0;
-            game.persist.off_level.insert(102, crate::game::persist::OffLevel::Mob(held));
+            game.persist
+                .off_level
+                .insert(102, crate::game::persist::OffLevel::Mob(held));
             let mut resident = Mob::new(103, kind, Vec3::ZERO, 0.0);
             resident.extra.mount = Some(101);
             resident.extra.vehicle_order = 1;
