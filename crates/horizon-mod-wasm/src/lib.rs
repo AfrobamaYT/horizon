@@ -770,3 +770,70 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod mixed_install_tests {
+    use super::*;
+    fn refusal(hash: &str) -> String {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("wasm-mixed-{}-{nonce}", std::process::id()));
+        let addon = root.join("addon");
+        let library = root.join("lib");
+        std::fs::create_dir_all(&addon).unwrap();
+        std::fs::create_dir_all(library.join("src")).unwrap();
+        let header = |id| {
+            format!("id='{id}'\nname='{id}'\nversion='1'\napi='0.2'\ncapabilities=['registries']\n")
+        };
+        std::fs::write(addon.join("mod.wasm"), b"\0asm\x01\0\0\0").unwrap();
+        std::fs::write(addon.join("horizon-mod.toml"), format!("{}[dependencies]\nlib='*'\n[wasm]\nsha512='e20ed12e5a7e3bdee30a3a4f26c2813edb79b8fbead058d15688f104f6039a5a3de349e9cbbdd5d9a68f306d0804914e45124f0dedc0bcbefa7b30dd778aa6c0'\ntoolchain='t'\nbuilt_with='t'\n", header("addon"))).unwrap();
+        std::fs::write(
+            library.join("horizon-mod.toml"),
+            format!(
+                "{}[native]\ngame='26.3'\nhorizon='{}'\nmixins='{}'\n",
+                header("lib"),
+                "a".repeat(40),
+                "b".repeat(40)
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            library.join("Cargo.toml"),
+            "[package]\nname='lib'\nversion='1.0.0'\n",
+        )
+        .unwrap();
+        std::fs::write(library.join("src/lib.rs"), "pub fn run() {}\n").unwrap();
+        std::fs::write(
+            addon.join("layouts.json"),
+            br#"{"lib":{"T":"0123456789abcdef"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            library.join("layouts.json"),
+            format!(r#"{{"lib":{{"T":"{hash}"}}}}"#),
+        )
+        .unwrap();
+        let loaded = load_installed(&root, &[addon, library]);
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(loaded.mods.is_empty());
+        assert_eq!(loaded.refused.len(), 1);
+        assert_eq!(loaded.refused[0].0, "addon");
+        loaded.refused[0].1.to_string()
+    }
+    #[test]
+    fn wasm_to_native_layout_mismatch_names_the_type() {
+        assert_eq!(
+            refusal("1123456789abcdef"),
+            "addon: layout mismatch in library lib for type T"
+        );
+    }
+    #[test]
+    fn wasm_to_native_matching_layout_is_still_unsupported() {
+        assert_eq!(
+            refusal("0123456789abcdef"),
+            "lib is a native mod; wasm mod addon depends on it: mixed native and wasm dependencies aren't supported yet"
+        );
+    }
+}

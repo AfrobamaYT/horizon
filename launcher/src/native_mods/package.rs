@@ -140,3 +140,71 @@ pub(super) fn checked_bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
     }
     Ok(found)
 }
+
+#[cfg(test)]
+mod mixed_tests {
+    use super::*;
+    use sha2::{Digest, Sha512};
+
+    fn refusal(hash: &str) -> String {
+        let home = tempfile::tempdir().unwrap();
+        let addon = home.path().join("addon");
+        let library = home.path().join("lib");
+        fs::create_dir_all(addon.join("src")).unwrap();
+        fs::create_dir_all(&library).unwrap();
+        fs::write(
+            addon.join("Cargo.toml"),
+            "[package]\nname='addon'\nversion='1.0.0'\n",
+        )
+        .unwrap();
+        fs::write(addon.join("src/lib.rs"), "pub fn run() {}\n").unwrap();
+        let header = |id| {
+            format!("id='{id}'\nname='{id}'\nversion='1'\napi='0.2'\ncapabilities=['registries']\n")
+        };
+        fs::write(
+            addon.join(MANIFEST),
+            format!(
+                "{}[dependencies]\nlib='*'\n[native]\ngame='26.3'\nhorizon='{}'\nmixins='{}'\n",
+                header("addon"),
+                "a".repeat(40),
+                "b".repeat(40)
+            ),
+        )
+        .unwrap();
+        let module = b"\0asm\x01\0\0\0";
+        fs::write(library.join("mod.wasm"), module).unwrap();
+        fs::write(
+            library.join(MANIFEST),
+            format!(
+                "{}[wasm]\nsha512='{:x}'\ntoolchain='t'\nbuilt_with='t'\n",
+                header("lib"),
+                Sha512::digest(module)
+            ),
+        )
+        .unwrap();
+        fs::write(
+            addon.join("layouts.json"),
+            br#"{"lib":{"T":"0123456789abcdef"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            library.join("layouts.json"),
+            format!(r#"{{"lib":{{"T":"{hash}"}}}}"#),
+        )
+        .unwrap();
+        checked_bundles(home.path()).expect_err("mixed dependency must refuse")
+    }
+
+    #[test]
+    fn native_to_wasm_layout_mismatch_names_the_type() {
+        assert_eq!(
+            refusal("1123456789abcdef"),
+            "addon: layout mismatch in library lib for type T"
+        );
+    }
+
+    #[test]
+    fn native_to_wasm_matching_layout_is_still_unsupported() {
+        assert_eq!(refusal("0123456789abcdef"), "lib is a wasm mod; native mod addon depends on it: mixed native and wasm dependencies aren't supported yet");
+    }
+}
