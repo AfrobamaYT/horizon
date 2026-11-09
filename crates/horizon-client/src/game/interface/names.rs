@@ -846,7 +846,7 @@ struct NameTag {
 /// summoned or set as `{text: "..", color: "red"}` keeps its colour), else the plain text.
 pub(super) fn name_component(m: &Mob, name: &str) -> horizon_core::nbt::Tag {
     match &m.custom_name_text {
-        Some(text) => horizon_client::scoreboard::json_to_tag(&text.component()),
+        Some(text) => horizon_client::scoreboard::component_tag(&text.component()),
         None => horizon_protocol::text::literal(name),
     }
 }
