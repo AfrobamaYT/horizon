@@ -84,22 +84,7 @@ impl Fixture {
         self.title.finish_preparing();
         assert!(matches!(self.title.creation_packs(), Some((_, _))));
     }
-    fn finish_backup(&mut self) {
-        self.title.backup_shown.set(true);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while matches!(self.title.mode, Mode::Backup { .. }) {
-            assert!(std::time::Instant::now() < deadline);
-            std::thread::sleep(std::time::Duration::from_millis(10));
-            self.title.poll_backup();
-        }
-    }
 }
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
-    }
-}
-
 include!("preset_tests.rs");
 
 mod multiplayer_parent_navigation {

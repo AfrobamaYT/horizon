@@ -1970,6 +1970,10 @@ impl Title {
         }
         folder
     }
+    /// The screen this mode is, as the narrator reads it: its id and
+    /// `getNarrationMessage` (the title, or `joinForNarration(title, message)`
+    /// for the confirm and alert screens). `None` for the screens that
+    /// narrate themselves.
     fn narration(&self) -> Option<crate::widgets::ScreenInfo> {
         use crate::widgets::{ScreenInfo, join_for_narration as join};
         let get = |key: &str, fallback: &str| lang::get_or(key, fallback);

@@ -528,8 +528,4 @@ impl Title {
                 .collect(),
         }
     }
-    /// The screen this mode is, as the narrator reads it: its id and
-    /// `getNarrationMessage` (the title, or `joinForNarration(title, message)`
-    /// for the confirm and alert screens). `None` for the screens that
-    /// narrate themselves.
 }
