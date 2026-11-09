@@ -31,10 +31,15 @@ fn child_keeps_gate_and_tree_after_creator_closes_its_copies() {
     let root = tempfile::tempdir().unwrap();
     let data = root.path().join("data");
     let trees = [directory(&root.path().join("tree"))];
-    if std::env::var_os("HORIZON_TEST_CLOSED_STDIN").is_some() {
-        // SAFETY: only the isolated regression subprocess closes its own stdin.
-        unsafe {
-            libc::close(0);
+    if let Ok(mask) = std::env::var("HORIZON_TEST_CLOSED_STDIO") {
+        let mask: u8 = mask.parse().unwrap();
+        // SAFETY: only the isolated regression subprocess closes its own stdio.
+        for fd in 0..3 {
+            if mask & (1 << fd) != 0 {
+                unsafe {
+                    libc::close(fd);
+                }
+            }
         }
     }
     let claims = ChildLeases::acquire(&data, &trees).unwrap();
@@ -55,7 +60,24 @@ fn child_keeps_gate_and_tree_after_creator_closes_its_copies() {
         ])
         .env("HORIZON_LEASE_BRIDGE_ACTOR", "1")
         .stdin(Stdio::piped())
-        .stdout(Stdio::piped());
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if std::env::var_os("HORIZON_TEST_STDIO_CLOEXEC").is_some() {
+        use std::os::unix::process::CommandExt;
+        // Model the post-dup2(fd, fd) state for every slot independently of
+        // Command's pipe allocation order. Only fcntl runs after fork.
+        unsafe {
+            command.pre_exec(|| {
+                for fd in 0..3 {
+                    let flags = libc::fcntl(fd, libc::F_GETFD);
+                    if flags < 0 || libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) < 0 {
+                        return Err(io::Error::last_os_error());
+                    }
+                }
+                Ok(())
+            });
+        }
+    }
     let mut child = claims.spawn(command).unwrap();
     let mut output = std::io::BufReader::new(child.stdout.take().unwrap());
     let mut line = String::new();
@@ -90,6 +112,18 @@ fn child_keeps_gate_and_tree_after_creator_closes_its_copies() {
     );
     child.stdin.take().unwrap().write_all(b"exit\n").unwrap();
     assert!(child.wait().unwrap().success());
+    use std::io::Read;
+    let mut remaining = String::new();
+    output.read_to_string(&mut remaining).unwrap();
+    assert!(remaining.contains("BRIDGE-EXIT"));
+    let mut errors = String::new();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut errors)
+        .unwrap();
+    assert!(errors.contains("BRIDGE-STDERR"));
     released(&registry, &trees[0]);
     drop(registry);
     gate.try_lock().unwrap();
@@ -103,7 +137,11 @@ fn bridge_actor() {
     }
     println!("BRIDGE-READY");
     std::io::stdout().flush().unwrap();
-    std::io::stdin().read_line(&mut String::new()).unwrap();
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input).unwrap();
+    assert_eq!(input, "exit\n");
+    eprintln!("BRIDGE-STDERR");
+    println!("BRIDGE-EXIT");
 }
 
 #[cfg(unix)]
@@ -115,7 +153,39 @@ fn closed_stdin_does_not_lose_tree() {
             "process::leases::tests::child_keeps_gate_and_tree_after_creator_closes_its_copies",
             "--nocapture",
         ])
-        .env("HORIZON_TEST_CLOSED_STDIN", "1")
+        .env("HORIZON_TEST_CLOSED_STDIO", "1")
+        .status()
+        .unwrap();
+    assert!(status.success());
+}
+
+#[cfg(unix)]
+#[test]
+fn all_closed_stdio_masks_preserve_configured_pipes() {
+    for mask in 1..=7 {
+        let status = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "process::leases::tests::child_keeps_gate_and_tree_after_creator_closes_its_copies",
+                "--nocapture",
+            ])
+            .env("HORIZON_TEST_CLOSED_STDIO", mask.to_string())
+            .status()
+            .unwrap();
+        assert!(status.success(), "closed stdio mask {mask}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn configured_stdio_cloexec_is_cleared_after_setup() {
+    let status = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "process::leases::tests::child_keeps_gate_and_tree_after_creator_closes_its_copies",
+            "--nocapture",
+        ])
+        .env("HORIZON_TEST_STDIO_CLOEXEC", "1")
         .status()
         .unwrap();
     assert!(status.success());

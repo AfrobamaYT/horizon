@@ -62,6 +62,24 @@ impl ChildLeases {
         // spawn returns, and the creator's copies keep their original CLOEXEC flags.
         unsafe {
             command.pre_exec(move || {
+                // Command's fork path can allocate a pipe at a closed stdio slot. Its
+                // dup2(fd, fd) leaves CLOEXEC set, so exec would discard that pipe.
+                // Stdio setup is complete here; preserve every configured stdio handle.
+                for fd in 0..3 {
+                    let flags = libc::fcntl(fd, libc::F_GETFD);
+                    if flags < 0 {
+                        let error = io::Error::last_os_error();
+                        if error.raw_os_error() == Some(libc::EBADF) {
+                            continue;
+                        }
+                        return Err(error);
+                    }
+                    if flags & libc::FD_CLOEXEC != 0
+                        && libc::fcntl(fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) < 0
+                    {
+                        return Err(io::Error::last_os_error());
+                    }
+                }
                 for &fd in &fds {
                     let flags = libc::fcntl(fd, libc::F_GETFD);
                     if flags < 0 || libc::fcntl(fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) < 0 {
