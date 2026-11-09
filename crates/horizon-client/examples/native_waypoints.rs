@@ -135,6 +135,7 @@ fn main() {
         vec![ModEntry::new("waypoints", Box::<Waypoints>::default())],
         &[],
         &[],
+        None,
     );
 }
 
