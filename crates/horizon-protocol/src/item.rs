@@ -86,6 +86,8 @@ pub mod component {
     pub const ATTACK_RANGE: i32 = 30;
     pub const EQUIPPABLE: i32 = 32;
     pub const GLIDER: i32 = 34;
+    /// `DeathProtection`: the `death_effects` a stack runs when it saves its holder.
+    pub const DEATH_PROTECTION: i32 = 36;
     pub const BLOCKS_ATTACKS: i32 = 37;
     pub const KINETIC_WEAPON: i32 = 39;
     pub const STORED_ENCHANTMENTS: i32 = 45;
@@ -591,7 +593,7 @@ impl Component {
     /// registry references (`None` when one is direct).
     fn banner_layers(bytes: &[u8]) -> Option<Vec<(i32, i32)>> {
         let mut r = Reader::new(bytes);
-        let n = r.count(r.remaining()).ok()?;
+        let n = r.count(r.remaining() / 2).ok()?;
         let mut layers = Vec::with_capacity(n);
         for _ in 0..n {
             let pattern = r.varint().ok()?;
@@ -1498,6 +1500,11 @@ mod tests {
         potion.extend([0, 1, 0, 0, 0, 1].repeat(200_000));
         potion.extend([0, 1, 0, 0, 0, 0, 0]);
         assert!(read_on_network_stack(potion).is_err());
+        // A can_break predicate whose exact component matcher holds another can_break, 200,000 deep.
+        let mut predicate = vec![1, 1, 1, 0, component::CAN_BREAK as u8];
+        predicate.extend([1, 0, 0, 0, 1, component::CAN_BREAK as u8].repeat(200_000));
+        predicate.extend([0]);
+        assert!(read_on_network_stack(predicate).is_err());
     }
 
     #[test]

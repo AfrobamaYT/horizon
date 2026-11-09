@@ -154,6 +154,27 @@ pub enum SlotBacking {
 }
 
 impl Slots {
+    /// Optional persisted limits in the container's menu order.
+    pub fn stack_limits(self, world: &World, size: usize) -> Vec<Option<u32>> {
+        match self {
+            Self::Block(pos) => world
+                .container_stack_limit(pos)
+                .map_or_else(Vec::new, |limit| vec![Some(limit); size]),
+            Self::Double(a, b) => {
+                let (a, b) = (
+                    world.container_stack_limit(a),
+                    world.container_stack_limit(b),
+                );
+                if a.is_none() && b.is_none() {
+                    Vec::new()
+                } else {
+                    [vec![a; 27], vec![b; 27]].concat()
+                }
+            }
+            _ => Vec::new(),
+        }
+    }
+
     /// Locate a container slot, including the correct half of a double chest.
     pub fn backing(self, world: &World, n: usize) -> Option<SlotBacking> {
         match self {
@@ -393,6 +414,7 @@ pub struct View<'a> {
     pub container: Option<&'a mut [Option<ItemStack>]>,
     /// The container is a shulker box (`ShulkerBoxSlot`).
     pub shulker: bool,
+    pub container_limits: Vec<Option<u32>>,
     /// Container slots that do not exist in this menu (see [`Menu::hidden`]).
     pub hidden: &'a [usize],
     /// The context the hooks fired inside a click are given.
@@ -480,7 +502,12 @@ impl View<'_> {
         self.enabled(i) && self.slot_rules(i, stack, rules).0
     }
     fn slot_max(&self, i: usize, stack: &ItemStack, rules: &dyn Rules) -> u32 {
-        self.slot_rules(i, stack, rules).1
+        let max = self.slot_rules(i, stack, rules).1;
+        self.container_limits
+            .get(i)
+            .copied()
+            .flatten()
+            .map_or(max, |limit| max.min(limit))
     }
     /// `Slot.mayPickup`: whether menu slot `i` gives its stack up. The
     /// armour slots refuse while a survival player wears a binding curse
@@ -1436,6 +1463,7 @@ mod tests {
             guest: &mut guest,
             container: Some(&mut chest),
             shulker: false,
+            container_limits: Vec::new(),
             hidden: &[],
             loop_context: &crate::test_resources::loop_context(
                 horizon_world::native_load_context::LoopSide::Server,
@@ -1466,6 +1494,7 @@ mod tests {
             guest: &mut g,
             container: Some(&mut chest),
             shulker: false,
+            container_limits: Vec::new(),
             hidden: &[],
             loop_context: &crate::test_resources::loop_context(
                 horizon_world::native_load_context::LoopSide::Server,
@@ -1508,6 +1537,7 @@ mod tests {
             guest: &mut g,
             container: Some(&mut chest),
             shulker: false,
+            container_limits: Vec::new(),
             hidden: &[],
             loop_context: &crate::test_resources::loop_context(
                 horizon_world::native_load_context::LoopSide::Server,
@@ -1551,6 +1581,7 @@ mod tests {
             guest: &mut g,
             container: Some(&mut chest),
             shulker: false,
+            container_limits: Vec::new(),
             hidden: &[],
             loop_context: &crate::test_resources::loop_context(
                 horizon_world::native_load_context::LoopSide::Server,
@@ -1628,6 +1659,7 @@ mod tests {
             guest: &mut g,
             container: Some(&mut chest),
             shulker: false,
+            container_limits: Vec::new(),
             hidden: &[],
             loop_context: crate::test_resources::server_loop_context(),
         };
@@ -1661,6 +1693,7 @@ mod tests {
             guest: &mut guest,
             container: Some(&mut chest),
             shulker: false,
+            container_limits: Vec::new(),
             hidden: &[],
             loop_context: crate::test_resources::server_loop_context(),
         };
@@ -1903,6 +1936,7 @@ mod tests {
                 guest: &mut g,
                 container: Some(&mut read),
                 shulker: false,
+                container_limits: Vec::new(),
                 hidden: &[],
                 loop_context: &crate::test_resources::loop_context(
                     horizon_world::native_load_context::LoopSide::Server,
@@ -1943,6 +1977,7 @@ mod tests {
             guest: &mut g,
             container: Some(&mut container),
             shulker: false,
+            container_limits: Vec::new(),
             hidden: &hidden,
             loop_context: &crate::test_resources::loop_context(
                 horizon_world::native_load_context::LoopSide::Server,
@@ -1966,6 +2001,7 @@ mod tests {
             guest: &mut guest,
             container: Some(&mut chest),
             shulker: false,
+            container_limits: Vec::new(),
             hidden: &[],
             loop_context: crate::test_resources::server_loop_context(),
         };
@@ -1999,6 +2035,7 @@ mod tests {
                     guest: &mut guest,
                     container: Some(&mut chest),
                     shulker: false,
+                    container_limits: Vec::new(),
                     hidden: &[],
                     loop_context: crate::test_resources::server_loop_context(),
                 };
@@ -2049,6 +2086,7 @@ mod tests {
             guest: &mut g,
             container: Some(&mut chest),
             shulker: false,
+            container_limits: Vec::new(),
             hidden: &[],
             loop_context: &crate::test_resources::loop_context(
                 horizon_world::native_load_context::LoopSide::Server,
@@ -2171,6 +2209,7 @@ mod tests {
             guest: &mut guest,
             container: Some(&mut chest),
             shulker: false,
+            container_limits: Vec::new(),
             hidden: &[],
             loop_context: crate::test_resources::server_loop_context(),
         };
@@ -2210,6 +2249,7 @@ mod tests {
             guest: &mut g,
             container: Some(&mut chest),
             shulker: false,
+            container_limits: Vec::new(),
             hidden: &[],
             loop_context: &crate::test_resources::loop_context(
                 horizon_world::native_load_context::LoopSide::Server,
@@ -2264,6 +2304,7 @@ mod tests {
             guest: &mut g,
             container: Some(&mut chest),
             shulker: false,
+            container_limits: Vec::new(),
             hidden: &[],
             loop_context: &crate::test_resources::loop_context(
                 horizon_world::native_load_context::LoopSide::Server,
@@ -2312,6 +2353,7 @@ mod tests {
                 guest: &mut g,
                 container: Some(&mut container),
                 shulker,
+                container_limits: Vec::new(),
                 hidden: &[],
                 loop_context: &crate::test_resources::loop_context(
                     horizon_world::native_load_context::LoopSide::Server,
@@ -2369,6 +2411,7 @@ mod tests {
             guest: &mut g,
             container: None,
             shulker: false,
+            container_limits: Vec::new(),
             hidden: &[],
             loop_context: &crate::test_resources::loop_context(
                 horizon_world::native_load_context::LoopSide::Server,
@@ -2453,6 +2496,7 @@ mod tests {
             guest: &mut g,
             container: Some(&mut chest),
             shulker: false,
+            container_limits: Vec::new(),
             hidden: &[],
             loop_context: &crate::test_resources::loop_context(
                 horizon_world::native_load_context::LoopSide::Server,
@@ -2496,6 +2540,7 @@ mod tests {
             guest: &mut g,
             container: Some(&mut chest),
             shulker: false,
+            container_limits: Vec::new(),
             hidden: &[],
             loop_context: &crate::test_resources::loop_context(
                 horizon_world::native_load_context::LoopSide::Server,
@@ -2535,6 +2580,7 @@ mod tests {
             guest: &mut g,
             container: Some(&mut chest),
             shulker: false,
+            container_limits: Vec::new(),
             hidden: &[],
             loop_context: &crate::test_resources::loop_context(
                 horizon_world::native_load_context::LoopSide::Server,
@@ -2577,6 +2623,7 @@ mod tests {
                     guest: &mut g,
                     container: None,
                     shulker: false,
+                    container_limits: Vec::new(),
                     hidden: &[],
                     loop_context: &crate::test_resources::loop_context(
                         horizon_world::native_load_context::LoopSide::Server,
@@ -2612,6 +2659,7 @@ mod tests {
                     guest: &mut g,
                     container: None,
                     shulker: false,
+                    container_limits: Vec::new(),
                     hidden: &[],
                     loop_context: &crate::test_resources::loop_context(
                         horizon_world::native_load_context::LoopSide::Server,
@@ -2664,6 +2712,7 @@ mod tests {
             guest: &mut g,
             container: None,
             shulker: false,
+            container_limits: Vec::new(),
             hidden: &[],
             loop_context: &crate::test_resources::loop_context(
                 horizon_world::native_load_context::LoopSide::Server,
@@ -2701,6 +2750,35 @@ mod tests {
     /// remainder vanilla's loop leaves, and a full inventory must leave the
     /// stack where it is.
     #[test]
+    fn container_override_caps_guest_pickup_and_shift_click() {
+        let rules = ItemRules(Items::for_tests(Default::default()));
+        let mut g = guest();
+        let mut chest = vec![None; 3];
+        let context = crate::test_resources::loop_context(
+            horizon_world::native_load_context::LoopSide::Server,
+        );
+        let mut view = View {
+            guest: &mut g,
+            container: Some(&mut chest),
+            shulker: false,
+            container_limits: vec![Some(10); 3],
+            hidden: &[],
+            loop_context: &context,
+        };
+        view.guest.carried = Some(ItemStack::new("minecraft:stick", 20));
+        let mut drag = None;
+        click(&mut view, &mut drag, 0, 0, input::PICKUP, &rules);
+        assert_eq!(view.get(0).unwrap().count, 10);
+        assert_eq!(view.guest.carried.as_ref().unwrap().count, 10);
+        view.guest.carried = None;
+        view.set(3, Some(ItemStack::new("minecraft:stick", 20)));
+        click(&mut view, &mut drag, 3, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(view.get(1).unwrap().count, 10);
+        assert_eq!(view.get(2).unwrap().count, 10);
+        assert!(view.get(3).is_none());
+    }
+
+    #[test]
     fn one_quick_move_spreads_a_stack_like_vanillas_repeat() {
         struct SmallRules;
         impl Rules for SmallRules {
@@ -2725,6 +2803,7 @@ mod tests {
             guest: &mut g,
             container: Some(&mut chest),
             shulker: false,
+            container_limits: Vec::new(),
             hidden: &[],
             loop_context: &crate::test_resources::loop_context(
                 horizon_world::native_load_context::LoopSide::Server,
@@ -2774,6 +2853,7 @@ mod tests {
             guest: &mut g,
             container: None,
             shulker: false,
+            container_limits: Vec::new(),
             hidden: &[],
             loop_context: &crate::test_resources::loop_context(
                 horizon_world::native_load_context::LoopSide::Server,

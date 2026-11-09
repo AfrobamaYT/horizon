@@ -1,5 +1,6 @@
 use mod_api::Hooks;
 
+pub mod area_macros;
 pub mod replace;
 pub mod shutdown;
 pub use replace::own_average;

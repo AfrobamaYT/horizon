@@ -3,6 +3,7 @@
 //! their chests or mine their gold.
 use super::Game;
 use horizon_client::{
+    first_person::SwingAnimation,
     items::ItemStack,
     mobs::{
         Mob, Species,
@@ -379,6 +380,12 @@ impl Game<'_> {
     /// `PiglinAi.throwItems`: barters and a baby's unwanted main-hand item
     /// use the same player-directed throw.
     fn piglin_throw_items(&mut self, i: usize, items: Vec<ItemStack>) {
+        if items.is_empty() {
+            return;
+        }
+        // `PiglinAi.throwItemsTowardPos` swings the off hand once before the
+        // throws, so the barters leave the hand the piglin admires them in.
+        self.mobs[i].swing_hand_modified(true, SwingAnimation::DEFAULT);
         let m = &self.mobs[i];
         let from = [m.position.x, m.position.y + 1.3, m.position.z];
         // BehaviorUtils.throwItem toward the nearest visible player
@@ -418,6 +425,10 @@ impl Game<'_> {
     }
     /// `PiglinAi.angerNearbyPiglins`.
     pub(super) fn anger_piglins(&mut self, only_if_seen: bool) {
+        // Fake players never become a mob's target.
+        if self.lan_acting_fake {
+            return;
+        }
         let Some(p) = self.player.as_ref() else {
             return;
         };
@@ -445,8 +456,34 @@ impl Game<'_> {
             if only_if_seen && !self.can_see(m.center(), eye) {
                 continue;
             }
+            let id = self.mobs[i].id;
+            let change = if mod_api::__private::listened(mod_api::HookId::LivingChangeTarget) {
+                let original = self
+                    .lan_acting_entity
+                    .or_else(|| self.player_identity().map(|(_, id)| id))
+                    .and_then(|id| self.entity(id))
+                    .and_then(|entity| self.living(entity));
+                let Some(original) = original else { continue };
+                let Some(epoch) = self.native_lifecycle.epoch() else {
+                    continue;
+                };
+                let mob = mod_api::MobRef::new(mod_api::EntityRef::new(epoch, id));
+                self.native_mob_target_event(mob, Some(original), true)
+                    .and_then(|target| self.native_mob_bind_target(id, target))
+                    .map_or(
+                        horizon_client::mobs::TargetChange::Keep,
+                        horizon_client::mobs::TargetChange::Set,
+                    )
+            } else {
+                horizon_client::mobs::TargetChange::Set(Some(horizon_client::mobs::Who::Player))
+            };
             let m = &mut self.mobs[i];
+            let previous = m.ai.target;
             horizon_client::mobs::piglin::set_guarded_anger_target(m, player_uuid);
+            m.ai.target = match change {
+                horizon_client::mobs::TargetChange::Keep => previous,
+                horizon_client::mobs::TargetChange::Set(target) => target,
+            };
         }
     }
     /// A clear line of sight between two points (blocks with collision stop it).
@@ -600,5 +637,30 @@ mod tests {
             Slot::MainHand,
             None
         ));
+    }
+
+    /// `PiglinAi.throwItemsTowardPos` swings the off hand once when it has
+    /// something to throw, so barters leave the admiring hand (#12512).
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_throw_swings_the_off_hand_once() {
+        let mut game = crate::game::game_tests::tests::server_game();
+        game.build_registries();
+        game.set_allow_commands(true);
+        assert!(game.run_command("summon piglin 8.5 80 8.5 {NoAI:1b,PersistenceRequired:1b}"));
+        let i = game
+            .mobs
+            .iter()
+            .position(|m| m.species() == Species::Piglin)
+            .expect("the summoned piglin");
+        // An empty list has nothing to throw and leaves the body alone.
+        game.piglin_throw_items(i, Vec::new());
+        assert!(!game.mobs[i].ai.swinging);
+        game.piglin_throw_items(i, vec![ItemStack::new("minecraft:gold_ingot", 1)]);
+        let m = &game.mobs[i];
+        assert!(m.ai.swinging, "the throw starts a swing");
+        // The off hand's arm: the right one only when the piglin is left-handed.
+        assert_eq!(m.extra.swing_right_arm, Some(m.main_arm_left()));
+        assert_eq!(m.swing_duration(), 6, "SwingAnimation.DEFAULT's ticks");
     }
 }

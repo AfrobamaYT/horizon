@@ -10,6 +10,7 @@ use super::{
 };
 use std::{fmt::Debug, marker::PhantomData, ops::Deref};
 
+// no wire: process-local capability declaration carries a provider function pointer and type identity.
 /// A capability: its name (`horizon:items`, `mymod:chemicals`), the handler trait `T` it answers
 /// with, and the game's own provider, if the game has one.
 // exhaustive: its fields are private, so mods cannot build or destructure it
@@ -24,6 +25,7 @@ pub struct CapabilityKey<T: ?Sized + 'static> {
 /// reached through (none: from no particular side): NeoForge's block capability context.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[derive(horizon_mod_api_macros::Wire)]
 pub struct BlockSide {
     /// The level.
     pub level: LevelRef,
@@ -33,6 +35,7 @@ pub struct BlockSide {
     pub side: Option<Direction>,
 }
 
+// no wire: owned trait-object capability handler; invoked through its provider, not serialized.
 /// A capability's handler, with who answered: a mod's provider or the game's own.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct Capability<T: ?Sized> {
@@ -93,6 +96,11 @@ pub const ITEMS: CapabilityKey<dyn ResourceHandler<ItemResource>> = CapabilityKe
 /// follow.
 struct GameItems(BlockSide);
 impl ResourceHandler<ItemResource> for GameItems {
+    fn set_max_stack_size(&self, host: &mut dyn ServerHost, tx: &Transaction, limit: u32) -> bool {
+        backend_mut_of(host)
+            .is_some_and(|backend| backend.container_set_stack_limit(self.0, limit, tx))
+    }
+
     fn size(&self, host: &mut dyn ServerHost) -> usize {
         backend_of(&*host)
             .and_then(|backend| backend.container_size(self.0))

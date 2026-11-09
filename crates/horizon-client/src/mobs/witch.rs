@@ -175,7 +175,7 @@ fn witch_attack(m: &mut Mob, who: Who, _power: f32, cx: &mut Cx) {
         return;
     };
     let motion = match who {
-        Who::Player => cx.w.player.as_ref().map_or(Vec3::ZERO, |p| p.velocity),
+        Who::Player => cx.w.selected_player().map_or(Vec3::ZERO, |p| p.velocity),
         Who::Mob(id) => cx.w.seen(id).map_or(Vec3::ZERO, |s| s.velocity),
     };
     let xd = t.position.x + motion.x - m.position.x;
@@ -202,13 +202,13 @@ fn witch_attack(m: &mut Mob, who: Who, _power: f32, cx: &mut Cx) {
     };
     // `target.hasEffect`: a target that already has the effect gets the next one.
     let has = |effect: &str| match who {
-        Who::Player => cx.w.player.as_ref().is_some_and(|p| p.has_effect(effect)),
+        Who::Player => cx.w.selected_player().is_some_and(|p| p.has_effect(effect)),
         Who::Mob(id) => cx.w.seen(id).is_some_and(|s| s.has_effect(effect)),
     };
     // The potion it throws: `PotionContents.createItemStack(Items.SPLASH_POTION,
     // potion)` for the one `Witch.performRangedAttack` picks.
     let potion = if heals {
-        m.ai.target = None;
+        m.set_ai_target(cx.w, None);
         if health <= 4.0 {
             "minecraft:healing"
         } else {

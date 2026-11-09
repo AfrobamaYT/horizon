@@ -5,6 +5,7 @@
 //! and the loot-condition subset that enchantment requirements use).
 use crate::item_data::Levels;
 use crate::items::{ItemStack, Items};
+use horizon_core::nbt::Tag;
 use horizon_core::random::{LegacyRandom, RandomSource};
 use serde_json::Value;
 use std::{
@@ -569,6 +570,24 @@ impl Enchantments {
     pub fn enchantable(&self, item: &str) -> u32 {
         self.props(item).map_or(0, |p| p.enchantable)
     }
+    /// `ItemStack.get(DataComponents.ENCHANTABLE)`: the stack's component,
+    /// else the item's default; a removed component leaves none.
+    pub fn enchantable_of(&self, stack: &ItemStack) -> u32 {
+        let data = stack.data();
+        if data.is_some_and(|d| d.other("!minecraft:enchantable").is_some()) {
+            return 0;
+        }
+        if let Some(tag) = data.and_then(|d| d.other("minecraft:enchantable")) {
+            return match tag.get("value") {
+                Some(Tag::Byte(v)) => u32::try_from(i32::from(*v)),
+                Some(Tag::Short(v)) => u32::try_from(i32::from(*v)),
+                Some(Tag::Int(v)) => u32::try_from(*v),
+                _ => Ok(0),
+            }
+            .unwrap_or(0);
+        }
+        self.enchantable(&stack.item)
+    }
     /// Whether `item` matches an id / `#tag` list.
     pub fn item_in(items: &Items, specs: &[String], item: &str) -> bool {
         specs.iter().any(|spec| {
@@ -670,7 +689,26 @@ impl Enchantments {
         bookcases: i32,
         item: &str,
     ) -> i32 {
-        if self.enchantable(item) == 0 {
+        self.enchantment_cost_with(random, slot, bookcases, self.enchantable(item))
+    }
+    /// `EnchantmentHelper.getEnchantmentCost` for a stack's own `ENCHANTABLE`.
+    pub fn enchantment_cost_of<R: RandomSource>(
+        &self,
+        random: &mut R,
+        slot: usize,
+        bookcases: i32,
+        stack: &ItemStack,
+    ) -> i32 {
+        self.enchantment_cost_with(random, slot, bookcases, self.enchantable_of(stack))
+    }
+    fn enchantment_cost_with<R: RandomSource>(
+        &self,
+        random: &mut R,
+        slot: usize,
+        bookcases: i32,
+        enchantable: u32,
+    ) -> i32 {
+        if enchantable == 0 {
             return 0;
         }
         let bookcases = bookcases.min(15);
@@ -744,6 +782,24 @@ impl Enchantments {
         self.select_with_value(items, random, item, cost, pool, self.enchantable(item))
     }
 
+    /// Select enchantments using the stack's enchantable component.
+    pub fn select_of<R: RandomSource>(
+        &self,
+        items: &Items,
+        random: &mut R,
+        stack: &ItemStack,
+        cost: i32,
+        pool: &[Arc<str>],
+    ) -> Levels {
+        self.select_with_value(
+            items,
+            random,
+            &stack.item,
+            cost,
+            pool,
+            self.enchantable_of(stack),
+        )
+    }
     /// Select with the enchantability of the stack after its component patch.
     pub fn select_with_value<R: RandomSource>(
         &self,

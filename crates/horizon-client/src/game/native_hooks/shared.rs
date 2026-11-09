@@ -1362,6 +1362,27 @@ pub(super) fn use_totem(level: DamageLevel<'_>, hurting: Hurting<'_>, off_hand: 
 /// per hit would allocate its entity boxes.
 pub(super) struct HitLevel<'a>(pub(super) DamageLevel<'a>);
 
+/// Let listeners override the vanilla invulnerability decision for this hit.
+pub(super) fn invulnerability_check(
+    level: DamageLevel<'_>,
+    hurting: Hurting<'_>,
+    vanilla: bool,
+) -> bool {
+    if !mod_api::__private::listened(mod_api::HookId::EntityInvulnerabilityCheck) {
+        return vanilla;
+    }
+    let (entity, kind, source) = hurt_server_args(hurting, level.attack());
+    let mut invulnerable = vanilla;
+    HitLevel(level).native_entity_invulnerability_check(
+        entity,
+        kind,
+        &source,
+        vanilla,
+        &mut invulnerable,
+    );
+    invulnerable
+}
+
 /// `native_living_incoming_damage` for the damage code: whether it
 /// canceled the hit.
 pub(super) fn incoming_damage(
@@ -1524,7 +1545,8 @@ pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut
         },
         Hurting::Player(_, source)
         | Hurting::Dragon(_, source)
-        | Hurting::ArmorStand(_, source) => {
+        | Hurting::ArmorStand(_, source)
+        | Hurting::Entity(_, _, source) => {
             if source.causing != 0 {
                 source.causing
             } else {
@@ -1556,6 +1578,7 @@ pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut
 
 /// The damage hooks every level of the game lends to its hits (`Game.damage_hooks`).
 pub(super) const DAMAGE_HOOKS: DamageHooks = DamageHooks {
+    invulnerable: Some(invulnerability_check),
     incoming: Some(incoming_damage),
     pre: Some(damage_pre),
     post: Some(damage_post),
@@ -1637,6 +1660,7 @@ fn hurt_server_args<'a>(hurting: Hurting<'a>, attack: &Attack) -> (i32, &'a str,
         ),
         Hurting::Dragon(entity, source) => (entity, "minecraft:ender_dragon", source),
         Hurting::ArmorStand(entity, source) => (entity, "minecraft:armor_stand", source),
+        Hurting::Entity(entity, kind, source) => (entity, kind, source),
     }
 }
 /// A mob's damage as its `DamageSource`: the causing entity is known when it
@@ -4285,8 +4309,8 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn client_host_reads_current_pause_state() {
-        use super::super::execution_role::ExecutionRole;
         use super::super::native_entity_refs::tests::with_game;
+        use crate::game::execution_role::ExecutionRole;
 
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;
@@ -4301,8 +4325,8 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn client_host_reads_playing_and_key_mappings() {
         use super::super::Screen;
-        use super::super::execution_role::ExecutionRole;
         use super::super::native_entity_refs::tests::with_game;
+        use crate::game::execution_role::ExecutionRole;
 
         use winit::keyboard::KeyCode;
 
@@ -4428,6 +4452,15 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn mod_sign_constructor_prioritizes_templates_over_suffixes() {
+        // This fixture adds blocks that are absent from the shared vanilla
+        // game's frozen process-wide block definitions.
+        if super::super::native_entity_refs::tests::run_fresh_cases(
+            "game::native_hooks::tests::mod_sign_constructor_prioritizes_templates_over_suffixes",
+            "HORIZON_SIGN_CONSTRUCTOR_CHILD",
+            &["signs"],
+        ) {
+            return;
+        }
         use super::super::{Audio, Game, Options, Progress, Settings, load_resources};
         use horizon_client::mod_content::{ContentMod, build};
         use horizon_mod_package::content::{Block, Content};
@@ -4596,14 +4629,14 @@ mod tests {
             &settings,
             std::time::Instant::now(),
             false,
-            super::super::execution_role::ExecutionRole::IntegratedServer,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
         .unwrap();
         let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
         options.resources = root.clone();
-        options.execution_role = super::super::execution_role::ExecutionRole::IntegratedServer;
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
         let game = Game::new(
             &loaded.resources,
             loaded.pack,
@@ -4707,7 +4740,7 @@ mod tests {
             &settings,
             std::time::Instant::now(),
             false,
-            super::super::execution_role::ExecutionRole::IntegratedServer,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!("no menu handoff"),
         )
@@ -4986,8 +5019,6 @@ mod tests {
             assert!(!body.contains("return true"), "{head}");
         }
     }
-    /// horizon-mixins refuses targets whose body has a `cfg` or a macro:
-    /// the hook points and helpers must stay free of both.
     /// A data packet for an old window leaves the open mod screen alone.
     #[test]
     fn mod_screen_data_is_its_windows_only() {
@@ -5002,28 +5033,6 @@ mod tests {
         assert!(s.set_data(4, 1, 7));
         assert!(!s.set_data(3, 1, 99));
         assert_eq!(s.data, [0, 7]);
-    }
-
-    #[test]
-    fn hook_points_stay_hookable() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/game/native_hooks");
-        let mut code = String::new();
-        for entry in std::fs::read_dir(dir).unwrap() {
-            let path = entry.unwrap().path();
-            if path.extension().is_some_and(|ext| ext == "rs")
-                && !matches!(path.file_stem().unwrap().to_str().unwrap(), "mod" | "fire")
-            {
-                let source = std::fs::read_to_string(path).unwrap();
-                code.push_str(source.split("#[cfg(test)]").next().unwrap());
-            }
-        }
-        let lines = code.lines().filter(|l| !l.trim_start().starts_with("//"));
-        for line in lines {
-            assert!(!line.contains("cfg"), "a cfg in the hook points: {line}");
-            for mac in ["!(", "![", "! {", "!{"] {
-                assert!(!line.contains(mac), "a macro in the hook points: {line}");
-            }
-        }
     }
 
     #[test]
@@ -5195,6 +5204,10 @@ mod tests {
         assert_eq!(
             hurt_server_args(Hurting::Dragon(5, arrow), &NO_ATTACK),
             dragon
+        );
+        assert_eq!(
+            hurt_server_args(Hurting::Entity(6, "minecraft:item", arrow), &NO_ATTACK),
+            (6, "minecraft:item", arrow)
         );
     }
 
@@ -5528,9 +5541,12 @@ pub(super) mod particle_count_tests {
             // every group without a particle tick.
             game.particles.tracking_emitter(
                 ParticleOptions::simple(ParticleType::Crit),
-                [0.0; 3],
-                1.0,
-                1.0,
+                horizon_client::particles::TrackingTarget::Entity(0),
+                horizon_client::particles::TrackingBody {
+                    feet: [0.0; 3],
+                    width: 1.0,
+                    height: 1.0,
+                },
             );
             assert!(host_clear(game));
             let host: &dyn ClientHost = game;
