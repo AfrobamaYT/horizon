@@ -957,7 +957,7 @@ fn allocated_ids_follow_mod_and_entry_order_after_vanilla() {
             ),
             (
                 "data/ruby/horizon/fluid/honey.json",
-                r#"{"template":"minecraft:water","still":"ruby:block/h","flowing":"ruby:block/f"}"#,
+                r#"{"sprite":"ruby:block/h"}"#,
             ),
         ],
     );
@@ -983,7 +983,7 @@ fn allocated_ids_follow_mod_and_entry_order_after_vanilla() {
             ),
             (
                 "data/alpha/horizon/fluid/molten/tin.json",
-                r#"{"template":"minecraft:lava","still":"alpha:block/s","flowing":"alpha:block/f"}"#,
+                r#"{"sprite":"alpha:block/s"}"#,
             ),
         ],
     );
@@ -1066,7 +1066,7 @@ fn allocated_ids_follow_mod_and_entry_order_after_vanilla() {
         // Each mod fluid after vanilla's, by id: its source, then its flowing form.
         assert_eq!(id("minecraft:fluid", "minecraft:lava"), 4);
         assert_eq!(id("minecraft:fluid", "alpha:molten/tin"), 5);
-        assert_eq!(id("minecraft:fluid", "alpha:molten/flowing_tin"), 6);
+        assert_eq!(id("minecraft:fluid", "alpha:flowing_molten/tin"), 6);
         assert_eq!(id("minecraft:fluid", "ruby:honey"), 7);
         assert_eq!(id("minecraft:fluid", "ruby:flowing_honey"), 8);
 
@@ -1092,7 +1092,7 @@ fn allocated_ids_follow_mod_and_entry_order_after_vanilla() {
             serde_json::json!([
                 "minecraft:water",
                 "alpha:molten/tin",
-                "alpha:molten/flowing_tin",
+                "alpha:flowing_molten/tin",
                 "ruby:honey",
                 "ruby:flowing_honey"
             ])
