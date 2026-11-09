@@ -1409,6 +1409,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::block_screen_effect_draw` | crosses | Wire call |
 | `Hooks::block_tool_modification` | crosses | Wire call |
 | `Hooks::bonemeal` | crosses | Wire call |
+| `Hooks::build_creative_mode_tab_contents` | crosses | Wire call |
 | `Hooks::calculate_player_turn` | crosses | Wire call |
 | `Hooks::camera_pose` | crosses | Wire call |
 | `Hooks::camera_type_cycle` | crosses | Wire call |
