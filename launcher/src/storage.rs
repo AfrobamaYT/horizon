@@ -44,7 +44,11 @@ pub(crate) fn mark_used(path: &Path) -> Result<(), Error> {
         return Err(Error::Unsafe(path.to_owned()));
     }
     #[cfg(windows)]
-    for ancestor in path.ancestors().skip(1).filter(|path| path.parent().is_some()) {
+    for ancestor in path
+        .ancestors()
+        .skip(1)
+        .filter(|path| path.parent().is_some())
+    {
         checked(ancestor, true)?;
     }
     let (folder, stamp) = if meta.is_dir() {
