@@ -36,6 +36,7 @@
 - [Design: main target configuration](concepts/main-target-config.md)
 - [Design: resource-backed special item renderers](concepts/resource-renderers.md)
 - [Design: section meshing](concepts/section-meshing.md)
+- [Design: entity render state](concepts/entity-render-state.md)
 - [Design: section geometry](concepts/section-geometry.md)
 - [Design: level extracted state](concepts/level-extracted-state.md)
 - [Design: mesh visibility](concepts/mesh-visibility.md)
