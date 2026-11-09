@@ -129,6 +129,44 @@ class Legs(unittest.TestCase):
         skipped = {command[i + 1] for i, arg in enumerate(command) if arg == "--skip"}
         self.assertEqual(skipped, {"marked", *owned[2]})
 
+    def test_a_listed_test_that_never_reports_fails_the_leg(self):
+        owned = leg_names()[1][:2]
+        listing = "".join(f"{name}: test\n" for name in owned)
+        output = target(1, f"test {owned[0]} ... ok\n", summary(passed=1))
+
+        def fake(command, **_):
+            if "--list" in command:
+                return subprocess.CompletedProcess(command, 0, listing)
+            return subprocess.CompletedProcess(command, 0, output)
+
+        with patch.object(ignored_tests.subprocess, "run", side_effect=fake), contextlib.redirect_stdout(io.StringIO()) as log:
+            self.assertIsNone(ignored_tests.run("example", [], 1, 2))
+        self.assertIn(owned[1], log.getvalue())
+
+    def test_a_marked_test_is_not_expected_to_report(self):
+        owned = leg_names()[1][:2]
+        listing = "".join(f"{name}: test\n" for name in owned)
+        output = target(1, f"test {owned[0]} ... ok\n", summary(passed=1))
+
+        def fake(command, **_):
+            if "--list" in command:
+                return subprocess.CompletedProcess(command, 0, listing)
+            return subprocess.CompletedProcess(command, 0, output)
+
+        with patch.object(ignored_tests.subprocess, "run", side_effect=fake), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(ignored_tests.run("example", [owned[1]], 1, 2), {owned[0]: True})
+
+    def test_every_target_runs_despite_a_failing_one(self):
+        calls = []
+
+        def fake(command, **_):
+            calls.append(command)
+            return subprocess.CompletedProcess(command, 0, target(1, "test a ... ok\n", summary(passed=1)))
+
+        with patch.object(ignored_tests.subprocess, "run", side_effect=fake), contextlib.redirect_stdout(io.StringIO()):
+            ignored_tests.run("example", [])
+        self.assertIn("--no-fail-fast", calls[0])
+
     def test_a_leg_that_cannot_list_its_tests_fails(self):
         def fake(command, **_):
             return subprocess.CompletedProcess(command, 101, "")

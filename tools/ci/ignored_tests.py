@@ -92,7 +92,9 @@ def run(package, skip, number=None, count=None):
         for key in ("HORIZON_LAUNCHER_TRASH", "HORIZON_LAUNCHER_CLIPBOARD", "HORIZON_LAUNCHER_DESKTOP"):
             homes[key] = Path(scratch) / key.lower()
         env = lab.game_env(**homes)
-        command = ["cargo", "test", "-p", package, "--lib", *(["--bins", "--tests"] if package in INTEGRATION_TESTS else [])]
+        # --no-fail-fast: a target with accepted known failures must not stop the targets after it.
+        command = ["cargo", "test", "-p", package, "--lib", *(["--bins", "--tests"] if package in INTEGRATION_TESTS else []), "--no-fail-fast"]
+        expected = set()
         if number is not None:
             # List what exists, then skip every test another leg owns.
             listing = subprocess.run(
@@ -104,6 +106,8 @@ def run(package, skip, number=None, count=None):
                 print(f"{package}: could not list the tests to split into legs (cargo exit {listing.returncode})")
                 return None
             others = sorted(name for name in names if not in_leg(name, number, count))
+            # Every test this leg owns and does not skip must report a result.
+            expected = set(names) - set(others) - set(skip)
             skip = [*skip, *others]
             print(f"{package}: leg {number} of {count} runs {len(names) - len(others)} of {len(names)} listed tests")
         skips = [arg for test in skip for arg in ("--skip", test)]
@@ -148,6 +152,11 @@ def run(package, skip, number=None, count=None):
         return None
     if process.returncode and all(results.values()):
         print(f"{package}: cargo exited {process.returncode} without a parsed test failure")
+        return None
+    if missing := sorted(expected - results.keys()):
+        print(f"{package}: {len(missing)} listed tests of this leg never reported a result:")
+        for name in missing[:50]:
+            print(f"  {name}")
         return None
     if not summaries:
         # A build failure: the compiler's output quotes only this repository's code.
