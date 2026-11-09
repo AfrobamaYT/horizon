@@ -2927,6 +2927,7 @@ mod tests {
 
         // QuadrupedModel (a cow) has a head and a body too: its family, not its parts, says it
         // isn't humanoid.
+        let cube = |x: f32| serde_json::json!({ "pose": [x, 0.0, 0.0], "polygons": [[[x, 0.0, 0.0, 0.0, 0.0], [x + 1.0, 0.0, 0.0, 1.0, 0.0], [x + 1.0, 1.0, 0.0, 1.0, 1.0], [x, 1.0, 0.0, 0.0, 1.0]]] });
         let quadruped = serde_json::json!({ "children": {
             "head": cube(0.0), "body": cube(0.0), "right_hind_leg": cube(-2.0),
             "left_hind_leg": cube(2.0), "right_front_leg": cube(-2.0), "left_front_leg": cube(2.0),
