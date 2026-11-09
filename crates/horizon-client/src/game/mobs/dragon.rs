@@ -601,9 +601,9 @@ const ADJACENCY: [u32; 24] = [
     8257536,
 ];
 impl Dragon {
-    /// `Entity.teleportSetPosition` with a transition of no motion (`/tp`).
-    pub(super) fn stop(&mut self) {
-        self.velocity = Vec3::ZERO;
+    /// `Entity.teleportSetPosition` with the command's relative motion flags.
+    pub(super) fn teleport_motion(&mut self, relative: [bool; 3]) {
+        self.velocity = super::commands::teleport_velocity(self.velocity, relative, false);
     }
     /// `EnderDragon`'s constructor: full health, hovering (`EnderDragonPhase.HOVERING`). Only
     /// `EnderDragonFight.createNewDragon` sets the holding pattern; a dragon from `/summon`, a
