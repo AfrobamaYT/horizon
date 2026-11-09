@@ -1003,10 +1003,3 @@ pub mod pack;
 #[cfg(test)]
 mod tests;
 
-/// Versions explicitly selected by the player, rather than automatic recommendations.
-pub fn chosen(home: &Path) -> std::collections::BTreeMap<String, String> {
-    fs::read(home.join("mod-browser/chosen-versions.json"))
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
-}
