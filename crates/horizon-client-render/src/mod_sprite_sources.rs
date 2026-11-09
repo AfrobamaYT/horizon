@@ -217,7 +217,7 @@ mod tests {
 
     #[test]
     fn what_cant_be_a_sprite_is_skipped_alone() {
-        let side = crate::atlas_sources::MAX_SPRITE_SIDE as u32;
+        let side = 32768_u32;
         let listed = list(&definition(), &textures(), &mut |_, _, _| {
             vec![
                 pixels("srctest:short", 2, 2, vec![0; 15]),
