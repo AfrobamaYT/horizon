@@ -1228,5 +1228,7 @@
   "{version} is not installed": "Hindi naka-install ang {version}",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (o .mcp.json sa isang proyekto)",
   "← All servers": "← Lahat ng mga server",
-  "← Newer": "← Mas bago"
+  "← Newer": "← Mas bago",
+  "This version supplies resources to native build {build}. Remove that build first.": "This version supplies resources to native build {build}. Remove that build first.",
+  "This native build needs its base version {base}; reinstall it.": "This native build needs its base version {base}; reinstall it."
 }

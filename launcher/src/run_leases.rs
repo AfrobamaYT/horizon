@@ -65,6 +65,22 @@ pub(crate) fn shared(command: &Command) -> Result<Vec<Claim>, Error> {
         }
         paths.push(source);
     }
+    // Native clients read prepared data from a different installed version. Hold that
+    // tree explicitly as well as the executable's tree for the child's entire lifetime.
+    let arguments = horizon_mod_package::selection::LaunchArguments::for_command(command)?;
+    for argument in arguments.rest {
+        if let horizon_mod_package::selection::Argument::Value(flag, resources) = argument {
+            if flag == "--resources" {
+                paths.push(
+                    command
+                        .get_current_dir()
+                        .unwrap_or(Path::new("."))
+                        .join(resources)
+                        .canonicalize()?,
+                );
+            }
+        }
+    }
     paths.sort();
     paths.dedup();
     if paths.is_empty() {

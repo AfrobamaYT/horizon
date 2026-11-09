@@ -1228,5 +1228,7 @@
   "{version} is not installed": "{version} ni nameščen",
   "~/.claude.json (or .mcp.json in a project)": "~/.claude.json (ali .mcp.json v projektu)",
   "← All servers": "← Vsi strežniki",
-  "← Newer": "← Novejše"
+  "← Newer": "← Novejše",
+  "This version supplies resources to native build {build}. Remove that build first.": "This version supplies resources to native build {build}. Remove that build first.",
+  "This native build needs its base version {base}; reinstall it.": "This native build needs its base version {base}; reinstall it."
 }
