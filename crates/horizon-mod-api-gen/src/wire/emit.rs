@@ -33,7 +33,7 @@ pub(super) fn types(types: &Types<'_>) -> String {
             } else {
                 String::new()
             };
-            writeln!(out,"impl crate::wire::Wire for {container}<dyn {path}> {{ const LAYOUT_SEED:u64=crate::wire::layout_name(stringify!({container}<dyn {path}>)); const MIN:usize=8; fn put(&self,out:&mut crate::wire::Writer) {{ {put} }} {transfer} fn take(input:&mut crate::wire::Reader<'_>)->Result<Self,crate::wire::WireError> {{ input.take_resource() }} }}").unwrap();
+            writeln!(out,"impl crate::wire::Wire for {container}<dyn {path}> {{ const LAYOUT_SEED:u64=crate::wire::layout_seed(stringify!({container}<dyn {path}>)); const MIN:usize=8; fn put(&self,out:&mut crate::wire::Writer) {{ {put} }} {transfer} fn take(input:&mut crate::wire::Reader<'_>)->Result<Self,crate::wire::WireError> {{ input.take_resource() }} }}").unwrap();
         }
     }
     for (def_id, def) in types.defs.iter().enumerate() {

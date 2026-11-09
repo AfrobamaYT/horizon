@@ -1300,7 +1300,7 @@ mod tests {
         };
         assert_eq!(layout(&all), layout(&selected));
         let file = syn::parse_file(&selected).unwrap();
-        let wires = file.items.iter().filter(|item| matches!(item, syn::Item::Impl(imp) if imp.trait_.as_ref().is_some_and(|(_, path, _)| path.segments.last().unwrap().ident == "Wire"))).count();
+        let wires = file.items.iter().filter(|item| matches!(item, syn::Item::Struct(record) if record.attrs.iter().any(|attr| attr.path().is_ident("cfg_attr") && attr.to_token_stream().to_string().contains("derive (:: mod_api :: Wire)")))).count();
         assert_eq!(wires, 1);
         assert!(selected.contains("fn point_first"));
         assert!(!selected.contains("fn point_second"));

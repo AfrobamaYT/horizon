@@ -581,6 +581,16 @@ pub trait Wire: Sized {
         Self::LAYOUT_SEED
     }
     /// The fewest bytes a value takes, so a length can be checked before anything is allocated.
+    /// Test-only schema introspection for the handwritten codec regression cases.
+    #[cfg(test)]
+    fn __field_layouts() -> Option<Vec<(&'static str, u64)>> {
+        None
+    }
+    /// Test-only tuple grouping, without adding encoding or framing.
+    #[cfg(test)]
+    fn __tuple_layouts() -> Option<Vec<u64>> {
+        None
+    }
     const MIN: usize;
     fn put(&self, out: &mut Writer);
     /// Consumes owned data when a resource's ownership must cross the boundary.
@@ -1015,6 +1025,15 @@ macro_rules! tuples {
         #[allow(non_snake_case)]
         impl<$($name: Wire),+> Wire for ($($name,)+) {
             const LAYOUT_SEED: u64 = layout_name("tuple");
+            #[cfg(test)]
+            fn __tuple_layouts() -> Option<Vec<u64>> {
+                let mut fields = Vec::new();
+                $(if let Some(nested) = $name::__tuple_layouts() {
+                    fields.extend(nested);
+                } else { fields.push($name::layout(&mut vec![])); })+
+                Some(fields)
+            }
+
     fn layout(visiting: &mut Vec<&'static str>) -> u64 { { let h = Self::LAYOUT_SEED; $(let h = layout_mix(h, $name::layout(visiting));)+ h } }
     const MIN: usize = 0 $(+ $name::MIN)+;
             fn put(&self, out: &mut Writer) {
@@ -1060,6 +1079,10 @@ impl Wire for std::time::Duration {
 // Rust representation (which may contain caches or validated constructor state).
 macro_rules! layout_fields {
     ($($field:literal => $ty:ty),* $(,)?) => {
+        #[cfg(test)]
+        fn __field_layouts() -> Option<Vec<(&'static str, u64)>> {
+            Some(vec![$(($field, <$ty as $crate::wire::Wire>::layout(&mut vec![]))),*])
+        }
         fn layout(visiting: &mut Vec<&'static str>) -> u64 {
             let identity = std::any::type_name::<Self>();
             if visiting.contains(&identity) { return crate::wire::layout_name("recursive"); }

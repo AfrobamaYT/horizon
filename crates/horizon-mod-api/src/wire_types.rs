@@ -2120,3 +2120,7 @@ impl crate::wire::Wire for crate::AttachmentWrite {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "wire_layout_tests.rs"]
+mod layout_tests;
