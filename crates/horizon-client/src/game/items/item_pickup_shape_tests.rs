@@ -5,7 +5,7 @@ use horizon_client::join_seq::{
     residency::{Journal, Kind, Owner, table::EntityTable},
 };
 use horizon_client::motion::PlayerMotion;
-use horizon_core::{geometry::Vec3, random::RandomSource as _};
+use horizon_core::geometry::Vec3;
 use mod_api::{Flow, Hooks, ItemPickedUpEvent, ModEntry, ServerHost, testing::with_mods};
 use std::sync::{Arc, Mutex};
 
