@@ -12,6 +12,13 @@ use std::collections::HashSet;
 pub struct Fences {
     cells: HashSet<[i32; 3]>,
     carriers: HashSet<u128>,
+    /// Set when a transfer broke after `prepared`: the fences hold, the
+    /// operation stays for recovery at world open, and every further
+    /// transfer refuses until the world reopens.
+    broken: bool,
+    /// Test seam: the next flush after `prepared` fails, as a crashed
+    /// writer would. Set by the carrier transfer tests only.
+    pub fail_flush: bool,
 }
 impl Fences {
     /// Whether a world cell is locked against edits, interactions,
@@ -43,5 +50,16 @@ impl Fences {
     /// Unlocks one carrier.
     pub fn unlock_carrier(&mut self, uuid: u128) {
         self.carriers.remove(&uuid);
+    }
+
+    /// Whether a transfer broke after `prepared` and the world must be
+    /// reopened before another runs.
+    pub fn is_broken(&self) -> bool {
+        self.broken
+    }
+
+    /// Marks the transfer broken: fences hold, further transfers refuse.
+    pub fn mark_broken(&mut self) {
+        self.broken = true;
     }
 }

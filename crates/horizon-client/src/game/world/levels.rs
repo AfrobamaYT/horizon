@@ -132,7 +132,7 @@ impl Default for Pass {
 /// The levels not in place, by dimension.
 #[derive(Default)]
 pub(super) struct Levels {
-    parked: HashMap<Dim, Parked>,
+    pub(super) parked: HashMap<Dim, Parked>,
     /// The levels whose open the mods heard (`native_level_load`), each to
     /// be told closed once.
     heard_open: Vec<Dim>,

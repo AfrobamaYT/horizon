@@ -3,6 +3,13 @@
 //! prepared and committed, and the assembly that runs at a tick
 //! boundary (issue #2413, slice 2 part C).
 //!
+//! A transfer is one synchronous call on the server's thread at a tick
+//! boundary: no tick runs between `prepared` and `committed`, so routes
+//! without their own fence chokepoint (the player's manual block
+//! placement, guest container clicks, attachment writes) cannot
+//! interleave today. If the commit ever becomes asynchronous, those
+//! routes need chokepoints of their own.
+//!
 //! The fences are one set of locked world cells plus locked carriers on
 //! the server's level. Each refusal route is checked at one chokepoint:
 //! breaking (`Game::break_block`), every mod write through the level's
@@ -19,6 +26,7 @@ use horizon_core::position::BlockPos;
 use horizon_world::carrier::codec;
 use horizon_world::carrier::contact::RigidTransform;
 use horizon_world::carrier::model::{Carrier, Cell, Invalid, LocalPos, MAX_CELLS};
+use horizon_world::level::data::state_flags::REPLACEABLE;
 
 /// Why a transfer refused. Refusals leave no partial transfer.
 #[cfg_attr(not(test), allow(dead_code))]
@@ -39,6 +47,17 @@ pub(crate) enum TransferError {
     Store(String),
     /// Revalidation after the lift found a cell that did not move.
     Revalidation([i32; 3]),
+    /// The rotation is not one of the cube's symmetries.
+    NotCubeSymmetry,
+    /// A rotation other than identity needs a state-rotation adapter
+    /// (slice 4's); without one facing properties would be rewritten
+    /// silently.
+    RotationNeedsAdapter,
+    /// A disassembly destination is neither air nor a replaceable block
+    /// without a block entity.
+    DestinationOccupied([i32; 3]),
+    /// The carrier file is missing or does not decode.
+    CarrierUnreadable(String),
     /// Plain I/O.
     Io(String),
 }
@@ -64,38 +83,71 @@ impl std::fmt::Display for TransferError {
                 "revalidation: cell ({},{},{}) did not move",
                 pos[0], pos[1], pos[2]
             ),
+            Self::NotCubeSymmetry => write!(f, "the rotation is not a cube symmetry"),
+            Self::RotationNeedsAdapter => {
+                write!(f, "a rotated disassembly needs a state adapter")
+            }
+            Self::DestinationOccupied(pos) => write!(
+                f,
+                "destination ({},{},{}) is neither air nor replaceable",
+                pos[0], pos[1], pos[2]
+            ),
+            Self::CarrierUnreadable(why) => write!(f, "carrier file: {why}"),
             Self::Io(text) => write!(f, "carrier transfer I/O: {text}"),
         }
     }
 }
 
 impl Game<'_> {
-    /// Assembles `cells` into one carrier at a tick boundary, server
-    /// side. Preflight refuses anything this slice does not move and
-    /// anything whose encoded operation cannot fit; the affected chunks
-    /// are forced to disk with acknowledgement before `prepared`, the
-    /// #2488 obligation covers the lift, the world cells and the carrier
-    /// fence until the flush barrier confirms every submission and the
-    /// journal records `committed`.
+    /// Assembles `cells` into one carrier. One synchronous call on the
+    /// server's thread at a tick boundary — no tick runs between
+    /// `prepared` and `committed`, which is why routes without their own
+    /// fence chokepoint (the player's manual block placement, guest
+    /// container clicks, attachment writes) cannot interleave; if the
+    /// commit ever becomes asynchronous, they will need chokepoints.
+    ///
+    /// Order: preflight; the operation encoded in memory; the affected
+    /// chunks forced to disk with the writer's acknowledged barrier
+    /// (before the #2488 obligation, under which saves refuse); a
+    /// revalidation that every cell still holds exactly its preflight
+    /// state and entity — a mismatch refuses with the world and the
+    /// store untouched; then, under the obligation, the operation file
+    /// and `prepared` durably, the lift (owned removal, no drops), the
+    /// fences, and forward only: after `prepared` an I/O failure leaves
+    /// the fences up, marks the transfer broken so every later transfer
+    /// refuses until the world reopens, and hands the operation to
+    /// recovery at open. The carrier file and the chunks go out through
+    /// the flush barrier, the journal commits, the fences drop.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn carrier_assemble(
         &mut self,
         uuid: u128,
         cells: &[BlockPos],
     ) -> Result<(), TransferError> {
-        use crate::carrier_store::{envelope_preflight, encode_operation, OpKind, OperationCell};
-        use crate::carrier_store::{CellImage, Operation};
+        use crate::carrier_store::{encode_operation, envelope_preflight, CellImage, OpKind};
+        use crate::carrier_store::{Operation, OperationCell};
         use horizon_client::join_seq::visibility::PassLease;
 
+        // A remote guest's mirror never transfers: the server's own
+        // transfer reaches it through synchronization, so this is a
+        // no-op on the guest, by design.
+        if !self.is_logical_server() {
+            return Ok(());
+        }
+        if self.world.carrier_fences.is_broken() {
+            return Err(TransferError::Store(
+                "a previous carrier transfer did not finish; reopen the world".into(),
+            ));
+        }
         if cells.len() > MAX_CELLS {
             return Err(TransferError::TooManyCells(cells.len()));
         }
         let registry = self.pack.assets.registry;
         envelope_preflight(registry).map_err(|_| TransferError::Envelope)?;
 
-        // Preflight: loaded, ticking chunks; plain blocks or passive
-        // block entities (this slice moves containers; ticking adapters
-        // are slice 4's).
+        // Preflight: loaded chunks; plain blocks or passive block
+        // entities (this slice moves containers; ticking adapters are
+        // slice 4's).
         let air = registry
             .default_state("minecraft:air")
             .ok_or_else(|| TransferError::Io("no air in the registry".into()))?;
@@ -104,8 +156,7 @@ impl Game<'_> {
             if !self.world.chunks.contains_key(&(x, z)) {
                 return Err(TransferError::CellNotLoaded([pos.x, pos.y, pos.z]));
             }
-            let state = self.world.block(pos.x, pos.y, pos.z);
-            if state == air {
+            if self.world.block(pos.x, pos.y, pos.z) == air {
                 return Err(TransferError::UnsupportedBlock([pos.x, pos.y, pos.z]));
             }
         }
@@ -162,11 +213,23 @@ impl Game<'_> {
         let carrier_cells = operation_cells
             .iter()
             .map(|cell| {
+                // The entity rides the carrier file whole: its NBT
+                // serialized once, so a later disassembly replays it.
+                let data = cell.before.entity.as_ref().and_then(|entity| {
+                    horizon_core::nbt::write_named(
+                        &horizon_core::nbt::NamedTag {
+                            name: "".into(),
+                            tag: entity.clone(),
+                        },
+                        horizon_core::nbt::Limits::saved(),
+                    )
+                    .ok()
+                });
                 Cell::new(
                     LocalPos::new(cell.local[0], cell.local[1], cell.local[2]),
                     &cell.before.name,
                     cell.before.properties.clone(),
-                    None,
+                    data,
                 )
             })
             .collect::<Result<Vec<_>, Invalid>>()
@@ -176,33 +239,41 @@ impl Game<'_> {
             uuid,
             generation,
             0,
-            RigidTransform::identity_at(
-                horizon_core::geometry::Vec3::new(
-                    cells[0].x as f64,
-                    cells[0].y as f64,
-                    cells[0].z as f64,
-                ),
-            )
+            RigidTransform::identity_at(horizon_core::geometry::Vec3::new(
+                cells[0].x as f64,
+                cells[0].y as f64,
+                cells[0].z as f64,
+            ))
             .map_err(|_| TransferError::Io("the identity placement refused".into()))?,
             carrier_cells,
         )
         .map_err(TransferError::Model)?;
 
-        // Force the affected chunks to disk, acknowledged, before any
-        // intent is published: replay must find the pre-image there.
         let op_id = store.next_op_id();
         let operation = Operation {
             op_id,
             kind: OpKind::Assemble,
             uuid,
             generation,
-            cells: operation_cells,
+            cells: operation_cells.clone(),
         };
         let encoded = encode_operation(&operation).map_err(|_| TransferError::Envelope)?;
 
-        // The lift runs under #2488's obligation, fenced until commit.
+        // The affected chunks reach the disk, acknowledged, before the
+        // obligation: under #2488 saves refuse, so this must precede the
+        // lease. Replay will find its pre-image here.
+        self.save_affected(cells)
+            .map_err(|e| TransferError::Io(e.to_string()))?;
+
+        // Revalidation, before any intent is published: every cell must
+        // still hold exactly the state and the entity the images were
+        // built from. A mismatch refuses with the world and the store
+        // untouched.
+        self.revalidate_cells(&operation_cells, registry)?;
+
+        // From here the path runs forward to `committed`. The lift is
+        // under #2488's obligation, fenced until the barrier confirms.
         let _lease = PassLease::enter();
-        self.save_affected(cells).map_err(|e| TransferError::Io(e.to_string()))?;
         store
             .write_operation(op_id, &encoded)
             .map_err(|e| TransferError::Store(e.to_string()))?;
@@ -227,29 +298,360 @@ impl Game<'_> {
         self.world.carrier_fences.lock_carrier(uuid);
         drop(_lease);
 
-        // Revalidation: every cell moved, nothing partially transferred.
+        // The application is this same synchronous call's own writes; a
+        // cell that is not air here is a bug, not a refusal path.
         for pos in cells {
-            if self.world.block(pos.x, pos.y, pos.z) != air {
-                return Err(TransferError::Revalidation([pos.x, pos.y, pos.z]));
-            }
+            debug_assert_eq!(self.world.block(pos.x, pos.y, pos.z), air);
         }
 
-        // The carrier file and the affected chunks go out, then the
-        // barrier covers every submission, and only then `committed`.
-        let carrier_bytes = codec::encode(&carrier).map_err(|e| TransferError::Store(e.to_string()))?;
-        store
-            .write_carrier(uuid, generation, &carrier_bytes)
-            .map_err(|e| TransferError::Store(e.to_string()))?;
-        self.save_affected(cells).map_err(|e| TransferError::Io(e.to_string()))?;
-        self.save.flush().map_err(|e| TransferError::Io(e.to_string()))?;
-        store
-            .commit()
-            .map_err(|e| TransferError::Store(e.to_string()))?;
+        // Forward only: an I/O failure past `prepared` keeps the fences,
+        // marks the transfer broken and leaves the operation to
+        // recovery at world open.
+        if let Err(error) = self.finish_assemble(&mut store, uuid, generation, &carrier, cells) {
+            log::error!("carrier transfer did not finish: {error}");
+            self.world.carrier_fences.mark_broken();
+            return Err(error);
+        }
         for pos in cells {
             self.world.carrier_fences.unlock_cell([pos.x, pos.y, pos.z]);
         }
         self.world.carrier_fences.unlock_carrier(uuid);
         Ok(())
+    }
+
+    /// Disassembles the carrier back into the world, the assembly's
+    /// mirror with the same order rules. `translation` places the
+    /// carrier's local origin in the world on the grid; `rotation` must
+    /// be one of the cube's symmetries, and this slice — with no
+    /// state-rotation adapter — accepts only the identity, refusing
+    /// rather than silently rewriting facing properties. Destinations
+    /// must be air or a replaceable block without a block entity; the
+    /// entity returns from the carrier's own payload, then the ordinary
+    /// neighbour updates run. One synchronous server call: no tick runs
+    /// between `prepared` and `committed`.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn carrier_disassemble(
+        &mut self,
+        uuid: u128,
+        generation: u32,
+        translation: [i32; 3],
+        rotation: [f64; 4],
+    ) -> Result<(), TransferError> {
+        use crate::carrier_store::{
+            cube_symmetry_rotation, envelope_preflight, CellImage, OpKind, Operation,
+            OperationCell,
+        };
+        use horizon_client::join_seq::visibility::PassLease;
+        use horizon_core::nbt::{self, Tag};
+
+        if self.world.carrier_fences.is_broken() {
+            return Err(TransferError::Store(
+                "a previous carrier transfer did not finish; reopen the world".into(),
+            ));
+        }
+        if !cube_symmetry_rotation(rotation) {
+            return Err(TransferError::NotCubeSymmetry);
+        }
+        if rotation != [1.0, 0.0, 0.0, 0.0] {
+            return Err(TransferError::RotationNeedsAdapter);
+        }
+        let registry = self.pack.assets.registry;
+        envelope_preflight(registry).map_err(|_| TransferError::Envelope)?;
+
+        let mut store = match Store::open(&self.world_root) {
+            Ok(crate::carrier_store::Opened::Live(store)) => store,
+            _ => {
+                return Err(TransferError::Store(
+                    "the carrier store does not open".into(),
+                ))
+            }
+        };
+        if !store.journal().lists(uuid, generation) {
+            return Err(TransferError::CarrierUnreadable(
+                "the journal does not list this carrier".into(),
+            ));
+        }
+        let carrier_bytes = std::fs::read(store.carrier_path(uuid, generation))
+            .map_err(|e| TransferError::CarrierUnreadable(e.to_string()))?;
+        let carrier = codec::decode(&carrier_bytes)
+            .map_err(|e| TransferError::CarrierUnreadable(e.to_string()))?;
+
+        // Destinations: on loaded chunks, air or replaceable without a
+        // block entity. The images are built from the carrier itself.
+        let mut operation_cells = Vec::with_capacity(carrier.cells().len());
+        for cell in carrier.cells() {
+            let world = [
+                translation[0] + i32::from(cell.pos().x()),
+                translation[1] + i32::from(cell.pos().y()),
+                translation[2] + i32::from(cell.pos().z()),
+            ];
+            if !self.world.chunks.contains_key(&(world[0] >> 4, world[2] >> 4)) {
+                return Err(TransferError::CellNotLoaded(world));
+            }
+            let state = self.world.block(world[0], world[1], world[2]);
+            let occupied = self
+                .world
+                .block_entities
+                .contains_key(&(world[0], world[1], world[2]));
+            let replaceable = self.with_level(|b, _level, _ticks| {
+                b.facts(state).flags & REPLACEABLE != 0
+            });
+            if !replaceable || occupied {
+                return Err(TransferError::DestinationOccupied(world));
+            }
+            let entity = cell.data().and_then(|bytes| {
+                nbt::read_named(bytes, horizon_core::nbt::Limits::saved())
+                    .ok()
+                    .map(|(named, _)| named.tag)
+            });
+            let properties = cell
+                .properties()
+                .iter()
+                .map(|(key, value)| (key.to_string(), value.to_string()))
+                .collect();
+            operation_cells.push(OperationCell {
+                world,
+                local: [cell.pos().x(), cell.pos().y(), cell.pos().z()],
+                before: CellImage {
+                    name: "minecraft:air".to_string(),
+                    properties: Vec::new(),
+                    entity: None,
+                },
+                after: CellImage {
+                    name: cell.name().to_string(),
+                    properties,
+                    entity,
+                },
+            });
+        }
+
+        let cells: Vec<BlockPos> = operation_cells
+            .iter()
+            .map(|cell| BlockPos::new(cell.world[0], cell.world[1], cell.world[2]))
+            .collect();
+        let op_id = store.next_op_id();
+        let operation = Operation {
+            op_id,
+            kind: OpKind::Disassemble,
+            uuid,
+            generation,
+            cells: operation_cells.clone(),
+        };
+        let encoded = crate::carrier_store::encode_operation(&operation)
+            .map_err(|_| TransferError::Envelope)?;
+
+        self.save_affected(&cells)
+            .map_err(|e| TransferError::Io(e.to_string()))?;
+        self.revalidate_destinations(&operation_cells)?;
+
+        let _lease = PassLease::enter();
+        store
+            .write_operation(op_id, &encoded)
+            .map_err(|e| TransferError::Store(e.to_string()))?;
+        store
+            .begin(OpKind::Disassemble, uuid, generation)
+            .map_err(|e| TransferError::Store(e.to_string()))?;
+        for cell in &operation_cells {
+            let pos = BlockPos::new(cell.world[0], cell.world[1], cell.world[2]);
+            let state = self
+                .pack
+                .assets
+                .registry
+                .default_state(&cell.after.name)
+                .ok_or(TransferError::UnsupportedBlock(cell.world))?;
+            // The block through the level's own write path — neighbour
+            // updates included — then the entity from the carrier's
+            // payload.
+            self.with_level(|_b, level, ticks| {
+                _b.set_block(level, ticks, pos, state, 3);
+            });
+            self.world.modified.insert((pos.x >> 4, pos.z >> 4));
+            if let Some(Tag::Compound(map)) = cell.after.entity.clone() {
+                self.with_level(|_b, level, _ticks| {
+                    level.load_block_entity(pos, map);
+                });
+            }
+        }
+        for cell in &operation_cells {
+            self.world.carrier_fences.lock_cell(cell.world);
+        }
+        self.world.carrier_fences.lock_carrier(uuid);
+        drop(_lease);
+
+        if let Err(error) = self.finish_disassemble(&mut store, uuid, generation, &cells) {
+            log::error!("carrier transfer did not finish: {error}");
+            self.world.carrier_fences.mark_broken();
+            return Err(error);
+        }
+        for cell in &operation_cells {
+            self.world.carrier_fences.unlock_cell(cell.world);
+        }
+        self.world.carrier_fences.unlock_carrier(uuid);
+        Ok(())
+    }
+
+    /// The disassembly's commit tail: the chunks and the barrier, then
+    /// `committed` — whose tombstone holds until the carrier file's
+    /// deletion proves durable at a later open.
+    fn finish_disassemble(
+        &mut self,
+        store: &mut Store,
+        uuid: u128,
+        generation: u32,
+        cells: &[BlockPos],
+    ) -> Result<(), TransferError> {
+        self.save_affected(cells)
+            .map_err(|e| TransferError::Io(e.to_string()))?;
+        #[cfg(test)]
+        if self.world.carrier_fences.fail_flush {
+            return Err(TransferError::Io(
+                "injected: the flush barrier failed after prepared".into(),
+            ));
+        }
+        self.save
+            .flush()
+            .map_err(|e| TransferError::Io(e.to_string()))?;
+        store
+            .commit()
+            .map_err(|e| TransferError::Store(e.to_string()))?;
+        // The tombstone this commit leaves holds the carrier from coming
+        // back until a later open finds the file durably gone.
+        if let Err(error) = std::fs::remove_file(store.carrier_path(uuid, generation)) {
+            log::warn!("carrier file removal deferred: {error}");
+        }
+        Ok(())
+    }
+
+    /// Whether every destination still holds what the images recorded:
+    /// replaceable, with no block entity.
+    fn revalidate_destinations(
+        &mut self,
+        cells: &[crate::carrier_store::OperationCell],
+    ) -> Result<(), TransferError> {
+        for cell in cells {
+            let pos = cell.world;
+            let state = self.world.block(pos[0], pos[1], pos[2]);
+            let replaceable = self.with_level(|b, _level, _ticks| {
+                b.facts(state).flags & REPLACEABLE != 0
+            });
+            let entity = self
+                .world
+                .block_entities
+                .contains_key(&(pos[0], pos[1], pos[2]));
+            if !replaceable || entity {
+                return Err(TransferError::Revalidation(pos));
+            }
+        }
+        Ok(())
+    }
+
+    /// The commit tail: the carrier file, the affected chunks and the
+    /// flush barrier, then `committed`.
+    fn finish_assemble(
+        &mut self,
+        store: &mut Store,
+        uuid: u128,
+        generation: u32,
+        carrier: &Carrier,
+        cells: &[BlockPos],
+    ) -> Result<(), TransferError> {
+        let carrier_bytes =
+            codec::encode(carrier).map_err(|e| TransferError::Store(e.to_string()))?;
+        store
+            .write_carrier(uuid, generation, &carrier_bytes)
+            .map_err(|e| TransferError::Store(e.to_string()))?;
+        self.save_affected(cells)
+            .map_err(|e| TransferError::Io(e.to_string()))?;
+        #[cfg(test)]
+        if self.world.carrier_fences.fail_flush {
+            return Err(TransferError::Io(
+                "injected: the flush barrier failed after prepared".into(),
+            ));
+        }
+        self.save
+            .flush()
+            .map_err(|e| TransferError::Io(e.to_string()))?;
+        store
+            .commit()
+            .map_err(|e| TransferError::Store(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Whether every cell still holds exactly its image's state and
+    /// entity, read straight from the live world.
+    fn revalidate_cells(
+        &self,
+        cells: &[crate::carrier_store::OperationCell],
+        registry: &horizon_world::registry::BlockRegistry,
+    ) -> Result<(), TransferError> {
+        for cell in cells {
+            let pos = cell.world;
+            let state = self.world.block(pos[0], pos[1], pos[2]);
+            let descriptor = registry
+                .state(state)
+                .ok_or(TransferError::Revalidation(pos))?;
+            let same_state = descriptor.name == cell.before.name
+                && descriptor.properties.len() == cell.before.properties.len()
+                && cell.before.properties.iter().all(|(key, value)| {
+                    descriptor.properties.get(key).is_some_and(|v| v == value)
+                });
+            if !same_state {
+                return Err(TransferError::Revalidation(pos));
+            }
+            let entity_present = self
+                .world
+                .block_entities
+                .contains_key(&(pos[0], pos[1], pos[2]));
+            if entity_present != cell.before.entity.is_some() {
+                return Err(TransferError::Revalidation(pos));
+            }
+        }
+        Ok(())
+    }
+    /// Recovers the world's carrier store at open, before any chunk
+    /// ticks and before any player joins: the level in place first, then
+    /// every parked level through the same enter/return route the
+    /// autosave uses. A refusal fails the world's load with a clear
+    /// message — and nothing saves after it: the open itself aborts,
+    /// while the store stays exactly as recovery found it.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn carrier_recover_all_levels(&mut self) -> crate::Result<()> {
+        let back = self.dim;
+        let mut dims = vec![back];
+        dims.extend(self.levels.parked.keys().copied());
+        for dim in dims {
+            if dim != back {
+                self.enter_level(dim)
+                    .map_err(|e| format!("carrier recovery could not enter {dim:?}: {e}"))?;
+            }
+            if let Err(error) = self.carrier_recover_current() {
+                return Err(format!("world load refused: {error}").into());
+            }
+        }
+        if back != self.dim {
+            self.enter_level(back)
+                .map_err(|e| format!("carrier recovery could not return to {back:?}: {e}"))?;
+        }
+        Ok(())
+    }
+
+    /// Recovers the level in place: no store means nothing to do; a live
+    /// store's in-progress operation replays against this level's region
+    /// directory.
+    fn carrier_recover_current(&mut self) -> Result<(), String> {
+        let mut store = match crate::carrier_store::Store::open(&self.world_root) {
+            Ok(crate::carrier_store::Opened::Live(store)) => store,
+            Ok(crate::carrier_store::Opened::NeverUsed) => return Ok(()),
+            Err(error) => return Err(error.to_string()),
+        };
+        if store.journal().in_progress.is_none() {
+            return Ok(());
+        }
+        let region = self.save.root.clone();
+        let states = crate::carrier_store::RegistryStates::new(self.pack.assets.registry);
+        crate::carrier_store::recover(&mut store, &region, &states)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
 
     /// Saves every affected chunk and waits for the writer's barrier, so
@@ -386,6 +788,254 @@ mod tests {
             assert!(game.native_level_write_allowed(level, fenced));
             assert!(!game.refuse_locked_container((4, 64, 4), "minecraft:chest"));
         });
+    }
+
+    /// A flush that fails after `prepared`: the fences hold, the next
+    /// transfer refuses, and recovery at a reopen finishes the
+    /// operation with the chest's items in exactly one place.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_flush_failure_after_prepared_recovers_on_reopen() {
+        let root = std::env::temp_dir().join(format!(
+            "horizon-carrier-flush-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("data")).unwrap();
+        write_level_dat(&root);
+        with_game(|game| {
+            game.world_root = root.clone();
+            game.save = std::sync::Arc::new(horizon_client::save::SaveDir::new(
+                root.join("dimensions/minecraft/overworld"),
+                horizon_client::save::LevelShape::OVERWORLD,
+            ));
+            game.world.chunks.insert(
+                (0, 0),
+                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            let registry = game.pack.assets.registry;
+            let chest = registry.default_state("minecraft:chest").unwrap();
+            game.world.set(4, 64, 4, chest).unwrap();
+
+            // The writer's barrier fails after prepared.
+            game.world.carrier_fences.fail_flush = true;
+            assert!(
+                game.carrier_assemble(7, &[BlockPos::new(4, 64, 4)])
+                    .is_err()
+            );
+            // The fences hold and the world refuses further transfers.
+            assert!(game.world.carrier_fences.locks_cell(&[4, 64, 4]));
+            assert!(game.world.carrier_fences.is_broken());
+            assert!(game.carrier_assemble(8, &[BlockPos::new(6, 64, 6)]).is_err());
+
+            // Recovery, as the next open runs it: the operation replays,
+            // the journal commits and the chest is air in the world.
+            let mut store = match crate::carrier_store::Store::open(&root).unwrap() {
+                crate::carrier_store::Opened::Live(store) => store,
+                _ => panic!("the store must reopen"),
+            };
+            let region = root.join("dimensions/minecraft/overworld/region");
+            let states = crate::carrier_store::RegistryStates::new(registry);
+            let report = crate::carrier_store::recover(&mut store, &region, &states).unwrap();
+            // The interrupted save left the post-state on disk, so the
+            // reopen verifies it rather than replaying — either way the
+            // operation commits and exactly one side owns the chest.
+            assert_eq!(report.applied + report.verified, 1);
+            assert!(
+                store.journal().in_progress.is_none(),
+                "the operation committed"
+            );
+            // One owner: the items live in the carrier file, and the
+            // operation file is gone.
+            assert!(root
+                .join("data/horizon_carrier_00000000000000000000000000000007-1.nbt")
+                .is_file());
+            assert!(!root.join("data/horizon_carrier_op_1.nbt").is_file());
+        });
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Assemble then disassemble: at every step the chest has exactly
+    /// one owner — the world, the carrier's images or the carrier file.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn assemble_then_disassemble_keeps_one_owner_at_every_step() {
+        let root = transfer_root("cycle");
+        with_game(|game| {
+            game.world_root = root.clone();
+            game.world.chunks.insert(
+                (0, 0),
+                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            let registry = game.pack.assets.registry;
+            let chest = registry.default_state("minecraft:chest").unwrap();
+            let air = registry.default_state("minecraft:air").unwrap();
+            game.world.set(4, 64, 4, chest).unwrap();
+
+            game.carrier_assemble(9, &[BlockPos::new(4, 64, 4)])
+                .unwrap();
+            assert_eq!(game.world.block(4, 64, 4), air);
+            let carrier_bytes = std::fs::read(root.join(format!(
+                "data/horizon_carrier_{:032x}-1.nbt",
+                9_u128
+            )))
+            .unwrap();
+            assert_eq!(codec::decode(&carrier_bytes).unwrap().cells().len(), 1);
+
+            game.carrier_disassemble(9, 1, [4, 64, 4], [1.0, 0.0, 0.0, 0.0])
+                .unwrap();
+            assert_eq!(game.world.block(4, 64, 4), chest);
+            // The carrier file is gone: one owner, the world.
+            assert!(!root
+                .join(format!("data/horizon_carrier_{:032x}-1.nbt", 9_u128))
+                .is_file());
+        });
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A destination that already holds a block entity refuses, with
+    /// the carrier intact.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_destination_with_a_block_entity_refuses() {
+        let root = transfer_root("dest");
+        with_game(|game| {
+            game.world_root = root.clone();
+            game.world.chunks.insert(
+                (0, 0),
+                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            let registry = game.pack.assets.registry;
+            let chest = registry.default_state("minecraft:chest").unwrap();
+            game.world.set(4, 64, 4, chest).unwrap();
+            game.carrier_assemble(5, &[BlockPos::new(4, 64, 4)])
+                .unwrap();
+            // A second chest occupies the destination cell.
+            game.world.set(10, 64, 10, chest).unwrap();
+            game.world.block_entities.insert(
+                (10, 64, 10),
+                horizon_client::chunk::block_entity::BlockEntity::Chest(Vec::new()),
+            );
+            match game.carrier_disassemble(5, 1, [10, 64, 10], [1.0, 0.0, 0.0, 0.0]) {
+                Err(TransferError::DestinationOccupied(pos)) => assert_eq!(pos, [10, 64, 10]),
+                other => panic!("expected an occupied destination, got {other:?}"),
+            }
+            assert!(root
+                .join(format!("data/horizon_carrier_{:032x}-1.nbt", 5_u128))
+                .is_file());
+        });
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A rotation that is not a cube symmetry refuses; a cube rotation
+    /// without an adapter refuses too; the carrier survives both.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn rotations_refuse_without_symmetry_or_an_adapter() {
+        let root = transfer_root("rot");
+        with_game(|game| {
+            game.world_root = root.clone();
+            game.world.chunks.insert(
+                (0, 0),
+                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            let registry = game.pack.assets.registry;
+            let chest = registry.default_state("minecraft:chest").unwrap();
+            game.world.set(4, 64, 4, chest).unwrap();
+            game.carrier_assemble(6, &[BlockPos::new(4, 64, 4)])
+                .unwrap();
+
+            // A sixth of a turn about Y: not a cube symmetry.
+            let half = 0.5_f64;
+            match game.carrier_disassemble(6, 1, [8, 64, 8], [half, 0.0, half, 0.0]) {
+                Err(TransferError::NotCubeSymmetry) => {}
+                other => panic!("expected a symmetry refusal, got {other:?}"),
+            }
+            // A quarter turn is a symmetry, but no adapter exists yet.
+            let quarter = std::f64::consts::FRAC_1_SQRT_2;
+            match game.carrier_disassemble(
+                6,
+                1,
+                [8, 64, 8],
+                [quarter, 0.0, quarter, 0.0],
+            ) {
+                Err(TransferError::RotationNeedsAdapter) => {}
+                other => panic!("expected an adapter refusal, got {other:?}"),
+            }
+            assert!(root
+                .join(format!("data/horizon_carrier_{:032x}-1.nbt", 6_u128))
+                .is_file());
+        });
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Revalidation itself: images built from the world, the world then
+    /// changed underneath — the mismatch refuses and nothing moved.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn revalidation_refuses_a_changed_cell_without_touching_the_world() {
+        with_game(|game| {
+            game.world.chunks.insert(
+                (0, 0),
+                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            let registry = game.pack.assets.registry;
+            let chest = registry.default_state("minecraft:chest").unwrap();
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            game.world.set(4, 64, 4, chest).unwrap();
+            let descriptor = registry.state(chest).unwrap();
+            let properties = descriptor
+                .properties
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
+            let images = [crate::carrier_store::OperationCell {
+                world: [4, 64, 4],
+                local: [0, 0, 0],
+                before: crate::carrier_store::CellImage {
+                    name: "minecraft:chest".to_string(),
+                    properties,
+                    entity: None,
+                },
+                after: crate::carrier_store::CellImage {
+                    name: "minecraft:air".to_string(),
+                    properties: Vec::new(),
+                    entity: None,
+                },
+            }];
+            assert!(game.revalidate_cells(&images, registry).is_ok());
+            game.world.set(4, 64, 4, stone).unwrap();
+            match game.revalidate_cells(&images, registry) {
+                Err(TransferError::Revalidation(pos)) => assert_eq!(pos, [4, 64, 4]),
+                other => panic!("expected a revalidation refusal, got {other:?}"),
+            }
+            // The world keeps the changed cell; nothing was lifted.
+            assert_eq!(game.world.block(4, 64, 4), stone);
+        });
+    }
+
+    /// A fresh throwaway world root with `data/` and a readable
+    /// `level.dat`, named after the test.
+    fn transfer_root(name: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "horizon-carrier-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("data")).unwrap();
+        write_level_dat(&root);
+        root
+    }
+
+    fn write_level_dat(root: &std::path::Path) {
+        crate::save::write_dat(
+            &root.join("level.dat"),
+            horizon_core::nbt::Tag::compound([(
+                "Data",
+                horizon_core::nbt::Tag::Compound(Default::default()),
+            )]),
+        )
+        .unwrap();
     }
 
     /// The #2488 obligation is what autosave and `save-all` refuse on:

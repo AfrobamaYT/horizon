@@ -12248,6 +12248,9 @@ impl Game<'_> {
         self.streaming.sky_light = dim != Dim::Nether;
         self.streaming.nether_shading = dim == Dim::Nether;
         self.load_world_state();
+        // Carrier recovery before the first tick and any player: a
+        // refusal fails the open, and no save runs after it.
+        self.carrier_recover_all_levels()?;
         // The level the world opens in, before any of its chunks.
         self.native_level_opened(dim);
         self.open_saved_portal_levels()
