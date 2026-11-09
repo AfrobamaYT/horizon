@@ -188,7 +188,7 @@ is Horizon (PvP & HUD and replays, [above](#controllers-splitscreen-replays-and-
 | A speed-up that keeps vanilla's results | engine | next to the code it speeds up |
 | A call to a Mojang or Microsoft service vanilla makes | engine | `auth.rs`, `realms/`, `skins.rs`, `horizon-server-files` |
 | A place mods, ports or Horizon can hook into | engine + platform | an extension point in the engine crate, naming no type from above; its public face in the platform |
-| A mod hook, host method or mod format | platform | `horizon-mods`, the mod API (today: `game/mod_api_host.rs`, `game/native_*.rs`) |
+| A mod hook, host method or mod format | platform | `horizon-mod-api`, with game owners under `game/modding/` and `game/native_hooks/` |
 | A shader or resource pack format vanilla doesn't read | platform | `horizon-shaders`, `horizon-optifine`, `horizon-polytone`, or a new platform crate |
 | A dedicated server option (anticheat, chat filter) | platform | `horizon-anticheat`, `horizon-chat-filter` |
 | Controller support: a device, bindings, glyphs, pad menus | platform | the pad modules, on the engine's input hooks ([Controllers](#controllers-splitscreen-replays-and-ui-pages)) |
@@ -336,37 +336,36 @@ Generated files and `third_party/` are not checked. Test code doesn't count eith
 build doesn't compile it: inline `#[cfg(test)] mod name { ... }` modules. Filenames such as `tests.rs`
 or `<name>_tests.rs` do not exempt a file; other `#[cfg(test)]` items count.
 
-## The checks
+## The check
 
-- `python3 tools/check_layers.py` (#12983) reads the workspaces' `cargo metadata` (no build, about a second) and
-  `tools/layers.json`, which gives every crate its layer and each layer what it may use. It fails on:
-  - a crate with no layer;
-  - a dependency its layer may not use that `allowed` doesn't list;
-  - a branch adding an `allowed` entry for a crate that already had a layer (a crate newly split out of another
-    may carry the old crate's exceptions);
-  - shipped code depending on a tool.
+`python3 tools/check_layers.py` reads the `cargo metadata` of the three workspaces `tools/layers.json` lists (the
+game, `launcher/` and `crates/horizon-mod-registry/`; no build, about a second) and
+[`tools/layers.json`](../tools/layers.json), which gives every crate its layer. It fails when:
 
-  Each failure names the section of this page that applies. An `allowed` entry with no dependency left is only a
-  note.
-- `python3 tools/check_addresses.py` (#12990) checks the built-in addresses ([below](#built-in-addresses)).
-- `python3 tools/check_file_size.py` (#13015) checks the file-size rule above.
+- a crate has no layer;
+- a dependency goes up a layer and neither `allowed` lists it nor `optional` lists it as an optional dependency;
+- an `optional` entry's dependency is no longer optional (one mandatory declaration, for any target or as a build
+  dependency, is enough);
+- a pull request adds an entry to `allowed` or `optional` for a crate that already had a layer (a crate newly split
+  out of another may carry the old crate's exceptions, and an `allowed` entry may move to `optional`);
+- shipped code depends on a tool.
 
-All three run in CI's verify job and in `tools/pr_ready.py`.
+Each failure names the section of this page that applies. An `allowed` or `optional` entry that has no dependency
+left is only reported: take it out when you like. `--list` prints every crate's layer and the upward dependencies
+left.
 
 ### Today's exceptions
 
-47, on main at d5504cd328 (2026-11-08):
+The current dependency inventory is in `tools/layers.json`, with fork-specific classifications and reasons in
+`_fork_baselines`. It excludes removed services and records existing upward dependencies rather than reintroducing
+them. The separate launcher and registry workspaces take two engine crates: `horizon-mod-package` (the launcher's
+package, modpack and index reads; the registry's index format) and `horizon-system` (the launcher's bug reports).
+Those three edges are `allowed` rows like the launcher's other engine dependencies.
 
-| Crate | Uses, against the rule |
-|---|---|
-| `horizon-client` | platform: `horizon-anticheat`, `-chat-filter`, `-dualsense`, `-hdr`, `-mod-api-gen`, `-mods`, `-optifine`, `-shader-api`, `-shaders`, `-theme`; Horizon: `horizon-bench`, `-cosmetics`, `-friends`, `-telemetry` |
-| `horizon-client-lib` | the same, plus `horizon-mcp`, minus `horizon-mod-api-gen` |
-| `horizon-client-render` | platform: `horizon-hdr`, `-mod-api-gen`, `-optifine`, `-polytone`, `-shader-api`, `-shaders`, `-theme`; Horizon: `horizon-bench`, `-cosmetics`, `-telemetry` |
-| `horizon-client-input` | platform: `horizon-dualsense`, `horizon-theme` |
-| `horizon-launcher` (Horizon) | engine: `horizon-core`, `horizon-prepare`, `horizon-protocol`, `horizon-world` |
-| `horizon-server` (Horizon) | engine: `horizon-core`, `horizon-server-files`, `horizon-world` |
-
-No platform crate depends on Horizon.
+`horizon-mod-package`'s registry index validates shader packages with `horizon-shader-api`, behind the optional
+`index` feature (the portable crates take `horizon-mod-package` without it). That edge is the one `optional` row:
+it excuses the layer check and the portable check only while the dependency stays optional, so making it mandatory
+fails both.
 
 ## Built-in addresses
 

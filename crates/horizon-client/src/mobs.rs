@@ -502,6 +502,7 @@ pub struct MobType {
     pub food: Arc<[String]>,
     /// TemptGoal items when they differ from the food.
     pub tempt: Arc<[String]>,
+    pub passenger_attachments: Vec<[f32; 3]>,
 }
 impl MobType {
     pub fn inventory_stack_limit(&self, stack: &crate::items::ItemStack) -> u32 {
@@ -765,10 +766,7 @@ impl MobTypes {
             let defaults = exact.get(&id).cloned().unwrap_or_default();
             let fields = MobType::attribute_fields(|name| defaults.get(name).copied());
             let mut layers = crate::fast_hash::FxHashMap::default();
-            if let Some(all) = models
-                .as_ref()
-                .and_then(|models| models.value().as_object())
-            {
+            if let Some(all) = models.as_ref().and_then(|m| m.value().as_object()) {
                 for prefix in def.layer_prefixes() {
                     let start = format!("minecraft:{prefix}#");
                     for (k, v) in all.iter().filter(|(k, _)| k.starts_with(&start)) {
@@ -785,6 +783,8 @@ impl MobTypes {
             }
             let category = t["category"].as_str().unwrap_or("creature").to_owned();
             let flags = def.flags(t["fire_immune"].as_bool().unwrap_or(false));
+            let passenger_attachments =
+                riders::parse_passenger_attachments(&t["passenger_attachments"]);
             out.insert(
                 id.clone(),
                 MobType {
@@ -835,15 +835,12 @@ impl MobTypes {
                     anim: def.anim,
                     sounds: def.sounds,
                     step_sound: def.step_sound,
-                    food: def
-                        .food_tag()
-                        .map(tag)
-                        .unwrap_or_else(|| Arc::from(Vec::new())),
+                    food: def.food_tag().map_or_else(|| Arc::from(Vec::new()), tag),
                     tempt: def
                         .tempt_tag()
                         .or(def.food_tag())
-                        .map(tag)
-                        .unwrap_or_else(|| Arc::from(Vec::new())),
+                        .map_or_else(|| Arc::from(Vec::new()), tag),
+                    passenger_attachments,
                     category,
                     id,
                 },
@@ -5989,6 +5986,7 @@ pub(crate) mod sensor_scan_tests {
             step_sound: None,
             food: Arc::default(),
             tempt: Arc::default(),
+            passenger_attachments: Vec::new(),
         })
     }
     #[test]
