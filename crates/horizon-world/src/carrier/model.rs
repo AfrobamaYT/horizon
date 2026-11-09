@@ -45,9 +45,17 @@ pub const MAX_LOCAL_COORD: i32 = 127;
 /// `horizon-mod-runtime/src/block_definitions.rs`) bounds neither the
 /// number of properties nor the length of any name or value, and neither
 /// does the identifier charset — so the model sets no length of its own
-/// either. A state's only bound is the codec's input budget: a carrier
-/// whose encoded form does not fit it does not decode, whatever its
-/// cells hold.
+/// either. What does bound a state is its storage: each block id,
+/// property name and value is one NBT string, and an NBT string holds at
+/// most [`MAX_NBT_STRING_BYTES`] of modified UTF-8 (vanilla's chunk
+/// palette stores states the same way). Past that the disk writer would
+/// silently write an empty string, so such a state is refused here, never
+/// saved in a form that cannot load. Beyond that, a carrier whose encoded
+/// form does not fit the codec's input budget does not decode.
+///
+/// The NBT string limit: `DataOutput.writeUTF`'s u16 length prefix. Every
+/// accepted token is ASCII, where modified UTF-8 length equals byte length.
+pub const MAX_NBT_STRING_BYTES: usize = 65_535;
 /// How far a stored quaternion's squared norm may sit from one and still
 /// count as the encoder's normalized output: renormalizing rounds each
 /// component, leaving the squared norm within a few units in the last
@@ -101,6 +109,12 @@ pub enum Invalid {
     InvalidProperty,
     /// Two properties with the same name.
     DuplicateProperty,
+    /// A block id, property name or value longer than one NBT string can
+    /// hold ([`MAX_NBT_STRING_BYTES`]).
+    StringTooLong {
+        /// The string's length in bytes.
+        len: usize,
+    },
 }
 impl fmt::Display for Invalid {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -125,6 +139,10 @@ impl fmt::Display for Invalid {
             Self::BlockName => write!(f, "invalid block name"),
             Self::InvalidProperty => write!(f, "invalid property name or value"),
             Self::DuplicateProperty => write!(f, "duplicate property name"),
+            Self::StringTooLong { len } => write!(
+                f,
+                "state string of {len} bytes exceeds the NBT string limit {MAX_NBT_STRING_BYTES}"
+            ),
         }
     }
 }
@@ -191,6 +209,9 @@ impl Cell {
         properties: impl IntoIterator<Item = (String, String)>,
         data: Option<Vec<u8>>,
     ) -> Result<Self, Invalid> {
+        if name.len() > MAX_NBT_STRING_BYTES {
+            return Err(Invalid::StringTooLong { len: name.len() });
+        }
         if Identifier::parse_namespaced(name).is_none() {
             return Err(Invalid::BlockName);
         }
@@ -199,6 +220,12 @@ impl Cell {
         }
         let mut sorted: Vec<(Box<str>, Box<str>)> = Vec::new();
         for (key, value) in properties {
+            if let Some(len) = [key.len(), value.len()]
+                .into_iter()
+                .find(|len| *len > MAX_NBT_STRING_BYTES)
+            {
+                return Err(Invalid::StringTooLong { len });
+            }
             if !valid_property_token(&key) || !valid_property_token(&value) {
                 return Err(Invalid::InvalidProperty);
             }

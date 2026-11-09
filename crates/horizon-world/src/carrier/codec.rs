@@ -33,16 +33,21 @@ pub const SCHEMA_VERSION: i32 = 1;
 const ROOT_NAME: &str = "horizon_carrier";
 /// Input envelope: this bounds the wire bytes on the way in, not the
 /// decoded heap — a full-size carrier decodes to noticeably more than
-/// this once the tree exists. It stays the only bound on state names and
-/// properties, which the registry does not length-limit: a carrier whose
-/// encoded form passes it refuses at the door, before the tree is
+/// this once the tree exists. Past each string's own NBT limit (see
+/// [`super::model::MAX_NBT_STRING_BYTES`]), it is the only bound on state
+/// names and properties: a carrier whose encoded form passes it refuses at
+/// the door, before the tree is
 /// parsed.
 const MAX_INPUT_BYTES: usize = 24 * 1024 * 1024;
-/// Node ceiling: the smallest possible node is five wire bytes (a tag
-/// byte, a u16 name length and a u16 string payload), so 24 MiB of input
-/// can hold at most about five million nodes; the ceiling matches that
-/// derivation, refusing junk forests whose node count outruns their
-/// bytes.
+/// Node ceiling, a chosen bound rather than one the byte budget implies:
+/// an unnamed element of a byte list costs one wire byte, so hostile input
+/// could pack far more nodes into 24 MiB, and this ceiling, not the byte
+/// budget, is what bounds them. A legal carrier's smallest repeated node is
+/// a property entry (tag byte, u16 name length, a name byte, u16 value
+/// length, a value byte: seven bytes), so a legal carrier within the input
+/// budget has under 3.6 million nodes and fits with margin. The reader
+/// allocates the complete tree before the carrier schema is checked, so
+/// neither bound is a heap bound.
 const MAX_NODES: usize = 5 * 1024 * 1024;
 /// The schema nests three deep under the root; eight refuses anything
 /// deeper before it is parsed.
@@ -922,6 +927,54 @@ mod tests {
         assert_eq!(
             decoded.cells()[0].properties()[0].0.as_ref(),
             "a".repeat(65)
+        );
+    }
+
+    #[test]
+    fn state_strings_round_trip_at_the_nbt_limit_and_refuse_one_past() {
+        // One NBT string holds at most 65,535 bytes of modified UTF-8; the
+        // disk writer would write anything longer as empty, so 65,535 must
+        // round-trip exactly and 65,536 must refuse before any save.
+        let at_limit = Carrier::new(
+            10,
+            0,
+            0,
+            RigidTransform::identity_at(Vec3::ZERO).unwrap(),
+            vec![
+                Cell::new(
+                    LocalPos::new(0, 0, 0),
+                    &format!("m:{}", "p".repeat(65_533)),
+                    vec![("k".repeat(65_535), "v".repeat(65_535))],
+                    None,
+                )
+                .unwrap(),
+            ],
+        )
+        .unwrap();
+        let decoded = decode(&encode(&at_limit).unwrap()).unwrap();
+        assert_eq!(decoded, at_limit);
+        assert_eq!(decoded.cells()[0].name().len(), 65_535);
+        assert_eq!(decoded.cells()[0].properties()[0].0.len(), 65_535);
+        assert_eq!(decoded.cells()[0].properties()[0].1.len(), 65_535);
+
+        let cell = |name: &str, key: String, value: String| {
+            Cell::new(LocalPos::new(0, 0, 0), name, vec![(key, value)], None)
+        };
+        assert_eq!(
+            cell("minecraft:stone", "k".to_string(), "v".repeat(65_536)),
+            Err(Invalid::StringTooLong { len: 65_536 })
+        );
+        assert_eq!(
+            cell("minecraft:stone", "k".repeat(65_536), "v".to_string()),
+            Err(Invalid::StringTooLong { len: 65_536 })
+        );
+        assert_eq!(
+            cell(
+                &format!("m:{}", "p".repeat(65_534)),
+                "k".to_string(),
+                "v".to_string()
+            ),
+            Err(Invalid::StringTooLong { len: 65_536 })
         );
     }
 
