@@ -8,7 +8,7 @@ worked examples, and which shape to choose, are in [Injections](../../injections
 
 A catalog hook's trait method, event and return make up its `hook_version` contract
 ([Named hook points](../../how-to/native-mods/011-named-hook-points.md#named-hook-points)). These per-hook contract versions are catalog metadata, not minimum game
-versions. Catalog hooks, `Host` calls and raw `target` injections all build against the
+versions. Catalog hooks, `Host` calls and internals `[[inject]]` declarations all build against the
 [game's exact source revision](../../how-to/native-mods/005-native-mod-source-revisions.md#native-mod-source-revisions). Rebuild the mod when that contract changes.
 
 Every `impl Hooks` must have `#[mod_api::horizon_mod]`. The attribute derives

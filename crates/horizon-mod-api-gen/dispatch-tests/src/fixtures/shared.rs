@@ -201,6 +201,12 @@ trait Registrar {}
 struct GoalRegistrar<'a> {
     _lifetime: std::marker::PhantomData<&'a ()>,
 }
+/// The behavior registrar of the generated `EntityPart` (#824), as the
+/// fixture sees it: like [`GoalRegistrar`], only its type is asked for.
+#[expect(dead_code)]
+struct BehaviorRegistrar<'a> {
+    _lifetime: std::marker::PhantomData<&'a ()>,
+}
 /// Scope fixtures install their own Parts. Block attachments retain their API keys;
 /// other scopes keep their existing single-target fixture tables.
 #[derive(Default)]

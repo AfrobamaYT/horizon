@@ -77,6 +77,18 @@ pub trait PlayersBackend {
     #[access(WorldOnly)]
     fn player_item_cooldown_percent(&self, player: PlayerRef, group: &str) -> Option<f32>;
     /// Side: server.
+    /// `Player.getAttackStrengthScale(partial)`: the charge the player's next
+    /// `Player.attack` reads, from 0 (just swung) to 1 (full), where `partial`
+    /// (vanilla reads 0.5) is how far between ticks the read is. It is
+    /// `(attackStrengthTicker + partial) / getCurrentItemAttackStrengthDelay()`,
+    /// the delay from the attack speed attribute and the main-hand item.
+    /// Inside `attack_entity` it reads the charge that blow uses: the hook
+    /// runs before `Player.attack` resets the ticker. 1.0 under 1.8.9 rules,
+    /// which have no cooldown. None for a stale or unavailable player.
+    #[access(WorldOnly)]
+    /// Non-finite partial ticks return `None`; finite partials are not restricted.
+    fn player_attack_strength_scale(&self, player: PlayerRef, partial: f32) -> Option<f32>;
+    /// Side: server.
     /// `Player.takeXpDelay`: the ticks before the player can take the next
     /// experience orb.
     #[access(WorldOnly)]

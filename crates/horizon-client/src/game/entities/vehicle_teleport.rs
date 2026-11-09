@@ -244,8 +244,7 @@ impl Game<'_> {
             if source == destination {
                 return Ok(false);
             }
-            // The vehicle and the server players riding it are asked before
-            // anything moves; one cancel keeps them all where they are.
+            // Refused passengers are dismounted and remain in the source level.
             if !game.tree_may_travel(root, destination) {
                 return Ok(true);
             }
@@ -358,29 +357,11 @@ impl Game<'_> {
     /// carries) may all travel to `destination` by a teleport
     /// (`entity_travel_to_dimension`).
     fn tree_may_travel(&mut self, root: u32, destination: super::Dim) -> bool {
-        let mounts: Vec<_> = self.mobs.iter().map(|m| (m.id, m.extra.mount)).collect();
-        let tree = super::persist::vehicle_tree(root, &mounts);
-        let mut asked = vec![root];
-        if self.riding.is_some_and(|id| tree.contains(&id))
-            && let Some(id) = self.network_entity_id(Target::Player)
-        {
-            asked.push(id as u32);
-        }
-        if let Some(host) = self.lan.as_ref() {
-            asked.extend(
-                host.hub
-                    .guests
-                    .iter()
-                    .filter(|g| {
-                        Some(g.conn) != self.lan_acting
-                            && g.vehicle.is_some_and(|id| tree.contains(&id))
-                    })
-                    .map(|g| g.entity_id as u32),
-            );
-        }
-        asked.into_iter().all(|id| {
-            self.entity_may_travel(id, destination, super::server_travel::TravelCause::Teleport)
-        })
+        self.entity_may_travel(
+            root,
+            destination,
+            super::server_travel::TravelCause::Teleport,
+        )
     }
 
     /// `Entity.teleportSameDimension`: after `t` moved from `from` to `to`, its

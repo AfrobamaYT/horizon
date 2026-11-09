@@ -375,7 +375,7 @@ impl Game<'_> {
     /// The confirmation's title, the command in yellow in its message, and
     /// its two buttons.
     fn command_prompt_layout(&self, prompt: &CommandPrompt, size: (f32, f32)) -> Choice {
-        let command = Text::literal(&prompt.command).with_color(0xFF_FF55);
+        let command = Text::untrusted(&prompt.command).with_color(0xFF_FF55);
         let mut choice = Choice::new(
             &self.gui.atlas.font,
             size,

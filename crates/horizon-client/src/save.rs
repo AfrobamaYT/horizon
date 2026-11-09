@@ -965,21 +965,21 @@ fn decode_mod_block_entity(id: String, tag: &Tag) -> Option<crate::containers::M
     ))
 }
 /// Decode an entity at a known block, refusing undeclared IDs and invalid native membership.
-/// Vanilla decoding remains unchanged; only declared native types override templates.
+/// Canonical membership wins; blocks absent from the table use vanilla membership.
 pub fn decode_block_entity_for_block(
     tag: &Tag,
     block: &str,
 ) -> Option<((i32, i32, i32), crate::containers::BlockEntity)> {
     let decoded = decode_block_entity(tag)?;
+    // Several vanilla types share a decoded representation (for example barrel
+    // and chest). Membership belongs to the saved type, not that representation.
+    let saved_id = text(tag.get("id"))?;
     let valid = match &decoded.1 {
         crate::containers::BlockEntity::Mod(m) => {
             crate::block_entity_types::valid(block, m.id()) == Some(true)
         }
-        _ => {
-            crate::block_entity_types::valid(block, decoded.1.id()) == Some(true)
-                || (crate::block_entity_types::type_for(block).is_none()
-                    && (block.starts_with("minecraft:") || decoded.1.fits(block)))
-        }
+        _ => crate::block_entity_types::valid(block, &saved_id)
+            .unwrap_or_else(|| decoded.1.fits(block)),
     };
     valid.then_some(decoded)
 }
@@ -7317,36 +7317,145 @@ mod tests {
         // The production registry is immutable. Exercise its real readers in a fresh process.
         const CHILD: &str = "HORIZON_TEST_NATIVE_SAVED_MEMBERSHIP";
         if std::env::var_os(CHILD).is_none() {
-            assert!(
+            for mode in ["accepted", "revoked"] {
+                assert!(
                 std::process::Command::new(std::env::current_exe().unwrap())
                     .args([
                         "--exact",
                         "save::tests::native_saved_ids_must_match_the_declared_block_membership",
                         "--nocapture"
                     ])
-                    .env(CHILD, "1")
+                    .env(CHILD, mode)
                     .status()
                     .unwrap()
                     .success()
             );
+            }
             return;
         }
         use crate::block_entity_types::{self, BlockEntityTypes};
-        block_entity_types::install(BlockEntityTypes::new(
+        let mut types = BlockEntityTypes::new(
             [
                 ("test:press".into(), "test:machine".into()),
                 ("test:mill".into(), "test:machine".into()),
                 ("test:board".into(), "test:other".into()),
             ]
             .into(),
-            vec!["test:machine".into(), "test:other".into()],
-        ))
-        .unwrap();
+            vec![
+                "test:machine".into(),
+                "test:other".into(),
+                "minecraft:chest".into(),
+            ],
+        );
+        // Seed the same canonical pairs as production when resources are available.
+        // The explicit shared-representation cases below also run without resources.
+        let mut vanilla_blocks: Vec<String> = [
+            "chest",
+            "trapped_chest",
+            "barrel",
+            "dropper",
+            "dispenser",
+            "hopper",
+            "shulker_box",
+        ]
+        .into_iter()
+        .map(|name| format!("minecraft:{name}"))
+        .collect();
+        for color in [
+            "white",
+            "orange",
+            "magenta",
+            "light_blue",
+            "yellow",
+            "lime",
+            "pink",
+            "gray",
+            "light_gray",
+            "cyan",
+            "purple",
+            "blue",
+            "brown",
+            "green",
+            "red",
+            "black",
+        ] {
+            vanilla_blocks.push(format!("minecraft:{color}_shulker_box"));
+        }
+        if let Some(root) = std::env::var_os("HORIZON_TEST_RESOURCES") {
+            let path = horizon_protocol::registry::Builtin::find(&PathBuf::from(root))
+                .expect("registries.json");
+            let builtin = horizon_protocol::registry::Builtin::load(&path).unwrap();
+            vanilla_blocks.extend(
+                builtin
+                    .get("minecraft:block")
+                    .unwrap()
+                    .names
+                    .iter()
+                    .cloned(),
+            );
+        }
+        for block in vanilla_blocks {
+            if let Some(kind) = crate::lan::chunks::block_entity_type(&block) {
+                types.template(block.clone(), block, kind.into());
+            }
+        }
+        types.template(
+            "minecraft:trapped_chest".into(),
+            "minecraft:trapped_chest".into(),
+            "minecraft:trapped_chest".into(),
+        );
+        let accepted = std::env::var(CHILD).unwrap() == "accepted";
+        if accepted {
+            types
+                .add_valid("minecraft:trapped_chest", "minecraft:chest")
+                .unwrap();
+        }
+        block_entity_types::install(types).unwrap();
         let tag = |id: &str| {
             horizon_core::nbt::parse_snbt(&format!(r#"{{id:"{id}",x:1,y:64,z:2,energy:900L}}"#,))
                 .unwrap()
                 .0
         };
+        for (block, kind) in block_entity_types::current().unwrap().memberships() {
+            if block.starts_with("minecraft:") {
+                let saved = tag(kind);
+                // Some vanilla types have no client representation yet. Membership
+                // must not discard any entity that the decoder can represent.
+                assert_eq!(
+                    decode_block_entity_for_block(&saved, block).is_some(),
+                    decode_block_entity(&saved).is_some(),
+                    "{kind} on {block}"
+                );
+            }
+        }
+        assert_eq!(
+            decode_block_entity_for_block(&tag("minecraft:chest"), "minecraft:trapped_chest")
+                .is_some(),
+            accepted
+        );
+        assert!(
+            decode_block_entity_for_block(&tag("minecraft:banner"), "minecraft:stone").is_none()
+        );
+        assert!(
+            decode_block_entity_for_block(&tag("minecraft:banner"), "minecraft:trapped_chest")
+                .is_none()
+        );
+        for block in [
+            "trapped_chest",
+            "barrel",
+            "dropper",
+            "dispenser",
+            "hopper",
+            "shulker_box",
+            "red_shulker_box",
+        ] {
+            let block = format!("minecraft:{block}");
+            let kind = crate::lan::chunks::block_entity_type(&block).unwrap();
+            assert!(
+                decode_block_entity_for_block(&tag(kind), &block).is_some(),
+                "{kind} on {block}"
+            );
+        }
         for block in ["test:press", "test:mill"] {
             let (_, entity) = decode_block_entity_for_block(&tag("test:machine"), block).unwrap();
             assert!(entity.fits(block));

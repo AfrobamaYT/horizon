@@ -376,8 +376,6 @@ impl Game<'_> {
             self.recipe_ui.client.displays(),
         )
     }
-    /// A new session forgets the entries the last server's packets carried.
-
     /// The book's model is made again from `Game::recipes` when next needed:
     /// the server's recipes arrived, or a new session began.
     pub(super) fn forget_book(&mut self) {

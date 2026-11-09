@@ -86,7 +86,7 @@ impl BookScreen {
 fn view_pages(data: Option<&StackData>) -> Vec<Text> {
     let Some(data) = data else { return Vec::new() };
     let Some(w) = &data.written else {
-        return data.writable_pages.iter().map(Text::literal).collect();
+        return data.writable_pages.iter().map(Text::untrusted).collect();
     };
     let tagged = w.page_tags.len() == w.pages.len();
     w.pages
@@ -98,13 +98,13 @@ fn view_pages(data: Option<&StackData>) -> Vec<Text> {
             Some(tag @ (horizon_core::nbt::Tag::Compound(_) | horizon_core::nbt::Tag::List(_))) => {
                 horizon_client::entity_nbt::name_text(tag)
             }
-            _ => Text::literal(page),
+            _ => Text::untrusted(page),
         })
         .collect()
 }
 impl Game<'_> {
     fn book_lines(&self, page: &str) -> Vec<Text> {
-        self.page_lines(&Text::literal(page))
+        self.page_lines(&Text::untrusted(page))
     }
     fn page_lines(&self, page: &Text) -> Vec<Text> {
         self.gui.atlas.font.split(page, 114.0)
