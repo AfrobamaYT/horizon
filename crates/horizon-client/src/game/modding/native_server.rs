@@ -4247,6 +4247,84 @@ mod fake_action_tests {
         });
     }
 
+    /// A listener on `attack_entity` reads the attacking player's attack
+    /// strength where the hook runs.
+    struct ChargeWatcher(std::sync::Arc<std::sync::Mutex<Vec<Option<f32>>>>);
+
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for ChargeWatcher {
+        fn attack_entity(
+            &self,
+            host: &mut dyn mod_api::ServerHost,
+            _event: &mut mod_api::AttackEntityEvent<'_>,
+        ) -> mod_api::Flow {
+            let player = host.players().acting_player().expect("an attacking player");
+            let scale = player.attack_strength_scale(host, 0.5);
+            self.0.lock().unwrap().push(scale);
+            mod_api::Flow::Continue
+        }
+    }
+
+    /// `PlayerRef::attack_strength_scale` inside `attack_entity` reads the
+    /// charge the blow uses: `Player.attack` reads `getAttackStrengthScale`
+    /// itself at its start, and the hook runs before that read and before the
+    /// swing resets the ticker. After the blow the same read sees 0. A
+    /// resting player reads its saved ticker and body too.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn attack_strength_scale_reads_the_charge_at_the_hook_and_not_after_the_swing() {
+        use super::super::native_entity_refs::tests::with_game;
+        use std::sync::{Arc, Mutex};
+
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "charge-watcher",
+            Box::new(ChargeWatcher(seen.clone())),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                let (player, fake_conn, _) = fake(game, None, 0);
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update_all(|g| g.yaw = -90.0);
+                let near = zombie(game, 5000, [2.0, 64.0, 0.5]);
+                let full = health(game, 5000);
+                // A fist's cooldown is 5 ticks: a full ticker reads 1.0, and half of one
+                // ((2 + 0.5) / 5) reads 0.5.
+                game.as_guest(fake_conn, |g| g.attack_ticks = 5).unwrap();
+                assert_eq!(
+                    player.attack_strength_scale(game, 0.5),
+                    Some(1.0),
+                    "a full ticker is a fully charged blow"
+                );
+                game.as_guest(fake_conn, |g| g.attack_ticks = 2).unwrap();
+                assert_eq!(
+                    player.attack_strength_scale(game, 0.5),
+                    Some(0.5),
+                    "a resting fake reads its saved ticker and body"
+                );
+                assert_eq!(
+                    game.player_perform_action(player, PlayerAction::Attack { target: near }),
+                    Ok(ActionOutcome::Consumed)
+                );
+                assert_eq!(*seen.lock().unwrap(), vec![Some(0.5)]);
+                // The blow uses the charge the hook read: 0.5 scales a fist's 1 to 0.4, and a
+                // zombie's 2 armour takes `getDamageAfterAbsorb`'s share.
+                let dealt = 0.4f32 * (1.0 - (2.0 - 0.4 / 2.0) / 25.0);
+                assert!((full - health(game, 5000) - dealt).abs() < 1e-4);
+                assert_eq!(
+                    player.attack_strength_scale(game, 0.5),
+                    Some(0.1),
+                    "the swing reset the ticker to 0 after the blow: (0 + 0.5) / 5"
+                );
+            });
+        });
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_fake_breaks_blocks_at_once_by_the_game_modes_rules() {
