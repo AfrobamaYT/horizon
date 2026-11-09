@@ -586,12 +586,6 @@ const GL_DEPTH_WGSL: &str = r#"
 /// A chain [`PostEffects::preload`] loaded, by id.
 type Preloaded = (String, Result<Option<Chain>, String>);
 
-/// The chains a spectated entity applies (`GameRenderer.checkEntityPostEffect`): the
-/// first frame through a creeper's eyes compiled its pipelines, a 0.1-0.9 s freeze on
-/// the Mac mini.
-pub const SPECTATOR_CHAINS: [&str; 3] =
-    ["minecraft:creeper", "minecraft:spider", "minecraft:invert"];
-
 fn empty_source() -> &'static ResourceSource {
     static EMPTY: std::sync::OnceLock<ResourceSource> = std::sync::OnceLock::new();
     EMPTY.get_or_init(|| ResourceSource::indexed(Default::default()))
@@ -698,12 +692,12 @@ impl PostEffects {
     /// Loads the `ids` chains (namespaced) not loaded yet and compiles their pipelines for
     /// `format`, on a thread of their own: `apply` leaves a chain out until it has
     /// arrived instead of compiling it in the frame that first asks for it.
-    pub fn preload(
+    pub fn preload<'a>(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         root: &ResourceSource,
-        ids: &[&str],
+        ids: impl IntoIterator<Item = &'a str>,
         format: wgpu::TextureFormat,
     ) {
         self.use_root(root);
@@ -711,9 +705,9 @@ impl PostEffects {
             return;
         }
         let ids: Vec<String> = ids
-            .iter()
-            .filter(|id| !self.chains.contains_key(**id) && !self.failed.contains(**id))
-            .map(|id| normalise(id))
+            .into_iter()
+            .filter(|id| !self.chains.contains_key(*id) && !self.failed.contains(*id))
+            .map(normalise)
             .collect();
         if ids.is_empty() {
             return;
@@ -2410,7 +2404,7 @@ mod tests {
         std::fs::remove_dir_all(root.join("assets")).unwrap();
         let mut effects = PostEffects::new(&device);
         let format = wgpu::TextureFormat::Rgba8Unorm;
-        effects.preload(&device, &queue, &source, &["minecraft:preloaded"], format);
+        effects.preload(&device, &queue, &source, ["minecraft:preloaded"], format);
         assert!(effects.pending.contains("minecraft:preloaded"));
         let started = std::time::Instant::now();
         while !effects.pending.is_empty() {

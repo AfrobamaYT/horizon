@@ -463,14 +463,31 @@ pub(super) fn register_resource_sources(role: ExecutionRole) {
     Game::native_register_sprite_sources(&RegistrationContext::new(), &mut sources);
     horizon_client_render::mod_sprite_sources::register(sources);
 }
+/// The client presentation registrations, resolved once before the first level opens: the
+/// dimension transition screens and the entity spectator shaders.
+pub(super) fn register_client_presentations(role: ExecutionRole) {
+    register_dimension_transition_screens(role);
+    register_entity_spectator_shaders(role);
+}
+
 /// Resolve client dimension-transition registrations once, before the first level opens.
-pub(super) fn register_dimension_transition_screens(role: ExecutionRole) {
+fn register_dimension_transition_screens(role: ExecutionRole) {
     if !role.is_client() {
         return;
     }
     let mut screens = Vec::new();
     Game::native_register_dimension_transition_screen(&RegistrationContext::new(), &mut screens);
     horizon_client_render::dimension_transition::register(screens);
+}
+
+/// Resolve client spectator post-effect registrations once, before the first level opens.
+pub(super) fn register_entity_spectator_shaders(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut shaders = Vec::new();
+    Game::native_register_entity_spectator_shaders(&RegistrationContext::new(), &mut shaders);
+    horizon_client_render::spectator_shaders::register(shaders);
 }
 
 /// The native mods' colour resolvers (`native_register_color_resolvers`), kept once at start,
