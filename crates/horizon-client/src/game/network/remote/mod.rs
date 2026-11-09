@@ -550,18 +550,17 @@ pub(super) struct Remote {
     /// The level's facts from the dimension type this connection's server sent (`None` when it
     /// sent none the game takes): owned by the connection, so entering a level touches no other
     /// level's facts, the integrated server's included.
-    pub(in crate::game) level_facts: Option<&'static horizon_world::dimension_type::DimensionFacts>,
-    /// The facts made for each level of this connection, by level, with the type they came from:
-    /// a level entered again with the same type reuses them, so a reconnect-free session leaks
-    /// one set per distinct type.
+    pub(in crate::game) level_facts: Option<Arc<horizon_world::dimension_type::DimensionFacts>>,
     /// The sky, fog and cloud attributes (and timelines) of the level from the server's type, for a
     /// level of a mod or a pack (`None` for a built-in level, or when the type is refused).
     pub(in crate::game) level_environment: Option<horizon_client::environment::Environment>,
+    /// Connection-owned facts, cached by level and the full named type identity.
     facts_cache: HashMap<
         String,
         (
+            String,
             serde_json::Value,
-            &'static horizon_world::dimension_type::DimensionFacts,
+            Arc<horizon_world::dimension_type::DimensionFacts>,
         ),
     >,
     /// `ClientPlayerNetworkEvent.LoggingOut` was fired for this connection: every way out
@@ -2698,25 +2697,39 @@ impl Game<'_> {
             let cached = r
                 .facts_cache
                 .get(&spawn.dimension)
-                .filter(|(old, _)| *old == json)
-                .map(|(_, facts)| *facts);
+                .filter(|(old_name, old, _)| *old_name == name && *old == json)
+                .map(|(_, _, facts)| facts.clone());
             r.level_facts = cached.or_else(|| {
                 use horizon_world::dimension_type::DimensionFacts;
                 let base = DimensionFacts::base_for_type(&name);
-                let facts = DimensionFacts::patched(base, &name, &json)
-                    .map_err(|why| {
-                        log::warn!("the server's dimension type {name} is refused ({why})")
-                    })
-                    .ok()?;
+                let facts = (|| {
+                    for field in ["coordinate_scale", "ambient_light"] {
+                        if json.get(field).is_some()
+                            && !json[field].as_f64().is_some_and(f64::is_finite)
+                        {
+                            return Err(format!("invalid {field}"));
+                        }
+                    }
+                    if json.get("monster_spawn_block_light_limit").is_some()
+                        && json["monster_spawn_block_light_limit"].as_i64().is_none()
+                    {
+                        return Err("invalid monster_spawn_block_light_limit".into());
+                    }
+                    DimensionFacts::patched(base, &name, &json)
+                })()
+                .map_err(|why| log::warn!("the server's dimension type {name} is refused ({why})"))
+                .unwrap_or_else(|_| base.clone());
                 if !sane_facts(&facts) {
                     log::warn!(
                         "the server's dimension type {name} is refused (a value out of range)"
                     );
-                    return None;
+                    return Some(Arc::new(base.clone()));
                 }
-                let facts: &'static DimensionFacts = Box::leak(Box::new(facts));
-                r.facts_cache
-                    .insert(spawn.dimension.clone(), (json.clone(), facts));
+                let facts = Arc::new(facts);
+                r.facts_cache.insert(
+                    spawn.dimension.clone(),
+                    (name.clone(), json.clone(), facts.clone()),
+                );
                 Some(facts)
             });
         }
@@ -14205,11 +14218,30 @@ mod tests {
         use horizon_client::level_loading::Reason;
         use horizon_protocol::{connection::Pipe, packets::play::SpawnInfo};
         use mod_api::{DimensionKey, LevelRef};
+        use std::sync::Arc;
 
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;
             let (client, _server) = Pipe::pair();
+            use horizon_world::dimension_type::DimensionFacts;
+            let stale_key = horizon_core::LevelKey::parse("test:stale_guest_facts").unwrap();
+            let mut stale = DimensionFacts::overworld().clone();
+            stale.coordinate_scale = 19.0;
+            DimensionFacts::set_levels(vec![(stale_key, stale)]);
             game.connect_local(client, "CustomLevelTest").unwrap();
+            assert_eq!(game.dimension_facts_for(stale_key).coordinate_scale, 1.0);
+            let mut registries = (*game.remote.as_ref().unwrap().registries).clone();
+            let json = serde_json::json!({"min_y": 0, "height": 256,
+                "coordinate_scale": 4.0, "ambient_light": 0.3,
+                "attributes": {"minecraft:gameplay/fast_lava": true}});
+            registries.registries.insert(
+                "minecraft:dimension_type".into(),
+                vec![(
+                    "test:type".into(),
+                    Some(horizon_client::scoreboard::json_to_tag(&json)),
+                )],
+            );
+            game.set_registries(Arc::new(registries));
             let spawn = SpawnInfo {
                 dimension_type: 0,
                 dimension: "test:pocket".into(),
@@ -14230,8 +14262,121 @@ mod tests {
             assert_eq!(level.dimension().id(game).as_deref(), Some("test:pocket"));
             assert!(game.level("minecraft:overworld").is_none());
             assert!(level.height(game).is_some());
+            let facts = level.dimension_type(game).unwrap();
+            assert_eq!(facts.id, "test:type");
+            assert_eq!(facts.coordinate_scale, 4.0);
+            assert_eq!(facts.ambient_light, 0.3);
+            assert!(facts.fast_lava);
+            assert_eq!(game.dimension_type().coordinate_scale, 4.0);
             let overworld = LevelRef::new(level.epoch(), DimensionKey::OVERWORLD);
             assert_eq!(overworld.height(game), None);
+            // An equal JSON body with a different type name must not hit the old cache.
+            let mut renamed = (*game.remote.as_ref().unwrap().registries).clone();
+            renamed
+                .registries
+                .get_mut("minecraft:dimension_type")
+                .unwrap()[0]
+                .0 = "test:renamed".into();
+            game.set_registries(Arc::new(renamed));
+            game.enter_remote_dimension(&spawn, false, Reason::Other);
+            assert_eq!(game.dimension_type().id, "test:renamed");
+            // Reject invalid server numbers and enums without failing the join.
+            for (field, value) in [
+                ("coordinate_scale", serde_json::json!(0.0)),
+                ("coordinate_scale", serde_json::json!("NaN")),
+                ("coordinate_scale", serde_json::Value::Null),
+                ("ambient_light", serde_json::json!("NaN")),
+                ("ambient_light", serde_json::Value::Null),
+                ("monster_spawn_block_light_limit", serde_json::json!(16)),
+                ("monster_spawn_block_light_limit", serde_json::json!(-1)),
+                ("skybox", serde_json::json!("invalid")),
+            ] {
+                let mut invalid = json.clone();
+                invalid[field] = value;
+                let mut registries = (*game.remote.as_ref().unwrap().registries).clone();
+                registries.registries.insert(
+                    "minecraft:dimension_type".into(),
+                    vec![(
+                        "minecraft:the_nether".into(),
+                        Some(horizon_client::scoreboard::json_to_tag(&invalid)),
+                    )],
+                );
+                game.set_registries(Arc::new(registries));
+                game.enter_remote_dimension(&spawn, false, Reason::Other);
+                assert_eq!(game.dimension_type().coordinate_scale, 8.0, "{field}");
+                assert!(game.dimension_type().fast_lava);
+            }
+            let min = f64::from(1.0E-5_f32);
+            let max = 30_000_000.0_f64;
+            for (value, valid) in [
+                (min.next_down(), false),
+                (min, true),
+                (min.next_up(), true),
+                (max.next_down(), true),
+                (max, true),
+                (max.next_up(), false),
+                (f64::from_bits(1), false),
+            ] {
+                let mut boundary = json.clone();
+                boundary["coordinate_scale"] = serde_json::json!(value);
+                // Vanilla uses Codec.FLOAT, not a unit-interval ambient-light codec.
+                boundary["ambient_light"] = serde_json::json!(1.1);
+                let mut registries = (*game.remote.as_ref().unwrap().registries).clone();
+                registries.registries.insert(
+                    "minecraft:dimension_type".into(),
+                    vec![(
+                        "minecraft:the_nether".into(),
+                        Some(horizon_client::scoreboard::json_to_tag(&boundary)),
+                    )],
+                );
+                game.set_registries(Arc::new(registries));
+                game.enter_remote_dimension(&spawn, false, Reason::Other);
+                assert_eq!(
+                    game.dimension_type().coordinate_scale,
+                    if valid { value } else { 8.0 }
+                );
+                if valid {
+                    assert_eq!(game.dimension_type().ambient_light, 1.1);
+                }
+            }
+            for ambient in [1.5_f32, -0.5_f32] {
+                let mut legal = json.clone();
+                legal["ambient_light"] = serde_json::json!(ambient);
+                let block_limit = if ambient > 0.0 { 15 } else { 0 };
+                legal["monster_spawn_block_light_limit"] = serde_json::json!(block_limit);
+                let mut registries = (*game.remote.as_ref().unwrap().registries).clone();
+                registries.registries.insert(
+                    "minecraft:dimension_type".into(),
+                    vec![(
+                        "test:type".into(),
+                        Some(horizon_client::scoreboard::json_to_tag(&legal)),
+                    )],
+                );
+                game.set_registries(Arc::new(registries));
+                game.enter_remote_dimension(&spawn, false, Reason::Other);
+                assert_eq!(game.dimension_type().coordinate_scale, 4.0);
+                assert_eq!(game.dimension_type().ambient_light, ambient);
+                assert_eq!(
+                    game.dimension_type().monster_spawn_block_light_limit,
+                    block_limit
+                );
+                let level = game.level("test:pocket").unwrap();
+                assert_eq!(level.dimension_type(game).unwrap().ambient_light, ambient);
+            }
+            // Disconnect drops the connection-owned table; the server table is untouched.
+            let lifetime =
+                Arc::downgrade(game.remote.as_ref().unwrap().level_facts.as_ref().unwrap());
+            game.leave_server(None).unwrap();
+            assert!(
+                lifetime.upgrade().is_none(),
+                "connection facts must be released"
+            );
+            assert_eq!(DimensionFacts::of_level(stale_key).coordinate_scale, 19.0);
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "SecondFactsSession").unwrap();
+            let key = horizon_core::LevelKey::parse("test:pocket").unwrap();
+            assert_eq!(game.dimension_facts_for(key).coordinate_scale, 1.0);
+            DimensionFacts::set_levels(Vec::new());
         });
     }
 
@@ -17106,6 +17251,7 @@ mod player_tick_tests {
 fn sane_facts(facts: &horizon_world::dimension_type::DimensionFacts) -> bool {
     (f64::from(1.0e-5_f32)..=3.0e7).contains(&facts.coordinate_scale)
         && (0..=15).contains(&facts.monster_spawn_block_light_limit)
+        && facts.ambient_light.is_finite()
 }
 
 #[cfg(test)]
