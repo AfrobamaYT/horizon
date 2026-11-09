@@ -622,6 +622,7 @@ fn structure_config_is_converted_at_load_and_shared_by_starts() {
 }
 
 #[test]
+#[allow(clippy::err_expect)] // TODO(#2273): `expect_err` once the Ok type is Debug
 fn structure_bad_config_refuses_at_load_but_unknown_types_do_not_convert() {
     use horizon_world::worldgen::structure::{
         mod_types::ModStructureTypes,
@@ -644,7 +645,7 @@ fn structure_bad_config_refuses_at_load_but_unknown_types_do_not_convert() {
         &types,
     )
     .err()
-    .expect("refused during definition load"); // TODO(#2273): `expect_err` once the Ok type is Debug
+    .expect("refused during definition load");
     assert_eq!(
         error.to_string(),
         "structure probe:tower: probe:kind: JSON-to-NBT does not accept nested null"

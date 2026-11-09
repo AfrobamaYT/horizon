@@ -3,7 +3,7 @@
 //! `Game` functions with the same names. `Host`, `ServerHost` and `ClientHost` are the unions of those traits, so
 //! a mod reaches every area through them and the handles.
 // The generated impls convert error types that are already equal; TODO(#2273): make the generator skip it.
-#![allow(clippy::useless_conversion)]
+#![allow(clippy::useless_conversion, clippy::unit_arg)]
 use super::Game;
 use mod_api::__private::game::*;
 use mod_api::*;
