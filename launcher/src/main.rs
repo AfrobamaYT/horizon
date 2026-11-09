@@ -4010,18 +4010,22 @@ impl Launcher {
         let size = bytes
             .map(megabytes)
             .unwrap_or_else(|| tr("Unavailable on this platform").into());
-        div().absolute().inset_0().occlude().flex().items_center().justify_center().bg(gpui::black().opacity(0.65))
-            .child(div().w(px(520.)).p(px(28.)).bg(t.well).flex().flex_col().gap(px(18.))
-                .child(tr("Allow native mods?"))
-                .children(name.map(|name| div().child(trf("{mod} is a native mod.", &[("mod", &name)]))))
-                .child(tr("Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors."))
+        div().absolute().inset_0().occlude().flex().items_center().justify_center().bg(crate::glass_ui::scrim())
+            .child(plate(&t).w(px(520.)).p(px(28.)).bg(t.surface).rounded(px(16.)).border_1().border_color(t.rule).shadow_lg().flex().flex_col().gap(px(18.))
+                .child(div().size(px(48.)).rounded(px(12.)).bg(t.warn.opacity(0.12)).flex().items_center().justify_center().child(crate::glass_ui::icon("information-circle", 26., t.warn)))
+                .child(div().text_size(px(24.)).font_weight(FontWeight::BOLD).child(tr("Allow native mods?")))
+                .children(name.map(|name| {
+                    let body = trf("{mod} is a native mod. Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.", &[("mod", &name)]);
+                    let highlight = body.find(&name).map(|start| (start..start + name.len(), gpui::HighlightStyle { font_weight: Some(FontWeight::BOLD), ..Default::default() }));
+                    div().child(gpui::StyledText::new(body).with_highlights(highlight))
+                }))
                 .child(trf("Horizon will download the Rust compiler ({size}) to build them. You can turn this off in Settings, Storage.", &[("size", &size)]))
-                .child(div().flex().gap(px(12.))
-                    .child(button("native-cancel", "Cancel", Kind::Secondary, &t).w(px(210.)).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                .child(div().flex().justify_end().gap(px(12.))
+                    .child(button("native-cancel", "Cancel", Kind::Secondary, &t).w(px(120.)).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                         this.cancel_native_consent();
                         cx.notify();
                     })))
-                    .child(button("native-allow", "Allow", Kind::Primary, &t).when(bytes.is_none(), disabled).w(px(210.)).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    .child(button("native-allow", "Allow", Kind::Primary, &t).when(bytes.is_none(), disabled).w(px(120.)).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                         match native_consent::resolve(&mut this.pending_consent, true, bytes.is_some(), &mut this.settings, &this.mods.home()) {
                             Err(error) => this.mods.message = Some(Err(error)),
                             Ok(Some(action)) => match action {

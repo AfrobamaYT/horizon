@@ -1229,8 +1229,7 @@
   "Needs permission": "Needs permission",
   "Allow native mods": "Allow native mods",
   "Unavailable on this platform": "Unavailable on this platform",
-  "Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.": "Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.",
   "Horizon will download the Rust compiler ({size}) to build them. You can turn this off in Settings, Storage.": "Horizon will download the Rust compiler ({size}) to build them. You can turn this off in Settings, Storage.",
-  "{mod} is a native mod.": "{mod} is a native mod.",
-  "NATIVE": "NATIVE"
+  "NATIVE": "NATIVE",
+  "{mod} is a native mod. Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors.": "{mod} is a native mod. Native mods are native code that runs inside your game, with your rights: like any program you install, they can read and change your files. Allow them only if you trust their authors."
 }
