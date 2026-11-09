@@ -2801,6 +2801,7 @@ dependencies = [
  "glam",
  "gpui-fast",
  "gpui-fast-platform",
+ "horizon-addresses",
  "horizon-bench",
  "horizon-core",
  "horizon-cosmetics",
