@@ -441,6 +441,7 @@ mod off_level_tests {
                     0.0,
                 );
                 m.extra.set_body(Some("minecraft:tnt".into()));
+                sulfur_cube::adopt_body(&mut m);
                 m.extra.mount = mount;
                 game.mobs.push(m);
             }
@@ -448,7 +449,8 @@ mod off_level_tests {
             game.persist
                 .off_level
                 .insert(72, crate::game::persist::OffLevel::Mob(ghost));
-            game.sulfur_cube_power_priming();
+            let primable = game.sulfur_cubes_adopted_explosive();
+            game.sulfur_cube_power_priming(&primable);
             assert!(!sulfur_cube::primed(game.mob_object(73).unwrap()));
             assert!(sulfur_cube::primed(game.mob_object(74).unwrap()));
         });
