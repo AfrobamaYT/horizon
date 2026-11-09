@@ -89,7 +89,9 @@ fn admit(registration: &TextureAtlasRegistration, seen: &[Identifier]) -> Result
     Ok(())
 }
 
-/// `assets/<namespace>/atlases/<path>.json`'s sources, as the packs give it.
+/// `assets/<namespace>/atlases/<path>.json`'s sources. The root already holds the file's
+/// whole resource stack (`packs::resources` merges every pack's copy, bottom first, after
+/// the pack filters, as `SpriteSourceList.load` does), so this one read sees all of them.
 fn definition(
     source: &ResourceSource,
     id: &Identifier,
@@ -271,12 +273,102 @@ mod tests {
         assert!(second.source().contains(star) && !second.source().contains(heart));
     }
 
+    /// The definition is the packs' resource stack, as `SpriteSourceList.load` reads it: a
+    /// mod's file and a pack's file above it both add their sprites, and a pack filter above
+    /// them hides the lower files whole.
+    #[test]
+    fn the_definition_stacks_every_pack_and_a_filter_hides_the_ones_below() {
+        use horizon_client::packs::{self, Pack, Source};
+        let layer = |files: &[(&str, &[u8])]| {
+            ResourceSource::indexed(
+                files
+                    .iter()
+                    .map(|(name, bytes)| ((*name).to_owned(), Resource::bytes(bytes.to_vec())))
+                    .collect(),
+            )
+        };
+        let definition = |folder: &str| {
+            format!(r#"{{"sources":[{{"type":"directory","source":"{folder}","prefix":""}}]}}"#)
+        };
+        let heart = fixture_png(2, 2, 1);
+        let star = fixture_png(2, 2, 2);
+        let moon = fixture_png(2, 2, 3);
+        let mod_layer = Pack::mod_layer(
+            "icons_mod".into(),
+            Source::Opened(layer(&[
+                (
+                    "assets/icons_mod/atlases/icons.json",
+                    definition("hearts").as_bytes(),
+                ),
+                ("assets/icons_mod/textures/hearts/heart.png", &heart),
+            ])),
+        );
+        let pack = |meta: &str, folder: &str, texture: &str, png: &[u8]| {
+            packs::pack_for(
+                format!("file/{folder}"),
+                horizon_client::text::Text::literal(folder),
+                Source::Opened(layer(&[
+                    ("pack.mcmeta", meta.as_bytes()),
+                    (
+                        "assets/icons_mod/atlases/icons.json",
+                        definition(folder).as_bytes(),
+                    ),
+                    (texture, png),
+                ])),
+                packs::RESOURCE_FORMAT,
+            )
+            .unwrap()
+        };
+        let format = packs::RESOURCE_FORMAT.0;
+        let plain = format!(r#"{{"pack":{{"pack_format":{format},"description":""}}}}"#);
+        let filtering = format!(
+            r#"{{"pack":{{"pack_format":{format},"description":""}},
+                "filter":{{"block":[{{"namespace":"icons_mod","path":"atlases/icons\\.json"}}]}}}}"#
+        );
+        let stars = pack(
+            &plain,
+            "stars",
+            "assets/icons_mod/textures/stars/star.png",
+            &star,
+        );
+        let moons = pack(
+            &filtering,
+            "moons",
+            "assets/icons_mod/textures/moons/moon.png",
+            &moon,
+        );
+        let staged = |selected: &[Pack]| {
+            let source = packs::resources(layer(&[]), selected).unwrap();
+            let root = ResourceRoot::new("prepared".into(), "cache".into(), source);
+            stage_texture_atlases(root, &[registration("icons_mod:icons", "icons_mod:icons")])
+        };
+        let sprite = |name: &str| {
+            format!("assets/icons_mod/textures/gui/atlases/icons/icons_mod/{name}.png")
+        };
+        let both = staged(&[mod_layer.clone(), stars.clone()]);
+        assert_eq!(both.source().read(&sprite("heart")).unwrap(), heart);
+        assert_eq!(both.source().read(&sprite("star")).unwrap(), star);
+        let filtered = staged(&[mod_layer, stars, moons]);
+        assert!(!filtered.source().contains(&sprite("heart")));
+        assert!(!filtered.source().contains(&sprite("star")));
+        assert_eq!(filtered.source().read(&sprite("moon")).unwrap(), moon);
+    }
+
     /// A mod registering an atlas on the first load only: its id and vanilla's
     /// `map_decorations` definition, already in the resources.
     struct Maps(std::sync::Arc<std::sync::Mutex<(u32, Vec<Option<mod_api::AtlasRegion>>)>>);
 
     fn maps() -> TextureAtlasRegistration {
         registration("maps_mod:maps", "minecraft:map_decorations")
+    }
+
+    /// An atlas whose name holds `presets`, which the menu's own picture folder also has.
+    fn presets() -> TextureAtlasRegistration {
+        registration("maps_mod:presets", "minecraft:map_decorations")
+    }
+
+    fn player(atlas: &TextureAtlasRegistration) -> Identifier {
+        atlas.sprite_name(&Identifier::parse("minecraft:player").unwrap())
     }
 
     #[mod_api::__subscriptions]
@@ -290,6 +382,7 @@ mod tests {
             kept.0 += 1;
             if kept.0 == 1 {
                 event.atlases.push(maps());
+                event.atlases.push(presets());
             }
         }
 
@@ -299,8 +392,11 @@ mod tests {
             event: &mut mod_api::TextureAtlasStitchedEvent,
         ) {
             if event.atlas == mod_api::TextureAtlas::Gui {
-                let player = maps().sprite_name(&Identifier::parse("minecraft:player").unwrap());
-                self.0.lock().unwrap().1.push(host.gui_sprite(&player));
+                self.0
+                    .lock()
+                    .unwrap()
+                    .1
+                    .push(host.gui_sprite(&player(&maps())));
             }
         }
     }
@@ -319,10 +415,15 @@ mod tests {
         mod_api::testing::with_mods(mods, || {
             crate::game::native_entity_refs::tests::with_client_game(|game| {
                 game.texture_atlases_stitched();
-                let player = maps().sprite_name(&Identifier::parse("minecraft:player").unwrap());
+                let player = player(&maps());
                 assert_eq!(
                     game.gui_sprite_pixels(&player.to_string()),
                     Some([8.0, 8.0])
+                );
+                assert_eq!(
+                    game.gui_sprite_pixels(&self::player(&presets()).to_string()),
+                    Some([8.0, 8.0]),
+                    "a sprite under an atlas named presets is stitched too"
                 );
                 {
                     let kept = kept.lock().unwrap();
