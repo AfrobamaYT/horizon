@@ -271,10 +271,6 @@ impl mod_api::Hooks for InsideMod {
     }
 }
 
-/// One sweep test at a time: they share the process's parts table and hook
-/// bindings, and the harness runs them on separate threads.
-static SWEEP_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
 /// The part's mods, installed with their parts as a game's open does, before
 /// `with_game`: the game that opens then publishes the block index itself (the
 /// #824 parts-resolution order).
@@ -361,7 +357,6 @@ fn sweep_game_player(game: &mut Game<'_>) -> (f64, f64, bool) {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_part_pushes_the_player_and_its_effect_lands() {
-    let _sweep = SWEEP_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let part = InsidePart::default();
     let mods = install_inside_mod("inside-push", &part);
     mod_api::testing::with_mods(mods, || {
@@ -403,7 +398,6 @@ fn a_part_pushes_the_player_and_its_effect_lands() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_killing_write_stops_the_flush() {
-    let _sweep = SWEEP_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let mut part = InsidePart::default();
     part.kill_after = Some(0);
     let mods = install_inside_mod("inside-kill", &part);
@@ -431,10 +425,9 @@ fn a_killing_write_stops_the_flush() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_panicking_part_leaves_the_players_tick_restored() {
-    let _sweep = SWEEP_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let mut part = InsidePart::default();
-    // The panic lands on the first contact; the runtime quarantines the mod
-    // after it, as it does for every hook a part panics in.
+    // The panic lands on every contact: each one is caught in the staged fire,
+    // and the mod keeps receiving the walk's contacts.
     part.panic_after = Some(0);
     let mods = install_inside_mod("inside-panic", &part);
     mod_api::testing::with_mods(mods, || {
@@ -468,25 +461,17 @@ fn a_panicking_part_leaves_the_players_tick_restored() {
 }
 
 /// Without a listening part the walk runs its vanilla moments and leaves the
-/// player's writes and the pending queue alone: the fire's gate answers false
-/// and its DamageLevel is never built.
+/// player's writes and the pending queue alone: no part is installed, so the
+/// fire's gate answers false and its DamageLevel is never built.
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn without_a_part_the_walk_costs_no_mod_work() {
-    let _sweep = SWEEP_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let _ = horizon_client::block_contact::HOOKS.set(horizon_client::block_contact::Hooks {
-        step_on: |_, _| {},
-        any_inside: || false,
-        inside_listens: |_| false,
-        pass_listens: |_| false,
-        fall_listens: |_| false,
-        bounce_listens: |_| false,
-        fall_on: |_, _, _, _, _, _| {},
-        bounce_on: |_, _, _, _, _| {},
-        inside_fire: |_, _, _, _, _, _, _, _, _| {
-            panic!("no part listens: the fire is never built");
-        },
-    });
+    // The production binding, as every sweep test sets it: nothing is installed
+    // on this thread, so its gate answers false for every state and the fire's
+    // DamageLevel is never built. (A dummy binding here would race the
+    // process-wide `block_contact::HOOKS` OnceLock — first setter wins —
+    // against the other tests' real one.)
+    let _ = horizon_client::block_contact::HOOKS.set(BLOCK_CONTACT_HOOKS);
     crate::game::native_entity_refs::tests::with_game(|game| {
         let (before, after, dead) = sweep_game_player(game);
         assert!(!dead);
@@ -514,7 +499,6 @@ fn without_a_part_the_walk_costs_no_mod_work() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn an_added_effect_keeps_its_collector_position() {
-    let _sweep = SWEEP_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let part = InsidePart::default();
     let mods = install_inside_mod("inside-order", &part);
     mod_api::testing::with_mods(mods, || {
