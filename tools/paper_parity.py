@@ -278,7 +278,7 @@ def run_case(args, scenario, cancel, out):
         manifest['engine_sha256'] = lab.digest(args.engine, 'sha256')
         server = bench.Server(paper, boot, out / 'bootstrap.log', environment(boot))
         try:
-            server.wait_for(bench.DONE, 600)
+            server.wait_for(bench.DONE, args.startup_timeout)
         finally:
             server.stop()
         plugin = compile_plugin(out, jar)
@@ -375,7 +375,7 @@ def main():
     start.add_argument('--bots', type=Path, default=lab.cargo_target() / f'fast/horizon-bots{bench.EXE}')
     start.add_argument('--heap', default='2g')
     start.add_argument('--startup-timeout', type=int, default=1500,
-                       help='seconds to wait for a server''s Done line (resource loading is slow on network drives)')
+                       help="seconds to wait for a server's Done line (resource loading is slow on network drives)")
     start.add_argument('--scenario', choices=['all', *json.loads(SCENARIOS.read_text())], default='all')
     diff = commands.add_parser('report')
     diff.add_argument('out', type=Path)
