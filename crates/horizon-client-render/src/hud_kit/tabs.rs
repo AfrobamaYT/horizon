@@ -11,8 +11,10 @@
 //! ```
 //! use horizon_client_render::hud::HudAtlas;
 //! use horizon_client_render::hud_kit::tabs;
+//! use horizon_client_render::resource_source::ResourceSource;
 //!
-//! let atlas = HudAtlas::build(std::path::Path::new("/nonexistent")).unwrap();
+//! let resources = ResourceSource::directory(std::path::PathBuf::from("/nonexistent"));
+//! let atlas = HudAtlas::build(&resources).unwrap();
 //! let names = ["General", "Camera", "Build"].map(String::from);
 //! let strip = tabs::collapsed(&atlas, &names, 0, [8.0, 100.0, 112.0, 16.0]);
 //! assert_eq!(strip.label, "General");
