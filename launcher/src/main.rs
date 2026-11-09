@@ -250,6 +250,8 @@ struct Launcher {
     disk: Vec<(String, u64)>,
     storage_report: Option<storage::Report>,
     storage_pending: bool,
+    /// A Clear the player still has to confirm: `Some(None)` is Clear all.
+    storage_confirm: Option<Option<storage::Category>>,
     storage_error: Option<String>,
     disk_for: Vec<String>,
     install_error: Option<(String, String)>,
@@ -576,6 +578,7 @@ impl Launcher {
             disk: Vec::new(),
             storage_report: None,
             storage_pending: false,
+            storage_confirm: None,
             storage_error: None,
             disk_for: Vec::new(),
             install_error: None,

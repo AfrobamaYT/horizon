@@ -1249,5 +1249,7 @@
   "Native mods have access to your computer.": "Native mods have access to your computer.",
   "Turn off": "Turn off",
   "Native mods are off.": "Native mods are off.",
-  "A game is running. Files it may use are kept.": "A game is running. Files it may use are kept."
+  "A game is running. Files it may use are kept.": "A game is running. Files it may use are kept.",
+  "Clear all launcher caches? Up to {size} can be freed. Files a game or build uses are kept.": "Clear all launcher caches? Up to {size} can be freed. Files a game or build uses are kept.",
+  "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.": "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept."
 }

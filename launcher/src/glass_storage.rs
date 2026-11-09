@@ -4,6 +4,13 @@ use crate::glass_ui as ui;
 use horizon_launcher::browser;
 use storage::Category;
 
+/// What a Clear click asks to confirm, and what answering does: `Some(clear)` starts that
+/// cleanup, `None` (Cancel) clears nothing. Either answer ends the question.
+fn answer(pending: &mut Option<Option<Category>>, accept: bool) -> Option<Option<Category>> {
+    let asked = pending.take()?;
+    accept.then_some(asked)
+}
+
 impl Launcher {
     pub(super) fn refresh_storage(&mut self, clear: Option<Category>, all: bool) {
         if self.storage_pending {
@@ -44,7 +51,7 @@ impl Launcher {
                     .opacity(if blocked { 0.4 } else { 1.0 })
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if !blocked {
-                            this.refresh_storage(None, true);
+                            this.storage_confirm = Some(None);
                         }
                         cx.notify();
                     }))
@@ -97,18 +104,16 @@ impl Launcher {
         if let Some(error) = &self.storage_error {
             card = card.child(error.clone());
         }
+        if let Some(asked) = self.storage_confirm {
+            card = card.child(self.storage_confirmation(asked, cx));
+        }
         let summary = card;
         let mut card = crate::glass::plate(horizon_theme::glass::radius::PANEL)
             .flex()
             .flex_col()
             .p(px(8.));
-        for (category, label) in Category::ALL.into_iter().zip([
-            "Build files",
-            "Prebuilt games",
-            "Spare game builds",
-            "Rust compiler",
-            "Other caches",
-        ]) {
+        for category in Category::ALL {
+            let label = category_label(category);
             let row = self
                 .storage_report
                 .as_ref()
@@ -141,7 +146,7 @@ impl Launcher {
                     .opacity(if blocked { 0.4 } else { 1.0 })
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if !blocked {
-                            this.refresh_storage(Some(category), false);
+                            this.storage_confirm = Some(Some(category));
                         }
                         cx.notify();
                     }))
@@ -193,5 +198,85 @@ impl Launcher {
             .child(summary)
             .child(breakdown)
             .child(card)
+    }
+
+    /// The question before a manual Clear: which files, and how much space they hold now.
+    fn storage_confirmation(&self, asked: Option<Category>, cx: &mut Context<Self>) -> Div {
+        let t = self.theme;
+        let rows = self.storage_report.iter().flat_map(|report| &report.rows);
+        let bytes: u64 = rows
+            .filter(|row| asked.is_none_or(|category| row.category == category))
+            .map(|row| row.remaining_bytes)
+            .sum();
+        let size = storage::format_bytes(bytes);
+        let question = match asked {
+            None => trf(
+                "Clear all launcher caches? Up to {size} can be freed. Files a game or build uses are kept.",
+                &[("size", &size)],
+            ),
+            Some(category) => trf(
+                "Clear {category}? Up to {size} can be freed. Files a game or build uses are kept.",
+                &[("category", tr(category_label(category))), ("size", &size)],
+            ),
+        };
+        div().flex().flex_col().gap(px(8.)).child(question).child(
+            div()
+                .flex()
+                .justify_end()
+                .gap(px(8.))
+                .child(
+                    button("storage-confirm-cancel", "Cancel", Kind::Secondary, &t).on_click(
+                        cx.listener(|this, _, _, cx| {
+                            answer(&mut this.storage_confirm, false);
+                            cx.notify();
+                        }),
+                    ),
+                )
+                .child(
+                    button("storage-confirm-clear", "Clear", Kind::Primary, &t).on_click(
+                        cx.listener(|this, _, _, cx| {
+                            if let Some(clear) = answer(&mut this.storage_confirm, true) {
+                                this.refresh_storage(clear, clear.is_none());
+                            }
+                            cx.notify();
+                        }),
+                    ),
+                ),
+        )
+    }
+}
+
+fn category_label(category: Category) -> &'static str {
+    match category {
+        Category::BuildFiles => "Build files",
+        Category::PrebuiltGames => "Prebuilt games",
+        Category::SpareGameBuilds => "Spare game builds",
+        Category::RustCompiler => "Rust compiler",
+        Category::OtherCaches => "Other caches",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cancel_clears_nothing_and_accept_clears_what_was_asked() {
+        let mut pending = Some(Some(Category::PrebuiltGames));
+        assert_eq!(answer(&mut pending, false), None);
+        assert_eq!(pending, None);
+        assert_eq!(
+            answer(&mut pending, true),
+            None,
+            "nothing asked, nothing cleared"
+        );
+        let mut pending = Some(None);
+        assert_eq!(answer(&mut pending, true), Some(None), "Clear all");
+        assert_eq!(pending, None);
+        let mut pending = Some(Some(Category::RustCompiler));
+        assert_eq!(
+            answer(&mut pending, true),
+            Some(Some(Category::RustCompiler))
+        );
     }
 }
