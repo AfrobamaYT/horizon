@@ -39,11 +39,16 @@ pub const MAX_CARRIER_DATA_BYTES: usize = 16 * 1024 * 1024;
 pub const MIN_LOCAL_COORD: i32 = -128;
 /// See [`MIN_LOCAL_COORD`].
 pub const MAX_LOCAL_COORD: i32 = 127;
-/// Canonical registry names are short — vanilla's longest block-state
-/// name with full properties is about sixty bytes. Names past this bound
-/// are not credible registry values, and refusing them keeps 4,096 names
-/// inside the codec's input envelope next to a full 16 MiB payload.
-pub const MAX_STATE_NAME_BYTES: usize = 1024;
+/// The block name plus every property name and value together are at
+/// most this many bytes. Canonical states are short — vanilla's longest
+/// block-state name with full properties is about sixty bytes — and the
+/// bound keeps 4,096 full states inside the codec's input envelope next
+/// to a full 16 MiB payload.
+pub const MAX_STATE_BYTES: usize = 1024;
+/// At most this many state properties per cell.
+pub const MAX_PROPERTIES: usize = 64;
+/// A property name or value is at most this many bytes.
+pub const MAX_PROPERTY_BYTES: usize = 64;
 /// How far a stored quaternion's squared norm may sit from one and still
 /// count as the encoder's normalized output: renormalizing rounds each
 /// component, leaving the squared norm within a few units in the last
@@ -90,8 +95,24 @@ pub enum Invalid {
     },
     /// An air block state; air is never stored.
     AirCell,
-    /// An empty, malformed or oversized block-state name.
+    /// An empty, malformed block identifier.
     BlockName,
+    /// A property name or value that is empty, longer than
+    /// [`MAX_PROPERTY_BYTES`], or holds a character outside `[a-z0-9_]`.
+    InvalidProperty,
+    /// Two properties with the same name.
+    DuplicateProperty,
+    /// More properties than [`MAX_PROPERTIES`].
+    PropertyCount {
+        /// The offending property count.
+        count: usize,
+    },
+    /// The block name plus all property names and values together exceed
+    /// [`MAX_STATE_BYTES`].
+    StateBytes {
+        /// The offending total.
+        total: usize,
+    },
 }
 impl fmt::Display for Invalid {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -113,7 +134,15 @@ impl fmt::Display for Invalid {
                 "carrier payload of {total} bytes exceeds {MAX_CARRIER_DATA_BYTES}"
             ),
             Self::AirCell => write!(f, "air cells are not stored"),
-            Self::BlockName => write!(f, "invalid block state name"),
+            Self::BlockName => write!(f, "invalid block name"),
+            Self::InvalidProperty => write!(f, "invalid property name or value"),
+            Self::DuplicateProperty => write!(f, "duplicate property name"),
+            Self::PropertyCount { count } => {
+                write!(f, "{count} properties exceeds {MAX_PROPERTIES}")
+            }
+            Self::StateBytes { total } => {
+                write!(f, "block state of {total} bytes exceeds {MAX_STATE_BYTES}")
+            }
         }
     }
 }
@@ -152,26 +181,66 @@ impl fmt::Display for LocalPos {
     }
 }
 
-/// One local cell of a carrier: an integer local position, the canonical
-/// namespaced block-state name, and an optional block-entity payload.
+/// One local cell of a carrier: an integer local position, the block's
+/// canonical namespaced identifier, its state properties (like vanilla
+/// structure NBT's `Name` plus `Properties`), and an optional
+/// block-entity payload. Properties are stored sorted by name, without
+/// duplicates.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Cell {
     pos: LocalPos,
-    state: Box<str>,
+    name: Box<str>,
+    properties: Box<[(Box<str>, Box<str>)]>,
     data: Option<Box<[u8]>>,
 }
 impl Cell {
-    /// Validates and builds one cell. The state name must be a canonical
-    /// namespaced identifier (explicit namespace, nonempty path), must not
-    /// be one of the vanilla air states, and must fit
-    /// [`MAX_STATE_NAME_BYTES`]; the payload must fit
-    /// [`MAX_CELL_DATA_BYTES`].
-    pub fn new(pos: LocalPos, state: &str, data: Option<Vec<u8>>) -> Result<Self, Invalid> {
-        if state.len() > MAX_STATE_NAME_BYTES || Identifier::parse_namespaced(state).is_none() {
+    /// Validates and builds one cell. The block name must be a canonical
+    /// namespaced identifier (explicit namespace, nonempty path) and must
+    /// not be one of the vanilla air states. Each property name and value
+    /// must be nonempty, at most [`MAX_PROPERTY_BYTES`] and drawn from
+    /// `[a-z0-9_]`; there are at most [`MAX_PROPERTIES`] of them, names
+    /// must not repeat, and the name plus every property name and value
+    /// together must fit [`MAX_STATE_BYTES`]. The payload must fit
+    /// [`MAX_CELL_DATA_BYTES`]. Every bound is checked as it is reached —
+    /// properties are consumed lazily and nothing is pre-allocated from an
+    /// unchecked count.
+    pub fn new(
+        pos: LocalPos,
+        name: &str,
+        properties: impl IntoIterator<Item = (String, String)>,
+        data: Option<Vec<u8>>,
+    ) -> Result<Self, Invalid> {
+        if Identifier::parse_namespaced(name).is_none() {
             return Err(Invalid::BlockName);
         }
-        if AIR_STATES.contains(&state) {
+        // The name and the properties share one budget, so the name is
+        // checked on its own before any property is consumed.
+        let mut total = name.len();
+        if total > MAX_STATE_BYTES {
+            return Err(Invalid::StateBytes { total });
+        }
+        if AIR_STATES.contains(&name) {
             return Err(Invalid::AirCell);
+        }
+        let mut sorted: Vec<(Box<str>, Box<str>)> = Vec::new();
+        for (key, value) in properties {
+            if !valid_property_token(&key) || !valid_property_token(&value) {
+                return Err(Invalid::InvalidProperty);
+            }
+            if sorted.len() == MAX_PROPERTIES {
+                return Err(Invalid::PropertyCount {
+                    count: sorted.len() + 1,
+                });
+            }
+            total += key.len() + value.len();
+            if total > MAX_STATE_BYTES {
+                return Err(Invalid::StateBytes { total });
+            }
+            sorted.push((key.into_boxed_str(), value.into_boxed_str()));
+        }
+        sorted.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        if sorted.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+            return Err(Invalid::DuplicateProperty);
         }
         if let Some(bytes) = &data
             && bytes.len() > MAX_CELL_DATA_BYTES
@@ -180,7 +249,8 @@ impl Cell {
         }
         Ok(Self {
             pos,
-            state: state.into(),
+            name: name.into(),
+            properties: sorted.into_boxed_slice(),
             data: data.map(Vec::into_boxed_slice),
         })
     }
@@ -189,9 +259,13 @@ impl Cell {
     pub fn pos(&self) -> LocalPos {
         self.pos
     }
-    /// The canonical namespaced block-state name.
-    pub fn state(&self) -> &str {
-        &self.state
+    /// The canonical namespaced block identifier, without properties.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    /// The state properties, sorted by name without duplicates.
+    pub fn properties(&self) -> &[(Box<str>, Box<str>)] {
+        &self.properties
     }
     /// The block-entity payload, if the block has one. `Some(&[])` and
     /// `None` are distinct and both round-trip.
@@ -203,6 +277,16 @@ impl Cell {
     pub fn data_len(&self) -> usize {
         self.data.as_ref().map_or(0, |data| data.len())
     }
+}
+
+/// A nonempty property name or value: at most [`MAX_PROPERTY_BYTES`],
+/// drawn from `[a-z0-9_]`.
+fn valid_property_token(token: &str) -> bool {
+    !token.is_empty()
+        && token.len() <= MAX_PROPERTY_BYTES
+        && token
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
 
 /// A level-owned carrier: UUID, generation, simulation revision, rigid
@@ -348,7 +432,7 @@ mod tests {
     }
 
     fn stone(pos: LocalPos) -> Cell {
-        Cell::new(pos, "minecraft:stone", None).unwrap()
+        Cell::new(pos, "minecraft:stone", Vec::new(), None).unwrap()
     }
 
     #[test]
@@ -396,24 +480,40 @@ mod tests {
             "Minecraft:Stone", // uppercase
         ] {
             assert_eq!(
-                Cell::new(LocalPos::new(0, 0, 0), state, None),
+                Cell::new(LocalPos::new(0, 0, 0), state, Vec::new(), None),
                 Err(Invalid::BlockName),
                 "{state:?}"
             );
         }
         for air in AIR_STATES {
             assert_eq!(
-                Cell::new(LocalPos::new(0, 0, 0), air, None),
+                Cell::new(LocalPos::new(0, 0, 0), air, Vec::new(), None),
+                Err(Invalid::AirCell)
+            );
+            // Properties do not smuggle air in either.
+            assert_eq!(
+                Cell::new(
+                    LocalPos::new(0, 0, 0),
+                    air,
+                    vec![("facing".to_string(), "north".to_string())],
+                    None
+                ),
                 Err(Invalid::AirCell)
             );
         }
-        let long = format!("minecraft:{}", "a".repeat(MAX_STATE_NAME_BYTES + 1));
-        assert_eq!(
-            Cell::new(LocalPos::new(0, 0, 0), &long, None),
-            Err(Invalid::BlockName)
+        let long = format!(
+            "minecraft:{}",
+            "a".repeat(MAX_STATE_BYTES + 1 - "minecraft:".len())
         );
-        let fitting = format!("minecraft:{}", "a".repeat(MAX_STATE_NAME_BYTES - 10));
-        assert!(Cell::new(LocalPos::new(0, 0, 0), &fitting, None).is_ok());
+        assert_eq!(long.len(), MAX_STATE_BYTES + 1);
+        assert_eq!(
+            Cell::new(LocalPos::new(0, 0, 0), &long, Vec::new(), None),
+            Err(Invalid::StateBytes {
+                total: MAX_STATE_BYTES + 1
+            })
+        );
+        let fitting = format!("minecraft:{}", "a".repeat(MAX_STATE_BYTES - 10));
+        assert!(Cell::new(LocalPos::new(0, 0, 0), &fitting, Vec::new(), None).is_ok());
     }
 
     #[test]
@@ -422,6 +522,7 @@ mod tests {
             Cell::new(
                 LocalPos::new(0, 0, 0),
                 "minecraft:stone",
+                Vec::new(),
                 Some(vec![0; MAX_CELL_DATA_BYTES])
             )
             .is_ok()
@@ -430,6 +531,7 @@ mod tests {
             Cell::new(
                 LocalPos::new(0, 0, 0),
                 "minecraft:stone",
+                Vec::new(),
                 Some(vec![0; MAX_CELL_DATA_BYTES + 1])
             ),
             Err(Invalid::CellData {
@@ -474,6 +576,7 @@ mod tests {
                 Cell::new(
                     LocalPos::new(i as i8, 0, 0),
                     "minecraft:stone",
+                    Vec::new(),
                     Some(vec![0; MAX_CELL_DATA_BYTES]),
                 )
                 .unwrap()
@@ -488,6 +591,138 @@ mod tests {
             Carrier::new(1, 0, 0, identity_transform(), over),
             Err(Invalid::CarrierData {
                 total: MAX_CARRIER_DATA_BYTES + 1
+            })
+        );
+    }
+
+    fn oak_stairs_properties() -> Vec<(String, String)> {
+        vec![
+            ("waterlogged".to_string(), "false".to_string()),
+            ("half".to_string(), "bottom".to_string()),
+            ("facing".to_string(), "north".to_string()),
+            ("shape".to_string(), "straight".to_string()),
+        ]
+    }
+
+    #[test]
+    fn properties_are_stored_sorted_regardless_of_input_order() {
+        let cell = Cell::new(
+            LocalPos::new(0, 0, 0),
+            "minecraft:oak_stairs",
+            oak_stairs_properties(),
+            None,
+        )
+        .unwrap();
+        let names: Vec<&str> = cell
+            .properties()
+            .iter()
+            .map(|(key, _)| key.as_ref())
+            .collect();
+        assert_eq!(names, ["facing", "half", "shape", "waterlogged"]);
+        // The same state built in canonical order is equal.
+        let sorted = Cell::new(
+            LocalPos::new(0, 0, 0),
+            "minecraft:oak_stairs",
+            vec![
+                ("facing".to_string(), "north".to_string()),
+                ("half".to_string(), "bottom".to_string()),
+                ("shape".to_string(), "straight".to_string()),
+                ("waterlogged".to_string(), "false".to_string()),
+            ],
+            None,
+        )
+        .unwrap();
+        assert_eq!(cell, sorted);
+    }
+
+    #[test]
+    fn refuses_bad_property_lists() {
+        let cell = |properties: Vec<(String, String)>| {
+            Cell::new(
+                LocalPos::new(0, 0, 0),
+                "minecraft:oak_stairs",
+                properties,
+                None,
+            )
+        };
+        assert_eq!(
+            cell(vec![
+                ("facing".to_string(), "north".to_string()),
+                ("facing".to_string(), "south".to_string()),
+            ]),
+            Err(Invalid::DuplicateProperty)
+        );
+        // Empty value and empty name.
+        assert_eq!(
+            cell(vec![("facing".to_string(), String::new())]),
+            Err(Invalid::InvalidProperty)
+        );
+        assert_eq!(
+            cell(vec![(String::new(), "north".to_string())]),
+            Err(Invalid::InvalidProperty)
+        );
+        // Uppercase in the value, dash in the name.
+        assert_eq!(
+            cell(vec![("facing".to_string(), "North".to_string())]),
+            Err(Invalid::InvalidProperty)
+        );
+        assert_eq!(
+            cell(vec![("not-a-key".to_string(), "north".to_string())]),
+            Err(Invalid::InvalidProperty)
+        );
+        // Sixty-five properties.
+        let many = (0..=MAX_PROPERTIES)
+            .map(|i| (format!("p{i:02}"), "1".to_string()))
+            .collect();
+        assert_eq!(
+            cell(many),
+            Err(Invalid::PropertyCount {
+                count: MAX_PROPERTIES + 1
+            })
+        );
+        // Sixty-four distinct properties fit the count bound.
+        assert!(
+            cell(
+                (0..MAX_PROPERTIES)
+                    .map(|i| (format!("p{i:02}"), "1".to_string()))
+                    .collect()
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn state_byte_budget_covers_name_and_properties_together() {
+        // The name plus property names and values share the budget. Each
+        // token stays under the 64-byte cap, so the budget is filled with
+        // many small properties, not a few huge ones.
+        let name = "minecraft:stone";
+        let mut properties = Vec::new();
+        let mut total = name.len();
+        let mut index = 0;
+        // Single-byte keys keep the arithmetic exact; 'a' + index stays a
+        // valid lowercase token for the handful of properties needed.
+        while total + 1 + MAX_PROPERTY_BYTES <= MAX_STATE_BYTES {
+            let key = char::from(b'a' + index as u8).to_string();
+            properties.push((key, "x".repeat(MAX_PROPERTY_BYTES)));
+            total += 1 + MAX_PROPERTY_BYTES;
+            index += 1;
+        }
+        let room = MAX_STATE_BYTES - total;
+        if room > 0 {
+            properties.push(("z".to_string(), "x".repeat(room - 1)));
+            total += room;
+        }
+        assert_eq!(total, MAX_STATE_BYTES);
+        assert!(Cell::new(LocalPos::new(0, 0, 0), name, properties.clone(), None).is_ok());
+        // One more byte in the last value tips the total over.
+        let mut over = properties;
+        let (_, last_value) = over.last_mut().unwrap();
+        *last_value = format!("{last_value}x");
+        assert_eq!(
+            Cell::new(LocalPos::new(0, 0, 0), name, over, None),
+            Err(Invalid::StateBytes {
+                total: MAX_STATE_BYTES + 1
             })
         );
     }

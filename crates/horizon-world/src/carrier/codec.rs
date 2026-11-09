@@ -32,15 +32,18 @@ pub const SCHEMA_VERSION: i32 = 1;
 /// The file root's name.
 const ROOT_NAME: &str = "horizon_carrier";
 /// Input envelope: the largest legal carrier encodes to a full 16 MiB
-/// payload budget plus 4,096 cells of names (at most
-/// [`super::model::MAX_STATE_NAME_BYTES`] each), positions and NBT
-/// framing — about 20.3 MiB — so anything past 24 MiB is refused before
-/// the tree is parsed.
+/// payload budget plus 4,096 cells of states — block names and property
+/// names and values together at most
+/// [`super::model::MAX_STATE_BYTES`] each, so 4 MiB of content and about
+/// 2 MiB of NBT framing — under 22.3 MiB, so anything past 24 MiB is
+/// refused before the tree is parsed.
 const MAX_INPUT_BYTES: usize = 24 * 1024 * 1024;
-/// Node ceiling for the exact schema shape: 4 nodes per cell envelope
-/// gives 16,409 nodes at 4,096 cells; six per cell leaves headroom while
-/// still refusing junk forests outright.
-const MAX_NODES: usize = 6 * MAX_CELLS;
+/// Node ceiling for the exact schema shape: a cell compound carries up to
+/// 68 nodes (position, name, a properties compound of at most
+/// [`super::model::MAX_PROPERTIES`] strings, payload), which is 278,549
+/// nodes at 4,096 cells; seventy per cell leaves headroom while still
+/// refusing junk forests outright.
+const MAX_NODES: usize = 70 * MAX_CELLS;
 /// The schema nests three deep under the root; eight refuses anything
 /// deeper before it is parsed.
 const MAX_DEPTH: usize = 8;
@@ -75,6 +78,12 @@ pub enum CodecError {
     /// Structurally valid NBT violating the carrier model's bounds or
     /// invariants.
     Invalid(Invalid),
+    /// Well-formed NBT with extra bytes after the root; the file is
+    /// refused whole rather than silently trimmed.
+    TrailingBytes {
+        /// How many bytes followed the root tag.
+        extra: usize,
+    },
 }
 impl fmt::Display for CodecError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -86,6 +95,9 @@ impl fmt::Display for CodecError {
             ),
             Self::Malformed(what) => write!(f, "carrier schema malformed: {what}"),
             Self::Invalid(invalid) => write!(f, "carrier refused: {invalid}"),
+            Self::TrailingBytes { extra } => {
+                write!(f, "{extra} bytes follow the carrier root")
+            }
         }
     }
 }
@@ -118,13 +130,13 @@ pub fn encode(carrier: &Carrier) -> Result<Vec<u8>, CodecError> {
     let translation = transform.translation();
     let pivot = transform.pivot();
     let rotation = transform.rotation().components();
-    let cells = carrier
-        .cells()
-        .iter()
-        .map(|cell| {
-            let pos = cell.pos();
-            Tag::compound(
-                [
+    let cells =
+        carrier
+            .cells()
+            .iter()
+            .map(|cell| {
+                let pos = cell.pos();
+                let mut entries = vec![
                     (
                         "pos",
                         Tag::IntArray(vec![
@@ -133,16 +145,22 @@ pub fn encode(carrier: &Carrier) -> Result<Vec<u8>, CodecError> {
                             i32::from(pos.z()),
                         ]),
                     ),
-                    ("state", Tag::String(cell.state().into())),
-                ]
-                .into_iter()
-                .chain(
-                    cell.data()
-                        .map(|data| ("data", Tag::ByteArray(data.to_vec()))),
-                ),
-            )
-        })
-        .collect::<Vec<_>>();
+                    ("state", Tag::String(cell.name().into())),
+                ];
+                if !cell.properties().is_empty() {
+                    entries.push((
+                        "properties",
+                        Tag::compound(cell.properties().iter().map(|(key, value)| {
+                            (key.as_ref(), Tag::String(value.as_ref().into()))
+                        })),
+                    ));
+                }
+                if let Some(data) = cell.data() {
+                    entries.push(("data", Tag::ByteArray(data.to_vec())));
+                }
+                Tag::compound(entries)
+            })
+            .collect::<Vec<_>>();
     let root = Tag::compound([
         ("version", Tag::Int(SCHEMA_VERSION)),
         ("uuid_msb", Tag::Long((carrier.uuid() >> 64) as u64 as i64)),
@@ -187,7 +205,12 @@ fn double_list(values: &[f64]) -> Tag {
 /// non-canonical transforms are refused whole; nothing is clamped and no
 /// refusal depends on catching a panic.
 pub fn decode(bytes: &[u8]) -> Result<Carrier, CodecError> {
-    let (root, _) = nbt::read_named(bytes, limits()).map_err(CodecError::Nbt)?;
+    let (root, used) = nbt::read_named(bytes, limits()).map_err(CodecError::Nbt)?;
+    if used != bytes.len() {
+        return Err(CodecError::TrailingBytes {
+            extra: bytes.len() - used,
+        });
+    }
     let Tag::Compound(mut map) = root.tag else {
         return Err(malformed("root is not a compound"));
     };
@@ -234,7 +257,8 @@ pub fn decode(bytes: &[u8]) -> Result<Carrier, CodecError> {
             }
             axes[axis] = value as i8;
         }
-        let state = string_field(&cell_map, "state")?;
+        let name = string_field(&cell_map, "state")?;
+        let properties = decode_properties(&mut cell_map)?;
         let data = match cell_map.remove(&JavaString::from("data")) {
             Some(Tag::ByteArray(bytes)) => {
                 // Checked arithmetic on the running budget: overflow and
@@ -251,8 +275,13 @@ pub fn decode(bytes: &[u8]) -> Result<Carrier, CodecError> {
             None => None,
         };
         cells.push(
-            Cell::new(LocalPos::new(axes[0], axes[1], axes[2]), &state, data)
-                .map_err(CodecError::Invalid)?,
+            Cell::new(
+                LocalPos::new(axes[0], axes[1], axes[2]),
+                &name,
+                properties,
+                data,
+            )
+            .map_err(CodecError::Invalid)?,
         );
     }
     // Sorting and duplicate detection happen once, in the model; the
@@ -282,16 +311,45 @@ fn expect_exact_keys(map: &Compound, keys: &[&str]) -> Result<(), CodecError> {
     }
 }
 
-/// Cell compounds hold `pos` and `state` always, `data` optionally, and
-/// nothing else.
+/// Cell compounds hold `pos` and `state` always, `properties` and
+/// `data` optionally, and nothing else.
 fn check_cell_keys(map: &Compound) -> Result<(), CodecError> {
-    let has_pos = field(map, "pos").is_some();
-    let has_state = field(map, "state").is_some();
-    let has_data = field(map, "data").is_some();
-    match map.len() {
-        2 if has_pos && has_state => Ok(()),
-        3 if has_pos && has_state && has_data => Ok(()),
-        _ => Err(malformed("cell keys are not pos, state and optional data")),
+    const OPTIONAL: [&str; 4] = ["pos", "state", "properties", "data"];
+    let present = OPTIONAL
+        .iter()
+        .filter(|key| field(map, key).is_some())
+        .count();
+    if present == map.len() && field(map, "pos").is_some() && field(map, "state").is_some() {
+        Ok(())
+    } else {
+        Err(malformed(
+            "cell keys are not pos, state and optional properties/data",
+        ))
+    }
+}
+
+/// Takes the optional `properties` compound as string pairs; wrong value
+/// types fail as malformed schema rather than model refusals.
+fn decode_properties(cell_map: &mut Compound) -> Result<Vec<(String, String)>, CodecError> {
+    match cell_map.remove(&JavaString::from("properties")) {
+        Some(Tag::Compound(map)) => {
+            let mut pairs = Vec::new();
+            for (key, value) in map {
+                let Tag::String(value) = value else {
+                    return Err(malformed("property is not a string"));
+                };
+                let key = key
+                    .to_string()
+                    .map_err(|_| malformed("property name is not valid UTF-16"))?;
+                let value = value
+                    .to_string()
+                    .map_err(|_| malformed("property value is not valid UTF-16"))?;
+                pairs.push((key, value));
+            }
+            Ok(pairs)
+        }
+        Some(_) => Err(malformed("properties is not a compound")),
+        None => Ok(Vec::new()),
     }
 }
 
@@ -388,15 +446,22 @@ mod tests {
             1 << 40,
             transform,
             vec![
-                Cell::new(LocalPos::new(1, 2, 3), "minecraft:stone", None).unwrap(),
+                Cell::new(LocalPos::new(1, 2, 3), "minecraft:stone", Vec::new(), None).unwrap(),
                 Cell::new(
                     LocalPos::new(-4, 5, -6),
                     "minecraft:furnace",
+                    vec![("facing".to_string(), "south".to_string())],
                     Some(vec![7, 8, 9]),
                 )
                 .unwrap(),
                 // An empty payload is Some, distinct from None.
-                Cell::new(LocalPos::new(9, 9, 9), "minecraft:chest", Some(vec![])).unwrap(),
+                Cell::new(
+                    LocalPos::new(9, 9, 9),
+                    "minecraft:chest",
+                    Vec::new(),
+                    Some(vec![]),
+                )
+                .unwrap(),
             ],
         )
         .unwrap()
@@ -423,15 +488,38 @@ mod tests {
         Tag::List(cells)
     }
 
-    fn cell_tag(x: i32, y: i32, z: i32, state: &str, data: Option<Vec<u8>>) -> Tag {
-        Tag::compound(
-            [
-                ("pos", Tag::IntArray(vec![x, y, z])),
-                ("state", Tag::String(state.into())),
-            ]
-            .into_iter()
-            .chain(data.map(|data| ("data", Tag::ByteArray(data)))),
-        )
+    fn cell_tag(x: i32, y: i32, z: i32, name: &str, data: Option<Vec<u8>>) -> Tag {
+        cell_tag_with(x, y, z, name, &[], data)
+    }
+
+    /// A cell compound with explicit `properties`, like vanilla structure
+    /// NBT's `Properties` compound of strings.
+    fn cell_tag_with(
+        x: i32,
+        y: i32,
+        z: i32,
+        name: &str,
+        properties: &[(&str, &str)],
+        data: Option<Vec<u8>>,
+    ) -> Tag {
+        let mut entries = vec![
+            ("pos", Tag::IntArray(vec![x, y, z])),
+            ("state", Tag::String(name.into())),
+        ];
+        if !properties.is_empty() {
+            entries.push((
+                "properties",
+                Tag::compound(
+                    properties
+                        .iter()
+                        .map(|(key, value)| (*key, Tag::String((*value).into()))),
+                ),
+            ));
+        }
+        if let Some(data) = data {
+            entries.push(("data", Tag::ByteArray(data)));
+        }
+        Tag::compound(entries)
     }
 
     #[test]
@@ -493,7 +581,7 @@ mod tests {
             RigidTransform::identity_at(Vec3::new(1.0, 1.0, 1.0)).unwrap(),
             positions(MAX_CELLS)
                 .into_iter()
-                .map(|pos| Cell::new(pos, "minecraft:stone", None).unwrap())
+                .map(|pos| Cell::new(pos, "minecraft:stone", Vec::new(), None).unwrap())
                 .collect(),
         )
         .unwrap();
@@ -780,14 +868,159 @@ mod tests {
         // declared length with the bytes present before allocating.
         let mut bytes = vec![0x07, 0x00, 0x01, b'x'];
         bytes.extend_from_slice(&i32::MAX.to_be_bytes());
-        assert!(matches!(decode(&bytes), Err(CodecError::Nbt(_))));
-        // A cells list declaring 2^31 compounds inside a valid root.
+        match decode(&bytes) {
+            Err(CodecError::Nbt(error)) => {
+                assert_eq!(
+                    error.reason, "collection exceeds available bytes",
+                    "{error}"
+                );
+            }
+            other => panic!("expected the byte length refusal, got {other:?}"),
+        }
+        // A cells list declaring 2^31 compounds inside a valid root. The
+        // key is complete, so the refusal comes from the list length
+        // check, not from parsing the key.
         let mut bytes = vec![0x0a, 0x00, 0x00]; // compound root, empty name
         bytes.extend_from_slice(&[0x09]); // list
-        bytes.extend_from_slice(&[0x00, 0x05]); // key "cells"
+        bytes.extend_from_slice(&[0x00, 0x05]); // key length: "cells"
+        bytes.extend_from_slice(b"cells");
         bytes.extend_from_slice(&[0x0a]); // element type compound
         bytes.extend_from_slice(&i32::MAX.to_be_bytes());
-        assert!(matches!(decode(&bytes), Err(CodecError::Nbt(_))));
+        match decode(&bytes) {
+            Err(CodecError::Nbt(error)) => {
+                assert_eq!(error.reason, "node limit exceeded", "{error}");
+            }
+            other => panic!("expected the list length refusal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn trailing_bytes_after_the_root_are_refused() {
+        let mut bytes = encode(&sample_carrier()).unwrap();
+        bytes.push(0);
+        assert_eq!(decode(&bytes), Err(CodecError::TrailingBytes { extra: 1 }));
+        bytes.extend_from_slice(&[1, 2, 3]);
+        assert_eq!(decode(&bytes), Err(CodecError::TrailingBytes { extra: 4 }));
+    }
+
+    #[test]
+    fn properties_round_trip_sorted_regardless_of_file_order() {
+        // The canonical fixture: vanilla oak_stairs with four properties,
+        // handed to the model in a shuffled order.
+        let shuffled = vec![
+            ("waterlogged".to_string(), "false".to_string()),
+            ("half".to_string(), "bottom".to_string()),
+            ("facing".to_string(), "north".to_string()),
+            ("shape".to_string(), "straight".to_string()),
+        ];
+        let carrier = Carrier::new(
+            5,
+            0,
+            0,
+            RigidTransform::identity_at(Vec3::ZERO).unwrap(),
+            vec![
+                Cell::new(
+                    LocalPos::new(0, 0, 0),
+                    "minecraft:oak_stairs",
+                    shuffled,
+                    None,
+                )
+                .unwrap(),
+            ],
+        )
+        .unwrap();
+        let decoded = decode(&encode(&carrier).unwrap()).unwrap();
+        assert_eq!(decoded, carrier);
+        let cell = &decoded.cells()[0];
+        assert_eq!(cell.name(), "minecraft:oak_stairs");
+        let flat: Vec<(&str, &str)> = cell
+            .properties()
+            .iter()
+            .map(|(key, value)| (key.as_ref(), value.as_ref()))
+            .collect();
+        assert_eq!(
+            flat,
+            [
+                ("facing", "north"),
+                ("half", "bottom"),
+                ("shape", "straight"),
+                ("waterlogged", "false")
+            ]
+        );
+        // The same state written with properties in reverse file order
+        // decodes to the same sorted model.
+        let bytes = rewrite(&encode(&carrier).unwrap(), |map| {
+            map.insert(
+                "cells".into(),
+                cells_tag(vec![cell_tag_with(
+                    0,
+                    0,
+                    0,
+                    "minecraft:oak_stairs",
+                    &[
+                        ("waterlogged", "false"),
+                        ("shape", "straight"),
+                        ("half", "bottom"),
+                        ("facing", "north"),
+                    ],
+                    None,
+                )]),
+            );
+        });
+        assert_eq!(decode(&bytes).unwrap(), carrier);
+    }
+
+    #[test]
+    fn bad_properties_in_file_are_refused() {
+        let base = encode(&sample_carrier()).unwrap();
+        // An empty property value.
+        let bytes = rewrite(&base, |map| {
+            map.insert(
+                "cells".into(),
+                cells_tag(vec![cell_tag_with(
+                    0,
+                    0,
+                    0,
+                    "minecraft:oak_stairs",
+                    &[("facing", "")],
+                    None,
+                )]),
+            );
+        });
+        assert_eq!(
+            decode(&bytes),
+            Err(CodecError::Invalid(Invalid::InvalidProperty))
+        );
+        // A property value with an uppercase character.
+        let bytes = rewrite(&base, |map| {
+            map.insert(
+                "cells".into(),
+                cells_tag(vec![cell_tag_with(
+                    0,
+                    0,
+                    0,
+                    "minecraft:oak_stairs",
+                    &[("facing", "North")],
+                    None,
+                )]),
+            );
+        });
+        assert_eq!(
+            decode(&bytes),
+            Err(CodecError::Invalid(Invalid::InvalidProperty))
+        );
+        // A property value that is not a string is malformed schema.
+        let bytes = rewrite(&base, |map| {
+            map.insert(
+                "cells".into(),
+                cells_tag(vec![Tag::compound([
+                    ("pos", Tag::IntArray(vec![0, 0, 0])),
+                    ("state", Tag::String("minecraft:oak_stairs".into())),
+                    ("properties", Tag::compound([("facing", Tag::Int(1))])),
+                ])]),
+            );
+        });
+        assert!(matches!(decode(&bytes), Err(CodecError::Malformed(_))));
     }
 
     #[test]
@@ -821,7 +1054,7 @@ mod tests {
             RigidTransform::identity_at(Vec3::ZERO).unwrap(),
             cells
                 .iter()
-                .map(|pos| Cell::new(*pos, "minecraft:stone", None).unwrap())
+                .map(|pos| Cell::new(*pos, "minecraft:stone", Vec::new(), None).unwrap())
                 .collect(),
         )
         .unwrap();
