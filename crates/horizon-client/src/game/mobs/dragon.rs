@@ -6632,7 +6632,7 @@ mod dragon_fireball_spawn_tests {
     use horizon_core::geometry::Vec3;
     use std::sync::Arc;
 
-    fn end_game() -> Game<'static> {
+    fn end_game<'a>(resources: &'a mut Option<std::sync::Arc<crate::game::Resources>>) -> Game<'a> {
         let root = std::path::PathBuf::from(
             std::env::var_os("HORIZON_TEST_RESOURCES")
                 .expect("set HORIZON_TEST_RESOURCES to prepared resources"),
@@ -6654,7 +6654,7 @@ mod dragon_fireball_spawn_tests {
         let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
         options.resources = root.clone();
         options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
-        let res: &'static _ = Box::leak(Box::new(loaded.resources));
+        let res = resources.insert(loaded.resources);
         let mut game = Game::new(
             res,
             loaded.pack,
@@ -6712,7 +6712,8 @@ mod dragon_fireball_spawn_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn the_dragons_fireball_starts_at_its_start_with_a_tenth_of_its_direction() {
-        let mut game = end_game();
+        let mut resources = None;
+        let mut game = end_game(&mut resources);
         let start = Vec3::new(0.5, 100.0, 0.5);
         game.spawn_dragon_fireball(start, Vec3::new(3.0, 0.0, 4.0));
         let b = dragon_fireballs(&game)
@@ -6729,7 +6730,8 @@ mod dragon_fireball_spawn_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn the_dragons_fireball_first_world_tick() {
-        let mut game = end_game();
+        let mut resources = None;
+        let mut game = end_game(&mut resources);
         assert!(game.run_command("tick freeze"));
         let start = Vec3::new(0.5, 100.0, 0.5);
         game.spawn_dragon_fireball(start, Vec3::new(3.0, 0.0, 4.0));
@@ -6769,7 +6771,8 @@ mod dragon_fireball_spawn_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn the_dragons_fireball_direction_is_normalized_twice() {
-        let mut game = end_game();
+        let mut resources = None;
+        let mut game = end_game(&mut resources);
         game.spawn_dragon_fireball(Vec3::new(0.5, 100.0, 0.5), Vec3::new(1.0, 0.0, -1.0));
         let b = dragon_fireballs(&game)
             .last()
