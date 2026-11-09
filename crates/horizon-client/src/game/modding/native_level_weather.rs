@@ -270,4 +270,25 @@ mod tests {
             });
         });
     }
+    /// `DifficultyInstance`'s formula worked by hand, not through the shared code, for a chunk
+    /// that isn't loaded (no inhabited time, no moon) on Hard: 3 x 0.75 = 2.25 (special
+    /// multiplier 0.125) before day time 72 000, and 3 x (0.75 + 0.25) = 3.0 (special 0.5)
+    /// once the time factor is full at 1 512 000.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn local_difficulty_matches_vanilla_values_for_an_unloaded_chunk() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let level = game.level(game.dim.id()).unwrap();
+            let far = (100_000, -100_000);
+            assert!(!game.world.chunks.contains_key(&far));
+            let at = [far.0 * 16 + 8, 64, far.1 * 16 + 8];
+            game.world.health_rules.difficulty = horizon_world::food::Difficulty::Hard;
+            for (day_time, effective, special) in [(0, 2.25, 0.125), (1_512_000, 3.0, 0.5)] {
+                game.world.day_time = day_time;
+                let read = level.local_difficulty(game, at).unwrap();
+                assert_eq!((read.base, read.effective), (3, effective), "{day_time}");
+                assert_eq!(read.special_multiplier(), special, "{day_time}");
+            }
+        });
+    }
 }
