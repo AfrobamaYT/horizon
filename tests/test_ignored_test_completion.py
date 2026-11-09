@@ -1,6 +1,7 @@
 """Ignored-test CI must distinguish completed targets from child fixture output."""
 import contextlib
 import io
+import os
 import subprocess
 import unittest
 from unittest.mock import patch
@@ -98,6 +99,24 @@ def leg_names(count=2):
 
 
 class Legs(unittest.TestCase):
+    def test_worldgen_shard_optimizes_listing_and_execution_without_changing_parent(self):
+        output = target(1, "test suite::a ... ok\n", summary(passed=1))
+        for package, optimization in [("horizon-client-lib", "3"), ("example", "0")]:
+            with self.subTest(package=package), patch.dict(os.environ, CARGO_PROFILE_TEST_OPT_LEVEL="0"):
+                calls = []
+
+                def execute(command, **kwargs):
+                    calls.append((command, kwargs["env"]["CARGO_PROFILE_TEST_OPT_LEVEL"]))
+                    return subprocess.CompletedProcess(command, 0, "suite::a: test\n" if "--list" in command else output)
+
+                with patch.object(ignored_tests.subprocess, "run", side_effect=execute), contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(ignored_tests.run(package, [], 1, 1), {"suite::a": True})
+                self.assertEqual(len(calls), 2)
+                self.assertIn("--list", calls[0][0])
+                self.assertNotIn("--list", calls[1][0])
+                self.assertEqual([level for _, level in calls], [optimization, optimization])
+                self.assertEqual(os.environ["CARGO_PROFILE_TEST_OPT_LEVEL"], "0")
+
     def test_shard_names(self):
         self.assertEqual(ignored_tests.parse_shard("horizon-client#2of3"), ("horizon-client", 2, 3))
         self.assertEqual(ignored_tests.parse_shard("horizon-client-lib"), ("horizon-client-lib", None, None))

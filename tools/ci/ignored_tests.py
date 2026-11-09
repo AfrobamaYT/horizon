@@ -92,6 +92,9 @@ def run(package, skip, number=None, count=None):
         for key in ("HORIZON_LAUNCHER_TRASH", "HORIZON_LAUNCHER_CLIPBOARD", "HORIZON_LAUNCHER_DESKTOP"):
             homes[key] = Path(scratch) / key.lower()
         env = lab.game_env(**homes)
+        if package == "horizon-client-lib":
+            # Worldgen must meet its real-time deadlines without disabling test assertions.
+            env["CARGO_PROFILE_TEST_OPT_LEVEL"] = "3"
         # --no-fail-fast: a target with accepted known failures must not stop the targets after it.
         command = ["cargo", "test", "-p", package, "--lib", *(["--bins", "--tests"] if package in INTEGRATION_TESTS else []), "--no-fail-fast"]
         expected = set()
