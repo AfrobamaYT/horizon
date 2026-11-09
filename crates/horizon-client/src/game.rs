@@ -2733,6 +2733,7 @@ struct Game<'a> {
     /// The side, registries and mod settings of this game's resource generation, which
     /// its menus lend to the hooks they fire inside a loop; rebuilt by `refresh_loop_context`.
     loop_context: Arc<horizon_world::native_load_context::LoopContext>,
+    setting_overrides: std::cell::RefCell<std::collections::BTreeMap<(String, String), String>>,
     /// The native damage hooks every level of this game lends to its hits.
     damage_hooks: horizon_client::health::DamageHooks,
     music: horizon_client::music::MusicManager,
@@ -8250,6 +8251,7 @@ impl Game<'_> {
                             eff.amplifier,
                             eff.ambient,
                             eff.show_particles,
+                            eff.show_icon,
                         );
                         changed |= self.living_add_effect(living, &effect);
                     } else {
@@ -12468,6 +12470,7 @@ impl Game<'_> {
     /// Let go of every entity of the level (saved first): the next world
     /// opened must not inherit them, nor save them as its own.
     pub(super) fn clear_entities(&mut self) {
+        self.clear_pending_mob_actions();
         self.mobs.clear();
         self.dropped.clear();
         self.orbs.clear();
@@ -16936,6 +16939,7 @@ impl<'a> Game<'a> {
             world_adopted: false,
             audio,
             loop_context: Arc::new(res.core.item_data.context().loop_context(loop_side, [])),
+            setting_overrides: Default::default(),
             damage_hooks: native_hooks::DAMAGE_HOOKS,
             music: {
                 // The manager starts with the saved option (MusicManager's constructor).

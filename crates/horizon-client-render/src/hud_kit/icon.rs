@@ -16,7 +16,8 @@
 //! use horizon_client_render::hud::{HudAtlas, HudBatch};
 //! use horizon_client_render::hud_kit::icon::{self, Icon, NoItems};
 //!
-//! let atlas = HudAtlas::build(std::path::Path::new("/nonexistent")).unwrap();
+//! let source = horizon_client_render::resource_source::ResourceSource::directory("/nonexistent".into());
+//! let atlas = HudAtlas::build(&source).unwrap();
 //! let mut batch = HudBatch::scratch([854, 480]);
 //! // Without the game, items have no painter: nothing is drawn.
 //! let drawn = icon::draw(&mut batch, &atlas, &NoItems, Icon::Item("minecraft:chest"), [10.0, 10.0, 16.0], 1.0);

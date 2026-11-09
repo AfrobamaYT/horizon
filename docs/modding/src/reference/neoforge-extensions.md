@@ -106,7 +106,7 @@ same facts is `StateFacts` in `crates/horizon-items/src/blocks.rs`.
 | `isScaffolding(state, level, pos, entity)` | Missing | — | Scaffolding is identified by block class; no content field or Part. |
 | `hidesNeighborFace(level, pos, state, neighborState, direction)` | Missing | — | `block_render_visibility` hides a whole state from the mesher, not one face. |
 | `supportsExternalFaceHiding(state)` | Missing | — | No per-face culling query. |
-| `onBlockStateChange(level, pos, oldState, newState)` | Partial | `block_changed` (`hooks/base.rs`, a global server hook) | Fires after the commit but before block side effects and neighbour updates, and only on an authoritative server; NeoForge's runs after neighbours on both sides. Neither may modify the level here. |
+| `onBlockStateChange(level, pos, oldState, newState)` | Partial | `block_changed` (`hooks/base.rs`, a global server hook) | Fires after the commit but before block side effects and neighbour updates, and only on an authoritative server. It may not modify the level. |
 | `canBeHydrated(state, level, pos, fluid)` | Missing | — | Farmland hydration is engine-owned; fluid `canHydrate` is data. |
 | `getMapColor(state, level, pos, defaultColor)` | Partial | `BlockProperties.map_color` → `StateFacts.map_color` | Static; no position. |
 | `getAppearance(state, level, pos, direction, neighborState, neighborPos)` | Missing | — | No appearance query. |
