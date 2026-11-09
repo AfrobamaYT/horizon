@@ -2833,3 +2833,11 @@ mod vehicle_damage_command_tests {
         });
     }
 }
+
+impl Game<'_> {
+    /// `PoiTypes`: the point of interest type of a block state.
+    fn poi_type(&self, state: horizon_world::registry::BlockStateId) -> Option<&'static str> {
+        let s = self.pack.assets.registry.state(state)?;
+        horizon_world::poi::poi_type(s).map(|(kind, _)| kind)
+    }
+}
