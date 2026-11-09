@@ -918,6 +918,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `menu::SlotView::allow_modification` | crosses | Wire call |
 | `menu::SlotView::safe_insert` | crosses | Wire call |
 | `menu::SlotView::safe_take` | crosses | Wire call |
+| `Registrar::declare_attribute` | crosses | Wire call |
 | `Registrar::block_entity_type_key` | crosses | Wire call |
 | `Registrar::declare_block_entity_type` | crosses | Wire call |
 | `Registrar::attach_block_entity_part` | crosses | Wire call |

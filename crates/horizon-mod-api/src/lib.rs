@@ -79,6 +79,37 @@ pub enum EntityAttributeError {
     Duplicate,
 }
 
+/// Why a mod's attribute type declaration was refused
+/// ([`Registrar::declare_attribute`](AttributesRegistrar::declare_attribute)).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum AttributeRegistrationError {
+    /// Only both-side packages may change the attribute registry.
+    WrongSide,
+    /// The attribute's id is malformed, empty or in a namespace the
+    /// declaring mod does not own (a vanilla attribute's included).
+    InvalidId,
+    /// Another declaration already covers the attribute.
+    Duplicate,
+    /// The default or a bound is not finite.
+    NotFinite,
+    /// `min > max`, or the default is not inside `[min, max]`
+    /// (`RangedAttribute`'s own checks).
+    InvalidBounds,
+}
+
+/// Tooltip color semantics for an attribute change.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Sentiment {
+    /// Increasing values are beneficial.
+    #[default]
+    Positive,
+    /// Increasing values are harmful.
+    Negative,
+    /// Changes are neutral.
+    Neutral,
+}
+
 /// A boolean game rule declared by a mod.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: only the registration table creates keys
