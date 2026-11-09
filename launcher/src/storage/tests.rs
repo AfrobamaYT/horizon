@@ -203,7 +203,10 @@ fn child_cargo_locks_prevent_clear_and_survive_idle_cleanup() {
             ));
             assert!(output.exists());
             held.unlock().unwrap();
-            if matches!(cache.access(), Access::UninstrumentedGame) {
+            if matches!(
+                cache.access(&home.0.join(cache.relative())).unwrap(),
+                Access::UninstrumentedGame
+            ) {
                 assert!(matches!(
                     storage.clear(cache),
                     Err(Error::UnprovenExclusion)

@@ -1205,7 +1205,6 @@
   "Horizon runs a data pack's functions, function tags, predicates, item modifiers, recipes, loot tables, advancements, villager trades, damage types, most tags and most worldgen (biomes, features, structures, dimensions). Other files, such as world presets, are not read yet.": "O Horizon executa as funções, tags de funções, predicados, modificadores de itens, receitas, tabelas de saque, conquistas, trocas de aldeões, tipos de dano, a maioria das tags e a maior parte da geração do mundo (biomas, características, estruturas, dimensões) de um pacote de dados. Os outros arquivos, como as predefinições de mundo, ainda não são lidos.",
   "{title} would change nothing in Horizon yet: Horizon doesn't read its {files}.": "{title} ainda não mudaria nada no Horizon: o Horizon ainda não lê os seus {files}.",
   "Game cache leases require a supported local filesystem.": "Game cache leases require a supported local filesystem.",
-  "Game cache cleanup is unavailable because running games cannot be reliably excluded.": "Game cache cleanup is unavailable because running games cannot be reliably excluded.",
   "Use recommended (kept at {version})": "Usar a recomendada (mantida em {version})",
   "E_INJECT_INVALID: {id}: invalid {field}; {fix}": "E_INJECT_INVALID: {id}: invalid {field}; {fix}",
   "E_INJECT_MISSING: {id}: {at} gone; rerun inject add": "E_INJECT_MISSING: {id}: {at} gone; rerun inject add",
@@ -1238,5 +1237,7 @@
   "replace needs a return the API carries": "replace needs a return the API carries",
   "Freed {size} of old caches": "Freed {size} of old caches",
   "Space it couldn't free: protected, recently used, or unknown last use.": "Space it couldn't free: protected, recently used, or unknown last use.",
-  "Runtime lease registry entries: {count}": "Runtime lease registry entries: {count}"
+  "Runtime lease registry entries: {count}": "Runtime lease registry entries: {count}",
+  "Native compilation outputs were kept because their executable completeness cannot be proven.": "Native compilation outputs were kept because their executable completeness cannot be proven.",
+  "Space it couldn't free: an older game build can use this cache without runtime leases.": "Space it couldn't free: an older game build can use this cache without runtime leases."
 }

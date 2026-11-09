@@ -263,6 +263,8 @@ fn install_in(
     file: &str,
     date: &str,
 ) -> Result<String, String> {
+    let _publication =
+        crate::run_leases::installation().map_err(crate::native_mods::cache_error)?;
     let sha256: String = Sha256::digest(program)
         .iter()
         .map(|b| format!("{b:02x}"))

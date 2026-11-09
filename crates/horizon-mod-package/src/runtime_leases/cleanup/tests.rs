@@ -1,22 +1,6 @@
 use super::*;
 
-// Other libtest threads can fork while Cleanup holds its exclusive gate. Keep
-// these lifetime assertions in a process with no unrelated descriptor owners.
-fn isolated() -> bool {
-    if std::env::var_os("RUNTIME_CLEANUP_ISOLATED").is_some() {
-        return false;
-    }
-    let test = std::thread::current().name().unwrap().to_owned();
-    assert!(
-        std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", &test, "--nocapture"])
-            .env("RUNTIME_CLEANUP_ISOLATED", "1")
-            .status()
-            .unwrap()
-            .success()
-    );
-    true
-}
+use crate::runtime_leases::isolated_test as isolated;
 
 fn setup() -> (tempfile::TempDir, Arc<Registry>) {
     let root = tempfile::tempdir().unwrap();

@@ -379,4 +379,15 @@ pub(crate) fn publish_existing() -> Result<(), Error> {
     Ok(())
 }
 
+/// Held from before an executable becomes visible through its completion publication.
+pub(crate) fn installation() -> Result<horizon_mod_package::runtime_leases::Publication, Error> {
+    use horizon_mod_package::{
+        locks::{LockMode, Release},
+        runtime_leases::Registry,
+    };
+    Registry::with_release(&crate::backend::data_dir(), Release::Close)?
+        .publication(LockMode::Shared)
+        .map_err(Into::into)
+}
+
 pub(crate) mod control;

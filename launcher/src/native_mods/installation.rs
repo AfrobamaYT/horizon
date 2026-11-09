@@ -10,6 +10,7 @@ pub(super) fn install(
     about: &serde_json::Value,
     mods: &[Bundle],
 ) -> Result<(), String> {
+    let _publication = crate::run_leases::installation().map_err(cache_error)?;
     let from = backend::version_dir(base);
     let partial = target.directory(&format!(".{version}.partial"));
     let _ = fs::remove_dir_all(&partial);

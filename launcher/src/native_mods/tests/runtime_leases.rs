@@ -60,6 +60,37 @@ fn fresh_native_install_starts_directly_without_a_launcher_launch() {
     )
     .unwrap();
     crate::run_leases::publish(&root.join("home")).unwrap();
+    let cache = root.join("cache");
+    fs::create_dir(&cache).unwrap();
+    crate::cache_cleanup::delete_game_unit_observed(&cache, || {
+        let refused = install(
+            "base",
+            "concurrent",
+            Target::Client,
+            &std::env::current_exe().unwrap(),
+            &[],
+            &serde_json::json!({}),
+            &[],
+        )
+        .unwrap_err();
+        assert_eq!(
+            refused,
+            cache_error(crate::native_cache::Error::Busy),
+            "publication must exclude an install between classification and rename"
+        );
+        assert!(!backend::version_dir("concurrent").exists());
+    })
+    .unwrap();
+    install(
+        "base",
+        "concurrent",
+        Target::Client,
+        &std::env::current_exe().unwrap(),
+        &[],
+        &serde_json::json!({}),
+        &[],
+    )
+    .unwrap();
     assert!(
         Command::new(backend::version_dir("fresh").join(backend::CLIENT))
             .args([

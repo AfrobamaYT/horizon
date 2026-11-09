@@ -51,7 +51,7 @@ impl Home {
         assert!(!output.status.success(), "{output:?}");
         assert!(
             String::from_utf8_lossy(&output.stderr).contains(
-                "Game cache cleanup is unavailable because running games cannot be reliably excluded."
+                "Space it couldn't free: an older game build can use this cache without runtime leases."
             ),
             "{output:?}"
         );
@@ -417,7 +417,7 @@ fn explicit_version_removal_refuses_before_changing_install_metadata() {
     assert!(!output.status.success(), "{output:?}");
     assert!(
         String::from_utf8_lossy(&output.stderr).contains(
-            "Game cache cleanup is unavailable because running games cannot be reliably excluded."
+            "Space it couldn't free: an older game build can use this cache without runtime leases."
         ),
         "{output:?}"
     );

@@ -555,8 +555,9 @@ pub fn cache_error(error: crate::storage::Error) -> String {
         crate::native_cache::Error::Busy => {
             tr("A native build or cache cleanup is running. Try again when it finishes.").into()
         }
+        crate::native_cache::Error::IncompleteUnit => tr("Native compilation outputs were kept because their executable completeness cannot be proven.").into(),
         crate::native_cache::Error::UnprovenExclusion => tr(
-            "Game cache cleanup is unavailable because running games cannot be reliably excluded.",
+            "Space it couldn't free: an older game build can use this cache without runtime leases.",
         )
         .into(),
         crate::native_cache::Error::UnsupportedFilesystem => {
@@ -2179,6 +2180,7 @@ fn pipeline(
         if let Some(cache_dir) = platform.cache_dir {
             target_dir.push(cache_dir);
         }
+        let _publication = crate::run_leases::installation().map_err(cache_error)?;
         let compiled = profile;
         let profile_dir = target_dir.join(compiled.cargo().0);
         fs::create_dir_all(&profile_dir).map_err(|error| Failed::Other(error.to_string()))?;
@@ -2405,7 +2407,7 @@ pub fn build(
         instances::edit(&instance.id, |meta| {
             meta.version = Some(built.version.clone())
         })?;
-        prune(&built.version);
+        // logged() runs central eviction under the retained build lease.
         if built.plan != Plan::UpToDate {
             progress(Step::Done {
                 secs: built.secs,
@@ -2475,8 +2477,7 @@ pub fn build_server(
         )
         .map_err(String::from)?;
         export(&Target::Server.directory(&built.version), &output)?;
-        // Exports are independent; keep only the newest cached server builds.
-        prune_server_cache(&root().join("server-builds"), &built.version);
+        // logged() runs central eviction under the retained build lease.
         if built.plan != Plan::UpToDate {
             progress(Step::Done {
                 secs: built.secs,
@@ -2604,80 +2605,6 @@ fn carried_over(name: &std::ffi::OsStr, target: Target) -> bool {
     let named = |n: &str| name == std::ffi::OsStr::new(n);
     !own.iter()
         .any(|n| named(n) || named(&format!("{n}{}", std::env::consts::EXE_SUFFIX)))
-}
-
-/// How many native builds no instance plays stay installed, the newest first: switching a mod
-/// off and on again plays the kept build again, without compiling.
-const SPARE_BUILDS: usize = 3;
-
-// Cached server exports remain directly executable, independently of the exported copy.
-fn prune_server_cache(cached: &Path, keep: &str) {
-    if crate::cache_cleanup::Access::UninstrumentedGame
-        .check()
-        .is_err()
-    {
-        return;
-    }
-    let builds = fs::read_dir(cached)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter(|entry| entry.path().join(".installed").is_file())
-        .map(|entry| {
-            let at = fs::metadata(entry.path().join(".installed"))
-                .and_then(|meta| meta.modified())
-                .unwrap_or(std::time::UNIX_EPOCH);
-            (entry.file_name().to_string_lossy().into_owned(), at)
-        })
-        .collect();
-    for old in stale(builds, keep, &[]) {
-        let _ = fs::remove_dir_all(cached.join(old));
-    }
-}
-
-#[cfg(test)]
-#[path = "native_mods/tests/runtime_eviction.rs"]
-mod runtime_eviction_tests;
-
-/// Removes the native builds no instance plays, but `keep` and the [`SPARE_BUILDS`] newest. The
-/// compiled crates (`native/target`) stay, so the next build only compiles what changed.
-pub fn prune(keep: &str) {
-    let played: Vec<String> = instances::list()
-        .into_iter()
-        .filter_map(|i| i.version)
-        .collect();
-    let builds = backend::installed()
-        .into_iter()
-        .filter(|v| is_native(v))
-        .map(|v| {
-            let made = fs::metadata(backend::version_dir(&v).join(".installed"))
-                .and_then(|m| m.modified())
-                .unwrap_or(std::time::UNIX_EPOCH);
-            (v, made)
-        })
-        .collect();
-    for old in stale(builds, keep, &played) {
-        if backend::in_use(&old) {
-            continue;
-        }
-        let _ = backend::remove(&old);
-    }
-}
-
-/// The native `builds` (with when each was made or last used) to remove: those no instance plays
-/// (`played`), other than `keep`, past the [`SPARE_BUILDS`] newest.
-fn stale(
-    mut builds: Vec<(String, std::time::SystemTime)>,
-    keep: &str,
-    played: &[String],
-) -> Vec<String> {
-    builds.retain(|(v, _)| v != keep && !played.contains(v));
-    builds.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    builds
-        .into_iter()
-        .skip(SPARE_BUILDS)
-        .map(|(v, _)| v)
-        .collect()
 }
 
 #[cfg(test)]
@@ -4357,27 +4284,6 @@ mod tests {
             newer_than("v2026.10.13", &releases).as_deref(),
             Some("v2026.10.20")
         );
-    }
-
-    #[test]
-    fn the_newest_builds_no_instance_plays_are_kept() {
-        let at = |s: u64| std::time::UNIX_EPOCH + std::time::Duration::from_secs(s);
-        let builds: Vec<(String, std::time::SystemTime)> = [
-            ("native-a", 1),
-            ("native-b", 6),
-            ("native-c", 3),
-            ("native-d", 5),
-            ("native-e", 4),
-            ("native-f", 2),
-            ("native-g", 7),
-        ]
-        .map(|(v, s)| (v.to_string(), at(s)))
-        .to_vec();
-        // g was just built, b another instance plays: d, e and c are the newest spare ones.
-        let mut gone = stale(builds.clone(), "native-g", &["native-b".into()]);
-        gone.sort();
-        assert_eq!(gone, ["native-a", "native-f"]);
-        assert!(stale(builds[..4].to_vec(), "native-a", &[]).is_empty());
     }
 
     #[test]
