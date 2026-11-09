@@ -107,6 +107,20 @@ pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<Route
         .collect::<Vec<_>>();
     let mut decisions = Vec::new();
     for inject in &manifest.inject {
+        // An API listener needs the point's record: every parameter with an API type.
+        let refusal = catalog
+            .points
+            .iter()
+            .find(|point| plain(&point.target) == plain(&inject.at))
+            .and_then(|point| point.api_refusal.as_ref())
+            .filter(|_| inject.access == Access::Api && inject.call.is_none());
+        if let Some(why) = refusal {
+            return Err(InjectError::NoSlot {
+                id: format!("{}:{}", manifest.id, inject.id),
+                reason: NoSlotReason::NoApiRecord,
+                declaration: format!("{}: {why}", inject.at),
+            });
+        }
         let route = route(
             Entry {
                 inject,

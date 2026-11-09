@@ -607,31 +607,12 @@ pub mod crossing;
 mod dispatch;
 mod host_param;
 mod index;
-/// Generate codecs for ordinary scoped native callable resources.
-pub mod native_callable;
-pub mod native_crate;
-pub mod native_patch;
-pub mod native_policy;
-/// Native raw-point frame projection plans used by staging.
-pub mod native_raw;
-/// Canonical identities for native row layouts.
-pub mod native_schema;
-
-// One implementation for registration in the native source and guest schema generation.
-#[path = "../../horizon-mod-points/src/exposure.rs"]
-pub mod exposure;
-pub mod native_value;
-/// Generated lazy native row projections.
-pub mod native_window;
-/// Owned typed guest row wrapper generation.
-pub mod row_views;
 mod wire;
 pub use wire::generate as generate_wire;
 pub use wire::generate_host as generate_wire_host;
 pub mod internals;
 pub mod internals_table;
 pub mod internals_view;
-pub mod native_fields;
 pub mod notes;
 pub mod points;
 pub mod sites;

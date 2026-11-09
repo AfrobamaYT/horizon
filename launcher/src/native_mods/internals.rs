@@ -126,6 +126,7 @@ impl Catalog {
                 target: point.target,
                 raw: true,
                 at_return: true,
+                api_refusal: Some("a private source point has no API record".into()),
                 listener: Some(format!("{}::__{name}Listener", point.module)),
                 return_listener: Some(format!("{}::__{name}ReturnListener", point.module)),
                 private: true,

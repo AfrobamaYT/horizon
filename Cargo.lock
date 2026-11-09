@@ -2227,6 +2227,7 @@ dependencies = [
  "horizon-core",
  "horizon-mod-api",
  "horizon-mod-api-gen",
+ "horizon-mod-api-macros",
  "horizon-mod-package",
  "horizon-mod-point-emit",
  "horizon-mod-points",

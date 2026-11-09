@@ -67,6 +67,7 @@ pub(super) fn main_rs(
                         target: point.target.clone(),
                         private: point.private,
                         at_return: point.at_return,
+                        api_refusal: point.api_refusal.clone(),
                     })
                     .collect::<Vec<_>>();
                 horizon_mod_point_emit::api(manifest, &api_points, &format!("mod_{i}::"))
@@ -644,6 +645,7 @@ mod tests {
             target: "game::Game::tick".into(),
             raw: true,
             at_return: true,
+            api_refusal: None,
             listener: None,
             return_listener: None,
         }];
