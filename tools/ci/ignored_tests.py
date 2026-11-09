@@ -32,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tools import lab
 
 KNOWN = Path(__file__).with_name("ignored-tests-known-failures.txt")
-RESULT = re.compile(r"^test (\S+) \.\.\. (ok|FAILED)$")
+RESULT = re.compile(r"^test (\S+)(?: - should panic)? \.\.\. (ok|FAILED)$")
 SUMMARY = re.compile(r"^test result: \S+\. (\d+) passed; (\d+) failed; (\d+) ignored; (\d+) measured;")
 TARGET = re.compile(r"^\s+Running (?:unittests|tests/)")
 COUNT = re.compile(r"^running (\d+) tests?$")
@@ -92,6 +92,9 @@ def run(package, skip, number=None, count=None):
         for key in ("HORIZON_LAUNCHER_TRASH", "HORIZON_LAUNCHER_CLIPBOARD", "HORIZON_LAUNCHER_DESKTOP"):
             homes[key] = Path(scratch) / key.lower()
         env = lab.game_env(**homes)
+        if package == "horizon-client-lib":
+            # Worldgen must meet its real-time deadlines without disabling test assertions.
+            env["CARGO_PROFILE_TEST_OPT_LEVEL"] = "3"
         # --no-fail-fast: a target with accepted known failures must not stop the targets after it.
         command = ["cargo", "test", "-p", package, "--lib", *(["--bins", "--tests"] if package in INTEGRATION_TESTS else []), "--no-fail-fast"]
         expected = set()

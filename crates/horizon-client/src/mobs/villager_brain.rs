@@ -671,8 +671,7 @@ fn visible_contains(m: &mut Mob, w: &MobWorld, who: Who) -> bool {
 fn sense_players(m: &mut Mob, w: &MobWorld) {
     let range = m.attrs.follow_range;
     let near = w
-        .player
-        .as_ref()
+        .selected_player()
         .is_some_and(|p| !p.spectator && m.distance_sqr(p.position) < range * range);
     let players: Vec<Who> = if near { vec![Who::Player] } else { vec![] };
     let visible: Vec<Who> = players
@@ -3039,7 +3038,9 @@ impl B {
                     self.do_stop(m, cx);
                     return;
                 }
-                let Some(p) = cx.w.player.clone() else { return };
+                let Some(p) = cx.w.selected_player().cloned() else {
+                    return;
+                };
                 mem(m).look_target.set(Tracker::Entity(Who::Player, true));
                 let close = {
                     let a = block_of(p.position);
@@ -3085,7 +3086,7 @@ impl B {
                     mem(m).look_target.set(Tracker::Entity(target, true));
                 }
                 // findItemsToDisplay: the trades the player's item pays for.
-                let current = cx.w.player.as_ref().and_then(|p| p.main_hand.clone());
+                let current = cx.w.selected_player().and_then(|p| p.main_hand.clone());
                 // getOffers makes the trades on first use: the level rolls
                 // them, and the cost is compared from the next tick on.
                 let unset = m.extra.trade.as_ref().is_none_or(|t| t.unset);
@@ -3521,8 +3522,7 @@ fn follow_trading_condition(m: &Mob, w: &MobWorld) -> bool {
         && m.alive()
         && !m.fluids.in_water
         && m.hurt_time <= 0
-        && w.player
-            .as_ref()
+        && w.selected_player()
             .is_some_and(|p| m.distance_sqr(p.position) <= 16.0)
 }
 fn follow_trading_player(m: &mut Mob) {
@@ -3537,7 +3537,7 @@ fn follow_trading_player(m: &mut Mob) {
 /// `GiveGiftToHero.isHeroVisible`.
 fn hero_visible(m: &Mob, w: &MobWorld) -> bool {
     mem_ref(m).is_some_and(|mm| mm.nearest_visible_player.get() == Some(&Who::Player))
-        && w.player.as_ref().is_some_and(|p| p.hero)
+        && w.selected_player().is_some_and(|p| p.hero)
 }
 /// `ShowTradesToPlayer.checkExtraStartConditions`.
 fn show_trades_condition(m: &Mob, w: &MobWorld) -> bool {

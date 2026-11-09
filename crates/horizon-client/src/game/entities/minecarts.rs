@@ -2157,7 +2157,17 @@ impl Game<'_> {
                 return;
             }
             let p = self.carts[i].position;
-            self.hurt_cart(i, 4.0, false, true);
+            let kind = self.carts[i].kind.id();
+            let source = horizon_client::health::HurtSource {
+                damage_type: "minecraft:lava",
+                causing: 0,
+                direct: 0,
+                position: None,
+            };
+            let vanilla = self.saved_refuses_damage(id, "minecraft:lava", false);
+            if !self.native_nonliving_invulnerable(id, kind, source, vanilla) {
+                self.hurt_cart(i, 4.0, false, true);
+            }
             self.lava_hurt_sound([p.x, p.y, p.z]);
         }
     }
@@ -2620,7 +2630,21 @@ impl Game<'_> {
         let kind = self.carts[i].kind.id();
         let (damage, _, _, magic) = self.melee_damage(kind, false, Some(id as u32));
         let sweep = self.sweep_before_hit(kind, false);
-        self.hurt_cart(i, damage, self.creative, burning);
+        let attacker = self.own_entity_id();
+        let source = horizon_client::health::HurtSource {
+            damage_type: "minecraft:player_attack",
+            causing: attacker,
+            direct: attacker,
+            position: None,
+        };
+        let vanilla =
+            self.saved_refuses_damage(id as u32, "minecraft:player_attack", self.creative);
+        if !crate::game::entity::damage_level_of!(self, scoped).invulnerability_check(
+            horizon_client::health::Hurting::Entity(id, kind, source),
+            vanilla,
+        ) {
+            self.hurt_cart(i, damage, self.creative, burning);
+        }
         self.vehicle_attack_sounds(area, sweep, magic.then_some(id));
         // Player.onAttack: the hit starts the attack strength again.
         self.attack_ticks = 0;

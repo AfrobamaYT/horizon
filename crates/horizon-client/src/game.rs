@@ -5447,11 +5447,53 @@ impl Game<'_> {
                 cells.remove(i, item.position);
                 continue;
             }
-            let environment = item.environment_tick(
-                &self.world,
+            let item_id = item.id;
+            let saved = [
+                "minecraft:on_fire",
+                "minecraft:lava",
+                "minecraft:in_fire",
+                "minecraft:cactus",
+            ]
+            .map(|damage| self.saved_refuses_damage(item_id, damage, false));
+            let tags = world_items!(self);
+            let registry = self.pack.assets.registry;
+            let block_registries = &self.pack.block_registries;
+            let hooks = &self.damage_hooks;
+            let environment = item.environment_tick_with_hook(
+                &mut self.world,
                 self.res.facts(),
-                self.pack.assets.registry,
-                world_items!(self),
+                registry,
+                tags,
+                |world, damage| {
+                    let vanilla = match damage {
+                        "minecraft:on_fire" => saved[0],
+                        "minecraft:lava" => saved[1],
+                        "minecraft:in_fire" => saved[2],
+                        "minecraft:cactus" => saved[3],
+                        _ => false,
+                    };
+                    let source = horizon_client::health::HurtSource {
+                        damage_type: damage,
+                        causing: 0,
+                        direct: 0,
+                        position: None,
+                    };
+                    horizon_client::health::DamageLevel::of(
+                        world,
+                        registry,
+                        Some(tags),
+                        Some(block_registries),
+                        hooks,
+                    )
+                    .invulnerability_check(
+                        horizon_client::health::Hurting::Entity(
+                            item_id as i32,
+                            "minecraft:item",
+                            source,
+                        ),
+                        vanilla,
+                    )
+                },
             );
             if environment.should_play_lava_hurt_sound(item.ticks) {
                 let pitch = 2.0 + self.world.random.next_float() * 0.4;
@@ -8158,6 +8200,7 @@ impl Game<'_> {
     }
     fn apply_consume_effect(
         &mut self,
+        consumed: &horizon_client::items::ItemStack,
         effect: &horizon_client::items::ConsumeEffect,
         mob: Option<mod_api::LivingRef>,
         allow_native: bool,
@@ -8236,7 +8279,7 @@ impl Game<'_> {
                 if mob.is_some() {
                     return None;
                 }
-                self.teleport_randomly(teleport)
+                self.teleport_randomly(teleport, consumed)
             }
             ConsumeEffect::PlaySound(sound) => {
                 let at = match mob {

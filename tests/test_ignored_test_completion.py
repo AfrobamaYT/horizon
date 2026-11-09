@@ -1,6 +1,7 @@
 """Ignored-test CI must distinguish completed targets from child fixture output."""
 import contextlib
 import io
+import os
 import subprocess
 import unittest
 from unittest.mock import patch
@@ -98,6 +99,24 @@ def leg_names(count=2):
 
 
 class Legs(unittest.TestCase):
+    def test_worldgen_shard_optimizes_listing_and_execution_without_changing_parent(self):
+        output = target(1, "test suite::a ... ok\n", summary(passed=1))
+        for package, optimization in [("horizon-client-lib", "3"), ("example", "0")]:
+            with self.subTest(package=package), patch.dict(os.environ, CARGO_PROFILE_TEST_OPT_LEVEL="0"):
+                calls = []
+
+                def execute(command, **kwargs):
+                    calls.append((command, kwargs["env"]["CARGO_PROFILE_TEST_OPT_LEVEL"]))
+                    return subprocess.CompletedProcess(command, 0, "suite::a: test\n" if "--list" in command else output)
+
+                with patch.object(ignored_tests.subprocess, "run", side_effect=execute), contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(ignored_tests.run(package, [], 1, 1), {"suite::a": True})
+                self.assertEqual(len(calls), 2)
+                self.assertIn("--list", calls[0][0])
+                self.assertNotIn("--list", calls[1][0])
+                self.assertEqual([level for _, level in calls], [optimization, optimization])
+                self.assertEqual(os.environ["CARGO_PROFILE_TEST_OPT_LEVEL"], "0")
+
     def test_shard_names(self):
         self.assertEqual(ignored_tests.parse_shard("horizon-client#2of3"), ("horizon-client", 2, 3))
         self.assertEqual(ignored_tests.parse_shard("horizon-client-lib"), ("horizon-client-lib", None, None))
@@ -128,6 +147,25 @@ class Legs(unittest.TestCase):
         command = calls[1]
         skipped = {command[i + 1] for i, arg in enumerate(command) if arg == "--skip"}
         self.assertEqual(skipped, {"marked", *owned[2]})
+
+    def test_should_panic_results_complete_a_leg_and_preserve_known_failures(self):
+        good, bad = leg_names()[1][:2]
+        listing = f"{good}: test\n{bad}: test\n"
+        for should_panic_passes in (True, False):
+            verdict = "ok" if should_panic_passes else "FAILED"
+            output = target(2, f"test {good} - should panic ... {verdict}\n"
+                            f"test {bad} ... FAILED\n",
+                            summary(passed=int(should_panic_passes), failed=2-int(should_panic_passes)))
+
+            def fake(command, **_):
+                return subprocess.CompletedProcess(command, 0 if "--list" in command else 101,
+                                                   listing if "--list" in command else output)
+
+            with patch.object(ignored_tests.subprocess, "run", side_effect=fake), contextlib.redirect_stdout(io.StringIO()):
+                result = ignored_tests.run("example", [], 1, 2)
+            self.assertEqual(result, {good: should_panic_passes, bad: False})
+            code, _ = self.judge({("example", bad): None}, result)
+            self.assertEqual(code, 0 if should_panic_passes else 1)
 
     def test_a_listed_test_that_never_reports_fails_the_leg(self):
         owned = leg_names()[1][:2]

@@ -45,12 +45,12 @@ impl Goal for ResetUniversalAnger {
     }
     /// `NeutralMob.forgetCurrentTargetAndRefreshUniversalAnger`:
     /// `stopBeingAngry`, then `startPersistentAngerTimer`.
-    fn start(&mut self, m: &mut Mob, _: &mut Cx) {
+    fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
         self.timestamp = m.ai.last_hurt_by_time;
         // setLastHurtByMob(null) also stamps the time.
         m.ai.last_hurt_by = None;
         m.ai.last_hurt_by_time = m.age as i32;
-        m.ai.target = None;
+        m.set_ai_target(cx.w, None);
         m.extra.angry_at = None;
         // `TimeUtil.rangeOfSeconds(20, 39)`.
         m.extra.anger = 400 + m.random.next_int_bound(381).unwrap_or(0);
@@ -245,7 +245,9 @@ impl Goal for DefendVillage {
         super::goals::TARGET
     }
     fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
-        let Some(p) = &cx.w.player else { return false };
+        let Some(p) = cx.w.selected_player() else {
+            return false;
+        };
         if !p.alive || p.creative || p.spectator || m.spares_players(cx.w) {
             return false;
         }
@@ -278,11 +280,11 @@ impl Goal for DefendVillage {
                 && m.position.distance_squared(t.position) <= 64.0 * 64.0
         })
     }
-    fn start(&mut self, m: &mut Mob, _cx: &mut Cx) {
-        m.ai.target = Some(Who::Player);
+    fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
+        m.set_ai_target(cx.w, Some(Who::Player));
     }
-    fn stop(&mut self, m: &mut Mob, _cx: &mut Cx) {
-        m.ai.target = None;
+    fn stop(&mut self, m: &mut Mob, cx: &mut Cx) {
+        m.set_ai_target(cx.w, None);
     }
 }
 /// `MoveTowardsTargetGoal`: close in on a target within range.
@@ -416,11 +418,12 @@ pub fn iron_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
     };
     let from = [m.position.x, m.position.y, m.position.z];
     // The hit, then the toss only if it landed (game/creatures.rs).
-    cx.events.push(MobEvent::IronGolemHit {
-        target: who,
-        amount,
-        source: super::Damage::mob(m.id, from),
-    });
+    cx.events
+        .push(cx.w.route_player_event(MobEvent::IronGolemHit {
+            target: who,
+            amount,
+            source: super::Damage::mob(m.id, from),
+        }));
     cx.events.push(MobEvent::Sound(
         "entity.iron_golem.attack",
         m.center(),
