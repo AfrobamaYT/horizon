@@ -884,7 +884,26 @@ mod eviction_tests {
         let storage = Storage::at(&home.0).unwrap();
         let root = Root::open(&home.0).unwrap();
         let entries = vec![Entry::fixed(&root, Path::new("game"), Category::BuildFiles).unwrap()];
-        let bytes = allocated_bytes(&file).unwrap();
+        let directory = file.parent().unwrap();
+        // Give inline-directory filesystems enough names to allocate directory blocks too.
+        for index in 0..32 {
+            fs::write(
+                directory.join(format!("padding-{index:02}-{}", "x".repeat(180))),
+                [],
+            )
+            .unwrap();
+        }
+        // Independent filesystem allocations, not the recursive production sum.
+        let own_bytes = |path: &Path| {
+            super::super::allocation(path, &fs::symlink_metadata(path).unwrap())
+                .unwrap()
+                .1
+        };
+        let bytes = own_bytes(directory)
+            + fs::read_dir(directory)
+                .unwrap()
+                .map(|entry| own_bytes(&entry.unwrap().path()))
+                .sum::<u64>();
         let report = storage.apply_retaining(entries, None, true, true).unwrap();
         let row = report
             .rows

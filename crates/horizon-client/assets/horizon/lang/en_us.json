@@ -123,6 +123,7 @@
   "HDR Calibration %s/%s: %s": "HDR Calibration %s/%s: %s",
   "HDR Lighting": "HDR Lighting",
   "HDR output on an HDR display: lava, fire and sunlight shine brighter.": "HDR output on an HDR display: lava, fire and sunlight shine brighter.",
+  "HDR output stopped the game the last time it started with this graphics driver. Choose a mode to try again.": "HDR output stopped the game the last time it started with this graphics driver. Choose a mode to try again.",
   "Hidden Faces": "Hidden Faces",
   "Hides entities behind opaque blocks.": "Hides entities behind opaque blocks.",
   "Hides models behind opaque blocks. Async checks off-thread; entities tick.": "Hides models behind opaque blocks. Async checks off-thread; entities tick.",
