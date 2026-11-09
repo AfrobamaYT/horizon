@@ -1432,7 +1432,9 @@ mod tests {
             host: &mut dyn mod_api::ServerHost,
             e: &mut mod_api::EntityMountEvent<'_>,
         ) -> mod_api::Flow {
-            if self.spare.load(Ordering::Relaxed) == 1004 && !e.mounting && e.entity == 102
+            if self.spare.load(Ordering::Relaxed) == 1004
+                && !e.mounting
+                && e.entity == 102
                 && let Some(sibling) = host.entity(103)
             {
                 assert!(sibling.discard(host));
