@@ -17,7 +17,7 @@ def health_reason(jobs, now):
                 return f"boat job {job['id']} queued for more than 10 minutes"
         if job.get("conclusion") == "failure" and not any(
             step.get("started_at") for step in job.get("steps", [])
-            if step.get("name") != "Set up job"
+            if step.get("name") not in ("Set up job", "Complete job")
         ):
             return f"boat job {job['id']} failed before its first step"
     return ""

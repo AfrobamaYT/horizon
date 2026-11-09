@@ -34,13 +34,15 @@ class BoatHealthTests(unittest.TestCase):
     def test_setup_failure(self):
         sample = job()
         sample.update(status="completed", conclusion="failure", steps=[
-            dict(name="Set up job", started_at="2026-11-10T11:51:00Z", conclusion="failure")])
+            dict(name="Set up job", started_at="2026-11-10T11:51:00Z", conclusion="failure"),
+            dict(name="Complete job", started_at="2026-11-10T11:51:01Z")])
         self.assertIn("first step", boat.health_reason([sample], NOW))
 
     def test_real_failure_is_not_retried(self):
         sample = job()
         sample.update(status="completed", conclusion="failure", steps=[
-            dict(name="Run tests", started_at="2026-11-10T11:51:00Z", conclusion="failure")])
+            dict(name="Run tests", started_at="2026-11-10T11:51:00Z", conclusion="failure"),
+            dict(name="Complete job", started_at="2026-11-10T11:51:01Z")])
         self.assertEqual(boat.health_reason([sample], NOW), "")
 
     def test_other_runners_do_not_poison_boat(self):

@@ -11,7 +11,7 @@ from boat_health import api, health_reason
 def recovery_reason(jobs, now):
     """Do not replace a run that has already reported a genuine failure."""
     if any(job.get("conclusion") == "failure" and any(
-        step.get("started_at") and step.get("name") != "Set up job"
+        step.get("started_at") and step.get("name") not in ("Set up job", "Complete job")
         for step in job.get("steps", [])
     ) for job in jobs):
         return ""
@@ -42,7 +42,7 @@ def main():
             return
         if len(targets) == 2 and all(
             job["status"] == "completed" or any(
-                step.get("started_at") and step.get("name") != "Set up job"
+                step.get("started_at") and step.get("name") not in ("Set up job", "Complete job")
                 for step in job.get("steps", [])
             ) for job in targets
         ):
