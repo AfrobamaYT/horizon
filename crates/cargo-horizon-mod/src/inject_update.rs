@@ -321,6 +321,28 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]
+    fn inject_update_changed_report_shows_old_and_new_signatures() {
+        let text = pinned();
+        let (mut items, catalog) = fixture();
+        let mut old = items.clone();
+        old[0].signature = "fn tick(&self, value: bool)".into();
+        items[0].hash = "new-signature".into();
+        let (_, reports, refused) = plan(
+            &text,
+            &Manifest::parse(&text).unwrap(),
+            &items,
+            &catalog,
+            &old,
+            &[],
+        )
+        .unwrap();
+        assert!(refused);
+        let expected = "game::tick signature-fixture (fn tick(&self, value: bool)) -> \
+                        new-signature (fn tick(&mut self)); run inject update";
+        assert!(reports[0].starts_with("E_INJECT_CHANGED: "));
+        assert!(reports[0].ends_with(expected), "{}", reports[0]);
+    }
+    #[test]
     fn inject_update_noop_leaves_inode_and_mtime() {
         let dir = reviewer_directory("update-noop");
         let path = dir.join(MANIFEST);
