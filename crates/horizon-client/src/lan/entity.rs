@@ -1416,7 +1416,6 @@ impl Entities {
                     // Usually the client still sees all it tracks.
                     let mut removed = Vec::new();
                     if kept != v.tracker.seen.len() {
-                        let states = states;
                         let Tracker { seen, events, .. } = &mut *v.tracker;
                         seen.retain(|id, tracked| match states.get(id) {
                             Some(s) if s.seen == now && flags[s.index] & TRACKS != 0 => true,
