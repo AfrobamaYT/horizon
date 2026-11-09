@@ -32,6 +32,7 @@ struct EntityFluidWorld<'a> {
 /// shape from the shared `FlowingFluid.shapes` cache (the first query of a
 /// fluid state fixes its height), as the player's own ray reads it.
 pub fn water_clip(
+    context: &LoopContext,
     world: &World,
     fluids: &FluidResources,
     from: Vec3,
@@ -50,6 +51,7 @@ pub fn water_clip(
         velocity: &mut velocity,
         world,
         fluids,
+        context,
     };
     let Ok(mut shapes) = fluids.shapes.lock() else {
         return false;

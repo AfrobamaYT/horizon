@@ -1825,11 +1825,11 @@ mod tests {
     #[test]
     fn sitting_down_keeps_a_wolfs_begging_tilt() {
         let ran = crate::mobs::world::with_test_world(&[], |w, _| {
-            let mut lr = horizon_core::random::LegacyRandom::new(0);
+            let mut fixture = crate::health::TestLevel::new(0);
             let mut events = Vec::new();
             let mut cx = Cx {
                 w,
-                lr: &mut lr,
+                level: &mut fixture.level(),
                 events: &mut events,
             };
             let mut m = wolf();

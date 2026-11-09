@@ -701,7 +701,15 @@ impl Game<'_> {
                 return Some(());
             }
             // The water's shape, through the shared fluid shape cache.
-            horizon_client::entities::water_clip(&self.world, fluids, from, to, p).then_some(())
+            horizon_client::entities::water_clip(
+                &self.loop_context,
+                &self.world,
+                fluids,
+                from,
+                to,
+                p,
+            )
+            .then_some(())
         });
         if matches!(hit, Ok(Some(()))) {
             0.0

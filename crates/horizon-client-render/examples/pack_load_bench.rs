@@ -412,9 +412,11 @@ fn main() {
     row("CTM tiles: prefetched", sprites(false, true, &tiles, true));
     // The mip chains the renderer uploads, from the same pack layers: the HD pack's
     // 64 px block sprites fill the array, as they do for a player who has it on.
-    let mut atlas = Sprites::with_disk_cache(&root);
+    let mut atlas = Sprites::with_disk_cache(
+        &horizon_client_render::resource_source::ResourceRoot::directory(root.clone()),
+    );
     for name in &blocks {
-        atlas.insert(&root, name).unwrap();
+        atlas.insert(name).unwrap();
     }
     atlas.finish();
     let border = vec![255u8; (atlas.size * atlas.size * 4) as usize];

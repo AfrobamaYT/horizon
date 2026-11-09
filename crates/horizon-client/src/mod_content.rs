@@ -21,8 +21,8 @@ use horizon_core::{
     nbt::{Compound, JavaString, Limits, Tag},
 };
 use horizon_mod_package::content::{
-    Block, BlockEntityType, BlockShapes, Content, CreativeTab, EntityType, Fluid, FluidLook,
-    MenuType, MobEffect, Rarity, StateProperty, StateValues,
+    Block, BlockEntityType, BlockShapes, Content, CreativeTab, EntityType, FluidLook, MenuType,
+    MobEffect, Rarity, StateProperty, StateValues,
 };
 use horizon_mod_package::manifest::{
     JarInputsError, JarRef, collect_jar_requirements, missing_jars,
@@ -92,8 +92,8 @@ pub fn mob_effects(mods: &[ContentMod]) -> Vec<&MobEffect> {
 
 /// The mods' fluids in registry order, by id as effects are. Each takes two
 /// network ids after vanilla's, its source's then its flowing form's.
-pub fn fluids(mods: &[ContentMod]) -> Vec<&Fluid> {
-    let mut fluids: Vec<&Fluid> = mods.iter().flat_map(|m| &m.content.fluids).collect();
+pub fn fluids(mods: &[ContentMod]) -> Vec<&FluidLook> {
+    let mut fluids: Vec<&FluidLook> = mods.iter().flat_map(|m| &m.content.fluids).collect();
     fluids.sort_by(|a, b| a.id.cmp(&b.id));
     fluids
 }
@@ -797,7 +797,7 @@ struct Plan<'a> {
     /// Every vanilla item id, including items omitted from the search tab.
     vanilla_items: BTreeSet<String>,
     effects: Vec<&'a MobEffect>,
-    fluids: Vec<&'a Fluid>,
+    fluids: Vec<&'a FluidLook>,
     entity_types: Vec<&'a EntityType>,
     block_entity_types: Vec<&'a BlockEntityType>,
     block_entity_factories: BTreeMap<&'a str, &'a str>,

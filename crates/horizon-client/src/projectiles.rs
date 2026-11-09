@@ -1399,13 +1399,7 @@ impl Projectile {
         if self.applies_block_effects() {
             self.bubble_columns_along(w, from);
         }
-        w.block_contacts(
-            self.id as i32,
-            self.kind.id(),
-            from,
-            self.position,
-            self.bounds(),
-        );
+        w.block_contacts(self.id as i32, from, self.position, self.bounds());
         self.fire_tick(w, client_side);
         self.stuck_tick(w, from);
         if !base_first {

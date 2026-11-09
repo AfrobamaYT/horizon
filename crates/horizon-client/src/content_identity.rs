@@ -157,7 +157,7 @@ fn hash_facts(bytes: &[u8]) -> Result<[u8; 32], IdentityError> {
 }
 
 /// The built-in registries whose network ids content mods extend besides blocks.
-const REGISTRIES: [&str; 5] = [
+const REGISTRIES: [&str; 6] = [
     "minecraft:item",
     "minecraft:mob_effect",
     "minecraft:fluid",
@@ -276,7 +276,9 @@ mod tests {
                 r#"{{"minecraft:fluid":{{"entries":{{"minecraft:water":{{"protocol_id":2}}{extra}}}}}}}"#
             );
             std::fs::write(root.join("registries.json"), report).unwrap();
-            let hash = identity(&root).unwrap();
+            std::fs::write(root.join("items.json"), "{}").unwrap();
+            let defaults = horizon_world::item_defaults::read(&root).unwrap();
+            let hash = identity(&root, &defaults).unwrap();
             std::fs::remove_dir_all(&root).unwrap();
             (hash, hash_facts(facts).unwrap())
         };
