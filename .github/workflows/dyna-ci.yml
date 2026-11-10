@@ -57,6 +57,7 @@ jobs:
       actions: read
     outputs:
       self_hosted: ${{ !inputs.github-fallback && steps.hosted.outputs.forced_github != 'true' && steps.runner.outputs.self_hosted || 'false' }}
+      routing_reason: ${{ steps.runner.outputs.routing_reason }}
       # Every ignored-tests shard on main pushes and dispatches; empty on pull requests.
       ignored_matrix: ${{ steps.matrix.outputs.matrix || '{"shard":[]}' }}
       # Where lint and verify run when they don't go to Dyna's pool: boat-large for listed outside contributors
@@ -87,9 +88,9 @@ jobs:
           name: boat-base-1
           path: boat-base.json
           retention-days: 2
-      # The pool's switch and lease are read live: `vars` is fixed when the run is created, and a main run
-      # that waits in the concurrency group would otherwise see a lease that expired while it waited.
-      # A fork's pull request gets no token to read them and stays on GitHub's runners.
+      # Prefer the live pool switch/lease. github.token normally cannot read Variables;
+      # its snapshot fallback uses run creation time, bounded to an hour of queue age.
+      # Fork pull requests remain on GitHub's runners.
       - id: runner
         env:
           GH_TOKEN: ${{ github.token }}
@@ -107,7 +108,17 @@ jobs:
           case "${LEASE:-}" in '' | *[!0-9]*) LEASE= ;; esac
           case "${ENABLED:-}" in true | false) ;; *) ENABLED= ;; esac
           echo "pool lease: live=${LEASE:-unreadable} snapshot=${VARS_LEASE:-none}"
-          ENABLED=${ENABLED:-$VARS_ENABLED} LEASE=${LEASE:-$VARS_LEASE} bash tools/ci/dyna_ci_runner.sh >> "$GITHUB_OUTPUT"
+          SOURCE=live
+          CREATED=
+          if [ -z "${LEASE:-}" ]; then
+            SOURCE=snapshot
+            # Actions read is sufficient for run metadata, unlike the Variables endpoint.
+            CREATED_AT=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" -q .created_at 2>/dev/null || true)
+            if [ -n "$CREATED_AT" ]; then
+              CREATED=$(date -d "$CREATED_AT" +%s 2>/dev/null || true)
+            fi
+          fi
+          ENABLED=${ENABLED:-$VARS_ENABLED} LEASE=${LEASE:-$VARS_LEASE} LEASE_SOURCE=$SOURCE CREATED=$CREATED bash tools/ci/dyna_ci_runner.sh >> "$GITHUB_OUTPUT"
       - id: hosted
         env:
           GH_TOKEN: ${{ github.token }}
