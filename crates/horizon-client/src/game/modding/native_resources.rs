@@ -57,7 +57,7 @@ mod tests {
                 std::fs::create_dir_all(pack.join("data/demo/value")).unwrap();
                 std::fs::write(
                     pack.join("pack.mcmeta"),
-                    r#"{"pack":{"description":"test","min_format":101,"max_format":101}}"#,
+                    r#"{"pack":{"description":"test","pack_format":121,"min_format":[121,0],"max_format":[121,0]}}"#,
                 )
                 .unwrap();
                 std::fs::write(pack.join("data/demo/value/order.json"), bytes).unwrap();
@@ -65,12 +65,16 @@ mod tests {
             game.build_registries();
             game.set_allow_commands(true);
             assert!(game.run_command("reload"));
+            assert!(game.run_command("datapack disable \"file/high\""));
+            assert!(game.run_command("datapack disable \"file/low\""));
+            assert!(game.run_command("datapack enable \"file/low\" first"));
             assert!(game.run_command("datapack enable \"file/high\" last"));
             assert_eq!(
                 game.resource(PackType::ServerData, &id("demo:value/order.json"))
                     .as_deref(),
                 Some(b"high".as_slice())
             );
+            assert!(game.run_command("datapack disable \"file/low\""));
             assert!(game.run_command("datapack enable \"file/low\" last"));
             assert_eq!(
                 game.resource(PackType::ServerData, &id("demo:value/order.json"))
