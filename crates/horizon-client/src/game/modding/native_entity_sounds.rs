@@ -27,7 +27,7 @@ pub(super) fn hostile_species(species: Species) -> bool {
 impl Game<'_> {
     /// The level in place holds the entity: events and game events are
     /// queued in it.
-    fn native_entity_here(&self, entity: EntityRef) -> bool {
+    pub(super) fn native_entity_here(&self, entity: EntityRef) -> bool {
         self.entity_level(entity)
             .is_some_and(|level| level.dimension() == self.native_level_key())
     }
@@ -100,48 +100,24 @@ impl Game<'_> {
     /// False for an event vanilla doesn't have, a dead guest and a guest while
     /// another one acts.
     pub(super) fn entity_game_event(&mut self, entity: EntityRef, event: &str) -> bool {
-        let Some(event) = horizon_client::sculk::intern(event) else {
-            return false;
-        };
         let Some(target) = self.native_entity_target(entity) else {
             return false;
         };
-        if !self.native_entity_here(entity) {
-            return false;
-        }
         let Some(at) = self.target_position(target) else {
             return false;
         };
-        match target {
-            Target::Player => {
-                let ctx = self.player_context(None);
-                self.post_game_event(event, at, ctx);
-                true
-            }
-            Target::Guest(conn) => {
-                let Some(uuid) = self.command_guest(conn).map(|g| g.uuid) else {
-                    return false;
-                };
-                self.native_as_player(uuid, |game| {
-                    let ctx = game.player_context(None);
-                    let at = game
-                        .player
-                        .as_ref()
-                        .map_or(at, |p| [p.position.x, p.position.y, p.position.z]);
-                    game.post_game_event(event, at, ctx);
-                })
-            }
-            Target::Mob(id) => {
-                let ctx = self.mob_context(id, None);
-                self.post_game_event(event, at, ctx);
-                true
-            }
-            _ => {
-                let ctx = self.entity_event_context(entity.id(), None);
-                self.post_game_event(event, at, ctx);
-                true
-            }
-        }
+        let Some(level) = self.level(self.dim.id()) else {
+            return false;
+        };
+        self.level_game_event(
+            level,
+            event,
+            at,
+            mod_api::GameEventContext {
+                source_entity: Some(entity),
+                affected_state: None,
+            },
+        )
     }
     /// `Level.broadcastEntityEvent(entity, id)`: sends entity event `id` (the
     /// byte `Entity.handleEntityEvent` reads: `2` is a hurt flash, `3` a
