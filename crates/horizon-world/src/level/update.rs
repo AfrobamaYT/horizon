@@ -434,7 +434,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     pub fn remove_block(&mut self, pos: BlockPos, moved_by_piston: bool) -> bool {
         let fluid = self.fluid_at(pos);
         let legacy = self.b.legacy_block(fluid);
-        self.set_block(pos, legacy, 3 | if moved_by_piston { 64 } else { 0 })
+        let replacement =
+            self.level
+                .adjust_remove_block(pos, self.state(pos), moved_by_piston, legacy);
+        self.set_block(pos, replacement, 3 | if moved_by_piston { 64 } else { 0 })
     }
     /// `Level.destroyBlock(pos, dropResources, null, limit)`.
     pub fn destroy_block(&mut self, pos: BlockPos, drop: bool, limit: i32) -> bool {

@@ -895,6 +895,16 @@ pub trait LevelAccess {
     ) -> bool {
         vanilla
     }
+    /// Replacement for `Level.removeBlock`; the default keeps the fluid block.
+    fn adjust_remove_block(
+        &self,
+        _pos: BlockPos,
+        _state: BlockStateId,
+        _moved_by_piston: bool,
+        vanilla: BlockStateId,
+    ) -> BlockStateId {
+        vanilla
+    }
     /// Whether connection queries (fences, walls, bars and panes) need the level hook.
     fn has_connection_hook(&self) -> bool {
         false

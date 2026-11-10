@@ -344,7 +344,7 @@ impl Game<'_> {
             return false;
         }
         let changed =
-            self.with_level(|_, level, ticks| level.native_remove_block(ticks, pos, moved));
+            self.with_level(|_, level, ticks| level.remove_block_write(ticks, pos, moved));
         let _ = self.process_level_events();
         changed
     }

@@ -1424,6 +1424,15 @@ impl LevelAccess for GameLevel<'_> {
         );
         connected
     }
+    fn adjust_remove_block(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+        moved_by_piston: bool,
+        vanilla: BlockStateId,
+    ) -> BlockStateId {
+        self.removal_replacement(pos, state, moved_by_piston, vanilla)
+    }
     fn has_connection_hook(&self) -> bool {
         self.native_authoritative
             && mod_api::__private::has_scoped_hook(mod_api::HookId::ConnectsTo)

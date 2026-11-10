@@ -947,7 +947,7 @@ fn stack_crossing_routed(
                 )
             } else if block {
                 format!(
-                    "match {local}.try_into_engine(&*self) {{ Ok(value) => value, Err(_) => return }}"
+                    "match {local}.try_into_engine(&*self) {{ Ok(value) => value, Err(error) => {{ log::warn!(\"mod block state write refused: {{error:?}}\"); return; }} }}"
                 )
             } else if stack {
                 let result = format!("__checked_{name}");

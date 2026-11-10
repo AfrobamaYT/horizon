@@ -639,7 +639,7 @@ impl<'a: 'b, 'b> mod_api::LevelWriteHost for LevelTicks<'b, &mut super::GameLeve
     }
 
     fn remove_block(&mut self, pos: [i32; 3], moved: bool) -> bool {
-        self.level.native_remove_block(self.ticks, pos, moved)
+        self.level.remove_block_write(self.ticks, pos, moved)
     }
 
     fn set_block_property(&mut self, pos: [i32; 3], key: &str, value: &str, flags: i32) -> bool {

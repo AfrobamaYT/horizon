@@ -4824,4 +4824,8 @@ fn fresh_chunk_sculk_charge_does_not_wait_for_ticking_readiness() {
 }
 
 mod barrel;
+#[cfg(test)]
+mod removal {
+    include!("tests/removal.rs");
+}
 mod fluid_tick;
