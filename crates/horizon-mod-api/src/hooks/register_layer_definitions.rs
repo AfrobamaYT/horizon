@@ -11,7 +11,7 @@ pub trait Hooks {
     /// registered already is logged and left out. API @API:model_layers@.
     #[notes = r#"## Entity model layers
 
-`Hooks::layer_definitions` is the client registration-phase counterpart of NeoForge 26.3's
+`Hooks::register_layer_definitions` is the client registration-phase counterpart of NeoForge 26.3's
 `EntityRenderersEvent.RegisterLayerDefinitions`. It receives a `RegistrationContext`, once at
 client startup, and collects `(id, LayerDefinition)` entries in dependency order. Dedicated
 and integrated server roles do not fire this client event. IDs are `<mod id>:<model>#<layer>`;
@@ -22,7 +22,7 @@ at a `PartPose`, on a texture of the given size. Texture offsets, mirroring and
 `CubeDeformation` match vanilla's model builders. This listener is compiled in the API tests:
 
 ```rust,ignore
-{{#include ../../../../crates/horizon-client/tests/mod_api_hooks.rs:layer_definitions}}
+{{#include ../../../../crates/horizon-client/tests/mod_api_hooks.rs:register_layer_definitions}}
 ```
 
 `ClientHost::bake_layer` bakes a registered layer or a vanilla layer by its
@@ -43,5 +43,5 @@ The sprite is the entity texture ID and the tint is `0xRRGGBB`."#]
         context = "registration",
         neoforge = "EntityRenderersEvent.RegisterLayerDefinitions"
     )]
-    fn layer_definitions();
+    fn register_layer_definitions();
 }
