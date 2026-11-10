@@ -414,6 +414,14 @@ fn a_biome_modifier_declared_in_code_applies_to_the_root_biomes() {
     let after = biome_modifiers_over_packs(&out, &packs, &declared)
         .unwrap()
         .expect("a declared modifier changes the biomes");
+    let file_mod = zinc_mod(&scratch.join("file-zinc"), &[("declared", &declared[0][2])]);
+    let file_out = scratch.join("file-out");
+    build_fixture(&base, &base.join("jars"), &[file_mod], &file_out).unwrap();
+    let original: BTreeMap<String, String> =
+        serde_json::from_slice(&fs::read(out.join("worldgen/biomes.json")).unwrap()).unwrap();
+    let expected: BTreeMap<String, String> =
+        serde_json::from_slice(&fs::read(file_out.join("worldgen/biomes.json")).unwrap()).unwrap();
+    assert_eq!(after.apply("biomes", original), expected);
     let plains = after
         .entries("biomes")
         .find(|(id, _)| *id == "minecraft:plains")
@@ -431,6 +439,30 @@ fn a_biome_modifier_declared_in_code_applies_to_the_root_biomes() {
             [],
             ["minecraft:ore_coal", "zinc:ore_zinc"]
         ])
+    );
+    // Removals win even when declared before an addition to the same feature.
+    let removal = mod_api::BiomeModifier {
+        biomes: vec!["#minecraft:is_overworld".to_owned()],
+        operation: mod_api::BiomeModifierOperation::RemoveFeatures {
+            features: vec!["zinc:ore_zinc".to_owned()],
+            steps: vec!["underground_ores".to_owned()],
+        },
+    };
+    let ordered = [
+        ["zinc".to_owned(), "remove.json".to_owned(), removal.json()],
+        declared[0].clone(),
+    ];
+    let removed = biome_modifiers_over_packs(&out, &packs, &ordered)
+        .unwrap()
+        .unwrap();
+    let original: BTreeMap<String, String> =
+        serde_json::from_slice(&fs::read(out.join("worldgen/biomes.json")).unwrap()).unwrap();
+    let removed = removed.apply("biomes", original);
+    let removed_plains: serde_json::Value =
+        serde_json::from_str(&removed["minecraft:plains"]).unwrap();
+    assert_eq!(
+        removed_plains["features"][6],
+        serde_json::json!(["minecraft:ore_coal"])
     );
     // The nether is not in the overworld tag: untouched, so not written out.
     assert!(

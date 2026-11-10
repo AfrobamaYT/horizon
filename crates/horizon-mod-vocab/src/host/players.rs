@@ -63,6 +63,18 @@ pub trait PlayersBackend {
     #[access(WorldOnly)]
     fn player_name(&self, player: PlayerRef) -> Option<String>;
     /// Side: both.
+    /// The level the online player is in (`ServerPlayer.level`): on an integrated
+    /// server or dedicated server, the player's current dimension; on a client,
+    /// the client's level. None for a stale or unavailable player.
+    #[access(WorldOnly)]
+    fn player_level(&self, player: PlayerRef) -> Option<LevelRef>;
+    /// Side: both.
+    /// The dimension the online player is in (`ServerPlayer.level().dimension()`):
+    /// `minecraft:overworld`, `minecraft:the_nether`, ... None for a stale
+    /// or unavailable player.
+    #[access(WorldOnly)]
+    fn player_dimension(&self, player: PlayerRef) -> Option<Identifier>;
+    /// Side: both.
     /// `Inventory.getSelectedSlot`: the hotbar slot the player holds, 0..9.
     #[access(WorldOnly)]
     fn player_selected_slot(&self, player: PlayerRef) -> Option<usize>;

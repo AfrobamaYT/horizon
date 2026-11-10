@@ -133,7 +133,7 @@ pub enum ProvidedBy {
 }
 
 /// The parts attached by tag, by tag name, in registration order.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct TagParts {
     pub(crate) blocks: Vec<(Box<str>, Attached<dyn BlockPart>)>,
     pub(crate) items: Vec<(Box<str>, Attached<dyn ItemPart>)>,
@@ -524,6 +524,7 @@ impl PartRegistrar {
             dimension_shape: |_| false,
             chunk_generators: Vec::new(),
             refused: Vec::new(),
+            self_refusal: None,
         }
     }
     /// `part`, of kind `kind`, for tag `tag`; none if it is refused.
@@ -612,11 +613,25 @@ pub(crate) fn register_all(
         }
     }
     let _scope = RestoreKeys(REGISTERING_KEYS.replace(Some(registrar.registry_keys.clone())));
-    let context = crate::RegistrationContext::new();
     for (index, hooks) in crate::entered_registration(mods, "register").enumerate() {
         registrar.mod_id = mods[index].id;
         registrar.mod_index = index;
+        let context = crate::RegistrationContext::new();
+        let rollback = registrar.registration_checkpoint();
         hooks.register(&mut registrar, &context);
+        let reason = context
+            .self_refusal
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+            .or_else(|| registrar.self_refusal.take());
+        if let Some(reason) = reason {
+            rollback(&mut registrar);
+            registrar.refused.push(format!(
+                "mod {} refused registration: {reason}",
+                mods[index].id
+            ));
+        }
     }
     registrar.expand_block_entity_parts();
     registrar.refuse_unknown_dimension_generators();

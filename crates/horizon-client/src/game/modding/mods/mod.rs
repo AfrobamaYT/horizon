@@ -1592,6 +1592,66 @@ pub(super) fn living_mod_types()
         .collect()
 }
 
+/// The block states native mods add to vanilla POI types (`native_extend_poi_types`),
+/// resolved against `registry` once its block definitions are published and before any
+/// world's POI tables are built; collected again when the resources reload. Each refusal
+/// is logged once.
+pub(super) fn extend_poi_types(registry: &horizon_world::registry::BlockRegistry) {
+    let (additions, refusals) = collect_poi_extensions(registry);
+    for refusal in refusals
+        .into_iter()
+        .chain(horizon_world::poi::extend(additions))
+    {
+        log::warn!("Horizon: POI type extension refused: {refusal}");
+    }
+}
+
+/// Ask the mods, then turn each predicate into the complete states of `registry` it
+/// selects, in registration order. A tag predicate is refused here: additions name blocks.
+pub(in crate::game) fn collect_poi_extensions(
+    registry: &horizon_world::registry::BlockRegistry,
+) -> (Vec<horizon_world::poi::PoiExtension>, Vec<String>) {
+    let Some(metadata) = mod_api::__private::block_definitions() else {
+        return (Vec::new(), Vec::new());
+    };
+    let mut extensions = mod_api::PoiTypeExtensionRegistry::new(metadata);
+    Game::native_extend_poi_types(&RegistrationContext::new(), &mut extensions);
+    let mut additions = Vec::new();
+    let mut refusals = Vec::new();
+    for (poi, predicate) in extensions.into_entries() {
+        let record = mod_api::StatePredicateRecord::from(&predicate);
+        let block = match record.target {
+            mod_api::StatePredicateTarget::Block(block) => block,
+            mod_api::StatePredicateTarget::Tag(_) => {
+                refusals.push(format!(
+                    "{poi} asked for a block tag's states; an addition names a block"
+                ));
+                continue;
+            }
+        };
+        // The predicate was built on this metadata, so its block is known.
+        let Ok(name) = mod_api::BlockMetadata::name(metadata, block) else {
+            continue;
+        };
+        for index in 0..registry.len() {
+            let state = registry
+                .state(horizon_world::registry::BlockStateId(index as u32))
+                .expect("registry index is in bounds");
+            if state.name == name
+                && record.constraints.iter().all(|constraint| {
+                    state.properties.get(constraint.name.as_str()) == Some(&constraint.value)
+                })
+            {
+                additions.push(horizon_world::poi::PoiExtension {
+                    state: state.clone(),
+                    poi: poi.to_string(),
+                });
+            }
+        }
+    }
+    (additions, refusals)
+}
+
 /// Registered callbacks indexed directly by the slots resolved in enchantment content.
 pub(in crate::game) static ENCHANTMENT_DAMAGE_EFFECTS: std::sync::OnceLock<
     Vec<std::sync::Arc<dyn mod_api::EnchantmentDamageEffect>>,

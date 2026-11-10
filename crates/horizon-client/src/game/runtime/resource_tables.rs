@@ -146,6 +146,7 @@ impl PackResources {
     ) -> Result<Self> {
         let visibility = models::load_visibility(root.prepared(), assets.registry)?;
         api_values::resolve_block_definitions(assets.registry)?;
+        mods::extend_poi_types(assets.registry);
         let tables = Arc::new(
             MeshTables::new(
                 &assets,

@@ -75,8 +75,8 @@ use mod_api::{
     CommandInvocation, EnchantmentDamageEffects, EnchantmentInfo, EntityRef, GameRuleActor,
     HandRender, InteractionAttempt, InteractionKey, LayerDefinition, LifecycleContext, LivingRef,
     NoteBlockChange, ParticleProviders, PathComputationType, Placement, PlayerRef,
-    RecipeBookCategory, ScreenId, ScreenOpening, ScreenshotImage, ServerReloadListeners,
-    ServerTickPhase, TicketController, ToolUse, WorldPhase,
+    PoiTypeExtensions, RecipeBookCategory, ScreenId, ScreenOpening, ScreenshotImage,
+    ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
     ActiveEffect, AttachmentStore, BlockClick, BlockUpdateFlags, BonemealSource, ChunkRef,
