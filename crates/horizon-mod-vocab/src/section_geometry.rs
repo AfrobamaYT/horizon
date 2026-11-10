@@ -10,19 +10,34 @@ use std::sync::Arc;
 
 /// A mod's extra section geometry: NeoForge's `AdditionalSectionGeometryRenderer`.
 pub trait SectionGeometry: Send + Sync + 'static {
-    /// `render(context)`: the quads of the section whose lowest corner is block `origin` (a
-    /// multiple of 16 on each axis). `level` reads the section's chunk and its eight neighbours.
-    /// Asked on a meshing worker every time that section meshes, also when it holds only air; a
-    /// section the renderer has nothing for gets an empty list. The list is taken whole or refused
-    /// whole, logged once: more than 262144 quads, a corner or UV out of range or not a number, or
-    /// a sprite the atlas lacks refuses it. A renderer that panics is asked no more.
-    fn add(&self, origin: [i32; 3], level: &dyn BlockAndTintGetter) -> Vec<SectionQuad>;
+    /// `render(context)`: adds the quads of the section whose lowest corner is block `origin` (a
+    /// multiple of 16 on each axis) through `context`. Asked on a meshing worker every time that
+    /// section meshes, also when it holds only air; a renderer with nothing for the section adds
+    /// nothing. What it adds is taken whole or refused whole, logged once: see
+    /// [`SectionGeometryContext::add`]. A renderer that panics is asked no more.
+    fn add(&self, origin: [i32; 3], context: &mut dyn SectionGeometryContext);
+}
+
+/// One section a [`SectionGeometry`] adds quads to. The section's quads, its own blocks' and
+/// every renderer's together, share one budget: 262144 quads and 32 MiB of mesh data. All
+/// sections meshing at once share another, 128 MiB of added quads not yet in their meshes. A
+/// quad is checked against them before it is kept.
+pub trait SectionGeometryContext {
+    /// Reads the section's chunk and its eight neighbours.
+    fn level(&self) -> &dyn BlockAndTintGetter;
+    /// Adds `quad`, drawn with the block atlas sprite `sprite` (`minecraft:block/stone`, a mod's
+    /// `mymod:block/glow`). False when this renderer's quads for the section are refused, and
+    /// then none of them are drawn and every later `add` is false too: a quad past a budget, a
+    /// corner or UV out of range or not a number, or a sprite the atlas lacks refuses them all.
+    fn add(&mut self, sprite: &str, quad: SectionQuad) -> bool;
+    /// How many more quads the section takes before its budget refuses one.
+    fn remaining(&self) -> u32;
 }
 
 /// One quad a [`SectionGeometry`] adds. Its corners go counter-clockwise seen from the side it
 /// faces; a solid quad is culled from behind, as a block's faces are, so a quad seen from both
 /// sides is two quads.
-#[derive(Clone, Debug, PartialEq, horizon_mod_api_macros::Wire)]
+#[derive(Clone, Copy, Debug, PartialEq, horizon_mod_api_macros::Wire)]
 // exhaustive: mods build quads with struct literals
 pub struct SectionQuad {
     /// The corners, in blocks from the section's lowest corner, each 0 to 16: a quad stays inside
@@ -30,9 +45,6 @@ pub struct SectionQuad {
     pub positions: [[f32; 3]; 4],
     /// Each corner's texture coordinate within the sprite, 0 to 1.
     pub uvs: [[f32; 2]; 4],
-    /// The block atlas sprite the quad draws, `minecraft:block/stone` or a mod's
-    /// `mymod:block/glow`.
-    pub sprite: String,
     /// ARGB the sprite's texels are multiplied by; `0xFFFFFFFF` leaves them as they are.
     pub color: u32,
     /// Sky and block light, 0 to 15 each (`BlockAndTintGetter::brightness` reads the world's).

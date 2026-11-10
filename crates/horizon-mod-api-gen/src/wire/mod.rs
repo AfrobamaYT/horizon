@@ -58,6 +58,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "ColorResolvers",
     "BlockTintSources",
     "SectionGeometryRenderers",
+    "SectionGeometryContext",
     "ParticleProviders",
     "EnchantmentDamageEffects",
     "BlockAndTintGetter",
