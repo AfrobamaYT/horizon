@@ -38,10 +38,13 @@ client-side list. The query also returns `None` while any lookup member is
 temporarily extracted, rather than returning an incomplete authoritative list.
 
 The walk preserves lookup admission order across storage families, including
-removal and re-admission at the end. Initial world loading still admits storage
-families in the engine's loading order, which can differ from vanilla's chunk
-entity loading order. Exact order parity for saved worlds requires a shared
-chunk-load admission stream, rather than reconstructing it from grouped storage.
+removal and re-admission at the end. A chunk's entities join in the order the
+chunk was stored: vanilla's `storeChunkSections` order, section by section from
+section 0 upward and then the negative sections, each section in admission
+order, whatever storage family holds each entity. A vehicle comes before its
+passengers. One difference remains: an entity that moved into another section
+since it joined is stored at its admission place there, where vanilla moves it
+to the end of the section it entered.
 The call allocates buffers for the result and sorts admission keys; it does not
 allocate an object per entity. Cache the result when doing several passes in one
 hook rather than repeatedly crossing the host boundary.
