@@ -134,6 +134,19 @@ def main():
         return ["--extern", f"{crate}={library}"]
 
     def run(command, **kwargs):
+        if command[0] == "rustc" and any(str(arg).startswith("horizon_client=") for arg in command):
+            # Engine metadata describes code carried by the top-level host dylib.
+            # Explicitly link that carrier in probes which otherwise only name internals.
+            command = list(command)
+            index = next(i for i, arg in enumerate(command) if str(arg).endswith(".rs"))
+            source = Path(command[index])
+            lines = source.read_text().splitlines(keepends=True)
+            insertion = next((i for i, line in enumerate(lines) if line.strip() and not line.startswith(("//", "#!["))), len(lines))
+            lines.insert(insertion, "extern crate horizon_mod_host;\n")
+            copied = output / (source.parent.name + "-" + source.name)
+            copied.write_text("".join(lines))
+            command[index] = str(copied)
+            command.extend(extern("horizon_mod_host"))
         with (output / "commands.log").open("a") as log:
             log.write(json.dumps(list(map(str, command))) + "\n")
             log.flush()
