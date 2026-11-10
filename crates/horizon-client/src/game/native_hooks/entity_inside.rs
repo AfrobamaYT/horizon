@@ -933,4 +933,144 @@ mod sweep_tests {
             assert!(horizon_client::block_contact::take_pending().is_empty());
         });
     }
+
+    /// An arrow's contacts, on the same batch sweep the other projectiles':
+    /// a flying arrow meets its blocks in walk order, once each, and a stuck
+    /// arrow keeps the contact of the block it sits in.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn an_arrow_is_told_once_a_block_stuck_and_flying() {
+        let part = InsidePart::default();
+        let mods = install_inside_mod("inside-arrow", &part);
+        mod_api::testing::with_mods(mods, || {
+            crate::game::native_entity_refs::tests::with_game(|game| {
+                let _ = horizon_client::block_contact::HOOKS.set(BLOCK_CONTACT_HOOKS);
+                let stone = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:stone")
+                    .unwrap();
+                game.world.chunks.insert(
+                    (0, 0),
+                    std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+                );
+                for x in [1, 2] {
+                    game.world.set(x, 100, 0, stone).unwrap();
+                }
+                let flying = arrow_shot(9, (0.5, 100.0, 0.5), (2.5, 100.0, 0.5));
+                let before = flying.velocity.x;
+                let mut flying = flying;
+                horizon_client::block_contact::in_level(Some("minecraft:overworld"), || {
+                    game.sweep_projectile_inside(&mut flying);
+                });
+                assert_eq!(
+                    *part.contacts.lock().unwrap(),
+                    vec![[1, 100, 0], [2, 100, 0]],
+                    "the flying arrow meets its blocks in walk order, once each"
+                );
+                assert!(
+                    (flying.velocity.x - before - 1.0).abs() < 1e-9,
+                    "the part's pushes applied to the arrow"
+                );
+                part.contacts.lock().unwrap().clear();
+                // A stuck arrow: no move, the block it sits in still tells the part.
+                let mut stuck = arrow_shot(10, (1.5, 100.0, 0.5), (1.5, 100.0, 0.5));
+                stuck.velocity = horizon_core::geometry::Vec3::ZERO;
+                horizon_client::block_contact::in_level(Some("minecraft:overworld"), || {
+                    game.sweep_projectile_inside(&mut stuck);
+                });
+                assert_eq!(
+                    *part.contacts.lock().unwrap(),
+                    vec![[1, 100, 0]],
+                    "the stuck arrow keeps the contact of its block"
+                );
+                assert!(horizon_client::block_contact::take_pending().is_empty());
+            });
+        });
+    }
+
+    /// A panicking part inside the arrow batch: the listener's panic is contained
+    /// in the staged fire, the lifted projectile row returns to the level's list
+    /// exactly once, and the arrow keeps its state.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_panicking_part_leaves_the_arrow_list_whole() {
+        let mut part = InsidePart::default();
+        part.panic_after = Some(0);
+        let mods = install_inside_mod("inside-arrow-panic", &part);
+        mod_api::testing::with_mods(mods, || {
+            crate::game::native_entity_refs::tests::with_game(|game| {
+                let _ = horizon_client::block_contact::HOOKS.set(BLOCK_CONTACT_HOOKS);
+                let stone = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:stone")
+                    .unwrap();
+                game.world.chunks.insert(
+                    (0, 0),
+                    std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+                );
+                for x in [1, 2] {
+                    game.world.set(x, 100, 0, stone).unwrap();
+                }
+                // The arrow joins the level's own list: the batch's lifted row.
+                let shot = arrow_shot(11, (0.5, 100.0, 0.5), (2.5, 100.0, 0.5));
+                let velocity = shot.velocity.x;
+                let id = shot.id;
+                game.creatures.projectiles.push(shot);
+                let rows = game.creatures.projectiles.len();
+                let mut projectiles = game.creatures.projectiles.lift();
+                horizon_client::block_contact::in_level(Some("minecraft:overworld"), || {
+                    projectiles.update(0, |p| game.sweep_projectile_inside(p));
+                });
+                game.creatures.projectiles.restore(
+                    projectiles,
+                    horizon_client::join_seq::RestoreOrder::SpawnsFirst,
+                );
+                assert_eq!(
+                    part.contacts.lock().unwrap().len(),
+                    2,
+                    "both contacts reached the part; each panic was contained"
+                );
+                assert_eq!(
+                    game.creatures.projectiles.len(),
+                    rows,
+                    "the lifted row returned, exactly once"
+                );
+                let arrow = game
+                    .creatures
+                    .projectiles
+                    .get(0)
+                    .expect("the arrow is still in the list");
+                assert_eq!(arrow.id, id, "the same arrow, not lost nor duplicated");
+                assert!(
+                    (arrow.velocity.x - velocity).abs() < 1e-9,
+                    "the panicking callback's staged writes never applied"
+                );
+                assert!(horizon_client::block_contact::take_pending().is_empty());
+            });
+        });
+    }
+
+    /// An arrow for the sweep tests: an arrow state, its move recorded.
+    fn arrow_shot(
+        id: u32,
+        from: (f64, f64, f64),
+        to: (f64, f64, f64),
+    ) -> horizon_client::projectiles::Projectile {
+        let mut shot = horizon_client::projectiles::Projectile::new(
+            horizon_client::projectiles::ProjectileKind::Arrow {
+                base_damage: 1.0,
+                critical: false,
+                effect: None,
+            },
+            horizon_core::geometry::Vec3::new(to.0, to.1, to.2),
+            None,
+        );
+        shot.id = id;
+        shot.previous = horizon_core::geometry::Vec3::new(from.0, from.1, from.2);
+        shot
+    }
 }
