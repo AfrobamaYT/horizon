@@ -35,29 +35,16 @@ impl SpriteMask {
         }
         self.frames[frame][y as usize * self.width + x as usize]
     }
-    /// This mask's opaque pixels kept only where `clip`'s are, sampled by position
-    /// so masks of different sizes still line up. The longer animation repeats its
-    /// last frame for the shorter one's.
-    fn clipped(&self, clip: &SpriteMask) -> SpriteMask {
-        let frame = |frames: &Vec<Vec<bool>>, i: usize| frames[i.min(frames.len() - 1)].clone();
-        let frames = (0..self.frames.len().max(clip.frames.len()))
-            .map(|i| {
-                let own = frame(&self.frames, i);
-                let other = frame(&clip.frames, i);
-                (0..self.height)
-                    .flat_map(|y| (0..self.width).map(move |x| (x, y)))
-                    .map(|(x, y)| {
-                        let (cx, cy) = (x * clip.width / self.width, y * clip.height / self.height);
-                        own[y * self.width + x] || other[cy * clip.width + cx]
-                    })
-                    .collect()
-            })
-            .collect();
-        SpriteMask {
-            width: self.width,
-            height: self.height,
-            frames,
+    /// This mask's per-frame transparency, a pixel opaque in any frame opaque in the result
+    /// (`SpriteContents.getUniqueFrames`, which the mask quads union).
+    fn union(&self) -> Vec<bool> {
+        let mut opaque = vec![false; self.width * self.height];
+        for frame in &self.frames {
+            for (o, transparent) in opaque.iter_mut().zip(frame) {
+                *o |= !*transparent;
+            }
         }
+        opaque
     }
 }
 /// The sprites of the item and block atlases.
@@ -140,7 +127,7 @@ pub fn bake_item_model(
 /// The flat item model a layer sprite hangs off (`ItemModelGenerator`'s parent).
 const ITEM_GENERATED_MODEL: &str = "minecraft:item/generated";
 
-/// One `item/generated` layer of `sprite`, drawn through `mask`'s opaque pixels when
+/// One `item/generated` layer of `sprite`, its shape the opaque pixels of `mask` when
 /// set: `ItemModelGenerator.bakeExtrudedSprite` for a base layer, NeoForge's
 /// `UnbakedElementsHelper.bakeItemMaskQuads` for a fluid or cover layer.
 pub fn bake_sprite_layer(
@@ -174,13 +161,13 @@ pub fn bake_resolved(
     bake_layers(model, sprites, None)
 }
 
-/// `mask` clips the first layer's extrusion, as NeoForge's mask quads do.
+/// `mask` gives the first layer its shape (NeoForge's mask quads): its own sprite is
+/// drawn, and the mask sprite's opaque pixels decide where.
 fn bake_layers(
     model: &ResolvedCuboidModel,
     sprites: &dyn SpriteLookup,
     mask: Option<&str>,
 ) -> Result<BakedItemModel> {
-    let clip = mask.and_then(|sprite| sprites.mask(sprite));
     let known = |sprite: &str| sprite == MISSING_SPRITE || sprites.mask(sprite).is_some();
     let material = |m: &Material| {
         if known(&m.sprite) {
@@ -202,18 +189,22 @@ fn bake_layers(
                 break;
             };
             let m = material(m);
-            let mut layer_mask = if m.sprite == MISSING_SPRITE {
+            if layer == 0
+                && let Some(mask) = mask
+            {
+                let shape = sprites
+                    .mask(mask)
+                    .unwrap_or_else(|| SpriteMask::opaque(16, 16));
+                quads.extend(extrude_masked(&shape, &m, layer as i32)?);
+                continue;
+            }
+            let layer_mask = if m.sprite == MISSING_SPRITE {
                 SpriteMask::opaque(16, 16)
             } else {
                 sprites
                     .mask(&m.sprite)
                     .unwrap_or_else(|| SpriteMask::opaque(16, 16))
             };
-            if layer == 0
-                && let Some(clip) = &clip
-            {
-                layer_mask = layer_mask.clipped(clip);
-            }
             quads.extend(extrude_layer(&layer_mask, &m, layer as i32)?);
         }
         quads
@@ -308,6 +299,21 @@ fn extrude_layer(mask: &SpriteMask, material: &Material, layer: i32) -> Result<V
             layer,
         )?,
     ];
+    quads.extend(side_faces(mask, material, layer)?);
+    Ok(quads)
+}
+
+/// `UnbakedElementsHelper.bakeItemMaskQuads`: one thin face per edge of `shape`'s
+/// opaque pixels (which `ItemModelGenerator.bakeSideFaces` emits first), then the
+/// front and back faces over merged runs of those pixels, not over the whole sprite.
+fn extrude_masked(shape: &SpriteMask, material: &Material, layer: i32) -> Result<Vec<ModelQuad>> {
+    let mut quads = side_faces(shape, material, layer)?;
+    quads.extend(mask_rect_faces(shape, material, layer)?);
+    Ok(quads)
+}
+
+/// One thin face per opaque/transparent edge, over every animation frame.
+fn side_faces(mask: &SpriteMask, material: &Material, layer: i32) -> Result<Vec<ModelQuad>> {
     let (width, height) = (mask.width as i64, mask.height as i64);
     let mut faces = BTreeSet::new();
     for frame in 0..mask.frames.len() {
@@ -327,6 +333,7 @@ fn extrude_layer(mask: &SpriteMask, material: &Material, layer: i32) -> Result<V
     }
     let x_scale = 16.0 / mask.width as f32;
     let y_scale = 16.0 / mask.height as f32;
+    let mut quads = Vec::new();
     for (y, x, side) in faces {
         let (x, y) = (x as f32, y as f32);
         let u0 = x + 0.1;
@@ -375,6 +382,69 @@ fn extrude_layer(mask: &SpriteMask, material: &Material, layer: i32) -> Result<V
     Ok(quads)
 }
 
+/// The front and back faces of a mask's opaque pixels: each row's run of still-unused
+/// pixels, grown down while every column stays opaque, as one rectangle (NeoForge's
+/// greedy merge). A run ending at the row's last pixel is emitted too, where NeoForge's
+/// loop only closes one on a transparent pixel.
+fn mask_rect_faces(shape: &SpriteMask, material: &Material, layer: i32) -> Result<Vec<ModelQuad>> {
+    let (width, height) = (shape.width, shape.height);
+    let mut opaque = shape.union();
+    let mut quads = Vec::new();
+    for y in 0..height {
+        let mut x = 0;
+        while x < width {
+            if !opaque[y * width + x] {
+                x += 1;
+                continue;
+            }
+            let start = x;
+            while x < width && opaque[y * width + x] {
+                x += 1;
+            }
+            let mut bottom = y + 1;
+            while bottom < height && (start..x).all(|cx| opaque[bottom * width + cx]) {
+                bottom += 1;
+            }
+            for cy in y..bottom {
+                for cx in start..x {
+                    opaque[cy * width + cx] = false;
+                }
+            }
+            for direction in [Direction::South, Direction::North] {
+                quads.push(mask_rect_face(
+                    shape,
+                    material,
+                    layer,
+                    (start, x, y, bottom),
+                    direction,
+                )?);
+            }
+        }
+    }
+    Ok(quads)
+}
+
+/// One front or back face over the sprite's pixels `x0..x1` by `y0..y1`, its UVs the
+/// same sub-rectangle (`FaceBakery.defaultFaceUV`).
+fn mask_rect_face(
+    shape: &SpriteMask,
+    material: &Material,
+    layer: i32,
+    (x0, x1, y0, y1): (usize, usize, usize, usize),
+    direction: Direction,
+) -> Result<ModelQuad> {
+    let (width, height) = (shape.width as f32, shape.height as f32);
+    let (u0, u1) = (16.0 * x0 as f32 / width, 16.0 * x1 as f32 / width);
+    let (v0, v1) = (16.0 * y0 as f32 / height, 16.0 * y1 as f32 / height);
+    let from = [u0, 16.0 - v1, 7.5];
+    let to = [u1, 16.0 - v0, 8.5];
+    let uv = match direction {
+        Direction::South => [u0, v0, u1, v1],
+        _ => [u1, v0, u0, v1],
+    };
+    bake_flat_face(from, to, uv, direction, material.clone(), layer)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -382,7 +452,8 @@ mod tests {
     use std::collections::BTreeMap;
 
     /// The stick: 2x2 with one transparent pixel. `item/cit`: one opaque pixel, so a bake
-    /// shows whose mask it extruded. A fluid sprite and its mask overlap in one pixel.
+    /// shows whose mask it extruded. A fluid sprite and its masks: one pixel, an L, a
+    /// fully opaque square and a fully transparent one.
     struct Sprites;
     impl SpriteLookup for Sprites {
         fn mask(&self, sprite: &str) -> Option<SpriteMask> {
@@ -402,10 +473,22 @@ mod tests {
                     height: 2,
                     frames: vec![vec![false, false, false, false]],
                 }),
+                // One opaque pixel: the bottom-right.
                 "mod:item/mask" => Some(SpriteMask {
                     width: 2,
                     height: 2,
                     frames: vec![vec![true, true, true, false]],
+                }),
+                // An L of three opaque pixels, the bottom-right one transparent.
+                "mod:item/l" => Some(SpriteMask {
+                    width: 2,
+                    height: 2,
+                    frames: vec![vec![false, false, false, true]],
+                }),
+                "mod:item/clear" => Some(SpriteMask {
+                    width: 2,
+                    height: 2,
+                    frames: vec![vec![true, true, true, true]],
                 }),
                 _ => None,
             }
@@ -467,6 +550,46 @@ mod tests {
         assert_eq!(baked.particle.sprite, "horizon_cit:item/cit");
         assert_eq!(baked.transforms[5].as_ref().unwrap().scale, [2.0; 3]);
     }
+    /// A quad's model-space bounds (its `from`..`to` after the /16 bake).
+    fn extent(quad: &ModelQuad) -> ([f32; 3], [f32; 3]) {
+        let mut min = [f32::INFINITY; 3];
+        let mut max = [f32::NEG_INFINITY; 3];
+        for corner in &quad.positions {
+            for (i, value) in corner.iter().enumerate() {
+                min[i] = min[i].min(*value);
+                max[i] = max[i].max(*value);
+            }
+        }
+        (min, max)
+    }
+    /// A quad's texture coordinates in 0..16 units, sorted so corner order is not pinned.
+    fn uv_corners(quad: &ModelQuad) -> Vec<[i32; 2]> {
+        let mut corners: Vec<[i32; 2]> = quad
+            .uv
+            .iter()
+            .map(|uv| [(uv[0] * 16.0).round() as i32, (uv[1] * 16.0).round() as i32])
+            .collect();
+        corners.sort();
+        corners
+    }
+    fn assert_face(
+        quad: &ModelQuad,
+        direction: Direction,
+        from: [f32; 3],
+        to: [f32; 3],
+        uv: [[i32; 2]; 4],
+    ) {
+        assert_eq!(quad.facing, direction);
+        let (min, max) = extent(quad);
+        for i in 0..3 {
+            assert!((min[i] - from[i]).abs() < 1e-6, "{min:?} != {from:?}");
+            assert!((max[i] - to[i]).abs() < 1e-6, "{max:?} != {to:?}");
+        }
+        let mut expected = uv.to_vec();
+        expected.sort();
+        assert_eq!(uv_corners(quad), expected);
+    }
+
     #[test]
     fn a_sprite_layer_is_extruded_through_its_mask() {
         let library = library();
@@ -474,19 +597,126 @@ mod tests {
         let fluid = bake_sprite_layer(&library, &Sprites, "mod:item/fluid", None).unwrap();
         assert_eq!(fluid.quads.len(), 10);
         assert_eq!(fluid.particle.sprite, "mod:item/fluid");
-        // The mask keeps the bottom-right pixel: front, back and its 4 edges.
-        let clipped =
+        // The mask keeps the bottom-right pixel: its 4 edges, and front and back over
+        // that pixel only (NeoForge's mask quads), both drawn with the fluid sprite.
+        let masked =
             bake_sprite_layer(&library, &Sprites, "mod:item/fluid", Some("mod:item/mask")).unwrap();
-        assert_eq!(clipped.quads.len(), 6);
-        // The mask clips the shape; the sprite is still what is drawn.
+        assert_eq!(masked.quads.len(), 6);
+        let faces: Vec<&ModelQuad> = masked
+            .quads
+            .iter()
+            .filter(|q| matches!(q.facing, Direction::South | Direction::North))
+            .collect();
+        assert_eq!(faces.len(), 2);
+        assert_face(
+            faces[0],
+            Direction::South,
+            [0.5, 0.0, 8.5 / 16.0],
+            [1.0, 0.5, 8.5 / 16.0],
+            [[8, 8], [8, 16], [16, 16], [16, 8]],
+        );
+        assert_face(
+            faces[1],
+            Direction::North,
+            [0.5, 0.0, 7.5 / 16.0],
+            [1.0, 0.5, 7.5 / 16.0],
+            [[8, 8], [8, 16], [16, 16], [16, 8]],
+        );
+        // The mask is the shape; the sprite is still what is drawn.
         assert!(
-            clipped
+            masked
                 .quads
                 .iter()
                 .all(|q| q.material.sprite == "mod:item/fluid")
         );
         // A sprite layer takes `item/generated`'s displays, as NeoForge reads its
         // top transforms.
-        assert_eq!(clipped.transforms[5].as_ref().unwrap().scale, [2.0; 3]);
+        assert_eq!(masked.transforms[5].as_ref().unwrap().scale, [2.0; 3]);
+    }
+
+    #[test]
+    fn a_transparent_mask_bakes_no_faces() {
+        let library = library();
+        let masked =
+            bake_sprite_layer(&library, &Sprites, "mod:item/fluid", Some("mod:item/clear"))
+                .unwrap();
+        assert!(masked.quads.is_empty());
+    }
+
+    #[test]
+    fn a_partial_mask_merges_its_runs_into_one_face_pair_each() {
+        let library = library();
+        let masked =
+            bake_sprite_layer(&library, &Sprites, "mod:item/fluid", Some("mod:item/l")).unwrap();
+        // Three opaque pixels, all on the sprite's border: 2 + 3 + 3 edges, then the
+        // greedy merge's two rectangles (top row's two pixels, then the lower-left one),
+        // each a front and a back face.
+        assert_eq!(masked.quads.len(), 8 + 4);
+        let faces: Vec<&ModelQuad> = masked
+            .quads
+            .iter()
+            .filter(|q| matches!(q.facing, Direction::South | Direction::North))
+            .collect();
+        assert_eq!(faces.len(), 4);
+        // The top row's both columns: x 0..16, y 8..16 of a 16-high sprite.
+        assert_face(
+            faces[0],
+            Direction::South,
+            [0.0, 0.5, 8.5 / 16.0],
+            [1.0, 1.0, 8.5 / 16.0],
+            [[0, 0], [0, 8], [16, 8], [16, 0]],
+        );
+        assert_face(
+            faces[1],
+            Direction::North,
+            [0.0, 0.5, 7.5 / 16.0],
+            [1.0, 1.0, 7.5 / 16.0],
+            [[0, 0], [0, 8], [16, 8], [16, 0]],
+        );
+        // The lower-left pixel: x 0..8, y 0..8.
+        assert_face(
+            faces[2],
+            Direction::South,
+            [0.0, 0.0, 8.5 / 16.0],
+            [0.5, 0.5, 8.5 / 16.0],
+            [[0, 8], [0, 16], [8, 16], [8, 8]],
+        );
+        assert_face(
+            faces[3],
+            Direction::North,
+            [0.0, 0.0, 7.5 / 16.0],
+            [0.5, 0.5, 7.5 / 16.0],
+            [[0, 8], [0, 16], [8, 16], [8, 8]],
+        );
+    }
+
+    #[test]
+    fn a_full_mask_keeps_one_front_and_back() {
+        let library = library();
+        // The fluid sprite's own four opaque pixels mask the same way it draws.
+        let masked =
+            bake_sprite_layer(&library, &Sprites, "mod:item/fluid", Some("mod:item/fluid"))
+                .unwrap();
+        assert_eq!(masked.quads.len(), 10);
+        let faces: Vec<&ModelQuad> = masked
+            .quads
+            .iter()
+            .filter(|q| matches!(q.facing, Direction::South | Direction::North))
+            .collect();
+        assert_eq!(faces.len(), 2);
+        assert_face(
+            faces[0],
+            Direction::South,
+            [0.0, 0.0, 8.5 / 16.0],
+            [1.0, 1.0, 8.5 / 16.0],
+            [[0, 0], [0, 16], [16, 16], [16, 0]],
+        );
+        assert_face(
+            faces[1],
+            Direction::North,
+            [0.0, 0.0, 7.5 / 16.0],
+            [1.0, 1.0, 7.5 / 16.0],
+            [[0, 0], [0, 16], [16, 16], [16, 0]],
+        );
     }
 }
