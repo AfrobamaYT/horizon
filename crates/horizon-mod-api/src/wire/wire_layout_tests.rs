@@ -594,7 +594,8 @@ fn particle_record_has_declared_field_bytes() {
 #[test]
 fn saved_attachment_batch_fields_keep_scoped_identity_and_nbt() {
     use horizon_mod_runtime::attachments::{
-        AttachmentBatch as Batch, AttachmentEntry, index::AttachmentOwner,
+        AttachmentBatch as Batch, AttachmentEntry,
+        index::{AttachmentOwner, AttachmentSnapshot},
     };
     let holder = AttachmentHolder::Entity(EntityRef::new(WorldEpoch::new(43), 29));
     let mut saved = Compound::new();
@@ -602,7 +603,9 @@ fn saved_attachment_batch_fields_keep_scoped_identity_and_nbt() {
     let row = AttachmentOwner::from_parts(holder, 71).into_row(std::sync::Arc::new(
         AttachmentEntry::from_saved(saved.clone()),
     ));
-    let batch = AttachmentBatch::from(Batch::new(std::sync::Arc::new(vec![row])));
+    let batch = AttachmentBatch::from(Batch::new(std::sync::Arc::new(
+        AttachmentSnapshot::from_rows(vec![row]),
+    )));
     let (rows,): (Vec<(AttachmentWriteToken, Vec<u8>)>,) = decode(batch);
     assert_eq!(rows.len(), 1);
     let (token, bytes) = rows.into_iter().next().unwrap();
@@ -846,7 +849,13 @@ fn every_game_mode_pose_animation_and_connection_case_has_declared_tag_type() {
         (ArmPose::Spear, 9),
         (ArmPose::Brush, 10),
     ] {
-        fields(value, (tag,));
+        let mut output = Writer::new();
+        output.put(&value);
+        assert_eq!(output.bytes(), tag.to_le_bytes());
+        assert_eq!(
+            Reader::new(output.bytes()).take::<ArmPose>().unwrap(),
+            value
+        );
     }
     for (value, tag) in [
         (UseAnimation::None, 0u32),

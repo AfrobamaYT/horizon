@@ -1,5 +1,5 @@
 use super::*;
-use horizon_mod_package::manifest::inject::mod_points::Point;
+use point_shape::catalog::Point;
 use quote::ToTokens;
 
 /// A mod crate `chemlib` in a fresh folder, with `lib.rs` and `tanks.rs`.

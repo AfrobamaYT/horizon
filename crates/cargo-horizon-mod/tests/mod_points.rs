@@ -1,8 +1,9 @@
 //! Mod points (#2339) end to end on native: the chemicals fixture library is staged by the build
 //! tool's pass, an addon's api and internals listeners are routed and registered with the same
 //! emitters the launcher's generated `main` uses, and a real binary runs the patched library.
-use horizon_mod_package::manifest::inject::mod_points::{self, Catalog, Library};
+use horizon_mod_package::manifest::inject::mod_points::{self, Library};
 use horizon_mod_package::manifest::inject::{Access, Inject, Kind};
+use point_shape::catalog::Catalog;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -56,13 +57,14 @@ fn inject(id: &str, at: &str, kind: Kind, access: Access, with: &str, hash: &str
         with: with.into(),
         access,
         priority: 0,
-        hash: hash.into(),
+        hash: Some(hash.into()),
         call: None,
         nth: None,
         ctx: None,
         local: None,
         local_type: None,
         position: None,
+        expr: None,
     }
 }
 
@@ -159,13 +161,16 @@ fn an_addon_patches_a_library_through_its_mod_points() {
     let listed =
         horizon_mod_api_gen::points::mod_crate::mod_points(&library, &Default::default()).unwrap();
     assert_eq!(
-        pinned.inject[0].hash,
-        listed
-            .points
-            .iter()
-            .find(|p| p.target == "chemlib::transfer")
-            .unwrap()
-            .hash
+        pinned.inject[0].hash.as_deref(),
+        Some(
+            listed
+                .points
+                .iter()
+                .find(|p| p.target == "chemlib::transfer")
+                .unwrap()
+                .hash
+                .as_str()
+        )
     );
     let opted = tool(&[
         "inject",

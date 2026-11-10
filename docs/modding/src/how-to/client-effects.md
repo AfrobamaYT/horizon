@@ -2,6 +2,13 @@
 
 These effects change what a player hears, not the server's world. They do nothing until a mod asks for them. See the [API reference](../reference/api.md) for the generated signatures.
 
+## Reading the tooltip preference
+
+Read `ClientHost::gui_options().advanced_item_tooltips` for the current
+`advancedItemTooltips` preference (F3+H). The snapshot reflects the current client
+setting on native and wasm; request a new snapshot after a toggle. This is separate
+from the advanced flag supplied to an individual tooltip request.
+
 ## Muffling sounds
 
 `ClientHost::muffle_sounds(amount, lowpass, ticks, exempt)` temporarily muffles the sound output, for example to accompany ringing ears after a nearby blast:

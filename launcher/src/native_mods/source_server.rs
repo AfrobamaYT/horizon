@@ -96,11 +96,11 @@ fn run(proof: Proof, private: bool) {
     }
     let catalog_dir = scratch.join("catalog");
     fs::create_dir(&catalog_dir).unwrap();
-    horizon_mod_api_gen::staging::stage(
+    horizon_platform::mod_build::api_gen::staging::stage(
         &source,
         &catalog_dir.join("points.json"),
         &catalog_dir.join("internals.json"),
-        horizon_mod_api_gen::staging::Mode::Build,
+        horizon_platform::mod_build::api_gen::staging::Mode::Build,
     )
     .unwrap();
     let catalog = internals::Catalog::read(&catalog_dir).unwrap();
@@ -110,15 +110,16 @@ fn run(proof: Proof, private: bool) {
         let mut tar = Command::new("tar");
         tar.arg("-xf").arg(&archive).arg("-C").arg(&discovery);
         checked(tar);
-        let entries = horizon_mod_api_gen::internals_view::catalog(
+        let entries = horizon_platform::mod_build::api_gen::internals_view::catalog(
             &fs::read_to_string(catalog_dir.join("internals.json")).unwrap(),
         )
         .unwrap();
         Some(
-            horizon_mod_api_gen::sites::source::stage(
+            horizon_platform::mod_build::api_gen::sites::source::stage(
                 &discovery,
                 &entries,
-                &[horizon_mod_api_gen::sites::Declaration {
+                &[horizon_platform::mod_build::api_gen::sites::Declaration {
+                    expression: None,
                     local: None,
                     target: "horizon_client::game::Game::next_autosave_interval".into(),
                     selector: "horizon_client::game::autosave_interval".into(),
@@ -191,22 +192,28 @@ fn run(proof: Proof, private: bool) {
         .unwrap();
     }
     for entry in &mut bundle.manifest.internals {
-        entry.hash = catalog
-            .internals
-            .iter()
-            .find(|item| internals::plain_path(&item.path) == internals::plain_path(&entry.path))
-            .unwrap()
-            .hash
-            .clone();
+        entry.hash = Some(
+            catalog
+                .internals
+                .iter()
+                .find(|item| {
+                    internals::plain_path(&item.path) == internals::plain_path(&entry.path)
+                })
+                .unwrap()
+                .hash
+                .clone(),
+        );
     }
     for entry in &mut bundle.manifest.inject {
-        entry.hash = catalog
-            .internals
-            .iter()
-            .find(|item| internals::plain_path(&item.path) == internals::plain_path(&entry.at))
-            .unwrap()
-            .hash
-            .clone();
+        entry.hash = Some(
+            catalog
+                .internals
+                .iter()
+                .find(|item| internals::plain_path(&item.path) == internals::plain_path(&entry.at))
+                .unwrap()
+                .hash
+                .clone(),
+        );
         if let Some(call) = &entry.call {
             let site = if let Some(site) = &discovered_call {
                 sites::Site::from(site.clone())
@@ -250,13 +257,13 @@ fn run(proof: Proof, private: bool) {
     );
     super::source::stage(&source, &catalog_dir, std::slice::from_ref(&bundle)).unwrap();
     assert_eq!(
-        horizon_mod_api_gen::points::source::read(&source)
+        horizon_platform::mod_build::api_gen::points::source::read(&source)
             .unwrap()
             .len(),
         if private && !calls { 2 } else { 0 }
     );
     assert_eq!(
-        horizon_mod_api_gen::sites::source::read(&source)
+        horizon_platform::mod_build::api_gen::sites::source::read(&source)
             .unwrap()
             .len(),
         usize::from(private && calls)

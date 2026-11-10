@@ -1257,7 +1257,7 @@ impl Game<'_> {
         m: &Mob,
         stacks: [Option<&horizon_client::items::ItemStack>; 2],
     ) -> [Option<horizon_core::arm_pose::ArmPose>; 2] {
-        use super::api_values::TryIntoApi;
+        use super::api_values::{TryIntoApi, TryIntoEngine};
         use horizon_client::mobs::anim::humanoid_arm_poses;
         let stacks =
             stacks.map(|stack| stack.filter(|s| s.count > 0 && &*s.item != "minecraft:air"));
@@ -1282,8 +1282,8 @@ impl Game<'_> {
             }),
             ticks_using_item: m.extra.using_item,
             use_animation: m.extra.use_animation,
-            main_arm_pose,
-            off_arm_pose,
+            main_arm_pose: main_arm_pose.try_into_api().unwrap(),
+            off_arm_pose: off_arm_pose.try_into_api().unwrap(),
         };
         for ((pose, stack), hand) in poses
             .iter_mut()
@@ -1295,10 +1295,13 @@ impl Game<'_> {
             };
             let mut answer = None;
             self.native_get_arm_pose(entity_id, hand, stack, &humanoid, &mut answer);
-            if answer.is_some() {
-                *pose = answer;
+            if let Some(answer) = answer
+                && let Ok(answer) = answer.try_into_engine(&())
+            {
+                *pose = Some(answer);
             }
         }
+        self.transform_selected_arm_poses(m, &mut poses, humanoid);
         poses
     }
     /// The entity id the local player has on its server: the one it was

@@ -1145,24 +1145,22 @@ impl Game<'_> {
         resists: Option<([i32; 3], f32)>,
         source: ExplosionSource,
     ) -> Result<()> {
+        let start = ExplosionStart::from(mod_api::__private::built::ExplosionStart {
+            dimension: self.dim.id(),
+            center,
+            radius,
+            fire,
+            interaction: match interaction {
+                BlockInteraction::Keep => mod_api::BlockInteraction::Keep,
+                BlockInteraction::Destroy => mod_api::BlockInteraction::Destroy,
+                BlockInteraction::DestroyWithDecay => mod_api::BlockInteraction::DestroyWithDecay,
+            },
+            damage_type,
+            source: self.combat.explosion_source,
+            // `getIndirectSourceEntity`, as the blast's attacker is.
+            owner: self.blast_attacker().map(|(id, _)| id),
+        });
         if self.serving.is_some() || self.options.dedicated.is_some() {
-            let start = ExplosionStart::from(mod_api::__private::built::ExplosionStart {
-                dimension: self.dim.id(),
-                center,
-                radius,
-                fire,
-                interaction: match interaction {
-                    BlockInteraction::Keep => mod_api::BlockInteraction::Keep,
-                    BlockInteraction::Destroy => mod_api::BlockInteraction::Destroy,
-                    BlockInteraction::DestroyWithDecay => {
-                        mod_api::BlockInteraction::DestroyWithDecay
-                    }
-                },
-                damage_type,
-                source: self.combat.explosion_source,
-                // `getIndirectSourceEntity`, as the blast's attacker is.
-                owner: self.blast_attacker().map(|(id, _)| id),
-            });
             if self.explosion_start_cancelled(&start) {
                 return Ok(());
             }
@@ -1196,7 +1194,7 @@ impl Game<'_> {
             }
             let mut drops = ExplosionDrops::default();
             for &pos in &targets {
-                self.explosion_hit_block(pos, radius, interaction, &mut drops)?;
+                self.explosion_hit_block(pos, radius, interaction, &start, &mut drops)?;
             }
             self.spawn_explosion_drops(drops);
         }
@@ -1270,6 +1268,7 @@ impl Game<'_> {
         pos: [i32; 3],
         radius: f32,
         interaction: BlockInteraction,
+        explosion: &ExplosionStart<'_>,
         dropped: &mut ExplosionDrops,
     ) -> Result<()> {
         let state = self.world.block(pos[0], pos[1], pos[2]);
@@ -1368,6 +1367,7 @@ impl Game<'_> {
             }
         }
         self.pending.clear(pos);
+        self.notify_block_exploded(pos, state, explosion);
         self.level_set(pos, self.world.air)?;
         // BeehiveBlock.onExplosionHit: the bees about turn on the player.
         if is_hive {
@@ -1709,8 +1709,23 @@ mod tests {
                 let mut drops = ExplosionDrops::default();
                 for pos in [[1, 64, 1], [2, 64, 1]] {
                     game.world.set(pos[0], pos[1], pos[2], dirt).unwrap();
-                    game.explosion_hit_block(pos, 4.0, BlockInteraction::Destroy, &mut drops)
-                        .unwrap();
+                    game.explosion_hit_block(
+                        pos,
+                        4.0,
+                        BlockInteraction::Destroy,
+                        &ExplosionStart::from(mod_api::__private::built::ExplosionStart {
+                            dimension: "minecraft:overworld",
+                            center: [0.0; 3],
+                            radius: 4.0,
+                            fire: false,
+                            interaction: mod_api::BlockInteraction::Destroy,
+                            damage_type: "minecraft:explosion",
+                            source: None,
+                            owner: None,
+                        }),
+                        &mut drops,
+                    )
+                    .unwrap();
                 }
                 game.spawn_explosion_drops(drops);
                 game.world.random.next_int()
@@ -2281,3 +2296,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "explosion/explosion_part_tests.rs"]
+mod explosion_part_tests;

@@ -441,6 +441,22 @@ impl Game<'_> {
         }
         Ok(())
     }
+    /// Whether the player's tool harvests the block `state` at `pos`, once vanilla's rule
+    /// answered `harvest`: the block's parts (`can_harvest_block`, NeoForge's
+    /// `IBlockExtension.canHarvestBlock`) answer first, then the global `player_harvest_check`
+    /// (`PlayerEvent.HarvestCheck`) hears the result.
+    pub(in crate::game) fn mod_harvest_check(
+        &mut self,
+        pos: [i32; 3],
+        state: horizon_world::registry::BlockStateId,
+        harvest: &mut bool,
+    ) {
+        let player = self.own_entity_id() as u32;
+        self.native_can_harvest_block(player, pos, state, harvest);
+        if mod_api::__private::listened(mod_api::HookId::PlayerHarvestCheck) {
+            self.native_player_harvest_check(player, pos, state.0, harvest);
+        }
+    }
     /// `BlockBehaviour.getDestroyProgress` with `Player.getDestroySpeed`, whose
     /// end asks the mods' `native_player_break_speed`. Every dig's progress comes from
     /// here: single player's, a host's for each guest, a remote client's own.
@@ -453,14 +469,7 @@ impl Game<'_> {
         let mut harvest =
             !facts.requires_tool || self.items().correct_for_drops(self.held(), &facts.name);
         let hardness = facts.hardness;
-        if mod_api::__private::listened(mod_api::HookId::PlayerHarvestCheck) {
-            self.native_player_harvest_check(
-                self.own_entity_id() as u32,
-                pos,
-                state.0,
-                &mut harvest,
-            );
-        }
+        self.mod_harvest_check(pos, state, &mut harvest);
         let block_break_speed = self.block_break_speed();
         let facts = self.res.facts().get(state);
         let mut speed = self.items().mining_speed(self.held(), &facts.name);
