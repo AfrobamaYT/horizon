@@ -332,7 +332,7 @@ fn a_missing_table_and_a_stale_handle_are_none() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn component_stack_capacity_is_preserved_on_every_split() {
-    let mut resources = crate::game::Resources::new();
+    let mut resources = None;
     let (mut game, level) = game(&mut resources, "component-split");
     let stacks = game
         .level_roll_loot(level, "test:small", ORIGIN, None, None)
