@@ -52,7 +52,8 @@ impl Game<'_> {
 mod tests {
     use crate::game::api_values::TryIntoApi;
     use crate::game::native_entity_refs::tests::with_game;
-    use horizon_client::{chunk::Chunk, items::ItemStack, who::EventSource};
+    use horizon_client::{chunk::Chunk, items::ItemStack};
+    use horizon_client_core::who::EventSource;
     use mod_api::{EntityRef, GameEventContext};
     use std::sync::Arc;
 
@@ -129,7 +130,7 @@ mod tests {
                 .chunks
                 .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
             let registry = &game.pack.assets.registry;
-            let sensor = registry.default_state("minecraft:sculk_sensor").unwrap();
+            let sensor_state = registry.default_state("minecraft:sculk_sensor").unwrap();
             let stone = registry
                 .default_state("minecraft:stone")
                 .unwrap()
@@ -140,7 +141,7 @@ mod tests {
                 .unwrap()
                 .try_into_api()
                 .unwrap();
-            game.world.set(1, 64, 1, sensor).unwrap();
+            game.world.set(1, 64, 1, sensor_state).unwrap();
             game.sculk_sync_index();
             game.spawn_item(
                 ItemStack::new("minecraft:stone", 1),
