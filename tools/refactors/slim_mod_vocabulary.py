@@ -16,6 +16,7 @@ MOVES = (
     ("profiler/firefox.rs", "profiler/firefox.rs"),
     ("content/crash.rs", "content/crash.rs"),
     ("wire/wire_resources.rs", "wire/wire_resources.rs"),
+    ("world/phase.rs", "load_state.rs"),
 )
 
 
