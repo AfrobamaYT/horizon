@@ -182,9 +182,9 @@ fn site_routes_validate_freshness_and_execute_every_kind_adapter() {
         super::super::slots::check(&catalog, &manifest).unwrap();
         let registration = super::super::api::main_rs("/* MOD_SLOTS */", &[&manifest], &[], &catalog.sites);
         exercise(&dir, &registration, &site.constructor(), &case);
-        manifest.inject[0].hash = "changed".into();
+        manifest.inject[0].hash = Some("changed".into());
         assert!(matches!(super::super::slots::check(&catalog, &manifest), Err(InjectError::Changed { .. })));
-        manifest.inject[0].hash = "signature".into();
+        manifest.inject[0].hash = Some("signature".into());
         manifest.inject[0].ctx = Some("changed".into());
         assert!(matches!(super::super::slots::check(&catalog, &manifest), Err(InjectError::Lost { .. })));
         manifest.inject[0].ctx = Some("statement".into());
@@ -262,7 +262,7 @@ fn private_wrap_adapters_repeat_suppress_and_condition_the_original() {
         let mut manifest = Manifest::parse(&base).unwrap();
         manifest.inject.push(Inject {
             id: "wrap".into(), at: "game::run".into(), kind, with: "hook".into(),
-            access: Access::Internals, priority: 7, hash: "signature".into(),
+            access: Access::Internals, priority: 7, hash: Some("signature".into()),
             call: Some("game::step".into()), nth: Some(0), ctx: Some("statement".into()),
         });
         catalog.sites.clear();

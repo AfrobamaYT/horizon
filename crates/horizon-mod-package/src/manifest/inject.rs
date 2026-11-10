@@ -21,7 +21,10 @@ pub struct Inject {
     pub access: Access,
     #[serde(default)]
     pub priority: i32,
-    pub hash: String,
+    /// Optional pinning: the function's catalog fingerprint `inject add` writes. Absent, the
+    /// build takes it from the pinned game's catalog, which `[native] horizon` fixes exactly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hash: Option<String>,
     pub call: Option<String>,
     pub nth: Option<usize>,
     pub ctx: Option<String>,
@@ -90,8 +93,18 @@ impl Inject {
             if entry.id.trim().is_empty() || !ids.insert(&entry.id) {
                 return Err(invalid("id", "use a nonempty, unique inject id"));
             }
-            if entry.at.trim().is_empty() || entry.hash.trim().is_empty() {
-                return Err(invalid("at/hash", "run inject add for the pinned game"));
+            if entry.at.trim().is_empty() {
+                return Err(invalid("at", "name the target function's canonical path"));
+            }
+            if entry
+                .hash
+                .as_ref()
+                .is_some_and(|hash| hash.trim().is_empty())
+            {
+                return Err(invalid(
+                    "hash",
+                    "omit it, or run inject add for the pinned game",
+                ));
             }
             let name = entry.with.as_bytes();
             if RESERVED.split_whitespace().any(|word| word == entry.with)
@@ -272,11 +285,12 @@ pub fn route(entry: Entry<'_>, slots: &[Place]) -> Result<Route, InjectError> {
             at: inject.at.clone(),
         });
     };
-    if place.hash != inject.hash {
+    // An absent hash follows the catalog routed against: the pinned game's own.
+    if let Some(old) = inject.hash.as_ref().filter(|hash| **hash != place.hash) {
         return Err(InjectError::Changed {
             id,
             at: inject.at.clone(),
-            old: inject.hash.clone(),
+            old: old.clone(),
             new: place.hash.clone(),
         });
     }
@@ -439,12 +453,12 @@ mod tests {
             Err(InjectError::Lost { .. })
         ));
         i.access = Access::Internals;
-        i.hash = "stale".into();
+        i.hash = Some("stale".into());
         assert!(matches!(
             run(&i, Target::Native, &[p]),
             Err(InjectError::Changed { .. })
         ));
-        i.hash = "signature".into();
+        i.hash = Some("signature".into());
         i.ctx = Some("wrong".into());
         assert!(matches!(
             run(&i, Target::Native, &[place()]),
@@ -557,6 +571,35 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn an_absent_hash_follows_the_catalog_and_a_present_one_is_checked() {
+        let native = format!(
+            "[native]\ngame='26.3'\nhorizon='{0}'\nmixins='{0}'",
+            "a".repeat(40)
+        );
+        let m = parse(&DECL.replace("hash='signature'\n", ""), &native).unwrap();
+        let mut i = m.inject[0].clone();
+        assert_eq!(i.hash, None);
+        let mut p = place();
+        p.hash = "whatever the pinned game says".into();
+        for target in [Target::Native, Target::Wasm] {
+            assert_eq!(
+                run(&i, target, &[p.clone()]),
+                Ok(Route::Slot(SlotKind::Head))
+            );
+            // Still refused where the function is gone.
+            assert!(matches!(
+                run(&i, target, &[]),
+                Err(InjectError::Missing { .. })
+            ));
+        }
+        i.hash = Some("stale".into());
+        assert!(matches!(
+            run(&i, Target::Native, &[p]),
+            Err(InjectError::Changed { old, .. }) if old == "stale"
+        ));
     }
 
     #[test]

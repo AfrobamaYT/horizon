@@ -62,11 +62,7 @@ pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<Route
         .inject
         .iter()
         .filter_map(|entry| {
-            let item = catalog.internals.iter().find(|item| {
-                !item.shape_only
-                    && plain(&item.path) == plain(&entry.at)
-                    && matches!(item.kind.as_str(), "fn" | "method" | "struct")
-            })?;
+            let item = catalog.target(&entry.at)?;
             let point = catalog
                 .points
                 .iter()

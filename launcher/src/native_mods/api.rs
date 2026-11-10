@@ -706,7 +706,7 @@ mod tests {
                 with: format!("listen_{index}"),
                 access: Access::Api,
                 priority: 12,
-                hash: "pin".into(),
+                hash: Some("pin".into()),
                 call: None,
                 nth: None,
                 ctx: None,

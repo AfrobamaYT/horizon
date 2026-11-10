@@ -38,14 +38,14 @@ fn no_slot_suggestions_round_trip_through_the_slot_reader() {
             with: "on_slot".into(),
             access: Access::Api,
             priority: 0,
-            hash: "signature".into(),
+            hash: Some("signature".into()),
             call: is_call.then(|| "test_slots::callee".into()),
             nth: is_call.then_some(2),
             ctx: is_call.then(|| "context-identity".into()),
         };
         let place = Place {
             at: inject.at.clone(),
-            hash: inject.hash.clone(),
+            hash: inject.hash.clone().unwrap(),
             slots: vec![],
             native_only: false,
             calls: vec![CallPlace {

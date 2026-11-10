@@ -33,7 +33,7 @@ fn api_head_without_prebuilt_slot_is_refused() {
         with: "listen".into(),
         access: Access::Api,
         priority: 0,
-        hash: "signature".into(),
+        hash: Some("signature".into()),
         call: None,
         nth: None,
         ctx: None,
@@ -81,7 +81,7 @@ fn every_native_kind_and_access_registers_or_refuses_by_name() {
                 with: "listen".into(),
                 access,
                 priority: 7,
-                hash: "signature".into(),
+                hash: Some("signature".into()),
                 call: call.then(|| "game::step".into()),
                 nth: call.then_some(0),
                 ctx: call.then(|| "context".into()),
@@ -162,7 +162,7 @@ fn an_api_listener_at_a_point_without_an_api_record_is_refused_naming_the_type()
         with: "listen".into(),
         access,
         priority: 0,
-        hash: "signature".into(),
+        hash: Some("signature".into()),
         call: None,
         nth: None,
         ctx: None,
@@ -199,7 +199,7 @@ fn a_replace_at_a_point_whose_return_has_no_api_form_is_refused_naming_it() {
         with: "listen".into(),
         access: Access::Api,
         priority: 0,
-        hash: "signature".into(),
+        hash: Some("signature".into()),
         call: None,
         nth: None,
         ctx: None,
@@ -249,7 +249,7 @@ fn unified_route_checks_freshness_and_selects_native_function_source() {
         with: "listen".into(),
         access: Access::Internals,
         priority: 0,
-        hash: "signature".into(),
+        hash: Some("signature".into()),
         call: Some("game::step".into()),
         nth: Some(0),
         ctx: Some("context".into()),
@@ -259,12 +259,12 @@ fn unified_route_checks_freshness_and_selects_native_function_source() {
         check(&catalog, &manifest),
         Err(InjectError::Invalid { field: "kind", .. })
     ));
-    manifest.inject[0].hash = "stale".into();
+    manifest.inject[0].hash = Some("stale".into());
     assert!(matches!(
         check(&catalog, &manifest),
         Err(InjectError::Changed { .. })
     ));
-    manifest.inject[0].hash = "signature".into();
+    manifest.inject[0].hash = Some("signature".into());
     manifest.inject[0].call = None;
     manifest.inject[0].kind = Kind::Head;
     catalog.points.clear();
@@ -299,7 +299,7 @@ fn unstaged_source_value_before_listed_wrap_if_does_not_panic() {
         with: "listen".into(),
         access: Access::Internals,
         priority: 7,
-        hash: "signature".into(),
+        hash: Some("signature".into()),
         call: Some("game::other".into()),
         nth: Some(0),
         ctx: Some("other-statement".into()),
