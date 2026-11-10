@@ -158,7 +158,7 @@ class UntrustedBuildTests(unittest.TestCase):
         self.assertEqual(self.game.count("Swatinem/rust-cache"), 1)
 
     def test_an_untrusted_build_never_runs_on_the_release_runner(self):
-        runs_on = [line for line in self.game.splitlines() if "runs-on:" in line]
+        runs_on = [line for line in self.game.splitlines() if "runs-on: ${{" in line]
         self.assertEqual(len(runs_on), 2)
         # The nightly's own runner: never the release runner, and never behind pull requests' parity queue.
         nightly_default = "'[\"self-hosted\", \"macOS\", \"horizon-nightly\"]'"

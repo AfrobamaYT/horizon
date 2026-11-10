@@ -7,7 +7,10 @@ import re
 import shutil
 import subprocess
 import tempfile
+import textwrap
 import unittest
+
+from tests.test_ci_runners import jobs, runs_on
 
 ROOT = Path(__file__).resolve().parents[1]
 GAME = ROOT / ".github/workflows/game-build.yml"
@@ -18,6 +21,12 @@ class NightlyRoutingTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "Node evaluates GitHub's JavaScript-style expressions")
     def test_real_matrix_routes_both_trust_levels(self):
         text = GAME.read_text()
+        workflow_jobs = dict(jobs(text))
+        guard = workflow_jobs["runner-configuration"]
+        guard_if = re.search(r"^\s*if:\s*(.*)$", guard, re.M).group(1)
+        self.assertEqual(runs_on(guard), "ubuntu-latest")
+        self.assertIn("needs: runner-configuration", workflow_jobs["exporters"])
+        self.assertIn("needs: [runner-configuration, exporters]", workflow_jobs["build"])
         expressions = re.findall(r"^\s*runs-on:\s*\$\{\{(.*?)\}\}\s*$", text, re.M)
         block = text.split("        include:\n", 1)[1].split("    runs-on:", 1)[0]
         rows = []
@@ -55,6 +64,7 @@ console.log(JSON.stringify(eval(expression)));
             dedicated = "release-mac" if release_runner else ""
             expected_exporter = dedicated if trusted else ("ubuntu-latest" if disabled else ("dyna-large" if configured else default_mac))
             with self.subTest(configured=configured, release_runner=release_runner, disabled=disabled, trusted=trusted):
+                self.assertEqual(evaluate(guard_if, {}, trusted), trusted and not release_runner)
                 self.assertEqual(evaluate(expressions[0], {}, trusted), expected_exporter)
                 expected_bookkeeping = "ubuntu-latest" if disabled else ("dyna-small" if configured else ["self-hosted", "linux", "horizon-light"])
                 self.assertEqual(evaluate(bookkeeping, {}, trusted), expected_bookkeeping)
@@ -67,6 +77,15 @@ console.log(JSON.stringify(eval(expression)));
                         expected = row["os"]
                     with self.subTest(entry=row["name"]):
                         self.assertEqual(evaluate(expressions[1], row, trusted), expected)
+
+    @unittest.skipUnless(shutil.which("bash"), "The runner guard executes in Bash")
+    def test_missing_release_runner_guard_fails_clearly(self):
+        guard = dict(jobs(GAME.read_text()))["runner-configuration"]
+        shell = textwrap.dedent(guard.split("        run: |\n", 1)[1])
+        result = subprocess.run(["bash", "-c", shell], text=True, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("::error::", result.stdout)
+        self.assertIn("MAC_RUNNER", result.stdout)
 
     @unittest.skipUnless(os.name == "posix", "The smoke command runs on Linux and macOS")
     def test_smoke_runs_from_relative_or_absolute_binary_directory(self):

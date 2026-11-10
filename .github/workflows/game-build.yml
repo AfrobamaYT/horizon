@@ -36,7 +36,16 @@ on:
 permissions:
   contents: read
 jobs:
+  runner-configuration:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a dedicated trusted release runner
+        if: inputs.trusted && vars.MAC_RUNNER == ''
+        run: |
+          echo '::error::MAC_RUNNER must name a dedicated release runner before trusted builds can run.'
+          exit 1
   exporters:
+    needs: runner-configuration
     # This runner holds the maintainer's own pinned Minecraft jars. Only our classes leave it. An untrusted build
     # goes to the Mac mini's nightly runner (macOS + horizon-nightly: ludovics-mac-mini-nightly, beside the one that
     # runs pull requests' parity jobs, so a nightly never waits behind their queue), never the release runner
@@ -95,7 +104,7 @@ jobs:
           retention-days: 3
 
   build:
-    needs: exporters
+    needs: [runner-configuration, exporters]
     name: build ${{ matrix.name }}
     # Windows ARM64 and musl are new: a failure never holds the other platforms' release (the signing job
     # needs this job, and a failed entry of it would fail it). The release steps leave the missing
