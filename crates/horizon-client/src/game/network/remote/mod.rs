@@ -1305,24 +1305,6 @@ impl Game<'_> {
         Ok(())
     }
 
-    /// Minecraft.disconnect's `ClientPlayerNetworkEvent.LoggingOut`: on
-    /// leaving a world, and on quitting the game from one. Once per
-    /// connection, whichever way out runs first.
-    pub(super) fn client_logging_out(&mut self) {
-        let Some(remote) = self.remote.as_mut().filter(|r| !r.logged_out) else {
-            return;
-        };
-        remote.logged_out = true;
-        let player = self
-            .player
-            .as_ref()
-            .map(|_| (remote.entity_id, remote.profile));
-        self.native_client_player_logging_out(player.map(|p| p.0), player.map(|p| p.1));
-        self.native_lifecycle.begin_close();
-        self.native_lifecycle_world_closed();
-        self.recipe_ui.server_properties = Default::default();
-    }
-
     /// Prepare a client session and remote state to receive packets from a studio replay.
     pub(super) fn init_remote_for_replay(&mut self) -> Result<()> {
         self.realm_session = false;
@@ -5368,9 +5350,7 @@ impl Game<'_> {
             }
             C::OpenScreen(p) => self.remote_open_screen(p),
             C::MountScreenOpen(p) => self.remote_open_mount(p),
-            C::UpdateRecipes(p) => {
-                self.recipe_ui.server_properties.replace(p);
-            }
+            C::UpdateRecipes(p) => self.remote_recipe_properties(p),
             C::RecipeBookAdd(p) => self.remote_recipe_book_add(p),
             C::RecipeBookRemove(p) => self.remote_recipe_book_remove(p),
             C::RecipeBookSettings(p) => self.remote_recipe_book_settings(p),
