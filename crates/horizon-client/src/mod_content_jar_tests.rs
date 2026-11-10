@@ -526,3 +526,86 @@ fn carver_modifiers_edit_the_biomes_carvers() {
     );
     fs::remove_dir_all(scratch).unwrap();
 }
+
+/// `horizon:modify_biome` sets a biome's single values after the additions and removals; the
+/// sky colour goes to the biome's attribute, the grass colour to `effects`.
+#[test]
+fn modify_biome_sets_climate_and_colours() {
+    let base = biome_base("biome-modifiers-modify");
+    let scratch = base.parent().unwrap().to_owned();
+    let m = zinc_mod(
+        &scratch.join("zinc"),
+        &[
+            (
+                "chill",
+                r##"{"type":"horizon:modify_biome","biomes":"minecraft:plains","temperature":-0.5,"has_precipitation":true,"temperature_modifier":"frozen","effects":{"sky_color":13164799,"grass_color":"#80a0ff"}}"##,
+            ),
+            (
+                "ore",
+                r#"{"type":"neoforge:add_features","biomes":"minecraft:plains","features":"zinc:ore_zinc","step":"underground_ores"}"#,
+            ),
+        ],
+    );
+    let out = scratch.join("out");
+    let warnings = build_fixture(&base, &base.join("jars"), &[m], &out).unwrap();
+    assert!(
+        warnings.iter().all(|w| !w.contains("skipped")),
+        "{warnings:?}"
+    );
+    let after: BTreeMap<String, String> =
+        serde_json::from_slice(&fs::read(out.join("worldgen/biomes.json")).unwrap()).unwrap();
+    let plains: serde_json::Value = serde_json::from_str(&after["minecraft:plains"]).unwrap();
+    assert_eq!(plains["temperature"], serde_json::json!(-0.5));
+    assert_eq!(plains["downfall"], serde_json::json!(0.4));
+    assert_eq!(plains["has_precipitation"], serde_json::json!(true));
+    assert_eq!(plains["temperature_modifier"], "frozen");
+    assert_eq!(
+        plains["attributes"]["minecraft:visual/sky_color"],
+        "#c8e0ff"
+    );
+    assert_eq!(plains["effects"]["grass_color"], "#80a0ff");
+    // The other modifiers still apply, and a biome no modifier names is untouched.
+    assert_eq!(
+        plains["features"][6],
+        serde_json::json!(["minecraft:ore_coal", "zinc:ore_zinc"])
+    );
+    assert_eq!(
+        after["minecraft:desert"],
+        r#"{"temperature":2.0,"downfall":0.0,"features":[["minecraft:fossil"]]}"#
+    );
+    fs::remove_dir_all(scratch).unwrap();
+}
+
+/// An invalid value skips the `horizon:modify_biome` modifier with a warning.
+#[test]
+fn modify_biome_with_an_invalid_value_is_skipped_with_a_warning() {
+    let base = biome_base("biome-modifiers-modify-bad");
+    let scratch = base.parent().unwrap().to_owned();
+    let m = zinc_mod(
+        &scratch.join("zinc"),
+        &[
+            (
+                "colour",
+                r#"{"type":"horizon:modify_biome","biomes":"minecraft:plains","effects":{"sky_color":16777216}}"#,
+            ),
+            (
+                "modifier",
+                r#"{"type":"horizon:modify_biome","biomes":"minecraft:plains","temperature_modifier":"warm"}"#,
+            ),
+        ],
+    );
+    let out = scratch.join("out");
+    let warnings = build_fixture(&base, &base.join("jars"), &[m], &out).unwrap();
+    assert_eq!(
+        warnings.iter().filter(|w| w.contains("skipped")).count(),
+        2,
+        "{warnings:?}"
+    );
+    assert!(warnings.iter().any(|w| w.contains("effects.sky_color")));
+    assert!(warnings.iter().any(|w| w.contains("temperature_modifier")));
+    assert_eq!(
+        fs::read(out.join("worldgen/biomes.json")).unwrap(),
+        fs::read(base.join("worldgen/biomes.json")).unwrap()
+    );
+    fs::remove_dir_all(scratch).unwrap();
+}
