@@ -884,7 +884,8 @@ mod tests {
                 .contains("expr")
         );
         let mut api = m.inject[0].clone();
-        (api.at, api.hash, api.access) = ("game::tick".into(), "signature".into(), Access::Api);
+        (api.at, api.hash, api.access) =
+            ("game::tick".into(), Some("signature".into()), Access::Api);
         assert!(run(&api, Target::Native, &[place()]).unwrap_err().to_string().contains(
             "expression requires native internals source rebuilding; use internals, or request a hook"
         ));
@@ -1023,11 +1024,9 @@ mod tests {
         for kind in [
             Kind::Head,
             Kind::Return,
-            Kind::ModifyArg,
             Kind::Replace,
             Kind::BeforeCall,
             Kind::AfterCall,
-            Kind::ModifyCallArg,
             Kind::ModifyValue,
             Kind::WrapCall,
             Kind::WrapIf,
@@ -1036,10 +1035,15 @@ mod tests {
             Kind::Expression,
         ] {
             let mut valid = inject(kind);
-            valid.local_type =
-                matches!(kind, Kind::ModifyLocal | Kind::Field).then(|| "u32".into());
+            valid.local_type = matches!(kind, Kind::ModifyLocal | Kind::Field | Kind::Expression)
+                .then(|| "u32".into());
             valid.local = (kind == Kind::ModifyLocal).then(|| "n".into());
             valid.position = (kind == Kind::ModifyLocal).then_some(Position::Before);
+            if kind == Kind::Expression {
+                valid.expr = Some("1u32".into());
+                valid.nth = Some(0);
+                valid.ctx = Some("context".into());
+            }
             Inject::check_all(&[valid.clone()], "sample", true).unwrap();
             for field in ["local", "type", "position"] {
                 let mut invalid = valid.clone();

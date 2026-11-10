@@ -511,7 +511,13 @@ mod tests {
         let manifest = horizon_mod_package::manifest::Manifest::parse(
             r#"
 id = "charged"
+name = "Charged"
 version = "1.0.0"
+api = "0.2"
+[native]
+game = "26.3"
+horizon = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+mixins = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 [[inject]]
 id = "charge"
 at = "game::Game"
