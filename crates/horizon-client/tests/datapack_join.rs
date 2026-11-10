@@ -368,7 +368,17 @@ fn a_reload_snapshot_gives_the_client_generation_two_and_stales_old_handles() {
 
     // What `/reload` does: publish the next generation, then send each joined client its snapshot.
     datapack_net::serve(Some(Arc::new(first.reload(candidate(9)).unwrap())));
-    let data = datapack_net::reload_payload(offline_uuid("Mage")).expect("a snapshot for Mage");
+    let data = datapack_net::reload_payload(
+        host.hub
+            .guests
+            .iter()
+            .find(|g| g.uuid == offline_uuid("Mage"))
+            .unwrap()
+            .sender
+            .datapack_offer
+            .as_deref(),
+    )
+    .expect("a snapshot for Mage");
     host.hub.send_to(
         host.joined[0],
         &play::Clientbound::CustomPayload(cfg::CustomPayload {

@@ -11,10 +11,7 @@
 //! on the same channel, built from the offer it made at the join (kept here by player). The
 //! client checks it as at the join and swaps its set in one step, or ends the connection. See
 //! `docs/modding/src/concepts/mod-datapack-registries.md`.
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex, atomic::AtomicU64},
-};
+use std::sync::{Arc, Mutex, atomic::AtomicU64};
 
 /// The snapshot, server to client.
 pub const CHANNEL: &str = "horizon:datapack_registries";
@@ -27,33 +24,12 @@ static SERVED: Held = Mutex::new(None);
 /// What this process's client last received from a server.
 static RECEIVED: Held = Mutex::new(None);
 static SESSION: AtomicU64 = AtomicU64::new(1);
-/// The offer each joined player made, to build the snapshots a reload sends them.
-static OFFERS: Mutex<Option<HashMap<u128, Vec<u8>>>> = Mutex::new(None);
-/// The most offers kept; past it they are dropped and those players get no reload snapshot
-/// until they rejoin.
-const MAX_OFFERS: usize = 4096;
-
-/// Keeps the offer `player` made at the join, replacing an earlier one.
-pub fn remember_offer(player: u128, offer: Vec<u8>) {
-    let mut offers = OFFERS.lock().unwrap_or_else(|e| e.into_inner());
-    let offers = offers.get_or_insert_with(HashMap::new);
-    if offers.len() >= MAX_OFFERS {
-        offers.clear();
-    }
-    offers.insert(player, offer);
-}
-
 /// The snapshot of the set now served for `player`, from the offer they made at the join, when
 /// there is one to send.
-pub fn reload_payload(player: u128) -> Option<Vec<u8>> {
-    let offer = OFFERS
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .as_ref()?
-        .get(&player)?
-        .clone();
+pub fn reload_payload(offer: Option<&[u8]>) -> Option<Vec<u8>> {
+    let offer = offer?;
     let declarations = mod_api::__private::datapack_registry_declarations();
-    match step_for(declarations, served().as_deref(), true, Some(&offer)) {
+    match step_for(declarations, served().as_deref(), true, Some(offer)) {
         Step::Send(bytes) => Some(bytes),
         _ => None,
     }

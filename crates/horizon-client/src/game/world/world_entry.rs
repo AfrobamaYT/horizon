@@ -425,7 +425,9 @@ impl Game<'_> {
             .filter_map(|g| {
                 Some((
                     g.conn,
-                    horizon_client::datapack_net::reload_payload(g.uuid)?,
+                    horizon_client::datapack_net::reload_payload(
+                        g.sender.datapack_offer.as_deref(),
+                    )?,
                 ))
             })
             .collect();

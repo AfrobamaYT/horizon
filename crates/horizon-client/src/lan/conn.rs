@@ -279,6 +279,8 @@ pub struct PlayerSender {
     /// The connection's bytes on the wire (after compression and encryption), counted by its
     /// network thread: `horizon-report`'s network use per player. None for a test's channel.
     wire: Option<Arc<Counters>>,
+    /// Registry negotiation belongs to this live connection, never a process-wide UUID cache.
+    pub datapack_offer: Option<Arc<[u8]>>,
 }
 #[derive(Clone)]
 enum To {
@@ -298,6 +300,7 @@ impl PlayerSender {
             held: Arc::default(),
             to: To::Channel(tx),
             wire: None,
+            datapack_offer: None,
         }
     }
     /// A connectionless actor has no writer, queue or packet delivery.
@@ -308,6 +311,7 @@ impl PlayerSender {
             held: Arc::default(),
             to: To::Disabled,
             wire: None,
+            datapack_offer: None,
         }
     }
     /// The bytes received from and sent to the client on the wire so far.
@@ -971,6 +975,7 @@ struct Parts {
     properties: Vec<login::Property>,
     info: ClientInformation,
     brand: String,
+    datapack_offer: Option<Vec<u8>>,
 }
 
 fn login_and_configure(
@@ -1225,9 +1230,6 @@ fn login_and_configure(
         }
     }
     // The mods' datapack registries this client has, or the reason it cannot play (#811).
-    if let Some(offer) = &datapack_offer {
-        crate::datapack_net::remember_offer(uuid, offer.clone());
-    }
     match crate::datapack_net::server_step(brand == "horizon", datapack_offer.as_deref()) {
         crate::datapack_net::Step::Nothing => {}
         crate::datapack_net::Step::Send(data) => send(
@@ -1278,6 +1280,7 @@ fn login_and_configure(
         properties,
         info,
         brand,
+        datapack_offer,
     }))
 }
 
@@ -1507,6 +1510,7 @@ fn play(
         held: Arc::default(),
         to: To::Pool(outbox.clone(), watch.clone()),
         wire: Some(c.reader.counters.clone()),
+        datapack_offer: parts.datapack_offer.map(Into::into),
     };
     let required_pack = shared
         .config
@@ -2503,3 +2507,7 @@ mod tests {
         assert!(rate.next > t0 + Duration::from_secs(10));
     }
 }
+
+#[cfg(test)]
+#[path = "datapack_offer_tests.rs"]
+mod datapack_offer_tests;
