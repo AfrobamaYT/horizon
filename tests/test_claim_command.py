@@ -1,3 +1,5 @@
+import json
+import threading
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -200,6 +202,108 @@ class LimitTests(unittest.TestCase):
         self.assertEqual(cc.without_pull_request(issues, "A"), [2, 3])
 
 
+class Shared:
+    """One claimant's assignments, seen by several runs at once; each run's first count waits at a barrier, so every
+    run has counted before any assigns, as two workflow runs for different issues can."""
+
+    def __init__(self, held, runs):
+        self.held, self.lock, self.barrier = set(held), threading.Lock(), threading.Barrier(runs)
+        self.waited = set()
+
+    def api(self, number):
+        shared = self
+
+        class Run(Fake):
+            def held_issues(self, login):
+                with shared.lock:
+                    now = [held(n) for n in sorted(shared.held)]
+                if threading.get_ident() not in shared.waited:
+                    shared.waited.add(threading.get_ident())
+                    shared.barrier.wait()
+                return now
+
+            def assign(self, n, login):
+                with shared.lock:
+                    shared.held.add(n)
+                return [login]
+
+            def unassign(self, n, login):
+                with shared.lock:
+                    shared.held.discard(n)
+
+        return Run({number: thread()})
+
+
+class ConcurrentClaimTests(unittest.TestCase):
+    def test_claims_made_at_once_never_pass_the_limit(self):
+        shared = Shared(range(1, 5), runs=2)
+        outcomes = {}
+
+        def claim(number):
+            try:
+                outcomes[number] = do("/claim", shared.api(number), n=number)[0]
+            except cc.Refused as refused:
+                outcomes[number] = str(refused)
+
+        runs = [threading.Thread(target=claim, args=(n,)) for n in (20, 21)]
+        for run in runs:
+            run.start()
+        for run in runs:
+            run.join(5)
+        self.assertLessEqual(len(shared.held), cc.LIMIT)
+        refused = [n for n, text in outcomes.items() if text is not None]
+        self.assertTrue(refused)
+        for n in refused:
+            self.assertNotIn(n, shared.held)
+            self.assertIn("at the same moment", outcomes[n])
+
+    def test_the_recount_backs_out_only_past_the_limit(self):
+        class Racing(Fake):
+            """4 held at the first count; another claim lands before the second."""
+            counts = iter([[held(n) for n in range(1, 5)], [held(n) for n in range(1, 7)]])
+
+            def held_issues(self, login):
+                return next(self.counts)
+
+        with self.assertRaisesRegex(cc.Refused, "at the same moment"):
+            do("/claim", Racing())
+        text, api = do("/claim", Fake(held=[held(n) for n in range(1, 5)]))  # the recount sees 4 + this one: kept
+        self.assertIsNone(text)
+
+
+class PaginationTests(unittest.TestCase):
+    def test_every_page_of_an_issues_links_is_read(self):
+        def page(nodes, more):
+            return {"pageInfo": {"hasNextPage": more, "endCursor": "c" if more else None}, "nodes": nodes}
+
+        mine = {"state": "OPEN", "author": {"login": "newcomer"}}
+        other = {"state": "OPEN", "author": {"login": "someone"}}
+        answers = [
+            {"issues": page([{"number": 1, "closedByPullRequestsReferences": page([other] * 50, True),
+                              "timelineItems": page([{"source": other}] * 100, True)}], False)},
+            {"issue": {"closedByPullRequestsReferences": page([mine], False)}},
+            {"issue": {"timelineItems": page([{"source": other}], False)}},
+        ]
+        sent = []
+
+        def gh(*args, **_):
+            sent.append(args)
+            return json.dumps({"data": {"repository": answers.pop(0)}})
+
+        real, cc.gh = cc.gh, gh
+        try:
+            issues = cc.Api("arismoko/horizon").held_issues("newcomer")
+        finally:
+            cc.gh = real
+        self.assertEqual(answers, [])
+        self.assertEqual(len(issues[0]["closedByPullRequestsReferences"]["nodes"]), 51)
+        self.assertEqual(len(issues[0]["timelineItems"]["nodes"]), 101)
+        self.assertIn("wantRefs=true", sent[1])
+        self.assertIn("refs=c", sent[1])
+        self.assertIn("events=c", sent[2])
+        self.assertEqual(cc.without_pull_request(issues, "newcomer"), [])
+
+
 class UnclaimTests(unittest.TestCase):
     def test_own(self):
         text, api = do("/unclaim", Fake({5: thread(holders=("NewComer",))}))
@@ -278,6 +382,8 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(cc.release(api, NOW, dry_run=True), [(7, "a"), (8, "c")])
         self.assertEqual(api.calls, [])
         cc.release(api, NOW, dry_run=False)
+        # #8 lost its only holder, so it is offered again; #7 keeps b.
+        self.assertEqual([c for c in api.calls if c[0] == "label"], [("label", 8, "help wanted", "claimed")])
         self.assertEqual([c[:3] for c in api.calls if c[0] == "unassign"], [("unassign", 7, "a"), ("unassign", 8, "c")])
         comments = [c[2] for c in api.calls if c[0] == "comment"]
         self.assertEqual(len(comments), 2)

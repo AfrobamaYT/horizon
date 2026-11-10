@@ -37,7 +37,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import nightly_set as ns  # noqa: E402  (the same trusted reviewers and owner)
 
-PREFIX = "🤖 Claims: "
+PREFIX = "🤖 Agent: "
 STALE = timedelta(days=5)
 LOGIN = re.compile(r"^@?([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))$")
 USAGE = "Use `/claim` or `/unclaim` (the repository owner and trusted reviewers: `/unclaim @login`)."
@@ -116,6 +116,17 @@ def gh(*args: str, check: bool = True, stdin: str | None = None) -> str:
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
+LINKS = """
+fragment Links on Issue {
+  closedByPullRequestsReferences(first: 50, includeClosedPrs: false) {
+    pageInfo { hasNextPage endCursor } nodes { state author { login } }
+  }
+  timelineItems(first: 100, itemTypes: [CROSS_REFERENCED_EVENT]) {
+    pageInfo { hasNextPage endCursor }
+    nodes { ... on CrossReferencedEvent { source { ... on PullRequest { state author { login } } } } }
+  }
+}"""
+
 HELD_ISSUES = """
 query($owner: String!, $name: String!, $login: String!, $cursor: String) {
   repository(owner: $owner, name: $name) {
@@ -123,10 +134,23 @@ query($owner: String!, $name: String!, $login: String!, $cursor: String) {
       pageInfo { hasNextPage endCursor }
       nodes {
         number
-        closedByPullRequestsReferences(first: 10, includeClosedPrs: false) { nodes { state author { login } } }
-        timelineItems(last: 100, itemTypes: [CROSS_REFERENCED_EVENT]) {
-          nodes { ... on CrossReferencedEvent { source { ... on PullRequest { state author { login } } } } }
-        }
+        ...Links
+      }
+    }
+  }
+}""" + LINKS
+
+# The rest of one issue's links, when HELD_ISSUES got only their first page; each connection is paged on its own.
+ISSUE_LINKS = """
+query($owner: String!, $name: String!, $number: Int!, $refs: String, $events: String, $wantRefs: Boolean!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      closedByPullRequestsReferences(first: 50, after: $refs, includeClosedPrs: false) @include(if: $wantRefs) {
+        pageInfo { hasNextPage endCursor } nodes { state author { login } }
+      }
+      timelineItems(first: 100, after: $events, itemTypes: [CROSS_REFERENCED_EVENT]) @skip(if: $wantRefs) {
+        pageInfo { hasNextPage endCursor }
+        nodes { ... on CrossReferencedEvent { source { ... on PullRequest { state author { login } } } } }
       }
     }
   }
@@ -177,20 +201,32 @@ class Api:
         gh("api", f"repos/{self.repo}/issues/{n}/labels", "-f", f"labels[]={add}")
         gh("api", "-X", "DELETE", f"repos/{self.repo}/issues/{n}/labels/{remove.replace(' ', '%20')}", check=False)
 
-    def held_issues(self, login: str) -> list[dict]:
-        """The open issues assigned to `login`, with the open pull requests that link each."""
+    def graphql(self, query: str, **variables) -> dict:
         owner, name = self.repo.split("/")
+        args = ["api", "graphql", "-F", f"owner={owner}", "-F", f"name={name}", "-f", f"query={query}"]
+        for key, value in variables.items():
+            if value is not None:
+                args += ["-F", f"{key}={str(value).lower() if isinstance(value, bool) else value}"]
+        return json.loads(gh(*args))["data"]["repository"]
+
+    def held_issues(self, login: str) -> list[dict]:
+        """The open issues assigned to `login`, each with every open pull request that links it (all pages)."""
         out, cursor = [], None
         while True:
-            args = ["api", "graphql", "-F", f"owner={owner}", "-F", f"name={name}", "-F", f"login={login}",
-                    "-f", f"query={HELD_ISSUES}"]
-            if cursor:
-                args += ["-F", f"cursor={cursor}"]
-            page = json.loads(gh(*args))["data"]["repository"]["issues"]
+            page = self.graphql(HELD_ISSUES, login=login, cursor=cursor)["issues"]
             out += page["nodes"]
             if not page["pageInfo"]["hasNextPage"]:
-                return out
+                break
             cursor = page["pageInfo"]["endCursor"]
+        for issue in out:
+            for field, cursor_name in (("closedByPullRequestsReferences", "refs"), ("timelineItems", "events")):
+                links = issue[field]
+                while links["pageInfo"]["hasNextPage"]:
+                    more = self.graphql(ISSUE_LINKS, number=issue["number"], wantRefs=cursor_name == "refs",
+                                        **{cursor_name: links["pageInfo"]["endCursor"]})["issue"][field]
+                    links["nodes"] += more["nodes"]
+                    links["pageInfo"] = more["pageInfo"]
+        return out
 
     def react(self, comment_id: int) -> None:
         gh("api", f"repos/{self.repo}/issues/comments/{comment_id}/reactions", "-f", "content=+1")
@@ -254,7 +290,8 @@ def run(api, cmd: Command, actor: ns.Actor, number: int, reviewers: ns.Reviewers
         if KIRA_LABEL in labels:
             raise Refused(f"someone claimed this issue on Discord (Kira's `{KIRA_LABEL}` label): pick another, or ask "
                           "in the thread.")
-        if association not in STAFF and login.lower() not in exempt and not is_team(actor, reviewers, api.repo):
+        limited = association not in STAFF and login.lower() not in exempt and not is_team(actor, reviewers, api.repo)
+        if limited:
             open_claims = without_pull_request(api.held_issues(login), login)
             if len(open_claims) >= LIMIT:
                 listed = ", ".join(f"#{n}" for n in sorted(open_claims))
@@ -263,6 +300,14 @@ def run(api, cmd: Command, actor: ns.Actor, number: int, reviewers: ns.Reviewers
                               "or `/unclaim` on one, frees a slot.")
         if login.lower() not in {a.lower() for a in api.assign(number, login)}:
             raise Refused("GitHub didn't assign you; nothing changed.")
+        # Runs for different issues aren't serialized (one queue for the whole repository would let GitHub cancel
+        # the pending runs of a burst, leaving comments unanswered), so two claims made at once can both pass the
+        # count above. Counting again after assigning catches that: whoever then sees more than the limit backs out.
+        if limited and len(without_pull_request(api.held_issues(login), login)) > LIMIT:
+            api.unassign(number, login)
+            raise Refused(f"another of your claims was made at the same moment and together they pass the limit of "
+                          f"{LIMIT} claimed issues with no open pull request of yours, so this one was undone. "
+                          "`/claim` again if you still have a free slot.")
         api.label(number, "claimed", "help wanted")
         return None
     who = cmd.who or login
@@ -336,7 +381,8 @@ def stale_claims(issue: dict, now: datetime) -> list[str]:
 def release(api, now: datetime, dry_run: bool) -> list[tuple[int, str]]:
     done = []
     for issue in api.assigned_issues():
-        for login in stale_claims(issue, now):
+        stale = stale_claims(issue, now)
+        for login in stale:
             done.append((issue["number"], login))
             if dry_run:
                 continue
@@ -345,6 +391,8 @@ def release(api, now: datetime, dry_run: bool) -> list[tuple[int, str]]:
                         f"{PREFIX}released @{login}'s claim: {STALE.days} days without an open pull request that links "
                         f"this issue. `/claim` again when you pick it back up (a draft pull request with "
                         f"`Fixes #{issue['number']}` keeps the claim).")
+        if stale and not dry_run and len(stale) == len(issue["assignees"]["nodes"]):
+            api.label(issue["number"], "help wanted", "claimed")
     return done
 
 

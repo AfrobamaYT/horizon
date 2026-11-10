@@ -26,7 +26,10 @@ jobs:
       startsWith(github.event.comment.body, '🤖 Agent: /claim') ||
       startsWith(github.event.comment.body, '🤖 Agent: /unclaim'))
     # One command per issue at a time, so two `/claim`s can't both find it free. On the job, not the workflow:
-    # the skipped runs of ordinary comments must not cancel a waiting one.
+    # the skipped runs of ordinary comments must not cancel a waiting one. Not one group for the whole repository:
+    # GitHub keeps one pending run per group and cancels the older one, so a burst of claims on different issues
+    # would leave comments unanswered. Claims by one person on different issues can run at once; the script counts
+    # again after assigning and backs out a claim that took them past the limit.
     concurrency:
       group: claim-${{ github.event.issue.number }}
     # One of our small runners (horizon-light), out of GitHub's pool: main's script only (docs/ci-runners.md).
