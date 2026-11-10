@@ -828,13 +828,10 @@ fn component_types(map: &J) -> BTreeSet<String> {
     }
 }
 
-/// Blocks and items native mods declare in code (`native_blocks`,
-/// `native_items`), joined to their manifest owner. All of an owner's
-/// namespaces are validated together, so references between its code
-/// declarations are independent of namespace ordering. A namespace without
-/// a known owner becomes a content mod with no files of its own.
-/// Checked as files are ([`horizon_mod_package::Content::declare`],
-/// [`accept_mod`]); an owner's refused declarations are left out whole.
+/// Code declarations, joined to their manifest owner. Each owner's namespaces
+/// validate together, independent of namespace order, with all-or-nothing refusal.
+/// Unknown namespaces become synthetic content-only mods. Checked as files are
+/// ([`horizon_mod_package::Content::declare`], [`accept_mod`]).
 pub fn accept_declared(
     mods: &mut Vec<ContentMod>,
     blocks: &[horizon_mod_package::content::Block],

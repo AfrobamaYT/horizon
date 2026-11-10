@@ -2134,9 +2134,16 @@ capabilities = ["registries"]
             assert_eq!((c.blocks.len(), c.items.len()), (1, 0), "{e}");
             e
         };
-        assert!(refused(&[block("emerald:gear")], &[]).contains("not an id in ruby:"));
-        assert!(refused(&[block("minecraft:gear")], &[]).contains("not an id in ruby:"));
-        assert!(refused(&[], &[item("ruby")]).contains("not an id in ruby:"));
+        for error in [
+            refused(&[block("emerald:gear")], &[]),
+            refused(&[block("minecraft:gear")], &[]),
+            refused(&[], &[item("ruby")]),
+        ] {
+            assert!(
+                error.contains("owned namespaces") && error.contains("ruby"),
+                "{error}"
+            );
+        }
         assert!(refused(&[block("ruby:gear")], &[]).contains("declared twice"));
         assert!(refused(&[], &[item("ruby:gear")]).contains("block's item"));
         let modded = Block {
