@@ -156,6 +156,21 @@ pub trait LevelsBackend {
         inputs: &RecipeInput,
     ) -> Result<Option<RecipeMatch>, RecipeLookupError>;
     /// Side: server.
+    /// Every available member of the server level's entity lookup
+    /// (`ServerLevel.getAllEntities`), including spectators and entities outside
+    /// any spatial query. Dragon parts are not lookup members.
+    /// Returns None on a remote client, for a stale handle or a parked level.
+    /// Returns None while any lookup member is temporarily extracted, rather
+    /// than returning an incomplete list.
+    /// Order is lookup admission order, preserved across temporary extraction;
+    /// removal and re-admission moves an entity to the end. On initial world
+    /// load, admission follows the engine's storage-family loading order, which
+    /// can differ from vanilla's chunk entity loading order.
+    /// Allocates a result buffer, not one allocation per entity; sorting is
+    /// O(n log n), followed by one authoritative handle lookup per candidate.
+    #[access(WorldOnly)]
+    fn level_all_entities(&self, level: LevelRef) -> Option<Vec<EntityRef>>;
+    /// Side: server.
     /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
     /// Face-only contact does not intersect; spectator players are excluded.
     /// Returns None on a client, for a stale handle, or for a parked level:
@@ -280,14 +295,18 @@ pub trait LevelsBackend {
     #[access(WorldOnly)]
     fn level_fluid_flow(&self, level: LevelRef, pos: [i32; 3]) -> Option<Vec3>;
     /// Side: server.
-    /// Block-local outline or collision boxes with an empty context. Interaction,
-    /// visual, occlusion and support shapes are not exposed. Returns None on a
-    /// client, for a stale handle, or for a closed level. Unloaded blocks read
-    /// as air; collision errors return no boxes, like `native_block_collision`.
+    /// The supplied state's block-local outline or collision boxes at `pos`,
+    /// with an empty context (`BlockState.getShape` / `getCollisionShape`).
+    /// The state need not be the block stored there; level-dependent shapes
+    /// still read the real level. Pass `block_state(host, pos)` to query the
+    /// state at that position. Interaction, visual, occlusion and support shapes
+    /// are not exposed. Returns None on a client, for an unknown state, a stale
+    /// handle or a closed level. Collision errors return no boxes.
     #[access(WorldOnly)]
     fn level_block_shape(
         &self,
         level: LevelRef,
+        state: BlockState,
         pos: [i32; 3],
         kind: BlockShapeKind,
     ) -> Option<Vec<[f64; 6]>>;

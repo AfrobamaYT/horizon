@@ -1,9 +1,12 @@
 //! Recipe book declarations supplied by a custom recipe type.
 #[path = "recipe_display.rs"]
 mod display;
+#[path = "recipe_book_settings.rs"]
+pub mod settings;
 #[allow(unused_imports)]
 use crate::*;
 pub use display::{RecipeBookDisplay, RecipeBookDisplayEntry, RecipeSlotDisplay};
+pub use settings::{RecipeBookIdentity, RecipeBookSettings};
 /// A mod's book category and displays for one custom recipe type.
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
@@ -35,6 +38,22 @@ pub struct RecipeBookTypeKey {
 }
 
 impl RecipeBookTypeKey {
+    /// Frozen registered book identities in stable namespaced order.
+    /// Intended for connection negotiation and declaration validation, not ticks.
+    pub fn registered() -> Vec<Self> {
+        let mut keys: Vec<_> = crate::parts::installed()
+            .map(|registry| {
+                registry
+                    .recipe_book_types
+                    .keys()
+                    .map(|id| Self { id: id.clone() })
+                    .collect()
+            })
+            .unwrap_or_default();
+        keys.sort_by(|a, b| a.id.cmp(&b.id));
+        keys
+    }
+
     /// Whether this process has installed this identity in its frozen registry.
     pub fn is_registered(&self) -> bool {
         crate::parts::installed()

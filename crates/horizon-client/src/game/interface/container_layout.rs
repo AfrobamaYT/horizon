@@ -8,7 +8,33 @@ thread_local! {
     pub(in crate::game) static LAYOUT_CONSTRUCTIONS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
+/// Selectors read by slot_position; item contents and scroll do not move slots.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(super) struct SlotInputs {
+    count: usize,
+    craft_size: usize,
+    creative_inventory: bool,
+    creative_tab: bool,
+    station: Option<(std::mem::Discriminant<super::stations::Kind>, usize)>,
+    container: Option<std::mem::Discriminant<horizon_client::containers::BlockEntity>>,
+    machine: Option<bool>,
+    crafter: bool,
+    mount: Option<(usize, bool, bool)>,
+    rows: Option<usize>,
+    native: Option<(u64, Option<f32>, Option<f32>)>,
+}
+
 impl Game<'_> {
+    fn native_slot_inputs(&self) -> Option<(u64, Option<f32>, Option<f32>)> {
+        self.shown_native_screen().map(|s| {
+            (
+                s.layout_revision,
+                self.native_screen_inventory_x(),
+                self.native_screen_inventory_y(),
+            )
+        })
+    }
+
     pub(super) fn container_layout(
         &self,
         batch: &horizon_client::hud::HudBatch,
@@ -91,6 +117,22 @@ impl Game<'_> {
             ]
         });
         ContainerLayout {
+            slot_inputs: SlotInputs {
+                count: self.slot_count(),
+                craft_size: self.craft_size,
+                creative_inventory: self.creative_inventory_open(),
+                creative_tab: self.creative_tab_open(),
+                station: self
+                    .station
+                    .as_ref()
+                    .map(|s| (std::mem::discriminant(&s.kind), s.inputs.len())),
+                container: self.container_kind().map(std::mem::discriminant),
+                machine: self.machine_layout_selector(),
+                crafter: self.crafter_open(),
+                mount: self.mount_layout_inputs(),
+                rows: self.chest_rows(),
+                native: self.native_slot_inputs(),
+            },
             image,
             origin,
             book,
