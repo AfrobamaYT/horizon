@@ -63,7 +63,9 @@ class ConceptPages(unittest.TestCase):
         for name in ("zeta", "alpha"):
             (self.src / f"concepts/{name}.md").write_text("# Same title\n")
         glob = Path.glob
-        with patch.object(Path, "glob", lambda path, pattern: iter(sorted(glob(path, pattern), reverse=True))):
+        def reversed_glob(path, *args, **kwargs):
+            return iter(sorted(glob(path, *args, **kwargs), reverse=True))
+        with patch.object(Path, "glob", reversed_glob):
             result = pages.expand(copy.deepcopy(self.book), self.src)
         found = [c["path"] for c in pages.chapters(result["sections"])
                  if c["path"] in {"concepts/alpha.md", "concepts/zeta.md"}]
