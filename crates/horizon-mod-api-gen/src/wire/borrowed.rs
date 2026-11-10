@@ -11,8 +11,10 @@ pub(super) fn calls(types: &Types<'_>) -> String {
     for (def_id, def) in types.defs.iter().enumerate() {
         // Both sides reconstruct non-exhaustive borrowed records outside the vocabulary crate.
         // A typed constructor generated from public fields keeps this structural, not per-type glue.
-        if def.lifetimes == 1
-            && let BorrowedShape::Record(fields) = &def.borrowed
+        if def.lifetimes > 0
+            && def.projection.is_none()
+            && (matches!(def.borrowed, BorrowedShape::Record(_)) || def.append.is_some())
+            && let Some(fields) = def.borrow_fields()
         {
             let args = fields
                 .iter()
@@ -33,7 +35,8 @@ pub(super) fn calls(types: &Types<'_>) -> String {
                 .map(|f| f.rust.as_str())
                 .collect::<Vec<_>>()
                 .join(",");
-            writeln!(out, "#[doc(hidden)] pub fn __wire_record_{def_id}<'a>({args}) -> {}<'a> {{ {} {{ {names} }} }}", def.rust, def.rust).unwrap();
+            let lifetimes = vec!["'a"; def.lifetimes].join(",");
+            writeln!(out, "#[doc(hidden)] pub fn __wire_record_{def_id}<'a>({args}) -> {}<{lifetimes}> {{ {} {{ {names} }} }}", def.rust, def.rust).unwrap();
         }
         if def.append.is_some() || def.projection.is_some() {
             let put = def
@@ -78,8 +81,14 @@ fn borrowed(types: &super::ty::Types<'_>, ty: &super::ty::Ty) -> String {
     use super::ty::Ty;
     match ty {
         Ty::Named(def) if types.defs[*def].lifetimes > 0 => {
-            format!("{}<'_>", types.defs[*def].rust)
+            let lifetimes = vec!["'_"; types.defs[*def].lifetimes].join(",");
+            format!("{}<{lifetimes}>", types.defs[*def].rust)
         }
+        Ty::Ref(inner, mutable) => format!(
+            "&{}{}",
+            if *mutable { "mut " } else { "" },
+            borrowed(types, inner)
+        ),
         Ty::Option(item) => format!("Option<{}>", borrowed(types, item)),
         ty => super::calls::rust_ty(types, ty, false),
     }

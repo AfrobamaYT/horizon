@@ -214,7 +214,7 @@ Outside the host areas, 2279 `mod_api` references are in test code; 206 of them 
 
 |  | files | lines |
 |---|---|---|
-| all | 2 | 1045 |
+| all | 2 | 1048 |
 | pure (no generated include, unsafe, process state or non-core crate path) | 0 | 0 |
 | includes generator output (OUT_DIR) | 1 |  |
 | `unsafe` | 1 | 45 |
@@ -224,5 +224,5 @@ Dependencies: `horizon-core` (normal, engine), `horizon-items` (dev, engine), `h
 
 Blockers by file (generated includes, `unsafe`, state), lines:
 
-- `src/wire/wire_guest.rs`: generated_include 14; unsafe 18,32,37,39,51,199,223,278,313,314,315,319…; state 7,9,25,169,170,173,176,177,202,206,207,220…
+- `src/wire/wire_guest.rs`: generated_include 15; unsafe 19,33,38,40,52,200,224,279,314,315,316,320…; state 7,9,26,170,171,174,177,178,203,207,208,221…
 <!-- generated: end -->

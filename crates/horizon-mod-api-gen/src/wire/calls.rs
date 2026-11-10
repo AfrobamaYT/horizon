@@ -850,6 +850,12 @@ fn borrowed(
             "let {m}{name} = {}::__wire_from_fields({args});",
             d.rust
         ));
+    } else if matches!(d.borrowed, super::ty::BorrowedShape::TupleRecord(_)) {
+        read.push_str(&format!(
+            "let {m}{name} = {} {{ {} }};",
+            d.rust,
+            build.join(", ")
+        ));
     } else {
         let args = build
             .iter()
