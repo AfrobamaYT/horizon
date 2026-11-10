@@ -20,10 +20,16 @@ fbf4f06490.
    existing load path, with the faulting member treated as refused at load. Its dependents go with it, by the rule
    load already applies to a required dependency that is missing. Each library is still one copy in one memory per
    group, and no second mechanism is added. Until a rebuild exists, the stop lasts until the next start, as today.
-5. **The interruption budget counts guest time, not wall time.** Epoch interruption stays (it is cheap). A deadline
-   callback grants back the epochs spent inside host imports, and checks the thread's CPU time before it interrupts,
-   so a host import or a descheduled thread can't use up a guest's budget. Fuel is the alternative to measure, not
-   the default.
+5. **The runaway budget is fuel: deterministic guest work.** Wasmtime fuel is consumed only by guest instructions,
+   from one tank per store. So time spent in host imports, time the thread is descheduled and machine load never
+   count, and nested calls draw on the outer call's tank. The same call uses the same fuel on any machine. Epoch
+   interruption and its timer thread are removed. Fuel's cost is measured before it lands (§1). If that cost is too
+   high, the fallback is a wall-clock heuristic, documented as best effort and not deterministic, not a mix of the
+   two.
+8. **A fault aborts the transaction it happened in.** When the faulted call runs inside a transaction (decide, fire,
+   apply, or an item transaction), that transaction is aborted, never committed. Writes made through imports outside
+   any transaction stay applied, as they do today. This is decided before recovery is built, and the rebuild (4)
+   waits until it is implemented and tested.
 6. **A fault names three things:** the member whose hook was entered, the member whose code was running at the trap
    (the innermost wasm frame), and the call path through the host. It goes to the log, to the Mods page and to
    operators, so it is never silent.
@@ -65,37 +71,42 @@ fbf4f06490.
 
 ## 1. Interruption by guest work (#2766)
 
-The runaway check should fire when the guest itself runs too long. Waiting on the host or on the OS scheduler should
-not count.
+The runaway check should fire when the guest itself does too much work. Waiting on the host or on the OS scheduler
+must not count, and a busy server must give the same outcome as an idle one.
 
-**Mechanism.** Wasmtime 50 has `Store::epoch_deadline_callback`, which runs only when the deadline is reached and
-returns `UpdateDeadline::Continue(n)` or `Interrupt`. This design uses it in place of the bare trap:
+**Mechanism: fuel.** `Config::consume_fuel(true)` makes every guest instruction consume fuel from the store's
+tank, and a guest that empties it traps with `Trap::OutOfFuel`.
+- **Setting the tank.** An outermost call fills it with `Store::set_fuel(budget)`. A nested call (one that resumes
+  the store lent to native code, `Resumed::take`) does not refill it. So a reentered callback spends from the same
+  tank as the call that reentered it.
+- **No accounting on the host side.** Fuel stops being consumed the moment the guest calls an import and resumes
+  when it returns. Time spent in native dispatch, in nested native work, waiting for a lock or descheduled is never
+  charged. Nested guest work is always charged, once, to the shared tank.
+- **What it covers.** Both cases fork-review raised hold by construction:
+  - a finite call that waits a long time inside an import, then makes a nested call, survives, because the wait
+    used no fuel;
+  - a runaway loop inside a nested callback empties the shared tank and is interrupted, however the work is split
+    between the outer and nested calls.
+- **Budgets.** Fuel counts instructions, not milliseconds, so today's 100 and 30,000 epochs don't carry over. Each
+  budget is set from measurement: the most fuel any ordinary call and any `Load` call uses in the in-tree samples and
+  fixtures (horizon-machine-sample, the wasm fixture, the group fixtures), with a margin stated next to the
+  constant. The 100-epoch value is not evidence for any particular fuel number.
+- **Cost.** Fuel instruments guest code. #1780's profile shows guest dispatch glue, codecs and allocation are a large
+  share of the remaining wasm tick, so the overhead is measured on #1780's scene before fuel replaces epochs (see
+  "What to measure"). Wasmtime's `fuel_async_yield_interval` and async features are not used.
 
-- **Count host time in epochs.** The ticker thread also bumps an `AtomicU64` epoch count that the runtime owns
-  (`Engine` doesn't expose its counter). `host()` reads that count on entry and on exit, and adds the difference to
-  the store's `host_epochs`. That is two relaxed atomic loads per import, with no clock call. #1780 counts about
-  9,000 imports per 1,000-machine tick, so this adds roughly 18,000 relaxed loads per tick. That cost is to be
-  measured, not assumed to be negligible.
-- **Grant those epochs back at the deadline.** The callback runs at the deadline. It computes `guest = elapsed -
-  host_epochs` since the outermost call began. If `guest` is under the call's budget, it continues by
-  `budget - guest`. Nested calls keep sharing the outer budget, so recursion through the host still counts.
-- **Confirm by CPU time before interrupting.** When `guest` reaches the budget, the callback reads the thread's CPU
-  time once (`CLOCK_THREAD_CPUTIME_ID` on Unix, `GetThreadTimes` on Windows) and continues for one more budget.
-  At the next deadline it reads the CPU time again. If the thread used at least half of the wall time between the
-  two reads, the guest is spinning, and the call is interrupted. If it used less, the thread was starved, and the
-  deadline is extended. Either way the clock is read only at a deadline, never on an ordinary call.
-- **Keep a hard ceiling against true hangs.** A ceiling of 100× the budget (10 s for an ordinary call) interrupts
-  whatever the CPU reading says. A server starved for that long is hung anyway, and the diagnostic says
-  "starved", not "runaway".
+**Fallback, only if fuel's cost is rejected: a best-effort wall-clock heuristic.** It keeps epochs and a deadline
+callback, and counts host time with exclusive transitions so nothing is charged twice:
+- the store keeps `host_epochs` and `mark`, the epoch at the last transition;
+- **guest → host** (import entry, and a nested call returning into an import) sets `mark = now`;
+- **host → guest** (import exit, and a nested call starting inside an import) adds `now - mark` to `host_epochs`,
+  so an outer import's time is credited before the reentered callback runs;
+- the deadline callback continues by the credited epochs while `elapsed - host_epochs` is under the budget, and
+  interrupts once it isn't.
 
-**Why not fuel by default?** Fuel is deterministic: the same guest work uses the same fuel on any machine, which is
-exactly what #2766 asks for. But it instruments every basic block. #1780's profile puts guest code, meaning dispatch
-glue, codecs and allocation, at a large share of the remaining wasm tick. Fuel is therefore a measured candidate. If
-its overhead on the 1,000-machine scene stays within the noise of #1780's runs, choose fuel instead and drop the CPU
-confirmation. The note leaves that choice to the measurement.
-
-**Budgets stay as they are:** 100 for ordinary calls and 30,000 for `Load`, now counted in guest epochs. A
-100 ms guest hook already exceeds two ticks, so a lower budget would only add false positives.
+That heuristic still charges descheduled guest time, so a starved finite call can be interrupted. The note says so,
+and the acceptance rows for the fallback say so too. It is not offered as a guest-work budget, and no CPU-time check
+is added on top of it.
 
 ## 2. After an interruption or a trap (#2766, #2761)
 
@@ -106,7 +117,7 @@ confirmation. The note leaves that choice to the measurement.
 | Depth over 64 | not entered at that depth | keeps running | unavailable | once per call path: the path, the limit |
 | Busy | not entered | keeps running | unavailable | as today (`warn`) |
 | Trap, guest panic, import error | cut off | **stops** | unavailable | fault report (decision 6) |
-| Interruption (after §1) | cut off | **stops** | unavailable | fault report, marked runaway or starved |
+| Out of fuel (after §1) | cut off | **stops** | unavailable | fault report, marked runaway, with the budget |
 
 **Why a refusal is safe:** for every refusal, guest code either never ran at that depth or returned through
 `wire_guest::run`, which pops its own state. The host decoded nothing, so it wrote nothing back. Rate-limiting the
@@ -123,9 +134,9 @@ library the addon called, or in a nested callback into another member.
 
 - **The faulting member.** Read the innermost frame of the trap's `WasmBacktrace` (`FrameInfo::module`) and map its
   module back to its member with `Module::same` against the modules the linker compiled (`link.rs:509`). Members are
-  linked with `--strip-all`, so function names are missing, but which module a frame belongs to is not. For an
-  interruption, this is the member that was running when the deadline fired. Stated honestly: it is not
-  necessarily the member that used the budget.
+  linked with `--strip-all`, so function names are missing, but which module a frame belongs to is not. When fuel
+  runs out, this is the member that was running as the tank emptied. Stated honestly: it is not necessarily the
+  member that used most of the budget.
 - **The entered member and the call path.** The host already pushes a frame for each nested call (`cx.frames`,
   `cx.module`). The report lists every member on that stack, outermost first, with the hook or point at each level.
 - **What stays unattributable.** Direct calls from one member into a library don't cross the host, so the time
@@ -176,26 +187,29 @@ The trap gives no proof that it avoided all of these. So, after a fault:
   for what can't cross.
 - **No silent skip.** Every stop, refusal and rebuild is reported, and the Mods page shows the group's state.
 
-## What to measure
+## What to measure and test
 
 All measurements run on the same frozen main, with the same scene as #1780's runs: `tools/shm-scene`, 1,000
 `machine_sample:machine`, a flat dedicated world, 15 s warmup and 20 s report, three repetitions, with the CPU named.
 
 | Measurement | Compared | Acceptance |
 |---|---|---|
-| Host-epoch accounting (two atomic loads per import) | before and after, wasm mspt mean and p99, plus `block_entity_ticks` bench | within the run-to-run spread |
-| Deadline callback | a hook that ends just under the budget, against today | no change while the guest is under budget |
-| Fuel instead of epochs | same scene and bench, plus a 1M-operation guest loop | adopt fuel only if its cost is within the spread |
-| False interruptions | finite work with 1,000 epochs inside an import; a nested call after a long import; a thread starved by `SCHED_IDLE` or a pinned busy sibling | no interruption |
-| True runaway | an infinite loop, an infinite loop inside a nested call, a loop inside a library | interrupted within budget × 2, report names the innermost member |
-| Refusal survival | guest error reply, bad reply, depth 65 | group keeps running, later calls answer |
+| Fuel cost | fuel against today's epochs: wasm mspt mean and p99 on the scene, the `block_entity_ticks` bench, and a 1M-operation guest loop | adopted if within the run-to-run spread; otherwise the numbers go to the owner with the fallback |
+| Budgets | the most fuel per ordinary and per `Load` call across the in-tree samples and fixtures | the budget constants and their margins come from this |
+| Determinism | the same call's fuel use on an idle machine and under a busy sibling pinned to the same core | identical |
+| Long import, then nested call | a finite call that blocks 1 s inside an import, then makes a nested finite call | survives, and the group keeps running |
+| Starved thread | a finite call whose thread is run under `SCHED_IDLE` beside a busy sibling | survives (fuel); for the fallback, may be interrupted, reported as such |
+| Runaway | an infinite loop; an infinite loop in a nested callback; a loop inside a library; a loop split across outer and nested calls | interrupted every time; the report names the innermost member |
+| Refusal survival | one case per refusal kind: guest error reply, undecodable reply, trailing bytes, depth 65, busy | each answers unavailable, the group keeps running, and the next call to the same listener succeeds |
+| Independent groups | a trap in group A, which has two members; group B is separate | both members of A stop; B keeps answering |
+| Transaction abort | a fault after a write through an import inside a transaction, and one outside any transaction | the transaction's write is rolled back; the write outside stays, as decided (8) |
 | Fault isolation (after the rebuild lands) | addon trap in a group with a library and a second addon | the second addon and the library answer after the rebuild; the faulting addon stays refused |
 | Rebuild cost | time to rebuild a group of 3 and of 10 members between ticks | reported, not gated |
 
 ## Open questions
 
-1. **Fuel or epochs plus a CPU check?** Decided by the overhead measurement above. If fuel wins, §1's CPU
-   confirmation and ceiling go away.
+1. **If fuel costs too much, which way?** Accept the cost, take the best-effort fallback and live with load-dependent
+   interruptions, or cut guest work first (#1780) and measure again. That choice goes to the owner with the numbers.
 2. **When is the rebuild allowed?** Between any two ticks, or only at a save point, or on an operator command? A
    rebuild mid-session drops guest-memory state, which some mods may not expect.
 3. **Should repeated refusals stop a listener?** For example, after 100 consecutive refusals of the same listener,
@@ -203,8 +217,7 @@ All measurements run on the same frozen main, with the same scene as #1780's run
    mod.
 4. **Snapshots for `Load`.** A checkpoint before each `Load` call could let a fault there drop only the faulting
    member without a full rebuild. Is that worth the extra path, or is the rebuild enough?
-5. **Writes made through imports before a fault.** Hooks with a transaction (decide, fire, apply) can abort it, but
-   imports outside a transaction stay applied. Should a fault always abort the current transaction, as a native
-   panic unwinding through it would? That depends on #796 and #781's transaction contract.
+5. **Writes outside any transaction.** Decision 8 leaves them applied. Should more hooks run their imports inside a
+   transaction so a fault can undo them? That belongs to #796 and #781's transaction contract.
 6. **Who sees the report in multiplayer?** Server log and operators, certainly. Should players get a chat line when
    a group whose content they're interacting with stops?
