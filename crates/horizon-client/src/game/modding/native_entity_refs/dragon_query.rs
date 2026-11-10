@@ -32,6 +32,31 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn ordinary_entities_precede_dragon_parts() {
+        with_game(|game| {
+            let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            game.mobs.push(Mob::new(12, kind, Vec3::ZERO, 0.0));
+            let mut dragon = Dragon::new(Vec3::new(0.0, 80.0, 0.0), 0.0, 0);
+            dragon.id = 20;
+            game.dragon.replace(dragon);
+            let level = game.level(game.dim.id()).unwrap();
+            // Parts start at the origin, away from the dragon's own body.
+            let ids = game
+                .level_entities_in(level, [-10.0, -1.0, -10.0], [10.0, 10.0, 10.0])
+                .unwrap()
+                .into_iter()
+                .map(|e| e.id())
+                .collect::<Vec<_>>();
+            assert_eq!(ids.first(), Some(&12));
+            // This test pins only the ordinary/parts boundary, not part order.
+            let mut parts = ids[1..].to_vec();
+            parts.sort_unstable();
+            assert_eq!(parts, (21..=28).collect::<Vec<_>>());
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn entities_in_includes_dragon_and_separate_parts() {
         with_game(|game| {
             let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
