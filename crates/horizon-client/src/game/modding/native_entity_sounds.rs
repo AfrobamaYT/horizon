@@ -154,10 +154,8 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::super::dispense_fixture;
-    use super::super::lan::LanSettings;
     use super::super::native_entity_refs::tests::with_game;
     use horizon_client::command::args::GameMode;
-    use horizon_client::lan::{NetConfig, hub::HubConfig};
     use horizon_client::mobs::Mob;
     use horizon_client::motion::PlayerMotion;
     use horizon_core::geometry::Vec3;
@@ -172,8 +170,7 @@ mod tests {
 
     fn acting_player(game: &mut super::Game<'_>) {
         game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
-        game.lan_acting_entity = Some(7);
-        game.lan_acting_uuid = Some(7);
+        crate::game::native_entity_refs::tests::bind_local_player(game, 7, 7);
     }
 
     #[test]
@@ -211,35 +208,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn play_sound_queues_at_the_entity_in_its_source() {
-        with_game(|game| {
-            // The seed comes from the hub's sound-seed generator, so only a
-            // hosting game queues sounds.
-            let config = HubConfig {
-                default_game_mode: 0,
-                guest_commands: false,
-                force_game_mode: false,
-                hardcore: false,
-                view_distance: 2,
-                simulation_distance: 2,
-                dimension: game.dim.id().to_owned(),
-                allow_flight: true,
-                seed: 0,
-                max_players: 3,
-                integrated: true,
-                levels: game.level_shapes,
-            };
-            let net = NetConfig {
-                listen: false,
-                announce: false,
-                lod_distance: 0,
-                ..NetConfig::lan(0, String::new(), 3)
-            };
-            let settings = LanSettings {
-                port: 0,
-                guest_commands: false,
-                force_game_mode: false,
-            };
-            game.lan_host(settings, net, config).unwrap();
+        super::super::native_guest_turn_tests::with_guests(|game| {
             let cow = spawn(game, 10, "minecraft:cow");
             assert!(game.entity_play_sound(cow, "minecraft:entity.cow.ambient", 0.5, 1.5));
             let sound = &game.creatures.lan_sounds[0];
@@ -254,13 +223,14 @@ mod tests {
             assert!(!game.entity_play_sound(cow, "minecraft:entity.cow.ambient", 1.0, f32::NAN));
             assert_eq!(game.creatures.lan_sounds.len(), 1);
             // A player doesn't hear their own sound, silent or not.
-            acting_player(game);
-            game.lan_acting = Some(3);
-            let player = game.entity(7).unwrap();
-            assert!(game.entity_play_sound(player, "minecraft:entity.player.burp", 1.0, 1.0));
-            let sound = &game.creatures.lan_sounds[1];
-            assert_eq!(sound.source as usize, SoundSource::Players.index());
-            assert_eq!(sound.except, Some(3));
+            game.as_guest(12, |game| {
+                let player = game.entity(12).unwrap();
+                assert!(game.entity_play_sound(player, "minecraft:entity.player.burp", 1.0, 1.0));
+                let sound = &game.creatures.lan_sounds[1];
+                assert_eq!(sound.source as usize, SoundSource::Players.index());
+                assert_eq!(sound.except, Some(12));
+            })
+            .expect("the sound's real guest turn runs");
             let stale = EntityRef::new(WorldEpoch::new(cow.epoch().get() + 1), 10);
             assert!(!game.entity_play_sound(stale, "minecraft:entity.cow.ambient", 1.0, 1.0));
             assert_eq!(game.creatures.lan_sounds.len(), 2);

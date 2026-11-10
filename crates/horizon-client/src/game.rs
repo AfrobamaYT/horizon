@@ -4317,67 +4317,13 @@ impl Game<'_> {
         pos: [i32; 3],
         player_context: bool,
     ) -> Vec<[f64; 6]> {
-        self.outline_boxes_iter(world, anims, pos, player_context)
-            .collect()
-    }
-    /// The same outline traversal without allocating a box list.
-    fn outline_boxes_iter(
-        &self,
-        world: &World,
-        anims: &horizon_client::block_entity_anim::BlockEntityAnims,
-        pos: [i32; 3],
-        player_context: bool,
-    ) -> impl Iterator<Item = [f64; 6]> + '_ {
-        let state = world.block(pos[0], pos[1], pos[2]);
-        let declared = self.collision.cached_shapes().context_outline_shape(
-            state,
-            if player_context {
-                self.outline_context_kind()
-            } else {
-                horizon_world::collision_context::EntityContextKind::Other
-            },
-        );
-        let context = declared
-            .is_none()
-            .then(|| self.context_outline(pos, state, player_context, anims))
-            .flatten();
-        let f = self.res.facts().get(state);
-        let o = perspective::outline_offset(
-            &self.pack.context.tables,
-            state,
-            pos[0],
-            pos[2],
-            f.outline_offset,
-        );
-        let base = [
-            f64::from(pos[0]) + o[0],
-            f64::from(pos[1]) + o[1],
-            f64::from(pos[2]) + o[2],
-        ];
-        let boxes = if context.is_some() || declared.is_some() {
-            &[][..]
-        } else {
-            &f.outline[..]
-        };
-        context
-            .map(|b| std::array::from_fn(|i| f64::from(pos[i % 3]) + b[i]))
-            .into_iter()
-            .chain(
-                declared
-                    .into_iter()
-                    .flat_map(|shape| shape.boxes())
-                    .map(move |b| {
-                        let min = b.min_position();
-                        let max = b.max_position();
-                        let coords = [min.x, min.y, min.z, max.x, max.y, max.z];
-                        std::array::from_fn(|i| base[i % 3] + coords[i])
-                    }),
-            )
-            .chain(
-                boxes
-                    .iter()
-                    .map(move |b| std::array::from_fn(|i| base[i % 3] + b[i])),
-            )
+        self.outline_boxes_iter(
+            world.block(pos[0], pos[1], pos[2]),
+            anims,
+            pos,
+            player_context,
+        )
+        .collect()
     }
     /// The declared outline uses vanilla's inside-ray test and interaction override.
     fn clip_declared_outline(
@@ -17717,7 +17663,7 @@ pub(crate) fn run_with(
     mods::register_color_resolvers(options.execution_role);
     mods::register_block_tint_sources(options.execution_role);
     mods::register_particles(options.execution_role);
-    mods::freeze_declarations();
+    mods::freeze_declarations()?;
     mod_phase.advance(mod_api::__private::ModPhase::Setup)?;
     // Minecraft.<init>: read the last start's flag, then mark this one as not
     // finished until onGameLoadFinished. A dedicated server has no options.txt.
@@ -18084,10 +18030,8 @@ pub(crate) fn in_own_process(name: &str, body: impl FnOnce()) {
 #[cfg(test)]
 mod escape_tests {
     use super::game_tests::tests::server_game;
-    use horizon_client::chunk::Chunk;
     use horizon_client::items::ItemStack;
     use horizon_core::random::RandomSource;
-    use std::sync::Arc;
 
     /// `Entity.moveTowardsClosestSpace` uses the item's own random, never the
     /// level's random. Seeded Java values pin vanilla's float arithmetic (#13043).
@@ -18098,9 +18042,10 @@ mod escape_tests {
         let mut game = server_game(&mut game_resources);
         let feet = horizon_core::geometry::Vec3::new(8.5, 70.0, 8.5);
         game.player = Some(horizon_client::motion::PlayerMotion::new(game.motion, feet).unwrap());
-        game.world
-            .chunks
-            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        super::native_entity_refs::tests::prepare_entity_ticking_neighborhood(
+            &mut game,
+            horizon_core::position::ChunkPos::new(0, 0),
+        );
         game.update_chunk_tickets();
         assert!(game.entity_ticking_area()(8, 8));
         let stone = game
