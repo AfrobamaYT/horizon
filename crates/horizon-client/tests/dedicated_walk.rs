@@ -17,6 +17,15 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// Reap the server on assertion failures as well as successful test completion.
+struct Server(std::process::Child);
+impl Drop for Server {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 fn resources() -> Option<PathBuf> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../.local/horizon-client")
@@ -120,11 +129,11 @@ fn a_dedicated_server_keeps_ticking_while_a_player_walks() {
     ] {
         command.env(key, scratch.path().join(folder));
     }
-    let mut server = command.spawn().unwrap();
+    let mut server = Server(command.spawn().unwrap());
     let (lines, read) = std::sync::mpsc::channel::<String>();
     for stream in [
-        Box::new(server.stdout.take().unwrap()) as Box<dyn std::io::Read + Send>,
-        Box::new(server.stderr.take().unwrap()),
+        Box::new(server.0.stdout.take().unwrap()) as Box<dyn std::io::Read + Send>,
+        Box::new(server.0.stderr.take().unwrap()),
     ] {
         let lines = lines.clone();
         thread::spawn(move || {
@@ -136,6 +145,7 @@ fn a_dedicated_server_keeps_ticking_while_a_player_walks() {
             }
         });
     }
+    drop(lines);
     let mut log = Vec::new();
     let started = Instant::now();
     while !log.iter().any(|line: &String| line.contains("Done (")) {
@@ -144,7 +154,7 @@ fn a_dedicated_server_keeps_ticking_while_a_player_walks() {
             .unwrap_or_else(|_| panic!("the server never finished starting:\n{}", log.join("\n")));
         log.push(line);
     }
-    let mut console = server.stdin.take().unwrap();
+    let mut console = server.0.stdin.take().unwrap();
     let walked = (|| {
         let mut bot = join(port, "Walker").map_err(|e| e.to_string())?;
         bot.reader
@@ -158,7 +168,7 @@ fn a_dedicated_server_keeps_ticking_while_a_player_walks() {
         let mut moves = 0;
         let deadline = Instant::now() + Duration::from_secs(20);
         while Instant::now() < deadline {
-            let mut tick = Instant::now();
+            let tick = Instant::now();
             loop {
                 match bot.recv() {
                     Ok((id, payload)) => match C::decode(id, &payload) {
@@ -193,7 +203,6 @@ fn a_dedicated_server_keeps_ticking_while_a_player_walks() {
                     Err(e) => return Err(format!("connection lost after {moves} moves: {e}")),
                 }
                 if tick.elapsed() >= Duration::from_millis(50) {
-                    tick = Instant::now();
                     break;
                 }
             }
@@ -236,9 +245,9 @@ fn a_dedicated_server_keeps_ticking_while_a_player_walks() {
         }
         Ok(())
     })();
-    let exited = server.try_wait().unwrap();
-    let _ = server.kill();
-    let _ = server.wait();
+    let exited = server.0.try_wait().unwrap();
+    let _ = server.0.kill();
+    let _ = server.0.wait();
     log.extend(read.try_iter());
     let unfinished = log
         .iter()

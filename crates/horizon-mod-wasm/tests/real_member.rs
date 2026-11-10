@@ -122,6 +122,13 @@ fn real_member() {
             mod_api::ModBlockEntity::new("wasm_fixture:counter".into(), Default::default());
         mod_api::dispatch_block_entity_tick(&mut Quiet, [0, 64, 0], &mut entity);
         assert_eq!(entity.data, [23]);
+        for key in ["entity_pre_calls", "entity_post_calls"] {
+            assert_eq!(
+                entity.nbt.get(&key.into()),
+                Some(&mod_api::Tag::Int(1)),
+                "{key}"
+            );
+        }
         assert_eq!(
             entity.nbt.get(&"counter".into()),
             Some(&mod_api::Tag::Int(17))
