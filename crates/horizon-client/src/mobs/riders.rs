@@ -588,7 +588,9 @@ pub fn resume_after_consumption(
     events: &mut Vec<super::MobEvent>,
 ) -> bool {
     tick_with(mobs, index, w, level, events, |m, w, level, events| {
-        super::ai::resume_after_consumption(m, w, level, was_on_fire, events)
+        let kept = super::ai::resume_after_consumption(m, w, level, was_on_fire, events);
+        super::neutral_anger::after_tick(m, w.game_time);
+        kept
     })
 }
 

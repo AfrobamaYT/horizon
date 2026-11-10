@@ -11,6 +11,20 @@ use super::*;
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn h13076_loaded_anger_end_time_is_kept() {
     with_game(|game| {
+        // Entity-ticking readiness waits for the full two-chunk neighbourhood,
+        // not only the four columns used by the summon/save fixture.
+        for z in -2..=2 {
+            for x in -2..=2 {
+                if !game.world.chunks.contains_key(&(x, z)) {
+                    game.world
+                        .chunks
+                        .insert((x, z), Arc::new(horizon_client::chunk::Chunk::empty(x, z)));
+                    game.block_ticks
+                        .add_empty_chunk(horizon_core::position::ChunkPos::new(x, z))
+                        .unwrap();
+                }
+            }
+        }
         game.world.game_time = 100;
         assert!(game.run_command("gamerule spawn_mobs false"));
         let mut summon = |n: i32, kind: &str, end: i64, no_ai: bool| {
