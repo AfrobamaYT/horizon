@@ -16536,7 +16536,8 @@ impl<'a> Game<'a> {
             transactions: Vec::new(),
             block_entity_tick_key: None,
             block_entity_tick_items: None,
-            wasm_dispatch_failures: horizon_mod_wasm::dispatch_failure_counter(),
+            wasm_dispatch_failures:
+                horizon_mod_runtime::dispatch_failures::dispatch_failure_counter(),
             contents_changing: Vec::new(),
             mod_screen: None,
             mod_container_viewers: HashMap::new(),

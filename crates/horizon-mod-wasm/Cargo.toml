@@ -8,6 +8,7 @@ description = "The runtime for wasm mods: groups packages by their dependencies 
 
 [dependencies]
 horizon-core = { path = "../horizon-core" }
+horizon-mod-runtime = { path = "../horizon-mod-runtime" }
 mod_points = { package = "horizon-mod-points", path = "../horizon-mod-points" }
 mod_api = { package = "horizon-mod-api", path = "../horizon-mod-api" }
 horizon-mod-package = { path = "../horizon-mod-package", default-features = false }
@@ -22,7 +23,6 @@ horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
 
 [dev-dependencies]
 horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
-horizon-mod-runtime = { path = "../horizon-mod-runtime" }
 mod_points = { package = "horizon-mod-points", path = "../horizon-mod-points" }
 horizon-mod-api-macros = { path = "../horizon-mod-api-macros" }
 horizon-client-core = { path = "../horizon-client-core" }

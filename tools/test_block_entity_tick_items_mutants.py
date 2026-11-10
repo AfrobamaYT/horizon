@@ -35,7 +35,7 @@ mutants = [
      "e.id == proposal.id && e.stack == proposal.original", "e.id == proposal.id",
      "finalization_never_retargets_stale_items_or_replaced_placeholders", {"ROW4_PRECONDITION_CASE": "stack", "HORIZON_LIVE_HOLDER_GAME_CHILD": "valid"}),
     ("drop_decode_poison", "crates/horizon-mod-wasm/src/runtime.rs",
-     "crate::record_dispatch_failure();", "// mutant: discard decode-failure poison",
+     "horizon_mod_runtime::dispatch_failures::record_dispatch_failure();", "// mutant: discard decode-failure poison",
      "native_tick_publishes_or_rejects_item_proposals_with_writeback", {"ROW4_NATIVE_CASE": "wasm_malformed"}),
 ]
 for name, relative, old, new, test, case in mutants:
