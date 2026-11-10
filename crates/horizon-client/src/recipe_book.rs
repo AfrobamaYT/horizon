@@ -18,6 +18,8 @@ pub use properties::ServerRecipeProperties;
 
 mod custom_books;
 mod mod_index;
+pub mod settings_codec;
+pub mod settings_sync;
 pub use custom_books::{BookError, BookFlags, CustomBooks, read_saved};
 pub use mod_index::{DisplayLoadError, DisplayResources, ModBookIndex};
 

@@ -2740,7 +2740,7 @@ registration path.
 
 - A server player released a drawn bow, by the use-item key or a mod's `release_using_item`, with `native_player_ready_arrow(player, name, arrow)`: the name of the selected projectile item.
 
-- A server player's recipe book open or filter setting changed: `native_player_recipe_book_settings_change(player, name, book, open, filtering)`, where `book` is its protocol id.
+- A server player's recipe book open or filter setting changed: `native_player_recipe_book_settings_change(player, name, book, open, filtering)`, where `book` is its typed `RecipeBookIdentity`.
 
 - A server player released the use-item key, or a mod's `release_using_item` did, before the item finished being used: `native_player_stop_using_item(player, name)`.
 

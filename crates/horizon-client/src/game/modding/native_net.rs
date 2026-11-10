@@ -22,6 +22,10 @@ pub(super) const PER_TICK: u32 = 32;
 /// The messages waiting, and what each player used of this tick's allowance.
 #[derive(Default)]
 pub(super) struct NativeNet {
+    pub(super) book_connections:
+        HashMap<u32, horizon_client::recipe_book::settings_sync::Authority>,
+    pub(super) book_view: horizon_client::recipe_book::settings_sync::ClientView,
+    pub(super) book_request: u64,
     from_players: Vec<(u128, Message)>,
     from_counts: HashMap<u128, u32>,
     to_players: Vec<(u128, Vec<u8>)>,

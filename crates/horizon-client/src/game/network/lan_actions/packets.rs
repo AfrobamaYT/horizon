@@ -767,6 +767,11 @@ impl Game<'_> {
             S::CustomPayload(p) if p.channel == horizon_protocol::quiet::CHANNEL => {
                 self.guest_quiet_commands(conn, &p.data)
             }
+            S::CustomPayload(p)
+                if p.channel == horizon_client::recipe_book::settings_sync::CHANNEL =>
+            {
+                self.guest_book_settings(conn, &p.data)
+            }
             S::CustomPayload(p) if p.channel == horizon_protocol::mod_net::CHANNEL => {
                 self.guest_native_net(conn, &p.data)
             }
