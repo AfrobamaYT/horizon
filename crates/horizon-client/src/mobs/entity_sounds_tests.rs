@@ -240,3 +240,25 @@ fn entity_sounds_step_only_override_and_mute_preserve_ambient() {
         );
     }
 }
+
+#[test]
+fn entity_sounds_malformed_row_reports_entity_id() {
+    for sounds in [serde_json::json!({"hurt":42}), serde_json::Value::Null] {
+        let row = serde_json::json!({"sounds":sounds});
+        let error = Sounds::load("bird:vulture", &row).unwrap_err().to_string();
+        assert!(error.contains("bird:vulture"), "{error}");
+        let dir = tempfile::tempdir().unwrap();
+        let mut row = row;
+        row["template"] = serde_json::json!("minecraft:villager");
+        std::fs::write(
+            dir.path().join("entity-types.json"),
+            serde_json::to_vec(&serde_json::json!({"bird:vulture":row})).unwrap(),
+        )
+        .unwrap();
+        let Err(error) = MobTypes::load_for_server(dir.path()) else {
+            panic!("malformed sounds were admitted by the entity loader");
+        };
+        assert!(error.to_string().contains("bird:vulture"), "{error}");
+    }
+    assert!(Sounds::load("bird:vulture", &serde_json::json!({})).is_ok());
+}

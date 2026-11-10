@@ -1348,12 +1348,7 @@ impl Content {
                     file.template
                 ));
             }
-            if !file.passenger_attachments.is_empty() {
-                return Err(format!(
-                    "{name}: only a living type has passenger attachments (its template is {})",
-                    file.template
-                ));
-            }
+            file.validate_thrown_attachments_and_sounds(&name)?;
             let Some(item) = &file.item else {
                 return Err(format!(
                     "{name}: a thrown type names the item that throws it"

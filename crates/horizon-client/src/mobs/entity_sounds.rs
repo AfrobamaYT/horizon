@@ -27,20 +27,24 @@ pub struct Sounds {
     pub step: Selection,
 }
 impl Sounds {
-    pub fn load(row: &serde_json::Value) -> Self {
-        let sounds: EntitySounds =
-            serde_json::from_value(row["sounds"].clone()).unwrap_or_default();
+    pub fn load(entity: &str, row: &serde_json::Value) -> crate::Result<Self> {
+        let sounds: EntitySounds = match row.get("sounds") {
+            None => EntitySounds::default(),
+            Some(value) => serde_json::from_value(value.clone())
+                .map_err(|error| format!("{entity}: sounds: {error}"))?,
+        };
+        sounds.validate(entity)?;
         let resolve = |slot| match slot {
             None => Selection::Inherit,
             Some(SoundOverride::Mute(_)) => Selection::Mute,
             Some(SoundOverride::Id(id)) => Selection::Id(intern_full_id(&id)),
         };
-        Self {
+        Ok(Self {
             ambient: resolve(sounds.ambient),
             hurt: resolve(sounds.hurt),
             death: resolve(sounds.death),
             step: resolve(sounds.step),
-        }
+        })
     }
 }
 /// Namespace normalization at audio/network boundaries. Full ids are borrowed unchanged.

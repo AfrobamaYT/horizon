@@ -841,7 +841,7 @@ impl MobTypes {
                     brain: def.brain(),
                     anim: def.anim,
                     sounds: def.sounds,
-                    sound_overrides: entity_sounds::Sounds::load(t),
+                    sound_overrides: entity_sounds::Sounds::load(&id, t)?,
                     food: def.food_tag().map_or_else(|| Arc::from(Vec::new()), tag),
                     tempt: def
                         .tempt_tag()

@@ -84,3 +84,21 @@ impl EntityType {
         LIVING_TEMPLATES.contains(&self.template.as_str())
     }
 }
+
+impl EntityType {
+    pub(super) fn validate_thrown_attachments_and_sounds(&self, name: &str) -> Result<(), String> {
+        if !self.passenger_attachments.is_empty() {
+            return Err(format!(
+                "{name}: only a living type has passenger attachments (its template is {})",
+                self.template
+            ));
+        }
+        if self.sounds != EntitySounds::default() {
+            return Err(format!(
+                "{name}: only a living type has sounds (its template is {})",
+                self.template
+            ));
+        }
+        Ok(())
+    }
+}
