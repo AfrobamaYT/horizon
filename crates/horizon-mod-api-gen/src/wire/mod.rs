@@ -57,8 +57,11 @@ pub(super) const IMPORTS: &[&str] = &[
     "PackFinders",
     "ColorResolvers",
     "BlockTintSources",
+    "SectionGeometryRenderers",
+    "SectionGeometryContext",
     "ParticleProviders",
     "EnchantmentDamageEffects",
+    "PoiTypeExtensions",
     "BlockAndTintGetter",
     "GroundLevel",
     "BlockMetadata",
@@ -127,6 +130,7 @@ const EXPORTS: &[&str] = &[
     "ClientReloadListener",
     "BiomeColorResolver",
     "BlockTintSource",
+    "SectionGeometry",
     "ParticleProvider",
     "EnchantmentDamageEffect",
     "CommandArgumentType",
@@ -161,13 +165,14 @@ const LOAD_CONTEXTS: &[&str] = &[
 ];
 
 /// The traits the game calls on its worker threads: a mod's structure types and their pieces on
-/// the worldgen workers, its block tint sources and colour resolvers on the meshing workers. They
-/// keep no mutable state and get no `Host`.
+/// the worldgen workers, its block tint sources, colour resolvers and section geometry on the
+/// meshing workers. They keep no mutable state and get no `Host`.
 const WORKERS: &[&str] = &[
     "StructureType",
     "StructurePiece",
     "BlockTintSource",
     "BiomeColorResolver",
+    "SectionGeometry",
 ];
 
 /// What a call of `method` is to the runtime, for its limits and its wait.

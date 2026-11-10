@@ -796,6 +796,11 @@ pub struct Screen {
     /// target this menu; no panel is enabled until authoritative settings arrive.
     /// Leaving this unset keeps the screen without a recipe book.
     pub recipe_book: Option<crate::RecipeBookTypeKey>,
+    /// Optional 20 × 18 recipe-book toggle position relative to this menu.
+    /// The screen author reserves this area, as vanilla screen templates do.
+    /// Without an anchor the engine uses an external gutter; if none fits,
+    /// the book is refused with a diagnostic while the menu remains usable.
+    pub recipe_book_toggle: Option<[f32; 2]>,
 }
 
 /// An item the panel shows (`panel_items`): its id
@@ -1071,4 +1076,19 @@ pub struct MenuRef {
     pub(crate) player: PlayerRef,
     pub(crate) window: i32,
     pub(crate) generation: u64,
+}
+
+/// Per-window targeting controls. Defaults preserve vanilla picking. Reach remains backed
+/// by `minecraft:block_interaction_range` and `minecraft:entity_interaction_range`; a server
+/// mod changes those through the player's living attribute handle, not these client controls.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, horizon_mod_api_macros::Wire)]
+#[non_exhaustive]
+pub struct ClientTargeting {
+    /// Include source and flowing fluid shapes in the ordinary outline pick.
+    pub pick_liquids: bool,
+    /// Let entity picks and mod-selected attacks pass block outlines on this client.
+    pub hit_through_walls: bool,
+    /// Prefer this client-level entity for the crosshair and attacks; None restores the ray.
+    /// Stale, self, unsupported, out-of-reach or occluded targets cannot be attacked.
+    pub entity: Option<EntityRef>,
 }

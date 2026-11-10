@@ -95,7 +95,6 @@
       "horizon-client-core",
       "horizon-command",
       "horizon-core",
-      "horizon-game-discovery",
       "horizon-items",
       "horizon-protocol",
       "horizon-world",

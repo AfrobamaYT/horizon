@@ -398,7 +398,7 @@ jobs:
           EPHEMERAL: ${{ needs.decide.outputs.dry_run == 'true' && 'yes' || '' }}
         run: |
           key=(); [[ -n "$EPHEMERAL" ]] && key=(--key "$(cat dist/ephemeral.pub)")
-          cargo run --locked --quiet -p horizon-release-sign -- verify --tag "$TAG" --publishing "${key[@]}" dist
+          cargo run --locked --quiet -p horizon-release-sign -- verify --repository "$GITHUB_REPOSITORY" --tag "$TAG" --publishing "${key[@]}" dist
       # Never marked latest: Horizon's own releases stay the repository's latest.
       - name: The Windows ARM64 launcher, if it built
         # Its build may fail without holding the release (continue-on-error): the release then has no ARM64

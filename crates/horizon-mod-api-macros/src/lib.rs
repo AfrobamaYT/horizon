@@ -18,6 +18,8 @@ use syn::{
 };
 
 /// The staged call site's typed boundary. Only generated source invokes this macro.
+/// A borrowing record is passed as `Args::<'a>`; the generated dispatch function
+/// binds that call lifetime and preserves it through every continuation.
 #[proc_macro]
 pub fn site(input: TokenStream) -> TokenStream {
     let args = parse_macro_input!(input with Punctuated::<syn::Expr, Token![,]>::parse_terminated);
@@ -41,8 +43,14 @@ pub fn site(input: TokenStream) -> TokenStream {
         .to_compile_error()
         .into();
     };
+    let borrow_lifetime = match record {
+        syn::Expr::Path(path) if path.path.segments.iter().any(|s| !s.arguments.is_empty()) => {
+            quote!(, 'a)
+        }
+        _ => quote!(),
+    };
     quote! {{
-        fn #wrap<'g>(__at: usize, __receiver: #recv_ty<'g, '_>, __args: &mut #record,
+        fn #wrap<'g #borrow_lifetime>(__at: usize, __receiver: #recv_ty<'g, '_>, __args: &mut #record,
             __original: &mut dyn FnMut(#recv_ty<'g, '_>, &mut #record) -> #output) -> #output {
             ::mod_points::__private::wrap(::mod_points::SiteId::#place, __at, |__entry| {
                 match __entry {

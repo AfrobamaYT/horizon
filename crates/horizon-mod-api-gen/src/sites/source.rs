@@ -144,4 +144,39 @@ mod tests {
         assert_eq!(fs::read_to_string(&file).unwrap(), text);
         fs::remove_dir_all(root).unwrap();
     }
+    #[test]
+    fn mutable_borrow_refusal_does_not_write_source() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "../../target/source-borrow-refusal-{}",
+            std::process::id()
+        ));
+        let file = root.join("crates/horizon-client/src/game.rs");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let text = "fn run(value: &mut u32) { change(value); } fn change(value: &mut u32) {}";
+        let entries = vec![
+            internal("horizon_client::game::run", "fn", "fn run(value: &mut u32)"),
+            internal(
+                "horizon_client::game::change",
+                "fn",
+                "fn change(value: &mut u32)",
+            ),
+        ];
+        let request = Declaration {
+            expression: None,
+            local: None,
+            target: entries[0].path.clone(),
+            selector: entries[1].path.clone(),
+            ordinal: Some(0),
+            ctx: String::new(),
+            origin: "borrow:call".into(),
+        };
+        fs::write(&file, text).unwrap();
+        assert!(
+            stage(&root, &entries, &[request])
+                .unwrap_err()
+                .contains("borrowing or non-Copy")
+        );
+        assert_eq!(fs::read(&file).unwrap(), text.as_bytes());
+        fs::remove_dir_all(root).unwrap();
+    }
 }

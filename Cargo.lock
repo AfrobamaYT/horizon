@@ -2077,6 +2077,7 @@ dependencies = [
  "horizon-core",
  "horizon-mod-host",
  "horizon-mod-package",
+ "horizon-protocol",
  "horizon-threads",
  "serde_json",
  "tempfile",
@@ -2169,6 +2170,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "syn 2.0.119",
+ "tempfile",
  "toml",
  "wit-parser",
 ]
@@ -2436,6 +2438,7 @@ dependencies = [
 name = "horizon-port-pack"
 version = "0.1.0"
 dependencies = [
+ "horizon-mod-api",
  "horizon-mod-api-gen",
  "horizon-mod-package",
  "serde",
