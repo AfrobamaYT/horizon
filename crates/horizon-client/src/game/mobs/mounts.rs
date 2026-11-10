@@ -1606,5 +1606,5 @@ mod tests {
 }
 
 #[cfg(test)]
-#[path = "camel_jump_tests.rs"]
+#[path = "mounts/camel_jump_tests.rs"]
 mod camel_jump_tests;

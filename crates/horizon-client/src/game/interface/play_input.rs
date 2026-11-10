@@ -490,41 +490,6 @@ impl Game<'_> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{studio_freecam_movement_key, studio_replay_shortcut};
-    use winit::keyboard::KeyCode;
-
-    #[test]
-    fn replay_shortcuts_are_distinct_from_freecam_movement() {
-        for key in [
-            KeyCode::Escape,
-            KeyCode::KeyP,
-            KeyCode::KeyF,
-            KeyCode::KeyT,
-            KeyCode::KeyM,
-            KeyCode::Home,
-            KeyCode::KeyL,
-            KeyCode::KeyK,
-            KeyCode::Delete,
-        ] {
-            assert!(studio_replay_shortcut(key));
-        }
-        for key in [
-            KeyCode::KeyW,
-            KeyCode::KeyA,
-            KeyCode::KeyS,
-            KeyCode::KeyD,
-            KeyCode::KeyE,
-            KeyCode::KeyQ,
-        ] {
-            assert!(studio_freecam_movement_key(key));
-            assert!(!studio_replay_shortcut(key));
-        }
-        assert!(!studio_freecam_movement_key(KeyCode::KeyI));
-    }
-}
-
 /// The input source (docs/layers.md, "Controllers, splitscreen, replays and UI pages"): what
 /// gameplay asks of a device beyond the keyboard and mouse, and tells it. Gameplay calls these,
 /// never the controller modules; today `pad` answers.
@@ -595,5 +560,40 @@ impl Game<'_> {
             KeyCode::KeyD => right,
             _ => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{studio_freecam_movement_key, studio_replay_shortcut};
+    use winit::keyboard::KeyCode;
+
+    #[test]
+    fn replay_shortcuts_are_distinct_from_freecam_movement() {
+        for key in [
+            KeyCode::Escape,
+            KeyCode::KeyP,
+            KeyCode::KeyF,
+            KeyCode::KeyT,
+            KeyCode::KeyM,
+            KeyCode::Home,
+            KeyCode::KeyL,
+            KeyCode::KeyK,
+            KeyCode::Delete,
+        ] {
+            assert!(studio_replay_shortcut(key));
+        }
+        for key in [
+            KeyCode::KeyW,
+            KeyCode::KeyA,
+            KeyCode::KeyS,
+            KeyCode::KeyD,
+            KeyCode::KeyE,
+            KeyCode::KeyQ,
+        ] {
+            assert!(studio_freecam_movement_key(key));
+            assert!(!studio_replay_shortcut(key));
+        }
+        assert!(!studio_freecam_movement_key(KeyCode::KeyI));
     }
 }

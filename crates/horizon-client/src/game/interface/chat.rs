@@ -2178,9 +2178,7 @@ impl Game<'_> {
             return None;
         }
         let name = screenshot_name(&dir, &self.ui.screenshot_messages);
-        let Some(renderer) = self.renderer.as_mut() else {
-            return None;
-        };
+        let renderer = self.renderer.as_mut()?;
         let path = dir.join(name);
         // A second shortcut before rendering replaces the queued frame. Release
         // that request's name: no readback will arrive to finish it.

@@ -8375,9 +8375,6 @@ impl Game<'_> {
         });
         cancel
     }
-    /// The clock of the animated textures: `Minecraft.runTick` ticks the `TextureManager`
-    /// only while the level runs normally. Under `HORIZON_STILL` it is the world's ticks.
-
     fn tick(&mut self) -> Result<()> {
         if self.agent.hold_server {
             return Ok(());
