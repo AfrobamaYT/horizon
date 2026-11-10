@@ -38,13 +38,13 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
         ],
         Target::Api | Target::Vocab => {
             if matches!(target, Target::Vocab) {
-                fs::write(
+                write_if_changed(
                     out_dir.join(super::parts::OUTPUT),
                     super::parts::source(root)?,
                 )
                 .map_err(|e| e.to_string())?;
                 for (name, code) in super::exports::sources(root)? {
-                    fs::write(out_dir.join(name), code).map_err(|e| e.to_string())?;
+                    write_if_changed(out_dir.join(name), code).map_err(|e| e.to_string())?;
                 }
             }
             let hooks = generated.hooks;
