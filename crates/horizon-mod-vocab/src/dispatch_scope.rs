@@ -33,6 +33,7 @@ pub struct Backend {
 /// Plain per-call instrumentation data. The platform must validate the pool
 /// generation and slot before accessing its profiler storage.
 #[doc(hidden)]
+#[derive(Clone, Copy)]
 pub struct Timing {
     pub generation: usize,
     pub slot: usize,
@@ -59,7 +60,10 @@ impl ModGuardFactory {
     pub fn finish(self, state: State) -> ModGuard {
         ModGuard {
             owner: self.owner,
-            timing: state.timing.map(|timing| (self.leave, timing)),
+            _timing: state.timing.map(|timing| TimingGuard {
+                leave: self.leave,
+                timing,
+            }),
             _thread: std::marker::PhantomData,
         }
     }
@@ -70,20 +74,27 @@ impl ModGuardFactory {
 #[must_use]
 pub struct ModGuard {
     owner: (Option<u64>, Option<ModCall>),
-    timing: Option<(fn(State), Timing)>,
+    _timing: Option<TimingGuard>,
     _thread: std::marker::PhantomData<std::rc::Rc<()>>,
 }
 impl Drop for ModGuard {
     #[inline]
     fn drop(&mut self) {
         crate::content::crash::pop(self.owner.0, self.owner.1);
-        if let Some((leave, timing)) = self.timing.take() {
-            leave(State {
-                outer_frame: None,
-                outer_call: None,
-                timing: Some(timing),
-            });
-        }
+    }
+}
+
+struct TimingGuard {
+    leave: fn(State),
+    timing: Timing,
+}
+impl Drop for TimingGuard {
+    fn drop(&mut self) {
+        (self.leave)(State {
+            outer_frame: None,
+            outer_call: None,
+            timing: Some(self.timing),
+        });
     }
 }
 
@@ -112,7 +123,7 @@ pub(crate) fn enter(call: ModCall) -> ModGuard {
     }
     ModGuard {
         owner,
-        timing: None,
+        _timing: None,
         _thread: std::marker::PhantomData,
     }
 }
