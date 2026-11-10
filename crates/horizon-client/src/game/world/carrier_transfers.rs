@@ -226,8 +226,10 @@ impl Game<'_> {
         let mut store = match Store::open(&self.world_root) {
             Ok(crate::carrier_store::Opened::Live(store)) => store,
             Ok(crate::carrier_store::Opened::NeverUsed) => {
-                let data_existed = self.world_root.join("data").is_dir();
-                Store::first_use(&self.world_root, data_existed)
+                // The gate reads the flag captured at world open, not
+                // the folder's existence now: a data folder created
+                // this session does not pass for an old one.
+                Store::first_use(&self.world_root, self.world.carrier_data_existed_at_open)
                     .map_err(|e| TransferError::Store(e.to_string()))?
             }
             Err(e) => return Err(TransferError::Store(e.to_string())),
@@ -291,7 +293,7 @@ impl Game<'_> {
         }
         let carrier_cells = operation_cells
             .iter()
-            .map(|cell| {
+            .map(|cell| -> Result<Cell, TransferError> {
                 // The entity rides the carrier file whole: its NBT
                 // serialized once, so a later disassembly replays it. A
                 // serialization failure is a refusal — the entity is
@@ -317,9 +319,9 @@ impl Game<'_> {
                     cell.before.properties.clone(),
                     data,
                 )
+                .map_err(TransferError::Model)
             })
-            .collect::<Result<Vec<_>, Invalid>>()
-            .map_err(TransferError::Model)?;
+            .collect::<Result<Vec<_>, TransferError>>()?;
         let generation = 1;
         let carrier = Carrier::new(
             uuid,
@@ -786,7 +788,13 @@ impl Game<'_> {
         let dimension = match crate::carrier_store::Store::open(&self.world_root) {
             Ok(crate::carrier_store::Opened::Live(store)) => match store.journal().in_progress.as_ref() {
                 Some(op) => op.dimension.clone(),
-                None => return Ok(()),
+                // No pending operation — but retention still runs: the
+                // production cleanup clears finished disassemblies'
+                // tombstones and orphaned files at every open.
+                None => {
+                    self.carrier_cleanup();
+                    return Ok(());
+                }
             },
             Ok(crate::carrier_store::Opened::NeverUsed) => return Ok(()),
             Err(error) => return Err(format!("world load refused: {error}").into()),
@@ -824,7 +832,31 @@ impl Game<'_> {
             })?;
         }
         recovered.map_err(|e| format!("world load refused: {e}"))?;
+        // Production cleanup, as every open runs it: orphans, stale
+        // operation files and tombstones of durably deleted carriers
+        // clear here, so finished disassemblies and repeated transfers
+        // never exhaust the journal's bounded capacity.
+        self.carrier_cleanup();
         Ok(())
+    }
+
+    /// Cleans the store by the valid journal — the validated cleanup of
+    /// the storage layer, run from world open. Errors are logged and
+    /// swallowed: cleanup is retention work, never a load refusal.
+    fn carrier_cleanup(&mut self) {
+        let mut store = match crate::carrier_store::Store::open(&self.world_root) {
+            Ok(crate::carrier_store::Opened::Live(store)) => store,
+            _ => return,
+        };
+        if let Err(error) = store.cleanup() {
+            log::warn!("carrier store cleanup: {error}");
+        }
+    }
+
+    /// The production cleanup path under its test-facing name.
+    #[cfg(test)]
+    pub(crate) fn carrier_cleanup_for_tests(&mut self) {
+        self.carrier_cleanup();
     }
 
     /// Recovers the level in place: no store means nothing to do; a live
@@ -906,6 +938,9 @@ mod tests {
             // The harness's world root is empty: give the transfer a
             // throwaway world of its own, as the save tests do.
             game.world_root = root.clone();
+            // The fixture world pre-exists with its data folder, as an
+            // opened world would.
+            game.world.carrier_data_existed_at_open = true;
             game.world.chunks.insert(
                 (0, 0),
                 Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
@@ -1009,6 +1044,9 @@ mod tests {
         let root = transfer_root("overflow");
         with_game(|game| {
             game.world_root = root.clone();
+            // The fixture world pre-exists with its data folder, as an
+            // opened world would.
+            game.world.carrier_data_existed_at_open = true;
             game.save = std::sync::Arc::new(horizon_client::save::SaveDir::new(
                 root.join("dimensions/minecraft/overworld"),
                 horizon_client::save::LevelShape::OVERWORLD,
@@ -1048,6 +1086,9 @@ mod tests {
         let root = transfer_root("passive");
         with_game(|game| {
             game.world_root = root.clone();
+            // The fixture world pre-exists with its data folder, as an
+            // opened world would.
+            game.world.carrier_data_existed_at_open = true;
             game.save = std::sync::Arc::new(horizon_client::save::SaveDir::new(
                 root.join("dimensions/minecraft/overworld"),
                 horizon_client::save::LevelShape::OVERWORLD,
@@ -1061,7 +1102,18 @@ mod tests {
             game.world.set(4, 64, 4, furnace).unwrap();
             game.world.block_entities.insert(
                 (4, 64, 4),
-                horizon_client::chunk::block_entity::BlockEntity::Furnace(Default::default()),
+                horizon_client::chunk::block_entity::BlockEntity::Furnace(
+                    horizon_client::chunk::block_entity::Furnace {
+                        kind: horizon_client::chunk::block_entity::FurnaceKind::Furnace,
+                        items: [None, None, None],
+                        lit_remaining: 0,
+                        lit_total: 0,
+                        cooking_timer: 0,
+                        cooking_total: 0,
+                        speed: 1.0,
+                        recipes_used: Default::default(),
+                    },
+                ),
             );
             match game.carrier_assemble(53, &[BlockPos::new(4, 64, 4)]) {
                 Err(TransferError::UnsupportedBlock(pos)) => assert_eq!(pos, [4, 64, 4]),
@@ -1076,6 +1128,111 @@ mod tests {
                 .contains_key(&(4, 64, 4)));
             assert!(!root
                 .join(format!("data/horizon_carrier_{:032x}-1.nbt", 53_u128))
+                .is_file());
+        });
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// (item 6) Repeated live transfers beyond the journal's carrier
+    /// capacity (4,096 index entries): assemble-disassemble cycles with
+    /// production cleanup at each recovery stay bounded — the files do
+    /// not accumulate and the store keeps working.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn repeated_transfers_beyond_the_index_capacity_stay_bounded() {
+        let root = transfer_root("capacity");
+        with_game(|game| {
+            game.world_root = root.clone();
+            // The fixture world pre-exists with its data folder, as an
+            // opened world would.
+            game.world.carrier_data_existed_at_open = true;
+            game.save = std::sync::Arc::new(horizon_client::save::SaveDir::new(
+                root.join("dimensions/minecraft/overworld"),
+                horizon_client::save::LevelShape::OVERWORLD,
+            ));
+            game.world.chunks.insert(
+                (0, 0),
+                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            let registry = game.pack.assets.registry;
+            let chest = registry.default_state("minecraft:chest").unwrap();
+            // A few more cycles than the 4,096-entry index bound; each
+            // uses its own UUID and the store cleanup (via recovery)
+            // clears the finished ones.
+            let cycles = 4100;
+            for i in 0..cycles {
+                game.world.set(4, 64, 4, chest).unwrap();
+                game.carrier_assemble(1000 + i as u128, &[BlockPos::new(4, 64, 4)])
+                    .unwrap();
+                game.carrier_disassemble(
+                    1000 + i as u128,
+                    1,
+                    [4, 64, 4],
+                    [1.0, 0.0, 0.0, 0.0],
+                )
+                .unwrap();
+                // The production cleanup, as world open runs it.
+                game.carrier_cleanup_for_tests();
+            }
+            // Bounded: no operation files, no carrier files beyond the
+            // journal's two slots, and the store still opens.
+            let mut files = 0;
+            for entry in std::fs::read_dir(root.join("data")).unwrap().flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if name.starts_with("horizon_carrier") {
+                    files += 1;
+                }
+            }
+            assert!(
+                files <= 2,
+                "the store must stay bounded at the two slots, found {files} files"
+            );
+        });
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// (item 6) A crash after a finished disassembly: the tombstone
+    /// outlives the session, and the next open's recovery-plus-cleanup
+    /// resolves it cleanly — the carrier file is gone, the journal
+    /// holds no operation, and the world reopens.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_crash_after_a_finished_disassembly_recovers_clean() {
+        let root = transfer_root("post-disassembly");
+        with_game(|game| {
+            game.world_root = root.clone();
+            // The fixture world pre-exists with its data folder, as an
+            // opened world would.
+            game.world.carrier_data_existed_at_open = true;
+            game.save = std::sync::Arc::new(horizon_client::save::SaveDir::new(
+                root.join("dimensions/minecraft/overworld"),
+                horizon_client::save::LevelShape::OVERWORLD,
+            ));
+            game.world.chunks.insert(
+                (0, 0),
+                Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            let registry = game.pack.assets.registry;
+            let chest = registry.default_state("minecraft:chest").unwrap();
+            game.world.set(4, 64, 4, chest).unwrap();
+            game.carrier_assemble(61, &[BlockPos::new(4, 64, 4)])
+                .unwrap();
+            game.carrier_disassemble(61, 1, [4, 64, 4], [1.0, 0.0, 0.0, 0.0])
+                .unwrap();
+
+            // The next open: recovery (nothing pending) plus the
+            // production cleanup, which the open route runs.
+            game.carrier_recover_all_levels().unwrap();
+
+            // Clean: no tombstone, no carrier file, no operation.
+            let mut store = match crate::carrier_store::Store::open(&root).unwrap() {
+                crate::carrier_store::Opened::Live(store) => store,
+                _ => panic!("the store must open"),
+            };
+            assert!(store.journal().in_progress.is_none());
+            assert!(!store.journal().tombstoned(61, 1));
+            assert!(!root
+                .join(format!("data/horizon_carrier_{:032x}-1.nbt", 61_u128))
                 .is_file());
         });
         let _ = std::fs::remove_dir_all(&root);
@@ -1097,6 +1254,9 @@ mod tests {
         ];
         with_game(|game| {
             game.world_root = root.clone();
+            // The fixture world pre-exists with its data folder, as an
+            // opened world would.
+            game.world.carrier_data_existed_at_open = true;
             game.save = std::sync::Arc::new(horizon_client::save::SaveDir::new(
                 root.join("dimensions/minecraft/overworld"),
                 horizon_client::save::LevelShape::OVERWORLD,
@@ -1159,6 +1319,9 @@ mod tests {
         let root = transfer_root("states");
         with_game(|game| {
             game.world_root = root.clone();
+            // The fixture world pre-exists with its data folder, as an
+            // opened world would.
+            game.world.carrier_data_existed_at_open = true;
             game.save = std::sync::Arc::new(horizon_client::save::SaveDir::new(
                 root.join("dimensions/minecraft/overworld"),
                 horizon_client::save::LevelShape::OVERWORLD,
@@ -1232,6 +1395,9 @@ mod tests {
         let root = transfer_root("live-cargo");
         with_game(|game| {
             game.world_root = root.clone();
+            // The fixture world pre-exists with its data folder, as an
+            // opened world would.
+            game.world.carrier_data_existed_at_open = true;
             game.save = std::sync::Arc::new(horizon_client::save::SaveDir::new(
                 root.join("dimensions/minecraft/overworld"),
                 horizon_client::save::LevelShape::OVERWORLD,
@@ -1330,6 +1496,9 @@ mod tests {
         write_level_dat(&root);
         with_game(|game| {
             game.world_root = root.clone();
+            // The fixture world pre-exists with its data folder, as an
+            // opened world would.
+            game.world.carrier_data_existed_at_open = true;
             game.save = std::sync::Arc::new(horizon_client::save::SaveDir::new(
                 root.join("dimensions/minecraft/overworld"),
                 horizon_client::save::LevelShape::OVERWORLD,
@@ -1388,6 +1557,9 @@ mod tests {
         let root = transfer_root("cycle");
         with_game(|game| {
             game.world_root = root.clone();
+            // The fixture world pre-exists with its data folder, as an
+            // opened world would.
+            game.world.carrier_data_existed_at_open = true;
             game.world.chunks.insert(
                 (0, 0),
                 Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
@@ -1426,6 +1598,9 @@ mod tests {
         let root = transfer_root("dest");
         with_game(|game| {
             game.world_root = root.clone();
+            // The fixture world pre-exists with its data folder, as an
+            // opened world would.
+            game.world.carrier_data_existed_at_open = true;
             game.world.chunks.insert(
                 (0, 0),
                 Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
@@ -1460,6 +1635,9 @@ mod tests {
         let root = transfer_root("rot");
         with_game(|game| {
             game.world_root = root.clone();
+            // The fixture world pre-exists with its data folder, as an
+            // opened world would.
+            game.world.carrier_data_existed_at_open = true;
             game.world.chunks.insert(
                 (0, 0),
                 Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
@@ -1553,6 +1731,9 @@ mod tests {
         // the same folder).
         with_game(|game| {
             game.world_root = root.clone();
+            // The fixture world pre-exists with its data folder, as an
+            // opened world would.
+            game.world.carrier_data_existed_at_open = true;
             let registry = game.pack.assets.registry;
             let chest = registry.default_state("minecraft:chest").unwrap();
 
@@ -1628,6 +1809,9 @@ mod tests {
         let root = transfer_root("nope");
         with_game(|game| {
             game.world_root = root.clone();
+            // The fixture world pre-exists with its data folder, as an
+            // opened world would.
+            game.world.carrier_data_existed_at_open = true;
             // A prepared operation whose journal names minecraft:nope.
             let mut store = crate::carrier_store::Store::first_use(&root, true).unwrap();
             store
@@ -1676,6 +1860,9 @@ mod tests {
         let root = transfer_root("writer");
         with_game(|game| {
             game.world_root = root.clone();
+            // The fixture world pre-exists with its data folder, as an
+            // opened world would.
+            game.world.carrier_data_existed_at_open = true;
             let save = std::sync::Arc::new(horizon_client::save::SaveDir::new(
                 root.join("dimensions/minecraft/overworld"),
                 horizon_client::save::LevelShape::OVERWORLD,
@@ -1727,6 +1914,9 @@ mod tests {
         let root = transfer_root("saves");
         with_game(|game| {
             game.world_root = root.clone();
+            // The fixture world pre-exists with its data folder, as an
+            // opened world would.
+            game.world.carrier_data_existed_at_open = true;
             game.world.chunks.insert(
                 (0, 0),
                 Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
@@ -1765,6 +1955,9 @@ mod tests {
         let root = transfer_root("backup");
         with_game(|game| {
             game.world_root = root.clone();
+            // The fixture world pre-exists with its data folder, as an
+            // opened world would.
+            game.world.carrier_data_existed_at_open = true;
             game.save = std::sync::Arc::new(horizon_client::save::SaveDir::new(
                 root.join("dimensions/minecraft/overworld"),
                 horizon_client::save::LevelShape::OVERWORLD,
@@ -1896,6 +2089,9 @@ mod tests {
         std::fs::create_dir_all(root.join("data")).unwrap();
         with_game(|game| {
             game.world_root = root.clone();
+            // The fixture world pre-exists with its data folder, as an
+            // opened world would.
+            game.world.carrier_data_existed_at_open = true;
             game.world.chunks.insert(
                 (0, 0),
                 Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),

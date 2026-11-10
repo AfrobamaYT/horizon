@@ -98,6 +98,11 @@ pub struct World {
     /// (the game's carrier transfers). Empty, one load, when no
     /// operation is in flight.
     pub carrier_fences: crate::carrier_fences::Fences,
+    /// Whether the world's `data/` folder already existed when the
+    /// world opened — the carrier store's first-use gate. Captured at
+    /// open, not at transfer time, so a folder created this session
+    /// (by the first save, say) cannot pass for an old one.
+    pub carrier_data_existed_at_open: bool,
     /// Each chest's `ContainerOpenersCounter`: opener count and largest
     /// interaction range.
     pub chest_openers: FxHashMap<(i32, i32, i32), (i32, f64)>,
@@ -258,6 +263,7 @@ impl World {
             attachment_syncs: FxHashSet::default(),
             block_entities: Default::default(),
             carrier_fences: Default::default(),
+            carrier_data_existed_at_open: false,
             chest_openers: FxHashMap::default(),
             block_names: FxHashMap::default(),
             watched: Vec::new(),

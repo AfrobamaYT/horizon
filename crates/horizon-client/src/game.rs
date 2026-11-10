@@ -11760,6 +11760,10 @@ impl Game<'_> {
         let dim = Dim::from_id(&level.dimension);
         self.level_shapes = shapes;
         self.world_root = save_root.clone();
+        // The carrier store's first-use gate reads the data folder's
+        // existence here, at open — a folder created later this session
+        // (by the first save) does not pass for an old one.
+        self.world.carrier_data_existed_at_open = save_root.join("data").is_dir();
         // The root moves before the prepared level is installed. Until then a
         // final save must not run: the lock below only marks tag tables.
         self.world_adopted = false;
