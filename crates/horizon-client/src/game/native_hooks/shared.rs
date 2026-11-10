@@ -1,3 +1,6 @@
+#[path = "shared/book_screen.rs"]
+mod book_screen;
+
 use super::screen_build::ObservedScreen;
 use crate::game::api_values::{TryIntoApi, TryIntoEngine};
 use horizon_client::containers::ModBlockEntity as EngineBlockEntity;
@@ -3174,86 +3177,6 @@ impl Game<'_> {
         let c = self.world.block_entities.mod_container(state)?;
         mod_menu(c.menu.as_deref()?).map(|(menu, _)| menu)
     }
-    /// The container slots (of `size`) that the mod's screen for the block at
-    /// `pos` does not show: the server's menu does not have them either, so a
-    /// shift-click never moves an item where the player cannot see it.
-    pub(super) fn native_hidden_slots(&self, pos: Pos, size: usize) -> Vec<usize> {
-        if self.mod_menu_at(pos).is_none() {
-            return Vec::new();
-        }
-        let block = self
-            .res
-            .facts()
-            .get(self.world.block(pos.0, pos.1, pos.2))
-            .name
-            .to_string();
-        let mut screen = None;
-        self.native_screen(&block, &mut screen);
-        let Some(screen) = screen else {
-            return Vec::new();
-        };
-        (0..size)
-            .filter(|&i| screen.slots.get(i).is_none_or(Option::is_none))
-            .collect()
-    }
-    /// A menu opened on this client with its slots under `key`, on block
-    /// `target`: a mod block's is laid out by its mod (`native_screen`).
-    /// `extra` is what the server sent for this window first.
-    pub(super) fn open_native_screen(
-        &mut self,
-        key: Pos,
-        target: Option<Pos>,
-        window: i32,
-        menu: &str,
-        extra: Option<horizon_protocol::menu_extra::Message>,
-    ) {
-        self.mod_screen = None;
-        let Some(t) = target else {
-            return;
-        };
-        let block = self
-            .res
-            .facts()
-            .get(self.world.block(t.0, t.1, t.2))
-            .name
-            .to_string();
-        if block.starts_with("minecraft:") {
-            return;
-        }
-        // Only when this is the menu the clicked block opens: `target` outlives the
-        // use that set it, so another menu opened later (a command's, another
-        // mod's) would otherwise get the last clicked machine's screen. Asked
-        // here, as the window's world has no mod containers.
-        let mut container = None;
-        self.native_block_entity_container(&block, &mut container);
-        let opens = container.and_then(|c| mod_menu(c.menu.as_deref()?).map(|(m, _)| m));
-        if opens != Some(menu) {
-            return;
-        }
-        let mut screen = None;
-        self.native_screen(&block, &mut screen);
-        if let Some(screen) = screen {
-            self.mod_screen = Some(OpenNativeScreen {
-                layout_revision: {
-                    static NEXT: std::sync::atomic::AtomicU64 =
-                        std::sync::atomic::AtomicU64::new(1);
-                    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-                },
-                key,
-                window,
-                block,
-                screen,
-                data: Vec::new(),
-                extra,
-            });
-        }
-    }
-    /// The mod screen showing now, if any.
-    pub(super) fn shown_native_screen(&self) -> Option<&OpenNativeScreen> {
-        self.mod_screen
-            .as_ref()
-            .filter(|s| self.screen == Screen::Inventory && self.container == Some(s.key))
-    }
     /// A data slot of window `window`'s menu (`ContainerSetData`); false
     /// when no mod screen is showing for that window.
     pub(super) fn native_screen_data(&mut self, window: i32, id: i16, value: i16) -> bool {
@@ -3263,16 +3186,6 @@ impl Game<'_> {
         self.mod_screen
             .as_mut()
             .is_some_and(|s| s.set_data(window, id, value))
-    }
-    /// Whether a mod's screen is open for the current menu: it places its own
-    /// container slots and the player's inventory, so the stock layout of the
-    /// vanilla menu underneath stands back (`slot_position`).
-    pub(super) fn native_screen_shown(&self) -> bool {
-        self.shown_native_screen().is_some()
-    }
-    /// The open mod screen's height.
-    pub(super) fn native_screen_height(&self) -> Option<f32> {
-        self.shown_native_screen().map(|s| s.screen.height)
     }
     /// Where the open mod screen puts container slot `slot`.
     pub(super) fn native_screen_slot(&self, slot: usize) -> Option<(f32, f32)> {
