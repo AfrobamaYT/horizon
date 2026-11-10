@@ -42,7 +42,7 @@ fn instantiate_block_state_definition(
         let lit = properties.get("powered").is_some_and(|value| value == "true");
         event.models.push(BlockStateModelPick::Model {
             state: state as u32,
-            model: if lit { on.clone() } else { off.clone() },
+            model: (if lit { on } else { off }).to_string_lossy(),
             turns: [0; 3],
             uvlock: false,
         });
