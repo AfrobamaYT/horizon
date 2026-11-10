@@ -401,7 +401,20 @@ pub(super) fn source(root: &Path) -> Result<String, String> {
                 .to_string_lossy()
                 .into_owned();
             let module = format_ident!("token_{name}");
-            factories.extend(quote! { #[path = #path] mod #module; pub use #module::*; });
+            let source = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+            let parsed = syn::parse_file(&source).map_err(|e| e.to_string())?;
+            factories.extend(quote! { #[path = #path] mod #module; });
+            for item in parsed.items {
+                if let Item::Fn(function) = item
+                    && matches!(function.vis, Visibility::Public(_))
+                {
+                    let name = function.sig.ident;
+                    let conditions = function.attrs.iter().filter(|attr| {
+                        attr.path().is_ident("cfg") || attr.path().is_ident("cfg_attr")
+                    });
+                    factories.extend(quote! { #(#conditions)* pub use #module::#name; });
+                }
+            }
         }
     }
     let aliases = schema

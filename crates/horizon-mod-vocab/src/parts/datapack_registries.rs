@@ -1,7 +1,6 @@
 use super::*;
 use crate::world::datapack_registry::{
     DatapackField, DatapackRegistrationError, DatapackRegistryDeclaration, DatapackRegistrySync,
-    check_schema, valid_namespaced,
 };
 
 /// The datapack registries mods declared.
@@ -37,40 +36,4 @@ pub trait DatapackRegistriesRegistrar {
         sync: DatapackRegistrySync,
         fields: Vec<DatapackField>,
     ) -> Result<(), DatapackRegistrationError>;
-}
-
-
-
-
-
-#[cfg(test)]
-mod default_tests {
-    use super::*;
-    #[test]
-    fn registered_identifier_defaults_match_explicit_values() {
-        for kind in [
-            crate::DatapackFieldKind::Identifier,
-            crate::DatapackFieldKind::Reference {
-                registry: "minecraft:item".into(),
-            },
-        ] {
-            let mut registrar = PartRegistrar::new("defaults");
-            registrar
-                .declare_datapack_registry(
-                    "entry",
-                    DatapackRegistrySync::default(),
-                    vec![DatapackField::with_default(
-                        "id",
-                        kind,
-                        crate::DatapackValue::Text("ice".into()),
-                    )],
-                )
-                .unwrap();
-            let declaration = &registrar.datapack_registries[0];
-            assert_eq!(
-                declaration.decode_entry("{}").unwrap(),
-                declaration.decode_entry(r#"{"id":"ice"}"#).unwrap()
-            );
-        }
-    }
 }

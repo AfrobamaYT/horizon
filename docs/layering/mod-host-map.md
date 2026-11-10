@@ -141,7 +141,7 @@ Counts are source references (one per `use` leaf or path), split into production
 
 | engine crate | mod crate | files | prod refs | test refs |
 |---|---|---|---|---|
-| horizon-client | horizon-mod-api | 514 | 2809 | 5133 |
+| horizon-client | horizon-mod-api | 517 | 2813 | 5179 |
 | horizon-client | horizon-mod-api-gen | 7 | 8 | 0 |
 | horizon-client | horizon-mod-package | 29 | 86 | 88 |
 | horizon-client | horizon-mod-points | 2 | 4 | 0 |
@@ -162,11 +162,11 @@ Counts are source references (one per `use` leaf or path), split into production
 
 | area | files | prod refs | test refs |
 |---|---|---|---|
-| game/modding | 180 | 1439 | 2225 |
-| game/native_hooks | 121 | 457 | 522 |
-| client (non-game) | 85 | 407 | 310 |
+| game/modding | 180 | 1441 | 2233 |
+| game/native_hooks | 122 | 457 | 522 |
+| client (non-game) | 85 | 408 | 310 |
+| game/mobs | 30 | 167 | 482 |
 | game/interface | 48 | 150 | 485 |
-| game/mobs | 28 | 165 | 444 |
 | game/network | 26 | 167 | 369 |
 | game/blocks | 28 | 107 | 318 |
 | horizon-client-render | 48 | 209 | 156 |
@@ -174,7 +174,7 @@ Counts are source references (one per `use` leaf or path), split into production
 | game/entities | 29 | 45 | 294 |
 | game/items | 21 | 78 | 177 |
 | game/runtime | 9 | 32 | 132 |
-| game.rs | 1 | 133 | 0 |
+| game.rs | 1 | 132 | 0 |
 | game/administration | 10 | 18 | 44 |
 | game/host | 3 | 45 | 0 |
 | horizon-items | 2 | 2 | 3 |
@@ -184,12 +184,12 @@ Counts are source references (one per `use` leaf or path), split into production
 
 | strand | prod refs | test refs | of which in modding/ + native_hooks/ (prod) |
 |---|---|---|---|
-| loading | 254 | 777 | 78 |
-| host | 111 | 433 | 81 |
+| loading | 255 | 787 | 80 |
+| host | 111 | 440 | 81 |
 | slots | 8 | 0 | 0 |
 | attachments | 166 | 293 | 50 |
 | content_render | 312 | 428 | 180 |
-| hooks | 2691 | 3815 | 1507 |
+| hooks | 2694 | 3844 | 1507 |
 
 ### Engine files outside modding/ and native_hooks/: what they need of `mod_api`
 
@@ -197,17 +197,17 @@ Each file is put in the highest tier it uses in production code: `dispatch` (Hoo
 
 | highest tier | files |
 |---|---|
-| dispatch | 20 |
+| dispatch | 21 |
 | value | 151 |
 | more | 48 |
 
-- **dispatch** items, by files using them: `__private::listened` (65), `HookId` (8), `InteractionResult` (6), `HookId::LivingChangeTarget` (5), `__private::has_scoped_hook` (3), `HookId::AnvilUpdate` (2), `HookId::ArmorHurt` (2), `HookId::BlockDrops` (2), `HookId::CanContinueSleeping` (2), `HookId::CraftingRemainder` (2), `HookId::EffectParticleModification` (2), `HookId::EnchantedEntityLoot` (2), `HookId::LivingDeathPost` (2), `HookId::PlayerTickPost` (2), `HookId::PlayerTickPre` (2), `__private::PlayerSetSpawnCall` (2), `__private::PlayerTickPostCall` (2), `__private::PlayerTickPreCall` (2), `__private::built::ExplosionStart` (2), `__private::built::LootDrops` (2), `__private::built::ToolUse` (2), `__private::has_part_hook` (2), `HookId::AddServerReloadListeners` (1), `HookId::AnimalTame` (1), `HookId::BabyEntitySpawn` (1)
+- **dispatch** items, by files using them: `__private::listened` (66), `HookId` (8), `InteractionResult` (6), `HookId::LivingChangeTarget` (5), `__private::has_scoped_hook` (3), `HookId::AnvilUpdate` (2), `HookId::ArmorHurt` (2), `HookId::BlockDrops` (2), `HookId::CanContinueSleeping` (2), `HookId::CraftingRemainder` (2), `HookId::EffectParticleModification` (2), `HookId::EnchantedEntityLoot` (2), `HookId::LivingDeathPost` (2), `HookId::PlayerTickPost` (2), `HookId::PlayerTickPre` (2), `__private::PlayerSetSpawnCall` (2), `__private::PlayerTickPostCall` (2), `__private::PlayerTickPreCall` (2), `__private::built::ExplosionStart` (2), `__private::built::LootDrops` (2), `__private::built::ToolUse` (2), `__private::has_part_hook` (2), `HookId::AddServerReloadListeners` (1), `HookId::AnimalTame` (1), `HookId::BabyEntitySpawn` (1)
 
 - **value** items, by files using them: `Identifier` (17), `SoundSource` (14), `EntityRef::new` (12), `DimensionKey` (9), `EntityRef` (9), `BehaviorRefusal` (5), `BehaviorRegistrarBackend` (5), `LivingRef` (5), `LivingRef::new` (5), `RegisteredBehavior` (5), `entity::health::HurtSource` (5), `Activity` (4), `BehaviorRefusal::UnknownActivity` (4), `BlockSide` (4), `MobRef::new` (4), `RecipeBookDisplay` (4), `RecipeSlotDisplay` (4), `Transaction` (4), `__private::item_listens` (4), `client::particles::PositionSource` (4), `run_transaction` (4), `text::TextFormError` (4), `*` (3), `DimensionKey::OVERWORLD` (3), `FakeEffect::Menu` (3)
 
 - **more** items, by files using them: `__private::mods` (20), `__private::game::*` (8), `__private::ModPhase::Registration` (5), `__private::PhaseOwner::scope` (5), `content::crash::ModCall` (4), `content::crash::enter_native_mod` (4), `RegistrationContext` (3), `RegistrationContext::new` (3), `__private::ModPhase::Setup` (3), `__private::ModPhase::World` (3), `__private::dimension_key` (3), `__private::effect_key_by_index` (3), `__private::game::RegistrationContextNew` (3), `HostSide` (2), `__private::PhaseOwner` (2), `__private::fluid_key` (2), `__private::game::player_ref` (2), `__private::item_key_id` (2), `content::crash::clear_detail` (2), `content::crash::current_native_call` (2), `content::crash::set_detail` (2), `ClientHost` (1), `Host` (1), `ModEntry` (1), `Registrar` (1)
 
-Outside the host areas, 2732 `mod_api` references are in test code; 254 of them name `testing`, `part_tests` or `with_test_packages`.
+Outside the host areas, 2770 `mod_api` references are in test code; 258 of them name `testing`, `part_tests` or `with_test_packages`.
 
 ### The host areas by strand (files under game/modding/ and game/native_hooks/)
 
@@ -215,26 +215,36 @@ Outside the host areas, 2732 `mod_api` references are in test code; 254 of them 
 
 | strand | files | lines | inherent impls | foreign trait impls | to make public | inbound refs (prod) | inbound files |
 |---|---|---|---|---|---|---|---|
-| loading (phase 1) | 7 | 4284 | 5 | 0 | 48 | 103 | 27 |
+| loading (phase 1) | 7 | 4300 | 5 | 0 | 48 | 104 | 27 |
 | host (stays in the engine) | 4 | 1461 | 3 | 11 | 46 | 13 | 9 |
 | slots (phase 3) | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 | attachments (stays in the engine) | 13 | 2856 | 7 | 0 | 16 | 117 | 13 |
-| content_render (phase 5) | 6 | 2749 | 6 | 1 | 46 | 46 | 19 |
-| hooks (phase 6, not built) | 450 | 106561 | 404 | 19 | 590 | 1751 | 242 |
+| content_render (phase 5) | 6 | 2767 | 6 | 1 | 46 | 46 | 19 |
+| hooks (phase 6, not built) | 451 | 106568 | 404 | 19 | 590 | 1752 | 242 |
 
 ### horizon-mod-api: vocabulary or not (non-test files)
 
 |  | files | lines |
 |---|---|---|
-| all | 2 | 1048 |
-| pure (no generated include, unsafe, process state or non-core crate path) | 0 | 0 |
-| includes generator output (OUT_DIR) | 1 |  |
-| `unsafe` | 1 | 45 |
-| process state (static, thread_local, locks, atomics, cells) | 1 | 31 |
+| all | 40 | 11598 |
+| pure (no generated include, unsafe, process state or non-core crate path) | 7 | 919 |
+| includes generator output (OUT_DIR) | 2 |  |
+| `unsafe` | 3 | 56 |
+| process state (static, thread_local, locks, atomics, cells) | 11 | 88 |
 
-Dependencies: `horizon-core` (normal, engine), `horizon-items` (dev, engine), `horizon-mod-api-gen` (build, engine), `horizon-mod-api-macros` (normal, engine), `horizon-mod-runtime` (normal, engine), `horizon-mod-vocab` (normal, engine); build script: yes.
+Dependencies: `horizon-core` (normal, engine), `horizon-items` (dev, engine), `horizon-mod-api-gen` (build, engine), `horizon-mod-api-macros` (normal, engine), `horizon-mod-runtime` (normal, engine), `horizon-mod-vocab` (dev, engine), `horizon-mod-vocab` (normal, engine); build script: yes.
 
 Blockers by file (generated includes, `unsafe`, state), lines:
 
+- `src/content/crash.rs`: state 8,9,11,15,16,18,26,122
+- `src/fluid_state.rs`: state 4,13
+- `src/load_state.rs`: state 13,14,15,25,97
+- `src/parts/diagnostics.rs`: state 5,6,9,10
+- `src/parts/mod.rs`: generated_include 11; state 6,9
+- `src/parts/registration_access.rs`: state 3,5
+- `src/parts/shared.rs`: state 22,25,61,62,95,186,253,258,259,260,261
+- `src/profiler.rs`: unsafe 136,226,242,280,302,360,370; state 9,10,17,18,20,21,22,23,24,127,138,140…
+- `src/wire/static_strings.rs`: state 6,7,12
 - `src/wire/wire_guest.rs`: generated_include 15; unsafe 19,33,38,40,52,200,224,279,314,315,316,320…; state 7,9,26,170,171,174,177,178,203,207,208,221…
+- `src/wire/wire_resources.rs`: unsafe 237,349,376,378; state 5,95,288
 <!-- generated: end -->

@@ -38,6 +38,8 @@ pub(crate) fn with_registering_keys<T>(
 /// The game's [`Registrar`]: every mod's registrations, checked as they come.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct PartRegistrar {
+    pub(crate) biome_modifiers: Vec<BiomeModifierDeclaration>,
+    pub(crate) datapack_registries: Vec<crate::DatapackRegistryDeclaration>,
     pub(crate) menu_recipe_books:
         HashMap<String, (crate::RecipeBookTypeKey, String, crate::RecipeBookLayout)>,
     pub(crate) self_refusal: Option<String>,
@@ -73,6 +75,8 @@ impl PartRegistrar {
         Self {
             menu_recipe_books: HashMap::new(),
             self_refusal: None,
+            biome_modifiers: Vec::new(),
+            datapack_registries: Vec::new(),
             recipe_book_types: HashMap::new(),
             game_rule_categories: Vec::new(),
             game_rules: Vec::new(),
@@ -231,6 +235,8 @@ pub(crate) fn install_registrar(
     }
     let game_rule_slots = slots.expect("every schema refusal was collected");
     let installed = Installed {
+        biome_modifiers: registrar.biome_modifiers,
+        datapack_registries: registrar.datapack_registries,
         menu_recipe_books: registrar.menu_recipe_books,
         recipe_book_types: registrar.recipe_book_types,
         game_rule_slots,

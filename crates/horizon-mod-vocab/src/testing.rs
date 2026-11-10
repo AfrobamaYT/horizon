@@ -549,3 +549,7 @@ impl crate::LoopReader for TestReader {
         None
     }
 }
+
+#[cfg(test)]
+#[path = "testing/handle_level_tests.rs"]
+mod handle_level_tests;

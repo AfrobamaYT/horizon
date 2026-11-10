@@ -1,5 +1,4 @@
 //! Self-refusal transport and the registration admission savepoint.
-use super::*;
 
 /// Engine admission plumbing; mods call `RegistrationContext::refuse` instead.
 // hidden: the generated registrar call table transports self-refusals.

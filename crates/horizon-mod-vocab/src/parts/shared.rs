@@ -115,7 +115,7 @@ pub enum ProvidedBy {
 }
 
 /// The parts attached by tag, by tag name, in registration order.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct TagParts {
     pub(crate) blocks: Vec<(Box<str>, Attached<dyn BlockPart>)>,
     pub(crate) items: Vec<(Box<str>, Attached<dyn ItemPart>)>,

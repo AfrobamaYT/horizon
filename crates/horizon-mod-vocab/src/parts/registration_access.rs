@@ -28,6 +28,7 @@ pub struct RegistrationAccess {
     ) -> Result<(), Vec<String>>,
 }
 
+#[cfg(any(not(target_arch = "wasm32"), test))]
 pub(crate) fn registration_membership(kind: RegistrationKeyKind, slot: u32) -> Option<bool> {
     #[cfg(test)]
     if let Some(result) =

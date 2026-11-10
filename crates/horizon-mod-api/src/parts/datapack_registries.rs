@@ -9,7 +9,7 @@ impl DatapackRegistriesRegistrar for PartRegistrar {
         mut fields: Vec<DatapackField>,
     ) -> Result<(), DatapackRegistrationError> {
         let result = (|| {
-            if crate::world::phase::LoadedMods::new()
+            if mod_vocab::__private::parts_installation::loaded_mods()
                 .get(self.mod_id)
                 .is_some_and(|package| package.side() != crate::Side::Both)
             {
@@ -17,7 +17,9 @@ impl DatapackRegistriesRegistrar for PartRegistrar {
             }
             let (namespace, name) = path.split_once(':').unwrap_or((self.mod_id, path));
             let key = format!("{namespace}:{name}");
-            if namespace != self.mod_id || !valid_namespaced(&key) {
+            if namespace != self.mod_id
+                || !mod_vocab::__private::parts_installation::valid_datapack_id(&key)
+            {
                 return Err(DatapackRegistrationError::InvalidKey);
             }
             if self
@@ -27,7 +29,7 @@ impl DatapackRegistriesRegistrar for PartRegistrar {
             {
                 return Err(DatapackRegistrationError::Duplicate);
             }
-            check_schema(&fields)?;
+            mod_vocab::__private::parts_installation::validate_datapack_schema(&fields)?;
             for field in &mut fields {
                 if matches!(
                     field.kind,
@@ -61,7 +63,7 @@ impl DatapackRegistriesRegistrar for PartRegistrar {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::datapack_registry::DatapackFieldKind;
+    use crate::DatapackFieldKind;
 
     fn power() -> Vec<DatapackField> {
         vec![DatapackField::required(
@@ -140,3 +142,34 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+mod default_tests {
+    use super::*;
+    #[test]
+    fn registered_identifier_defaults_match_explicit_values() {
+        for kind in [
+            crate::DatapackFieldKind::Identifier,
+            crate::DatapackFieldKind::Reference {
+                registry: "minecraft:item".into(),
+            },
+        ] {
+            let mut registrar = PartRegistrar::new("defaults");
+            registrar
+                .declare_datapack_registry(
+                    "entry",
+                    DatapackRegistrySync::default(),
+                    vec![DatapackField::with_default(
+                        "id",
+                        kind,
+                        crate::DatapackValue::Text("ice".into()),
+                    )],
+                )
+                .unwrap();
+            let declaration = &registrar.datapack_registries[0];
+            assert_eq!(
+                declaration.decode_entry("{}").unwrap(),
+                declaration.decode_entry(r#"{"id":"ice"}"#).unwrap()
+            );
+        }
+    }
+}
