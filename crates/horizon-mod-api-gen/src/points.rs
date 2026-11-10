@@ -660,8 +660,7 @@ fn scan(root: &Path) -> Result<(Vec<Scanned>, Vec<(String, String)>), String> {
     let mut scanned = Vec::new();
     for (file, package) in files {
         let source = fs::read_to_string(&file.path).map_err(|e| e.to_string())?;
-        let parsed =
-            syn::parse_file(&source).map_err(|e| format!("{}: {e}", file.path.display()))?;
+        let parsed = crate::interface_cache::parse(&file.path, &source)?;
         scanned.push(Scanned {
             path: file.path,
             module: file.module,

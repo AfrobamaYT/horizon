@@ -12,5 +12,6 @@ fn main() {
         .join()
         .expect("host generator panicked")
         .expect("generating host boundary");
-    std::fs::write(out.join("wire_host_generated.rs"), code).expect("writing host boundary");
+    horizon_mod_api_gen::write_if_changed(out.join("wire_host_generated.rs"), code)
+        .expect("writing host boundary");
 }
