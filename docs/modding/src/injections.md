@@ -30,11 +30,21 @@ There are two access tiers, and they never mix:
   a `mod.wasm` declaring internals or an internals injection is refused at load:
   "internals access is native-only".
 
-## Adding a pinned declaration
+## Writing a declaration
+
+An `[[inject]]` needs `id`, `at`, `kind` and `with` (plus `call`, `nth` and `ctx` for a call kind,
+copied from the pinned `points.json`). `hash` is optional pinning. Without it, the build takes the
+function's fingerprint from the catalog of the game `[native] horizon` pins, which fixes every
+signature exactly, and records it in the build's `native-mods.json`. With it, the build checks it
+as written and refuses a stale one with `E_INJECT_CHANGED`. The same holds for each `internals`
+entry's `hash` (`E_INTERNAL_CHANGED`). Moving the pin with `cargo horizon-mod update` compares the
+old and new games for every declaration without a hash: an inject whose function changed refuses the
+update with `E_INJECT_CHANGED` until you pass `--accept <inject id>`, as a stale hash refuses the
+build, and internals without a hash are reported and stay without one.
 
 Run `cargo horizon-mod inject add <at> --kind <kind> --with <listener>` in a native mod's folder.
 The tool appends `[[inject]]`, preserving comments, formatting and permissions. A symlinked
-manifest is preserved; edits atomically replace its referent. Checked `[native].horizon` metadata supplies `hash`.
+manifest is preserved; edits atomically replace its referent. Checked `[native].horizon` metadata supplies `hash`, pinning it.
 `--with` supplies both listener and unique inject id (default `on_inject`); implement it separately.
 Access defaults to `api`; edit it to `internals` when needed. The tool prints each tier's availability
 at the place, such as `api: refused, argument 2 `batch` (`&mut HudBatch`) has no API type yet` and
@@ -47,7 +57,8 @@ duplicate ids, or call flags on function kinds leave the manifest untouched.
 
 ## Refreshing pinned declarations
 
-`cargo horizon-mod inject update` checks every declaration against the current game's catalogs;
+`cargo horizon-mod inject update` checks every declaration against the current game's catalogs (a
+declaration without a hash has none to refresh);
 it does not change `[native].horizon` (use top-level `update` to change that pin).
 A unique call context that moved reports `E_INJECT_MOVED` and updates only `nth`.
 Missing targets, missing contexts and ambiguous contexts are never retargeted.
@@ -137,7 +148,7 @@ Apply these rules in order and stop at the first that fits.
 
 1. A hook or a Part method exists for the moment: implement it. **No injection.**
 2. No hook: an API point declaration. Use `[[inject]]` with `at`, lowercase `kind = "head"` or
-   `"return"`, a crate-root `with` function, and the catalog's `hash`. Add `horizon-mod-points` beside
+   `"return"` and a crate-root `with` function (`hash` is optional pinning). Add `horizon-mod-points` beside
    `horizon-mod-api`; the function takes the side's host and the point's public record. Keep its body
    API-only so the same call can become a hook.
 3. You need game internals: declare them and use `access = "internals"` with the generated
@@ -147,7 +158,8 @@ Apply these rules in order and stop at the first that fits.
 | Field | Rule |
 | --- | --- |
 | `id` | unique, nonempty |
-| `at`, `hash` | canonical function path and its tool-written signature hash |
+| `at` | canonical function path |
+| `hash` | optional: the tool-written signature hash, pinning it; absent, the pinned game's |
 | `kind`, `with` | lowercase kind and a crate-root callback function |
 | `access` | `api` (default) or `internals` |
 | `priority` | descending; defaults to 0 |

@@ -251,12 +251,12 @@ fn checked_routes_and_identities_do_not_alias() {
     }
     assert!(make("one", "ab", "game::c", "head", vec![SlotKind::Head]).is_none());
     let mut manifest = declaration("one", "ab", "game::c", "head");
-    manifest.inject[0].hash = "changed".into();
+    manifest.inject[0].hash = Some("changed".into());
     assert!(matches!(
         adapt(&manifest, vec![], "fn target()"),
         Err(InjectError::Changed { .. })
     ));
-    manifest.inject[0].hash = "fingerprint".into();
+    manifest.inject[0].hash = Some("fingerprint".into());
     manifest.inject[0].access = Access::Api;
     let error = adapt(&manifest, vec![], "fn target()").err().unwrap();
     let message = error.to_string();

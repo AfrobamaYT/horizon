@@ -635,7 +635,7 @@ mod route_tests {
             with: "listen".into(),
             access,
             priority: 0,
-            hash: "pin".into(),
+            hash: Some("pin".into()),
             call: call.map(Into::into),
             nth: call.map(|_| 0),
             ctx: call.map(|_| "context".into()),

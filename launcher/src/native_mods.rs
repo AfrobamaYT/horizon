@@ -1959,7 +1959,9 @@ fn pipeline(
             left_out.clone()
         },
     };
-    let about = |route: &str| {
+    // The record carries each declaration's hash as the build checked it: an absent one from
+    // the pinned catalog (`internals::Catalog::pinned`).
+    let about = |route: &str, catalog: &internals::Catalog| {
         serde_json::json!({
             "base": origin,
             "horizon": revision,
@@ -1975,13 +1977,16 @@ fn pipeline(
             "target": target.name(),
             "rust_target": platform.target,
             "secs": started.elapsed().as_secs(),
-            "mods": mods.iter().map(|m| serde_json::json!({
-                "id": m.manifest.id,
-                "version": m.manifest.version,
-                "sha256": digests.get(&m.manifest.id).cloned().flatten(),
-                "internals": m.manifest.internals,
-                "inject": m.manifest.inject,
-            })).collect::<Vec<_>>(),
+            "mods": mods.iter().map(|m| {
+                let pinned = catalog.pinned(&m.manifest);
+                serde_json::json!({
+                    "id": m.manifest.id,
+                    "version": m.manifest.version,
+                    "sha256": digests.get(&m.manifest.id).cloned().flatten(),
+                    "internals": pinned.internals,
+                    "inject": pinned.inject,
+                })
+            }).collect::<Vec<_>>(),
         })
     };
     let linker = || match target {
@@ -2011,7 +2016,7 @@ fn pipeline(
             target,
             &binary,
             &libraries,
-            &about("prebuilt"),
+            &about("prebuilt", &internals::Catalog::read(game)?),
             &ordered,
         )?;
     } else if !exists {
@@ -2284,7 +2289,7 @@ fn pipeline(
             target,
             &binary,
             &[],
-            &about("source"),
+            &about("source", &catalog),
             &ordered,
         )?;
     } else {

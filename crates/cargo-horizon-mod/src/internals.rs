@@ -328,7 +328,10 @@ pub fn refresh(
                 ));
             }
         }
-        set_fingerprint(doc, index, &entry.hash, declared.kind.as_deref())?;
+        // A declaration without a hash follows the pin, so it stays without one.
+        if declared.hash.is_some() {
+            set_fingerprint(doc, index, &entry.hash, declared.kind.as_deref())?;
+        }
     }
     Ok(report)
 }
@@ -564,7 +567,7 @@ mod tests {
                 replace(&format!("{metadata}{body}[native]{pins}"), &entries).unwrap();
             let manifest = Manifest::parse(&candidate).unwrap();
             assert_eq!(manifest.internals.len(), 2);
-            assert_eq!(manifest.internals[0].hash, "new");
+            assert_eq!(manifest.internals[0].hash.as_deref(), Some("new"));
             assert_eq!(manifest.internals[0].kind.as_deref(), Some("struct"));
             assert!(candidate.contains("# keep"));
             assert!(candidate.starts_with(metadata));
@@ -585,7 +588,7 @@ mod tests {
             replace(&format!("{metadata}{body}[native]{pins}"), &entries[..1]).unwrap();
         let manifest = Manifest::parse(&candidate).unwrap();
         assert_eq!(manifest.internals.len(), 1);
-        assert_eq!(manifest.internals[0].hash, "new");
+        assert_eq!(manifest.internals[0].hash.as_deref(), Some("new"));
         assert_eq!(manifest.internals[0].kind.as_deref(), Some("struct"));
     }
 
@@ -596,7 +599,7 @@ mod tests {
         let mut declared = horizon_mod_package::manifest::Internal {
             path: "horizon_client::game::Game<'_>::reach".into(),
             kind: None,
-            hash: "2222".into(),
+            hash: Some("2222".into()),
         };
         assert_eq!(
             internals::check(&entries, "example", &declared)
@@ -604,7 +607,7 @@ mod tests {
                 .to_string(),
             "E_INTERNAL_CHANGED: example uses horizon_client::game::Game<'_>::reach, whose signature is now impl Game<'_> { fn reach(&self, hand: Hand) -> f64 }; run cargo horizon-mod update to see what changed."
         );
-        declared.hash = "abcd".into();
+        declared.hash = Some("abcd".into());
         internals::check(&entries, "example", &declared).unwrap();
     }
 }
