@@ -62,7 +62,6 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use mod_api::{DatapackReadError as E, *};
 
     #[test]
