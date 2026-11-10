@@ -212,9 +212,10 @@ impl Game<'_> {
                 };
                 let _owner = mod_api::__private::enter(callback.owner, "cauldron_interaction");
                 let plan = match callback.handler.decide(self, &input) {
-                    CauldronDecision::Pass => return Ok(false),
                     CauldronDecision::Consume => CauldronPlan::default(),
                     CauldronDecision::Success(plan) => plan,
+                    // `Pass`, and any decision this build doesn't know: no action.
+                    _ => return Ok(false),
                 };
                 let unchanged = |game: &mut Game<'_>| {
                     Arc::ptr_eq(table, &snapshot())

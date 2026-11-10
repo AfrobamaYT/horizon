@@ -5,6 +5,7 @@ use crate::{
 use std::sync::Arc;
 
 /// Immutable inputs captured for one selected interaction.
+// exhaustive: the engine builds one per use from its own state; mods only read it.
 #[derive(horizon_mod_api_macros::Wire, Clone, Debug)]
 pub struct CauldronUse {
     /// Dimension owning the target.
@@ -26,6 +27,7 @@ pub struct CauldronUse {
 }
 
 /// A bounded proposal, validated against the captured local resource snapshot.
+// exhaustive: a mod builds its plan as a struct literal (`..Default::default()` for the rest).
 #[derive(horizon_mod_api_macros::Wire, Clone, Debug, Default)]
 pub struct CauldronPlan {
     /// Optional replacement of the target block.
@@ -42,6 +44,7 @@ pub struct CauldronPlan {
 
 /// Selection result; a consuming result prevents subsequent normal item use.
 #[derive(horizon_mod_api_macros::Wire, Clone, Debug, Default)]
+#[non_exhaustive]
 pub enum CauldronDecision {
     /// Leave normal item use available.
     #[default]
@@ -54,6 +57,7 @@ pub enum CauldronDecision {
 
 /// A registration refused before the immutable dispatcher is published.
 #[derive(horizon_mod_api_macros::Wire, Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CauldronRegistrationError {
     /// Both the existing and attempted owner, in that order.
     Duplicate {
@@ -105,6 +109,7 @@ pub trait CauldronInteractions {
 
 /// Authoritative callback outcome; runtime refusal and traps refuse the action.
 #[derive(horizon_mod_api_macros::Wire, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CauldronFire {
     /// Permit the validated plan to commit with the callback writes.
     Applied,
