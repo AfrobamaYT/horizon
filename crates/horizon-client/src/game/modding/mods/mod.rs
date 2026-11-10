@@ -3,6 +3,7 @@
 //! assets (`content_root`), and the Mods page's rows. Code mods are native (`native_hooks.rs`)
 //! or wasm (`horizon-mod-wasm`, loaded at startup); any other executable file is refused.
 use super::{Game, execution_role::ExecutionRole};
+mod menu_books;
 use horizon_client::{
     lang,
     mod_list::{self, Installed},
@@ -903,7 +904,7 @@ pub(super) fn content_root(
             .join("\n")
     })?;
     register_entity_types(&overlay.mods);
-    register_menu_types(&overlay.mods);
+    register_menu_types(&overlay.mods)?;
     register_iterated_registries(overlay.root.prepared())?;
     horizon_client::mod_content::set_fluid_looks(&overlay.mods);
     Ok(overlay.root)
@@ -1126,9 +1127,12 @@ fn register_entity_types(mods: &[horizon_client::mod_content::ContentMod]) {
 
 /// the mods' menu types, as their entity types: set once, from the startup
 /// root.
-fn register_menu_types(mods: &[horizon_client::mod_content::ContentMod]) {
+fn register_menu_types(
+    mods: &[horizon_client::mod_content::ContentMod],
+) -> horizon_client::Result<()> {
     use horizon_client::containers;
     let menus = horizon_client::mod_content::menu_types(mods);
+    menu_books::validate_registered(&menus)?;
     let set = containers::register_mod_menu_types(menus.iter().map(|m| {
         let results = m.results.iter().map(|&r| usize::from(r)).collect();
         let crafting = m.crafting.map(|c| containers::ModCrafting {
@@ -1157,6 +1161,7 @@ fn register_menu_types(mods: &[horizon_client::mod_content::ContentMod]) {
     {
         log::warn!("Horizon: the mods' menu types changed; restart the game to use them");
     }
+    Ok(())
 }
 
 /// The embedded inventory, formatted for the crash report.
