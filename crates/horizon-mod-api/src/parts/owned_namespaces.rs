@@ -115,6 +115,7 @@ mod tests {
             r.declare_entity_attributes("legacy:cook", "minecraft:zombie", vec![])
                 .unwrap();
             r.add_dimension("legacy:kitchen", DimensionSettings::default());
+            assert!(r.recipe_book_type("legacy:kitchen").is_ok());
             assert_eq!(r.attributes[0].id, "legacy:stamina");
             assert_eq!(r.entity_attributes[0].id, "legacy:cook");
             assert_eq!(&*r.dimensions[0].id, "legacy:kitchen");
