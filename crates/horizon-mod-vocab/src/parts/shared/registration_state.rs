@@ -18,6 +18,7 @@ pub(crate) struct Installed {
     pub(crate) entity_attribute_modifications: Vec<EntityAttributeModification>,
     pub(crate) attributes: Vec<super::attributes::AttributeDeclaration>,
     pub(crate) spawn_placements: Vec<SpawnPlacementDeclaration>,
+    pub(crate) biome_modifiers: Vec<BiomeModifierDeclaration>,
     pub(crate) datapack_registries:
         Vec<crate::world::datapack_registry::DatapackRegistryDeclaration>,
     pub(crate) registry_keys: horizon_mod_runtime::registry_keys::Requests,
@@ -58,6 +59,7 @@ pub struct PartRegistrar {
     pub(crate) entity_attribute_modifications: Vec<EntityAttributeModification>,
     pub(crate) attributes: Vec<super::attributes::AttributeDeclaration>,
     pub(crate) spawn_placements: Vec<SpawnPlacementDeclaration>,
+    pub(crate) biome_modifiers: Vec<BiomeModifierDeclaration>,
     pub(crate) datapack_registries:
         Vec<crate::world::datapack_registry::DatapackRegistryDeclaration>,
     pub(crate) registry_keys: Rc<RefCell<horizon_mod_runtime::registry_keys::Requests>>,
@@ -69,4 +71,5 @@ pub struct PartRegistrar {
     pub(crate) dimension_shape: fn(&crate::DimensionSettings) -> bool,
     pub(crate) chunk_generators: Vec<crate::world::chunk_generator::ChunkGeneratorInfo>,
     pub(crate) refused: Vec<String>,
+    pub(crate) self_refusal: Option<String>,
 }

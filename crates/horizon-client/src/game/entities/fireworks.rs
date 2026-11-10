@@ -594,12 +594,21 @@ impl Game<'_> {
             }
             // Every other player in the level (LAN guests, the players of a
             // server thread), each swapped in as the player.
-            self.each_guest_hit_except(boosted, |g| g.rocket_blast_player(from, damage));
+            let guests: Vec<u32> = self.lan.as_ref().map_or_else(Vec::new, |host| {
+                host.hub
+                    .guests
+                    .iter()
+                    .filter(|g| host.hub.here(g) && Some(g.conn) != boosted)
+                    .map(|g| g.conn)
+                    .collect()
+            });
+            for conn in guests {
+                self.as_guest(conn, |g| g.rocket_blast_player(from, damage));
+            }
             let hits: Vec<(u32, f32)> = {
                 let world = self.mob_world_base(&[]);
                 self.mobs
                     .iter()
-                    .filter(|m| m.alive())
                     .filter_map(|m| {
                         let d2 = (m.position.x - from.x).powi(2)
                             + (m.position.y - from.y).powi(2)
@@ -765,10 +774,15 @@ impl Game<'_> {
                 .fireworks(at, v, r.explosions.clone(), camera.unwrap_or(at));
         }
     }
-    /// `dealExplosionDamage` on a player that is not the rocket's
+    /// `FireworkRocketEntity.dealExplosionDamage` on a player that is not the rocket's
     /// `attachedToEntity`: within 5 blocks, when the rocket sees its feet or
     /// its middle (`ClipContext.Block.COLLIDER`, no fluids).
     fn rocket_blast_player(&mut self, from: Vec3, damage: f32) {
+        // The splash query uses EntitySelector.NO_SPECTATORS. The attached
+        // target is hurt directly, without that query's exclusion.
+        if self.spectator() {
+            return;
+        }
         let Some(p) = self.player.as_ref() else {
             return;
         };
@@ -794,15 +808,8 @@ impl Game<'_> {
     /// from it and the death message names it; creative and spectator
     /// players are immune.
     fn rocket_hurt_player(&mut self, from: Vec3, amount: f32) {
-        if self.creative
-            || self.spectator()
-            || self
-                .player
-                .as_ref()
-                .is_none_or(|p| p.health.dead_or_dying())
-        {
-            return;
-        }
+        // Ability, spectator and death refusals belong to hurtServer, after
+        // its invulnerability observation (also for an attached target).
         // No mob ever owns a rocket.
         self.combat.projectile_owner = None;
         self.combat.rocket_hit = true;
@@ -1060,5 +1067,9 @@ mod tests {
         assert_eq!(packet.sound.1.unwrap().0, "minecraft:item.lead.break");
     }
 }
+#[cfg(test)]
+#[path = "fireworks/hit_attempt_tests.rs"]
+mod hit_attempt_tests;
+
 horizon_client::impl_joined!(Rocket);
 horizon_mod_runtime::impl_attachment_lifetime!(Rocket);
