@@ -1,5 +1,5 @@
 mod api {
-    pub(super) enum RecipeBookIdentity {
+    pub enum RecipeBookIdentity {
         Crafting,
         Furnace,
         BlastFurnace,
