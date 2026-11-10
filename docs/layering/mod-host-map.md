@@ -220,7 +220,7 @@ Outside the host areas, 2279 `mod_api` references are in test code; 206 of them 
 | `unsafe` | 3 | 55 |
 | process state (static, thread_local, locks, atomics, cells) | 23 | 143 |
 
-Dependencies: `horizon-core` (normal, engine), `horizon-items` (dev, engine), `horizon-mod-api-gen` (build, platform), `horizon-mod-api-macros` (normal, platform), `horizon-mod-package` (normal, engine), `horizon-mod-runtime` (normal, engine); build script: yes.
+Dependencies: `horizon-core` (normal, engine), `horizon-items` (dev, engine), `horizon-mod-api-gen` (build, platform), `horizon-mod-api-macros` (normal, platform), `horizon-mod-runtime` (normal, engine); build script: yes.
 
 Blockers by file (generated includes, `unsafe`, state), lines:
 
