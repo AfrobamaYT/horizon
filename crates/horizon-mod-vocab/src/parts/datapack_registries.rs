@@ -65,7 +65,6 @@ impl DatapackRegistriesRegistrar for PartRegistrar {
             {
                 return Err(DatapackRegistrationError::Duplicate);
             }
-            check_schema(&fields)?;
             for field in &mut fields {
                 if matches!(
                     field.kind,
@@ -78,6 +77,7 @@ impl DatapackRegistriesRegistrar for PartRegistrar {
                         .to_string();
                 }
             }
+            check_schema(&fields)?;
             self.datapack_registries.push(DatapackRegistryDeclaration {
                 mod_id: self.mod_id.to_owned(),
                 key,
