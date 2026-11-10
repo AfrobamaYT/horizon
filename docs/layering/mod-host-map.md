@@ -217,17 +217,18 @@ Outside the host areas, 2291 `mod_api` references are in test code; 207 of them 
 
 |  | files | lines |
 |---|---|---|
-| all | 944 | 68433 |
+| all | 945 | 69047 |
 | pure (no generated include, unsafe, process state or non-core crate path) | 772 | 24619 |
 | includes generator output (OUT_DIR) | 6 |  |
-| `unsafe` | 3 | 55 |
-| process state (static, thread_local, locks, atomics, cells) | 23 | 143 |
+| `unsafe` | 4 | 65 |
+| process state (static, thread_local, locks, atomics, cells) | 24 | 154 |
 
 Dependencies: `horizon-core` (normal, engine), `horizon-items` (dev, engine), `horizon-mod-api-gen` (build, platform), `horizon-mod-api-macros` (normal, platform), `horizon-mod-runtime` (normal, engine); build script: yes.
 
 Blockers by file (generated includes, `unsafe`, state), lines:
 
-- `src/__private.rs`: generated_include 83,91,107,474; state 420
+- `src/__private/points.rs`: unsafe 245,249,250,286,287,406,425,428,439,453; state 10,11,25,26,27,32,36,220,339,345,556
+- `src/__private.rs`: generated_include 83,91,107,476; state 420
 - `src/block/fluid_capability.rs`: state 143,144,316
 - `src/block/item_place.rs`: state 17,271
 - `src/block/unresolved_fluid.rs`: state 5,50
