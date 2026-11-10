@@ -54,12 +54,12 @@ class NightlyRoutingTests(unittest.TestCase):
 const state = JSON.parse(fs.readFileSync(0, 'utf8'));
 // Actions returns an empty string for absent context properties, not undefined.
 const context = values => new Proxy(values, {get: (values, key) => values[key] ?? ''});
-const matrix = context(state.matrix), vars = context(state.vars), inputs = state.inputs;
+const matrix = context(state.matrix), vars = context(state.vars), inputs = state.inputs, github = context(state.github);
 const expression = state.expression, fromJSON = JSON.parse, toJSON = JSON.stringify;
 console.log(JSON.stringify(eval(expression)));
 """
-        def evaluate(expression, matrix, trusted):
-            result = subprocess.run(["node", "-e", script], input=json.dumps({"expression": expression, "matrix": matrix, "inputs": {"trusted": trusted}, "vars": variables}), text=True, capture_output=True, check=True)
+        def evaluate(expression, matrix, trusted, repository="arismoko/horizon"):
+            result = subprocess.run(["node", "-e", script], input=json.dumps({"expression": expression, "matrix": matrix, "inputs": {"trusted": trusted}, "vars": variables, "github": {"repository": repository}}), text=True, capture_output=True, check=True)
             return json.loads(result.stdout)
         default_mac = ["self-hosted", "macOS", "horizon-nightly"]
         bookkeeping = re.search(r"^\s*runs-on:\s*\$\{\{(.*?)\}\}\s*$", NIGHTLY.read_text(), re.M).group(1)
@@ -94,6 +94,12 @@ console.log(JSON.stringify(eval(expression)));
                         expected = row["os"]
                     with self.subTest(entry=row["name"]):
                         self.assertEqual(evaluate(expressions[1], row, trusted), expected)
+
+        timeout = re.search(r"^\s*timeout-minutes:\s*\$\{\{(.*?)\}\}", workflow_jobs["build"], re.M).group(1)
+        for repository, trusted, row in itertools.product(["arismoko/horizon", "horizon-rust/horizon"], [False, True], rows):
+            with self.subTest(repository=repository, trusted=trusted, entry=row["name"]):
+                expected = 60 if repository == "arismoko/horizon" or row.get("mac") else 40
+                self.assertEqual(evaluate(timeout, row, trusted, repository), expected)
 
     def test_every_shipped_glibc_program_is_checked_by_workflow_owned_tools(self):
         text = GAME.read_text()
