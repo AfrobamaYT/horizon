@@ -6313,6 +6313,15 @@ impl Game<'_> {
             (ProjectileKind::Arrow { .. }, Hit::Block { .. }) => {}
             (ProjectileKind::Snowball, hit) => {
                 if let Hit::Entity {
+                    who: Who::Player, ..
+                } = hit
+                {
+                    self.mob_hits_player(
+                        0.0,
+                        [p.previous.x, p.previous.y, p.previous.z],
+                        "minecraft:thrown",
+                    );
+                } else if let Hit::Entity {
                     who: Who::Mob(id), ..
                 } = hit
                     && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
@@ -6376,10 +6385,10 @@ impl Game<'_> {
                             self.player_hit(&victim, "minecraft:thrown", Some(direct), t.damage);
                         }
                     }
-                    // Player.hurtServer takes no 0 damage.
+                    // Player.hurtServer observes invulnerability before refusing 0 damage.
                     Hit::Entity {
                         who: Who::Player, ..
-                    } if t.damage > 0.0 => {
+                    } => {
                         let from = [p.previous.x, p.previous.y, p.previous.z];
                         self.mob_hits_player(t.damage, from, "minecraft:thrown");
                     }
@@ -6390,6 +6399,15 @@ impl Game<'_> {
             }
             (ProjectileKind::Egg, hit) => {
                 if let Hit::Entity {
+                    who: Who::Player, ..
+                } = hit
+                {
+                    self.mob_hits_player(
+                        0.0,
+                        [p.previous.x, p.previous.y, p.previous.z],
+                        "minecraft:thrown",
+                    );
+                } else if let Hit::Entity {
                     who: Who::Mob(id), ..
                 } = hit
                     && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
@@ -6430,6 +6448,15 @@ impl Game<'_> {
             }
             (ProjectileKind::EnderPearl, hit) => {
                 if let Hit::Entity {
+                    who: Who::Player, ..
+                } = hit
+                {
+                    self.mob_hits_player(
+                        0.0,
+                        [p.previous.x, p.previous.y, p.previous.z],
+                        "minecraft:thrown",
+                    );
+                } else if let Hit::Entity {
                     who: Who::Mob(id), ..
                 } = hit
                     && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
@@ -6511,9 +6538,7 @@ impl Game<'_> {
                         pl.teleported_delta = [false; 3];
                     }
                     self.previous_position = to;
-                    if damage > 0.0 {
-                        self.hurt_player_by("minecraft:ender_pearl", damage);
-                    }
+                    self.hurt_player_by("minecraft:ender_pearl", damage);
                     self.audio.play(
                         "minecraft:entity.player.teleport",
                         Some([to.x, to.y, to.z]),
