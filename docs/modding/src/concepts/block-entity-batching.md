@@ -110,9 +110,10 @@ revision, position and state. Recommend a full saved-data snapshot on cache miss
 and a compact validity record on hit. `NeedFull` supplies that same entry's full
 snapshot once without advancing the cursor or executing a second tick. Recheck
 versions after host writes; a stale reply refuses rather than recomputing or
-writing over another entity. The revision coverage prerequisite overlaps
-[#2794](https://github.com/arismoko/horizon/issues/2794); inspect every saved-data
-and inventory mutation owner before relying on it.
+writing over another entity. The saved-data revision owner is unresolved: #2794 is the outside-engine
+JVM/language-host workstream, not this prerequisite. Identify the actual revision
+owner and audit every saved-data and inventory mutation path before implementation;
+cache reuse is gated on complete mutation coverage.
 
 The entity action covers listener Host writes and checked saved-data apply.
 A1's commit is visible to A2, including neighbor reads. Do not hold a mutable
@@ -254,7 +255,8 @@ No Rust, runtime promise or benchmark result is added by this note.
 - **Execution shape:** approve the cursor and singleton scheduling for multiple
   listeners. Recommendation: preserve exact order even at reduced batching gain;
   an eventual reply list cannot satisfy immediate visibility.
-- **Revision completeness:** coordinate #2794 and #1780. Recommendation: require
+- **Revision completeness:** identify the actual saved-data revision owner and coordinate #1780;
+  #2794 does not own revisions. Recommendation: require
   saved-data/items revision coverage and atomic checked apply before enabling
   cache reuse; never treat generation as a revision.
 - **Replacement and faults:** confirm wrapper rebinding and native recovery,
