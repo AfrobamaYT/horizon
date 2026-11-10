@@ -132,7 +132,7 @@ Counts are source references (one per `use` leaf or path), split into production
 
 | engine crate | mod crate | files | prod refs | test refs |
 |---|---|---|---|---|
-| horizon-client | horizon-mod-api | 445 | 2609 | 4534 |
+| horizon-client | horizon-mod-api | 445 | 2623 | 4536 |
 | horizon-client | horizon-mod-api-gen | 7 | 8 | 0 |
 | horizon-client | horizon-mod-package | 26 | 83 | 86 |
 | horizon-client | horizon-mod-points | 2 | 4 | 0 |
@@ -153,7 +153,7 @@ Counts are source references (one per `use` leaf or path), split into production
 
 | area | files | prod refs | test refs |
 |---|---|---|---|
-| game/modding | 156 | 1320 | 2106 |
+| game/modding | 156 | 1335 | 2108 |
 | game/native_hooks | 103 | 416 | 407 |
 | client (non-game) | 76 | 388 | 278 |
 | game/mobs | 26 | 163 | 444 |
@@ -165,7 +165,7 @@ Counts are source references (one per `use` leaf or path), split into production
 | game/entities | 25 | 45 | 132 |
 | game/items | 11 | 62 | 94 |
 | game/runtime | 8 | 28 | 117 |
-| game.rs | 1 | 135 | 0 |
+| game.rs | 1 | 134 | 0 |
 | game/administration | 10 | 18 | 44 |
 | game/host | 3 | 43 | 0 |
 | horizon-items | 2 | 2 | 3 |
@@ -176,11 +176,11 @@ Counts are source references (one per `use` leaf or path), split into production
 | strand | prod refs | test refs | of which in modding/ + native_hooks/ (prod) |
 |---|---|---|---|
 | loading | 247 | 689 | 75 |
-| host | 108 | 379 | 79 |
+| host | 108 | 380 | 79 |
 | slots | 8 | 0 | 0 |
 | attachments | 165 | 282 | 49 |
-| content_render | 286 | 381 | 158 |
-| hooks | 2469 | 3333 | 1375 |
+| content_render | 292 | 382 | 165 |
+| hooks | 2477 | 3333 | 1383 |
 
 ### Engine files outside modding/ and native_hooks/: what they need of `mod_api`
 
@@ -206,22 +206,22 @@ Outside the host areas, 2291 `mod_api` references are in test code; 207 of them 
 
 | strand | files | lines | inherent impls | foreign trait impls | to make public | inbound refs (prod) | inbound files |
 |---|---|---|---|---|---|---|---|
-| loading (phase 1) | 5 | 4001 | 5 | 0 | 49 | 101 | 26 |
+| loading (phase 1) | 5 | 4020 | 5 | 0 | 49 | 101 | 26 |
 | host (phase 2) | 4 | 1442 | 3 | 11 | 44 | 13 | 9 |
 | slots (phase 3) | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 | attachments (phase 4) | 13 | 2578 | 5 | 0 | 16 | 33 | 9 |
 | content_render (phase 5) | 5 | 2698 | 5 | 1 | 40 | 43 | 17 |
-| hooks (phase 6) | 389 | 99319 | 359 | 18 | 573 | 1639 | 226 |
+| hooks (phase 6) | 389 | 99446 | 359 | 18 | 573 | 1641 | 226 |
 
 ### horizon-mod-api: vocabulary or not (non-test files)
 
 |  | files | lines |
 |---|---|---|
-| all | 944 | 68433 |
-| pure (no generated include, unsafe, process state or non-core crate path) | 772 | 24619 |
+| all | 944 | 68779 |
+| pure (no generated include, unsafe, process state or non-core crate path) | 772 | 24624 |
 | includes generator output (OUT_DIR) | 6 |  |
 | `unsafe` | 3 | 55 |
-| process state (static, thread_local, locks, atomics, cells) | 23 | 143 |
+| process state (static, thread_local, locks, atomics, cells) | 23 | 156 |
 
 Dependencies: `horizon-core` (normal, engine), `horizon-items` (dev, engine), `horizon-mod-api-gen` (build, platform), `horizon-mod-api-macros` (normal, platform), `horizon-mod-runtime` (normal, engine); build script: yes.
 
@@ -234,7 +234,7 @@ Blockers by file (generated includes, `unsafe`, state), lines:
 - `src/client/client_reload.rs`: state 13,27,28,34,35,40,41
 - `src/client/particle_keys.rs`: state 3,11,12
 - `src/content/crash.rs`: state 5,7,9,11,12,13,15,16,18,26
-- `src/content/registry_keys.rs`: state 51,52,53,73,74,75
+- `src/content/registry_keys.rs`: state 54,55,56,76,77,78,131,132,133,134,135,136…
 - `src/host.rs`: generated_include 6
 - `src/lib.rs`: generated_include 15,23,26,27; state 9
 - `src/parts/block_entities.rs`: state 30,31

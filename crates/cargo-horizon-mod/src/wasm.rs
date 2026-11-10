@@ -298,16 +298,23 @@ fn registrations(
 /// exist only natively. The first that can't be built is refused, named with its reason.
 fn wasm_route(injects: &[horizon_mod_package::manifest::inject::Inject]) -> Result<(), String> {
     use horizon_mod_package::manifest::inject::Access;
-    let Some(entry) = injects
-        .iter()
-        .find(|entry| entry.access != Access::Api || entry.call.is_some())
-    else {
+    let Some(entry) = injects.iter().find(|entry| {
+        entry.kind == horizon_mod_package::manifest::inject::Kind::Field
+            || entry.access != Access::Api
+            || entry.call.is_some()
+    }) else {
         return Ok(());
     };
     let kind = serde_json::to_value(entry.kind)
         .ok()
         .and_then(|kind| kind.as_str().map(str::to_owned))
         .unwrap_or_default();
+    if entry.kind == horizon_mod_package::manifest::inject::Kind::Field {
+        return Err(format!(
+            "{}: {}: field requires native internals source rebuild; use attachments for API, wasm, persistence or sync",
+            entry.id, entry.at
+        ));
+    }
     let why = if entry.access != Access::Api {
         "`access = \"internals\"` is native-only".to_owned()
     } else {
@@ -635,7 +642,7 @@ mod route_tests {
             with: "listen".into(),
             access,
             priority: 0,
-            hash: "pin".into(),
+            hash: Some("pin".into()),
             call: call.map(Into::into),
             nth: call.map(|_| 0),
             ctx: call.map(|_| "context".into()),
@@ -665,6 +672,16 @@ mod route_tests {
                     .into()
             )
         );
+    }
+    #[test]
+    fn field_wasm_refuses_with_attachments() {
+        for access in [Access::Api, Access::Internals] {
+            let field = inject("count", Kind::Field, access, None);
+            assert_eq!(
+                wasm_route(&[field]).unwrap_err(),
+                "count: game::tick: field requires native internals source rebuild; use attachments for API, wasm, persistence or sync"
+            );
+        }
     }
 }
 
