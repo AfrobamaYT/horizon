@@ -8,10 +8,6 @@ Keep an existing contract or add a new version when it changes incompatibly.
 The catalog does not cover helper methods or arbitrary private game code.
 Injections name them with `hook` and `hook_version` ("Named hook points" above).
 
-### Client attack targeting
-
-`client_attack_target` runs with a ClientHost from the remote client's start-attack input path after interaction cancellation and before ordinary melee dispatch. Spear jabs bypass it. Cancellation suppresses attacks; an explicit target batch is deduplicated in first-occurrence order and each handle is checked for lifetime, reach, held-item range and occlusion. The server remains authoritative.
-
 ### Reading server blocks (draft)
 
 A native server tick hook can call `native_server_block` with its context, a dimension id and a block position. It returns the block name and state properties from a loaded chunk. It does not load a chunk or open a dimension. Reads outside that hook, from a stale context, from unavailable dimensions or outside the world bounds return an error.
