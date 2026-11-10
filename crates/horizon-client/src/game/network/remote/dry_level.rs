@@ -21,6 +21,8 @@ impl<'w> DryLevel<'w> {
     }
 }
 
+impl horizon_world::level::BlockEntityNeighbors for DryLevel<'_> {}
+
 impl horizon_world::level::LevelAccess for DryLevel<'_> {
     fn cake_can_eat(&self, vanilla: bool) -> bool {
         self.base.cake_can_eat(vanilla)
