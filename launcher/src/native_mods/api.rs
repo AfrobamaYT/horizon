@@ -32,7 +32,7 @@ pub(super) fn game_package(stage: &Path, target: super::Target, has_api: bool) -
         PACKAGE
     } else if target == super::Target::Client && has_official(stage) {
         OFFICIAL
-    } else if stage.join("crates/horizon-game/Cargo.toml").is_file() {
+    } else if stage.join("crates/horizon-game/src/main.rs").is_file() {
         "horizon-game"
     } else {
         "horizon-client"
@@ -589,6 +589,31 @@ pub(super) fn stage(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn engine_only_revisions_keep_their_executable_package() {
+        let stage = super::super::tests::dir("game-package-owner");
+        fs::create_dir_all(stage.join("crates/horizon-game/src")).unwrap();
+        fs::write(
+            stage.join("crates/horizon-game/Cargo.toml"),
+            "[package]\nname='horizon-game'\n",
+        )
+        .unwrap();
+        assert_eq!(
+            game_package(&stage, super::super::Target::Server, false),
+            "horizon-client"
+        );
+        fs::write(
+            stage.join("crates/horizon-game/src/main.rs"),
+            "fn main() {}\n",
+        )
+        .unwrap();
+        assert_eq!(
+            game_package(&stage, super::super::Target::Server, false),
+            "horizon-game"
+        );
+        fs::remove_dir_all(stage).unwrap();
+    }
 
     fn fixture() -> std::path::PathBuf {
         let name = std::thread::current().name().unwrap().replace(':', "-");
