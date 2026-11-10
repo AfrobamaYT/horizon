@@ -802,6 +802,9 @@ impl Game<'_> {
         if drawn {
             return;
         }
+        // `native_mob_layer`'s posed parts, kept from the draw below while a mod listens.
+        let mut parts = None;
+        let listened = self.mob_render_listened();
         // A spectator still draws its own model in third person: the poses'
         // visibility (set by player_model_visibility) hides body parts, and
         // translucent_body marks the body OIT for the ghostly look. Only first
@@ -816,6 +819,7 @@ impl Game<'_> {
                 self.res.mob_data(),
                 &self.player_armor_layers(),
                 hidden,
+                listened.then_some(&mut parts),
                 out,
             );
         } else {
@@ -827,6 +831,7 @@ impl Game<'_> {
                 packed,
                 self.res.mob_data(),
                 &self.player_armor_layers(),
+                listened.then_some(&mut parts),
                 out,
             );
         }
@@ -855,7 +860,7 @@ impl Game<'_> {
             // CustomHeadLayer: a pumpkin, skull or other head item.
             self.head_item_geometry(m, camera, alpha, packed, true, out);
             // `native_mob_layer`: a native mod's layer, over the vanilla ones.
-            self.mod_mob_layer_geometry(m, Some(who), alpha as f32, camera, packed, out);
+            self.mod_mob_layer_geometry(m, Some(who), parts, alpha as f32, camera, packed, out);
         }
         // LivingEntity.isCurrentlyGlowing: the Glowing effect.
         let vanilla = self
@@ -930,23 +935,20 @@ impl Game<'_> {
         let mut verts = Vec::new();
         // A spectator preview still draws its own model: the poses'
         // visibility hides body parts, leaving the head and its layers.
-        let render = if self.own_body_visible() || self.spectator() {
-            horizon_client::mobs::render::render_with
-        } else {
-            horizon_client::mobs::render::render_layers
-        };
+        let body = self.own_body_visible() || self.spectator();
+        let (data, armour) = (self.res.mob_data(), self.player_armor_layers());
         // A screen preview: custom entity model animations see is_in_gui = 1.
         horizon_client::mobs::cem_anim::in_gui(|| {
-            render(
-                &m,
-                1.0,
-                camera,
-                &lookup,
-                240 | 240 << 8,
-                self.res.mob_data(),
-                &self.player_armor_layers(),
-                &mut verts,
-            );
+            let light = 240 | 240 << 8;
+            if body {
+                horizon_client::mobs::render::render_with(
+                    &m, 1.0, camera, &lookup, light, data, &armour, &mut verts,
+                );
+            } else {
+                horizon_client::mobs::render::render_layers(
+                    &m, 1.0, camera, &lookup, light, data, &armour, None, &mut verts,
+                );
+            }
         });
         let chest = self.armor[1].as_ref().map(|s| &*s.item);
         if !self.own_invisible() {
@@ -1980,21 +1982,16 @@ mod preview_tests {
         };
         let draw = |body: bool| {
             let mut out = Vec::new();
-            let render = if body {
-                horizon_client::mobs::render::render_with
+            let at = glam::DVec3::ZERO;
+            if body {
+                horizon_client::mobs::render::render_with(
+                    &m, 1.0, at, &atlas, 0xF0F0, &data, &armour, &mut out,
+                );
             } else {
-                horizon_client::mobs::render::render_layers
-            };
-            render(
-                &m,
-                1.0,
-                glam::DVec3::ZERO,
-                &atlas,
-                0xF0F0,
-                &data,
-                &armour,
-                &mut out,
-            );
+                horizon_client::mobs::render::render_layers(
+                    &m, 1.0, at, &atlas, 0xF0F0, &data, &armour, None, &mut out,
+                );
+            }
             out
         };
         let (shown, hidden) = (draw(true), draw(false));
@@ -2017,6 +2014,7 @@ mod preview_tests {
                 0xF0F0,
                 &data,
                 armour,
+                None,
                 out,
             );
         }

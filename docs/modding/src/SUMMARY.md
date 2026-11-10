@@ -18,6 +18,11 @@
 - [Trait mods, Parts and attachments](concepts/trait-mods.md)
 - [Where the mod API is going](concepts/design.md)
 - [Design: server read tier](concepts/server-read-tier.md)
+- [Design: vehicle health layout](concepts/vehicle-health-layout.md)
+- [Design: per-type batched block entity ticks](concepts/block-entity-batching.md)
+- [Design: Source-validated guest point artifact](concepts/guest-point-artifact.md)
+- [Design: typed cauldron interactions](concepts/cauldron-interactions.md)
+- [Design: villager professions and trades](concepts/villager-professions.md)
 
 # How-to
 
@@ -46,3 +51,4 @@
 # Contributing
 
 - [Where each doc lives](contributing.md)
+- [Design: scoped whole-stack rollback](reference/design-stack-snapshot.md)

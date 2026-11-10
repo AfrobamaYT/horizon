@@ -5,6 +5,7 @@
 mod event_timings;
 #[cfg(test)]
 mod level_event_targets;
+mod mob_metadata;
 mod residency;
 
 use super::{
@@ -1267,21 +1268,7 @@ pub(super) fn mob_meta(
                 defaults.push((index, serializer::BOOLEAN, Value::Bool(true)));
             }
         }
-        // Enderman.DATA_CARRY_STATE and DATA_CREEPY (angry: the open mouth).
-        "minecraft:enderman" => {
-            if let Some(state) = e.carried {
-                meta.push((
-                    16,
-                    serializer::OPTIONAL_BLOCK_STATE,
-                    Value::Id(state.0 as i32),
-                ));
-            }
-            if e.flag {
-                meta.push((17, serializer::BOOLEAN, Value::Bool(true)));
-            }
-            defaults.push((17, serializer::BOOLEAN, Value::Bool(false)));
-            defaults.push((16, serializer::OPTIONAL_BLOCK_STATE, Value::Id(0)));
-        }
+        "minecraft:enderman" => mob_metadata::enderman(e, meta, defaults),
         // Zombie.DATA_DROWNED_CONVERSION_ID (after DATA_BABY_ID and
         // DATA_SPECIAL_TYPE_ID): the shaking of the conversion under water.
         "minecraft:zombie" | "minecraft:husk" => {
@@ -1608,9 +1595,7 @@ impl Game<'_> {
         ));
         Ok(())
     }
-    /// Start the network side and the play-state hub: for the LAN (with the
-    /// host's own profile reserved) or for a dedicated server (no host).
-    pub(super) fn lan_host(
+    pub(super) fn start_lan_hub(
         &mut self,
         settings: LanSettings,
         net: NetConfig,
@@ -2624,7 +2609,7 @@ impl Game<'_> {
                     // PlayerList.placeNewPlayer: the name the user cache knew,
                     // before it learns this one, for a renamed player's join line.
                     let mut renamed = None;
-                    if self.options.dedicated.is_some()
+                    if self.options.execution_role.is_dedicated_server()
                         && let Some((uuid, name)) =
                             host.hub.guest(conn).map(|g| (g.uuid, g.name.clone()))
                         && let Some(old) = super::dedicated::cached_user_by_id(uuid)
@@ -2636,7 +2621,7 @@ impl Game<'_> {
                     }
                     self.lan_guest_joined(conn, entities, spawn);
                     let host = self.lan.as_ref()?;
-                    if self.options.dedicated.is_some()
+                    if self.is_dedicated_server()
                         && let Some(g) = host.hub.guest(conn)
                     {
                         // PlayerList.placeNewPlayer, then the broadcast join message.
@@ -2742,7 +2727,7 @@ impl Game<'_> {
                     host.play.remove(&guest.conn);
                     self.clear_guest_book_connection(guest.conn);
                     // A held player was recorded as joined at its login: it leaves too.
-                    if self.options.dedicated.is_some() && (guest.placed || guest.held) {
+                    if self.is_dedicated_server() && (guest.placed || guest.held) {
                         super::dedicated::events::record(
                             "leave",
                             &guest.name,
@@ -3985,7 +3970,7 @@ impl Game<'_> {
         let Some(g) = host.hub.online_players().find(|g| g.uuid == sender) else {
             return;
         };
-        if self.options.dedicated.is_some() {
+        if self.is_dedicated_server() {
             super::dedicated::events::record(
                 "chat",
                 &g.name,
@@ -4000,7 +3985,7 @@ impl Game<'_> {
     /// (MinecraftServer.logChatMessage, `[Not Secure]` for unsigned or
     /// expired messages); a LAN host shows the chat.
     pub(super) fn lan_log_event(&mut self, event: HostEvent) {
-        let dedicated = self.options.dedicated.is_some();
+        let dedicated = self.is_dedicated_server();
         match event {
             HostEvent::Chat { line, secure } if dedicated => {
                 let tag = if secure { "" } else { "[Not Secure] " };
@@ -4871,6 +4856,33 @@ mod tests {
         );
     }
 
+    /// `Enderman.setTarget` and `setBeingStaredAt` reach normal tracker data,
+    /// including defaults needed to send the clear.
+    #[test]
+    #[ignore = "needs prepared resources in .local/horizon-client/26.3"]
+    fn enderman_target_flags_are_tracked_and_cleared() {
+        let mut enderman = mob_of("minecraft:enderman").expect("prepared mob types");
+        let hub = meta_hub("EndermanTargetMetaTest");
+        let metadata = |m: &Mob| {
+            let (mut values, mut defaults) = (Vec::new(), Vec::new());
+            super::mob_meta(m, &hub, None, 0, &mut values, &mut defaults);
+            (values, defaults)
+        };
+        enderman.extra.flag2 = true;
+        enderman.set_target(Some(horizon_client::mobs::Who::Mob(2)));
+        let (values, defaults) = metadata(&enderman);
+        for index in [17, 18] {
+            assert!(values.contains(&(index, serializer::BOOLEAN, Value::Bool(true))));
+            assert!(defaults.contains(&(index, serializer::BOOLEAN, Value::Bool(false))));
+        }
+        enderman.set_target(None);
+        let (values, defaults) = metadata(&enderman);
+        for index in [17, 18] {
+            assert!(!values.iter().any(|entry| entry.0 == index));
+            assert!(defaults.contains(&(index, serializer::BOOLEAN, Value::Bool(false))));
+        }
+    }
+
     /// What is stuck in a mob goes out through the tracker's metadata
     /// (`LivingEntity.DATA_ARROW_COUNT_ID`, `DATA_STINGER_COUNT_ID`): the
     /// counts that are set, and zero as the default so a count that falls
@@ -5634,7 +5646,7 @@ mod sources_tests {
 }
 
 #[cfg(test)]
-mod world_spawn_sync_tests {
+pub(crate) mod world_spawn_sync_tests {
     use super::*;
     use horizon_client::lan::{Joined, Out, PlayerSender, guest::Guest};
     use horizon_protocol::packets::play::{self, Clientbound as C};
@@ -5645,7 +5657,7 @@ mod world_spawn_sync_tests {
     }
 
     /// An integrated LAN host with one placed guest (uuid 1) in the Nether.
-    pub(super) fn host_for(game: &mut Game<'_>) -> mpsc::Receiver<Out> {
+    pub(crate) fn host_for(game: &mut Game<'_>) -> mpsc::Receiver<Out> {
         game.lan_host(
             LanSettings {
                 port: 0,

@@ -227,6 +227,7 @@ pub fn rewrite(
                         call: selector,
                         ctx: contexts[index].clone(),
                         listener: format!("{}::{listener}", found.module),
+                        once: false,
                         record: format!("{}::{record}", found.module),
                         receiver: "()".into(),
                         args: vec![("value".into(), ty.to_token_stream().to_string())],
@@ -352,6 +353,7 @@ pub fn rewrite(
                         call: path,
                         ctx: contexts[index].clone(),
                         listener: format!("{}::{listener}", found.module),
+                        once: false,
                         record: format!("{}::{record}", found.module),
                         receiver: quote!(&mut #ty).to_string(),
                         args: vec![],
@@ -368,7 +370,10 @@ pub fn rewrite(
                     fields,
                     types,
                     output,
-                } = resolve(expr, enclosing, found.sig, &lexical, entries, &rule)?;
+                    once,
+                } = resolve(
+                    expr, enclosing, found.sig, &lexical, entries, &rule, private,
+                )?;
                 let name = name(declaration, ordinal);
                 let record = format_ident!("__{name}Args");
                 let listener = format_ident!("__{name}Listener");
@@ -421,23 +426,93 @@ pub fn rewrite(
                             .parse()
                             .map_err(|_| Cause::Signature("invalid native type spelling").into())
                     };
+                let types = types
+                    .iter()
+                    .map(|ty| {
+                        local(ty.to_token_stream())
+                            .and_then(|tokens| syn::parse2::<Type>(tokens).map_err(Into::into))
+                    })
+                    .collect::<Result<Vec<_>, Error>>()?;
                 let receiver_type = local(receiver_type)?;
                 let output = local(output)?;
                 let mut alias_type: Type = syn::parse2(receiver_type.clone())?;
                 if let Type::Reference(reference) = &mut alias_type {
                     reference.lifetime = Some(syn::parse_quote!('r));
                 }
-                let raw = quote! {
-                    pub struct #record { #(pub #fields: #types,)* }
-                    pub type #receiver_alias<'g, 'r> = #alias_type;
-                    pub type #output_alias = #output;
-                    pub type #listener = for<'g> fn(#receiver_type, &mut #record, &mut dyn FnMut(#receiver_type, &mut #record) -> #output) -> #output;
+                let borrows = types.iter().any(|ty| matches!(ty, Type::Reference(_)));
+                let inner_borrow = types
+                    .iter()
+                    .any(|ty| ty.to_token_stream().to_string().contains("'g"));
+                let lifetime = if inner_borrow {
+                    Some(quote!(<'g, 'a>))
+                } else {
+                    borrows.then(|| quote!(<'a>))
                 };
+                let record_type = quote!(#record #lifetime);
+                let macro_record = if inner_borrow {
+                    quote!(#record::<'g, 'a>)
+                } else if borrows {
+                    quote!(#record::<'a>)
+                } else {
+                    quote!(#record)
+                };
+                let inferred_record = if inner_borrow {
+                    quote!(#record<'_, '_>)
+                } else if borrows {
+                    quote!(#record<'_>)
+                } else {
+                    quote!(#record)
+                };
+                let listener_lifetimes = if borrows {
+                    quote!(for<'g, 'a>)
+                } else {
+                    quote!(for<'g>)
+                };
+                let original_type = format_ident!("__{name}Original");
+                let raw = if once {
+                    quote! {
+                        pub struct #record #lifetime { #(pub #fields: #types,)* }
+                        pub type #receiver_alias<'g, 'r> = #alias_type;
+                        pub type #output_alias = #output;
+                        /// A call-scoped, single-use forwarding capability for this source call.
+                        pub struct #original_type<'g, 'a, 'next> {
+                            next: &'next mut dyn FnMut(#receiver_type, #record_type) -> #output,
+                            scope: ::std::marker::PhantomData<(&'g (), &'a ())>,
+                        }
+                        impl<'g, 'a, 'next> #original_type<'g, 'a, 'next> {
+                            fn new(next: &'next mut dyn FnMut(#receiver_type, #record_type) -> #output) -> Self {
+                                Self { next, scope: ::std::marker::PhantomData }
+                            }
+                            /// Consume this capability and the argument record, forwarding exactly once.
+                            pub fn call(self, receiver: #receiver_type, args: #record_type) -> #output {
+                                (self.next)(receiver, args)
+                            }
+                        }
+                        pub type #listener = for<'g, 'a, 'next> fn(#receiver_type, #record_type, #original_type<'g, 'a, 'next>) -> #output;
+                    }
+                } else {
+                    quote! {
+                        pub struct #record #lifetime { #(pub #fields: #types,)* }
+                        pub type #receiver_alias<'g, 'r> = #alias_type;
+                        pub type #output_alias = #output;
+                        pub type #listener = #listener_lifetimes fn(#receiver_type, &mut #record_type, &mut dyn FnMut(#receiver_type, &mut #record_type) -> #output) -> #output;
+                    }
+                };
+                let dispatch = if once {
+                    quote!(
+                        ::horizon_mod_api_macros::site_once!(#wrap, #variant, #listener, #receiver_alias, #macro_record, #output_alias, #original_type, #recv, #args, |#recv: #receiver_alias<'_, '_>, #args: #inferred_record| #original)
+                    )
+                } else {
+                    quote!(
+                        ::horizon_mod_api_macros::site!(#wrap, #variant, #listener, #receiver_alias, #macro_record, #output_alias, #recv, #args, |#recv: #receiver_alias<'_, '_>, #args: &mut #inferred_record| #original)
+                    )
+                };
+                let mutable = (!once).then(|| quote!(mut));
                 let replacement = quote! {
                     if ::mod_points::__private::SITES[::mod_points::SiteId::#variant as usize].load(::std::sync::atomic::Ordering::Relaxed) {
                         #binding
-                        let mut #args = #record { #(#fields: #arguments,)* };
-                        ::horizon_mod_api_macros::site!(#wrap, #variant, #listener, #receiver_alias, #record, #output_alias, #recv, #args, |#recv: #receiver_alias<'_, '_>, #args: &mut #record| #original)
+                        let #mutable #args = #record { #(#fields: #arguments,)* };
+                        #dispatch
                     } else { #expr }
                 };
                 let nth = ordinal;
@@ -460,6 +535,7 @@ pub fn rewrite(
                     call: path,
                     ctx: contexts[index].clone(),
                     listener: format!("{}::{listener}", found.module),
+                    once,
                     record: format!("{}::{record}", found.module),
                     receiver: receiver_type.to_string(),
                     args: fields

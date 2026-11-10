@@ -367,10 +367,8 @@ impl Game<'_> {
                     a.fired_from_weapon = Some(weapon.clone());
                     a.pierce = pierce;
                 }
-                // Flame: the arrow is spawned burning (EnchantmentHelper.onProjectileSpawned).
-                self.ignite_spawned_arrow(&weapon, &mut arrow);
                 arrow.shoot(&mut self.world.random, dir.to_array(), power, 1.0);
-                self.add_projectile(arrow);
+                self.spawn_projectile(arrow, ammo);
                 let (player, name, projectile) = (
                     horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid()),
                     self.acting_player_name().to_owned(),
@@ -493,8 +491,8 @@ mod tests {
         assert_eq!(at, vec![feet]);
     }
 
-    /// `AbstractArrow`'s constructor runs `EnchantmentHelper.onProjectileSpawned`
-    /// for the weapon the arrow is fired from, bow or crossbow, so a Flame
+    /// `Projectile.applyOnProjectileSpawned` runs `EnchantmentHelper.onProjectileSpawned`
+    /// for the weapon an arrow is fired from, bow or crossbow, so a Flame
     /// crossbow shoots burning arrows: Flame's `Ignite(constant(100))` is 100
     /// seconds, 2000 ticks, on every arrow of a Multishot volley (#10482).
     #[test]

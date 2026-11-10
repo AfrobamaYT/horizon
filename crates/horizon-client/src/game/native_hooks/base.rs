@@ -673,9 +673,9 @@ impl Game<'_> {
     /// you push through `native_data_pack_files` under the key
     /// `data_maps/<mod_id>:<registry path>/<name>`: `replace`, `values`
     /// (entry ids and `#tags` to JSON values) and `remove`, a newer value
-    /// overriding an older. Read them with `native_data_map` and
-    /// `native_data_map_entries`, in `native_data_maps.rs`. Server-side, not
-    /// synced to clients.
+    /// overriding an older. Push a typed map's `DataMap::ty`
+    /// and read its values with `ItemKey::data` and `BlockKey::data`. Server-side,
+    /// not synced to clients.
     pub(in crate::game) fn native_data_map_types(&mut self, types: &mut Vec<DataMapType>) {
         self.fire_data_map_types(types);
     }
@@ -766,20 +766,20 @@ impl Game<'_> {
         self.fire_gui_layer_post(layer, draw);
     }
     /// A player right-clicks the entity `entity` (`Entity.getId`) of type
-    /// `kind` (`minecraft:cow`) with `self.hand`, holding `stack` (none in an
+    /// `kind` (`minecraft:cow`) with `hand`, holding `stack` (none in an
     /// empty hand): where `Player.interactOn` starts, before the entity's own
     /// `interact` and the item's `interactLivingEntity`. Set `claimed` to take
     /// the click: the hand swings and neither runs. Asked once per hand, as
-    /// vanilla tries the main hand then the off hand. Server-side, for every
-    /// player of the world (the helpers read the acting one).
+    /// vanilla tries main then off hand. Server-side, for every acting player.
     pub(in crate::game) fn native_entity_interact(
         &mut self,
+        hand: Hand,
         entity: i32,
         kind: &str,
         stack: Option<&ItemStack>,
         claimed: &mut bool,
     ) {
-        self.fire_entity_interact(entity, kind, stack, claimed);
+        self.fire_entity_interact(hand, entity, kind, stack, claimed);
     }
     /// A player left-clicks the block `state` at `pos`, `face` the face hit
     /// (`[0, 1, 0]` is the top): where `ServerPlayerGameMode.handleBlockBreakAction`
@@ -950,18 +950,6 @@ impl Game<'_> {
     /// (`native_shake_matrix`).
     pub(in crate::game) fn native_camera_shake(&self, partial: f32, shake: &mut Shake) {
         self.fire_camera_shake(partial, shake);
-    }
-    /// Before one first-person hand, item, map or empty arm is drawn
-    /// (`RenderHandEvent`, client). Adjust `render`'s pose or cancel the
-    /// default geometry. Equip progress includes the item's swap scale.
-    /// Unlike NeoForge, this does not expose the full pose stack, player
-    /// render state or submission collector, and cannot draw a replacement.
-    pub(in crate::game) fn native_render_hand(
-        &self,
-        render: &mut HandRender<'_>,
-        canceled: &mut bool,
-    ) {
-        self.fire_render_hand(render, canceled);
     }
     /// Final scaled third-person camera distance, before visual-shape collision clipping.
     /// `entity` includes its living scale/distance and optional mount scale/distance.
@@ -1301,8 +1289,8 @@ impl Game<'_> {
     /// in the entity's frame, which starts at its feet turned with the body
     /// (`mob.head_yaw`, `mob.pitch` and the walk cycle place a part, the eyes
     /// being at the entity type's eye height). `who` is set for a player.
-    /// `parts` is a humanoid model's parts as vanilla posed them this frame,
-    /// None for a model that isn't humanoid.
+    /// `parts` is a humanoid model's parts as its draw posed them this frame (a part
+    /// `native_player_submit` hid is not visible), None for a model that isn't humanoid.
     /// Not asked for what a mod drew itself (`native_mob_submit`,
     /// `native_player_submit`) nor for a mob that isn't drawn at all.
     pub(in crate::game) fn native_mob_layer(
@@ -3481,13 +3469,13 @@ impl Game<'_> {
     ) {
         self.fire_dispense_item(dimension, pos, facing, stack, answer);
     }
-    /// A player uses `stack` (right click) with `self.hand`: in the air, or
+    /// A player uses `call.stack` with this click's `call.hand`: in the air, or
     /// on a block once `native_use_on` let it through, where `Item.use`
     /// starts. Each click reaches it once. Set `claimed` to take the use: the
     /// hand swings and the item's own use doesn't run. Server-side, for every
     /// player of the world; an item on cooldown is never used.
-    pub(in crate::game) fn native_use_item(&mut self, stack: &ItemStack, claimed: &mut bool) {
-        self.fire_use_item(stack, claimed);
+    pub(in crate::game) fn native_use_item(&mut self, call: mod_api::__private::UseItemCall<'_>) {
+        self.fire_use_item(call);
     }
     /// `Item.getUseDuration` of `stack`, in ticks: `duration` arrives with
     /// vanilla's (a consumable's time, 72000 for a shield, a spear, a bow,
@@ -4296,26 +4284,6 @@ impl Game<'_> {
         drops: &mut Vec<ItemStack>,
     ) {
         self.fire_loot_drops(context, drops);
-    }
-    /// The item `item` of a server player is about to lose `amount` points of
-    /// durability (`ItemStack.hurtAndBreak`; Bukkit's `PlayerItemDamageEvent`):
-    /// the tool that mines or hits, the armour that takes a hit, a shield, a
-    /// rod, an elytra. `amount` is what is left after Unbreaking; change it
-    /// (0 or less leaves the item whole) or set `cancel` for no wear at all. It
-    /// is not heard for a creative player's tools (they take no wear) nor when
-    /// Unbreaking already saved the item, nor for the wear of a mob's armour or
-    /// of a tool a dispenser uses, nor the host of a LAN world. The player's
-    /// state is swapped in, so `native_acting_player`, `native_tell` and the
-    /// item helpers reach them. Once for each wear, on a server.
-    pub(in crate::game) fn native_item_damaged(
-        &mut self,
-        player: u128,
-        name: &str,
-        item: &str,
-        amount: &mut i32,
-        cancel: &mut bool,
-    ) {
-        self.fire_item_damaged(player, name, item, amount, cancel);
     }
     /// `player` is about to take `count` of `item` from the ground
     /// (`ItemEntity.playerTouch`). Set `canceled` to leave it there: the

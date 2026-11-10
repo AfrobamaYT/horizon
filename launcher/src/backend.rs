@@ -55,42 +55,8 @@ pub struct Release {
     pub nightly: Option<String>,
 }
 
-/// The release assets of each system Horizon ships for: (OS, architecture, the game, the launcher).
-/// game-build.yml builds the game's, nightly-build.yml signs and publishes them, and launcher.yml
-/// builds the launcher's (`platform_assets_are_published`).
-pub const PLATFORMS: [(&str, &str, &str, &str); 5] = [
-    (
-        "linux",
-        "x86_64",
-        "horizon-linux-x86_64.tar.gz",
-        "horizon-launcher-linux-x86_64.tar.gz",
-    ),
-    (
-        "macos",
-        "aarch64",
-        "horizon-macos-arm64.zip",
-        "horizon-launcher-macos-arm64.zip",
-    ),
-    // Intel Macs (#1161).
-    (
-        "macos",
-        "x86_64",
-        "horizon-macos-x64.zip",
-        "horizon-launcher-macos-x64.zip",
-    ),
-    (
-        "windows",
-        "x86_64",
-        "horizon-windows-x64.zip",
-        "horizon-launcher-windows-x64.zip",
-    ),
-    (
-        "windows",
-        "aarch64",
-        "horizon-windows-arm64.zip",
-        "horizon-launcher-windows-arm64.zip",
-    ),
-];
+mod release_assets;
+pub use release_assets::PLATFORMS;
 
 /// `a == b`, in a const context.
 const fn same(a: &str, b: &str) -> bool {
@@ -479,14 +445,18 @@ const fn game_fallback_for(os: &str, arch: &str) -> Option<&'static str> {
 /// one file. A launcher running from one updates by replacing that file ([`appimage_path`]), so it
 /// needs this archive rather than the platform's `.tar.gz`.
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-pub const LAUNCHER_APPIMAGE_ASSET: Option<&str> = Some("horizon-launcher-linux-x86_64.AppImage");
+pub const LAUNCHER_APPIMAGE_ASSET: Option<&str> = Some(if cfg!(horizon_fork_launcher) {
+    "horizon-fork-launcher-linux-x86_64.AppImage"
+} else {
+    "horizon-launcher-linux-x86_64.AppImage"
+});
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
 pub const LAUNCHER_APPIMAGE_ASSET: Option<&str> = None;
 
 const LAUNCHER_BINARY: &str = if cfg!(windows) {
-    "horizon-launcher.exe"
+    crate::identity::WINDOWS_EXECUTABLE
 } else {
-    "horizon-launcher"
+    crate::identity::EXECUTABLE
 };
 
 pub(crate) const CLIENT: &str = if cfg!(windows) {
@@ -937,7 +907,7 @@ pub fn data_dir() -> PathBuf {
     }
     dirs::data_dir()
         .unwrap_or_else(std::env::temp_dir)
-        .join("horizon-launcher")
+        .join(crate::identity::LAUNCHER_FOLDER)
 }
 
 /// A canonical path without Windows' verbatim prefix: `canonicalize` gives `\\?\C:\...` there,
@@ -1085,7 +1055,7 @@ fn signed_digest(tag: &str, asset: &str) -> Result<String, String> {
     crate::signed::digest(
         tag,
         asset,
-        &horizon_release_sign::trusted_keys(),
+        &horizon_release_sign::trusted_keys_for(REPO),
         fetch_small,
     )
 }
@@ -1210,7 +1180,7 @@ pub fn install(release: &Release, progress: impl Fn(f32)) -> Result<(), String> 
                 github_tag,
                 &version,
                 asset,
-                &horizon_release_sign::trusted_keys(),
+                &horizon_release_sign::trusted_keys_for(REPO),
                 fetch_small,
             )?
         }
@@ -1245,6 +1215,9 @@ fn asset_installed<'a>(
         None
     }
 }
+
+mod developer_play;
+pub use developer_play::client_as;
 
 /// Downloads `release`'s archive for this platform, checks it against `sha256` (its signed
 /// checksum), and unpacks it as the installed version `tag`.
@@ -2561,7 +2534,7 @@ pub fn game_home() -> PathBuf {
     }
     dirs::data_dir()
         .unwrap_or_else(std::env::temp_dir)
-        .join("horizon")
+        .join(crate::identity::GAME_FOLDER)
 }
 
 /// Whether No AI is on: every AI feature hidden and off (`horizon_platform::no_ai`, kept in the
@@ -2846,7 +2819,7 @@ pub fn client_command(tag: &str) -> Command {
 
 /// The game's program: on macOS the one inside the version's Horizon.app, so the Dock and Cmd+Tab
 /// show Horizon's name and icon (game_app.rs); the bare binary elsewhere, or if that fails.
-fn client_program(tag: &str) -> PathBuf {
+pub(crate) fn client_program(tag: &str) -> PathBuf {
     let dir = version_dir(tag);
     #[cfg(target_os = "macos")]
     match crate::game_app::ensure(&dir) {
@@ -3104,45 +3077,6 @@ pub fn client(tag: &str) -> Result<Command, String> {
 /// What the command line adds to a refusal to play for want of an account.
 pub const SIGN_IN_HINT: &str = "Sign in with `horizon-launcher account sign-in`.";
 
-/// [`client`], playing as `who` for this launch only (`play --account`).
-pub fn client_as(tag: &str, who: Option<&str>) -> Result<Command, String> {
-    if let Some(error) = game_architecture_launch_error(tag) {
-        return Err(error);
-    }
-    play_step("reading the sign-in");
-    let hint = |refused: String| format!("{refused} {}", crate::i18n::tr(SIGN_IN_HINT));
-    let session = match who {
-        None => account::session_for_game(&game_home()).map_err(|refused| {
-            // A keyring that didn't answer isn't a missing sign-in (#12179).
-            match refused.keyring {
-                Some(why) => why,
-                None => hint(refused.to_string()),
-            }
-        }),
-        Some(who) => account::session_for_game_as(&game_home(), who).map_err(hint),
-    }?;
-    if let Err(e) = need_prepared(tag) {
-        account::discard_unread_sessions();
-        return Err(e);
-    }
-    play_step("checking the game's assets");
-    complete_assets(tag);
-    crate::browser::horizon::before_play(&game_home());
-    let mut cmd = client_command(tag);
-    if let Some(file) = session.file {
-        cmd.arg("--session-file").arg(file);
-    }
-    cmd.envs(session.env);
-    if let Some(e) = session.offline {
-        eprintln!("Playing offline: {e}");
-    }
-    if let Some(e) = account::take_unsaved() {
-        eprintln!("{e}");
-    }
-    append_game_args(&mut cmd);
-    Ok(cmd)
-}
-
 /// Start the game straight into a friend's world: `--server friend:CODE`.
 pub fn join_friend(cmd: &mut Command, code: &str) -> Result<(), String> {
     horizon_friends::invite::parse_detailed(code).map_err(|e| e.to_string())?;
@@ -3168,13 +3102,14 @@ pub fn server(tag: &str, folder: &Path, accept_eula: bool) -> Result<Command, St
     Ok(server_command(tag, folder))
 }
 
+mod release_selection;
+
 /// One release's notes: the tag given, or the newest.
 pub fn release_notes(tag: Option<&str>) -> Result<Release, String> {
     let releases = releases()?;
     match tag {
-        Some(tag) => releases
-            .into_iter()
-            .find(|r| r.tag == tag)
+        Some(tag) => release_selection::by_tag(&releases, tag)
+            .cloned()
             .ok_or_else(|| format!("No Horizon release is tagged {tag}.")),
         None => releases
             .into_iter()
@@ -3355,9 +3290,7 @@ pub fn install_tag(tag: &str, as_update: bool, progress: impl Fn(f32)) -> Result
             .find(|r| r.asset.is_some() && !r.prerelease)
             .ok_or("No release has a build for this platform yet.")?
     } else {
-        releases
-            .iter()
-            .find(|r| r.tag == tag)
+        release_selection::by_tag(&releases, tag)
             .ok_or_else(|| format!("No Horizon release is tagged {tag}."))?
     };
     if release.asset.is_none() {
@@ -3470,7 +3403,7 @@ pub fn self_update_allowed() -> bool {
 /// The version in `horizon-launcher --version`'s output (`horizon-launcher 0.1.5`).
 fn parse_version_output(out: &str) -> Option<&str> {
     out.trim()
-        .strip_prefix("horizon-launcher ")
+        .strip_prefix(crate::identity::VERSION_PREFIX)
         .map(str::trim)
         .filter(|v| !v.is_empty())
 }
@@ -4151,7 +4084,7 @@ pub enum Msg {
     AccountRemoved(String, u64, Result<bool, String>),
     /// The owner gate's answer for the game about to start: the selected account's session
     /// file (none = offline) and why it plays offline, if it does.
-    Session(Result<crate::account::GameSession, crate::account::NoOwner>),
+    Session(Result<Option<crate::account::GameSession>, crate::account::NoOwner>),
     JarConsent {
         jars: Vec<horizon_mod_package::manifest::JarRef>,
         reply: std::sync::mpsc::Sender<bool>,
@@ -4198,6 +4131,7 @@ pub struct RuntimeGuard {
 pub use crate::run_leases::control::startup_cleanup;
 
 pub fn prepare_command(cmd: Command) -> Result<(Command, RuntimeGuard), String> {
+    crate::developer_offline::validate(&cmd)?;
     let leases = crate::run_leases::shared(&cmd).map_err(crate::native_mods::cache_error)?;
     #[cfg(windows)]
     let cmd = crate::windows_runtime::redirect(cmd);
@@ -4969,25 +4903,44 @@ pub fn {f}("
             platform_assets("macos", "aarch64"),
             Some((
                 "horizon-macos-arm64.zip",
-                "horizon-launcher-macos-arm64.zip"
+                if cfg!(horizon_fork_launcher) {
+                    "horizon-fork-launcher-macos-arm64.zip"
+                } else {
+                    "horizon-launcher-macos-arm64.zip"
+                }
             ))
         );
         assert_eq!(
             platform_assets("macos", "x86_64"),
-            Some(("horizon-macos-x64.zip", "horizon-launcher-macos-x64.zip"))
+            Some((
+                "horizon-macos-x64.zip",
+                if cfg!(horizon_fork_launcher) {
+                    "horizon-fork-launcher-macos-x64.zip"
+                } else {
+                    "horizon-launcher-macos-x64.zip"
+                }
+            ))
         );
         assert_eq!(
             platform_assets("windows", "x86_64"),
             Some((
                 "horizon-windows-x64.zip",
-                "horizon-launcher-windows-x64.zip"
+                if cfg!(horizon_fork_launcher) {
+                    "horizon-fork-launcher-windows-x64.zip"
+                } else {
+                    "horizon-launcher-windows-x64.zip"
+                }
             ))
         );
         assert_eq!(
             platform_assets("windows", "aarch64"),
             Some((
                 "horizon-windows-arm64.zip",
-                "horizon-launcher-windows-arm64.zip"
+                if cfg!(horizon_fork_launcher) {
+                    "horizon-fork-launcher-windows-arm64.zip"
+                } else {
+                    "horizon-launcher-windows-arm64.zip"
+                }
             ))
         );
         assert_eq!(platform_assets("linux", "aarch64"), None);
@@ -5272,8 +5225,16 @@ pub fn {f}("
     #[test]
     fn an_arm64_launcher_skips_a_release_without_its_zip() {
         let (arm, x64) = (
-            "horizon-launcher-windows-arm64.zip",
-            "horizon-launcher-windows-x64.zip",
+            if cfg!(horizon_fork_launcher) {
+                "horizon-fork-launcher-windows-arm64.zip"
+            } else {
+                "horizon-launcher-windows-arm64.zip"
+            },
+            if cfg!(horizon_fork_launcher) {
+                "horizon-fork-launcher-windows-x64.zip"
+            } else {
+                "horizon-launcher-windows-x64.zip"
+            },
         );
         let asset = |name: &str| serde_json::json!({"name": name, "browser_download_url": format!("https://example.test/{name}"), "size": 1});
         let list = serde_json::json!([
@@ -5289,13 +5250,12 @@ pub fn {f}("
 
     /// Every asset a launcher looks for is one the release workflows build, sign and publish.
     #[test]
-    fn platform_assets_are_published() {
+    fn game_platform_assets_are_published() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         let read = |path: &str| fs::read_to_string(repo.join(path)).unwrap();
         let build = read(".github/workflows/game-build.yml");
         let nightly = read(".github/workflows/nightly-build.yml");
-        let launcher = read(".github/workflows/launcher.yml");
-        for (os, arch, game, launcher_asset) in PLATFORMS {
+        for (os, arch, game, _launcher_asset) in PLATFORMS {
             assert!(
                 build.contains(&format!("asset: {game}")),
                 "game-build.yml builds no {game}"
@@ -5307,10 +5267,6 @@ pub fn {f}("
             assert!(
                 named == 2 || (optional && named > 2),
                 "nightly-build.yml must sign and publish {game} ({os} {arch})"
-            );
-            assert!(
-                launcher.contains(&format!("asset: {launcher_asset}")),
-                "launcher.yml builds no {launcher_asset}"
             );
         }
     }
@@ -5455,7 +5411,7 @@ pub fn {f}("
         assert_eq!(launcher_version("launcher-vx"), None);
         let list = serde_json::json!([
             {"tag_name": "v2026.10.12", "assets": [{"name": "horizon-linux-x86_64.tar.gz", "browser_download_url": "u", "size": 1}]},
-            {"tag_name": "launcher-v9.0.0", "assets": [{"name": "horizon-launcher-linux-x86_64.tar.gz", "browser_download_url": "u", "size": 1}]},
+            {"tag_name": "launcher-v9.0.0", "assets": [{"name": if cfg!(horizon_fork_launcher) { "horizon-fork-launcher-linux-x86_64.tar.gz" } else { "horizon-launcher-linux-x86_64.tar.gz" }, "browser_download_url": "u", "size": 1}]},
             {"tag_name": "v2026.10.13", "assets": []},
             {"tag_name": "launcher-v0.0.1", "draft": true, "assets": []},
         ]);
@@ -5684,7 +5640,7 @@ pub fn {f}("
         assert!(launcher_update(&[r(own_tag())]).is_none());
         assert_eq!(launcher_version(&own_tag()), Some(VERSION));
         assert_eq!(
-            parse_version_output(&format!("horizon-launcher {VERSION}\n")),
+            parse_version_output(&format!("{}{VERSION}\n", crate::identity::VERSION_PREFIX)),
             Some(VERSION)
         );
     }
@@ -5800,7 +5756,11 @@ pub fn {f}("
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         assert_eq!(
             launcher_asset_running_from(true),
-            Some("horizon-launcher-linux-x86_64.AppImage")
+            Some(if cfg!(horizon_fork_launcher) {
+                "horizon-fork-launcher-linux-x86_64.AppImage"
+            } else {
+                "horizon-launcher-linux-x86_64.AppImage"
+            })
         );
     }
 
@@ -6985,7 +6945,11 @@ pub fn {f}("
     #[test]
     fn launcher_versions_read_from_the_binary() {
         assert_eq!(
-            parse_version_output("horizon-launcher 0.1.5\n"),
+            parse_version_output(if cfg!(horizon_fork_launcher) {
+                "horizon-fork-launcher 0.1.5\n"
+            } else {
+                "horizon-launcher 0.1.5\n"
+            }),
             Some("0.1.5")
         );
         assert_eq!(parse_version_output("something else"), None);

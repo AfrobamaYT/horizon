@@ -2,6 +2,8 @@
 //! by the `#[point]` attribute (the check at the function's head) and the mod API generator (the
 //! records, `PointId` and `points.json`), so the two always agree.
 pub mod catalog;
+/// Filename of the versioned SDK tool catalog.
+pub const SDK_CATALOG_FILE: &str = "mod-catalog.json";
 
 use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote};

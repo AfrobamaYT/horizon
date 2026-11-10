@@ -217,6 +217,16 @@ class DynaRoutingTests(unittest.TestCase):
                     self.assertIn(f"Shard result: {result}", summary.read_text())
                     summary.unlink()
 
+    def test_tooling_tests_run_only_after_every_earlier_verify_step_succeeded(self):
+        # After a failed step the Rust install is skipped, so the Python tests that launch rustc can't run (#2920).
+        from test_ci_runners import jobs
+        verify = dict(jobs((ROOT / ".github/workflows/dyna-ci.yml").read_text()))["verify"]
+        step = verify.split("- name: Test offline research tooling\n", 1)[1].split("\n      - ", 1)[0]
+        condition = step.split("if:", 1)[1].split("\n", 1)[0]
+        self.assertIn("success()", condition)
+        self.assertNotIn("cancelled()", condition)
+        self.assertNotIn("always()", condition)
+
     @unittest.skipUnless(POSIX_BASH, "needs a bash that is not WSL's")
     def test_missing_prepared_data_fails_push_and_nightly_dispatch(self):
         from test_ci_runners import jobs

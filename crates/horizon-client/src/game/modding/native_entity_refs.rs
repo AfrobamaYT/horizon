@@ -12,6 +12,9 @@
 pub(in crate::game) mod dragon_parts_table;
 #[path = "native_entity_refs/dragon_query.rs"]
 mod dragon_query;
+#[cfg(test)]
+#[path = "native_entity_refs/roll_loot_tests.rs"]
+mod roll_loot_tests;
 #[path = "native_entity_refs/save_lending.rs"]
 mod save_lending;
 use super::{
@@ -355,6 +358,47 @@ impl Game<'_> {
         let at = horizon_core::position::BlockPos::new(pos[0], pos[1], pos[2]);
         Some(self.with_level(|_, level, _| level.block_drops_of(at, state, tool, entity)))
     }
+    /// One roll of the world's loot table `table` (`LootTable.getRandomItems`) with `origin` as
+    /// ORIGIN, `tool` as TOOL and `entity` as THIS_ENTITY when given: the context
+    /// `/loot … fish <table> <pos> <tool>` gives. It draws from the table's random sequence,
+    /// else the level random, and the stacks come split to their stack sizes. None for a
+    /// missing table, a stale handle or one of a parked level, a client, and an `entity` that
+    /// names nothing.
+    pub(super) fn level_roll_loot(
+        &mut self,
+        level: LevelRef,
+        table: &str,
+        origin: [f64; 3],
+        tool: Option<&ItemStack>,
+        entity: Option<EntityRef>,
+    ) -> Option<Vec<ItemStack>> {
+        if !self.is_logical_server()
+            || self.native_lifecycle.epoch() != Some(level.epoch())
+            || self.dim.key() != level.dimension()
+            || !world_items!(self).has_loot_table(table)
+        {
+            return None;
+        }
+        if let Some(entity) = entity {
+            self.native_entity_target(entity)?;
+        }
+        let place = self.loot_place_at(origin, None);
+        horizon_world::loot::with_native_loot_place(place, || {
+            let this_entity = entity.is_some();
+            match world_items!(self).loot_sequence(table) {
+                Some(sequence) => {
+                    let random = self.rand_sequences.get(&sequence, self.level.seed);
+                    world_items!(self).roll_loot_table(table, tool, this_entity, random)
+                }
+                None => world_items!(self).roll_loot_table(
+                    table,
+                    tool,
+                    this_entity,
+                    &mut self.world.random,
+                ),
+            }
+        })
+    }
     /// Set a block through Level.setBlock. Typed errors distinguish stale/unavailable
     /// levels; Ok(false) preserves vanilla's position/no-change refusal.
     pub(super) fn level_set_block(
@@ -470,6 +514,45 @@ impl Game<'_> {
         }
         self.server_destroy_block_progress(breaker, pos, progress);
         true
+    }
+    /// `Level.sendBlockUpdated`: queue the block at `pos` to be sent to the clients again.
+    pub(super) fn level_send_block_updated(&mut self, level: LevelRef, pos: [i32; 3]) -> bool {
+        if !self.native_level_write_allowed(level, pos) || self.dim.key() != level.dimension() {
+            return false;
+        }
+        self.after_commit(super::transactions::After::NotifyClients((
+            pos[0], pos[1], pos[2],
+        )));
+        true
+    }
+    /// `LevelRenderer.destroyBlockProgress` for this client's own view only.
+    pub(super) fn level_set_client_break_progress(
+        &mut self,
+        level: LevelRef,
+        breaker: i32,
+        pos: [i32; 3],
+        progress: i32,
+    ) -> bool {
+        if self.is_logical_server() || self.native_level_read_world(level).is_none() {
+            return false;
+        }
+        self.destroy_block_progress(breaker, pos, progress);
+        true
+    }
+    /// `ItemStack.getDestroySpeed` of `tool` on the block at `pos`.
+    pub(super) fn level_block_break_speed(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+        tool: Option<&ItemStack>,
+    ) -> Option<f32> {
+        let world = self.native_level_read_world(level)?;
+        if !world.loaded(pos[0], pos[2]) || !world.shape.contains_y(pos[1]) {
+            return None;
+        }
+        let state = world.block(pos[0], pos[1], pos[2]);
+        let name = &self.res.facts().get(state).name;
+        Some(self.items().mining_speed(tool, name))
     }
     /// Apply bone meal to the block at `pos` as a dispenser does (`BoneMealItem.growCrop`, then
     /// `growWaterPlant`): the mods' `bonemeal` hook first, level event 1505 when something grew.
@@ -3629,8 +3712,8 @@ pub(super) mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn level_block_writes_validate_and_change_world() {
         use super::super::{Audio, Game, Options, Progress, Settings, load_resources};
-        use horizon_client::chunk::Chunk;
-        use mod_api::{Authority, BlockUpdateFlags};
+        use horizon_client::{chunk::Chunk, items::ItemStack};
+        use mod_api::{Authority, BlockUpdateFlags, HostTransaction};
         use std::{sync::Arc, time::Instant};
 
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
@@ -3753,6 +3836,62 @@ pub(super) mod tests {
             game.world.block_log.as_ref().unwrap(),
             &vec![(3, 64, 0), (4, 64, 0)]
         );
+        // `sendBlockUpdated` queues the block again without writing; out of height it queues nothing.
+        game.world.modified.clear();
+        let dirty_before = game.world.modified.clone();
+        let block_before = game.world.block(5, 64, 0);
+        assert!(game.level_send_block_updated(level, [5, 64, 0]));
+        assert!(game.level_send_block_updated(level, [5, 64, 0]));
+        assert_eq!(game.world.modified.clone(), dirty_before);
+        assert_eq!(game.world.block(5, 64, 0), block_before);
+        let host: &mut dyn mod_api::ServerHost = &mut game;
+        let aborted: Result<(), ()> = host.transaction(|host, _| {
+            assert!(level.send_block_updated(host, [6, 64, 0]));
+            Err(())
+        });
+        assert!(aborted.is_err());
+        assert!(!game.world.block_log.as_ref().unwrap().contains(&(6, 64, 0)));
+        assert!(!game.level_send_block_updated(level, [5, 10_000, 0]));
+        assert_eq!(
+            game.world.block_log.as_ref().unwrap(),
+            &vec![(3, 64, 0), (4, 64, 0), (5, 64, 0)]
+        );
+        // A bare hand mines at the base speed; an unloaded position has none.
+        assert_eq!(
+            game.level_block_break_speed(level, [3, 64, 0], None),
+            Some(1.0)
+        );
+        assert_eq!(
+            game.level_block_break_speed(level, [3, 10_000, 0], None),
+            None
+        );
+        let mut pickaxe = ItemStack::new("minecraft:iron_pickaxe", 1);
+        assert_eq!(
+            game.level_block_break_speed(level, [3, 64, 0], Some(&pickaxe)),
+            Some(6.0)
+        );
+        pickaxe.enchant("minecraft:efficiency", 5);
+        assert_eq!(
+            game.level_block_break_speed(level, [3, 64, 0], Some(&pickaxe)),
+            Some(6.0)
+        );
+        let mut custom_tool = ItemStack::new("minecraft:stick", 1);
+        let components = horizon_client::item_data::command_components(
+            r#"[tool={rules:[{blocks:"stone",speed:7.0f}],default_mining_speed:2.0f}]"#,
+        )
+        .unwrap();
+        (custom_tool.damage, custom_tool.extra) =
+            horizon_client::item_data::decode_components(Some(&components));
+        assert_eq!(
+            game.level_block_break_speed(level, [3, 64, 0], Some(&custom_tool)),
+            Some(7.0)
+        );
+        assert_eq!(
+            game.level_block_break_speed(level, [5, 64, 0], Some(&custom_tool)),
+            Some(2.0)
+        );
+        // Server-side game: the client-only crack is refused.
+        assert!(!game.level_set_client_break_progress(level, 1, [3, 64, 0], 4));
         game.world.block_log = None;
         let waterlogged = game
             .pack

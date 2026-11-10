@@ -18,7 +18,7 @@ fn fixture() -> (Manifest, Catalog) {
         }])).unwrap(),
         sites: serde_json::from_value(serde_json::json!([{
             "name":"Sone", "target":"game::run", "selector":"self.step", "ordinal":0,
-            "call":"game::step", "ctx":"context", "hash":"place", "listener":"game::__SoneListener", "record":"game::__SoneArgs", "output":"()"
+            "once":false, "call":"game::step", "ctx":"context", "hash":"place", "listener":"game::__SoneListener", "record":"game::__SoneArgs", "output":"()"
         }])).unwrap(),
         discovery: false,
     };

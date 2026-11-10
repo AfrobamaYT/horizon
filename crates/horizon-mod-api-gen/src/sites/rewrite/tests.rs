@@ -1,4 +1,5 @@
 use super::*;
+mod owned;
 use crate::crossing::tests::internal;
 
 fn rewrite(
@@ -878,4 +879,92 @@ fn string_literals_differing_only_in_spaces_are_separate_reads() {
         "self.value"
     );
     assert_eq!(super::super::expression::spelling("- 1").unwrap(), "-1");
+}
+
+#[test]
+fn private_borrowed_calls_have_call_scoped_records_for_both_ordinals() {
+    let source = "fn run(wood: &str) { editor_sprite(\"hanging_signs\", wood); editor_sprite(\"signs\", wood); }";
+    let entries = vec![
+        internal("horizon_client::game::run", "fn", "fn run(wood: &str)"),
+        internal(
+            "horizon_client::game::editor_sprite",
+            "fn",
+            "fn editor_sprite(folder: &str, wood: &str) -> String",
+        ),
+    ];
+    for ordinal in [0, 1] {
+        let mut request = declaration("horizon_client::game::editor_sprite", Some(ordinal));
+        request.target = "horizon_client::game::run".into();
+        let (rewritten, sites) = super::rewrite(
+            source,
+            "horizon_client::game",
+            &entries,
+            &[request.clone()],
+            true,
+        )
+        .unwrap();
+        syn::parse_file(&rewritten).unwrap();
+        assert_eq!(sites[0].ordinal, ordinal);
+        assert_eq!(sites[0].output, ":: std :: string :: String");
+        assert!(rewritten.contains("Args < 'a >"), "{rewritten}");
+        assert!(rewritten.contains("for < 'g , 'a >"));
+        assert!(rewritten.contains("folder : & 'a str"));
+        assert!(
+            super::rewrite(source, "horizon_client::game", &entries, &[request], false)
+                .unwrap_err()
+                .to_string()
+                .contains("borrowing or non-Copy")
+        );
+    }
+}
+
+#[test]
+fn private_engine_borrow_and_copy_array_are_call_scoped() {
+    let source = "fn sense_secondary(w: &MobWorld) { farmland(w, [1, 2, 3]); }";
+    let module = "horizon_client_lib::mobs::villager_brain::secondary";
+    let entries = vec![
+        internal(
+            "horizon_client_lib::mobs::MobWorld",
+            "struct",
+            "pub struct MobWorld<'a> { marker: &'a u32 }",
+        ),
+        internal(
+            &format!("{module}::sense_secondary"),
+            "fn",
+            "fn sense_secondary(w: &MobWorld)",
+        ),
+        internal(
+            &format!("{module}::farmland"),
+            "fn",
+            "fn farmland(w: &MobWorld, p: [i32; 3]) -> bool",
+        ),
+    ];
+    let mut entries = entries;
+    // The real catalog resolves this imported engine type before lowering.
+    let world_path = entries[0].path.clone();
+    entries[2].refs.insert("MobWorld".into(), world_path);
+    let mut request = declaration(&entries[2].path, Some(0));
+    request.target = entries[1].path.clone();
+    let (rewritten, sites) =
+        super::rewrite(source, module, &entries, &[request.clone()], true).unwrap();
+    syn::parse_file(&rewritten).unwrap();
+    assert!(
+        rewritten.contains("& 'a crate :: mobs :: MobWorld < 'g >"),
+        "{rewritten}"
+    );
+    assert!(rewritten.contains("p : [i32 ; 3]"));
+    assert_eq!(sites[0].output, "bool");
+    assert!(
+        super::rewrite(source, module, &entries, &[request.clone()], false)
+            .unwrap_err()
+            .to_string()
+            .contains("borrowing or non-Copy")
+    );
+    entries[2].signature = "fn farmland(w: &mut MobWorld, p: [i32; 3]) -> bool".into();
+    assert!(
+        super::rewrite(source, module, &entries, &[request], true)
+            .unwrap_err()
+            .to_string()
+            .contains("borrowing or non-Copy")
+    );
 }

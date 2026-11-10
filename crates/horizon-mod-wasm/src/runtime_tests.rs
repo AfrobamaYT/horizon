@@ -88,10 +88,12 @@ fn module(body: &str) -> WasmMod {
     let bytes = guest(*mod_api::wire::LAYOUT, body);
     WasmMod::instantiate(
         &engine,
+        &[],
         &[Member {
             name: "test",
             module: &bytes,
         }],
+        None,
     )
     .unwrap()
     .remove(0)
@@ -324,10 +326,12 @@ fn a_member_cannot_bypass_group_limits_with_private_memories() {
         wat::parse_str(r#"(module (@custom "dylink.0" "\01\04\00\00\00\00") (memory 1))"#).unwrap();
     let refusal = WasmMod::instantiate(
         &engine().unwrap(),
+        &[],
         &[Member {
             name: "private",
             module: &bytes,
         }],
+        None,
     )
     .err()
     .unwrap();
@@ -344,6 +348,7 @@ fn guest_input_pool_stays_flat_for_100k_no_import_calls() {
     .unwrap();
     let module = WasmMod::instantiate(
         &engine().unwrap(),
+        &[],
         &[
             Member {
                 name: "std",
@@ -354,6 +359,7 @@ fn guest_input_pool_stays_flat_for_100k_no_import_calls() {
                 module: &fixture,
             },
         ],
+        None,
     )
     .unwrap()
     .pop()
@@ -418,6 +424,7 @@ fn real_members_link_when_built() {
     let engine = engine().unwrap();
     let modules = WasmMod::instantiate(
         &engine,
+        &[],
         &[
             Member {
                 name: "std",
@@ -428,6 +435,7 @@ fn real_members_link_when_built() {
                 module: &fixture,
             },
         ],
+        None,
     );
     let modules = modules.unwrap_or_else(|why| panic!("real shared members did not load: {why}"));
     assert_eq!(modules.len(), 1);
@@ -546,6 +554,7 @@ fn boundary_exports_are_per_member_but_other_horizon_symbols_are_not() {
     let engine = engine().unwrap();
     let modules = WasmMod::instantiate(
         &engine,
+        &[],
         &[
             Member {
                 name: "first",
@@ -556,6 +565,7 @@ fn boundary_exports_are_per_member_but_other_horizon_symbols_are_not() {
                 module: &bytes,
             },
         ],
+        None,
     )
     .unwrap();
     assert_eq!(modules.len(), 2);
@@ -565,6 +575,7 @@ fn boundary_exports_are_per_member_but_other_horizon_symbols_are_not() {
     .unwrap();
     let refusal = WasmMod::instantiate(
         &engine,
+        &[],
         &[
             Member {
                 name: "first",
@@ -575,6 +586,7 @@ fn boundary_exports_are_per_member_but_other_horizon_symbols_are_not() {
                 module: &bytes,
             },
         ],
+        None,
     )
     .err()
     .unwrap();
@@ -582,6 +594,41 @@ fn boundary_exports_are_per_member_but_other_horizon_symbols_are_not() {
         refusal
             .to_string()
             .contains("exports horizon_shared, which first already does")
+    );
+}
+
+#[test]
+fn loader_refuses_poi_registration_before_unsupported_metadata_can_run() {
+    let std = wat::parse_str(
+        r#"(module (@custom "dylink.0" "\01\04\00\00\00\00") (import "env" "memory" (memory 1)))"#,
+    )
+    .unwrap();
+    let mut subscriptions = Writer::new();
+    subscriptions.put(&vec![("extend_poi_types".to_owned(), 0_i32, false)]);
+    let bytes = subscriptions.into_bytes();
+    let mut body = String::new();
+    for (offset, byte) in bytes.iter().enumerate() {
+        body.push_str(&format!(
+            "i32.const {} i32.const {byte} i32.store8 ",
+            2048 + offset
+        ));
+    }
+    body.push_str(&format!(
+        "i64.const {}",
+        (2048_u64 << 32) | bytes.len() as u64
+    ));
+    let module = guest(*mod_api::wire::LAYOUT, &body);
+    let manifest = horizon_mod_package::manifest::Manifest::parse(&format!("id = 'poi_probe'\nname = 'POI probe'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = ['registries']\n[wasm]\nsha512 = '{}'\ntoolchain = 'test'\nbuilt_with = 'test'\n", "a".repeat(128))).unwrap();
+    let loaded = crate::load(&std, vec![crate::WasmPackage { manifest, module }]);
+    assert!(loaded.mods.is_empty());
+    assert_eq!(loaded.refused.len(), 1);
+    assert!(
+        loaded.refused[0]
+            .1
+            .to_string()
+            .contains("PoiTypeExtensions::metadata"),
+        "{:?}",
+        loaded.refused
     );
 }
 
@@ -653,10 +700,12 @@ fn layout_mismatch_is_a_mods_page_refusal() {
     let bytes = guest(*mod_api::wire::LAYOUT ^ 1, "i64.const 0");
     let refusal = WasmMod::instantiate(
         &engine,
+        &[],
         &[Member {
             name: "test",
             module: &bytes,
         }],
+        None,
     )
     .err()
     .unwrap();
@@ -680,10 +729,12 @@ fn point_record_layout_mismatch_is_refused() {
     .unwrap();
     let refusal = WasmMod::instantiate(
         &engine().unwrap(),
+        &[],
         &[Member {
             name: "points",
             module: &bytes,
         }],
+        None,
     )
     .err()
     .unwrap();
@@ -785,6 +836,72 @@ fn another_threads_hook_fails_fast_while_an_import_lends_the_group() {
         Some(7)
     );
     assert!(!module.is_stopped());
+}
+
+#[test]
+fn contended_calls_wait_for_the_group_and_workers_ignore_lending() {
+    for (class, lending) in [(CallClass::Hook, false), (CallClass::Worker, true)] {
+        let module = module("i64.const 2199023255556");
+        let group = module.running.group.lock().unwrap();
+        if lending {
+            module.running.lending.store(1, Ordering::Relaxed);
+        }
+        let (started, ready) = std::sync::mpsc::channel();
+        let (send, receive) = std::sync::mpsc::channel();
+        let other = module.clone();
+        let thread = std::thread::spawn(move || {
+            started.send(()).unwrap();
+            let result = other.call(
+                class,
+                Frame::default(),
+                0,
+                None,
+                |w| w.put(&42u32),
+                |r| r.take::<u32>(),
+            );
+            send.send(result).unwrap();
+        });
+        ready.recv().unwrap();
+        let early = receive.recv_timeout(Duration::from_millis(100));
+        let waited = matches!(&early, Err(std::sync::mpsc::RecvTimeoutError::Timeout));
+        module.running.lending.store(0, Ordering::Relaxed);
+        drop(group);
+        let result = match early {
+            Ok(value) => value,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                receive.recv_timeout(Duration::from_secs(5)).unwrap()
+            }
+            Err(error) => panic!("call thread failed: {error}"),
+        };
+        thread.join().unwrap();
+        assert!(
+            waited,
+            "a contended call returned before the lock was released"
+        );
+        assert_eq!(result, Some(42));
+        assert!(!module.is_stopped());
+    }
+}
+
+#[test]
+fn contended_hook_times_out_without_poisoning_the_group() {
+    let module = module("i64.const 2199023255556");
+    let group = module.running.group.lock().unwrap();
+    let (send, receive) = std::sync::mpsc::channel();
+    let other = module.clone();
+    let thread = std::thread::spawn(move || {
+        let start = Instant::now();
+        let result = call(&other);
+        send.send((result, start.elapsed())).unwrap();
+    });
+    let result = receive.recv_timeout(Duration::from_secs(10));
+    drop(group);
+    thread.join().unwrap();
+    let (answer, elapsed) = result.expect("contended hook did not time out");
+    assert_eq!(answer, None);
+    assert!(elapsed >= Duration::from_secs(5));
+    assert!(!module.is_stopped());
+    assert_eq!(call(&module), Some(42));
 }
 
 #[test]
@@ -1187,4 +1304,123 @@ fn memory_growth_limit_traps_and_poison_is_shared_by_proxies() {
         super::runtime_tests::module("ref.null func i32.const 1048576 table.grow drop i64.const 0");
     assert_eq!(call(&module), None);
     assert!(module.running.poisoned.load(Ordering::Relaxed));
+}
+
+#[test]
+fn registration_refusal_names_the_indexed_mod_injection() {
+    let manifest: horizon_mod_package::Manifest = serde_json::from_value(serde_json::json!({
+        "id": "addon", "name": "Addon", "version": "1.0.0", "description": "", "api": "0.2",
+        "capabilities": [], "dependencies": {"chem-lib": "*"},
+        "inject": [
+            {"id": "engine", "at": "game::tick", "kind": "head", "with": "listener", "hash": "unused"},
+            {"id": "first", "at": "chem_lib::first", "kind": "head", "with": "listener", "hash": "unused"},
+            {"id": "second", "at": "chem_lib::second", "kind": "head", "with": "listener", "hash": "unused"}
+        ]
+    })).unwrap();
+    for index in [1, 2, 3] {
+        // Add a registration export to the real boundary module before compiling it.
+        let text = format!(
+            r#"(module
+            (@custom "dylink.0" "\01\04\00\00\00\00")
+            (import "env" "memory" (memory 1))
+            (func (export "horizon_layout") (result i64) i64.const {})
+            (func (export "horizon_in") (param i32) (result i32) i32.const 0)
+            (func (export "horizon_hook") (param i32) (result i64) i64.const 0)
+            (func (export "horizon_mod_points_register") (result i32) i32.const {index}))"#,
+            *mod_api::wire::LAYOUT
+        );
+        let bytes = wat::parse_str(text).unwrap();
+        let refusal = WasmMod::instantiate(
+            &engine().unwrap(),
+            &[("libaddon.so", &manifest)],
+            &[Member {
+                name: "libaddon.so",
+                module: &bytes,
+            }],
+            None,
+        )
+        .err()
+        .expect("registration must refuse");
+        let Refusal::Runtime(message) = refusal else {
+            panic!("unexpected refusal: {refusal:?}")
+        };
+        let expected = match index {
+            1 => "addon:first: refused by library registry",
+            2 => "addon:second: refused by library registry",
+            _ => "libaddon.so: invalid mod point registration refusal index 3",
+        };
+        assert_eq!(message, expected);
+    }
+}
+
+#[test]
+fn a_mod_point_listener_without_its_bridge_or_its_library_seal_is_refused_at_load() {
+    let manifest = |id: &str, dependencies: serde_json::Value, inject: serde_json::Value| {
+        serde_json::from_value::<horizon_mod_package::Manifest>(serde_json::json!({
+            "id": id, "name": id, "version": "1.0.0", "description": "", "api": "0.2",
+            "capabilities": [], "dependencies": dependencies, "inject": inject
+        }))
+        .unwrap()
+    };
+    let addon = manifest(
+        "addon",
+        serde_json::json!({"chem-lib": "*"}),
+        serde_json::json!([{"id": "first", "at": "chem_lib::first", "kind": "head", "with": "listener", "hash": "unused"}]),
+    );
+    let library = manifest("chem-lib", serde_json::json!({}), serde_json::json!([]));
+    let member = |exports: &str| {
+        wat::parse_str(format!(
+            r#"(module
+            (@custom "dylink.0" "\01\04\00\00\00\00")
+            (import "env" "memory" (memory 1))
+            (func (export "horizon_layout") (result i64) i64.const {})
+            (func (export "horizon_in") (param i32) (result i32) i32.const 0)
+            (func (export "horizon_hook") (param i32) (result i64) i64.const 0)
+            {exports})"#,
+            *mod_api::wire::LAYOUT
+        ))
+        .unwrap()
+    };
+    let register = r#"(func (export "horizon_mod_points_register") (result i32) i32.const 0)"#;
+    let seal = r#"(func (export "horizon_mod_points_seal"))"#;
+    let load = |addon_exports: &str, library_exports: &str| {
+        let (addon_bytes, library_bytes) = (member(addon_exports), member(library_exports));
+        WasmMod::instantiate(
+            &engine().unwrap(),
+            &[("libaddon.so", &addon), ("libchem_lib.so", &library)],
+            &[
+                Member {
+                    name: "libchem_lib.so",
+                    module: &library_bytes,
+                },
+                Member {
+                    name: "libaddon.so",
+                    module: &addon_bytes,
+                },
+            ],
+            None,
+        )
+        .map(|_| ())
+        .map_err(|refusal| match refusal {
+            Refusal::Runtime(message) => message,
+            other => panic!("unexpected refusal: {other:?}"),
+        })
+    };
+    assert_eq!(load(register, seal), Ok(()));
+    assert_eq!(
+        load("", seal),
+        Err(
+            "addon:first: libaddon.so has no mod point registration; rebuild it with `cargo \
+             horizon-mod build --wasm`"
+                .into()
+        )
+    );
+    assert_eq!(
+        load(register, ""),
+        Err(
+            "addon:first: library chem-lib has no mod point seal in this group; rebuild it with \
+             `cargo horizon-mod build --wasm`"
+                .into()
+        )
+    );
 }
