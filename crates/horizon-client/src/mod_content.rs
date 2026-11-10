@@ -2557,6 +2557,11 @@ fn place_in_biomes(
         }
     }
     overlay.write(MODIFIERS, &serde_json::to_vec(&saved)?)?;
+    // Without file modifiers the bundle stands byte for byte; the saved state is what
+    // biome modifiers declared in code apply with at world open.
+    if modifiers.is_empty() {
+        return Ok(());
+    }
     overlay.write(BIOMES, &serde_json::to_vec(&doc)?)
 }
 
@@ -2694,13 +2699,19 @@ impl SavedModifiers {
 /// pack is in, to the final biomes and tags: a pack's file for a biome
 /// (Terralith's `minecraft:plains`) keeps the mods' features and spawns, and
 /// a pack's biome its tags put under a modifier's selector gets them too.
+/// `declared` are the modifiers mods declared in code (mod, file, text), applied after
+/// the root's own, which native mods register too late for the content build to read.
 /// `None` when the root's biomes stand: no modifiers, or packs that bring no
-/// biome and no biome tag.
+/// biome and no biome tag and nothing declared.
 pub fn biome_modifiers_over_packs(
     root: &Path,
     packs: &horizon_world::worldgen::overrides::WorldgenOverrides,
+    declared: &[[String; 3]],
 ) -> Result<Option<horizon_world::worldgen::overrides::WorldgenOverrides>> {
-    if packs.entries("biomes").next().is_none() && packs.tags("biome_tags").next().is_none() {
+    if declared.is_empty()
+        && packs.entries("biomes").next().is_none()
+        && packs.tags("biome_tags").next().is_none()
+    {
         return Ok(None);
     }
     let Ok(bytes) = fs::read(root.join(MODIFIERS)) else {
@@ -2716,7 +2727,7 @@ pub fn biome_modifiers_over_packs(
     };
     let mut warnings = Vec::new();
     let mut modifiers = Vec::new();
-    for [m, file, text] in &saved.modifiers {
+    for [m, file, text] in saved.modifiers.iter().chain(declared) {
         modifiers.extend(biomes::Modifier::read(m, file, text, &mut warnings)?);
     }
     // What the generator reads without the modifiers over the packs.
@@ -3420,7 +3431,7 @@ pub fn build(
             placed_doc = Some(doc);
         }
     }
-    if !modifiers.is_empty() {
+    if !modifiers.is_empty() || (!mods.is_empty() && base.join(BIOMES).exists()) {
         place_in_biomes(
             base,
             &overlay,
