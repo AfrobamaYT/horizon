@@ -274,12 +274,41 @@ pub(crate) fn enter(call: ModCall) -> Option<Guard> {
             slot
         }
     });
+    // Each entry reserves one unique record before user code runs. The clock
+    // field temporarily holds the start timestamp, and leave completes it.
+    // Exhaustion is explicit: the sentinel still owns one ACTIVE reference.
+    let record = match pool.buffers.get(slot) {
+        Some(buffer) => {
+            let record = buffer.next.fetch_add(1, SeqCst);
+            if record < CALLS {
+                #[allow(
+                    unsafe_code,
+                    reason = "Entry uniquely owns this reserved record; stop waits for ACTIVE."
+                )]
+                unsafe {
+                    *buffer.records[record].get() = Some(Record {
+                        mod_id: call.id,
+                        hook: call.hook,
+                        part: call.part,
+                        nanoseconds: (pool.clock)(),
+                    });
+                }
+                record
+            } else {
+                pool.dropped.fetch_add(1, SeqCst);
+                usize::MAX
+            }
+        }
+        None => {
+            pool.dropped.fetch_add(1, SeqCst);
+            usize::MAX
+        }
+    };
     Some(Guard {
         timing: Some(mod_vocab::dispatch_scope::Timing {
             generation: epoch,
             slot,
-            call,
-            began: (pool.clock)(),
+            record,
         }),
     })
 }
@@ -291,8 +320,8 @@ impl Drop for Guard {
     }
 }
 pub(crate) fn leave(timing: mod_vocab::dispatch_scope::Timing) {
-    // Only a genuine guard created by enter reaches this private callback.
-    // Its ACTIVE reference pins this exact epoch; stale epochs are refused.
+    // The factory capability ensures only an authentic entry reaches this private
+    // callback. Its ACTIVE reference pins the pool epoch until completion.
     if POOL_EPOCH.load(SeqCst) != timing.generation {
         return;
     }
@@ -300,36 +329,26 @@ pub(crate) fn leave(timing: mod_vocab::dispatch_scope::Timing) {
     if pointer.is_null() {
         return;
     }
-    // This guard holds one ACTIVE reference, so stop cannot free the pool yet.
     #[allow(
         unsafe_code,
-        reason = "The guard retains an ACTIVE reference to the pool."
+        reason = "The authentic timing token owns an ACTIVE reference to this epoch."
     )]
     let pool = unsafe { &*pointer };
     if timing.slot >= pool.next_thread.load(SeqCst) {
         return;
     }
-    let ns = (pool.clock)().saturating_sub(timing.began);
-    let index = pool
+    if let Some(record) = pool
         .buffers
         .get(timing.slot)
-        .map(|b| (b, b.next.fetch_add(1, SeqCst)));
-    if let Some((buffer, index)) = index.filter(|(_, i)| *i < CALLS) {
-        // Unique reserved index, and stop waits for our ACTIVE decrement before reading.
+        .and_then(|buffer| buffer.records.get(timing.record))
+    {
         #[allow(
             unsafe_code,
-            reason = "Each writer owns its reserved record until ACTIVE is decremented."
+            reason = "Only this token writes its reserved record; stop waits for ACTIVE."
         )]
-        unsafe {
-            *buffer.records[index].get() = Some(Record {
-                mod_id: timing.call.id,
-                hook: timing.call.hook,
-                part: timing.call.part,
-                nanoseconds: ns,
-            });
+        if let Some(record) = unsafe { &mut *record.get() } {
+            record.nanoseconds = (pool.clock)().saturating_sub(record.nanoseconds);
         }
-    } else {
-        pool.dropped.fetch_add(1, SeqCst);
     }
     ACTIVE.fetch_sub(1, SeqCst);
 }

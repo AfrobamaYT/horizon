@@ -142,6 +142,22 @@ pub fn details() -> Vec<(&'static str, String)> {
     DETAILS.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
+pub(crate) fn ensure_installed() -> Result<(), &'static str> {
+    static INSTALLED: std::sync::OnceLock<Result<(), &'static str>> = std::sync::OnceLock::new();
+    *INSTALLED.get_or_init(|| {
+        mod_vocab::dispatch_scope::install(mod_vocab::dispatch_scope::Backend {
+            enter: enter_native,
+            leave: leave_native,
+            current_native: current_native_call,
+            current_converted: current_converted_call,
+            enter_converted,
+            set_detail: |key, value| set_detail(key, value),
+            clear_detail,
+            details,
+        })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -374,20 +390,4 @@ mod tests {
         assert_eq!(current_converted_call().unwrap().package, "example:outer");
         assert_eq!(current_native_mod(), Some("runtime"));
     }
-}
-
-pub(crate) fn ensure_installed() -> Result<(), &'static str> {
-    static INSTALLED: std::sync::OnceLock<Result<(), &'static str>> = std::sync::OnceLock::new();
-    *INSTALLED.get_or_init(|| {
-        mod_vocab::dispatch_scope::install(mod_vocab::dispatch_scope::Backend {
-            enter: enter_native,
-            leave: leave_native,
-            current_native: current_native_call,
-            current_converted: current_converted_call,
-            enter_converted,
-            set_detail: |key, value| set_detail(key, value),
-            clear_detail,
-            details,
-        })
-    })
 }

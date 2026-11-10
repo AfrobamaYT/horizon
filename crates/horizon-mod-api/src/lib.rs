@@ -7,6 +7,7 @@ pub mod wire {
     pub use mod_vocab::wire::*;
     #[path = "wire_resources.rs"]
     mod resources;
+    #[doc(hidden)]
     pub use resources::{
         ResourceCodec, ResourceScope, ScopeError, ScopeLease, ScopeToken, borrow_token,
     };
@@ -18,8 +19,11 @@ pub mod wire {
 }
 
 /// Platform-owned crash attribution with shared vocabulary types.
+#[doc(hidden)]
 pub mod content {
+    #[doc(hidden)]
     pub mod crash;
 }
 /// Platform runtime operations and engine-owned vocabulary installations.
+#[doc(hidden)]
 pub mod __private;

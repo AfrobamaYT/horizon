@@ -29,8 +29,7 @@ pub struct Backend {
 pub struct Timing {
     pub generation: usize,
     pub slot: usize,
-    pub began: u64,
-    pub call: ModCall,
+    pub record: usize,
 }
 
 /// The outer attribution and optional timing record restored at scope exit.
