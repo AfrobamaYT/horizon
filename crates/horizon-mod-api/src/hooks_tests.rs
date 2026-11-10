@@ -280,6 +280,39 @@ fn client_tick_pre_and_post_hear_their_own_moment() {
 }
 
 #[test]
+fn client_level_tick_pre_and_post_hear_the_level_in_their_own_moment() {
+    use std::sync::Mutex;
+    struct Ticks(Arc<Mutex<Vec<(&'static str, LevelRef)>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for Ticks {
+        fn client_level_tick_pre(
+            &self,
+            _: &mut dyn ClientHost,
+            event: &mut ClientLevelTickPreEvent,
+        ) {
+            self.0.lock().unwrap().push(("pre", event.level));
+        }
+        fn client_level_tick_post(
+            &self,
+            _: &mut dyn ClientHost,
+            event: &mut ClientLevelTickPostEvent,
+        ) {
+            self.0.lock().unwrap().push(("post", event.level));
+        }
+    }
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let level = LevelRef::new(WorldEpoch::new(4), DimensionKey::OVERWORLD);
+    testing::with_mods(
+        vec![ModEntry::new("ticks", Box::new(Ticks(heard.clone())))].into(),
+        || {
+            dispatch_client_level_tick_pre(&mut FakeHost::new(), level);
+            dispatch_client_level_tick_post(&mut FakeHost::new(), level);
+        },
+    );
+    assert_eq!(*heard.lock().unwrap(), [("pre", level), ("post", level)]);
+}
+
+#[test]
 fn render_frame_pre_and_post_hear_their_own_moment_with_the_frames_time() {
     use std::{sync::Mutex, time::Duration};
     struct Frames(Arc<Mutex<Vec<(&'static str, Duration)>>>);
