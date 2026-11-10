@@ -176,11 +176,7 @@ impl Game<'_> {
             yaw: self.yaw,
             pitch: self.pitch,
             may_build: self.may_build(),
-            can_eat: self.creative
-                || self
-                    .player
-                    .as_ref()
-                    .is_some_and(|p| p.health.food.food < 20),
+            can_eat: self.can_eat(self.held(), false),
             game_master: self.can_use_game_master_blocks(),
         }
     }

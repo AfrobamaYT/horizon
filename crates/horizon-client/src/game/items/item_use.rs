@@ -436,7 +436,7 @@ impl Game<'_> {
     }
     /// `Player.canEat(canAlwaysEat)` for `stack`, food that is eaten only
     /// when hungry, then a mod's answer.
-    pub(super) fn can_eat(&self, stack: &ItemStack, can_always_eat: bool) -> bool {
+    pub(super) fn can_eat(&self, stack: Option<&ItemStack>, can_always_eat: bool) -> bool {
         let vanilla = can_always_eat
             || self.creative
             || self
@@ -1092,6 +1092,46 @@ pub(super) mod interact_vibration_tests {
             return;
         };
         assert!(lines.is_empty(), "{lines:?}");
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources and an isolated process for native mods"]
+    fn cake_context_uses_can_eat_instead_of_raw_hunger() {
+        use mod_api::{CanEatEvent, Hooks};
+        struct Refuse;
+        #[mod_api::__subscriptions]
+        impl Hooks for Refuse {
+            fn can_eat(
+                &self,
+                host: &dyn mod_api::Host,
+                event: &mut CanEatEvent<'_>,
+            ) -> Option<bool> {
+                if let Some(stack) = event.stack {
+                    assert_eq!(stack.item().id(host), "minecraft:stick");
+                }
+                Some(!event.vanilla_can_eat)
+            }
+        }
+        let mods: mod_api::Mods =
+            vec![mod_api::ModEntry::new("cake-refusal", Box::new(Refuse))].into();
+        mod_api::testing::with_mods(mods, || {
+            with_game("minecraft:stick", |game| {
+                game.creative = true;
+                assert!(!game.use_context().can_eat);
+                *game.held_mut() = None;
+                assert!(
+                    !game.use_context().can_eat,
+                    "empty hand also reaches the hook"
+                );
+                game.creative = false;
+                game.player.as_mut().unwrap().health.food.food = 20;
+                assert!(
+                    game.use_context().can_eat,
+                    "a hook can permit a full player"
+                );
+            })
+            .expect("HORIZON_TEST_RESOURCES must name prepared resources");
+        });
     }
 
     #[test]
