@@ -810,13 +810,12 @@ impl Game<'_> {
         }
         // `NeutralMob.addPersistentAngerSaveData`: the anger ends at an
         // absolute game time, so it goes on while the chunk is unloaded, and
-        // the target is the entity the mob is angry at.
+        // the target is the entity the mob is angry at (`settle_anger_end`).
         let anger = self.mob_at(object).extra.anger;
-        // A loaded NoAI Enderman owns an absolute NeutralMob timestamp;
-        // its skipped AI does not decrement the derived gameplay counter.
-        if !(self.mob_at(object).species() == horizon_client::mobs::Species::Enderman
-            && self.mob_at(object).no_ai)
-        {
+        if horizon_client::mobs::persistent_anger(self.mob_at(object).species()) {
+            let game_time = self.world.game_time;
+            horizon_client::mobs::settle_anger_end(self.mob_at_mut(object), game_time);
+        } else {
             self.mob_at_mut(object).extra.anger_end = if anger > 0 {
                 self.world.game_time + i64::from(anger)
             } else {
