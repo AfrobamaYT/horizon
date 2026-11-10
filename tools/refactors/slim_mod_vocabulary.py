@@ -15,14 +15,18 @@ MOVES = (
     ("profiler.rs", "profiler.rs"),
     ("profiler/firefox.rs", "profiler/firefox.rs"),
     ("content/crash.rs", "content/crash.rs"),
+    ("wire/wire_resources.rs", "wire/wire_resources.rs"),
 )
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--verify", action="store_true")
+    parser.add_argument("--only", help="Move or verify just this relative source path")
     args = parser.parse_args()
     for source, target in MOVES:
+        if args.only and source != args.only:
+            continue
         old = f"crates/horizon-mod-vocab/src/{source}"
         new = f"crates/horizon-mod-api/src/{target}"
         if args.verify:
