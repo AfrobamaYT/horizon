@@ -6,7 +6,8 @@ import re
 path = Path(__file__).resolve().parents[2] / '.github/workflows/dyna-ci.yml'
 source = path.read_text()
 if 'steps.selection.outputs.rust_required' in source:
-    raise SystemExit('selection is already centralized')
+    print('selection is already centralized')
+    raise SystemExit(0)
 source = source.replace("steps.rust.outputs.required", "needs.changes.outputs.rust_required")
 source = source.replace("steps.rust.outputs.sample", "needs.changes.outputs.sample_required")
 source = source.replace("steps.launcher.outputs.required", "needs.changes.outputs.launcher_required")
