@@ -407,7 +407,7 @@ pub struct Package {
     pub layouts: crate::layouts::Layouts,
     /// A wasm mod's own points (#2339), as its build listed them; a native mod's are listed from
     /// its source when it is built.
-    pub points: Option<inject::mod_points::Catalog>,
+    pub points: Option<point_shape::catalog::Catalog>,
 }
 impl Package {
     /// The kind of this validated package, independent of its install folder.
