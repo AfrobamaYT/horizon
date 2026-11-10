@@ -7556,7 +7556,7 @@ impl Game<'_> {
                 }
                 return Ok(answer.consumes_action());
             }
-            self.native_use_item(&stack, &mut claimed);
+            self.use_item_in_hand(&stack, &mut claimed);
         }
         if claimed {
             self.swing_arm();
