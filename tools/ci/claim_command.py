@@ -303,7 +303,13 @@ def run(api, cmd: Command, actor: ns.Actor, number: int, reviewers: ns.Reviewers
         # Runs for different issues aren't serialized (one queue for the whole repository would let GitHub cancel
         # the pending runs of a burst, leaving comments unanswered), so two claims made at once can both pass the
         # count above. Counting again after assigning catches that: whoever then sees more than the limit backs out.
-        if limited and len(without_pull_request(api.held_issues(login), login)) > LIMIT:
+        if limited:
+            try:
+                recount = len(without_pull_request(api.held_issues(login), login))
+            except RuntimeError:  # an unchecked claim isn't kept: undo it, then the caller reports GitHub's refusal
+                api.unassign(number, login)
+                raise
+        if limited and recount > LIMIT:
             api.unassign(number, login)
             raise Refused(f"another of your claims was made at the same moment and together they pass the limit of "
                           f"{LIMIT} claimed issues with no open pull request of yours, so this one was undone. "

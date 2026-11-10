@@ -271,6 +271,22 @@ class ConcurrentClaimTests(unittest.TestCase):
         self.assertIsNone(text)
 
 
+    def test_a_failed_recount_undoes_the_claim(self):
+        class Failing(Fake):
+            first = True
+
+            def held_issues(self, login):
+                if self.first:
+                    self.first = False
+                    return []
+                raise RuntimeError("gh api graphql: rate limited")
+
+        api = Failing()
+        with self.assertRaises(RuntimeError):
+            do("/claim", api)
+        self.assertEqual(api.calls, [("assign", 5, "newcomer"), ("unassign", 5, "newcomer")])
+
+
 class PaginationTests(unittest.TestCase):
     def test_every_page_of_an_issues_links_is_read(self):
         def page(nodes, more):
