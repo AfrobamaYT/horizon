@@ -117,10 +117,13 @@ fn module(body: &str) -> WasmMod {
     .remove(0)
 }
 fn call(module: &WasmMod) -> Option<u32> {
+    call_at(module, 0)
+}
+fn call_at(module: &WasmMod, id: u32) -> Option<u32> {
     module.call(
         CallClass::Hook,
         Frame::default(),
-        0,
+        id,
         None,
         |w| w.put(&42u32),
         |r| r.take(),
@@ -1311,6 +1314,7 @@ fn trap_stops_group_not_independent_group() {
     let echo = guest(*mod_api::wire::LAYOUT, "i64.const 2199023255556");
     let members = WasmMod::instantiate(
         &engine,
+        &[],
         &[
             Member {
                 name: "trap",
@@ -1329,6 +1333,107 @@ fn trap_stops_group_not_independent_group() {
     assert!(members.iter().all(WasmMod::is_stopped));
     assert_eq!(call(&members[1]), None);
     assert_eq!(call(&independent), Some(42));
+}
+
+/// One member's refusal leaves every member of its group answering: the next call of the
+/// refusing listener succeeds, and the other member never noticed.
+#[test]
+fn a_refusal_keeps_every_member_of_the_group_answering() {
+    let engine = engine().unwrap();
+    // Refuses the first call with an empty error reply at 512, then echoes; the flag lives in
+    // guest memory at 600, which the input write at 512 never touches.
+    let flaky = guest(
+        *mod_api::wire::LAYOUT,
+        r#"i32.const 600 i32.load if (result i64) i64.const 2199023255556 else
+            i32.const 600 i32.const 1 i32.store i32.const 512 i32.const 0 i32.store
+            i64.const 2203318222847 end"#,
+    );
+    let echo = guest(*mod_api::wire::LAYOUT, "i64.const 2199023255556");
+    let members = WasmMod::instantiate(
+        &engine,
+        &[],
+        &[
+            Member {
+                name: "flaky",
+                module: &flaky,
+            },
+            Member {
+                name: "echo",
+                module: &echo,
+            },
+        ],
+    )
+    .unwrap();
+    assert_eq!(call(&members[0]), None);
+    assert!(members.iter().all(|member| !member.is_stopped()));
+    assert_eq!(call(&members[1]), Some(42));
+    assert_eq!(call(&members[0]), Some(42));
+}
+
+/// The refusal log names each (member, hook) once, not once per call.
+#[test]
+fn refusal_log_names_each_member_and_hook_once() {
+    capture_logs();
+    // Hook 0 reports its empty error reply at 512, hook 7 at 516.
+    let mut module = module(
+        r#"local.get 0 i32.eqz if (result i64) i32.const 512 i32.const 0 i32.store
+           i64.const 2203318222847 else i32.const 516 i32.const 0 i32.store
+           i64.const 2220498092031 end"#,
+    );
+    module.id = "hook_log_case".into();
+    for _ in 0..2 {
+        assert_eq!(call_at(&module, 0), None);
+        assert_eq!(call_at(&module, 7), None);
+    }
+    assert!(!module.is_stopped());
+    for hook in [0, 7] {
+        assert_eq!(
+            CAPTURE
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|m| **m == format!("wasm refusal: hook_log_case hook {hook}: "))
+                .count(),
+            1,
+            "hook {hook} logs exactly once"
+        );
+    }
+}
+
+/// A refusal during a reply's writeback applies none of it: the record a point listener would
+/// commit keeps its old value, and the same call path commits once the guest answers.
+#[test]
+fn refusal_during_writeback_leaves_the_record_unchanged() {
+    let write = |record: &mut (u32, u32), module: &WasmMod| {
+        module.call(
+            CallClass::Hook,
+            Frame::default(),
+            0,
+            None,
+            |w| w.put(&42u32),
+            |input| {
+                input.take::<()>()?;
+                let bytes = input.take_bytes(input.rest().len())?;
+                mod_api::wire::Record::apply(record, bytes)
+            },
+        )
+    };
+    // A reply of (1, 2) plus one trailing byte: decoded whole, refused, nothing assigned.
+    let refused = module(
+        "i32.const 512 i32.const 1 i32.store i32.const 516 i32.const 2 i32.store \
+         i32.const 520 i32.const -1 i32.store i64.const 2199023255561",
+    );
+    let mut record = (7u32, 9u32);
+    assert_eq!(write(&mut record, &refused), None);
+    assert!(!refused.is_stopped());
+    assert_eq!(record, (7, 9));
+    let answered = module(
+        "i32.const 512 i32.const 1 i32.store i32.const 516 i32.const 2 i32.store \
+         i64.const 2199023255560",
+    );
+    assert_eq!(write(&mut record, &answered), Some(()));
+    assert_eq!(record, (1, 2));
 }
 
 #[test]
