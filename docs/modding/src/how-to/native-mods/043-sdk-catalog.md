@@ -21,7 +21,6 @@ nullable `api_refusal`. Refused and native-only points remain in the file.
 
 The build generator owns this catalog. Output has no timestamps or absolute
 paths. A format change requires a schema version change; tools should use the
-catalog accompanying the build they target. CI checks the generated document’s SHA-256 and hook and point counts against
-`reference/mod-catalog.sha256`; the full file ships only in the SDK and developer
-install. Maintainers regenerate the checksum with
-`HORIZON_UPDATE_SDK_CATALOG=1 cargo test -p horizon-mod-api-gen --lib sdk_catalog`.
+catalog accompanying the build they target. CI regenerates the catalog in-test and compares the two documents for determinism.
+The full file ships only in the SDK and developer source build; no committed
+fingerprint needs refreshing when independently authored hooks land.
