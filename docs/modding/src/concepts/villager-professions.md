@@ -142,7 +142,10 @@ base layer without discarding identity. Restoring the mod resolves the same name
 a different registry order must not change profession or trade-set identity.
 
 Server authority applies to integrated, LAN and dedicated play equally. Negotiate
-custom registry support before entity pairing. API-owned Wire projections carry
+custom registry support before entity pairing through the #813/#2882
+negotiation layer. Until that layer lands, refuse a client without the required
+mod at admission with `MissingRequiredProfessionMod(mod_id)`, naming the missing
+mod and reason; do not send custom metadata or silently substitute vanilla. API-owned Wire projections carry
 qualified profession/POI/trade keys, translation data, texture identifiers and hat
 policy under the existing lifecycle identity. Reuse the common registry snapshot
 transport: peers validate a complete mapping and acknowledge activation before
@@ -167,7 +170,8 @@ vanilla profession substitution. Required client content is checked at admission
 
 Treat all mod declarations and network projections as untrusted. Proposed Horizon
 limits (not NeoForge limits): 65,536 total professions including all 15 vanilla
-entries; 256 UTF-8 bytes per qualified identifier; 1 MiB per declaration; 64 MiB
+entries; identifier length unresolved pending owning vanilla codec evidence;
+1 MiB per declaration; 64 MiB
 aggregate candidate definitions; nesting depth 64; 4,096 references per set; at
 most five level mappings with unique levels 1–5. Reject traversal, malformed
 identifiers, missing required references, cycles in trade-set references and
@@ -176,6 +180,9 @@ counts, costs, XP and provider results must be finite and fit their engine targe
 ranges, including item stack limits. Never truncate an oversized input. These
 budgets preserve vanilla's profession and five-level capacity; the implementation
 must check the complete vanilla trade dataset fits before fixing trade budgets.
+Identifier admission is gated on evidence of the owning vanilla codec limit or
+an approved bounded-transfer route preserving its capacity. A 256-byte cap is
+not approved; dataset fit alone does not establish vanilla capacity.
 
 Native unwind or wasm trap aborts candidate preparation with owner/key context;
 apply the runtime's failing-mod policy. Process-aborting native panics cannot be
