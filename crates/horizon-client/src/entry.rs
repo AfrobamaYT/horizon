@@ -5,7 +5,7 @@ use mod_api::__private::game::*;
 
 /// Validated startup state. No native hooks or workers may run before prepare returns.
 pub struct Startup {
-    launch: LaunchArguments,
+    pub launch: LaunchArguments,
     options: game::Options,
     _capture: Option<horizon_mod_package::output::Capture>,
 }
@@ -39,7 +39,7 @@ pub fn prepare() -> Startup {
 
 /// Start the game. The executable supplies the allocator and retains the mod API marker.
 pub fn main(startup: Startup) {
-    main_with(Vec::new(), &[], &[], startup);
+    start(horizon_mod_package::runtime::Runtime::default(), Vec::new(), &[], startup);
 }
 
 /// A native function slot, checked against its place's exact type before erasure.
@@ -50,10 +50,10 @@ pub use mod_points::__private::SlotListener as NativeSlot;
 pub use mod_points::PointId;
 
 /// Start with named mods and their function slots in installed dependency order.
-pub fn main_with(
-    mods: Vec<mod_api::ModEntry>,
+pub fn start(
+    native: horizon_mod_package::runtime::Runtime,
+    ids: Vec<&'static str>,
     slots: &[NativeSlot],
-    built: &'static [horizon_mod_package::runtime::BuiltMod],
     startup: Startup,
 ) {
     let Startup {
@@ -61,20 +61,6 @@ pub fn main_with(
         options,
         _capture,
     } = startup;
-    let exe = std::env::current_exe();
-    let native: crate::Result<_> = exe
-        .as_ref()
-        .map_err(|e| e.to_string().into())
-        .and_then(|exe| {
-            horizon_mod_package::runtime::Runtime::load(exe, built).map_err(Into::into)
-        });
-    let native = match native {
-        Ok(native) => native,
-        Err(error) => {
-            eprintln!("Horizon: {error}");
-            std::process::exit(game::exit_code::ERROR);
-        }
-    };
     horizon_threads::configure_allocator();
     // horizon-extras (docs/forking.md): without the feature, no Horizon Settings or Mods page.
     if !cfg!(feature = "horizon-extras") {
@@ -89,49 +75,6 @@ pub fn main_with(
     horizon_hooks::engine::seal();
     horizon_client::spans::startup::init(std::time::Instant::now());
     horizon_client::spans::trace::start_from_env();
-    let wasm = horizon_mod_wasm::load_installed(&launch.context.game_dir, &launch.context.dev_mods);
-    let mut mods = mods;
-    mods.extend(wasm.mods);
-    // One installed dispatch order for both targets; ties retain bundle order.
-    let manifests: Vec<_> = native
-        .packages()
-        .iter()
-        .map(|p| &p.manifest)
-        .chain(wasm.manifests.iter())
-        .filter(|m| mods.iter().any(|entry| entry.fields().id == m.id))
-        .collect();
-    assert_eq!(
-        manifests.len(),
-        mods.len(),
-        "loaded code has checked manifests"
-    );
-    let declared: Vec<_> = manifests
-        .iter()
-        .map(|m| horizon_mod_package::dependencies::from_manifest(&m.dependencies))
-        .collect();
-    let inputs: Vec<_> = manifests
-        .iter()
-        .zip(&declared)
-        .map(|(m, dependencies)| horizon_mod_package::dependencies::Mod {
-            id: &m.id,
-            version: &m.version,
-            has_api: true,
-            dependencies,
-        })
-        .collect();
-    let order = horizon_mod_package::dependencies::resolve(&inputs)
-        .unwrap_or_else(|error| panic!("mod load refused: {error}"));
-    let mut entries: std::collections::BTreeMap<_, _> = mods
-        .into_iter()
-        .map(|entry| (entry.fields().id, entry))
-        .collect();
-    let mods: Vec<_> = order
-        .order
-        .into_iter()
-        .map(|i| entries.remove(manifests[i].id.as_str()).unwrap())
-        .collect();
-    let ids: Vec<_> = mods.iter().map(|entry| entry.fields().id).collect();
-    mod_api::__private::install(mods.into());
     for id in ids {
         for slot in slots.iter().filter(|slot| slot.id() == id) {
             if let Err(error) = mod_points::register(slot) {
