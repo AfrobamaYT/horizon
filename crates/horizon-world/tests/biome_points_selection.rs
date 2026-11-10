@@ -37,15 +37,17 @@ fn source(entries: Vec<serde_json::Value>) -> MultiNoiseBiomeSource {
     MultiNoiseBiomeSource::new(decoded).unwrap()
 }
 
-fn pick(source: &MultiNoiseBiomeSource, temperature: f32) -> &str {
-    source.parameters().brute_force(TargetPoint::from_values([
-        temperature,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-    ]))
+fn pick<'a>(
+    source: &'a MultiNoiseBiomeSource,
+    search: &mut horizon_world::worldgen::climate::ClimateSearch<'a, String>,
+    temperature: f32,
+) -> &'a str {
+    let target = TargetPoint::from_values([temperature, 0.0, 0.0, 0.0, 0.0, 0.0]);
+    let expected = source.parameters().brute_force(target);
+    let found = search.find(target).unwrap();
+    assert_eq!(found, expected);
+    assert_eq!(search.find(target).unwrap(), expected);
+    found
 }
 
 #[test]
@@ -55,19 +57,20 @@ fn each_point_wins_inside_its_interval_and_the_nearest_wins_between() {
         entry("test:warm", [-0.2, 0.3], 0.0),
         entry("test:hot", [0.6, 1.0], 0.0),
     ]);
+    let mut search = source.parameters().searcher();
     // Inside an interval: that point's biome.
-    assert_eq!(pick(&source, -0.7), "test:cold");
-    assert_eq!(pick(&source, 0.0), "test:warm");
-    assert_eq!(pick(&source, 0.8), "test:hot");
+    assert_eq!(pick(&source, &mut search, -0.7), "test:cold");
+    assert_eq!(pick(&source, &mut search, 0.0), "test:warm");
+    assert_eq!(pick(&source, &mut search, 0.8), "test:hot");
     // Between two intervals: the nearer edge.
-    assert_eq!(pick(&source, -0.35), "test:cold");
-    assert_eq!(pick(&source, -0.25), "test:warm");
-    assert_eq!(pick(&source, -0.45), "test:cold");
-    assert_eq!(pick(&source, 0.4), "test:warm");
-    assert_eq!(pick(&source, 0.5), "test:hot");
+    assert_eq!(pick(&source, &mut search, -0.35), "test:cold");
+    assert_eq!(pick(&source, &mut search, -0.25), "test:warm");
+    assert_eq!(pick(&source, &mut search, -0.45), "test:cold");
+    assert_eq!(pick(&source, &mut search, 0.4), "test:warm");
+    assert_eq!(pick(&source, &mut search, 0.5), "test:hot");
     // Past the outermost points: the closest end.
-    assert_eq!(pick(&source, -1.9), "test:cold");
-    assert_eq!(pick(&source, 1.9), "test:hot");
+    assert_eq!(pick(&source, &mut search, -1.9), "test:cold");
+    assert_eq!(pick(&source, &mut search, 1.9), "test:hot");
 }
 
 #[test]
@@ -76,8 +79,9 @@ fn a_higher_offset_loses_to_an_overlapping_point() {
         entry("test:cold", [-1.0, 1.0], 0.5),
         entry("test:warm", [-0.2, 0.3], 0.0),
     ]);
+    let mut search = source.parameters().searcher();
     // Both cover 0.0: the point with no offset is the closer one.
-    assert_eq!(pick(&source, 0.0), "test:warm");
+    assert_eq!(pick(&source, &mut search, 0.0), "test:warm");
     // Only the wide point covers -0.8.
-    assert_eq!(pick(&source, -0.8), "test:cold");
+    assert_eq!(pick(&source, &mut search, -0.8), "test:cold");
 }
