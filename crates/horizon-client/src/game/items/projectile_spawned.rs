@@ -12,9 +12,7 @@ use horizon_client::{
 use horizon_world::worldgen::value_provider::FloatProvider;
 use serde_json::Value;
 
-#[path = "projectile_spawned_validation.rs"]
-mod validation;
-use validation::{requirements_supported, valid_ranges};
+use super::projectile_spawned_validation::{requirements_supported, valid_ranges};
 
 const COMPONENT: &str = "minecraft:projectile_spawned";
 
@@ -165,7 +163,9 @@ impl Game<'_> {
                 if !requirements_supported(&conditional["requirements"])
                     || !valid_ranges(&conditional["effect"])
                 {
-                    eprintln!("projectile_spawned refused enchantment {enchantment}: unsupported requirement context or invalid level-value range");
+                    eprintln!(
+                        "projectile_spawned refused enchantment {enchantment}: unsupported requirement context or invalid level-value range"
+                    );
                     continue;
                 }
                 let Some(kind) = self.spawned_projectile(id).map(Projectile::entity_type) else {
