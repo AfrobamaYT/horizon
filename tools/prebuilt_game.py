@@ -105,11 +105,11 @@ def copy_artifacts(messages: list[dict], deps: Path) -> None:
         shutil.copy2(file, deps / file.name)
 
 
-def runtime_crates(metadata: dict) -> set[str]:
-    """Normal library dependencies of the game, excluding build and proc-macro dependency trees."""
+def runtime_crates(metadata: dict, root: str) -> set[str]:
+    """Normal library dependencies of the SDK root, excluding build and proc-macro dependency trees."""
     packages = {package["id"]: package for package in metadata["packages"]}
     nodes = {node["id"]: node for node in metadata["resolve"]["nodes"]}
-    pending = [package["id"] for package in metadata["packages"] if package["name"] == "horizon-client"]
+    pending = [package["id"] for package in metadata["packages"] if package["name"] == root]
     visited = set()
     names = set()
     while pending:
@@ -176,7 +176,7 @@ def build(out: Path, server: bool) -> None:
         "cargo", "metadata", "--locked", "--format-version", "1", "--filter-platform", rustc_host(),
         *features,
     ], cwd=staged))
-    eligible = facade_crates(deps, runtime_crates(metadata))
+    eligible = facade_crates(deps, runtime_crates(metadata, "horizon-mod-host"))
     assert_externs(out, eligible)
     native = out / NATIVE
     native.mkdir()

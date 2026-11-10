@@ -56,21 +56,24 @@ class PrebuiltContentsTests(unittest.TestCase):
             ]}
 
         metadata = {
-            "packages": [package("horizon-client"), package("point_shape"), package("horizon_core"),
+            "packages": [package("horizon-mod-host", "dylib"), package("horizon-client"),
+                         package("horizon-mod-wasm", "rlib"), package("point_shape"), package("horizon_core"),
                          package("build_tool"), package("derive", "proc-macro"), package("macro_helper")],
             "resolve": {"nodes": [
-                node("horizon-client", ("point_shape", None), ("horizon_core", None),
-                     ("build_tool", "build"), ("derive", None)),
+                node("horizon-mod-host", ("horizon-client", None), ("horizon-mod-wasm", None),
+                     ("build_tool", "build")), node("horizon-mod-wasm"),
+                node("horizon-client", ("point_shape", None), ("horizon_core", None), ("derive", None)),
                 node("point_shape"), node("horizon_core"), node("build_tool"),
                 node("derive", ("macro_helper", None)), node("macro_helper"),
             ]},
         }
-        runtime = prebuilt_game.runtime_crates(metadata)
-        self.assertEqual(runtime, {"horizon_client", "point_shape", "horizon_core"})
+        runtime = prebuilt_game.runtime_crates(metadata, "horizon-mod-host")
+        self.assertEqual(runtime, {"horizon_mod_host", "horizon_mod_wasm", "horizon_client", "point_shape", "horizon_core"})
         deps = self.folder("libpoint_shape-host.rmeta", "libpoint_shape-target.rmeta",
-                           "libhorizon_core-one.rmeta", "libbuild_tool-one.rmeta", "libmacro_helper-one.rmeta")
+                           "libhorizon_core-one.rmeta", "libbuild_tool-one.rmeta", "libmacro_helper-one.rmeta",
+                           "libhorizon_mod_host.so", "libhorizon_mod_wasm-one.rmeta", "libhorizon_client-one.rmeta")
         eligible = prebuilt_game.facade_crates(deps, runtime)
-        self.assertEqual(eligible, ["horizon_core"])
+        self.assertEqual(eligible, ["horizon_client", "horizon_core", "horizon_mod_host", "horizon_mod_wasm"])
 
     def test_sdk_assertion_refuses_a_duplicate_eligible_facade_on_every_os(self):
         root = self.folder("deps/libhorizon_core-one.rmeta", "deps/libmod_api-one.rmeta",
