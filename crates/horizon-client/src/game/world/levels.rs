@@ -326,7 +326,7 @@ impl Levels {
         }
     }
 
-    /// Whether a save of  is still waiting for a tick that admits
+    /// Whether a save of `dim` is still waiting for a tick that admits
     /// saves (the #2488 gate holds it back).
     #[cfg_attr(not(test), allow(dead_code))]
     pub(in crate::game) fn save_pending(&self, dim: Dim) -> bool {
