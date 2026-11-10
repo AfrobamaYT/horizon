@@ -287,6 +287,31 @@ mod tests {
     }
 
     #[test]
+    fn a_reload_cannot_change_which_registries_a_client_is_sent() {
+        let declaration = spell(DatapackRegistrySync::Required);
+        let declarations = std::slice::from_ref(&declaration);
+        let first = set(&declaration);
+        let reloaded = first
+            .reload(DatapackCandidate::build(declarations, &[]).unwrap())
+            .unwrap();
+        let offer = mod_api::DatapackSnapshot::decode_offer(
+            &mod_api::DatapackSnapshot::encode_offer(declarations).unwrap(),
+        )
+        .unwrap();
+        let shape = |set: &DatapackRegistrySet| {
+            let snapshot = set.snapshot_for(declarations, &offer).unwrap();
+            snapshot
+                .registries
+                .iter()
+                .map(|registry| registry.key.clone())
+                .collect::<Vec<_>>()
+        };
+        // The entries go, the registry (and so the negotiation) stays.
+        assert_eq!(shape(&first), shape(&reloaded));
+        assert_eq!(shape(&reloaded), vec!["example:spell".to_owned()]);
+    }
+
+    #[test]
     fn a_required_registry_refuses_a_client_that_lacks_it() {
         let declaration = spell(DatapackRegistrySync::Required);
         let declarations = std::slice::from_ref(&declaration);
