@@ -202,9 +202,11 @@ pub trait LevelsBackend {
     /// Returns None while any lookup member is temporarily extracted, rather
     /// than returning an incomplete list.
     /// Order is lookup admission order, preserved across temporary extraction;
-    /// removal and re-admission moves an entity to the end. On initial world
-    /// load, admission follows the engine's storage-family loading order, which
-    /// can differ from vanilla's chunk entity loading order.
+    /// removal and re-admission moves an entity to the end. A chunk's entities
+    /// join in the order it stored them: section by section, each in admission
+    /// order, as vanilla stores them. An entity that moved into another section
+    /// since it joined keeps its admission place there, where vanilla moves it
+    /// to the end of that section.
     /// Allocates a result buffer, not one allocation per entity; sorting is
     /// O(n log n), followed by one authoritative handle lookup per candidate.
     #[access(WorldOnly)]
