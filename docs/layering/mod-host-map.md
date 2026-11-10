@@ -133,7 +133,7 @@ Counts are source references (one per `use` leaf or path), split into production
 |---|---|---|---|---|
 | horizon-client | horizon-mod-api | 441 | 2607 | 4479 |
 | horizon-client | horizon-mod-api-gen | 7 | 8 | 0 |
-| horizon-client | horizon-mod-package | 23 | 76 | 79 |
+| horizon-client | horizon-mod-package | 23 | 77 | 79 |
 | horizon-client | horizon-mod-points | 2 | 4 | 0 |
 | horizon-client | horizon-mod-render | 10 | 18 | 3 |
 | horizon-client | horizon-mod-runtime | 59 | 64 | 161 |
@@ -153,7 +153,7 @@ Counts are source references (one per `use` leaf or path), split into production
 |---|---|---|---|
 | game/modding | 156 | 1318 | 2095 |
 | game/native_hooks | 103 | 418 | 407 |
-| client (non-game) | 71 | 379 | 242 |
+| client (non-game) | 71 | 380 | 242 |
 | game/mobs | 26 | 163 | 444 |
 | game/interface | 44 | 143 | 439 |
 | game/network | 24 | 161 | 369 |
@@ -173,7 +173,7 @@ Counts are source references (one per `use` leaf or path), split into production
 
 | strand | prod refs | test refs | of which in modding/ + native_hooks/ (prod) |
 |---|---|---|---|
-| loading | 234 | 678 | 73 |
+| loading | 235 | 678 | 73 |
 | host | 107 | 375 | 79 |
 | slots | 8 | 0 | 0 |
 | attachments | 165 | 282 | 49 |
