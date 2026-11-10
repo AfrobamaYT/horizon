@@ -167,6 +167,26 @@ impl Game<'_> {
         self.native_read_biome(level, pos)
     }
 
+    /// A biome's natural spawners by category from the world's biome table.
+    pub(super) fn level_biome_spawners(
+        &self,
+        level: LevelRef,
+        biome: &str,
+    ) -> Option<Vec<mod_api::world::biome::BiomeSpawners>> {
+        self.native_level_read_world(level)?;
+        world_biomes!(self).spawners(biome)
+    }
+
+    /// A biome's own sky, fog and water colours from the world's biome table.
+    pub(super) fn level_biome_effects(
+        &self,
+        level: LevelRef,
+        biome: &str,
+    ) -> Option<mod_api::world::biome::BiomeEffects> {
+        self.native_level_read_world(level)?;
+        world_biomes!(self).effects(biome)
+    }
+
     /// `ServerLevel.getLogicalHeight`: the dimension's logical height, not its build height.
     pub(super) fn level_logical_height(&self, level: LevelRef) -> Option<i32> {
         Some(self.native_level_read_world(level)?.shape.logical_height)

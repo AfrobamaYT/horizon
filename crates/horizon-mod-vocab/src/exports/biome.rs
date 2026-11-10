@@ -1,1 +1,1 @@
-pub use crate::world::biome::{BiomeColors, SpawnEntry};
+pub use crate::world::biome::{BiomeColors, BiomeEffects, BiomeSpawners, SpawnEntry};
