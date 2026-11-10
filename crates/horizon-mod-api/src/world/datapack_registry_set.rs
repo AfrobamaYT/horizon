@@ -77,21 +77,24 @@ impl DatapackCandidate {
     /// resolves every reference to a declared registry against the whole candidate, so a
     /// forward reference works and an absent target refuses everything. A reference to a
     /// registry no declaration here covers (a vanilla one) is not checked. The caller has
-    /// already dropped files whose pack conditions do not hold.
+    /// already dropped files whose pack conditions do not hold. The error is boxed: it is
+    /// large, and a refused candidate is rare.
     pub fn build(
         declarations: &[DatapackRegistryDeclaration],
         files: &[(String, Vec<Vec<u8>>)],
-    ) -> Result<Self, DatapackLoadError> {
+    ) -> Result<Self, Box<DatapackLoadError>> {
         let mut registries: BTreeMap<String, BTreeMap<String, DatapackEntry>> = declarations
             .iter()
             .map(|declaration| (declaration.key.clone(), BTreeMap::new()))
             .collect();
         for declaration in declarations {
-            let fail = |entry: &str, file: &str, reason| DatapackLoadError {
-                registry: declaration.key.clone(),
-                entry: entry.to_owned(),
-                file: file.to_owned(),
-                reason,
+            let fail = |entry: &str, file: &str, reason| {
+                Box::new(DatapackLoadError {
+                    registry: declaration.key.clone(),
+                    entry: entry.to_owned(),
+                    file: file.to_owned(),
+                    reason,
+                })
             };
             for (file, versions) in files {
                 let Some(entry) = entry_of(declaration, file) else {
@@ -127,7 +130,7 @@ impl DatapackCandidate {
                         continue;
                     };
                     if !targets.contains_key(target) {
-                        return Err(DatapackLoadError {
+                        return Err(Box::new(DatapackLoadError {
                             registry: declaration.key.clone(),
                             entry: entry.clone(),
                             file: declaration.entry_file(entry).unwrap_or_default(),
@@ -136,7 +139,7 @@ impl DatapackCandidate {
                                 registry: registry.clone(),
                                 target: target.clone(),
                             },
-                        });
+                        }));
                     }
                 }
             }
@@ -426,25 +429,23 @@ mod tests {
         )];
         assert_eq!(
             DatapackCandidate::build(&[spell()], &bad),
-            Err(DatapackLoadError {
+            Err(Box::new(DatapackLoadError {
                 registry: "example:spell".into(),
                 entry: "example:fire".into(),
                 file: "data/example/example/spell/fire.json".into(),
                 reason: DatapackLoadReason::Decode(DatapackDecodeError::OutOfRange {
                     field: "power".into()
                 }),
-            })
+            }))
         );
         let malformed = [file(
             "data/example/example/spell/fire.json",
             &[r#"{"power": 7}"#, "{"],
         )];
+        let refused = DatapackCandidate::build(&[spell()], &malformed).unwrap_err();
         assert!(matches!(
-            DatapackCandidate::build(&[spell()], &malformed),
-            Err(DatapackLoadError {
-                reason: DatapackLoadReason::Decode(DatapackDecodeError::Malformed(_)),
-                ..
-            })
+            refused.reason,
+            DatapackLoadReason::Decode(DatapackDecodeError::Malformed(_))
         ));
         // A later valid reload still publishes.
         assert_eq!(old.generation(), 1);
@@ -473,7 +474,7 @@ mod tests {
         )];
         assert_eq!(
             DatapackCandidate::build(&[spell()], &missing),
-            Err(DatapackLoadError {
+            Err(Box::new(DatapackLoadError {
                 registry: "example:spell".into(),
                 entry: "example:fire".into(),
                 file: "data/example/example/spell/fire.json".into(),
@@ -482,7 +483,7 @@ mod tests {
                     registry: "example:spell".into(),
                     target: "addon:ice".into(),
                 },
-            })
+            }))
         );
     }
 
