@@ -207,6 +207,10 @@ pub struct Store {
     entry_no: u64,
     last_slot: usize,
     journal: Journal,
+    /// The index-capacity bound this store enforces; the default
+    /// [`MAX_CARRIERS`], smaller in tests to exercise the overflow
+    /// paths in seconds.
+    capacity: usize,
     /// The tombstones whose carrier files were already absent when the
     /// store opened. Only those may clear: a file deleted during this
     /// session may not be durably deleted yet on Windows, where the
@@ -220,6 +224,11 @@ impl Store {
     /// validity decide between [`Opened::NeverUsed`], [`Opened::Live`]
     /// and a typed [`Refusal`]. Nothing is written or cleaned here.
     pub fn open(world_root: &Path) -> Result<Opened, Refusal> {
+        Self::open_with_capacity(world_root, MAX_CARRIERS)
+    }
+
+    /// [`Self::open`] with an explicit index capacity (tests).
+    pub fn open_with_capacity(world_root: &Path, capacity: usize) -> Result<Opened, Refusal> {
         let data = world_root.join("data");
         let flag = in_use_flag(world_root);
         if read_slots(&data)?.is_none() {
@@ -263,6 +272,7 @@ impl Store {
             entry_no,
             last_slot: slot,
             journal,
+            capacity,
             tombstones_absent_at_open,
         }))
     }
@@ -275,6 +285,15 @@ impl Store {
     /// never used — then slot 0 holds an empty initialized journal,
     /// published durably and read back before anything else may happen.
     pub fn first_use(world_root: &Path, data_existed_at_open: bool) -> Result<Self, FirstUseError> {
+        Self::first_use_with_capacity(world_root, data_existed_at_open, MAX_CARRIERS)
+    }
+
+    /// [`Self::first_use`] with an explicit index capacity (tests).
+    pub fn first_use_with_capacity(
+        world_root: &Path,
+        data_existed_at_open: bool,
+        capacity: usize,
+    ) -> Result<Self, FirstUseError> {
         if !data_existed_at_open {
             return Err(FirstUseError::DataCreatedThisSession);
         }
@@ -289,11 +308,11 @@ impl Store {
         }
         let data = world_root.join("data");
         let body = Journal::empty();
-        let bytes = encode_slot(1, &body).map_err(FirstUseError::Slot)?;
+        let bytes = encode_slot(1, &body, capacity).map_err(FirstUseError::Slot)?;
         durable::write(&data.join(SLOTS[0]), &bytes)
             .map_err(|e| FirstUseError::Io(e.to_string()))?;
         // Read the slot back: only a store that opens is a store.
-        match Self::open(world_root)? {
+        match Self::open_with_capacity(world_root, capacity)? {
             Opened::Live(store) => Ok(store),
             Opened::NeverUsed => Err(FirstUseError::Slot(
                 "slot 0 did not read back as valid".into(),
@@ -440,6 +459,32 @@ impl Store {
             .map_err(|e| StoreIoError(e.to_string()))
     }
 
+    /// Retention for a just-finished operation, called from the live
+    /// transfer path right after `commit`: the disassembly's tombstone
+    /// clears once its carrier file is gone from disk, so a long
+    /// session of transfers never grows the journal toward its bound.
+    /// This is the per-operation counterpart of [`Self::cleanup`], not a
+    /// replacement: world open still runs the full cleanup for files
+    /// left by crashed sessions.
+    pub fn finish_retention(&mut self) -> Result<(), StoreIoError> {
+        let tombstones = self.journal.tombstones.clone();
+        let mut changed = false;
+        for (uuid, generation) in tombstones {
+            if !self.data.join(format!(
+                "horizon_carrier_{uuid:032x}-{generation}.nbt"
+            ))
+            .exists()
+            {
+                self.journal.tombstones.retain(|t| *t != (uuid, generation));
+                changed = true;
+            }
+        }
+        if changed {
+            self.write_slot()?;
+        }
+        Ok(())
+    }
+
     /// Cleans the store by the valid journal: carrier files outside the
     /// index are orphans and go; an operation file that is not the
     /// in-progress one goes; a tombstone holds until its carrier file's
@@ -492,7 +537,7 @@ impl Store {
     /// Writes the next record into the slot that does not hold the newest
     /// valid one, durably, and only then adopts it.
     fn write_slot(&mut self) -> Result<(), StoreIoError> {
-        let bytes = encode_slot(self.entry_no + 1, &self.journal)
+        let bytes = encode_slot(self.entry_no + 1, &self.journal, self.capacity)
             .map_err(|e| StoreIoError(e.to_string()))?;
         let slot = 1 - self.last_slot;
         durable::write(&self.data.join(SLOTS[slot]), &bytes)
@@ -1242,8 +1287,8 @@ fn read_slot(slot: usize, bytes: &[u8]) -> SlotRecord {
 
 /// Encodes one slot: header, then the CRC-protected body. The body is
 /// checked against the slot cap before the file is written.
-fn encode_slot(entry_no: u64, journal: &Journal) -> Result<Vec<u8>, String> {
-    let body = encode_journal(journal)?;
+fn encode_slot(entry_no: u64, journal: &Journal, capacity: usize) -> Result<Vec<u8>, String> {
+    let body = encode_journal(journal, capacity)?;
     let len = SLOT_HEADER + body.len();
     if len > MAX_SLOT_FILE {
         return Err(format!(
@@ -1287,9 +1332,17 @@ fn slot_crc(bytes: &[u8]) -> u32 {
 
 /// The body serializer: `next_op_id`, the in-progress operation, the
 /// tombstone and carrier counts, then their fixed-size entries.
-fn encode_journal(journal: &Journal) -> Result<Vec<u8>, String> {
-    if journal.carriers.len() > MAX_CARRIERS {
-        return Err(format!("carrier index exceeds {MAX_CARRIERS}"));
+impl Journal {
+    /// Store-level bound check for tests: whether the journal fits the
+    /// capacity at encode.
+    pub fn encode_for_tests(&self, capacity: usize) -> Result<Vec<u8>, String> {
+        encode_journal(self, capacity)
+    }
+}
+
+fn encode_journal(journal: &Journal, capacity: usize) -> Result<Vec<u8>, String> {
+    if journal.carriers.len() > capacity {
+        return Err(format!("carrier index exceeds {capacity}"));
     }
     if journal.tombstones.len() > MAX_TOMBSTONES {
         return Err(format!("tombstones exceed {MAX_TOMBSTONES}"));

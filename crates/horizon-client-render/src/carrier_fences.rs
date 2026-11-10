@@ -19,6 +19,10 @@ pub struct Fences {
     /// Test seam: the next flush after `prepared` fails, as a crashed
     /// writer would. Set by the carrier transfer tests only.
     pub fail_flush: bool,
+    /// Test seam: the store's index capacity for transfers opened from
+    /// this game (None: the default 4,096). Lets the retention tests
+    /// exercise the overflow paths in seconds.
+    pub capacity_override: Option<usize>,
 }
 impl Fences {
     /// Whether a world cell is locked against edits, interactions,

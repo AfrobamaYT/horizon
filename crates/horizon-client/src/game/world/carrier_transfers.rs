@@ -20,7 +20,7 @@
 
 use crate::game::Game;
 use horizon_world::level::LevelAccess;
-use crate::carrier_store::Store;
+use crate::carrier_store::{Store, MAX_CARRIERS};
 use crate::save::encode_block_entity;
 use horizon_core::position::BlockPos;
 use horizon_world::carrier::codec;
@@ -222,15 +222,24 @@ impl Game<'_> {
             }
         }
 
-        // The store exists only from the first actual transfer.
-        let mut store = match Store::open(&self.world_root) {
+        // The store exists only from the first actual transfer. The
+        // capacity override is the tests' retention seam.
+        #[cfg(test)]
+        let capacity = self.world.carrier_fences.capacity_override.unwrap_or(MAX_CARRIERS);
+        #[cfg(not(test))]
+        let capacity = MAX_CARRIERS;
+        let mut store = match Store::open_with_capacity(&self.world_root, capacity) {
             Ok(crate::carrier_store::Opened::Live(store)) => store,
             Ok(crate::carrier_store::Opened::NeverUsed) => {
                 // The gate reads the flag captured at world open, not
                 // the folder's existence now: a data folder created
                 // this session does not pass for an old one.
-                Store::first_use(&self.world_root, self.world.carrier_data_existed_at_open)
-                    .map_err(|e| TransferError::Store(e.to_string()))?
+                Store::first_use_with_capacity(
+                    &self.world_root,
+                    self.world.carrier_data_existed_at_open,
+                    capacity,
+                )
+                .map_err(|e| TransferError::Store(e.to_string()))?
             }
             Err(e) => return Err(TransferError::Store(e.to_string())),
         };
@@ -468,7 +477,11 @@ impl Game<'_> {
         let registry = self.pack.assets.registry;
         envelope_preflight(registry).map_err(|_| TransferError::Envelope)?;
 
-        let mut store = match Store::open(&self.world_root) {
+        #[cfg(test)]
+        let capacity = self.world.carrier_fences.capacity_override.unwrap_or(MAX_CARRIERS);
+        #[cfg(not(test))]
+        let capacity = MAX_CARRIERS;
+        let mut store = match Store::open_with_capacity(&self.world_root, capacity) {
             Ok(crate::carrier_store::Opened::Live(store)) => store,
             _ => {
                 return Err(TransferError::Store(
@@ -684,6 +697,14 @@ impl Game<'_> {
         if let Err(error) = std::fs::remove_file(store.carrier_path(uuid, generation)) {
             log::warn!("carrier file removal deferred: {error}");
         }
+        // Retention runs per finished operation, not once per world
+        // open: a session of many transfers never grows the journal
+        // toward its bound. The file is gone from disk, so the
+        // tombstone clears here; a file that lingers keeps its
+        // tombstone until the next open's full cleanup.
+        store
+            .finish_retention()
+            .map_err(|e| TransferError::Store(e.to_string()))?;
         Ok(())
     }
 
@@ -858,11 +879,7 @@ impl Game<'_> {
         }
     }
 
-    /// The production cleanup path under its test-facing name.
-    #[cfg(test)]
-    pub(crate) fn carrier_cleanup_for_tests(&mut self) {
-        self.carrier_cleanup();
-    }
+
 
     /// Recovers the level in place: no store means nothing to do; a live
     /// store's in-progress operation replays against this level's region
@@ -1141,9 +1158,11 @@ mod tests {
     }
 
     /// (item 6) Repeated live transfers beyond the journal's carrier
-    /// capacity (4,096 index entries): assemble-disassemble cycles with
-    /// production cleanup at each recovery stay bounded — the files do
-    /// not accumulate and the store keeps working.
+    /// (item 6, the hole) Repeated live transfers beyond the store's
+    /// index capacity in ONE session, with no manual cleanup and no
+    /// reopen: the per-operation retention in the live path keeps the
+    /// journal bounded. The capacity is 8 (the test override); ten
+    /// cycles would overflow it without the live retention.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn repeated_transfers_beyond_the_index_capacity_stay_bounded() {
@@ -1163,26 +1182,24 @@ mod tests {
             );
             let registry = game.pack.assets.registry;
             let chest = registry.default_state("minecraft:chest").unwrap();
-            // A few more cycles than the 4,096-entry index bound; each
-            // uses its own UUID and the store cleanup (via recovery)
-            // clears the finished ones.
-            let cycles = 4100;
-            for i in 0..cycles {
+            // Ten cycles against a capacity of eight: without the live
+            // path's per-finish retention, the ninth assemble's journal
+            // write refuses ("carrier index exceeds 8").
+            game.world.carrier_fences.capacity_override = Some(8);
+            for i in 0..10u32 {
                 game.world.set(4, 64, 4, chest).unwrap();
                 game.carrier_assemble(1000 + i as u128, &[BlockPos::new(4, 64, 4)])
-                    .unwrap();
+                    .unwrap_or_else(|e| panic!("cycle {i}: {e}"));
                 game.carrier_disassemble(
                     1000 + i as u128,
                     1,
                     [4, 64, 4],
                     [1.0, 0.0, 0.0, 0.0],
                 )
-                .unwrap();
-                // The production cleanup, as world open runs it.
-                game.carrier_cleanup_for_tests();
+                .unwrap_or_else(|e| panic!("cycle {i}: {e}"));
             }
             // Bounded: no operation files, no carrier files beyond the
-            // journal's two slots, and the store still opens.
+            // journal's two slots.
             let mut files = 0;
             for entry in std::fs::read_dir(root.join("data")).unwrap().flatten() {
                 let name = entry.file_name().to_string_lossy().into_owned();
@@ -1195,6 +1212,31 @@ mod tests {
                 "the store must stay bounded at the two slots, found {files} files"
             );
         });
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The store's default capacity is the contract's 4,096.
+    #[test]
+    fn the_default_index_capacity_is_4096() {
+        use crate::carrier_store::MAX_CARRIERS;
+        assert_eq!(MAX_CARRIERS, 4096);
+        // The public constructors carry the default; a store built with
+        // it enforces the same bound at encode, visible by refusing an
+        // index past it.
+        let root = std::env::temp_dir().join(format!(
+            "horizon-capacity-default-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("data")).unwrap();
+        let mut journal = crate::carrier_store::Journal::default();
+        for i in 0..=MAX_CARRIERS as u128 {
+            journal.carriers.push((i, 1));
+        }
+        assert!(
+            journal.encode_for_tests(MAX_CARRIERS).is_err(),
+            "4097 entries must refuse at the default bound"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
