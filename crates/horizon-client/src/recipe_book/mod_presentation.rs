@@ -21,6 +21,8 @@ pub trait DisplayResolver {
 /// vanilla display ids. The caller paginates these buttons in groups of twenty.
 pub struct PresentedRecipe {
     pub recipe: String,
+    /// Original indices inside the authoritative recipe entry, after sorting/filtering.
+    pub sources: Vec<u32>,
     pub button: ButtonView,
     pub overlay: Vec<OverlayRecipe>,
 }
@@ -64,7 +66,7 @@ impl ModBookPanel<'_> {
             }
             for recipe in &cat.displays {
                 let mut alternatives = Vec::new();
-                for display in &recipe.displays {
+                for (source, display) in recipe.displays.iter().enumerate() {
                     let craftable = resolver.craftable(&recipe.recipe, display);
                     if filtering && !craftable {
                         continue;
@@ -81,6 +83,7 @@ impl ModBookPanel<'_> {
                         continue;
                     }
                     alternatives.push((
+                        source as u32,
                         results,
                         OverlayRecipe {
                             craftable,
@@ -88,14 +91,22 @@ impl ModBookPanel<'_> {
                         },
                     ));
                 }
-                alternatives.sort_by_key(|(_, overlay)| !overlay.craftable);
+                alternatives.sort_by_key(|(_, _, overlay)| !overlay.craftable);
                 if alternatives.is_empty() {
                     continue;
                 }
-                let has_craftable = alternatives.iter().any(|(_, overlay)| overlay.craftable);
-                let (entries, overlay) = alternatives.into_iter().unzip();
+                let has_craftable = alternatives.iter().any(|(_, _, overlay)| overlay.craftable);
+                let mut sources = Vec::with_capacity(alternatives.len());
+                let (entries, overlay) = alternatives
+                    .into_iter()
+                    .map(|(source, results, overlay)| {
+                        sources.push(source);
+                        (results, overlay)
+                    })
+                    .unzip();
                 view.recipes.push(PresentedRecipe {
                     recipe: recipe.recipe.clone(),
+                    sources,
                     button: ButtonView {
                         has_craftable,
                         entries,

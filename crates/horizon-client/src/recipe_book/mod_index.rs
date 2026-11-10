@@ -44,6 +44,7 @@ pub enum DisplayLoadError {
 /// unrestricted union of categories sharing a user-supplied search name.
 #[derive(Debug, Default)]
 pub struct ModBookIndex {
+    generation: u64,
     categories: BTreeMap<String, RecipeBookCategory>,
     layouts: BTreeMap<String, super::slot_layout::CheckedSlotLayout>,
     placements: BTreeMap<String, Option<crate::menu::place::custom_plan::MenuPlacement>>,
@@ -129,6 +130,12 @@ impl ModBookIndex {
                 ));
             }
             for recipe in &category.displays {
+                if u32::try_from(recipe.displays.len()).is_err() {
+                    return Err(DisplayLoadError::InvalidPlacement(format!(
+                        "recipe {} has more RecipeBookDisplay entries than Wire can index",
+                        recipe.recipe
+                    )));
+                }
                 if let Some(layout) = index.layouts.get(&category.target_menu) {
                     let owner = mod_api::RecipeBookLayout::declaring_mod(&category.target_menu)
                         .ok_or_else(|| {
@@ -172,7 +179,21 @@ impl ModBookIndex {
         for (_, _, categories) in index.books.values_mut() {
             categories.sort();
         }
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        index.generation = NEXT
+            .try_update(
+                std::sync::atomic::Ordering::Relaxed,
+                std::sync::atomic::Ordering::Relaxed,
+                |value| value.checked_add(1),
+            )
+            .map_err(|_| {
+                DisplayLoadError::InvalidPlacement("display generation exhausted".into())
+            })?;
         Ok(index)
+    }
+    /// Opaque successful declaration generation; zero is never a published generation.
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
     /// Authoritative, validated plan; explicit NOT_PLACEABLE differs from an unknown recipe.
     pub fn placement(

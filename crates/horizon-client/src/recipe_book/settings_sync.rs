@@ -71,6 +71,10 @@ pub struct Authority {
 }
 
 impl Authority {
+    /// Book membership was negotiated once for this connection, not inferred from a request.
+    pub fn contains(&self, key: &str) -> bool {
+        self.keys.contains(key)
+    }
     pub fn negotiate(epoch: u64, offered: Vec<String>, registered: &BTreeSet<String>) -> Self {
         Self {
             epoch,

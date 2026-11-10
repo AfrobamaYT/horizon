@@ -156,6 +156,7 @@ fn panel_search_selection_and_inventory_filter_are_isolated() {
         ["demo:one", "demo:two"]
     );
     assert_eq!(all.recipes[0].button.entries.len(), 5);
+    assert_eq!(all.recipes[0].sources, [4, 0, 1, 2, 3]);
     assert!(
         panel
             .presentation(Some("demo:c"), "", false, &Resolver)
@@ -172,6 +173,7 @@ fn panel_search_selection_and_inventory_filter_are_isolated() {
     let filtered = panel.presentation(None, "SMITH", true, &Resolver);
     assert_eq!(filtered.recipes.len(), 2);
     assert_eq!(filtered.recipes[0].button.entries.len(), 1);
+    assert_eq!(filtered.recipes[0].sources, [4]);
     assert!(filtered.recipes[0].button.has_craftable);
     assert!(
         panel

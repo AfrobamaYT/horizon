@@ -100,6 +100,7 @@ pub enum Frame {
     Start {
         identity: CatalogIdentity,
         layout: mod_api::RecipeBookLayout,
+        storage: super::menu_layout::MenuLayoutMetadata,
         total: u32,
     },
     Part {
@@ -210,8 +211,30 @@ impl Client {
         }
         self.pending = None;
         self.catalog = None;
+        self.completed = None;
         self.selection = None;
         true
+    }
+    /// A catalogue refusal must name the outstanding request, not a superseded window.
+    pub fn refused(&mut self, epoch: u64, number: u64, window: i32, nonce: u64) -> bool {
+        if self.epoch != Some(epoch) {
+            return false;
+        }
+        if number == 0 {
+            if self.ready {
+                return false;
+            }
+            self.close();
+            return true;
+        }
+        if !self.pending.as_ref().is_some_and(|pending| {
+            pending.number == number
+                && pending.window.window == window
+                && pending.window.nonce == nonce
+        }) {
+            return false;
+        }
+        self.invalidate(epoch)
     }
     pub fn open(&mut self, window: Window) -> Option<Frame> {
         self.close();
@@ -345,6 +368,12 @@ impl Client {
     }
     pub fn click(&mut self) {
         self.selection = None;
+    }
+    pub fn epoch(&self) -> Option<u64> {
+        self.epoch
+    }
+    pub fn window(&self) -> Option<&Window> {
+        self.window.as_ref()
     }
     pub fn catalog(&self) -> Option<&CatalogIdentity> {
         self.catalog.as_ref()

@@ -252,3 +252,38 @@ fn placement_frames_share_the_bounded_settings_channel_without_vanilla_ids() {
     assert!(ResourceId::try_from(format!("demo:{}", "a".repeat(RESOURCE_ID_BYTES - 4))).is_err());
     assert!(ResourceId::try_from("demo:bad path".to_owned()).is_err());
 }
+
+#[test]
+fn invalidation_also_revokes_a_completed_but_unpublished_catalogue() {
+    let mut client = client();
+    let identity = open(&mut client);
+    client.start(identity.clone(), layout(), 4).unwrap();
+    assert!(
+        client
+            .part(identity.epoch, identity.number, 0, vec![0; 4])
+            .unwrap()
+            .is_some()
+    );
+    assert!(client.invalidate(identity.epoch));
+    assert!(!client.accept_catalog(identity));
+}
+#[test]
+fn catalogue_refusals_cannot_cancel_a_newer_request_or_completed_view() {
+    let mut client = client();
+    let old = open(&mut client);
+    let current = open(&mut client);
+    assert!(!client.refused(old.epoch, old.number, old.window, old.nonce));
+    assert!(!client.refused(
+        current.epoch,
+        current.number,
+        current.window,
+        current.nonce + 1
+    ));
+    complete(&mut client, &current);
+    assert!(!client.refused(current.epoch, current.number, current.window, current.nonce));
+    assert!(!client.refused(current.epoch, 0, 0, 0));
+    assert_eq!(client.catalog(), Some(&current));
+    let current = open(&mut client);
+    assert!(client.refused(current.epoch, current.number, current.window, current.nonce));
+    assert_eq!(client.start(current, layout(), 4), Err(Refusal::Stale));
+}
