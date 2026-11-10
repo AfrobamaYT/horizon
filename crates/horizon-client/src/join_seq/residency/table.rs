@@ -341,15 +341,34 @@ mod tests {
                 ..HOME
             },
         );
-        // EntityLookup's linked insertion order: interleaved kinds, unsorted ids.
+        // Also compared to the runtime vanilla EntityLookup by the parity harness.
+        println!("lookup-order: {:?}", f.table.level_entities(HOME.dimension));
         assert_eq!(f.table.level_entities(HOME.dimension), vec![90, 3, 40]);
         let identity = Identity::new(90, first.join).unwrap();
         f.emit(first, Change::Extract(identity));
         f.emit(first, Change::PutBack(identity));
+        println!("lookup-order: {:?}", f.table.level_entities(HOME.dimension));
         assert_eq!(f.table.level_entities(HOME.dimension), vec![90, 3, 40]);
         f.emit(first, Change::Remove(identity));
         f.emit(first, Change::Install(identity));
+        println!("lookup-order: {:?}", f.table.level_entities(HOME.dimension));
         assert_eq!(f.table.level_entities(HOME.dimension), vec![3, 40, 90]);
+        f.emit(first, Change::Remove(identity));
+        let away = f.admit(
+            90,
+            Owner {
+                dimension: DimensionKey::NETHER,
+                ..HOME
+            },
+        );
+        println!("lookup-order: {:?}", f.table.level_entities(HOME.dimension));
+        println!(
+            "lookup-order: {:?}",
+            f.table.level_entities(DimensionKey::NETHER)
+        );
+        f.emit(away, Change::Remove(Identity::new(90, away.join).unwrap()));
+        f.admit(90, HOME);
+        println!("lookup-order: {:?}", f.table.level_entities(HOME.dimension));
     }
 
     #[test]

@@ -54,14 +54,25 @@ mod tests {
                 .filter(|id| [90, 20, 3].contains(id) || (21..=28).contains(id))
                 .collect();
             assert_eq!(ids, vec![90, 20, 3]);
+            use horizon_client::join_seq::Joined;
+            let join = game.mobs[0].join_seq();
+            let extracted = game.mobs.extract(join).unwrap();
+            assert_eq!(game.level_all_entities(level), None);
+            game.mobs.put_back(0, extracted);
+            assert!(game.level_all_entities(level).is_some());
             assert_eq!(
-                game.level_all_entities(LevelRef::new(level.epoch() + 1, level.dimension())),
+                game.level_all_entities(LevelRef::new(
+                    mod_api::WorldEpoch::new(level.epoch().get() + 1),
+                    level.dimension()
+                )),
                 None
             );
             assert_eq!(
                 game.level_all_entities(LevelRef::new(level.epoch(), DimensionKey::NETHER)),
                 None
             );
+            game.options.execution_role = crate::game::execution_role::ExecutionRole::Client;
+            assert_eq!(game.level_all_entities(level), None);
         });
     }
 

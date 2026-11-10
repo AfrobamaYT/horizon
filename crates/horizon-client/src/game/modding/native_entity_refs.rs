@@ -223,12 +223,12 @@ impl Game<'_> {
             .table
             .borrow_mut()
             .level_entities(level.dimension());
-        Some(
-            ids.into_iter()
-                .map(|id| EntityRef::new(level.epoch(), id))
-                .filter(|entity| self.native_entity_target(*entity).is_some())
-                .collect(),
-        )
+        ids.into_iter()
+            .map(|id| {
+                let entity = EntityRef::new(level.epoch(), id);
+                self.native_entity_target(entity).map(|_| entity)
+            })
+            .collect()
     }
 
     /// Entities whose bounding boxes intersect this box (`Level.getEntities`).

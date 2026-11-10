@@ -34,7 +34,8 @@ The placement type is `SpawnPlacements.isSpawnPositionOk`'s first check, and the
 `level_entities_in`, it does not append the dragon's parts: vanilla's
 `ServerLevel.getAllEntities` iterates the entity lookup, not multipart hit boxes.
 A remote client, stale handle or parked level returns `None`, never a partial
-client-side list. Temporarily extracted entities cannot resolve and are omitted.
+client-side list. The query also returns `None` while any lookup member is
+temporarily extracted, rather than returning an incomplete authoritative list.
 
 The walk preserves lookup admission order across storage families, including
 removal and re-admission at the end. Initial world loading still admits storage

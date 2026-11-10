@@ -160,7 +160,8 @@ pub trait LevelsBackend {
     /// (`ServerLevel.getAllEntities`), including spectators and entities outside
     /// any spatial query. Dragon parts are not lookup members.
     /// Returns None on a remote client, for a stale handle or a parked level.
-    /// Temporarily extracted entities are unavailable until restored.
+    /// Returns None while any lookup member is temporarily extracted, rather
+    /// than returning an incomplete list.
     /// Order is lookup admission order, preserved across temporary extraction;
     /// removal and re-admission moves an entity to the end. On initial world
     /// load, admission follows the engine's storage-family loading order, which
