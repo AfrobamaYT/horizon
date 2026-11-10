@@ -59,3 +59,82 @@ impl Game<'_> {
         Ok(set.get(handle)?.values.clone())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mod_api::{DatapackReadError as E, *};
+
+    #[test]
+    #[ignore = "needs prepared resources and isolated homes"]
+    fn level_registry_reads_check_world_session_and_generation() {
+        struct RegistryMod;
+        #[mod_api::__subscriptions]
+        impl Hooks for RegistryMod {
+            fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+                r.declare_datapack_registry(
+                    "spell",
+                    DatapackRegistrySync::Required,
+                    vec![DatapackField::required(
+                        "power",
+                        DatapackFieldKind::Int { min: 0, max: 100 },
+                    )],
+                )
+                .unwrap();
+            }
+        }
+        mod_api::testing::with_mods(
+            vec![ModEntry::new("example", Box::new(RegistryMod))].into(),
+            || {
+                super::super::native_entity_refs::tests::with_game(|game| {
+                    game.install_live_features();
+                    let level = game.level(game.dim.id()).unwrap();
+                    let candidate = || {
+                        DatapackCandidate::build(
+                            mod_api::__private::datapack_registry_declarations(),
+                            &[(
+                                "data/addon/example/spell/fire.json".into(),
+                                vec![br#"{"power":7}"#.to_vec()],
+                            )],
+                        )
+                        .unwrap()
+                    };
+                    let first = DatapackRegistrySet::first(candidate(), 123);
+                    game.mods.datapack_registries = Some(std::sync::Arc::new(first.clone()));
+                    assert_eq!(
+                        game.level_datapack_entries(level, "example:spell"),
+                        Some(vec!["addon:fire".into()])
+                    );
+                    let handle = game
+                        .level_datapack_handle(level, "example:spell", "addon:fire")
+                        .unwrap();
+                    assert_eq!(
+                        game.level_datapack_read(level, &handle),
+                        Ok(vec![("power".into(), DatapackValue::Int(7))])
+                    );
+                    assert_eq!(
+                        game.level_datapack_handle(level, "example:missing", "addon:fire"),
+                        Err(E::UnknownRegistry)
+                    );
+                    assert_eq!(
+                        game.level_datapack_handle(level, "example:spell", "addon:missing"),
+                        Err(E::MissingEntry)
+                    );
+                    game.mods.datapack_registries =
+                        Some(std::sync::Arc::new(first.reload(candidate()).unwrap()));
+                    assert_eq!(
+                        game.level_datapack_read(level, &handle),
+                        Err(E::StaleGeneration)
+                    );
+                    game.mods.datapack_registries = Some(std::sync::Arc::new(
+                        DatapackRegistrySet::first(candidate(), 124),
+                    ));
+                    assert_eq!(
+                        game.level_datapack_read(level, &handle),
+                        Err(E::WrongSession)
+                    );
+                });
+            },
+        );
+    }
+}
