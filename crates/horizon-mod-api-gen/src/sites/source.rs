@@ -21,6 +21,7 @@ pub fn read(root: &Path) -> Result<Vec<Site>, String> {
 pub fn facade_name(target: &str, callee: &str, ordinal: usize) -> String {
     super::rewrite::name(
         &Declaration {
+            local: None,
             target: crate::points::plain_path(target),
             selector: crate::points::plain_path(callee),
             ordinal: Some(ordinal),
@@ -74,6 +75,7 @@ mod tests {
             ),
         ];
         let mut request = Declaration {
+            local: None,
             target: entries[1].path.clone(),
             selector: entries[2].path.clone(),
             ordinal: Some(0),

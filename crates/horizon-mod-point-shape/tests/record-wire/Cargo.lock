@@ -210,7 +210,6 @@ dependencies = [
  "horizon-core",
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
- "horizon-mod-package",
  "horizon-mod-runtime",
  "log",
  "serde",
@@ -222,6 +221,7 @@ name = "horizon-mod-api-gen"
 version = "0.1.0"
 dependencies = [
  "heck",
+ "horizon-mod-package",
  "horizon-mod-point-shape",
  "prettyplease",
  "proc-macro2",
