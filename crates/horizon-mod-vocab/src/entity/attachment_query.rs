@@ -33,6 +33,9 @@ impl AttachmentBatch {
 /// A typed snapshot whose iterator borrows values from its captured bindings.
 /// `get(holder)` returns an owned clone with an expected O(1) probe before decode.
 /// Missing or not yet synced holders return `Ok(None)`; no default is created.
+/// `None` does not mean the holder is alive: absent and not-live holders alike
+/// return `Ok(None)` when absent from the snapshot, without a host liveness check.
+/// Only scoped residency probes report `StaleHolder`.
 // no wire: borrows a live attachment index.
 pub type AttachmentQuery<'key, T> = runtime::AttachmentQuery<'key, AttachmentHolder, T>;
 

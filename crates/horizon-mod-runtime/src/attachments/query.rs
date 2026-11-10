@@ -95,6 +95,9 @@ impl<H: Copy + Eq + Hash, T: Clone + Send + Sync + 'static> AttachmentQuery<'_, 
     /// Read an owned captured value with an expected O(1) holder probe before decode.
     /// Absent or not yet synced holders return `Ok(None)`, without initializing
     /// defaults. Decode/type errors are preserved as `AttachmentRowError::Value`.
+    /// `None` does not mean the holder is alive: absent and not-live holders
+    /// alike return `Ok(None)` when absent from captured membership, without a
+    /// host liveness check. Only scoped residency probes report `StaleHolder`.
     /// Later replacements, removals and rebinds require a fresh snapshot.
     pub fn get(&self, holder: H) -> Result<Option<T>, AttachmentRowError> {
         let Some(rows) = self.batch.rows.as_deref() else {
@@ -453,6 +456,23 @@ mod tests {
 mod existing_tests {
     use super::tests::{entry, key, query};
     use super::*;
+    #[test]
+    fn keyed_absent_and_unloaded_holders_return_none() {
+        let mut index = AttachmentIndex::default();
+        index.register(7, [(key(), entry(7u32))]).into_result();
+        let retained = query(&index);
+        let token = retained.iter().next().unwrap().unwrap().write_token();
+        index.unload(7).into_result();
+        let fresh = query(&index);
+        assert_eq!(fresh.get(7), Ok(None)); // no longer live
+        assert_eq!(fresh.get(11), Ok(None)); // never resident
+        assert_eq!(
+            index.validate_owner(&token),
+            Err(AttachmentRowError::StaleHolder)
+        );
+        assert_eq!(retained.get(7), Ok(Some(7))); // captured, not live
+    }
+
     #[test]
     fn keyed_existing_values_retain_snapshots_and_validate_rebound_tokens() {
         let mut index = AttachmentIndex::default();
