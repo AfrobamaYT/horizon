@@ -18,6 +18,20 @@ Code declarations carry component patches as ordered `Vec<(String, Option<Tag>)>
 The game converts this opaque NBT data at load; file declarations below still use JSON.
 No declaration conversion runs per tick.
 
+## Choosing what remains after removal
+
+Implement `BlockPart::remove_block` for a block that leaves a support or another
+state behind when removed. This server-only replacement receives the dimension,
+position, removed state and `moved_by_piston`. Answer `Some(state)` to choose the
+replacement, or `None` to keep vanilla's fluid block (air when dry). Only the
+removed block's own Part is called, not the replacement block's Part.
+
+The chosen state goes through the normal `setBlock` effects with flags 3, plus
+64 for piston movement. An unknown or unregistered state is refused with a
+reason and the vanilla replacement is written. This covers `Level.removeBlock`,
+not every direct `setBlock` or the separate `destroyBlock` path. The level view
+is read-only while answering, on both native and wasm.
+
 ## Making a content mod
 
 ```sh
@@ -373,6 +387,23 @@ or `brush`. A name that is no pose fails the mod's load, and an item without the
 player models, in the first person's own third-person view and in other players'; `spear` poses an arm only for an item
 with a kinetic weapon. A code mod that must decide by stack, hand or entity answers the `get_arm_pose` hook instead,
 which wins over the declared key.
+
+Code mods can also register a namespaced custom pose once in `Hooks::register` through
+`Registrar::register_arm_pose("mymod:flip", uses_both_arms, affects_offhand)`. Keep its
+`CustomArmPose` token and return `ArmPose::Custom(token)` from `get_arm_pose`. The two
+flags independently control the humanoid's two-arm ordering and whether the other
+hand's pose gives way. The token carries these flags as Wire data, so the pose's
+flag getters do not require a registration table inside a wasm guest. Duplicate, malformed and foreign-namespace ids refuse registration.
+
+In `arm_pose_transform`, match `event.pose` to that token and set `event.angles.right`
+or `event.angles.left` to absolute `[pitch, yaw, roll]` in radians. `event.right_arm`
+identifies the physical arm; `event.humanoid` supplies both stacks, the use state,
+and the poses selected after `get_arm_pose` answers. Transformers follow vanilla's
+physical-arm application order and do not run for a suppressed pose.
+Each non-finite angle leaves the base model component unchanged. The transform runs
+only for selected registered poses, on local players, remote players and humanoid mobs;
+swing and mob-specific animations still run afterward and can change those angles.
+Native and wasm mods use the same registration, token and Wire angle value.
 
 ```json
 { "template": "minecraft:stick", "arm_pose": "toot_horn" }

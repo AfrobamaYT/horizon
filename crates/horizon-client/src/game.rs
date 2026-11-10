@@ -7,8 +7,8 @@ use key_codes::{
 use loading_screen::{
     App, Loading, leave_fullscreen_after, missing_resources, run_event_loop, unclean_start_recovery,
 };
+use motion_ids::{motion_at, motion_block_entity};
 use resource_load::{Progress, launch_world, load_resources, named_scope, synchronous_startup};
-
 /// The content tables the world plays with, as field-level borrows: the
 /// world's data packs' over the game's own. The `Game::items`/`recipes`/
 /// `stations` methods read the same tables, but taking `&self` blocks a
@@ -49,7 +49,6 @@ macro_rules! world_biomes {
         }
     };
 }
-
 /// The world's packs' content files, as a field-level borrow (see the macros).
 fn pack_files(world_tables: &Option<WorldTables>) -> horizon_world::loot::PackOverlay<'_> {
     match world_tables {
@@ -114,7 +113,7 @@ use loading_window::{
 };
 // `Action` here is the title screen's buttons (`title::Action`).
 use self::api_values::TryIntoApi;
-pub(crate) use api_values::{block_jump_factor, block_speed_factor};
+pub(crate) use api_values::{block_jump_factor, block_speed_factor, is_ladder};
 use horizon_client::actions::Action as Mapping;
 use horizon_client::held::Source;
 use horizon_client::spans::startup;
@@ -245,7 +244,7 @@ pub(crate) struct Options {
     /// `--world-frames N`: exit after N frames drawn in the world (smoke runs; the world may load slowly).
     world_frames: Option<u64>,
     screenshot_after: Option<u64>,
-    timeout: Duration,
+    timeout: Option<Duration>,
     report: Option<PathBuf>,
     world: Option<String>,
     look: Option<(f32, f32)>,
@@ -381,7 +380,6 @@ impl Options {
             std::env::var_os("HORIZON_HOME").as_deref(),
         )?)
     }
-
     fn from_launch(LaunchArguments { context, rest }: LaunchArguments) -> Result<Option<Self>> {
         let sibling = std::env::current_exe()?
             .parent()
@@ -405,7 +403,7 @@ impl Options {
             split_in_main_window: false,
             world_frames: None,
             screenshot_after: None,
-            timeout: Duration::from_secs(120),
+            timeout: None,
             report: None,
             world: None,
             look: None,
@@ -507,10 +505,11 @@ impl Options {
                             "--frames" => o.frames = Some(value.parse()?),
                             "--world-frames" => {
                                 o.world_frames = Some(value.parse()?);
-                                // A frame-limited run in every other respect; --timeout-seconds still applies.
                                 o.frames.get_or_insert(u64::MAX);
                             }
-                            "--timeout-seconds" => o.timeout = Duration::from_secs(value.parse()?),
+                            "--timeout-seconds" => {
+                                o.timeout = Some(Duration::from_secs(value.parse()?))
+                            }
                             "--smoke-report" => o.report = Some(value.into()),
                             "--screenshot-after" => o.screenshot_after = Some(value.parse()?),
                             "--width" => o.window_size[0] = value.parse::<u32>()?.max(1),
@@ -756,6 +755,10 @@ struct InteractTarget {
 
 /// The client world as seen by the vanilla block-behaviour library.
 struct GameLevel<'w> {
+    cake_probe: bool,
+    cake_requested: std::cell::Cell<bool>,
+    cake_answer: Option<bool>,
+    api_level: Option<mod_api::LevelRef>,
     gateway_servers: &'w mut horizon_client::fast_hash::FxHashMap<
         [i32; 3],
         horizon_client::block_entity_anim::EndGateway,
@@ -1014,6 +1017,15 @@ impl GameLevel<'_> {
     }
 }
 impl LevelAccess for GameLevel<'_> {
+    fn cake_can_eat(&self, vanilla: bool) -> bool {
+        if self.cake_probe {
+            self.cake_requested.set(true);
+            false
+        } else {
+            self.cake_answer.unwrap_or(vanilla)
+        }
+    }
+
     fn within_world_border(&self, pos: BlockPos) -> bool {
         self.border
             .is_within_bounds(f64::from(pos.x), f64::from(pos.z), 0.0)
@@ -1423,6 +1435,15 @@ impl LevelAccess for GameLevel<'_> {
         );
         connected
     }
+    fn adjust_remove_block(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+        moved_by_piston: bool,
+        vanilla: BlockStateId,
+    ) -> BlockStateId {
+        self.removal_replacement(pos, state, moved_by_piston, vanilla)
+    }
     fn has_connection_hook(&self) -> bool {
         self.native_authoritative
             && mod_api::__private::has_scoped_hook(mod_api::HookId::ConnectsTo)
@@ -1558,6 +1579,17 @@ impl LevelAccess for GameLevel<'_> {
     fn before_can_survive(&self, pos: BlockPos, state: BlockStateId, survives: &mut Option<bool>) {
         if self.native_authoritative {
             self.native_can_survive(self.dimension, pos, state, survives);
+        }
+    }
+    fn before_can_sustain_plant(
+        &self,
+        state: BlockStateId,
+        ground: BlockStateId,
+        ground_pos: BlockPos,
+        sustains: &mut Option<bool>,
+    ) {
+        if self.native_authoritative {
+            self.native_can_sustain_plant(self.dimension, state, ground, ground_pos, sustains);
         }
     }
     fn before_may_place_on(
@@ -2097,19 +2129,6 @@ impl FallingBlock {
             self.previous.z + (self.position.z - self.previous.z) * alpha - 0.5 + dz,
         )
     }
-}
-
-/// A block entity's `mark_motion` id: its position, packed into the 32 bits beside the tag
-/// (x and z wrap at 2048 blocks and y at 1024; two block entities that far apart in one frame's
-/// view are told apart by their vertex counts, as `PackEntities` matches only equal runs).
-fn motion_block_entity(pos: [i32; 3]) -> u64 {
-    motion_at(Game::MOTION_BLOCK_ENTITY, pos)
-}
-
-/// `tag` with a block position packed into its low 32 bits (`motion_block_entity`).
-fn motion_at(tag: u64, pos: [i32; 3]) -> u64 {
-    let [x, y, z] = pos.map(|c| c as u32);
-    tag | u64::from((x & 0x7FF) | (z & 0x7FF) << 11 | (y & 0x3FF) << 22)
 }
 
 /// `FallingBlockRenderer.shouldRender` drops a falling block whose own state is
@@ -5612,6 +5631,10 @@ impl Game<'_> {
         }
         let native_authoritative = self.native_authoritative();
         let mut level = GameLevel {
+            cake_probe: false,
+            cake_requested: std::cell::Cell::new(false),
+            cake_answer: None,
+            api_level: self.level(self.dim.id()),
             command_block_transition: None,
             gateway_servers: &mut self.be_anims.gateway_servers,
             border: self.border.geometry(),
@@ -7061,14 +7084,8 @@ impl Game<'_> {
                 .behaviours()
                 .data(state)
                 .is(horizon_world::level::classes::Class::Door)
-            && mod_api::__private::listened(mod_api::HookId::PlayerHarvestCheck)
         {
-            self.native_player_harvest_check(
-                self.own_entity_id() as u32,
-                pos,
-                state.0,
-                &mut correct_tool,
-            );
+            self.mod_harvest_check(pos, state, &mut correct_tool);
         }
         let source = self
             .lan_acting_uuid
@@ -7090,14 +7107,7 @@ impl Game<'_> {
                     .res
                     .items()
                     .correct_for_drops(held.as_ref(), &facts.name);
-            if mod_api::__private::listened(mod_api::HookId::PlayerHarvestCheck) {
-                self.native_player_harvest_check(
-                    self.own_entity_id() as u32,
-                    pos,
-                    state.0,
-                    &mut harvest,
-                );
-            }
+            self.mod_harvest_check(pos, state, &mut harvest);
             if removed {
                 self.mine_block_with_held(&facts.name, facts.hardness);
             }
@@ -7507,7 +7517,7 @@ impl Game<'_> {
                     } else {
                         empty_template_ran = true;
                         let player = self.use_context();
-                        self.with_level(|b, level, ticks| {
+                        self.with_block_use_level(|b, level, ticks| {
                             b.use_without_item(level, ticks, state, block_hit, player)
                         })
                     };
@@ -18142,23 +18152,6 @@ mod escape_tests {
 }
 
 impl Game<'_> {
-    fn dark_outside(&self) -> bool {
-        !self.dimension_type().has_fixed_time && self.sky_darken() >= 4
-    }
-    fn can_have_weather(&self) -> bool {
-        level_can_have_weather(
-            self.world.shape.sky_light,
-            self.world.shape.has_ceiling,
-            self.dim == Dim::End,
-        )
-    }
-    fn weather_levels(&self, partial: f32) -> (f32, f32) {
-        if self.can_have_weather() {
-            self.world.weather.levels(partial)
-        } else {
-            (0.0, 0.0)
-        }
-    }
     fn held_mut(&mut self) -> &mut Option<ItemStack> {
         self.stack_in_mut(self.held_slot())
     }
@@ -18311,12 +18304,6 @@ impl Game<'_> {
             self.flash -= 1;
         }
         // The rain sounds come with the rain splashes (`tick_particles`).
-    }
-}
-
-impl Game<'_> {
-    fn held(&self) -> Option<&ItemStack> {
-        self.stack_in(self.held_slot())
     }
 }
 

@@ -12,6 +12,7 @@ pub(in crate::game) use fire::{
     BlockDropsCall, BlockScreenEffectDrawCall, ConnectsToCall, EntityChangeBlockPreCall,
     ItemAfterVerticalCollisionCall, UpdateShapeCall,
 };
+use mod_api::BlockEntityRef;
 
 use super::native_data_maps::DataMapType;
 use super::{
