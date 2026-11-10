@@ -112,6 +112,8 @@ fn bounded_codec_refuses_malformed_without_mutation() {
     );
     assert_eq!(decode(&[4]), Some(Message::Resnapshot));
     let messages = [
+        Message::Hello,
+        Message::Ready,
         Message::Offer(vec!["demo:pot".into()]),
         Message::Snapshot {
             epoch: 4,
@@ -159,4 +161,45 @@ fn bounded_codec_refuses_malformed_without_mutation() {
     .unwrap();
     *malformed.last_mut().unwrap() = 2;
     assert!(decode(&malformed).is_none());
+}
+
+#[test]
+fn payload_budget_bounds_all_snapshot_producing_routes() {
+    let mut budget = RequestBudget::default();
+    let now = Instant::now();
+    for _ in 0..20 {
+        assert!(budget.accept(now));
+    }
+    for _ in 0..100 {
+        assert!(!budget.accept(now));
+    }
+    assert!(budget.accept(now + Duration::from_secs(1)));
+    assert!(decode(&[5, 0]).is_none());
+    assert!(decode(&[6, 2]).is_none());
+}
+
+#[test]
+fn connected_replacement_removes_destination_only_flags() {
+    let mut books = CustomBooks::default();
+    books.set("demo:oven", flags(true, true)).unwrap();
+    let mut server = Authority::negotiate(12, registered().into_iter().collect(), &registered());
+    let mut client = ClientView::default();
+    assert!(client.receive(server.snapshot(&books), &registered()));
+    let mut imported = CustomBooks::default();
+    imported.set("demo:pot", flags(true, false)).unwrap();
+    books = imported;
+    server.revision += 1;
+    assert!(client.receive(server.snapshot(&books), &registered()));
+    assert_eq!(client.books.get("demo:pot"), flags(true, false));
+    assert_eq!(client.books.get("demo:oven"), flags(false, false));
+    assert!(!client.receive(
+        Message::Update {
+            epoch: 12,
+            revision: 1,
+            key: "demo:oven".into(),
+            flags: flags(true, true)
+        },
+        &registered()
+    ));
+    assert_eq!(client.books.get("demo:oven"), flags(false, false));
 }

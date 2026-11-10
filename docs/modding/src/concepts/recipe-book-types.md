@@ -141,7 +141,7 @@ exactly one entry. Reject malformed/oversized payloads before allocation or
 mutation, including duplicate snapshot keys. Rate-limit requests to 20 per
 second per player; excess requests are rejected and cannot alter flags. Client
 UI may show pending intent but only authoritative replies enter saved state.
-Single-player uses the same server apply operation without network serialization.
+The design called for single-player to use the same server apply operation without serialization; this build instead preserves the existing integrated server's byte-pipe connection and identical negotiated, rate-limited authority semantics, because a typed local route needs per-connection ordered queues bound to integrated player ownership and reconnect lifetime.
 
 ## Worked book and acceptance cases
 
@@ -241,3 +241,10 @@ change. There is no per-tick mod scan or new tick allocation. A connection's
 request replay guard and rate allowance survive rejected requests and repeat
 offers. Disconnect removes the connection authority and clears pending client
 intent; the saved server map remains independent of the client view.
+
+The response budget covers every payload, including malformed input and
+snapshot requests. Once exhausted, a negotiated peer receives a one-byte busy
+control reply instead of another large snapshot. The client disables the custom
+view and coalesces a retry after one second; a busy response schedules the next
+retry, and a successful authoritative snapshot cancels it. This bounds response
+amplification without leaving a lost resnapshot or pending UI intent unresolved.

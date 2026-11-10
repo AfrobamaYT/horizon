@@ -23,9 +23,11 @@ pub(super) const PER_TICK: u32 = 32;
 #[derive(Default)]
 pub(super) struct NativeNet {
     pub(super) book_connections:
-        HashMap<u32, horizon_client::recipe_book::settings_sync::Authority>,
+        HashMap<u32, horizon_client::recipe_book::settings_connection::Connection>,
     pub(super) book_view: horizon_client::recipe_book::settings_sync::ClientView,
     pub(super) book_request: u64,
+    pub(super) book_ready: bool,
+    pub(super) book_retry_at: Option<std::time::Instant>,
     from_players: Vec<(u128, Message)>,
     from_counts: HashMap<u128, u32>,
     to_players: Vec<(u128, Vec<u8>)>,
