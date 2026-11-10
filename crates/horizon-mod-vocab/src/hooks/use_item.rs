@@ -35,6 +35,9 @@ pub trait Hooks {
     /// starts. Each click reaches it once. Set `claimed` to take the use: the
     /// hand swings and the item's own use doesn't run. Server-side, for every
     /// player of the world; an item on cooldown is never used.
+    /// `hand` is the interaction hand of THIS click, including an instantaneous
+    /// air use. Unlike this field, `living_used_item_hand` answers only during
+    /// active item use. This is `PlayerInteractEvent.RightClickItem.getHand`.
     #[hook(
         side = "server",
         contract = "cancel",
@@ -43,5 +46,5 @@ pub trait Hooks {
         key = "stack",
         neoforge = "PlayerInteractEvent.RightClickItem"
     )]
-    fn use_item();
+    fn use_item(stack: &ItemStack, hand: Hand, claimed: &mut bool);
 }

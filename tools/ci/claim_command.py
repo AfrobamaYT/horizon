@@ -10,6 +10,9 @@ A comment on an issue, on its first line:
     /unclaim           unassigns the commenter
     /unclaim @login    the repository owner, Ludovic and trusted reviewers release someone else's claim
 
+Trailing command punctuation is allowed. `/claim` ignores explanatory text; `/unclaim` targets the commenter
+unless the entire remainder of that first line is a login.
+
 An assigned issue is taken, and so is one claimed on Discord (Kira's `in progress` label). Trackers and proposals
 (labels `tracker`, `proposal`, `not claimable`, set by maintainers) are never claimed whole. Refused with a one-line
 answer: a pull request (claim the issue it fixes), a closed or locked issue, or an issue someone else holds.
@@ -28,6 +31,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import string
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -40,7 +44,6 @@ import nightly_set as ns  # noqa: E402  (the same trusted reviewers and owner)
 PREFIX = "🤖 Agent: "
 STALE = timedelta(days=5)
 LOGIN = re.compile(r"^@?([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))$")
-USAGE = "Use `/claim` or `/unclaim` (the repository owner and trusted reviewers: `/unclaim @login`)."
 # The login GitHub shows for this workflow's token: `github-actions[bot]` in REST, `github-actions` in GraphQL.
 BOT_LOGINS = ("github-actions", "github-actions[bot]")
 # Kira's Discord `/claim` marks an issue with this label (horizon-rust/kira, WORK.label): it is taken too.
@@ -69,20 +72,18 @@ def safe(text: str) -> str:
 
 
 def parse(body: str) -> Command | None:
-    """The command on a comment's first line; None when it isn't one. Raises Refused when it is one, but wrong."""
+    """Read the first word, allowing trailing punctuation; only an exact unclaim login selects another person."""
     line = next((line.strip() for line in body.splitlines() if line.strip()), "")
     # Agents start every comment with "🤖 Agent:" (CLAUDE.md), so their `/claim` follows it.
     line = re.sub(r"^🤖\s*Agent:\s*", "", line)
-    m = re.match(r"^/(\w+)(?:\s+(.*))?$", line)
-    if not m or m.group(1).lower() not in ("claim", "unclaim"):
+    words = line.split(maxsplit=1)
+    command = words[0].rstrip(string.punctuation).lower() if words else ""
+    if command not in ("/claim", "/unclaim"):
         return None
-    verb, rest = m.group(1).lower(), (m.group(2) or "").strip()
-    if not rest:
-        return Command(verb)
-    who = LOGIN.match(rest)
-    if verb == "claim" or not who:
-        raise Refused(f"`{safe(rest)}` isn't understood here. {USAGE}")
-    return Command(verb, who.group(1))
+    verb = command[1:]
+    rest = words[1] if len(words) > 1 else ""
+    who = LOGIN.match(rest) if verb == "unclaim" else None
+    return Command(verb, who.group(1) if who else None)
 
 
 def is_team(actor: ns.Actor, reviewers: ns.Reviewers, repo: str) -> bool:

@@ -225,6 +225,7 @@ fn catalog_for_mod_with(
         &fresh.join(super::inject::POINTS),
         &fresh.join(internals::INTERNALS),
         horizon_platform::mod_build::api_gen::staging::Mode::Discovery,
+        horizon_mod_package::manifest::API,
     )?;
     fs::write(fresh.join(".discovery-ready"), "").map_err(|e| e.to_string())?;
     if game.exists() {

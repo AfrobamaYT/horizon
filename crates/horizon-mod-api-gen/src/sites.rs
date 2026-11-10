@@ -286,6 +286,8 @@ pub struct Site {
     /// Statement and nesting-path fingerprint, independent of ordinal drift.
     pub ctx: String,
     pub listener: String,
+    /// Source-only move record and consuming forwarding capability.
+    pub once: bool,
     pub record: String,
     pub receiver: String,
     pub args: Vec<(String, String)>,

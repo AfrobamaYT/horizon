@@ -101,6 +101,7 @@ fn run(proof: Proof, private: bool) {
         &catalog_dir.join("points.json"),
         &catalog_dir.join("internals.json"),
         horizon_platform::mod_build::api_gen::staging::Mode::Build,
+        horizon_mod_package::manifest::API,
     )
     .unwrap();
     let catalog = internals::Catalog::read(&catalog_dir).unwrap();

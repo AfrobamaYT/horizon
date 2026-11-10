@@ -33,6 +33,20 @@ pub(super) struct PreparedWorld {
     pub owner_migration: Option<(u128, u128)>,
 }
 
+/// The dedicated server's `Main` takes level.dat_old without asking
+/// (`getUnfixedDataTagWithFallback`): there is no world list to recover from. The integrated
+/// server's world opens from that list, which offers the recovery instead, whatever the launch
+/// configuration says.
+fn fall_back_to_level_dat_old_without_asking(
+    role: execution_role::ExecutionRole,
+    save_root: &std::path::Path,
+    folder: &str,
+) {
+    if role.is_dedicated_server() && horizon_client::save::fall_back_to_level_dat_old(save_root) {
+        log::warn!("Horizon: level.dat of \"{folder}\" did not read; level.dat_old took its place");
+    }
+}
+
 impl WorldRequest {
     pub fn new(
         folder: &str,
@@ -125,15 +139,7 @@ impl WorldRequest {
         // openWorldLoadLevelData: level data that does not read is RecoverWorldDataScreen's to
         // handle (the title screen shows it); a world opened another way must not become a
         // new one with a random seed under the same name.
-        // The dedicated server's `Main` takes level.dat_old without asking
-        // (`getUnfixedDataTagWithFallback`): there is no world list to recover from.
-        if options.dedicated.is_some()
-            && horizon_client::save::fall_back_to_level_dat_old(&save_root)
-        {
-            log::warn!(
-                "Horizon: level.dat of \"{folder}\" did not read; level.dat_old took its place"
-            );
-        }
+        fall_back_to_level_dat_old_without_asking(options.execution_role, &save_root, &folder);
         if let Some(issue) = horizon_client::save::level_data_needs_recovery(&save_root) {
             let why = match issue {
                 horizon_client::save::DatIssue::Missing => "level.dat is missing".to_owned(),
@@ -1231,6 +1237,46 @@ pub(super) fn make_streaming(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A world whose level.dat does not read but whose level.dat_old does: only the
+    /// dedicated server restores it unasked. Every role here carries the launch configuration
+    /// (`options.dedicated`) a dedicated server and the integrated server thread both have, so
+    /// it cannot be what decides.
+    #[test]
+    fn only_the_dedicated_role_takes_level_dat_old_unasked() {
+        use execution_role::ExecutionRole::{Client, DedicatedServer, IntegratedServer};
+        for (role, restored) in [
+            (DedicatedServer, true),
+            (IntegratedServer, false),
+            (Client, false),
+        ] {
+            let dir = std::env::temp_dir().join(format!(
+                "horizon-level-dat-old-{role:?}-{}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            Level {
+                name: "Recovered".into(),
+                ..Level::default()
+            }
+            .write(&dir)
+            .unwrap();
+            std::fs::copy(dir.join("level.dat"), dir.join("level.dat_old")).unwrap();
+            std::fs::write(dir.join("level.dat"), b"not a level").unwrap();
+            let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+            options.dedicated = Some(Vec::new());
+            options.execution_role = role;
+
+            fall_back_to_level_dat_old_without_asking(options.execution_role, &dir, "world");
+
+            assert_eq!(
+                horizon_client::save::level_dat_issue(&dir, false).is_none(),
+                restored,
+                "{role:?}"
+            );
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
 
     #[test]
     fn a_levels_sea_level_comes_from_its_mod_or_its_noise_settings() {
