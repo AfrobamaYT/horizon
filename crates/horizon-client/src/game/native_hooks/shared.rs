@@ -1,6 +1,7 @@
 use super::screen_build::ObservedScreen;
 use crate::game::api_values::{TryIntoApi, TryIntoEngine};
 use horizon_client::containers::ModBlockEntity as EngineBlockEntity;
+use screen_chars::chars_to_type;
 
 struct ContentsChangedGuard<'a, 'game> {
     game: &'a mut Game<'game>,
@@ -777,19 +778,6 @@ fn screen_text_hooked(text: &str, mut canceled: impl FnMut(char) -> bool) -> Opt
         return None;
     }
     Some(left)
-}
-
-/// What of a key press's text is characters for the
-/// `ScreenEvent.CharacterTyped.Pre` hook: control ones are gone (the key's own
-/// handling takes those, and vanilla fires no `charTyped` for them).
-/// With the edit modifier held the key is a shortcut and its characters are
-/// not text (`types_text`): no hook hears them, as vanilla's `textInput`
-/// gets none for Ctrl+A.
-fn chars_to_type(text: &str, types_text: bool) -> String {
-    if !types_text {
-        return String::new();
-    }
-    text.chars().filter(|c| !c.is_control()).collect()
 }
 
 /// The hook points. Each does nothing in Horizon.
