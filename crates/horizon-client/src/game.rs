@@ -7979,7 +7979,6 @@ impl Game<'_> {
         consumed: &horizon_client::items::ItemStack,
         effect: &horizon_client::items::ConsumeEffect,
         mob: Option<mod_api::LivingRef>,
-        allow_native: bool,
     ) -> Option<bool> {
         use horizon_client::items::ConsumeEffect;
         Some(match effect {
@@ -8079,11 +8078,7 @@ impl Game<'_> {
                 true
             }
             ConsumeEffect::Native { kind, data } => {
-                if !allow_native {
-                    return None;
-                }
-                self.native_consume_effect(kind, data);
-                return None;
+                consume_effect_dispatch::dispatch(kind, || self.native_consume_effect(kind, data))
             }
         })
     }
