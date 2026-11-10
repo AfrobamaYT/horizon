@@ -60,4 +60,10 @@ if __name__ == "__main__":
     parser.add_argument("--launcher", action="store_true", help="answer for the launcher instead")
     args = parser.parse_args()
     needs = needs_launcher if args.launcher else needs_rust
-    print(f"required={str(needs(changed_paths(args.base, args.head))).lower()}")
+    paths = changed_paths(args.base, args.head)
+    print(f"required={str(needs(paths)).lower()}")
+    sample = any(path in ROOT_RUST or path == "tools/ci/check_machine_sample.py"
+                 or path.startswith(("crates/horizon-mod-", "crates/horizon-core/",
+                                     "crates/horizon-game-discovery/"))
+                 for path in paths)
+    print(f"sample={str(sample).lower()}")
