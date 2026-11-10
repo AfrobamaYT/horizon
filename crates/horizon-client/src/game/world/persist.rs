@@ -40,21 +40,48 @@ use {
 
 /// An entity object retained by passenger links but refused level residency.
 /// Queries and tracking never visit this store; internal topology and saving do.
-/// Other rejected object kinds can be added without changing residency ownership.
+/// A boat or minecart is only ever a root here: mobs are the only modeled riders.
 pub(super) enum OffLevel {
     Mob(Mob),
+    Boat(super::boats::Boat),
+    Cart(super::minecarts::Minecart),
 }
 
 impl OffLevel {
-    fn as_mob(&self) -> Option<&Mob> {
+    pub(super) fn as_mob(&self) -> Option<&Mob> {
         match self {
             Self::Mob(mob) => Some(mob),
+            Self::Boat(_) | Self::Cart(_) => None,
         }
     }
 
     fn as_mob_mut(&mut self) -> Option<&mut Mob> {
         match self {
             Self::Mob(mob) => Some(mob),
+            Self::Boat(_) | Self::Cart(_) => None,
+        }
+    }
+
+    fn as_boat(&self) -> Option<&super::boats::Boat> {
+        match self {
+            Self::Boat(boat) => Some(boat),
+            Self::Mob(_) | Self::Cart(_) => None,
+        }
+    }
+
+    fn as_cart(&self) -> Option<&super::minecarts::Minecart> {
+        match self {
+            Self::Cart(cart) => Some(cart),
+            Self::Mob(_) | Self::Boat(_) => None,
+        }
+    }
+
+    /// Only a retained mob can be removed while dependents keep it: a boat or
+    /// cart is never selectable, so it leaves only with its passenger graph.
+    pub(super) fn is_removed(&self) -> bool {
+        match self {
+            Self::Mob(mob) => mob.removed,
+            Self::Boat(_) | Self::Cart(_) => false,
         }
     }
 }
@@ -1149,8 +1176,8 @@ impl Game<'_> {
     fn vehicle_of(&self, id: u32) -> Option<u32> {
         let v = self.mob_object(id)?.extra.mount?;
         let there = self.mob_objects().any(|m| m.id == v)
-            || self.boats.iter().any(|b| b.id == v)
-            || self.carts.iter().any(|c| c.id == v);
+            || self.boat_object(v).is_some()
+            || self.cart_object(v).is_some();
         there.then_some(v)
     }
     /// The root vehicle `root` with its passengers (`Entity.save`).
@@ -1158,19 +1185,17 @@ impl Game<'_> {
         if let Some(object) = self.mob_object_slot(root) {
             return Some(self.mob_object_tree_nbt(object));
         }
-        if self.boats.iter().any(|b| b.id == root) {
+        if self.boat_object(root).is_some() {
             let uuid = self.uuid_for(root);
-            let b = self.boats.iter().find(|b| b.id == root)?;
+            let b = self.boat_object(root)?;
             let mut tag = b.to_nbt(uuid, self.persist.raw.get(&root));
             self.put_mob_passengers(&mut tag, root);
             write_attachments(&mut tag, root, &self.entity_attachments);
             return Some(tag);
         }
-        if !self.carts.iter().any(|c| c.id == root) {
-            return None;
-        }
+        self.cart_object(root)?;
         let uuid = self.uuid_for(root);
-        let c = self.carts.iter().find(|c| c.id == root)?;
+        let c = self.cart_object(root)?;
         let mut tag = c.to_nbt(uuid, self.persist.raw.get(&root));
         self.put_mob_passengers(&mut tag, root);
         write_attachments(&mut tag, root, &self.entity_attachments);
@@ -1751,6 +1776,22 @@ impl Game<'_> {
                 }
                 keep
             });
+            if !self.persist.off_level.is_empty() {
+                // A retained boat or cart root is in no section and never saved:
+                // it lives only while a passenger or player still rides it.
+                let ridden: HashSet<u32> = self
+                    .mob_objects()
+                    .filter_map(|m| m.extra.mount)
+                    .chain(riding)
+                    .collect();
+                self.persist.off_level.retain(|id, object| {
+                    let keep = object.as_mob().is_some() || ridden.contains(id);
+                    if !keep {
+                        removed.push(*id);
+                    }
+                    keep
+                });
+            }
             self.dropped.retain(|e| {
                 let keep = !gone(e.position);
                 if !keep {
@@ -1805,7 +1846,7 @@ impl Game<'_> {
     pub(super) fn score_destroyed_entities(&mut self) {
         if !self.persist.off_level.is_empty() {
             for (&id, object) in &self.persist.off_level {
-                if matches!(object, OffLevel::Mob(mob) if mob.removed)
+                if object.is_removed()
                     && self.persist.score_destroyed.insert(id)
                     && let Some(uuid) = self.persist.uuids.get(&id)
                 {
@@ -1841,9 +1882,12 @@ impl Game<'_> {
         if !self.persist.off_level.is_empty() {
             // Query residency is not destruction. Rejected objects still own
             // their UUID state until removed, just like registered objects.
-            alive.extend(self.persist.off_level.iter().filter_map(|(&id, object)| {
-                matches!(object, OffLevel::Mob(mob) if !mob.removed).then_some(id)
-            }));
+            alive.extend(
+                self.persist
+                    .off_level
+                    .iter()
+                    .filter_map(|(&id, object)| (!object.is_removed()).then_some(id)),
+            );
         }
         for (id, uuid) in candidates {
             if !alive.contains(&id) {
@@ -1853,11 +1897,7 @@ impl Game<'_> {
     }
     pub(super) fn prune_entity_memory(&mut self) {
         if !self.persist.off_level.is_empty()
-            && self
-                .persist
-                .off_level
-                .values()
-                .any(|object| matches!(object, OffLevel::Mob(mob) if mob.removed))
+            && self.persist.off_level.values().any(OffLevel::is_removed)
         {
             // Complete the former resident's destruction before graph GC can
             // forget the UUID retained solely for dismount geometry.
@@ -1933,10 +1973,12 @@ impl Game<'_> {
         keys: &HashSet<ChunkKey>,
     ) -> Option<(ChunkKey, Tag)> {
         let m = &self.mobs[i];
+        // `Entity.shouldBeSaved`: a passenger saves only under its root, even
+        // when that root is a boat or cart retained off-level and never saved.
         let saves = self.mob_root(MobObject::Resident(i)) == MobObject::Resident(i)
-            && m.extra.mount.is_none_or(|v| {
-                self.boats.iter().all(|b| b.id != v) && self.carts.iter().all(|c| c.id != v)
-            })
+            && m.extra
+                .mount
+                .is_none_or(|v| self.boat_object(v).is_none() && self.cart_object(v).is_none())
             && keys.contains(&chunk_of(m.position))
             && !m.removed;
         saves.then(|| (chunk_of(self.mobs[i].position), self.mob_tree_nbt(i)))
