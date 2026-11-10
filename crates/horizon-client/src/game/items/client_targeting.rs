@@ -366,11 +366,24 @@ mod tests {
                 let mut held = horizon_items::items::ItemStack::new("minecraft:stick", 1);
                 held.data_mut().set_other(
                     "minecraft:attack_range",
-                    Some(horizon_core::nbt::Tag::Compound(vec![
-                        ("min_reach".into(), horizon_core::nbt::Tag::Float(0.0)),
-                        ("max_reach".into(), horizon_core::nbt::Tag::Float(0.25)),
-                        ("hitbox_margin".into(), horizon_core::nbt::Tag::Float(0.0)),
-                    ])),
+                    Some(horizon_core::nbt::Tag::Compound(
+                        [
+                            (
+                                "min_reach".into(),
+                                horizon_core::nbt::Tag::Float(0.0f32.to_bits()),
+                            ),
+                            (
+                                "max_reach".into(),
+                                horizon_core::nbt::Tag::Float(0.25f32.to_bits()),
+                            ),
+                            (
+                                "hitbox_margin".into(),
+                                horizon_core::nbt::Tag::Float(0.0f32.to_bits()),
+                            ),
+                        ]
+                        .into_iter()
+                        .collect(),
+                    )),
                 );
                 game.inventory[0] = Some(held);
                 assert!(game.targeting_entity_hit(entity).is_none());
