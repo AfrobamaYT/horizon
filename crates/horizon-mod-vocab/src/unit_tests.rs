@@ -1033,4 +1033,9 @@ fn player_level_and_dimension_reads() {
         p2.dimension(&host),
         Some(crate::Identifier::parse("minecraft:the_nether").unwrap())
     );
+    host.players = Default::default();
+    for disconnected in [p1, p2] {
+        assert_eq!(disconnected.level(&host), None);
+        assert_eq!(disconnected.dimension(&host), None);
+    }
 }
