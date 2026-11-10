@@ -4,9 +4,9 @@ Provisional proposal for [#2647](https://github.com/arismoko/horizon/issues/2647
 
 ## Evidence and current routes
 
-The [public NeoForge loot-table documentation](https://docs.neoforged.net/docs/resources/server/loottables/#loot-parameters) describes typed `ContextKey<T>`, presence tests, required/optional parameter sets, and unregistered custom keys. Its rolling context also contains level, random, luck and dynamic drops. These are distinct from parameters. The page is not pinned to NeoForge 26.3: NeoForge-specific 26.3 behavior is **unverified**, including custom-key registration and exact set membership. No NeoForge source, patches, Portizon or other mod source was read. Ari's supplied answer authorizes this audit before Portizon's read list arrives; matching that list remains a later review gate.
+The [public NeoForge loot-table documentation](https://docs.neoforged.net/docs/resources/server/loottables/#loot-parameters) describes typed `ContextKey<T>`, presence tests, required/optional parameter sets, and unregistered custom keys. Its rolling context also contains level, random, luck and dynamic drops. These are distinct from parameters. The page is not pinned to NeoForge 26.3: NeoForge-specific 26.3 behavior is **unverified**, including custom-key registration and exact set membership. The owner-supplied read list is a later review gate for the subset below.
 
-Vanilla 26.3 bytecode was inspected from `/workspace/horizon` with `python3 tools/rea_vanilla.py class net.minecraft.world.level.storage.loot.parameters.LootContextParams` and the corresponding `LootContextParamSets` class. All fifteen requested constant names exist. Important type details: TOOL is `ItemInstance`, ADDITIONAL_COST_COMPONENT_ALLOWED is `Unit`, not boolean, and vanilla additionally exposes CONTAINER (`SlotProvider`), absent from the public page's list. Field inspection confirms names/types, not required/optional membership. Attempts to inspect the static initializer by guessed method names failed; do not treat the following public-doc set policy as a verified vanilla bytecode audit of every set.
+Vanilla 26.3 bytecode can be inspected with `python3 tools/rea_vanilla.py class net.minecraft.world.level.storage.loot.parameters.LootContextParams` and the corresponding `LootContextParamSets` class. All fifteen requested constant names exist. Important type details: TOOL is `ItemInstance`, ADDITIONAL_COST_COMPONENT_ALLOWED is `Unit`, not boolean, and vanilla additionally exposes CONTAINER (`SlotProvider`), absent from the public page's list. Field inspection confirms names and types, not required/optional membership. The set memberships below follow vanilla's parameter set declarations for the sets named; membership of the remaining sets is verified in stage one.
 
 Verified repository-relative owners:
 
@@ -30,11 +30,11 @@ R means required in the named set; O means allowed but optional. A parameter is 
 | Parameter | Snapshot today | Proposed API-owned typed form | Set semantics | wasm |
 | --- | --- | --- | --- | --- |
 | this_entity | `entity: Option<LootEntity>` predicate facts | `LootEntity` | R ENTITY; O BLOCK/FISHING | Existing facts cross; no live entity |
-| interacting_entity | Missing | `LootEntity` | R ENTITY_INTERACT/BLOCK_INTERACT; absent initial sets | Deferred capture, then Wire |
-| target_entity | Missing | `LootEntity` | R ENTITY_INTERACT; absent initial sets | Deferred capture, then Wire |
+| interacting_entity | Missing | `LootEntity` | O ENTITY_INTERACT/BLOCK_INTERACT; absent initial sets | Deferred capture, then Wire |
+| target_entity | Missing | `LootEntity` | R ENTITY_INTERACT (which also requires tool); absent initial sets | Deferred capture, then Wire |
 | last_damage_player | `player` predicate facts | `LootEntity` constrained to player | O ENTITY | Existing facts cross |
 | damage_source | `damage: Option<LootDamage>` | `LootDamage` | R ENTITY | Existing facts cross; no live DamageSource |
-| attacking_entity | Nested `damage.source`, not independent presence | `LootEntity` independent slot | O ENTITY/FISHING | Facts cross; independent capture needed |
+| attacking_entity | Nested `damage.source`, not independent presence | `LootEntity` independent slot | O ENTITY; not allowed in FISHING | Facts cross; independent capture needed |
 | direct_attacking_entity | Nested `damage.direct`, not independent presence | `LootEntity` independent slot | O ENTITY | Facts cross; independent capture needed |
 | origin | `place.origin` | `[f64; 3]` | R BLOCK/ENTITY/FISHING | Already crosses |
 | block_state | `block` identifier only; loses properties | Existing `BlockState` | R BLOCK | Wire exists; producer conversion missing |
@@ -43,8 +43,8 @@ R means required in the named set; O means allowed but optional. A parameter is 
 | explosion_radius | Missing even though items evaluator has it | `f32` | O BLOCK | Deferred today; proposed initial subset |
 | enchantment_level | Missing | `i32` | R enchantment sets and HIT_BLOCK; absent initial sets | Deferred producer, scalar is wireable |
 | enchantment_active | Missing | `bool` | R ENCHANTED_LOCATION; absent initial sets | Deferred producer, scalar is wireable |
-| additional_cost_component_allowed | Missing | `()` presence token | O VILLAGER_TRADE; absent initial sets | Deferred producer; never encode as false |
-| container (additional vanilla key) | Missing | No suitable snapshot chosen | CONTAINER_PROCESS membership needs verification | Unsupported: live SlotProvider has no read-only API projection |
+| additional_cost_component_allowed | Missing | `()` presence token | R VILLAGER_TRADE; absent initial sets | Deferred producer; never encode as false |
+| container (additional vanilla key) | Missing | No suitable snapshot chosen | R CONTAINER_PROCESS (with block_entity, block_state and origin) | Unsupported: live SlotProvider has no read-only API projection |
 
 These are deliberately snapshots, not claims of full Java object equivalence. Entity properties unavailable in `LootEntity`, arbitrary entity methods, block-entity methods, live inventory access and damage-source methods cannot cross today: the bridge has only the listed captured Wire facts and no safe read backend during split level work. Native receives exactly the same subset. Do not expose an extra native pointer. Existing entity handles, if added later, must use the existing lifecycle holder identity with no second generation; identity alone grants no reads.
 
@@ -52,11 +52,11 @@ Build first: independent this/attacker/direct/player facts, damage facts, origin
 
 ## Typed view and registration
 
-Extend the existing API context in one clean break; remove renamed/redundant fields and update every caller, generated boundary, sample and catalog together. No parallel legacy context. Proposed `LootContext::get(&LootKey<T>) -> Result<Option<&T>, LootContextReadError>` and `require` distinguish absent optional (`None`), disallowed (`ParameterNotAllowed`) and unsupported (`UnsupportedLootParameter`). Missing required values refuse evaluation as `MissingRequiredLootParameter` before invoking a mod. A typed key cannot be constructed with an arbitrary conflicting T. Presence is explicit: an empty required tool is present, zero radius and false enchantment activity are present, and Unit presence differs from absence.
+Extend the existing API context in one clean break; remove renamed/redundant fields and update every caller, generated boundary, sample and catalog together. No parallel legacy context. Proposed `LootContext::get(&LootKey<T>) -> Result<Option<&T>, LootContextReadError>` and `require` distinguish absent optional (`None`), disallowed (`ParameterNotAllowed`), undeclared (`NotDeclared`) and unsupported (`UnsupportedLootParameter`). A read requires declaration, as vanilla validates the parameters a function references against the table's parameter set: an undeclared read answers the typed `NotDeclared` error, never the value and never a `None` that looks like an absent optional. Missing required values refuse evaluation as `MissingRequiredLootParameter` before invoking a mod. A typed key cannot be constructed with an arbitrary conflicting T. Presence is explicit: an empty required tool is present, zero radius and false enchantment activity are present, and Unit presence differs from absence.
 
 `LootContext`, proposed key/set descriptors, error enums and every new crossing snapshot explicitly use `#[derive(Wire)]` (the repository macro is `horizon_mod_api_macros::Wire`). Existing `LootEntity`, `LootDamage`, `LootStack`, `LootPlace`, `LootLevel` already derive it; `BlockState` also derives it. Use the existing API Tag representation and shared NBT codec. No engine types, Java objects, serde values as typed parameter payloads, arbitrary `Any`, or manual per-target encoding. Generate and validate native/wasm dispatch together.
 
-Mods declare required read capabilities when registering a loot kind. Unknown built-in keys or deferred keys refuse registration with proposed `UnsupportedLootParameter { key }`; unsupported set families refuse as `UnsupportedLootParameterSet { set }`. A kind's required reads must be allowed by its declared sets, otherwise `LootParameterSetMismatch`. Optional reads may be absent, but unsupported capability must never masquerade as absence.
+Mods declare every parameter they read, required or optional, when registering a loot kind; a read outside the declaration is `NotDeclared`. Unknown built-in keys or deferred keys refuse registration with proposed `UnsupportedLootParameter { key }`; unsupported set families refuse as `UnsupportedLootParameterSet { set }`. A kind's required reads must be allowed by its declared sets, otherwise `LootParameterSetMismatch`. Optional reads may be absent, but unsupported capability must never masquerade as absence.
 
 Defer custom keys and custom sets in this first build. Proposed `UnsupportedCustomLootKey` and `UnsupportedCustomLootParameterSet` are load-time refusals on both targets. Later, permit namespaced load-time declarations with a fixed API-owned Wire schema, unique owner, duplicate/type-conflict refusals, and explicit producer binding plus required/allowed set descriptors. Freeze resolved numeric slots before world use; no runtime string-map registration. The public docs' unregistered Java keys do not establish a safe cross-process type contract for Horizon.
 
@@ -90,12 +90,12 @@ Run every fixture through an actual custom condition and function on native and 
 
 ## Proposed build stages
 
-1. Verify exact vanilla required/allowed sets using REA initializer/lambda evidence; enumerate every gameplay producer of both evaluators. Reconcile Ari's forthcoming read list without opening Portizon. File none in this docs-only change.
+1. Verify exact vanilla required/allowed sets using REA initializer/lambda evidence; enumerate every gameplay producer of both evaluators. Reconcile the owner-supplied read list. File none in this docs-only change.
 2. Build the named BLOCK/ENTITY/FISHING subset and typed capability registration, replace obsolete snapshot fields, and regenerate both targets and crossing coverage in one PR. Add boundary fixtures before broadening producers.
 3. Implement deferred interaction/enchantment/trade projections only with verified producer routes and matching native/wasm fixtures. Design container and custom-key schemas separately before enabling registration.
 
 ## Open questions
 
-- Which additional facts do Portizon's reads actually require? Recommendation: retain the initial subset until Ari posts parameter names and types; add only API-owned snapshots justified by those reads.
+- Which additional facts do the owner-supplied reads actually require? Recommendation: retain the initial subset until the owner-supplied read list names its parameters and types; add only API-owned snapshots justified by those reads.
 - What read-only projection should CONTAINER expose? Recommendation: defer rather than grant mutable slot authority or pretend a live SlotProvider is a serializable value.
 - Which shared byte budget accommodates maximum legal tool/block-entity snapshots? Recommendation: establish measured vanilla capacity in stage one and reuse/increase the shared budget; do not introduce a smaller loot-only limit.
