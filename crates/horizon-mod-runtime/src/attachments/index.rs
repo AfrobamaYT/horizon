@@ -49,6 +49,15 @@ impl<H> std::ops::Deref for AttachmentSnapshot<H> {
     }
 }
 impl<H: Copy + Eq + Hash> AttachmentSnapshot<H> {
+    /// Build a captured bucket from transferred rows, preserving their order.
+    pub fn from_rows(rows: Vec<AttachmentRow<H>>) -> Self {
+        let mut snapshot = Self::default();
+        for row in rows {
+            snapshot.push(row);
+        }
+        snapshot
+    }
+
     fn push(&mut self, row: AttachmentRow<H>) {
         self.slots
             .insert((row.holder, row.generation), self.rows.len());
@@ -503,6 +512,10 @@ mod tests {
         assert_eq!(live.slot_of(&c), Some(1));
         assert_eq!(live.slot_of(&b), None);
         assert_eq!(old.slot_of(&c), Some(2));
+        let transferred = AttachmentSnapshot::from_rows(old.iter().cloned().collect());
+        assert_eq!(values(&transferred), [(1, 7), (2, 9), (3, 11)]);
+        assert_eq!(transferred.slot_of(&b), Some(1));
+        assert_eq!(transferred.slot_of(&c), Some(2));
         assert_eq!(values(&old), [(1, 7), (2, 9), (3, 11)]);
         assert!(index.unregister(&c).into_result());
         let seven = index.snapshot(&k);

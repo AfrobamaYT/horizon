@@ -111,7 +111,9 @@ impl crate::wire::Wire for AttachmentBatch {
                     .into_row(Arc::new(runtime::AttachmentEntry::from_saved(saved))),
             );
         }
-        Ok(Self(runtime::AttachmentBatch::new(Arc::new(result))))
+        Ok(Self(runtime::AttachmentBatch::new(Arc::new(
+            runtime::index::AttachmentSnapshot::from_rows(result),
+        ))))
     }
 }
 
