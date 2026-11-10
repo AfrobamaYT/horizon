@@ -31,8 +31,8 @@ impl RecipePropertyAddition {
 }
 /// A set of accepted items (expanded from an item, list or tag), and the
 /// items in its `HolderSet` order (`Ingredient.display`'s `TagSlotDisplay`).
-#[derive(Clone, Debug)]
-// exhaustive: the game builds it with a literal; mods only read it
+#[derive(Clone, Debug, PartialEq)]
+// exhaustive: placement providers and the game construct complete ingredient values
 #[derive(horizon_mod_api_macros::Wire)]
 pub struct Ingredient {
     /// The items it accepts, however the source shape named them.
@@ -48,7 +48,7 @@ pub struct Ingredient {
     pub children: Option<(Shape, Vec<Self>)>,
 }
 /// How a shape's children combine at match time.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 // exhaustive: a closed set the game matches without a wildcard
 #[derive(horizon_mod_api_macros::Wire)]
 pub enum Shape {

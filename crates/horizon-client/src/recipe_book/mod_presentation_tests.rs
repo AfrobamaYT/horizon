@@ -105,6 +105,7 @@ fn category(book: &str, id: &str, recipe: &str) -> RecipeBookCategory {
         displays: vec![mod_api::RecipeBookDisplayEntry {
             recipe: recipe.into(),
             displays: layouts(),
+            placement: None,
         }],
     }
 }
