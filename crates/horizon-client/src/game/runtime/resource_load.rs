@@ -3,6 +3,10 @@
 //! read from the prepared resources.
 use super::*;
 
+#[cfg(test)]
+#[path = "incoming_tests/resource_load_scope.rs"]
+mod scope_tests;
+
 pub(super) const STAGE_LINES: [&str; 10] = [
     "Loading menu",
     "Loading assets",
@@ -80,6 +84,10 @@ pub(super) fn named_scope<'scope, T: Send + 'scope>(
     name: &str,
     f: impl FnOnce() -> T + Send + 'scope,
 ) -> std::thread::ScopedJoinHandle<'scope, T> {
+    #[cfg(test)]
+    let inherited = mod_api::testing::inherit_mods(move |_: &()| f());
+    #[cfg(test)]
+    let f = move || inherited(&());
     std::thread::Builder::new()
         // Linux keeps 15 bytes of a thread name: a short prefix keeps them apart
         // ("horizon-load-core" and "horizon-load-collision" would both read
