@@ -12,6 +12,8 @@ use std::time::Instant;
 
 const THREADS: usize = 64;
 const CALLS: usize = 4096;
+// This cannot index any real record, even after capacity exhaustion.
+const OVERFLOW: usize = usize::MAX;
 static ENABLED: AtomicBool = AtomicBool::new(false);
 static EPOCH: AtomicUsize = AtomicUsize::new(0);
 // Unlike the admission epoch, this remains valid while stop drains existing guards.
@@ -57,6 +59,13 @@ pub(crate) struct Report {
     pub dropped: usize,
 }
 impl Report {
+    fn completed(&mut self, stored: StoredRecord) {
+        if stored.completed {
+            self.record(stored.record);
+        } else {
+            self.dropped += 1;
+        }
+    }
     fn record(&mut self, record: Record) {
         let a = self
             .calls
@@ -109,9 +118,14 @@ impl Report {
         text
     }
 }
+#[derive(Clone, Copy)]
+struct StoredRecord {
+    record: Record,
+    completed: bool,
+}
 struct Buffer {
     next: AtomicUsize,
-    records: Vec<UnsafeCell<Option<Record>>>,
+    records: Vec<UnsafeCell<Option<StoredRecord>>>,
 }
 // Each index is reserved once with fetch_add. Only its reserving guard writes it; stop
 // reads only after all guards have left. Buffers are never reused within an epoch.
@@ -226,7 +240,7 @@ pub(crate) fn stop_report() -> Report {
                 reason = "Profiling has drained all writers before reading records."
             )]
             if let Some(record) = unsafe { *record.get() } {
-                report.record(record);
+                report.completed(record);
             }
         }
     }
@@ -286,22 +300,25 @@ pub(crate) fn enter(call: ModCall) -> Option<Guard> {
                     reason = "Entry uniquely owns this reserved record; stop waits for ACTIVE."
                 )]
                 unsafe {
-                    *buffer.records[record].get() = Some(Record {
-                        mod_id: call.id,
-                        hook: call.hook,
-                        part: call.part,
-                        nanoseconds: (pool.clock)(),
+                    *buffer.records[record].get() = Some(StoredRecord {
+                        record: Record {
+                            mod_id: call.id,
+                            hook: call.hook,
+                            part: call.part,
+                            nanoseconds: (pool.clock)(),
+                        },
+                        completed: false,
                     });
                 }
                 record
             } else {
                 pool.dropped.fetch_add(1, SeqCst);
-                usize::MAX
+                OVERFLOW
             }
         }
         None => {
             pool.dropped.fetch_add(1, SeqCst);
-            usize::MAX
+            OVERFLOW
         }
     };
     Some(Guard {
@@ -347,7 +364,8 @@ pub(crate) fn leave(timing: mod_vocab::dispatch_scope::Timing) {
             reason = "Only this token writes its reserved record; stop waits for ACTIVE."
         )]
         if let Some(record) = unsafe { &mut *record.get() } {
-            record.nanoseconds = (pool.clock)().saturating_sub(record.nanoseconds);
+            record.record.nanoseconds = (pool.clock)().saturating_sub(record.record.nanoseconds);
+            record.completed = true;
         }
     }
     ACTIVE.fetch_sub(1, SeqCst);
@@ -375,6 +393,48 @@ mod tests {
     fn call(id: &'static str, hook: &'static str, part: Option<&'static str>) -> ModCall {
         ModCall { id, hook, part }
     }
+    #[test]
+    fn incomplete_records_are_skipped_and_counted() {
+        let mut report = Report::default();
+        report.completed(StoredRecord {
+            record: Record {
+                mod_id: "unfinished",
+                hook: "reserved",
+                part: None,
+                nanoseconds: u64::MAX,
+            },
+            completed: false,
+        });
+        assert!(report.calls.is_empty());
+        assert_eq!(report.dropped, 1);
+    }
+
+    #[test]
+    fn overflow_tokens_do_not_alias_records_or_lose_crash_owners() {
+        let _serial = SERIAL.lock().unwrap();
+        stop();
+        assert!(start_with_clock(tick));
+        let mut guards: Vec<_> = (0..CALLS)
+            .map(|_| enter_native_mod(call("nested", "frame", None)))
+            .collect();
+        let overflowing = enter_native_mod(call("overflow", "frame", None));
+        assert_eq!(
+            crate::content::crash::current_native_mod(),
+            Some("overflow")
+        );
+        drop(overflowing);
+        assert_eq!(crate::content::crash::current_native_mod(), Some("nested"));
+        while let Some(guard) = guards.pop() {
+            drop(guard);
+        }
+        assert_eq!(crate::content::crash::current_native_mod(), None);
+        assert_eq!(ACTIVE.load(SeqCst), 0);
+        let report = stop_report();
+        assert_eq!(report.dropped, 1);
+        assert_eq!(report.calls[&("nested", "frame", None)].count, CALLS as u64);
+        assert!(!report.calls.contains_key(&("overflow", "frame", None)));
+    }
+
     #[test]
     fn profiler_guards_and_threads() {
         let _serial = SERIAL.lock().unwrap();

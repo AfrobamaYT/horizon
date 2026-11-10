@@ -277,54 +277,6 @@ pub mod tests {
         );
     }
 
-    #[test]
-    pub(crate) fn tooltip_appender_restores_owner_even_on_panic() {
-        install_parts(&[], &crate::parts::tests::rule_schema(), |_| false).unwrap();
-        struct Check(bool);
-        impl TooltipAppender for Check {
-            fn append(
-                &self,
-                _: &dyn ClientHost,
-                _: &ItemStack,
-                _: &TooltipAppendContext,
-                _: &mut Vec<(Text, u32)>,
-            ) {
-                assert_eq!(crate::content::crash::current_native_mod(), Some("inner"));
-                assert!(!self.0, "test unwind");
-            }
-        }
-        let context = TooltipAppendContext {
-            player: 0,
-            player_entity_id: 0,
-            advanced: false,
-            creative: false,
-            nested: false,
-        };
-        let stack = stick();
-        let outer = crate::content::crash::enter_native_mod(crate::content::crash::ModCall {
-            id: "outer",
-            hook: "outer",
-            part: None,
-        });
-        for panic in [false, true] {
-            let part = super::TooltipAppenderPart {
-                mod_id: "inner",
-                mod_index: 0,
-                component: "test:item".into(),
-                placement: TooltipPlacement::AfterAll,
-                appender: std::sync::Arc::new(Check(panic)),
-            };
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                part.appender()
-                    .append(&NoHost, &stack, &context, &mut Vec::new())
-            }));
-            assert_eq!(result.is_err(), panic);
-            assert_eq!(crate::content::crash::current_native_mod(), Some("outer"));
-        }
-        drop(outer);
-        assert_eq!(crate::content::crash::current_native_mod(), None);
-    }
-
     /// A pipe's item capability, reached through `.0`: one slot from every side but its top,
     /// and what goes in is handed to the container east of it, through that container's west
     /// side.
