@@ -4,7 +4,7 @@ use super::{FORCED_FEATURES_RING, FORCED_FULL_RING, FORCED_TERRAIN_RING, Ranges}
 use crate::fast_hash::FxHashMap;
 use std::collections::HashSet;
 
-/// `Streaming::forced` and `mod_forced` as the Chebyshev distance from each column within
+/// The combined `Streaming::forced` set as the Chebyshev distance from each column within
 /// `REACH` of one to the nearest: `Ranges::in_main_range` answers by one lookup instead of going
 /// through every forced chunk (it is asked for every column, several times a tick).
 pub(super) struct ForcedCover {

@@ -700,7 +700,7 @@ pub struct Streaming {
     /// Set while `update` runs, after it refreshed `cover`: nothing else can
     /// change `extra` meanwhile, so `cover` answers without comparing them.
     cover_current: bool,
-    /// `forced` and `mod_forced` as each column's distance to the nearest one, made again when
+    /// The combined `forced` set as each column's distance to the nearest one, made again when
     /// they change; read like `cover`, while `cover_current`.
     forced_cover: Option<ForcedCover>,
     /// Mesh the sections for drawing (false on a server thread).
@@ -2945,7 +2945,7 @@ struct Ranges<'a> {
     /// `extra` indexed by a grid or buckets: coverage queries without a
     /// scan of every area.
     cover: Option<&'a ExtraCover>,
-    /// `forced` and `mod_forced` by distance (`Streaming::forced_cover`), while they match it.
+    /// The combined `forced` set by distance (`Streaming::forced_cover`), while it matches.
     forced_cover: Option<&'a ForcedCover>,
     band: Option<&'a Band>,
 }
