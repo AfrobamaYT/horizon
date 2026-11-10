@@ -840,22 +840,22 @@ use horizon_world::poi::PoiType as Poi;
 pub fn poi_at(w: &MobWorld, x: i32, y: i32, z: i32) -> Option<Poi> {
     poi_of_state(w, w.world.block(x, y, z))
 }
-/// The POI a block state is, if any (`PoiTypes.forState`), from the table
-/// of every state built on first use.
+/// Cache only vanilla classification. Mod additions are process-wide and replaced
+/// on reload, so every live resource set consults the current extension table.
 fn poi_of_state(w: &MobWorld, state: horizon_world::registry::BlockStateId) -> Option<Poi> {
     let table = w.data.pois.get_or_init(|| {
         (0..w.registry.len())
-            .map(|i| state_poi(w, horizon_world::registry::BlockStateId(i as u32)))
+            .map(|i| vanilla_state_poi(w, horizon_world::registry::BlockStateId(i as u32)))
             .collect()
     });
-    match table.get(state.0 as usize) {
-        Some(poi) => *poi,
-        None => state_poi(w, state),
-    }
+    let vanilla = table
+        .get(state.0 as usize)
+        .copied()
+        .unwrap_or_else(|| vanilla_state_poi(w, state));
+    vanilla.or_else(|| horizon_world::poi::extension(w.registry.state(state)?))
 }
-/// Vanilla's job sites, bed heads and bells, then the type a mod gave the state
-/// (`extend_poi_types`), Home and Meeting included.
-fn state_poi(w: &MobWorld, state: horizon_world::registry::BlockStateId) -> Option<Poi> {
+/// Vanilla's job sites, bed heads and bells, without reloadable mod additions.
+fn vanilla_state_poi(w: &MobWorld, state: horizon_world::registry::BlockStateId) -> Option<Poi> {
     let name = &*w.facts.get(state).name;
     if name == "minecraft:bell" {
         return Some(Poi::Meeting);
@@ -865,9 +865,7 @@ fn state_poi(w: &MobWorld, state: horizon_world::registry::BlockStateId) -> Opti
     if let Some(home) = runtime_bed_poi(name, part) {
         return Some(home);
     }
-    horizon_world::poi::saved_poi(state)
-        .filter(|p| p.is_job())
-        .or_else(|| horizon_world::poi::extension(state))
+    horizon_world::poi::vanilla_poi(state).filter(|p| p.is_job())
 }
 fn runtime_bed_poi(name: &str, part: Option<&str>) -> Option<Poi> {
     // PoiTypes.BEDS contains the colored Blocks.BED collection, not STRAW_BED.
@@ -4835,6 +4833,14 @@ mod poi_classification_tests {
                     })
                     .collect::<Vec<_>>();
                 assert_eq!(hay_states.len(), 3);
+                let meeting_states = hay_states
+                    .iter()
+                    .cloned()
+                    .map(|mut state| {
+                        state.poi = "minecraft:meeting".into();
+                        state
+                    })
+                    .collect();
                 horizon_world::poi::with_extensions(hay_states, |refusals| {
                     assert_eq!(refusals, Vec::<String>::new());
                     assert_eq!(poi_at(w, 0, 64, 0), Some(Poi::Home));
@@ -4843,6 +4849,13 @@ mod poi_classification_tests {
                     assert!(poi_exists(&mob, w, [0, 64, 0], PoiFilter::Home));
                     assert!(!poi_exists(&mob, w, [0, 64, 0], PoiFilter::Meeting));
                     assert!(!poi_exists(&mob, w, [1, 64, 0], PoiFilter::Home));
+                });
+                horizon_world::poi::with_extensions(meeting_states, |refusals| {
+                    assert!(refusals.is_empty());
+                    assert_eq!(poi_at(w, 0, 64, 0), Some(Poi::Meeting));
+                });
+                horizon_world::poi::with_extensions(Vec::new(), |_| {
+                    assert_eq!(poi_at(w, 0, 64, 0), None);
                 });
             },
         ));
