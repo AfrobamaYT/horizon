@@ -1,4 +1,5 @@
 //! Discover ordinary Parts modules, without joining their runtime bodies.
+mod installation;
 use crate::catalog::Catalog;
 use std::{fs, path::Path};
 use syn::{Item, Visibility};
@@ -79,6 +80,7 @@ pub(crate) fn source(root: &Path) -> Result<String, String> {
     }
     syn::parse_file(&template).map_err(|e| e.to_string())?;
     modules.push_str(&template);
+    modules.push_str(&installation::source(root)?);
     modules.push_str(&format!(
         "/// Shared Parts fixtures for engine tests.\n#[cfg(any(test, feature = \"testing\"))]\npub mod tests {{\n{fixtures}}}\n"
     ));
