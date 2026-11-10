@@ -100,6 +100,12 @@ fn build_with(tool: Tool, root: &Path) -> Result<(), String> {
         return Ok(());
     }
     let root = root.canonicalize().map_err(|e| e.to_string())?;
+    // Windows canonicalize keeps a `\\?\` verbatim prefix that `cargo metadata` never emits,
+    // so member manifest paths would not compare equal.
+    let root = root
+        .to_str()
+        .map(|text| PathBuf::from(text.strip_prefix(r"\\?\").unwrap_or(text)))
+        .unwrap_or(root);
     let declaration = horizon_mod_package::Manifest::parse(
         &fs::read_to_string(root.join(horizon_mod_package::manifest::MANIFEST))
             .map_err(|e| e.to_string())?,
