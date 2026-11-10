@@ -53,6 +53,8 @@ pub trait RecipesHost {
     /// Published asset/data read: available in Setup, Reloading and World.
     /// The validated category and icon of a custom recipe type, or None for
     /// an undeclared/invalid type, before resources load, or outside a world.
+    /// Returns the first category in category-id order when a type has several.
+    /// Any invalid declaration refuses the complete generation.
     /// Rebuilt when the recipe table changes. Does not unlock any recipes.
     #[access(PublishedResources)]
     fn recipe_book_category(&mut self, kind: &str) -> Option<RecipeBookCategory>;

@@ -213,6 +213,13 @@ A book has one menu and one search group; no search group can aggregate two
 books. Search membership is derived from the book's categories, so two mod
 books remain isolated and vanilla books have no mod search members.
 
+The live recipe-table declaration path validates the entire batch before
+publishing any categories. A refused batch retains its typed load error for
+that generation and publishes no partial book; reload or disconnect clears
+the cache. Multiple categories may share a recipe type. The engine's panel
+projection requires both the declared target menu and registered book key,
+and a category selected in another book cannot be reused as a tab here.
+
 This is display/index infrastructure, **not screen integration**. Existing
 screens do not yet render these declarations. A declaration's `book` is a
 registered `RecipeBookTypeKey` from #2415; it does not implicitly register
