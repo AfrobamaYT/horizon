@@ -5,28 +5,24 @@ mod tests {
     };
     use horizon_client::level_loading::Reason;
     use horizon_protocol::{connection::Pipe, packets::play::SpawnInfo};
-    use mod_api::{
-        HostSide, LevelTickPostEvent, LevelTickPreEvent, Hooks, LevelRef, ModEntry,
-    };
+    use mod_api::{Hooks, HostSide, LevelRef, LevelTickPostEvent, LevelTickPreEvent, ModEntry};
     use std::sync::{Arc, Mutex};
 
     struct Moments(Arc<Mutex<Vec<(&'static str, LevelRef, Option<i64>)>>>);
     #[mod_api::__subscriptions]
     impl Hooks for Moments {
-        fn level_tick_pre(
-            &self,
-            _: &mut dyn HostSide,
-            event: &mut LevelTickPreEvent,
-        ) {
-            let time = match host { HostSide::Client(h) => h.level_game_time(event.level), HostSide::Server(h) => h.level_game_time(event.level) };
+        fn level_tick_pre(&self, host: HostSide, event: &mut LevelTickPreEvent) {
+            let time = match host {
+                HostSide::Client(h) => h.level_game_time(event.level),
+                HostSide::Server(h) => h.level_game_time(event.level),
+            };
             self.0.lock().unwrap().push(("pre", event.level, time));
         }
-        fn level_tick_post(
-            &self,
-            _: &mut dyn HostSide,
-            event: &mut LevelTickPostEvent,
-        ) {
-            let time = match host { HostSide::Client(h) => h.level_game_time(event.level), HostSide::Server(h) => h.level_game_time(event.level) };
+        fn level_tick_post(&self, host: HostSide, event: &mut LevelTickPostEvent) {
+            let time = match host {
+                HostSide::Client(h) => h.level_game_time(event.level),
+                HostSide::Server(h) => h.level_game_time(event.level),
+            };
             self.0.lock().unwrap().push(("post", event.level, time));
         }
     }
@@ -43,6 +39,8 @@ mod tests {
                 game.native_lifecycle = NativeLifecycle::default();
                 let (client, _server) = Pipe::pair();
                 game.connect_local(client, "LevelTickTest").unwrap();
+                game.tick_remote_level().unwrap();
+                assert!(heard.lock().unwrap().is_empty(), "no level means no event");
                 let spawn = SpawnInfo {
                     dimension_type: 0,
                     dimension: "minecraft:overworld".into(),
@@ -74,7 +72,31 @@ mod tests {
 
                 heard.lock().unwrap().clear();
                 game.tick_remote_level().unwrap();
-                assert_eq!(*heard.lock().unwrap(), [("pre", level, Some(after)), ("post", level, Some(after + 1))]);
+                assert_eq!(
+                    *heard.lock().unwrap(),
+                    [
+                        ("pre", level, Some(after)),
+                        ("post", level, Some(after + 1))
+                    ]
+                );
+                heard.lock().unwrap().clear();
+                let failed = game.tick_remote_level_with(|_| Err("failed tick body".into()));
+                assert!(failed.is_err());
+                assert_eq!(
+                    *heard.lock().unwrap(),
+                    [("pre", level, Some(after + 1))],
+                    "failed ticks have no post event"
+                );
+                heard.lock().unwrap().clear();
+                let mut second = spawn.clone();
+                second.dimension = "minecraft:the_nether".into();
+                game.enter_remote_dimension(&second, false, Reason::Other);
+                let other = game.level("minecraft:the_nether").unwrap();
+                assert_ne!(level, other);
+                game.tick_remote_level().unwrap();
+                let moments = heard.lock().unwrap();
+                assert_eq!(moments.len(), 2);
+                assert_eq!((moments[0].1, moments[1].1), (other, other));
             });
         });
     }
