@@ -1,6 +1,8 @@
 //! Frozen mod-book membership and recipe-display validation, built on table reload.
 #[path = "mod_panel.rs"]
 mod panel;
+#[path = "mod_placement.rs"]
+mod placement;
 #[cfg(test)]
 #[path = "mod_index_tests.rs"]
 mod tests;
@@ -35,6 +37,7 @@ pub enum DisplayLoadError {
     DuplicateRecipe(String),
     ConflictingBook(String),
     InvalidLayout(String),
+    InvalidPlacement(String),
 }
 
 /// Immutable index. Search membership is derived from book ownership, not an
@@ -43,13 +46,15 @@ pub enum DisplayLoadError {
 pub struct ModBookIndex {
     categories: BTreeMap<String, RecipeBookCategory>,
     layouts: BTreeMap<String, super::slot_layout::CheckedSlotLayout>,
+    placements: BTreeMap<String, Option<crate::menu::place::custom_plan::MenuPlacement>>,
     books: BTreeMap<String, (String, String, Vec<String>)>,
 }
 impl ModBookIndex {
     pub fn build(
-        declarations: Vec<RecipeBookCategory>,
+        mut declarations: Vec<RecipeBookCategory>,
         resources: &dyn DisplayResources,
     ) -> Result<Self, DisplayLoadError> {
+        placement::validate_batch(&mut declarations, resources)?;
         let mut index = Self::default();
         for menu in mod_api::RecipeBookLayout::registered_menus() {
             let Some((_, recipe_type, layout)) = mod_api::RecipeBookLayout::registered(&menu)
@@ -124,6 +129,19 @@ impl ModBookIndex {
                 ));
             }
             for recipe in &category.displays {
+                if let Some(layout) = index.layouts.get(&category.target_menu) {
+                    let owner = mod_api::RecipeBookLayout::declaring_mod(&category.target_menu)
+                        .ok_or_else(|| {
+                            DisplayLoadError::InvalidPlacement(format!(
+                                "menu {} has no declaring mod",
+                                category.target_menu
+                            ))
+                        })?;
+                    index.placements.insert(
+                        recipe.recipe.clone(),
+                        placement::compile(owner, &category.target_menu, recipe, layout)?,
+                    );
+                }
                 if !resources.recipe(&recipe.recipe, &category.recipe_type) {
                     return Err(unknown("recipe", &recipe.recipe));
                 }
@@ -155,6 +173,21 @@ impl ModBookIndex {
             categories.sort();
         }
         Ok(index)
+    }
+    /// Authoritative, validated plan; explicit NOT_PLACEABLE differs from an unknown recipe.
+    pub fn placement(
+        &self,
+        recipe: &str,
+    ) -> Result<
+        &crate::menu::place::custom_plan::MenuPlacement,
+        crate::menu::place::custom_plan::PlacementRefusal,
+    > {
+        use crate::menu::place::custom_plan::PlacementRefusal as Refused;
+        self.placements
+            .get(recipe)
+            .ok_or(Refused::Unavailable)?
+            .as_ref()
+            .ok_or(Refused::NotPlaceable)
     }
     /// Frozen, validated menu-order destination map, if explicitly declared.
     pub fn layout(&self, menu: &str) -> Option<&super::slot_layout::CheckedSlotLayout> {
