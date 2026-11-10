@@ -159,6 +159,41 @@ fn regular_file_root_always_falls_back() {
     assert_eq!(fs::read(root).unwrap(), b"not a directory");
 }
 
+#[test]
+fn stale_temporaries_are_removed_and_fresh_ones_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join(".horizon-cache/wasm");
+    drop(ModuleCache::new(root.clone()));
+    let stale = root.join(".1-0.tmp");
+    let fresh = root.join(".2-0.tmp");
+    let entry = root.join("kept.cwasm");
+    for path in [&stale, &fresh, &entry] {
+        fs::write(path, b"x").unwrap();
+    }
+    let two_hours_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
+    for path in [&stale, &entry] {
+        File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(two_hours_ago)
+            .unwrap();
+    }
+    drop(ModuleCache::new(root.clone()));
+    assert!(!stale.exists());
+    assert!(fresh.exists());
+    assert!(entry.exists());
+}
+
+#[test]
+fn the_key_is_one_sha256_per_input() {
+    let engine = Engine::default();
+    let a = ModuleCache::key(&engine, &wasm(42));
+    assert_eq!(a.len(), 64);
+    assert_eq!(a, ModuleCache::key(&engine, &wasm(42)));
+    assert_ne!(a, ModuleCache::key(&engine, &wasm(43)));
+}
+
 #[cfg(unix)]
 #[test]
 fn writable_folder_disables_cache_with_folder_reason() {

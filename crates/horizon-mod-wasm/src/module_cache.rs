@@ -30,6 +30,9 @@ impl ModuleCache {
         let disabled = prepare_folder(&root)
             .err()
             .map(|why| format!("folder {}: {why}", root.display()));
+        if disabled.is_none() {
+            remove_stale_temporaries(&root);
+        }
         if let Some(why) = &disabled {
             log::warn!("wasm module cache disabled: {why}");
         }
@@ -40,16 +43,15 @@ impl ModuleCache {
         }
     }
 
+    /// One sha256 over the wasm digest, Wasmtime's compatibility hash and our engine settings.
+    /// The `Hash` impls write into the digest directly, so the key is stable across Rust
+    /// releases (unlike `DefaultHasher`).
     pub(crate) fn key(engine: &Engine, bytes: &[u8]) -> String {
-        let mut compatibility = std::collections::hash_map::DefaultHasher::new();
-        engine
-            .precompile_compatibility_hash()
-            .hash(&mut compatibility);
-        crate::runtime::ENGINE_CONFIG.hash(&mut compatibility);
-        let mut digest = Sha256::new();
-        digest.update(Sha256::digest(bytes));
-        digest.update(compatibility.finish().to_le_bytes());
-        format!("{:x}", digest.finalize())
+        let mut digest = KeyDigest(Sha256::new());
+        digest.0.update(Sha256::digest(bytes));
+        engine.precompile_compatibility_hash().hash(&mut digest);
+        crate::runtime::ENGINE_CONFIG.hash(&mut digest);
+        format!("{:x}", digest.0.finalize())
     }
 
     pub(crate) fn load_or_compile(
@@ -136,6 +138,43 @@ impl ModuleCache {
         }
         result?;
         Ok(())
+    }
+}
+
+/// A `Hasher` that feeds every write into one sha256, so `Hash` impls can join the key.
+struct KeyDigest(Sha256);
+impl Hasher for KeyDigest {
+    fn write(&mut self, bytes: &[u8]) {
+        self.0.update(bytes);
+    }
+    /// Unused: the key reads the full digest. `Hash` impls only call `write`.
+    fn finish(&self) -> u64 {
+        0
+    }
+}
+
+/// Temporary files a crashed write left behind. Only ones older than an hour are removed, so a
+/// second game writing into the same folder right now keeps its file.
+fn remove_stale_temporaries(root: &Path) {
+    const STALE: std::time::Duration = std::time::Duration::from_secs(3600);
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !(name.starts_with('.') && name.ends_with(".tmp")) {
+            continue;
+        }
+        let old = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > STALE);
+        if old {
+            let _ = fs::remove_file(entry.path());
+        }
     }
 }
 
