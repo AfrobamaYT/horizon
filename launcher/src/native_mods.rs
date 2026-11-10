@@ -2161,8 +2161,7 @@ fn pipeline(
         } else {
             sync(&source, &fresh)?;
         }
-        // Stage beside `fresh` and publish the tree and catalog only after the mods' sites
-        // check, as the prebuilt route validates before it creates its output.
+        // Publish the staged tree and catalog after validating the mods' sites.
         let pending = real.join("stage.pending");
         let catalog_dir = real.join("catalog.partial");
         let _ = fs::remove_dir_all(&pending);
@@ -2183,6 +2182,7 @@ fn pipeline(
         .arg(&pending)
         .arg(catalog_dir.join(inject::POINTS))
         .arg(catalog_dir.join(internals::INTERNALS))
+        .arg(horizon_mod_package::manifest::API)
         .env("CARGO_TARGET_DIR", real.join("target"));
         fn discard(pending: &Path, catalog: &Path, error: impl std::fmt::Display) -> String {
             let _ = fs::remove_dir_all(pending);
@@ -2203,6 +2203,7 @@ fn pipeline(
         fs::rename(&pending, &fresh).map_err(|error| discard(&pending, &catalog_dir, error))?;
         for name in [
             inject::POINTS,
+            "mod-catalog.json",
             internals::INTERNALS,
             horizon_platform::mod_build::api_gen::points::source::FILE,
             horizon_platform::mod_build::api_gen::sites::source::FILE,
@@ -2212,7 +2213,6 @@ fn pipeline(
         }
         let _ = fs::remove_dir_all(&catalog_dir);
         if !mods.is_empty() {
-            // Offline metadata resolves all targets, including packages not fetched for this host.
             let mut fetch = cargo(&rust, &source, "fetch");
             fetch.arg("--locked");
             run(fetch, "Downloading Horizon's crates", |_| {})?;

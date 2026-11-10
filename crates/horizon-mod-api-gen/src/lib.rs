@@ -6,6 +6,7 @@ mod game_modules;
 mod interface_cache;
 #[cfg(test)]
 mod interface_cache_tests;
+pub mod sdk_catalog;
 #[doc(hidden)]
 pub use dispatch_fixtures::layout as dispatch_fixture_layout;
 pub use game_modules::materialize_game_modules;
