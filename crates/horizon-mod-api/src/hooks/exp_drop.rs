@@ -17,7 +17,7 @@ pub trait Hooks {
         pos: BlockPos,
         state: BlockState,
         block_entity: Option<BlockEntityRef>,
-        breaker: Option<mod_api::EntityRef>,
+        breaker: Option<EntityRef>,
         tool: Option<&ItemStack>,
         experience: &mut Option<i32>,
     );

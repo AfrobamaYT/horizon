@@ -4,8 +4,8 @@ impl Game<'_> {
         &mut self,
         pos: BlockPos,
         state: BlockStateId,
-        block_entity: Option<mod_api::BlockEntityRef>,
-        explosion: &mod_api::ExplosionStart<'_>,
+        block_entity: Option<BlockEntityRef>,
+        explosion: &ExplosionStart<'_>,
     ) {
         self.fire_on_block_exploded(pos, state, block_entity, explosion);
     }
