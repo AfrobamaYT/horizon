@@ -39,7 +39,7 @@ fn inject(at: &str, kind: Kind, access: Access, hash: &str) -> Inject {
         with: "listener".into(),
         access,
         priority: 0,
-        hash: hash.into(),
+        hash: Some(hash.into()),
         call: None,
         nth: None,
         ctx: None,

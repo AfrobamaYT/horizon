@@ -227,13 +227,20 @@ pub fn route<'a>(
             at: inject.at.clone(),
         }));
     };
-    if point.hash != inject.hash {
+    let Some(hash) = &inject.hash else {
+        return Err(Refusal::Inject(InjectError::Invalid {
+            id,
+            field: "hash",
+            fix: "mod targets require an explicit signature hash",
+        }));
+    };
+    if &point.hash != hash {
         return Err(Refusal::Changed(Box::new(Changed {
             id,
             library: library.id.to_owned(),
             version: library.version.to_owned(),
             at: inject.at.clone(),
-            pinned: inject.hash.clone(),
+            pinned: hash.clone(),
             installed: point.hash.clone(),
             signature: point.signature.clone(),
         })));
