@@ -22,12 +22,22 @@ pub struct Staged {
 
 /// Mark points, expose internals and write their manifests in a disposable source copy.
 /// Internals precede points so their catalog contains only the original game items.
+/// A pass stamps the copy before edits; even a failed pass requires fresh source for a retry.
 pub fn stage(
     root: &Path,
     points_json: &Path,
     internals_json: &Path,
     mode: Mode,
 ) -> Result<Staged, String> {
+    let stamp = root.join(".horizon-source-staged");
+    if stamp.exists() {
+        return Err("source tree is already staged; use a fresh copy of the source".into());
+    }
+    std::fs::write(
+        &stamp,
+        "Source staging started. Use a fresh copy to stage again.\n",
+    )
+    .map_err(|error| format!("{}: {error}", stamp.display()))?;
     let mut internals = match mode {
         Mode::Build => internals::widen(root)?,
         Mode::Discovery => internals::discover(root)?,
@@ -37,17 +47,22 @@ pub fn stage(
         .extend(crate::crossing::foreign_internals());
     write(internals_json, &internals.entries)?;
     let sites = sites::stage(root, &internals.entries).map_err(|e| e.to_string())?;
-    let points = points::stage(root)?;
+    let wire = crate::build::wire_types(root)?;
+    let points = points::stage_with(root, &wire)?;
     #[derive(serde::Serialize)]
     struct Manifest {
         points: Vec<points::GamePoint>,
         sites: Vec<sites::Site>,
+        /// The `mod_api` types with a `Wire` layout: what a mod point's `api` record may hold
+        /// beside the mod's own derived types (#2339).
+        wire: std::collections::BTreeSet<String>,
     }
     write(
         points_json,
         &Manifest {
-            points: points::game_points(root)?,
+            points: points::points_with(root, &wire)?,
             sites,
+            wire,
         },
     )?;
     Ok(Staged { points, internals })
@@ -63,49 +78,72 @@ mod tests {
     use super::*;
 
     #[test]
-    fn staged_points_json_contains_return_slot_authority() {
-        let root =
-            std::env::temp_dir().join(format!("horizon-staging-return-{}", std::process::id()));
-        let source = root.join("crates/horizon-client/src/game.rs");
-        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
-        std::fs::write(
-            &source,
-            "impl Game<'_> { fn unit(&self) {} fn optional(&self) -> Option<u32> { None } }",
-        )
-        .unwrap();
-        std::fs::write(source.parent().unwrap().join("entry.rs"), "").unwrap();
-        std::fs::write(
-            source.parent().unwrap().join("lib.rs"),
-            "mod game; mod entry;\n",
-        )
-        .unwrap();
-        std::fs::write(
-            root.join("crates/horizon-client/Cargo.toml"),
-            "[package]\nname = 'horizon-client'\n",
-        )
-        .unwrap();
-        let lists = root.join("crates/horizon-mod-api-gen");
-        std::fs::create_dir_all(&lists).unwrap();
-        std::fs::write(lists.join("internals.txt"), "").unwrap();
-        std::fs::create_dir_all(lists.join("slots")).unwrap();
-        let package = root.join("crates/horizon-mod-points");
-        std::fs::create_dir_all(&package).unwrap();
-        std::fs::write(
-            package.join("Cargo.toml"),
-            "[package]\nname = 'horizon-mod-points'\n",
-        )
-        .unwrap();
-        let output = root.join("points.json");
-        stage(&root, &output, &root.join("internals.json"), Mode::Build).unwrap();
-        let bytes = std::fs::read(&output).unwrap();
-        assert_eq!(bytes.last(), Some(&b'\n'));
-        let manifest: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        let points = manifest["points"].as_array().unwrap();
-        for (name, expected) in [("unit", false), ("optional", true)] {
-            let point = points.iter().find(|point| point["name"] == name).unwrap();
-            assert_eq!(point["raw_shape"]["return_record_mutable"], expected);
+    fn staging_preserves_return_authority_and_refuses_reuse() {
+        // Each iteration starts from fresh source, not the preceding staged fixture.
+        for copy in 0..3 {
+            let root = std::env::temp_dir().join(format!(
+                "horizon-staging-return-{}-{copy}",
+                std::process::id()
+            ));
+            let source = root.join("crates/horizon-client/src/game.rs");
+            std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+            std::fs::write(
+                &source,
+                "impl Game<'_> { fn unit(&self) {} fn optional(&self) -> Option<u32> { None } }",
+            )
+            .unwrap();
+            std::fs::write(source.parent().unwrap().join("entry.rs"), "").unwrap();
+            std::fs::write(
+                source.parent().unwrap().join("lib.rs"),
+                "mod game; mod entry;\n",
+            )
+            .unwrap();
+            std::fs::write(
+                root.join("crates/horizon-client/Cargo.toml"),
+                "[package]\nname = 'horizon-client'\n",
+            )
+            .unwrap();
+            let lists = root.join("crates/horizon-mod-api-gen");
+            std::fs::create_dir_all(&lists).unwrap();
+            std::fs::write(lists.join("internals.txt"), "").unwrap();
+            std::fs::create_dir_all(lists.join("slots")).unwrap();
+            let package = root.join("crates/horizon-mod-points");
+            std::fs::create_dir_all(&package).unwrap();
+            std::fs::write(
+                package.join("Cargo.toml"),
+                "[package]\nname = 'horizon-mod-points'\n",
+            )
+            .unwrap();
+            let output = root.join("points.json");
+            if copy == 2 {
+                // Refuse retries even when a late output failure leaves edited source.
+                std::fs::create_dir(&output).unwrap();
+                assert!(stage(&root, &output, &root.join("internals.json"), Mode::Build).is_err());
+            } else {
+                stage(&root, &output, &root.join("internals.json"), Mode::Build).unwrap();
+                let bytes = std::fs::read(&output).unwrap();
+                assert_eq!(bytes.last(), Some(&b'\n'));
+                let manifest: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                let points = manifest["points"].as_array().unwrap();
+                for (name, expected) in [("unit", false), ("optional", true)] {
+                    let point = points.iter().find(|point| point["name"] == name).unwrap();
+                    assert_eq!(point["raw_shape"]["return_record_mutable"], expected);
+                }
+                assert!(manifest["sites"].is_array());
+            }
+            let before = std::fs::read(&source).unwrap();
+            assert!(String::from_utf8_lossy(&before).contains("horizon_mod_api_macros"));
+            for mode in [Mode::Build, Mode::Discovery] {
+                let error = stage(&root, &output, &root.join("internals.json"), mode)
+                    .err()
+                    .expect("staging twice must fail");
+                assert_eq!(
+                    error,
+                    "source tree is already staged; use a fresh copy of the source"
+                );
+                assert_eq!(std::fs::read(&source).unwrap(), before);
+            }
+            std::fs::remove_dir_all(root).unwrap();
         }
-        assert!(manifest["sites"].is_array());
-        std::fs::remove_dir_all(root).unwrap();
     }
 }
