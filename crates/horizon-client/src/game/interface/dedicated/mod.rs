@@ -2471,6 +2471,29 @@ fn console_level(active: super::Dim) -> Option<super::Dim> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn broadcast_console_destination_follows_role_not_launch_marker() {
+        use crate::game::execution_role::ExecutionRole;
+        let mut resources = None;
+        let mut game = crate::game::game_tests::tests::server_game(&mut resources);
+        game.options.dedicated = Some(Vec::new());
+        for (role, expected) in [
+            (
+                ExecutionRole::DedicatedServer,
+                vec!["destination probe".to_owned()],
+            ),
+            (ExecutionRole::IntegratedServer, Vec::new()),
+            (ExecutionRole::Client, Vec::new()),
+        ] {
+            game.options.execution_role = role;
+            let lines = capture_log(|| {
+                game.native_broadcast(horizon_client::text::Text::literal("destination probe"))
+            });
+            assert_eq!(lines, expected, "{role:?}");
+        }
+    }
+
     use super::{
         capture_log, log, log_from, overload_warning, panic_message, parse_whitelist_bypass,
     };
