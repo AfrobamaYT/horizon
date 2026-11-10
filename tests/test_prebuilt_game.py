@@ -46,6 +46,40 @@ class PrebuiltContentsTests(unittest.TestCase):
             "libpoint_shape-host.rmeta", "libpoint_shape-target.rmeta", "libderive.so", "libhorizon_client.so",
         })
 
+    def test_facades_exclude_build_only_and_ambiguous_runtime_crates(self):
+        def package(name, kind="lib"):
+            return {"id": name, "name": name, "targets": [{"name": name.replace('-', '_'), "kind": [kind]}]}
+
+        def node(name, *dependencies):
+            return {"id": name, "deps": [
+                {"pkg": target, "dep_kinds": [{"kind": kind}]} for target, kind in dependencies
+            ]}
+
+        metadata = {
+            "packages": [package("horizon-client"), package("point_shape"), package("horizon_core"),
+                         package("build_tool"), package("derive", "proc-macro"), package("macro_helper")],
+            "resolve": {"nodes": [
+                node("horizon-client", ("point_shape", None), ("horizon_core", None),
+                     ("build_tool", "build"), ("derive", None)),
+                node("point_shape"), node("horizon_core"), node("build_tool"),
+                node("derive", ("macro_helper", None)), node("macro_helper"),
+            ]},
+        }
+        runtime = prebuilt_game.runtime_crates(metadata)
+        self.assertEqual(runtime, {"horizon_client", "point_shape", "horizon_core"})
+        deps = self.folder("libpoint_shape-host.rmeta", "libpoint_shape-target.rmeta",
+                           "libhorizon_core-one.rmeta", "libbuild_tool-one.rmeta", "libmacro_helper-one.rmeta")
+        eligible = prebuilt_game.facade_crates(deps, runtime)
+        self.assertEqual(eligible, ["horizon_core"])
+
+    def test_sdk_assertion_refuses_a_duplicate_eligible_facade_on_every_os(self):
+        root = self.folder("deps/libhorizon_core-one.rmeta", "deps/libmod_api-one.rmeta",
+                           "deps/libhorizon_mod_package-one.rmeta")
+        prebuilt_game.assert_externs(root, ["horizon_core"])
+        (root / "deps/libhorizon_core-two.rmeta").write_bytes(b"")
+        with self.assertRaisesRegex(ValueError, "expected exactly one SDK metadata for horizon_core"):
+            prebuilt_game.assert_externs(root, ["horizon_core"])
+
     def test_native_extern_lookup_refuses_a_second_package_variant(self):
         root = self.folder("libhorizon_mod_package-runtime.rmeta")
         self.assertEqual(prebuilt_game.extern_args(root, "horizon_mod_package"), [

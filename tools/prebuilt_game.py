@@ -104,6 +104,44 @@ def copy_artifacts(messages: list[dict], deps: Path) -> None:
         shutil.copy2(file, deps / file.name)
 
 
+def runtime_crates(metadata: dict) -> set[str]:
+    """Normal library dependencies of the game, excluding build and proc-macro dependency trees."""
+    packages = {package["id"]: package for package in metadata["packages"]}
+    nodes = {node["id"]: node for node in metadata["resolve"]["nodes"]}
+    pending = [package["id"] for package in metadata["packages"] if package["name"] == "horizon-client"]
+    visited = set()
+    names = set()
+    while pending:
+        package_id = pending.pop()
+        if package_id in visited:
+            continue
+        visited.add(package_id)
+        targets = packages[package_id]["targets"]
+        libraries = [target["name"] for target in targets
+                     if any(kind in ("lib", "rlib", "dylib") for kind in target["kind"])]
+        if not libraries:
+            continue
+        names.update(libraries)
+        pending.extend(dependency["pkg"] for dependency in nodes[package_id]["deps"]
+                       if any(kind["kind"] is None for kind in dependency["dep_kinds"]))
+    return names
+
+
+def facade_crates(deps: Path, runtime: set[str]) -> list[str]:
+    """Only runtime crates with a unique extern can be exposed by an internals facade."""
+    eligible = []
+    for crate in sorted(runtime):
+        if dylib(deps, crate) is not None or len(list(deps.glob(f"lib{crate}-*.rmeta"))) == 1:
+            eligible.append(crate)
+    return eligible
+
+
+def assert_externs(out: Path, eligible: list[str]) -> None:
+    """Runs in the SDK build on every OS, including macOS, before publication."""
+    for crate in set(eligible) | {"mod_api", "horizon_mod_package"}:
+        extern_args(out / "deps", crate)
+
+
 def build(out: Path, server: bool) -> None:
     # Resolved here: the staging and build steps run from the staged copy.
     target_dir = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")).resolve() / "prebuilt"
@@ -133,6 +171,12 @@ def build(out: Path, server: bool) -> None:
     deps = out / "deps"
     deps.mkdir(parents=True)
     copy_artifacts(artifacts, deps)
+    metadata = json.loads(run([
+        "cargo", "metadata", "--locked", "--format-version", "1", "--filter-platform", rustc_host(),
+        *features,
+    ], cwd=staged))
+    eligible = facade_crates(deps, runtime_crates(metadata))
+    assert_externs(out, eligible)
     native = out / NATIVE
     native.mkdir()
     # Only libraries that come with a crate (its source in Cargo's home, or its build script's output): a
@@ -166,6 +210,7 @@ def build(out: Path, server: bool) -> None:
         "side": "server" if server else "client",
         "rustflags": rustflags,
         "link_args": link_args,
+        "facade_crates": eligible,
         "files": files,
     }
     (out / IDENTITY).write_text(json.dumps(identity, indent=2) + "\n")
@@ -207,6 +252,7 @@ def check(out: Path) -> None:
 def smoke(out: Path) -> None:
     """Build what a player's launcher builds: the starter mod and the generated executable, from OUT alone."""
     deps = out / "deps"
+    assert_externs(out, json.loads((out / IDENTITY).read_text())["facade_crates"])
 
     def extern(crate: str) -> list[str]:
         return extern_args(deps, crate)
