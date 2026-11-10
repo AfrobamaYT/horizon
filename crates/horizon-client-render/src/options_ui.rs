@@ -3318,7 +3318,7 @@ impl OptionsUi {
         let list_key = crate::widgets::key_of(&format!("options/{page:?}/list"));
         let framebuffer = [(w * batch.scale) as i32, (h * batch.scale) as i32];
         if list {
-            self.narrate_list(&widgets, list_key, (top, bottom), w, cursor);
+            self.narrate_list(widgets, list_key, (top, bottom), w, cursor);
         }
         let mut tooltip = None;
         // The widget a keyboard-focused tooltip belongs to: `MenuTooltipPositioner`
