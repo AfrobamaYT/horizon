@@ -43,7 +43,7 @@ HOME_KEYS = ('HORIZON_HOME', 'HORIZON_LAUNCHER_HOME', 'XDG_DATA_HOME', 'XDG_CONF
 def hook_map():
     """Read catalog attributes, including multiline attributes and Paper event lists."""
     mapping = {}
-    for path in (lab.ROOT / 'crates/horizon-mod-api/src/hooks').glob('*.rs'):
+    for path in (lab.ROOT / 'crates/horizon-mod-vocab/src/hooks').glob('*.rs'):
         for attrs, hook in re.findall(r'#\[hook\((.*?)\)\]\s*fn\s+(\w+)\s*\(', path.read_text(), re.S):
             if match := re.search(r'\bpaper\s*=\s*("[^"]+"|\[[^\]]*\])', attrs):
                 mapping[hook] = [s.strip() for v in re.findall(r'"([^"]+)"', match[1])

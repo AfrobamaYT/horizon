@@ -8,7 +8,7 @@ files are appended to, never replaced wholesale. A second apply refuses.
 
 Each entry requires a domain (`world`, `block`, `item`, `entity`, `client`,
 `command`, `text`, `content` or `wire`) and a lower-case topic. Values go to
-`crates/horizon-mod-api/src/<domain>/<topic>.rs`. New topic files are registered in
+`crates/horizon-mod-vocab/src/<domain>/<topic>.rs`. New topic files are registered in
 that domain's `mod.rs`; the domain itself must already be registered by the API.
 `lib` and `mod` are not valid topics. Exports, backend areas and game conversion
 modules retain their topic-based filenames. Choose distinct topics for unrelated
