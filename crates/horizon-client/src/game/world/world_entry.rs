@@ -363,29 +363,34 @@ impl Game<'_> {
             .iter()
             .filter_map(|declaration| declaration.key.split_once(':'))
             .collect();
-        let files: Vec<(String, Vec<Vec<u8>>)> = functions::registry_overlay(stack, &keys)
-            .into_iter()
-            .map(|(path, versions)| {
-                let versions = versions
-                    .into_iter()
-                    .filter_map(|bytes| {
-                        let Ok(mut json) = serde_json::from_slice::<serde_json::Value>(&bytes)
-                        else {
-                            // Malformed: the decoder reports it, naming the file.
-                            return Some(bytes);
-                        };
-                        if !conditions.allows(&json) {
-                            return None;
-                        }
-                        if let Some(object) = json.as_object_mut() {
-                            object.remove("neoforge:conditions");
-                        }
-                        serde_json::to_vec(&json).ok()
-                    })
-                    .collect();
-                (path, versions)
-            })
+        // Content files come before the world's enabled packs, lowest priority first.
+        let packs: Vec<_> = std::iter::once(&stack.content)
+            .chain(stack.enabled_packs())
             .collect();
+        let files: Vec<(String, Vec<Vec<u8>>)> =
+            horizon_client::datapack::registry_files(&packs, &keys)
+                .into_iter()
+                .map(|(path, versions)| {
+                    let versions = versions
+                        .into_iter()
+                        .filter_map(|bytes| {
+                            let Ok(mut json) = serde_json::from_slice::<serde_json::Value>(&bytes)
+                            else {
+                                // Malformed: the decoder reports it, naming the file.
+                                return Some(bytes);
+                            };
+                            if !conditions.allows(&json) {
+                                return None;
+                            }
+                            if let Some(object) = json.as_object_mut() {
+                                object.remove("neoforge:conditions");
+                            }
+                            serde_json::to_vec(&json).ok()
+                        })
+                        .collect();
+                    (path, versions)
+                })
+                .collect();
         mod_api::DatapackCandidate::build(declarations, &files)
             .map(Some)
             .map_err(|error| {
