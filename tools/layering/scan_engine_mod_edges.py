@@ -71,7 +71,9 @@ GENERATED = {
 }
 # File rules for the move set, before the edges' majority decides.
 FILE_RULES = [
-    ("host", re.compile(r"/game/(modding/(mod_api_host|api_values)|host/)")),
+    # api_values is the engine↔mod_api value conversion the hook bodies use: it stays with them.
+    ("hooks", re.compile(r"/game/modding/api_values")),
+    ("host", re.compile(r"/game/(modding/mod_api_host|host/)")),
     ("attachments", re.compile(r"/game/modding/(attachment_\w+|entity_initialization)")),
     ("loading", re.compile(r"/game/modding/mods/")),
     ("hooks", re.compile(r"/game/native_hooks/")),

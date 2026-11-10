@@ -21,10 +21,13 @@ How to read the numbers:
 startup and takes `ModEntry`, `NativeSlot` and `BuiltMod`: it splits into an engine start that takes what the host
 loaded through one registration call, and the host's load step that runs before it. The engine keeps one start call.
 
-**Host (phase 2): move behind a wrapper.** `horizon-mod-host` can't write `impl mod_api::Host for Game`: the trait
-and the type are both foreign to it (orphan rule), and `struct Game` is private to `horizon_client::game`. The impls
-move onto `ModHost<'g>(&'g mut Game)` in `horizon-mod-host`; what they read and write of the engine becomes accessors
-on `Game` named for what they do, never a blanket `pub` on fields.
+**Host (phase 2): not built.** The generated `Host` impls forward each of the 899 host trait methods to an inherent
+`Game` function in the hook-body files, which stay in the engine. Under option B the `Host` traits are engine-layer
+vocabulary, so the engine implements its own interface, which the layer rule allows. A socket would move only the
+forwarders and `mod_api_host.rs` (under 1,000 lines). It would make the 899 functions public, and engine unit tests
+couldn't use a host implemented above the engine: a dev-dependency cycle gives the test build a different `Game`.
+The engine↔`mod_api` value conversions (`game/modding/api_values`) are counted with the hook bodies: 117 engine
+files that stay use them.
 
 **Slots (phase 3): socket.** Eight production references: `entry.rs` (`mod_points::register`, `SlotListener`,
 `PointId`), `game.rs` (`seal`), `build.rs` and the `include!`s of generator output. The engine owns the slot table
@@ -46,9 +49,9 @@ the mod API's vocabulary in a crate below the engine (#2534); nothing in this st
 
 ## What a script can do
 
-- Phases 1–3: a move map (file → destination, with the rewrite of `impl Game` blocks into `ModHost` methods or free
-  functions over `&mut Game`) is mechanical. The accessors `Game` grows are listed by the scan ("to make public") and
-  named by hand.
+- Phases 1 and 3: a move map (file → destination) is mechanical once each moved file's production references from
+  files that stay in the engine are handled, and its unit tests have a home: every phase PR lists both. The
+  accessors `Game` grows are listed by the scan ("to make public") and named by hand.
 - Phase 6, if it happens: sockets generated from the hook catalog.
 - Hand design: the attachment field (phase 4), the registry and render sockets (phase 5), and the vocabulary split.
 
@@ -204,11 +207,11 @@ Outside the host areas, 2279 `mod_api` references are in test code; 206 of them 
 | strand | files | lines | inherent impls | foreign trait impls | to make public | inbound refs (prod) | inbound files |
 |---|---|---|---|---|---|---|---|
 | loading (phase 1) | 5 | 4001 | 5 | 0 | 49 | 101 | 26 |
-| host (phase 2) | 20 | 9270 | 7 | 12 | 53 | 159 | 39 |
+| host (phase 2) | 4 | 1441 | 3 | 11 | 44 | 13 | 9 |
 | slots (phase 3) | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 | attachments (phase 4) | 13 | 2578 | 5 | 0 | 16 | 33 | 9 |
 | content_render (phase 5) | 5 | 2698 | 5 | 1 | 40 | 44 | 17 |
-| hooks (phase 6) | 373 | 91408 | 355 | 17 | 571 | 1495 | 223 |
+| hooks (phase 6) | 389 | 99237 | 359 | 18 | 572 | 1641 | 225 |
 
 ### horizon-mod-api: vocabulary or not (non-test files)
 
