@@ -382,10 +382,19 @@ fn side_faces(mask: &SpriteMask, material: &Material, layer: i32) -> Result<Vec<
     Ok(quads)
 }
 
-/// The front and back faces of a mask's opaque pixels: each row's run of still-unused
-/// pixels, grown down while every column stays opaque, as one rectangle (NeoForge's
-/// greedy merge). A run ending at the row's last pixel is emitted too, where NeoForge's
-/// loop only closes one on a transparent pixel.
+/// The front and back faces of a masked layer. The rule: the layer's sprite is drawn on
+/// both faces over exactly the mask's opaque pixels (opaque in any of its frames), every
+/// one of them and nothing else, so the mask alone decides where the layer is visible.
+/// The pixels are merged into rectangles as NeoForge's `bakeItemMaskQuads` does: each
+/// row's run of still-unused opaque pixels, grown down while every one of the run's own
+/// columns stays opaque, becomes one South and one North quad with UVs over the same
+/// sub-rectangle.
+///
+/// Two deliberate departures from NeoForge 26.3's loop, which would leave holes: a run
+/// that reaches the sprite's last column is drawn (NeoForge closes a run only on a
+/// transparent pixel, so such a run loses its front and back), and growing down tests
+/// only the run's own columns (NeoForge also tests the transparent pixel that closed the
+/// run). Both were agreed on review of #2707.
 fn mask_rect_faces(shape: &SpriteMask, material: &Material, layer: i32) -> Result<Vec<ModelQuad>> {
     let (width, height) = (shape.width, shape.height);
     let mut opaque = shape.union();
@@ -643,6 +652,8 @@ mod tests {
         assert!(masked.quads.is_empty());
     }
 
+    /// Horizon's rule, not NeoForge's loop: the top row reaches the last column and is
+    /// still drawn (see `mask_rect_faces`).
     #[test]
     fn a_partial_mask_merges_its_runs_into_one_face_pair_each() {
         let library = library();
@@ -690,6 +701,8 @@ mod tests {
         );
     }
 
+    /// Horizon's rule, not NeoForge's loop: a fully opaque mask keeps its front and back
+    /// (NeoForge's loop draws none, every run reaching the last column).
     #[test]
     fn a_full_mask_keeps_one_front_and_back() {
         let library = library();
