@@ -19,7 +19,11 @@ impl LootTags for super::LootData {
     }
 }
 
+#[cfg(test)]
+thread_local! { static STEP_BUDGET: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) }; }
+
 /// Resolve a requested tag iteratively, preserving nested order without a depth limit.
+/// Completed subgraphs are skipped: their leaves are already in the deduplicated output.
 pub(super) fn members(
     tags: &std::collections::HashMap<(String, String), Vec<serde_json::Value>>,
     registry: &str,
@@ -32,11 +36,25 @@ pub(super) fn members(
     }
     let mut pending = vec![Step::Enter(name)];
     let mut active = std::collections::HashSet::new();
+    let mut completed = std::collections::HashSet::new();
     let mut seen = std::collections::HashSet::new();
     let mut result = Vec::new();
     while let Some(step) = pending.pop() {
+        #[cfg(test)]
+        STEP_BUDGET.with(|budget| {
+            if let Some(remaining) = budget.get() {
+                budget.set(Some(
+                    remaining
+                        .checked_sub(1)
+                        .expect("tag traversal repeated a completed subgraph"),
+                ));
+            }
+        });
         match step {
             Step::Enter(name) => {
+                if completed.contains(name) {
+                    continue;
+                }
                 if !active.insert(name) {
                     return Vec::new();
                 }
@@ -47,6 +65,7 @@ pub(super) fn members(
             }
             Step::Exit(name) => {
                 active.remove(name);
+                completed.insert(name);
             }
             Step::Value(value) => {
                 let Some(id) = value
@@ -70,6 +89,28 @@ pub(super) fn members(
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn repeated_shared_subtags_are_visited_once_without_exponential_work() {
+        let mut tags = std::collections::HashMap::new();
+        for index in 0..128 {
+            let next = json!(format!("#test:{}", index + 1));
+            tags.insert(
+                ("item".into(), format!("test:{index}")),
+                vec![next.clone(), next],
+            );
+        }
+        tags.insert(
+            ("item".into(), "test:128".into()),
+            vec![json!("minecraft:stick")],
+        );
+        // A deterministic test-only work budget kills repeated traversal without a
+        // timing assertion or allowing an exponential mutant to hang the suite.
+        STEP_BUDGET.with(|budget| budget.set(Some(4096)));
+        let result = members(&tags, "item", "test:0");
+        STEP_BUDGET.with(|budget| budget.set(None));
+        assert_eq!(result, ["minecraft:stick"]);
+    }
+
     #[test]
     fn nested_members_preserve_order_deduplicate_and_do_not_truncate_at_sixteen() {
         let mut tags = std::collections::HashMap::new();
