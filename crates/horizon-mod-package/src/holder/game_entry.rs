@@ -138,23 +138,27 @@ pub fn lease_paths(
     });
     let mut paths = vec![(install.to_path_buf(), complete)];
     let mut candidates = vec![
-        selection.context.game_dir.clone(),
-        selection.context.home.clone(),
+        (selection.context.game_dir.clone(), true),
+        (selection.context.home.clone(), true),
     ];
     for argument in &selection.rest {
         if let crate::selection::Argument::Value(name, value) = argument
             && name == "--resources"
         {
-            candidates.push(directory.join(value));
+            candidates.push((directory.join(value), false));
         }
     }
-    for path in candidates {
+    for (path, context_root) in candidates {
         let path = match path.canonicalize() {
             Ok(path) => path,
             Err(error) if error.kind() == io::ErrorKind::NotFound => path,
             Err(error) => return Err(error),
         };
-        if path.starts_with(data) && !paths.iter().any(|(existing, _)| *existing == path) {
+        // External instance/log roots still need identity claims: the immutable launch
+        // record binds both roots, even though they are not managed cache descendants.
+        if (context_root || path.starts_with(data))
+            && !paths.iter().any(|(existing, _)| *existing == path)
+        {
             paths.push((path, false));
         }
     }
@@ -176,6 +180,55 @@ pub fn lease_paths(
 mod tests {
     use super::*;
     use crate::locks::Release;
+
+    #[test]
+    fn managed_launch_binds_external_instance_and_log_roots() {
+        for separate in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let data = root.path().join("launcher");
+            let install = data.join("versions/game");
+            let game = root.path().join("instance");
+            let home = if separate {
+                root.path().join("logs")
+            } else {
+                game.clone()
+            };
+            for directory in [&install, &game, &home] {
+                std::fs::create_dir_all(directory).unwrap();
+            }
+            std::fs::write(install.join(".installed"), "").unwrap();
+            let executable = install.join("game");
+            std::fs::write(&executable, "test image").unwrap();
+            let mut command = Command::new(&executable);
+            command.current_dir(&game).env("HORIZON_HOME", &home);
+            let selection = LaunchArguments::for_command(&command).unwrap();
+            let trees = lease_paths(&executable, &selection, &data, &game).unwrap();
+            for context in [&game, &home] {
+                let matching: Vec<_> = trees.iter().filter(|(path, _)| path == context).collect();
+                assert_eq!(matching.len(), 1);
+                assert!(
+                    !matching[0].1,
+                    "external roots have no installed completion marker"
+                );
+                assert!(!context.join(".installed").exists());
+            }
+            assert!(!trees.iter().any(|(path, _)| path == root.path()));
+            assert!(
+                trees
+                    .iter()
+                    .any(|(path, complete)| *path == install && *complete)
+            );
+            assert!(trees.iter().any(|(path, _)| *path == data.join("versions")));
+            let program = Program {
+                executable: executable.into_os_string(),
+                arguments: vec![],
+                environment: vec![],
+                directory: game,
+                raw_windows: None,
+            };
+            let _prepared = Prepared::new(data, trees, program, &selection.context).unwrap();
+        }
+    }
 
     #[test]
     fn direct_entry_blocks_cleanup_and_refuses_busy_or_deleted_install() {
