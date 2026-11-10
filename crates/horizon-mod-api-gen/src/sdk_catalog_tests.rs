@@ -27,6 +27,19 @@ fn coverage_document_is_current() {
         .expect("manifest API constant");
     let document = sdk_catalog(&root, &api).unwrap();
     let value: Value = serde_json::from_str(&document).unwrap();
+    for hook in value["hooks"].as_array().unwrap() {
+        assert!(["server", "client", "both"].contains(&hook["side"].as_str().unwrap()));
+        assert!(
+            ["listen", "cancel", "collect", "replace"]
+                .contains(&hook["contract"].as_str().unwrap())
+        );
+        if !hook["scope"].is_null() {
+            assert!(
+                ["block", "blockentity", "item", "menu", "fluid"]
+                    .contains(&hook["scope"]["kind"].as_str().unwrap())
+            );
+        }
+    }
     assert!(!value["hooks"].as_array().unwrap().is_empty());
     assert!(!value["points"].as_array().unwrap().is_empty());
     // Regenerate from the same source instead of maintaining a shared fingerprint.
