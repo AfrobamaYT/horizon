@@ -2310,7 +2310,7 @@ mod tests {
             m.on_ground = true;
             m.attrs.knockback_resistance = own;
             m.gear_knockback_resistance = gear;
-            m.knockback(level, 0.4, 3.0, 0.0, &hit);
+            m.knockback(level, 0.4, 3.0, 0.0, &hit, 0.0);
             m.velocity.x
         };
         assert_eq!(pushed(None, 0.0), -0.4);
@@ -2347,7 +2347,7 @@ mod tests {
         let hit = Damage::player([3.0, 0.0, 0.0]);
         let mut push = |id, resistance| {
             let mut m = mob(id, resistance);
-            m.knockback(level, 0.4, 3.0, 0.0, &hit);
+            m.knockback(level, 0.4, 3.0, 0.0, &hit, 0.0);
             m
         };
         // No mod in the way (the hook leaves 9100 alone): vanilla's push, away from x = 3.

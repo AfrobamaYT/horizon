@@ -3,7 +3,7 @@ use crate::catalog::Catalog;
 use std::{fs, path::Path};
 use syn::{Item, Visibility};
 
-pub(crate) const DIRECTORY: &str = "crates/horizon-mod-api/src/parts";
+pub(crate) const DIRECTORY: &str = "crates/horizon-mod-vocab/src/parts";
 pub(crate) const OUTPUT: &str = "parts_modules.rs";
 
 fn visibility(item: &Item) -> Option<&Visibility> {
