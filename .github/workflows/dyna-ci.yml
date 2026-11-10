@@ -353,15 +353,16 @@ jobs:
       - name: Check Dyna dependencies (install fallback without root)
         if: steps.rust.outputs.required != 'false' && needs.changes.outputs.self_hosted == 'true'
         run: bash tools/ci/dyna_ci_deps.sh
-      - name: Install Rust toolchain and the ALSA and udev headers the client links against, and Xvfb
+      - name: Install Rust toolchain and the ALSA and udev headers the client links against, Xvfb and software Vulkan
         if: steps.rust.outputs.required != 'false'
         env:
           HOSTED: ${{ env.RUNNER_KIND == 'github' || env.RUNNER_KIND == 'boat' }}
           DYNA: ${{ needs.changes.outputs.self_hosted }}
         # Xvfb: GitHub's image has it, boat's does not; test_ci_xvfb's real-display tests need it.
+        # mesa-vulkan-drivers: the GPU tests' software Vulkan adapter (lavapipe); Mesa's GL one cannot render R32Float.
         run: |
           if [ "$HOSTED" = true ]; then
-            sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev xvfb
+            sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev xvfb mesa-vulkan-drivers
           elif [ "$DYNA" = true ]; then
             if [ ! -x "$CARGO_HOME/bin/rustup" ]; then
               curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal
