@@ -52,46 +52,36 @@ the mod API's vocabulary in a crate below the engine (#2534); nothing in this st
 - Phase 6, if it happens: sockets generated from the hook catalog.
 - Hand design: the attachment field (phase 4), the registry and render sockets (phase 5), and the vocabulary split.
 
-## The mod API's vocabulary: can it sit below the engine?
+## The mod API's engine vocabulary
 
-The question (#2534): could the engine keep one mod dependency, on a crate that holds only the mod API's vocabulary
-and dispatch table, the way it depends on `horizon-hooks`? The vocabulary table at the end gives the per-file
-answer for `horizon-mod-api` (non-test files). Summary:
+`horizon-mod-vocab` is the engine-owned interface crate for #2534 option B. It holds events, `HookId`, `Hooks`,
+Host traits, plain values, and `runtime.rs` dispatch. `horizon-mod-api` re-exports that surface without changing
+mod-facing paths and owns the WebAssembly guest transport. `horizon-mod-api-macros`, `horizon-mod-point-shape`,
+and `horizon-mod-api-gen` are engine crates too. The launcher reaches the latter two through the platform's
+optional `mod-build` facade, not through new layer exceptions.
 
-- **Plain already:** 772 of 944 files (24,619 lines): types, traits and functions with no generator include, no
-  `unsafe`, no process state and no crate path besides `horizon-core`.
-- **Blocker 1, the derive and attribute macros:** 150 files use `horizon-mod-api-macros` (517 `Wire` derives, 86
-  `host_area`, 1 `__subscriptions`). In 137 of them it is the only blocker. Relayering `horizon-mod-api-macros` and
-  its one dependency `horizon-mod-point-shape` to the engine layer clears them.
-- **Blocker 2, the build script:** `build.rs` runs `horizon-mod-api-gen` (platform, depends on
-  `horizon-mod-point-shape`). The generator writes the hook vocabulary itself: `mod_api_generated.rs` (events,
-  `HookId`, `Hooks`, Parts traits, the dispatch functions; about 680 types, no `unsafe`, no state),
-  `mod_api_generated_host.rs` (the `Host` traits), `wire_generated.rs`, the export lists and `parts_modules.rs`.
-  `wire_guest_generated.rs` (wasm guest glue, 6 `unsafe`) is not vocabulary. There are two ways: relayer the
-  generator to the engine layer (it runs only at build time, but build dependencies count), or commit its output
-  with a freshness check. Committing it adds a large generated file that every hook change touches.
-- **Not vocabulary; it stays in `horizon-mod-api` or goes to the host:** `wire/wire_guest.rs` and
-  `wire/wire_resources.rs` (`unsafe`, wasm guest), `profiler.rs` (`unsafe`, state), `content/crash.rs` (panic
-  marks), `content/registry_keys.rs`, `world/{phase,reload,server_reload}.rs`, `client/client_reload.rs`,
-  `parts/*` (installed Parts tables) and `testing/`. `runtime.rs` is the dispatch table and belongs with the
-  vocabulary. Whether the generated dispatch functions also need the Parts tables (`parts/shared.rs`) is open:
-  the split's first step settles it by compiling.
-- **Other crates:** `horizon-mod-runtime` (engine layer; attachments, registry keys, subscribers: 63 references in
-  17 files) can stay a dependency of a crate below the engine. `horizon-mod-package` is declared, but nothing in
-  the source uses it: remove it.
-- **Engine types in the surface:** `exports/horizon_core.rs` and `exports/horizon_world.rs` re-export
-  `horizon-core` types (`Identifier`, `Compound`, `Tag`, `LegacyRandom`, `BoundingBox`...) and
-  `horizon-mod-runtime` attachment types. Both crates sit below the engine, so this doesn't block a split. It is
-  the same exposure as today.
+The extraction's compile established that the dispatch closure is larger than plain vocabulary:
 
-**A clean split is possible** with three relayerings (`horizon-mod-api-macros`, `horizon-mod-point-shape`,
-`horizon-mod-api-gen` to the engine layer, or committed generator output instead of the last), the dead
-`horizon-mod-package` dependency removed, and the state-bearing files above kept out. The edges it needs:
-`horizon-mod-vocab` (engine) → `horizon-core`, `horizon-mod-runtime`, `horizon-mod-api-macros`, and as a build
-dependency `horizon-mod-api-gen`; then `horizon-mod-api` (platform) → `horizon-mod-vocab`, re-exporting it, so mods
-keep the `mod_api::` paths; the engine → `horizon-mod-vocab` replacing `-mod-api`, `-mod-api-macros` and part of
-`-mod-api-gen`. Whether the engine's uses outside the host stay within the vocabulary is shown in the
-"what they need of `mod_api`" table: the `more` tier (45 files) is what a split must still route through the host.
+- `runtime.rs` enters native crash markers; their guard owns a profiler guard. Crash markers and the profiler
+  therefore move with dispatch. Six profiler pool operations retain their existing `unsafe` implementation.
+- Wire's Writer and Reader own resource encode/decode operations. The resource codec moves with them, including
+  `ResourceScope::native_root`. Guest imports, arenas and generated guest calls stay in `horizon-mod-api`.
+- `Hooks::register` names `RegistrationContext`; handle methods also read phase and registry-key state. Their
+  types, access checks, installed registry-key tables and supporting reload contracts stay together initially.
+- Parts dispatch calls `has_part_hook`, `parts` and `entered_parts`. Its tables must be below the engine.
+  Registration does not separate by pure moves: generated `parts_modules.rs` joins the Registrar supertrait,
+  area traits and blanket implementations, while hand-written areas contain inherent implementations on
+  `dyn Registrar` and `HookParts`. The registrar and registry-key resolution closure move with the tables.
+  Test helpers stay beside the private tables and remain available through `mod_api::testing`.
+
+This is **not an unsafe-free or stateless interface**. The crate denies new unsafe code, with reasoned local
+allowances at the carried sites. [#2587](https://github.com/arismoko/horizon/issues/2587) separates crash marks,
+profiling and resource access behind engine-owned hook points and adds the generated installation interface
+needed to move Parts registration above the engine.
+
+The next dependency-switch PR changes engine dependencies to `horizon-mod-vocab` and removes their old allowed
+rows. It does not move hook bodies. The generated tables below still show the current engine dependency names;
+all production engine uses of `mod_api` now name vocabulary definitions or their re-exports, not guest transport.
 
 ## Generated tables
 
@@ -129,7 +119,7 @@ Counts are source references (one per `use` leaf or path), split into production
 
 | engine crate | mod crate | files | prod refs | test refs |
 |---|---|---|---|---|
-| horizon-client | horizon-mod-api | 444 | 2608 | 4511 |
+| horizon-client | horizon-mod-api | 445 | 2609 | 4522 |
 | horizon-client | horizon-mod-api-gen | 7 | 8 | 0 |
 | horizon-client | horizon-mod-package | 26 | 83 | 86 |
 | horizon-client | horizon-mod-points | 2 | 4 | 0 |
@@ -150,11 +140,11 @@ Counts are source references (one per `use` leaf or path), split into production
 
 | area | files | prod refs | test refs |
 |---|---|---|---|
-| game/modding | 156 | 1320 | 2095 |
-| game/native_hooks | 103 | 418 | 407 |
+| game/modding | 156 | 1320 | 2106 |
+| game/native_hooks | 103 | 416 | 407 |
 | client (non-game) | 76 | 388 | 278 |
 | game/mobs | 26 | 163 | 444 |
-| game/interface | 44 | 143 | 439 |
+| game/interface | 45 | 146 | 439 |
 | game/network | 24 | 161 | 369 |
 | game/blocks | 26 | 101 | 295 |
 | game/world | 20 | 80 | 211 |
@@ -172,12 +162,12 @@ Counts are source references (one per `use` leaf or path), split into production
 
 | strand | prod refs | test refs | of which in modding/ + native_hooks/ (prod) |
 |---|---|---|---|
-| loading | 247 | 685 | 75 |
+| loading | 247 | 687 | 75 |
 | host | 108 | 378 | 79 |
 | slots | 8 | 0 | 0 |
 | attachments | 165 | 282 | 49 |
-| content_render | 286 | 379 | 158 |
-| hooks | 2468 | 3317 | 1377 |
+| content_render | 286 | 380 | 158 |
+| hooks | 2469 | 3325 | 1375 |
 
 ### Engine files outside modding/ and native_hooks/: what they need of `mod_api`
 
@@ -186,7 +176,7 @@ Each file is put in the highest tier it uses in production code: `dispatch` (Hoo
 | highest tier | files |
 |---|---|
 | dispatch | 17 |
-| value | 133 |
+| value | 134 |
 | more | 45 |
 
 - **dispatch** items, by files using them: `__private::listened` (59), `HookId` (6), `InteractionResult` (6), `HookId::LivingChangeTarget` (5), `__private::has_scoped_hook` (3), `HookId::AnvilUpdate` (2), `HookId::ArmorHurt` (2), `HookId::BlockDrops` (2), `HookId::CanContinueSleeping` (2), `HookId::EffectParticleModification` (2), `HookId::EnchantedEntityLoot` (2), `HookId::PlayerHarvestCheck` (2), `HookId::PlayerTickPost` (2), `HookId::PlayerTickPre` (2), `__private::PlayerSetSpawnCall` (2), `__private::PlayerTickPostCall` (2), `__private::PlayerTickPreCall` (2), `__private::built::ExplosionStart` (2), `__private::built::LootDrops` (2), `__private::built::ToolUse` (2), `HookId::AddServerReloadListeners` (1), `HookId::AnimalTame` (1), `HookId::BabyEntitySpawn` (1), `HookId::BlockBreakProgressUpdate` (1), `HookId::BlockDamageAbort` (1)
@@ -208,7 +198,7 @@ Outside the host areas, 2279 `mod_api` references are in test code; 206 of them 
 | slots (phase 3) | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 | attachments (phase 4) | 13 | 2578 | 5 | 0 | 16 | 33 | 9 |
 | content_render (phase 5) | 5 | 2698 | 5 | 1 | 40 | 44 | 17 |
-| hooks (phase 6) | 373 | 91408 | 355 | 17 | 571 | 1495 | 223 |
+| hooks (phase 6) | 373 | 91488 | 355 | 17 | 572 | 1494 | 224 |
 
 ### horizon-mod-api: vocabulary or not (non-test files)
 
