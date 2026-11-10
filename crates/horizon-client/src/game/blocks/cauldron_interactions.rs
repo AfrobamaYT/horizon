@@ -24,6 +24,9 @@ pub(super) fn enter_decision() -> Option<Active> {
 pub(super) fn snapshot() -> Arc<Table> {
     TABLE.with_borrow(Arc::clone)
 }
+pub(super) fn clear() {
+    install(Arc::new(Table::default()));
+}
 pub(super) fn install(table: Arc<Table>) {
     TABLE.with_borrow_mut(|old| *old = table);
 }

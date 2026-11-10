@@ -93,13 +93,17 @@ pub trait Interaction: Send + Sync + 'static {
 /// Prepared dispatcher registration, corresponding to NeoForge's documented `Dispatcher` phase.
 pub trait CauldronInteractions {
     /// Register an exact item entry for a block's dispatcher; vanilla entries also own their slots.
+    /// Admission errors are returned immediately and stored: ignoring an error still fails
+    /// the whole preparation when it finishes, leaving the published snapshot unchanged.
     fn register(
         &mut self,
         block: BlockKey,
         item: ItemKey,
         handler: Arc<dyn Interaction>,
     ) -> Result<(), CauldronRegistrationError>;
-    /// Register over the complete prepared set, refusing the entire operation on conflict.
+    /// Queue registration over the complete prepared dispatcher set, including later declarations.
+    /// Item admission errors are returned and stored. Conflicts are discovered when preparation
+    /// finishes and fail the whole preparation with both owners; this method does not return Duplicate.
     fn register_to_all(
         &mut self,
         item: ItemKey,

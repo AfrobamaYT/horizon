@@ -1,52 +1,12 @@
 use super::*;
-use crate::game::native_entity_refs::tests::with_game_at;
+use crate::game::native_entity_refs::tests::{run_fresh_cases, with_game_at};
 use mod_api::{CauldronDecision, CauldronFire, CauldronPlan, CauldronUse, Hooks, Host, ServerHost};
-use std::sync::{
-    Mutex,
-    atomic::{AtomicUsize, Ordering},
-};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 const POS: [i32; 3] = [0, 64, 0];
-static CHILDREN: Mutex<()> = Mutex::new(());
-
-fn fresh(name: &str) -> bool {
-    if std::env::var("HORIZON_CAULDRON_CASE").as_deref() == Ok(name) {
-        return false;
-    }
-    let _serial = CHILDREN.lock().unwrap_or_else(|e| e.into_inner());
-    let scratch = tempfile::tempdir().unwrap();
-    let resources = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap())
-        .canonicalize()
-        .unwrap();
-    let output = std::process::Command::new(std::env::current_exe().unwrap())
-        .args([
-            "--ignored",
-            "--exact",
-            &format!("{}::{name}", module_path!().split_once("::").unwrap().1),
-            "--nocapture",
-        ])
-        .current_dir(scratch.path())
-        .env("HORIZON_CAULDRON_CASE", name)
-        .env("HORIZON_TEST_RESOURCES", resources)
-        .env("HORIZON_NO_AUDIO", "1")
-        .env("HORIZON_HOME", scratch.path().join("home"))
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&output.stdout).contains("1 passed"),
-        "child matched no test: {}",
-        String::from_utf8_lossy(&output.stdout)
-    );
-    true
-}
 #[derive(Default)]
 struct Seen {
+    fail_preparation: AtomicBool,
     decide: AtomicUsize,
     actor: AtomicUsize,
     fire: AtomicUsize,
@@ -139,6 +99,15 @@ impl Hooks for TestMod {
             .interactions
             .register(block, item, handler.clone())
             .unwrap();
+        if self.seen.fail_preparation.load(Ordering::SeqCst) {
+            event
+                .interactions
+                .register_to_all(
+                    mod_api::__private::item_key("minecraft:water_bucket").unwrap(),
+                    handler.clone(),
+                )
+                .unwrap();
+        }
         event
             .interactions
             .register(
@@ -233,7 +202,11 @@ fn unchanged(game: &Game<'_>, seen: &Seen) {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn cauldron_syrup_applies_once() {
-    if fresh("cauldron_syrup_applies_once") {
+    if run_fresh_cases(
+        "game::cauldron_interactions::tests::cauldron_syrup_applies_once",
+        "HORIZON_CAULDRON_CASE",
+        &["run"],
+    ) {
         return;
     }
     fixture(false, false, false, |game, seen| {
@@ -270,7 +243,11 @@ fn cauldron_syrup_applies_once() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn cauldron_refused_fire_is_atomic() {
-    if fresh("cauldron_refused_fire_is_atomic") {
+    if run_fresh_cases(
+        "game::cauldron_interactions::tests::cauldron_refused_fire_is_atomic",
+        "HORIZON_CAULDRON_CASE",
+        &["run"],
+    ) {
         return;
     }
     fixture(true, false, false, |game, seen| {
@@ -282,7 +259,11 @@ fn cauldron_refused_fire_is_atomic() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn cauldron_panicking_fire_is_atomic() {
-    if fresh("cauldron_panicking_fire_is_atomic") {
+    if run_fresh_cases(
+        "game::cauldron_interactions::tests::cauldron_panicking_fire_is_atomic",
+        "HORIZON_CAULDRON_CASE",
+        &["run"],
+    ) {
         return;
     }
     fixture(false, true, false, |game, seen| {
@@ -309,7 +290,11 @@ fn cauldron_panicking_fire_is_atomic() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn cauldron_outer_abort_discards_effects_and_drops() {
-    if fresh("cauldron_outer_abort_discards_effects_and_drops") {
+    if run_fresh_cases(
+        "game::cauldron_interactions::tests::cauldron_outer_abort_discards_effects_and_drops",
+        "HORIZON_CAULDRON_CASE",
+        &["run"],
+    ) {
         return;
     }
     fixture(false, false, false, |game, seen| {
@@ -329,7 +314,11 @@ fn cauldron_outer_abort_discards_effects_and_drops() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn cauldron_duplicates_name_both_owners() {
-    if fresh("cauldron_duplicates_name_both_owners") {
+    if run_fresh_cases(
+        "game::cauldron_interactions::tests::cauldron_duplicates_name_both_owners",
+        "HORIZON_CAULDRON_CASE",
+        &["run"],
+    ) {
         return;
     }
     fixture(false, false, false, |game, seen| {
@@ -374,7 +363,11 @@ fn cauldron_duplicates_name_both_owners() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn cauldron_dye_tag_shadows_exact_handler_even_on_pass() {
-    if fresh("cauldron_dye_tag_shadows_exact_handler_even_on_pass") {
+    if run_fresh_cases(
+        "game::cauldron_interactions::tests::cauldron_dye_tag_shadows_exact_handler_even_on_pass",
+        "HORIZON_CAULDRON_CASE",
+        &["run"],
+    ) {
         return;
     }
     fixture(false, false, true, |game, seen| {
@@ -407,7 +400,11 @@ fn cauldron_dye_tag_shadows_exact_handler_even_on_pass() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn cauldron_transfer_awards_two_statistics_once() {
-    if fresh("cauldron_transfer_awards_two_statistics_once") {
+    if run_fresh_cases(
+        "game::cauldron_interactions::tests::cauldron_transfer_awards_two_statistics_once",
+        "HORIZON_CAULDRON_CASE",
+        &["run"],
+    ) {
         return;
     }
     fixture(false, false, false, |game, _| {
@@ -419,7 +416,11 @@ fn cauldron_transfer_awards_two_statistics_once() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn cauldron_client_decides_without_firing_or_authoritative_writes() {
-    if fresh("cauldron_client_decides_without_firing_or_authoritative_writes") {
+    if run_fresh_cases(
+        "game::cauldron_interactions::tests::cauldron_client_decides_without_firing_or_authoritative_writes",
+        "HORIZON_CAULDRON_CASE",
+        &["run"],
+    ) {
         return;
     }
     fixture(false, false, false, |game, seen| {
@@ -450,5 +451,198 @@ fn cauldron_client_decides_without_firing_or_authoritative_writes() {
         assert_eq!(seen.actor.load(Ordering::SeqCst), 7);
         assert_eq!(seen.fire.load(Ordering::SeqCst), 0);
         unchanged(game, seen);
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn cauldron_register_to_all_and_admission_errors() {
+    if run_fresh_cases(
+        "game::cauldron_interactions::tests::cauldron_register_to_all_and_admission_errors",
+        "HORIZON_CAULDRON_CASE",
+        &["run"],
+    ) {
+        return;
+    }
+    fixture(false, false, false, |game, seen| {
+        use mod_api::CauldronInteractions as _;
+        let handler: Arc<dyn mod_api::Interaction> = Arc::new(Syrup {
+            seen: seen.clone(),
+            refused: false,
+            panic: false,
+        });
+        let item = mod_api::__private::item_key("test:syrup_bottle").unwrap();
+        let custom = mod_api::__private::block_key("test:syrup_cauldron").unwrap();
+        let make = || Registrar {
+            table: Table::default(),
+            items: game.items(),
+            registry: game.pack.assets.registry,
+            all: Vec::new(),
+            error: None,
+        };
+        let _owner = mod_api::__private::enter("all_mod", "register_cauldron_interaction");
+        let mut registrar = make();
+        registrar.register_to_all(item, handler.clone()).unwrap();
+        // The custom dispatcher is declared after register_to_all was queued.
+        registrar
+            .register(
+                custom,
+                mod_api::__private::item_key("minecraft:stick").unwrap(),
+                handler.clone(),
+            )
+            .unwrap();
+        let table = registrar.finish().unwrap();
+        assert_eq!(table.blocks().len(), 5);
+        for block in [
+            "minecraft:cauldron",
+            "minecraft:water_cauldron",
+            "minecraft:lava_cauldron",
+            "minecraft:powder_snow_cauldron",
+            "test:syrup_cauldron",
+        ] {
+            assert!(
+                matches!(table.select(block,"test:syrup_bottle",false),Some(Entry::Mod(callback)) if callback.owner=="all_mod")
+            );
+        }
+        let mut registrar = make();
+        assert_eq!(
+            registrar.register_to_all(
+                mod_api::__private::item_key("minecraft:water_bucket").unwrap(),
+                handler.clone()
+            ),
+            Ok(())
+        );
+        let error = registrar.finish().err().unwrap().to_string();
+        assert!(
+            error.contains("Duplicate") && error.contains("minecraft") && error.contains("all_mod"),
+            "{error}"
+        );
+        let mut items = game.items().clone();
+        items.items.remove("test:syrup_bottle");
+        let mut registrar = Registrar {
+            table: Table::default(),
+            items: &items,
+            registry: game.pack.assets.registry,
+            all: Vec::new(),
+            error: None,
+        };
+        assert_eq!(
+            registrar.register_to_all(item, handler.clone()),
+            Err(mod_api::CauldronRegistrationError::UnknownItem)
+        );
+        assert!(
+            registrar
+                .finish()
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("UnknownItem")
+        );
+        let mut registrar = Registrar {
+            table: Table::default(),
+            items: &items,
+            registry: game.pack.assets.registry,
+            all: Vec::new(),
+            error: None,
+        };
+        assert_eq!(
+            registrar.register(custom, item, handler.clone()),
+            Err(mod_api::CauldronRegistrationError::UnknownItem)
+        );
+        assert!(
+            registrar
+                .finish()
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("UnknownItem")
+        );
+        let registry = horizon_world::registry::BlockRegistry::from_facts_json(
+            &br#"{"defaults":{"minecraft:air":0},"states":[["air",true,false,"","minecraft:air"]]}"#[..],
+        )
+        .unwrap();
+        let mut registrar = Registrar {
+            table: Table::default(),
+            items: game.items(),
+            registry: &registry,
+            all: Vec::new(),
+            error: None,
+        };
+        assert_eq!(
+            registrar.register(custom, item, handler),
+            Err(mod_api::CauldronRegistrationError::UnknownBlock)
+        );
+        assert!(
+            registrar
+                .finish()
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("UnknownBlock")
+        );
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn cauldron_world_close_discards_callbacks_before_failed_preparation() {
+    if run_fresh_cases(
+        "game::cauldron_interactions::tests::cauldron_world_close_discards_callbacks_before_failed_preparation",
+        "HORIZON_CAULDRON_CASE",
+        &["run"],
+    ) {
+        return;
+    }
+    fixture(false, false, false, |game, seen| {
+        let old = snapshot();
+        assert!(matches!(
+            old.select("minecraft:cauldron", "test:syrup_bottle", false),
+            Some(Entry::Mod(_))
+        ));
+        seen.fail_preparation.store(true, Ordering::SeqCst);
+        assert!(
+            game.resolve_parts()
+                .unwrap_err()
+                .to_string()
+                .contains("Duplicate")
+        );
+        assert!(
+            Arc::ptr_eq(&old, &snapshot()),
+            "failed active reload retains its snapshot"
+        );
+        game.native_lifecycle_world_closed();
+        game.native_lifecycle
+            .begin_open(mod_api::Authority::IntegratedServer);
+        assert!(
+            game.resolve_parts()
+                .unwrap_err()
+                .to_string()
+                .contains("Duplicate")
+        );
+        assert_eq!(snapshot().blocks().len(), 4);
+        for block in [
+            "minecraft:cauldron",
+            "minecraft:water_cauldron",
+            "minecraft:lava_cauldron",
+            "minecraft:powder_snow_cauldron",
+            "test:syrup_cauldron",
+        ] {
+            assert!(
+                snapshot()
+                    .select(block, "test:syrup_bottle", false)
+                    .is_none()
+            );
+        }
+        game.inventory[0] = Some(ItemStack::new("minecraft:water_bucket", 1));
+        assert!(game.use_on_cauldron(POS).unwrap());
+        assert_eq!(
+            state(game),
+            ("minecraft:water_cauldron".into(), Some("3".into()))
+        );
+        assert_eq!(
+            &*game.inventory[0].as_ref().unwrap().item,
+            "minecraft:bucket"
+        );
+        assert_eq!(seen.decide.load(Ordering::SeqCst), 0);
     });
 }

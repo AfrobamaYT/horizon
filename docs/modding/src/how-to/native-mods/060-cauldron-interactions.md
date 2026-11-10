@@ -30,11 +30,14 @@ A custom block opts into dispatch by registration; its name need not end in
 `cauldron`. Register the filled target too when a plan replaces the empty block
 with a custom cauldron. Its declared state schema must admit the proposed state,
 for example `level=1` in a 1..3 level property. `register_to_all(item, handler)`
-expands over the complete prepared dispatcher set, including custom blocks
-registered later in the hook sequence.
+queues registration over the complete prepared dispatcher set, including custom blocks
+registered later in the hook sequence. Conflicts surface when preparation finishes;
+they fail the whole preparation and name both owners. `register_to_all` does not
+return `Duplicate` directly. Immediate admission errors from either registration
+method are also stored, so ignoring an error cannot publish a partial snapshot.
 
-Vanilla entries are prebound in the same table. Replacing one, or registering a
-second entry for the same dispatcher and item, returns
+Vanilla entries are prebound in the same table. With `register`, replacing one,
+or registering a second entry for the same dispatcher and item, returns
 `CauldronRegistrationError::Duplicate { owners }`, naming the existing owner and
 the attempted owner, and refuses publication. There is no override flag. Unknown
 block or item keys refuse registration. On water cauldrons, vanilla's dye tag
