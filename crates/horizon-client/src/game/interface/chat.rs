@@ -784,7 +784,7 @@ impl Game<'_> {
     }
     /// `ResourceOrIdArgument`'s loot tables are the server's: every table the
     /// world plays with, the game's, the content mods' and its packs'.
-    pub(super) fn sync_loot_table_ids(&mut self) {
+    pub(in crate::game) fn sync_loot_table_ids(&mut self) {
         let mut ids: Vec<String> = self.items().loot_table_ids().map(str::to_owned).collect();
         ids.sort();
         self.ui.registries.loot_tables = ids;

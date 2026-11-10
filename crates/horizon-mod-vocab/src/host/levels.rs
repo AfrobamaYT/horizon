@@ -922,6 +922,25 @@ pub trait LevelsBackendMut {
         entity: Option<EntityRef>,
     ) -> Result<Option<Vec<ItemStack>>, StackWriteError>;
     /// Side: server.
+    /// One roll of the loot table `table` (`mymod:sifting/gravel`, the world's data packs
+    /// merged), handed back instead of dropped: `LootTable.getRandomItems(LootParams)` with
+    /// `origin` as ORIGIN, `tool` as TOOL when given and `entity` as THIS_ENTITY when given,
+    /// the context `/loot … fish <table> <pos> <tool>` gives. The roll draws from the table's
+    /// random sequence, else the level random, as vanilla's does, so it moves later draws: that
+    /// is why this is a write. The stacks come split to their stack sizes, empties left out.
+    /// Mods' loot kinds see `origin` and this level; no `loot_drops` event, since nothing
+    /// drops. None for a table that isn't there, a stale or parked handle, a client, and a
+    /// stale `entity`.
+    #[access(WorldOnly)]
+    fn level_roll_loot(
+        &mut self,
+        level: LevelRef,
+        table: &str,
+        origin: [f64; 3],
+        tool: Option<&ItemStack>,
+        entity: Option<EntityRef>,
+    ) -> Result<Option<Vec<ItemStack>>, StackWriteError>;
+    /// Side: server.
     /// Send `ServerLevel.destroyBlockProgress` in this level: stages 0..9 show a crack,
     /// any other stage removes it. A machine uses a stable negative breaker id.
     #[access(WorldOnly)]
