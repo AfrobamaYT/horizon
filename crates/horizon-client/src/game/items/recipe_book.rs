@@ -397,6 +397,7 @@ impl Game<'_> {
         self.recipe_ui.book = None;
         self.recipe_ui.custom = mod_screen::ModRecipeUi::default();
         self.recipe_tables.books = None;
+        self.invalidate_mod_book_placement_catalogues();
     }
     /// Puts a server's entries over `book` (`Book::use_server_entries`). The
     /// names come from the connection's registries; a tag's items are the ones

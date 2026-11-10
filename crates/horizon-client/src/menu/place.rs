@@ -136,6 +136,8 @@ pub(super) mod picker;
 use picker::Picker;
 #[path = "place/custom.rs"]
 mod custom;
+#[path = "place/custom_access.rs"]
+mod custom_access;
 #[path = "place/custom_plan.rs"]
 pub mod custom_plan;
 

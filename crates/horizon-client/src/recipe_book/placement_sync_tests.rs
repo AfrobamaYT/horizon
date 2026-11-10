@@ -172,19 +172,28 @@ fn only_the_current_missing_response_can_install_a_ghost_once() {
     complete(&mut client, &identity);
     let old = select(&mut client);
     let current = select(&mut client);
-    assert!(!client.reply(&old, Outcome::MissingIngredients));
+    assert_eq!(client.reply(&old, Outcome::MissingIngredients), None);
     let mut wrong = current.clone();
     wrong.catalog.generation += 1;
-    assert!(!client.reply(&wrong, Outcome::MissingIngredients));
+    assert_eq!(client.reply(&wrong, Outcome::MissingIngredients), None);
     let mut wrong = current.clone();
     wrong.display.source += 1;
-    assert!(!client.reply(&wrong, Outcome::MissingIngredients));
-    assert!(client.reply(&current, Outcome::MissingIngredients));
-    assert!(!client.reply(&current, Outcome::MissingIngredients));
+    assert_eq!(client.reply(&wrong, Outcome::MissingIngredients), None);
+    assert_eq!(
+        client.reply(&current, Outcome::MissingIngredients),
+        Some(Outcome::MissingIngredients)
+    );
+    assert_eq!(client.reply(&current, Outcome::MissingIngredients), None);
     let current = select(&mut client);
-    assert!(!client.reply(&current, Outcome::Placed));
+    assert_eq!(
+        client.reply(&current, Outcome::Placed),
+        Some(Outcome::Placed)
+    );
     let current = select(&mut client);
-    assert!(!client.reply(&current, Outcome::Refused(Refusal::Denied)));
+    assert_eq!(
+        client.reply(&current, Outcome::Refused(Refusal::Denied)),
+        Some(Outcome::Refused(Refusal::Denied))
+    );
 }
 #[test]
 fn click_close_reload_and_reconnect_invalidate_pending_ghost_replies() {
@@ -193,20 +202,20 @@ fn click_close_reload_and_reconnect_invalidate_pending_ghost_replies() {
     complete(&mut client, &identity);
     let pending = select(&mut client);
     client.click();
-    assert!(!client.reply(&pending, Outcome::MissingIngredients));
+    assert_eq!(client.reply(&pending, Outcome::MissingIngredients), None);
     let pending = select(&mut client);
     client.close();
-    assert!(!client.reply(&pending, Outcome::MissingIngredients));
+    assert_eq!(client.reply(&pending, Outcome::MissingIngredients), None);
     let current = open(&mut client);
     complete(&mut client, &current);
     let pending = select(&mut client);
     assert!(client.invalidate(11));
-    assert!(!client.reply(&pending, Outcome::MissingIngredients));
+    assert_eq!(client.reply(&pending, Outcome::MissingIngredients), None);
     let current = open(&mut client);
     complete(&mut client, &current);
     let pending = select(&mut client);
     client.hello(12);
-    assert!(!client.reply(&pending, Outcome::MissingIngredients));
+    assert_eq!(client.reply(&pending, Outcome::MissingIngredients), None);
     assert!(client.catalog().is_none());
     assert!(!client.invalidate(11));
 }

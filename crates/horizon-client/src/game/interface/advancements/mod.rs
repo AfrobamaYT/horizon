@@ -1081,6 +1081,9 @@ impl Game<'_> {
         } else {
             self.recipe_toast(&allowed);
         }
+        if !allowed.is_empty() {
+            self.invalidate_mod_book_placement_knowledge();
+        }
         if allowed.is_empty() || self.remote.is_some() || self.no_player_here() {
             return taken_back;
         }

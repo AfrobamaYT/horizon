@@ -357,14 +357,16 @@ impl Client {
         Some(Frame::Place { selection, use_max })
     }
     /// Only a current missing-ingredients reply authorizes ghost installation.
-    pub fn reply(&mut self, selection: &Selection, outcome: Outcome) -> bool {
+    /// Consume only the reply to the current selection. Stale replies cannot
+    /// cancel a newer request's timeout or install its ghosts.
+    pub fn reply(&mut self, selection: &Selection, outcome: Outcome) -> Option<Outcome> {
         if self.selection.as_ref() != Some(selection)
             || self.catalog.as_ref() != Some(&selection.catalog)
         {
-            return false;
+            return None;
         }
         self.selection = None;
-        matches!(outcome, Outcome::MissingIngredients)
+        Some(outcome)
     }
     pub fn click(&mut self) {
         self.selection = None;
@@ -419,11 +421,11 @@ impl Authority {
         self.catalog = Some(identity);
         Ok(())
     }
+    pub fn owns(&self, catalog: &CatalogIdentity) -> bool {
+        self.ready && self.catalog.as_ref() == Some(catalog)
+    }
     pub fn place(&mut self, selection: &Selection) -> Result<(), Refusal> {
-        if !self.ready
-            || self.catalog.as_ref() != Some(&selection.catalog)
-            || selection.number <= self.last
-        {
+        if !self.owns(&selection.catalog) || selection.number <= self.last {
             return Err(Refusal::Stale);
         }
         self.last = selection.number;

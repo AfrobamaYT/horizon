@@ -37,6 +37,7 @@ impl Game<'_> {
         menu: &str,
         extra: Option<horizon_protocol::menu_extra::Message>,
     ) {
+        self.clear_mod_book_placement_screen();
         self.mod_screen = None;
         let Some(t) = target else {
             return;
@@ -78,6 +79,8 @@ impl Game<'_> {
                 data: Vec::new(),
                 extra,
             });
+            self.begin_mod_book_placement();
+            self.ensure_mod_book_catalog();
         }
     }
 }

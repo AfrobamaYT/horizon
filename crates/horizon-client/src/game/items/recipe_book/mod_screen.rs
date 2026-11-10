@@ -3,6 +3,8 @@ use super::*;
 use horizon_client::recipe_book::mod_presentation::ModPresentation;
 #[path = "mod_screen/layout.rs"]
 mod layout;
+#[path = "mod_screen/placement.rs"]
+mod placement;
 #[path = "mod_screen/resolve.rs"]
 mod resolve;
 
