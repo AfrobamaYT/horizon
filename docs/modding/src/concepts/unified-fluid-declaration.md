@@ -73,7 +73,7 @@ reject collisions, and never silently rename it to upstream's last-segment rule.
 The API-owned declaration, placement, template and appearance types each carry
 an explicit `#[derive(horizon_mod_api_macros::Wire)]`, using the shared Wire
 mechanism rather than catalog-generated per-type serialization forms. This
-follows `crates/horizon-mod-api/src/world/game_rule_value.rs:7` and the derive
+follows `crates/horizon-mod-vocab/src/world/game_rule_value.rs:7` and the derive
 entry point at `crates/horizon-mod-api-macros/src/lib.rs:6`. The generator builds
 host call tables only; engine structs stay out of the public API and ABI.
 Before applying these derives in `horizon-mod-package`, move the shared Wire
@@ -111,7 +111,7 @@ Verified current owners (line numbers describe this checkout):
 | Route | Owner and required change |
 | --- | --- |
 | File declarations, generated blocks/buckets | `crates/horizon-mod-package/src/content.rs:509`, `:521`, `:565`, `:877`: replace FluidFile/FluidLook split with one validated Fluid |
-| Code declaration ingress | `crates/horizon-mod-api/src/parts/fluids.rs:589`, `:634`; `crates/horizon-client/src/game/modding/api_values/content_declarations.rs:448`: replace world-only registrar and conversion with unified input |
+| Code declaration ingress | `crates/horizon-mod-vocab/src/parts/fluids.rs:589`, `:634`; `crates/horizon-client/src/game/modding/api_values/content_declarations.rs:448`: replace world-only registrar and conversion with unified input |
 | Registration and merge | `crates/horizon-client/src/mod_content.rs:95`, `:131`, `:157`: remove independent merging/override semantics; one owner, one publication pass |
 | Runtime identity and ticks | `crates/horizon-world/src/fluid.rs:150`, `:210`; `crates/horizon-world/src/level/tick.rs:1815`, `:1864`: retain kinds and tick matching |
 | Flow, bucket placement and pickup | `crates/horizon-world/src/level/fluids.rs:184`, `:312`, `:365`: consume resolved template/rules and preserve own block |

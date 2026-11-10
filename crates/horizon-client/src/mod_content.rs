@@ -152,20 +152,9 @@ pub fn register_world_fluids(
     Ok(names)
 }
 
-/// Joins the world fluids native mods declare in code to the content mods of their namespaces:
-/// a fluid's file, if it has one, keeps saying how it looks.
-pub fn accept_world_fluids(mods: &mut [ContentMod], fluids: &[FluidLook]) {
-    for fluid in fluids {
-        let namespace = fluid.id.split_once(':').map_or("", |(ns, _)| ns);
-        let Some(owner) = mods.iter_mut().find(|m| m.id == namespace) else {
-            continue;
-        };
-        match owner.content.fluids.iter_mut().find(|f| f.id == fluid.id) {
-            Some(look) => look.world = fluid.world,
-            None => owner.content.fluids.push(fluid.clone()),
-        }
-    }
-}
+#[path = "mod_content_fluid_declarations.rs"]
+mod fluid_declarations;
+pub use fluid_declarations::accept_world_fluids;
 
 /// How the fluid `id` looks, when a mod declares it.
 pub fn fluid_look(id: &str) -> Option<FluidLook> {
@@ -839,13 +828,10 @@ fn component_types(map: &J) -> BTreeSet<String> {
     }
 }
 
-/// Blocks and items native mods declare in code (`native_blocks`,
-/// `native_items`), joined to the content mods: each namespace's go into
-/// the content mod of that id when one is on (a native mod's own `.hmod`,
-/// with its models and textures), else into a content mod with no files of
-/// its own. Checked as files are ([`horizon_mod_package::Content::declare`],
-/// [`accept_mod`]); a namespace whose declarations are refused is left out
-/// whole, and its error returned.
+/// Code declarations, joined to their manifest owner. Each owner's namespaces
+/// validate together, independent of namespace order, with all-or-nothing refusal.
+/// Unknown namespaces become synthetic content-only mods. Checked as files are
+/// ([`horizon_mod_package::Content::declare`], [`accept_mod`]).
 pub fn accept_declared(
     mods: &mut Vec<ContentMod>,
     blocks: &[horizon_mod_package::content::Block],
@@ -853,37 +839,50 @@ pub fn accept_declared(
     types: &[BlockEntityType],
     known: &BTreeSet<String>,
 ) -> Vec<String> {
-    let namespace = |id: &str| id.split_once(':').map_or("", |(ns, _)| ns).to_owned();
-    let mut by_namespace: std::collections::BTreeMap<String, (Vec<_>, Vec<_>)> = Default::default();
+    let owners: BTreeMap<_, _> = mods
+        .iter()
+        .flat_map(|m| {
+            m.content
+                .namespaces
+                .iter()
+                .map(|ns| (ns.clone(), m.id.clone()))
+        })
+        .collect();
+    let owner = |id: &str| {
+        let ns = id.split_once(':').map_or("", |(ns, _)| ns);
+        owners.get(ns).cloned().unwrap_or_else(|| ns.to_owned())
+    };
+    let mut by_owner: BTreeMap<String, (Vec<_>, Vec<_>)> = Default::default();
     for block in blocks {
-        by_namespace
-            .entry(namespace(&block.id))
+        by_owner
+            .entry(owner(&block.id))
             .or_default()
             .0
             .push(block.clone());
     }
     for item in items {
-        by_namespace
-            .entry(namespace(&item.id))
+        by_owner
+            .entry(owner(&item.id))
             .or_default()
             .1
             .push(item.clone());
     }
     for kind in types {
-        by_namespace.entry(namespace(&kind.id)).or_default();
+        by_owner.entry(owner(&kind.id)).or_default();
     }
     let mut errors = Vec::new();
-    for (ns, (blocks, items)) in by_namespace {
-        let types = types.iter().filter(|t| namespace(&t.id) == ns).cloned();
-        let result = match mods.iter().position(|m| m.id == ns) {
+    for (id, (blocks, items)) in by_owner {
+        let types = types.iter().filter(|t| owner(&t.id) == id).cloned();
+        let result = match mods.iter().position(|m| m.id == id) {
             Some(i) => {
-                let mut content = horizon_mod_package::Content::declared(&ns);
+                let mut content = horizon_mod_package::Content::declared(&mods[i].id);
+                content.namespaces.clone_from(&mods[i].content.namespaces);
                 content.blocks.clone_from(&mods[i].content.blocks);
                 content.items.clone_from(&mods[i].content.items);
                 content
                     .declare(&blocks, &items)
                     .and_then(|()| {
-                        let mut added = horizon_mod_package::Content::declared(&ns);
+                        let mut added = horizon_mod_package::Content::declared(&id);
                         added.blocks.clone_from(&blocks);
                         added.items.clone_from(&items);
                         validate_components(&added, known).map_err(|e| e.to_string())
@@ -895,11 +894,11 @@ pub fn accept_declared(
                     })
             }
             None => {
-                let mut content = horizon_mod_package::Content::declared(&ns);
+                let mut content = horizon_mod_package::Content::declared(&id);
                 content.declare(&blocks, &items).and_then(|()| {
                     content.block_entity_types.extend(types);
                     let candidate = ContentMod {
-                        id: ns.clone(),
+                        id: id.clone(),
                         content,
                         jars: Vec::new(),
                     };
@@ -908,7 +907,7 @@ pub fn accept_declared(
             }
         };
         if let Err(e) = result {
-            errors.push(format!("native blocks and items of {ns}: {e}"));
+            errors.push(format!("native blocks and items of {id}: {e}"));
         }
     }
     errors
