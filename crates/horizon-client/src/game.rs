@@ -50,12 +50,6 @@ macro_rules! world_biomes {
     };
 }
 /// The world's packs' content files, as a field-level borrow (see the macros).
-/// A new id for a world session's published datapack registries: a handle from an earlier
-/// session fails with `WrongSession` against the next one.
-fn next_datapack_session() -> u64 {
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-}
 fn pack_files(world_tables: &Option<WorldTables>) -> horizon_world::loot::PackOverlay<'_> {
     match world_tables {
         Some(t) => horizon_world::loot::PackOverlay {
@@ -2211,9 +2205,6 @@ struct WorldTables {
     /// over the game's own, by registry (`TagLoader.loadTagsForExistingRegistries`):
     /// what the predicates' `#tag`s of those registries read.
     pack_tags: HashMap<&'static str, HashMap<String, HashSet<String>>>,
-    /// The entries of the mods' datapack registries, decoded and checked, until the load
-    /// publishes them (`Game::datapack_registries`); taken out then.
-    datapack_candidate: Option<mod_api::DatapackCandidate>,
 }
 
 struct PreparedParts {
@@ -2228,6 +2219,7 @@ struct PreparedWorldReload {
     health: horizon_client::health::HealthResources,
     parts: PreparedParts,
     wire: Option<Arc<horizon_client::lan::data::SyncData>>,
+    datapack_candidate: Option<mod_api::DatapackCandidate>,
 }
 
 impl WorldTables {
@@ -2946,9 +2938,6 @@ struct Game<'a> {
     /// The world's data packs' content tables, when it has packs (`None`
     /// keeps `Resources.rest`'s own in use).
     world_tables: Option<WorldTables>,
-    /// The entries of the mods' datapack registries this world session has published, at the
-    /// generation of the load or reload that built them; `None` when no mod declared one.
-    datapack_registries: Option<mod_api::DatapackRegistrySet>,
     /// Server-owned loot and item snapshots, independent of client preloads.
     server_loot: horizon_client::structure_blocks::LootSnapshot,
     server_items: Option<Arc<Items>>,
@@ -11789,16 +11778,7 @@ impl Game<'_> {
         self.score = Default::default();
         let stack = self.reload_datapacks(false, &level.enabled_features)?;
         let root = self.options.resources.clone();
-        (self.world_tables, self.health_resources) =
-            self.build_world_tables(&stack, false, &root, self.mods.data_switched)?;
-        // A new world session: the first generation of whatever the mods' registries hold.
-        let candidate = self
-            .world_tables
-            .as_mut()
-            .and_then(|tables| tables.datapack_candidate.take());
-        self.datapack_registries = candidate.map(|candidate| {
-            mod_api::DatapackRegistrySet::first(candidate, next_datapack_session())
-        });
+        self.open_world_tables(&stack, &root)?;
         self.damage_tag_generation = self.damage_tag_generation.wrapping_add(1);
         self.resolve_parts()?;
         // A code-mod switch can have rebuilt the root since `Game::new`.
@@ -16850,7 +16830,6 @@ impl<'a> Game<'a> {
             rcon_source: false,
             server_lists: None,
             world_tables: None,
-            datapack_registries: None,
             server_loot: Default::default(),
             server_items: None,
             cmds: Default::default(),
