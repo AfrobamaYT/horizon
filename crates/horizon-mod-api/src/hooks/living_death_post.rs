@@ -9,7 +9,8 @@ pub trait Hooks {
     /// `attacker` is the mob that dealt it, 0 for none or a player. It only
     /// hears. The tail of `living_death`, a separate moment, and not fired
     /// when that hook cancelled the death. Server-side, once per death, for
-    /// every living entity. Armor stands, boats and other non-mob entities
+    /// every ordinary living entity. The ender dragon uses a separate death
+    /// sequence and fires neither living death hook. Armor stands, boats and other non-mob entities
     /// are not told.
     #[hook(
         side = "server",

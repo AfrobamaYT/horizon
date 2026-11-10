@@ -2588,12 +2588,11 @@ impl Game<'_> {
                     // which its death message tells.
                     let alive = m.alive();
                     if alive {
-                        m.record_damage(
-                            horizon_client::mobs::Damage::of(
-                                horizon_client::mobs::DamageKind::GenericKill,
-                            ),
-                            f32::MAX,
+                        let source = horizon_client::mobs::Damage::of(
+                            horizon_client::mobs::DamageKind::GenericKill,
                         );
+                        m.record_damage(source, f32::MAX);
+                        m.last_damage = Some((source, i64::from(m.age)));
                     }
                     m.health = 0.0;
                     if m.death_time == 0 {

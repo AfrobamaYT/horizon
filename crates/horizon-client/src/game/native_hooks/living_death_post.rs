@@ -185,15 +185,12 @@ mod tests {
                 );
                 mob.health = 20.0;
                 game.mobs.last_mut().unwrap().health = 20.0;
-                // `/kill`: a generic_kill hit of Float.MAX_VALUE, which dies on
-                // the spot (its own `mob_died`). Horizon records the hit in the
-                // combat log without replacing `last_damage`, so the hook names
-                // the last hurt's source, exactly as `living_death` does.
+                // `/kill` replaces the earlier damage source with generic_kill.
                 game.kill_target(crate::game::commands::Target::Mob(mob.id));
                 assert_eq!(*heard.lock().unwrap(), ["death", "loot", "post"]);
                 assert_eq!(
                     post.lock().unwrap().damage_type.as_deref(),
-                    Some("minecraft:generic")
+                    Some("minecraft:generic_kill")
                 );
 
                 // A death `living_death` kept: no drop, no notice.
