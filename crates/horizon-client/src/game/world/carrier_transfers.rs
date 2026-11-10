@@ -275,6 +275,22 @@ impl Game<'_> {
         // From here the path runs forward to `committed`. The lift is
         // under #2488's obligation, fenced until the barrier confirms.
         let _lease = PassLease::enter();
+        // The immutable carrier is published and verified by reading it
+        // back BEFORE any intent exists: once `prepared` runs, the
+        // cargo's only durable owner is this file, and recovery only
+        // verifies it — nothing after the lift ever rewrites it.
+        let carrier_bytes = codec::encode(&carrier)
+            .map_err(|e| TransferError::Store(e.to_string()))?;
+        store
+            .write_carrier(uuid, generation, &carrier_bytes)
+            .map_err(|e| TransferError::Store(e.to_string()))?;
+        let read_back = std::fs::read(store.carrier_path(uuid, generation))
+            .map_err(|e| TransferError::Store(e.to_string()))?;
+        if read_back != carrier_bytes {
+            return Err(TransferError::Store(
+                "the published carrier did not read back identically".into(),
+            ));
+        }
         store
             .write_operation(op_id, &encoded)
             .map_err(|e| TransferError::Store(e.to_string()))?;
@@ -308,7 +324,7 @@ impl Game<'_> {
         // Forward only: an I/O failure past `prepared` keeps the fences,
         // marks the transfer broken and leaves the operation to
         // recovery at world open.
-        if let Err(error) = self.finish_assemble(&mut store, uuid, generation, &carrier, cells) {
+        if let Err(error) = self.finish_assemble(&mut store, uuid, generation, cells) {
             log::error!("carrier transfer did not finish: {error}");
             self.world.carrier_fences.mark_broken();
             return Err(error);
@@ -554,14 +570,9 @@ impl Game<'_> {
         store: &mut Store,
         uuid: u128,
         generation: u32,
-        carrier: &Carrier,
         cells: &[BlockPos],
     ) -> Result<(), TransferError> {
-        let carrier_bytes =
-            codec::encode(carrier).map_err(|e| TransferError::Store(e.to_string()))?;
-        store
-            .write_carrier(uuid, generation, &carrier_bytes)
-            .map_err(|e| TransferError::Store(e.to_string()))?;
+        let _ = (uuid, generation);
         self.save_affected(cells)
             .map_err(|e| TransferError::Io(e.to_string()))?;
         #[cfg(test)]

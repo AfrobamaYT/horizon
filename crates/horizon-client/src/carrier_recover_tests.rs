@@ -13,6 +13,8 @@ use crate::carrier_store::{
 };
 use horizon_core::nbt::{self, NamedTag, Tag};
 use horizon_core::position::{BlockPos, ChunkPos};
+use horizon_world::carrier::codec;
+use horizon_world::carrier::model::{Carrier, Cell, LocalPos};
 use horizon_world::carrier::region_strict::{self, Strict};
 use horizon_world::chunk::{ChunkData, PalettedContainer};
 use horizon_world::region::{ChunkRecord, RegionFile};
@@ -172,7 +174,10 @@ fn assemble_chest(op_id: u64, world: [i32; 3]) -> Operation {
             before: CellImage {
                 name: "minecraft:chest".to_string(),
                 properties: vec![("facing".to_string(), "north".to_string())],
-                entity: Some(Tag::compound([("Items", Tag::ByteArray(vec![1, 2, 3, 4]))])),
+                entity: Some(Tag::compound([
+                    ("id", Tag::String("minecraft:chest".into())),
+                    ("Items", Tag::ByteArray(vec![7; 8])),
+                ])),
             },
             after: CellImage {
                 name: "minecraft:air".to_string(),
@@ -185,9 +190,17 @@ fn assemble_chest(op_id: u64, world: [i32; 3]) -> Operation {
 
 /// Writes the operation file and the `prepared` journal record, in the
 /// durable order: file first, journal second.
+/// Publishes the operation file, then — as a live assembly does before
+/// `prepared` — the immutable carrier carrying the before-images'
+/// cargo, then the journal's prepared record.
 fn prepare(store: &mut Store, operation: &Operation) {
     let encoded = encode_operation(operation).unwrap();
     store.write_operation(operation.op_id, &encoded).unwrap();
+    if operation.kind == OpKind::Assemble {
+        store
+            .write_carrier(operation.uuid, operation.generation, &carrier_of(operation))
+            .unwrap();
+    }
     store
         .begin(
             operation.kind,
@@ -196,6 +209,51 @@ fn prepare(store: &mut Store, operation: &Operation) {
             &operation.dimension,
         )
         .unwrap();
+}
+
+/// The carrier a live assembly publishes: every before-image's cell
+/// with its entity payload serialized along.
+fn carrier_of(operation: &Operation) -> Vec<u8> {
+    let cells = operation
+        .cells
+        .iter()
+        .enumerate()
+        .map(|(index, cell)| {
+            let data = cell.before.entity.as_ref().and_then(|entity| {
+                nbt::write_named(
+                    &NamedTag {
+                        name: "".into(),
+                        tag: entity.clone(),
+                    },
+                    nbt::Limits::saved(),
+                )
+                .ok()
+            });
+            Cell::new(
+                LocalPos::new(index as i8, 0, 0),
+                &cell.before.name,
+                cell.before.properties.clone(),
+                data,
+            )
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let carrier = Carrier::new(
+        operation.uuid,
+        operation.generation,
+        0,
+        horizon_world::carrier::contact::RigidTransform::identity_at(
+            horizon_core::geometry::Vec3::new(
+                operation.cells[0].world[0] as f64,
+                operation.cells[0].world[1] as f64,
+                operation.cells[0].world[2] as f64,
+            ),
+        )
+        .unwrap(),
+        cells,
+    )
+    .unwrap();
+    codec::encode(&carrier).unwrap()
 }
 
 #[test]
@@ -221,7 +279,7 @@ fn a_crash_after_the_operation_file_but_before_prepared_replays_nothing() {
     put_chunk(
         &fixture,
         position,
-        &chunk_root(chest_state_tag(), &[(chest_at, vec![9; 8])]),
+        &chunk_root(chest_state_tag(), &[(chest_at, vec![7; 8])]),
     );
     let mut store = fixture.store();
     let operation = assemble_chest(store.next_op_id(), chest_at);
@@ -250,7 +308,7 @@ fn a_crash_after_prepared_takes_the_before_image_to_the_after_image() {
     put_chunk(
         &fixture,
         position,
-        &chunk_root(chest_state_tag(), &[(chest_at, vec![9; 8])]),
+        &chunk_root(chest_state_tag(), &[(chest_at, vec![7; 8])]),
     );
     let mut store = fixture.store();
     let operation = assemble_chest(store.next_op_id(), chest_at);
@@ -292,7 +350,7 @@ fn a_crash_mid_chunk_saves_finishes_only_the_untouched_side() {
     put_chunk(
         &fixture,
         ChunkPos::new(0, 0),
-        &chunk_root(chest_state_tag(), &[(chest_at, vec![9; 8])]),
+        &chunk_root(chest_state_tag(), &[(chest_at, vec![7; 8])]),
     );
     put_chunk(
         &fixture,
@@ -362,7 +420,7 @@ fn a_block_placed_after_the_commit_survives() {
     put_chunk(
         &fixture,
         position,
-        &chunk_root(chest_state_tag(), &[(chest_at, vec![9; 8])]),
+        &chunk_root(chest_state_tag(), &[(chest_at, vec![7; 8])]),
     );
     let mut store = fixture.store();
     let operation = assemble_chest(store.next_op_id(), chest_at);
@@ -501,7 +559,7 @@ fn an_unreadable_or_missing_operation_refuses_the_world_load() {
     put_chunk(
         &fixture,
         position,
-        &chunk_root(chest_state_tag(), &[(chest_at, vec![9; 8])]),
+        &chunk_root(chest_state_tag(), &[(chest_at, vec![7; 8])]),
     );
     // An unreadable operation file is a world-load refusal, both for
     // garbage bytes and for a file that is gone entirely.
@@ -712,7 +770,7 @@ fn a_journal_and_operation_from_different_dimensions_refuse() {
     put_chunk(
         &fixture,
         position,
-        &chunk_root(chest_state_tag(), &[(chest_at, vec![9; 8])]),
+        &chunk_root(chest_state_tag(), &[(chest_at, vec![7; 8])]),
     );
     let mut store = fixture.store();
     // The operation file says the Overworld; the journal's prepared
@@ -758,7 +816,7 @@ fn an_operation_of_another_dimension_leaves_this_level_untouched() {
     put_chunk(
         &fixture,
         position,
-        &chunk_root(chest_state_tag(), &[(chest_at, vec![9; 8])]),
+        &chunk_root(chest_state_tag(), &[(chest_at, vec![7; 8])]),
     );
     let mut store = fixture.store();
     let op_id = store.next_op_id();
@@ -831,3 +889,75 @@ fn two_operations_replay_one_after_the_other() {
     assert_eq!(chest_items(&root, second_at), None);
     assert!(store.journal().in_progress.is_none());
 }
+
+/// The items of a block entity's `Items` field, for cargo checks.
+fn entity_with_items(len: usize) -> Tag {
+    Tag::compound([
+        ("id", Tag::String("minecraft:chest".into())),
+        ("Items", Tag::ByteArray(vec![7; len])),
+    ])
+}
+
+/// (a) A crash after `prepared` in an assembly: recovery must leave a
+/// carrier file that durably owns the whole cargo — cells, states, the
+/// block entity — not merely an empty source cell.
+#[test]
+fn a_prepared_assembly_recovery_owns_the_cargo_in_a_carrier_file() {
+    let fixture = Fixture::new("cargo");
+    let position = ChunkPos::new(0, 0);
+    let chest_at = [4, 0, 4];
+    put_chunk(
+        &fixture,
+        position,
+        &chunk_root_at(chest_state_tag(), &[(chest_at, vec![7; 8])], 0, 0),
+    );
+    let mut store = fixture.store();
+    let mut operation = assemble_chest(store.next_op_id(), chest_at);
+    operation.cells[0].before.entity = Some(entity_with_items(8));
+    prepare(&mut store, &operation);
+
+    let report = recover(
+        &mut store,
+        &fixture.region(),
+        &AllStatesKnown,
+        "minecraft:overworld",
+    )
+    .unwrap_or_else(|e| panic!("recovery refused: {e}"));
+
+    // The source cell is air ...
+    let root = get_chunk(&fixture, position).unwrap();
+    let data = ChunkData::new(root).unwrap();
+    assert_eq!(
+        data.block(BlockPos::new(4, 0, 4)).unwrap().unwrap().name,
+        "minecraft:air"
+    );
+    // ... and the cargo lives in a published carrier file: cells,
+    // states and the block entity, decodable back.
+    let path = fixture
+        .data()
+        .join(format!("horizon_carrier_{:032x}-1.nbt", 7_u128));
+    let bytes = fs::read(&path)
+        .unwrap_or_else(|e| panic!("the carrier file must exist after recovery: {e}"));
+    let carrier = codec::decode(&bytes).unwrap();
+    assert_eq!(carrier.uuid(), 7);
+    assert_eq!(carrier.generation(), 1);
+    assert_eq!(carrier.cells().len(), 1, "the whole cargo is carried");
+    let cell = &carrier.cells()[0];
+    assert_eq!(cell.name(), "minecraft:chest");
+    assert_eq!(cell.pos(), LocalPos::new(0, 0, 0));
+    let entity = cell
+        .data()
+        .unwrap_or_else(|| panic!("the block entity rides the carrier"));
+    let (named, _) = nbt::read_named(entity, nbt::Limits::saved()).unwrap();
+    assert_eq!(
+        named.tag.get("Items").map(|t| match t {
+            Tag::ByteArray(bytes) => bytes.len(),
+            _ => 0,
+        }),
+        Some(8),
+        "the entity's items are the cargo's"
+    );
+    let _ = report;
+}
+
+

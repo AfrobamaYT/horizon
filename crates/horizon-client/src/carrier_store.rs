@@ -715,6 +715,28 @@ pub fn recover(
             operation.dimension.clone(),
         ));
     }
+    // An assembling operation publishes its immutable carrier before
+    // `prepared`: recovery verifies that file is in place with the
+    // journal's UUID and generation — the cargo has exactly one
+    // durable owner before the source is stripped — and refuses on
+    // anything else. Nothing else here rewrites the carrier; the live
+    // writer did, before prepared.
+    if operation.kind == OpKind::Assemble {
+        let path = store.carrier_path(operation.uuid, operation.generation);
+        let bytes = fs::read(&path).map_err(|error| {
+            RecoveryRefused::OperationUnreadable(format!(
+                "the prepared assembly's carrier file does not read: {error}"
+            ))
+        })?;
+        let carrier = horizon_world::carrier::codec::decode(&bytes).map_err(|e| {
+            RecoveryRefused::OperationUnreadable(format!(
+                "the prepared assembly's carrier does not decode: {e}"
+            ))
+        })?;
+        if carrier.uuid() != operation.uuid || carrier.generation() != operation.generation {
+            return Err(RecoveryRefused::IdentityDisagreement { field: "carrier" });
+        }
+    }
     let mut chunks: Vec<[i32; 2]> = Vec::new();
     for cell in &operation.cells {
         let key = [cell.world[0] >> 4, cell.world[2] >> 4];
