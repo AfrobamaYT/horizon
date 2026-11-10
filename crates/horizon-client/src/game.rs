@@ -756,6 +756,8 @@ struct InteractTarget {
 
 /// The client world as seen by the vanilla block-behaviour library.
 struct GameLevel<'w> {
+    /// Borrowed only: cake's eligibility hook receives the acting hand lazily.
+    held_stack: Option<&'w ItemStack>,
     gateway_servers: &'w mut horizon_client::fast_hash::FxHashMap<
         [i32; 3],
         horizon_client::block_entity_anim::EndGateway,
@@ -1014,6 +1016,10 @@ impl GameLevel<'_> {
     }
 }
 impl LevelAccess for GameLevel<'_> {
+    fn cake_can_eat(&self, vanilla: bool) -> bool {
+        self.cake_eligibility(vanilla)
+    }
+
     fn within_world_border(&self, pos: BlockPos) -> bool {
         self.border
             .is_within_bounds(f64::from(pos.x), f64::from(pos.z), 0.0)
@@ -5611,7 +5617,9 @@ impl Game<'_> {
             golem_chests.extend(self.chest_other_half(key));
         }
         let native_authoritative = self.native_authoritative();
+        let held_slot = self.held_slot();
         let mut level = GameLevel {
+            held_stack: self.inventory.get(held_slot).and_then(Option::as_ref),
             command_block_transition: None,
             gateway_servers: &mut self.be_anims.gateway_servers,
             border: self.border.geometry(),

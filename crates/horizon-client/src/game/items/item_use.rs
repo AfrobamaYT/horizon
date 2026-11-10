@@ -1098,37 +1098,72 @@ pub(super) mod interact_vibration_tests {
     #[ignore = "needs prepared resources and an isolated process for native mods"]
     fn cake_context_uses_can_eat_instead_of_raw_hunger() {
         use mod_api::{CanEatEvent, Hooks};
-        struct Refuse;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        struct Reverse(Arc<AtomicUsize>);
         #[mod_api::__subscriptions]
-        impl Hooks for Refuse {
+        impl Hooks for Reverse {
             fn can_eat(
                 &self,
                 host: &dyn mod_api::Host,
                 event: &mut CanEatEvent<'_>,
             ) -> Option<bool> {
+                self.0.fetch_add(1, Ordering::Relaxed);
                 if let Some(stack) = event.stack {
                     assert_eq!(stack.item().id(host), "minecraft:stick");
                 }
                 Some(!event.vanilla_can_eat)
             }
         }
-        let mods: mod_api::Mods =
-            vec![mod_api::ModEntry::new("cake-refusal", Box::new(Refuse))].into();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "cake-refusal",
+            Box::new(Reverse(calls.clone())),
+        )]
+        .into();
         mod_api::testing::with_mods(mods, || {
             with_game("minecraft:stick", |game| {
+                let use_block = |game: &mut Game<'_>, name: &str| {
+                    let player = game.use_context();
+                    game.with_level(|b, level, ticks| {
+                        let state = b.table.default_state(b.table.block_by_name(name).unwrap());
+                        b.use_without_item(
+                            level,
+                            ticks,
+                            state,
+                            horizon_core::geometry::BlockHit {
+                                block: horizon_core::position::BlockPos::new(0, 64, 0),
+                                direction: horizon_core::geometry::Direction::Up,
+                                location: horizon_core::geometry::Vec3::new(0.5, 65.0, 0.5),
+                                inside: false,
+                            },
+                            player,
+                        )
+                    })
+                };
                 game.creative = true;
-                assert!(!game.use_context().can_eat);
-                *game.held_mut() = None;
-                assert!(
-                    !game.use_context().can_eat,
-                    "empty hand also reaches the hook"
+                use_block(game, "minecraft:stone");
+                assert_eq!(calls.load(Ordering::Relaxed), 0);
+                assert_eq!(
+                    use_block(game, "minecraft:cake"),
+                    horizon_world::level::InteractionResult::Pass
                 );
+                assert_eq!(calls.load(Ordering::Relaxed), 1);
+                *game.held_mut() = None;
+                assert_eq!(
+                    use_block(game, "minecraft:candle_cake"),
+                    horizon_world::level::InteractionResult::Pass
+                );
+                assert_eq!(calls.load(Ordering::Relaxed), 2);
                 game.creative = false;
                 game.player.as_mut().unwrap().health.food.food = 20;
-                assert!(
-                    game.use_context().can_eat,
-                    "a hook can permit a full player"
+                assert_eq!(
+                    use_block(game, "minecraft:cake"),
+                    horizon_world::level::InteractionResult::Success
                 );
+                assert_eq!(calls.load(Ordering::Relaxed), 3);
             })
             .expect("HORIZON_TEST_RESOURCES must name prepared resources");
         });

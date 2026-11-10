@@ -399,6 +399,12 @@ pub enum Spread {
 
 /// The world as seen by block behaviour. Implemented by the game and tests.
 pub trait LevelAccess {
+    /// `Player.canEat(false)` at the cake bite, after item-specific interactions
+    /// have passed. Defaults to the interacting player's vanilla hunger answer.
+    fn cake_can_eat(&self, vanilla: bool) -> bool {
+        vanilla
+    }
+
     /// `WorldBorder.isWithinBounds(BlockPos)` for block movement.
     fn within_world_border(&self, _pos: BlockPos) -> bool {
         true
