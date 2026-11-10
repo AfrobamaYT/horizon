@@ -10,4 +10,4 @@ launcher/src/backend.rs 4572
 launcher/src/main.rs 5771
 launcher/src/servers_page.rs 3448
 crates/horizon-client/src/mobs/ai.rs 3604
-crates/horizon-client/src/game.rs 18280
+crates/horizon-client/src/game.rs 18267
