@@ -35,3 +35,5 @@ pub mod __private;
 mod load_state;
 #[doc(hidden)]
 pub use load_state::install_guest_packages;
+
+mod fluid_state;

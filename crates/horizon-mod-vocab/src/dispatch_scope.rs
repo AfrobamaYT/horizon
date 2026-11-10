@@ -11,6 +11,7 @@ static BACKEND: OnceLock<Option<Backend>> = OnceLock::new();
 /// Platform callbacks, installed once before dispatch starts.
 #[doc(hidden)]
 pub struct Backend {
+    pub unresolved_fluids: crate::__private::UnresolvedFluidAccess,
     pub enter: fn(ModGuardFactory, ModCall) -> ModGuard,
     pub leave: fn(State),
     pub profiler_enabled: &'static std::sync::atomic::AtomicBool,
@@ -38,7 +39,7 @@ pub struct Timing {
     pub record: usize,
 }
 
-/// The outer attribution and optional timing record restored at scope exit.
+/// Platform-owned timing data bound to a scope's factory capability.
 #[doc(hidden)]
 pub struct State {
     pub timing: Option<Timing>,

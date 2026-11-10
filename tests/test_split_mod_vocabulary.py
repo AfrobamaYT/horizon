@@ -38,7 +38,7 @@ class AuditTests(unittest.TestCase):
     def test_audit_accepts_platform_owned_dispatch_instrumentation_and_resource_access(self):
         self.run_audit([
             'lib.rs', '__private.rs', 'wire/wire_guest.rs', 'content/crash.rs',
-            'profiler.rs', 'profiler/firefox.rs', 'wire/wire_resources.rs', 'wire/static_strings.rs', 'load_state.rs',
+            'profiler.rs', 'profiler/firefox.rs', 'wire/wire_resources.rs', 'wire/static_strings.rs', 'load_state.rs', 'fluid_state.rs',
         ])
 
     def test_audit_rejects_unlisted_platform_neighbors(self):

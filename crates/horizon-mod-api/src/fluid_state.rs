@@ -1,6 +1,8 @@
 //! Platform-owned identities for retained unavailable-fluid names.
-use crate::UnresolvedFluid;
-use std::{collections::HashMap, sync::{LazyLock, RwLock}};
+use std::{
+    collections::HashMap,
+    sync::{LazyLock, RwLock},
+};
 
 #[derive(Default)]
 struct Table {
@@ -13,7 +15,7 @@ const MAX_IDS: usize = 4096;
 const MAX_ID_BYTES: usize = 256;
 
 /// Intern a stored name at an engine-owned data boundary.
-pub fn intern(id: &str) -> Option<UnresolvedFluid> {
+pub fn intern(id: &str) -> Option<u64> {
     let id = if id.contains(':') {
         id.to_owned()
     } else {
@@ -26,9 +28,9 @@ pub fn intern(id: &str) -> Option<UnresolvedFluid> {
 }
 
 impl Table {
-    fn insert(&mut self, id: String) -> Option<UnresolvedFluid> {
+    fn insert(&mut self, id: String) -> Option<u64> {
         if let Some(&slot) = self.slots.get(&id) {
-            return Some(UnresolvedFluid(slot));
+            return Some(slot);
         }
         if self.names.len() >= MAX_IDS {
             return None;
@@ -37,36 +39,33 @@ impl Table {
         self.names.push(id.clone());
         self.utf16_slots.insert(id.encode_utf16().collect(), slot);
         self.slots.insert(id, slot);
-        Some(UnresolvedFluid(slot))
+        Some(slot)
     }
 }
 
 /// Look up an already-interned identity without creating one.
-pub fn lookup(id: &str) -> Option<UnresolvedFluid> {
-    TABLE
-        .read()
-        .unwrap()
-        .slots
-        .get(id)
-        .copied()
-        .map(UnresolvedFluid)
+pub fn lookup(id: &str) -> Option<u64> {
+    TABLE.read().unwrap().slots.get(id).copied()
 }
 
 /// Look up an already-interned NBT name without allocation.
-pub fn lookup_utf16(id: &[u16]) -> Option<UnresolvedFluid> {
-    TABLE
-        .read()
-        .unwrap()
-        .utf16_slots
-        .get(id)
-        .copied()
-        .map(UnresolvedFluid)
+pub fn lookup_utf16(id: &[u16]) -> Option<u64> {
+    TABLE.read().unwrap().utf16_slots.get(id).copied()
 }
 
 /// Resolve an engine-issued process-lifetime handle.
-pub fn name(fluid: UnresolvedFluid) -> String {
-    TABLE.read().unwrap().names[fluid.0 as usize].clone()
+pub fn name(fluid: u64) -> String {
+    TABLE.read().unwrap().names[fluid as usize].clone()
 }
+
+pub(crate) const ACCESS: crate::__private::UnresolvedFluidAccess =
+    crate::__private::UnresolvedFluidAccess {
+        intern,
+        lookup,
+        lookup_utf16,
+        name,
+        slot_is_live: |slot| slot < TABLE.read().unwrap().names.len() as u64,
+    };
 
 #[cfg(test)]
 mod tests {
@@ -74,7 +73,7 @@ mod tests {
     #[test]
     fn full_table_refuses_new_names_but_keeps_existing_ones() {
         let mut table = Table::default();
-        for i in 0..MAX_IDS {
+        for i in 0..4096 {
             assert!(table.insert(format!("test:fluid_{i}")).is_some());
         }
         assert!(table.insert("test:overflow".into()).is_none());
@@ -116,7 +115,17 @@ mod tests {
         assert_eq!(intern("minecraft:mystery"), None);
         let old = intern("absent:fluid").unwrap();
         assert_eq!(Some(old), intern("absent:fluid"));
-        assert!(UnresolvedFluid::from_slot(u64::MAX).is_err());
+        crate::__private::initialize().unwrap();
+        let mut out = crate::wire::Writer::new();
+        out.put(&u64::MAX);
+        assert!(crate::wire::Reader::decode::<crate::UnresolvedFluid>(out.bytes()).is_err());
+        let typed = crate::__private::intern_unresolved_fluid("absent:typed").unwrap();
+        out.clear();
+        out.put(&typed);
+        assert_eq!(
+            crate::wire::Reader::decode::<crate::UnresolvedFluid>(out.bytes()),
+            Ok(typed)
+        );
         let next = intern("other:fluid").unwrap();
         assert_ne!(old, next);
         assert_eq!(name(old), "absent:fluid");

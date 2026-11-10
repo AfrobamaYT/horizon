@@ -1,10 +1,5 @@
 //! Opaque identities for fluid names retained from unavailable content.
 use crate::{FluidKey, Host, UnresolvedFluid};
-use std::{
-    collections::HashMap,
-    sync::{LazyLock, RwLock},
-};
-
 /// A registered fluid, or an opaque retained name from unavailable content.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -29,8 +24,8 @@ impl FluidIdentity {
 impl UnresolvedFluid {
     #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn from_slot(slot: u64) -> Result<Self, &'static str> {
-        let table = TABLE.read().unwrap();
-        (slot < table.names.len() as u64)
+        let access = access().ok_or("unresolved fluid storage requires the platform runtime")?;
+        (access.slot_is_live)(slot)
             .then_some(Self(slot))
             .ok_or("unknown unresolved fluid")
     }
@@ -61,3 +56,34 @@ pub fn identity_name(identity: FluidIdentity) -> String {
     }
 }
 
+// no wire: process-local callback table installed by the platform runtime.
+// exhaustive: the hidden installer builds every callback field together.
+#[doc(hidden)]
+pub struct UnresolvedFluidAccess {
+    pub intern: fn(&str) -> Option<u64>,
+    pub lookup: fn(&str) -> Option<u64>,
+    pub lookup_utf16: fn(&[u16]) -> Option<u64>,
+    pub name: fn(u64) -> String,
+    pub slot_is_live: fn(u64) -> bool,
+}
+fn access() -> Option<&'static UnresolvedFluidAccess> {
+    crate::dispatch_scope::backend().map(|backend| &backend.unresolved_fluids)
+}
+/// Intern at the engine-owned boundary; unavailable storage refuses issuance.
+pub fn intern(id: &str) -> Option<UnresolvedFluid> {
+    (access()?.intern)(id).map(UnresolvedFluid)
+}
+/// Find an already-issued identity without allocating.
+pub fn lookup(id: &str) -> Option<UnresolvedFluid> {
+    (access()?.lookup)(id).map(UnresolvedFluid)
+}
+/// Find an already-issued NBT identity without allocating.
+pub fn lookup_utf16(id: &[u16]) -> Option<UnresolvedFluid> {
+    (access()?.lookup_utf16)(id).map(UnresolvedFluid)
+}
+/// Resolve a handle whose issuing platform storage lives for the process.
+pub fn name(fluid: UnresolvedFluid) -> String {
+    (access()
+        .expect("issued fluid handles require their platform storage")
+        .name)(fluid.0)
+}
