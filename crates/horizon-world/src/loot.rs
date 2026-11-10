@@ -89,7 +89,7 @@ impl<'a> PackOverlay<'a> {
 /// namespace outside `minecraft:`, and the roll kept it for this call.
 /// The kind, the JSON, the context and the stack to change are here.
 #[inline(never)]
-pub fn native_loot_function(
+pub fn native_invoke_loot_function(
     kind: &str,
     data: &Value,
     ctx: &LootContext<'_>,
@@ -104,7 +104,7 @@ pub fn native_loot_function(
 /// whether it holds are here (`holds` starts `false`; a mod that claims
 /// the kind sets it).
 #[inline(never)]
-pub fn native_loot_condition(
+pub fn native_invoke_loot_condition(
     kind: &str,
     data: &Value,
     ctx: &LootContext<'_>,
@@ -1571,7 +1571,7 @@ impl<R: RandomSource> Context<'_, R> {
                 k if k.contains(':') && !k.starts_with("minecraft:") => {
                     let mut holds = false;
                     let tags = self.data;
-                    native_loot_condition(k, c, &self.native_ctx(), &mut holds, tags);
+                    native_invoke_loot_condition(k, c, &self.native_ctx(), &mut holds, tags);
                     holds
                 }
                 // An unknown type fails, as in items.rs `condition`.
@@ -2096,7 +2096,7 @@ impl<R: RandomSource> Context<'_, R> {
             // A mod's own kind: the hook changes the stack.
             k if k.contains(':') && !k.starts_with("minecraft:") => {
                 let tags = self.data;
-                native_loot_function(k, f, &self.native_ctx(), &mut stack, tags);
+                native_invoke_loot_function(k, f, &self.native_ctx(), &mut stack, tags);
             }
             // Lore and other data without random draws.
             _ => {}

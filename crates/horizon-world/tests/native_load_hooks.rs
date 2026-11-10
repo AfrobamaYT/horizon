@@ -90,7 +90,7 @@ fn load_hooks_are_noops_before_install_and_use_first_callbacks_after() {
     };
     for (kind, expected) in [("mymod:held", true), ("mymod:other", false)] {
         let mut holds = !expected;
-        loot::native_loot_condition(kind, &json!({}), &ctx, &mut holds, &EmptyTags);
+        loot::native_invoke_loot_condition(kind, &json!({}), &ctx, &mut holds, &EmptyTags);
         assert_eq!(holds, expected, "{kind}");
     }
 }
