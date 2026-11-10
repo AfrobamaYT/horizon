@@ -64,7 +64,7 @@ fn rustup_found() -> bool {
     Command::new("rustup").arg("--version").output().is_ok()
 }
 
-fn output(mut command: Command) -> Result<String, String> {
+pub(crate) fn output(mut command: Command) -> Result<String, String> {
     let out = command.output().map_err(|e| format!("{command:?}: {e}"))?;
     if !out.status.success() {
         return Err(format!(
@@ -626,6 +626,9 @@ mod route_tests {
 
     fn inject(id: &str, kind: Kind, access: Access, call: Option<&str>) -> Inject {
         Inject {
+            local: None,
+            local_type: None,
+            position: None,
             id: id.into(),
             at: "game::tick".into(),
             kind,

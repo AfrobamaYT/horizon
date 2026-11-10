@@ -27,6 +27,9 @@ fn no_slot_suggestions_round_trip_through_the_slot_reader() {
     for kind in [Kind::Head, Kind::BeforeCall, Kind::Field] {
         let is_call = kind == Kind::BeforeCall;
         let inject = Inject {
+            local: None,
+            local_type: None,
+            position: None,
             id: "test".into(),
             at: if kind == Kind::Field {
                 "test_slots::Thing"

@@ -3,6 +3,8 @@ use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, serde::Deserialize)]
 pub(super) struct Site {
+    #[serde(default)]
+    pub local: Option<horizon_mod_api_gen::sites::Local>,
     pub name: String,
     pub target: String,
     pub call: String,
@@ -18,6 +20,7 @@ pub(super) struct Site {
 impl From<horizon_platform::mod_build::api_gen::sites::Site> for Site {
     fn from(site: horizon_platform::mod_build::api_gen::sites::Site) -> Self {
         Self {
+            local: site.local,
             name: site.name,
             target: site.target,
             call: site.call,
@@ -37,7 +40,10 @@ impl Site {
     }
 
     fn export(&self) -> String {
-        horizon_platform::mod_build::api_gen::sites::source::facade_name(&self.target, &self.call, self.ordinal)
+        if self.local.is_some() {
+            return self.name.clone();
+        }
+        horizon_mod_api_gen::sites::source::facade_name(&self.target, &self.call, self.ordinal)
     }
 
     pub(super) fn facade(
@@ -65,13 +71,14 @@ impl Site {
         }
         exports.insert(format!("    pub use {} as __{export}Args;\n", self.record));
         let listener = format!("__{export}Listener");
-        constructors.insert(format!("    /// Registers this site's exact typed wrap listener.\n    pub const fn {}(id: &'static str, priority: i32, injection: &'static str, f: {listener}) -> mod_points::__private::SlotListener {{\n        // SAFETY: the function's exact type is checked before erasure.\n        unsafe {{ mod_points::__private::SlotListener::site(id, mod_points::SiteId::{}, priority, injection, f as *const ()) }}\n    }}\n", self.constructor(), self.name));
+        constructors.insert(format!("    /// Registers this site's exact typed wrap listener.\n    pub const fn {}(id: &'static str, priority: i32, injection: &'static str, f: {listener}) -> mod_points::__private::SlotListener {{\n        // SAFETY: the function's exact type is checked before erasure.\n        unsafe {{ mod_points::__private::SlotListener::site(id, mod_points::SiteId::{}.place(), priority, injection, f as *const ()) }}\n    }}\n", self.constructor(), self.name));
     }
 }
 
 pub(super) fn adapter(kind: horizon_mod_package::manifest::inject::Kind, f: &str) -> String {
     use horizon_mod_package::manifest::inject::Kind;
     match kind {
+        Kind::ModifyLocal => format!("|receiver, args, original| {{ {f}(receiver); original(receiver, args) }}"),
         Kind::BeforeCall | Kind::ModifyCallArg => format!("|receiver, args, original| {{ {f}(receiver, args); original(receiver, args) }}"),
         Kind::AfterCall => format!("|receiver, args, original| {{ let value = original(receiver, args); {f}(receiver, &value); value }}"),
         Kind::ModifyValue => format!("|receiver, args, original| {{ let value = original(receiver, args); {f}(receiver, value) }}"),
