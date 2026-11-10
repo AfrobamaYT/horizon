@@ -41,8 +41,43 @@ pub fn spelling(text: &str) -> Result<String, Error> {
     Ok(tokens(&expr))
 }
 
+/// The expression's tokens with a space only between two words (`self.speed`, `-1`, `"a b"`):
+/// spacing between tokens never decides a match, and a literal keeps every character.
 fn tokens(expr: &Expr) -> String {
-    expr.to_token_stream().to_string().replace(' ', "")
+    fn push(stream: proc_macro2::TokenStream, out: &mut String, word: &mut bool) {
+        use proc_macro2::{Delimiter, TokenTree};
+        for tree in stream {
+            match tree {
+                TokenTree::Group(group) => {
+                    let (open, close) = match group.delimiter() {
+                        Delimiter::Parenthesis => ("(", ")"),
+                        Delimiter::Brace => ("{", "}"),
+                        Delimiter::Bracket => ("[", "]"),
+                        Delimiter::None => ("", ""),
+                    };
+                    out.push_str(open);
+                    *word = false;
+                    push(group.stream(), out, word);
+                    out.push_str(close);
+                    *word = false;
+                }
+                TokenTree::Punct(punct) => {
+                    out.push(punct.as_char());
+                    *word = false;
+                }
+                TokenTree::Ident(_) | TokenTree::Literal(_) => {
+                    if *word {
+                        out.push(' ');
+                    }
+                    out.push_str(&tree.to_string());
+                    *word = true;
+                }
+            }
+        }
+    }
+    let mut out = String::new();
+    push(expr.to_token_stream(), &mut out, &mut false);
+    out
 }
 
 fn selectable(expr: &Expr) -> bool {

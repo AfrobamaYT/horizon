@@ -843,3 +843,39 @@ fn an_expression_site_wraps_one_read_and_keeps_its_value_when_nothing_listens() 
     );
     fs::remove_dir_all(directory).unwrap();
 }
+
+#[test]
+fn string_literals_differing_only_in_spaces_are_separate_reads() {
+    let source = "pub struct Game { pub value: u32 } impl Game { pub fn run(&mut self) -> Result<u32, ()> { let a = \"a b\"; let b = \"ab\"; let c = \" \"; let d = \"\"; Ok((a.len() + b.len() + c.len() + d.len()) as u32) } }";
+    let staged = |expr: &str, nth: usize| {
+        super::rewrite(
+            source,
+            "horizon_client::game",
+            &entries(),
+            &[expression(expr, "&'static str", nth)],
+            true,
+        )
+    };
+    let mut contexts = Vec::new();
+    for literal in ["\"a b\"", "\"ab\"", "\" \"", "\"\""] {
+        let (rewritten, sites) = staged(literal, 0).unwrap();
+        assert_eq!(sites[0].call, literal);
+        let marker = super::super::expression::marker(&sites[0].name);
+        assert!(
+            rewritten.contains(&format!("{marker} : & 'static str = {literal} ;")),
+            "{literal}: {rewritten}"
+        );
+        // Each literal is one read: no second one at nth 1.
+        assert!(staged(literal, 1).is_err(), "{literal}");
+        contexts.push(sites[0].ctx.clone());
+    }
+    contexts.sort();
+    contexts.dedup();
+    assert_eq!(contexts.len(), 4);
+    // Spacing between tokens still never decides a match.
+    assert_eq!(
+        super::super::expression::spelling("self . value").unwrap(),
+        "self.value"
+    );
+    assert_eq!(super::super::expression::spelling("- 1").unwrap(), "-1");
+}
