@@ -171,26 +171,3 @@ fn special_type_keeps_its_base_model() {
             .unwrap();
     assert!(matches!(n, ItemModelNode::Special { .. }));
 }
-
-#[test]
-fn fluid_container_draws_its_base_without_the_fluid() {
-    let n = node(
-        r#"{"type":"neoforge:fluid_container","fluid":"mod:gas","cover_is_mask":false,"flip_gas":true,
-            "textures":{"base":"minecraft:item/bucket","fluid":"neoforge:item/mask/bucket_fluid"}}"#,
-    )
-    .unwrap();
-    assert_eq!(model_id(&n), "minecraft:item/bucket");
-    let n = node(
-        r#"{"type":"neoforge:fluid_container","cover_is_mask":false,
-            "textures":{"base":"a:item/flask","cover":"a:item/flask_cover"}}"#,
-    )
-    .unwrap();
-    let ItemModelNode::Composite { models, .. } = n else {
-        panic!("base and cover")
-    };
-    assert_eq!(models.len(), 2);
-    assert!(matches!(
-        node(r#"{"type":"neoforge:fluid_container"}"#).unwrap(),
-        ItemModelNode::Empty
-    ));
-}

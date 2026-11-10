@@ -1,7 +1,7 @@
 //! The 26.3 client item definitions (`assets/<ns>/items/*.json`): the model
 //! tree (`model`, `composite`, `condition`, `select`, `range_dispatch`,
-//! `special`, `bundle/selected_item`, `empty`), its properties and tints, and
-//! the resolver that turns one stack into render layers
+//! `special`, `neoforge:fluid_container`, `bundle/selected_item`, `empty`), its
+//! properties and tints, and the resolver that turns one stack into render layers
 //! (`ItemModelResolver.updateForTopItem`).
 //!
 //! Baked geometry lives in [`crate::item_bake`]; this module decides *which*
@@ -17,9 +17,11 @@ use std::{
 };
 
 mod component_predicate;
+mod fluid_container;
 mod foreign;
 mod mod_properties;
 mod special;
+pub use fluid_container::{FluidAppearance, FluidContainer, FluidContainerTextures};
 pub use mod_properties::{
     is_range_property, is_select_property, is_tint_source, keep_mod_ids, register_range_properties,
     register_select_properties, register_tint_sources,
@@ -424,6 +426,7 @@ pub enum ItemModelNode {
         transformation: Option<Mat4>,
         model: SpecialModel,
     },
+    FluidContainer(FluidContainer),
     BundleSelectedItem,
 }
 #[derive(Clone, Debug)]
@@ -565,14 +568,17 @@ impl ItemModelNode {
                 model: SpecialModel::decode(required(m, "model")?)?,
             },
             "minecraft:bundle/selected_item" => Self::BundleSelectedItem,
-            other if foreign::is_foreign(other) => foreign::decode_node(other, m),
+            // NeoForge's own item model type, which the engine owns; not a foreign
+            // namespace's guess.
+            "neoforge:fluid_container" => Self::FluidContainer(FluidContainer::decode(m)?),
+            other if foreign::is_foreign(other) => foreign::decode_node(m),
             _ => return Err(err("unknown item model type")),
         })
     }
     /// Every model resource id the tree can ask for.
     pub fn dependencies(&self, out: &mut Vec<String>) {
         match self {
-            Self::Empty | Self::BundleSelectedItem => {}
+            Self::Empty | Self::BundleSelectedItem | Self::FluidContainer(_) => {}
             Self::Model(leaf) => out.push(leaf.model.clone()),
             Self::Composite { models, .. } => models.iter().for_each(|m| m.dependencies(out)),
             Self::Condition {
@@ -1100,6 +1106,17 @@ pub trait ItemEnv {
     ) -> i32 {
         -1
     }
+    /// The fluid `stack` holds (`FluidUtil.getFirstStackContained`), or `None` when it
+    /// holds none. Horizon has no per-stack fluid contents yet, so a container draws
+    /// only its declared fluid until a host answers this.
+    fn stack_fluid(&self, _stack: &StackView) -> Option<String> {
+        None
+    }
+    /// What `fluid` draws with in an item: its still sprite and tint. `None` for a
+    /// fluid the host does not know, `minecraft:empty` included.
+    fn fluid_appearance(&self, _fluid: &str) -> Option<FluidAppearance> {
+        None
+    }
     /// `PotionContents.getColorOr` for the potion/effects part: the mixed
     /// effect colour, or `None` when the contents have no visible effects.
     fn potion_effect_color(&self, _potion_contents: &Value) -> Option<i32> {
@@ -1154,6 +1171,12 @@ pub enum FoilType {
 pub enum LayerContent {
     /// A cuboid model resource, baked by [`crate::item_bake`].
     Model { model: String },
+    /// One `item/generated` layer of a sprite, its pixels kept only where `mask`'s
+    /// are opaque: NeoForge's `bakeItemMaskQuads`.
+    Sprite {
+        sprite: String,
+        mask: Option<String>,
+    },
     /// `MissingItemModel`.
     Missing,
     Special {
@@ -1430,6 +1453,9 @@ impl Resolve<'_> {
                     transform,
                 });
             }
+            ItemModelNode::FluidContainer(container) => {
+                self.fluid_container(out, container, parent);
+            }
             ItemModelNode::BundleSelectedItem => {
                 if let Some(selected) = self.bundle_selected() {
                     self.models
@@ -1437,6 +1463,58 @@ impl Resolve<'_> {
                 }
             }
         }
+    }
+    /// `DynamicFluidContainerModel.bakeModelForFluid`: the base layer, then the held
+    /// fluid's still sprite through the `fluid` mask, then the cover.
+    fn fluid_container(&self, out: &mut ResolvedItem, container: &FluidContainer, parent: &Mat4) {
+        let textures = &container.textures;
+        let held = self
+            .env
+            .stack_fluid(self.stack)
+            .unwrap_or_else(|| container.fluid.clone());
+        let appearance = self.env.fluid_appearance(&held);
+        if let Some(base) = &textures.base {
+            self.sprite_layer(out, base, None, Vec::new(), parent);
+        }
+        if let (Some(mask), Some(appearance)) = (&textures.fluid, appearance) {
+            self.sprite_layer(
+                out,
+                &appearance.still,
+                Some(mask),
+                vec![appearance.tint],
+                parent,
+            );
+        }
+        // A mask of `base` needs a base texture to mask against; an overlay does not.
+        let mask = textures.base.as_deref().filter(|_| container.cover_is_mask);
+        if let Some(cover) = &textures.cover
+            && (!container.cover_is_mask || mask.is_some())
+        {
+            self.sprite_layer(out, cover, mask, Vec::new(), parent);
+        }
+    }
+    /// One `item/generated` layer, which [`crate::item_bake::bake_sprite_layer`] extrudes.
+    fn sprite_layer(
+        &self,
+        out: &mut ResolvedItem,
+        sprite: &str,
+        mask: Option<&str>,
+        tints: Vec<i32>,
+        parent: &Mat4,
+    ) {
+        out.layers.push(Layer {
+            content: LayerContent::Sprite {
+                sprite: sprite.to_owned(),
+                mask: mask.map(str::to_owned),
+            },
+            tints,
+            foil: if self.has_foil() {
+                FoilType::Standard
+            } else {
+                FoilType::None
+            },
+            transform: *parent,
+        });
     }
     fn item_in_compass_tag(&self) -> bool {
         // `ItemTags.COMPASSES`: the compass and the recovery compass.
@@ -1883,6 +1961,8 @@ fn binary_search(a: &[f32], key: f32) -> std::result::Result<usize, usize> {
     Err(low as usize)
 }
 
+#[cfg(test)]
+mod fluid_container_tests;
 #[cfg(test)]
 mod foreign_tests;
 #[cfg(test)]

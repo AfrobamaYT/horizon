@@ -1,6 +1,6 @@
 //! Nodes and properties of other namespaces (a mod's, NeoForge's) decode to the closest vanilla behaviour.
 use super::{
-    ItemModelNode, ModelLeaf, Result, TintSource, get, ident, identifier, list, object,
+    ItemModelNode, ModelLeaf, Result, TintSource, get, ident, identifier, list,
     optional_transformation,
 };
 use crate::{json::error as err, math::Mat4};
@@ -49,10 +49,7 @@ fn leaf(model: String, m: &Map<String, Value>) -> ItemModelNode {
 }
 
 /// A node of an unknown non-vanilla type: its nested node, else its model id, else nothing.
-pub fn decode_node(kind: &str, m: &Map<String, Value>) -> ItemModelNode {
-    if kind == "neoforge:fluid_container" {
-        return fluid_container(m);
-    }
+pub fn decode_node(m: &Map<String, Value>) -> ItemModelNode {
     for key in MODEL_KEYS {
         match m.get(key) {
             Some(nested @ Value::Object(_)) => {
@@ -75,40 +72,5 @@ pub fn decode_node(kind: &str, m: &Map<String, Value>) -> ItemModelNode {
     match by_suffix {
         Some(id) => leaf(id, m),
         None => ItemModelNode::Empty,
-    }
-}
-
-// The fluid is not drawn: only the base (and an unmasked cover) texture, taken as a model id (a bucket's).
-fn fluid_container(m: &Map<String, Value>) -> ItemModelNode {
-    let textures = m.get("textures").and_then(|t| object(t).ok());
-    let texture = |key: &str| {
-        textures
-            .and_then(|t| t.get(key))
-            .and_then(Value::as_str)
-            .and_then(|id| identifier(id).ok())
-    };
-    let mut layers = vec![texture("base")];
-    if m.get("cover_is_mask") == Some(&Value::Bool(false)) {
-        layers.push(texture("cover"));
-    }
-    let mut models: Vec<ItemModelNode> = layers
-        .into_iter()
-        .flatten()
-        .map(|model| {
-            ItemModelNode::Model(ModelLeaf {
-                model,
-                transformation: None,
-                tints: Vec::new(),
-            })
-        })
-        .collect();
-    let transformation = optional_transformation(m).ok().flatten();
-    match models.len() {
-        0 => ItemModelNode::Empty,
-        1 => wrap(models.remove(0), transformation),
-        _ => ItemModelNode::Composite {
-            models,
-            transformation,
-        },
     }
 }

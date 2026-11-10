@@ -6,10 +6,10 @@ use crate::{
     item_model::DisplayContext,
     json::Result,
     math::{Mat4, quaternion_xyz},
-    model::{Direction, DisplayTransform, GuiLight, ItemTransform, Material},
-    resolve::{ModelLibrary, ResolvedCuboidModel},
+    model::{Direction, DisplayTransform, GuiLight, ItemTransform, Material, TextureSlot},
+    resolve::{GENERATED_MODEL, ModelLibrary, ResolvedCuboidModel},
 };
-use std::{collections::BTreeSet, f32::consts::PI};
+use std::{collections::BTreeMap, collections::BTreeSet, f32::consts::PI};
 
 pub const MISSING_SPRITE: &str = "minecraft:missingno";
 
@@ -34,6 +34,30 @@ impl SpriteMask {
             return true;
         }
         self.frames[frame][y as usize * self.width + x as usize]
+    }
+    /// This mask's opaque pixels kept only where `clip`'s are, sampled by position
+    /// so masks of different sizes still line up. The longer animation repeats its
+    /// last frame for the shorter one's.
+    fn clipped(&self, clip: &SpriteMask) -> SpriteMask {
+        let frame = |frames: &Vec<Vec<bool>>, i: usize| frames[i.min(frames.len() - 1)].clone();
+        let frames = (0..self.frames.len().max(clip.frames.len()))
+            .map(|i| {
+                let own = frame(&self.frames, i);
+                let other = frame(&clip.frames, i);
+                (0..self.height)
+                    .flat_map(|y| (0..self.width).map(move |x| (x, y)))
+                    .map(|(x, y)| {
+                        let (cx, cy) = (x * clip.width / self.width, y * clip.height / self.height);
+                        own[y * self.width + x] || other[cy * clip.width + cx]
+                    })
+                    .collect()
+            })
+            .collect();
+        SpriteMask {
+            width: self.width,
+            height: self.height,
+            frames,
+        }
     }
 }
 /// The sprites of the item and block atlases.
@@ -113,12 +137,50 @@ pub fn bake_item_model(
     bake_resolved(&model, sprites)
 }
 
+/// The flat item model a layer sprite hangs off (`ItemModelGenerator`'s parent).
+const ITEM_GENERATED_MODEL: &str = "minecraft:item/generated";
+
+/// One `item/generated` layer of `sprite`, drawn through `mask`'s opaque pixels when
+/// set: `ItemModelGenerator.bakeExtrudedSprite` for a base layer, NeoForge's
+/// `UnbakedElementsHelper.bakeItemMaskQuads` for a fluid or cover layer.
+pub fn bake_sprite_layer(
+    library: &ModelLibrary,
+    sprites: &dyn SpriteLookup,
+    sprite: &str,
+    mask: Option<&str>,
+) -> Result<BakedItemModel> {
+    let base = if library.resolves(ITEM_GENERATED_MODEL) {
+        ITEM_GENERATED_MODEL
+    } else {
+        GENERATED_MODEL
+    };
+    let textures = BTreeMap::from([(
+        "layer0".to_owned(),
+        TextureSlot::Material(Material {
+            sprite: sprite.to_owned(),
+            force_translucent: false,
+        }),
+    )]);
+    let model = library.resolve_with_textures(base, &textures)?;
+    bake_layers(&model, sprites, mask)
+}
+
 /// Bake an already resolved model, e.g. one from
 /// [`ModelLibrary::resolve_with_textures`].
 pub fn bake_resolved(
     model: &ResolvedCuboidModel,
     sprites: &dyn SpriteLookup,
 ) -> Result<BakedItemModel> {
+    bake_layers(model, sprites, None)
+}
+
+/// `mask` clips the first layer's extrusion, as NeoForge's mask quads do.
+fn bake_layers(
+    model: &ResolvedCuboidModel,
+    sprites: &dyn SpriteLookup,
+    mask: Option<&str>,
+) -> Result<BakedItemModel> {
+    let clip = mask.and_then(|sprite| sprites.mask(sprite));
     let known = |sprite: &str| sprite == MISSING_SPRITE || sprites.mask(sprite).is_some();
     let material = |m: &Material| {
         if known(&m.sprite) {
@@ -140,14 +202,19 @@ pub fn bake_resolved(
                 break;
             };
             let m = material(m);
-            let mask = if m.sprite == MISSING_SPRITE {
+            let mut layer_mask = if m.sprite == MISSING_SPRITE {
                 SpriteMask::opaque(16, 16)
             } else {
                 sprites
                     .mask(&m.sprite)
                     .unwrap_or_else(|| SpriteMask::opaque(16, 16))
             };
-            quads.extend(extrude_layer(&mask, &m, layer as i32)?);
+            if layer == 0
+                && let Some(clip) = &clip
+            {
+                layer_mask = layer_mask.clipped(clip);
+            }
+            quads.extend(extrude_layer(&layer_mask, &m, layer as i32)?);
         }
         quads
     } else {
@@ -315,7 +382,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     /// The stick: 2x2 with one transparent pixel. `item/cit`: one opaque pixel, so a bake
-    /// shows whose mask it extruded.
+    /// shows whose mask it extruded. A fluid sprite and its mask overlap in one pixel.
     struct Sprites;
     impl SpriteLookup for Sprites {
         fn mask(&self, sprite: &str) -> Option<SpriteMask> {
@@ -329,6 +396,16 @@ mod tests {
                     width: 1,
                     height: 1,
                     frames: vec![vec![false]],
+                }),
+                "mod:item/fluid" => Some(SpriteMask {
+                    width: 2,
+                    height: 2,
+                    frames: vec![vec![false, false, false, false]],
+                }),
+                "mod:item/mask" => Some(SpriteMask {
+                    width: 2,
+                    height: 2,
+                    frames: vec![vec![true, true, true, false]],
                 }),
                 _ => None,
             }
@@ -389,5 +466,27 @@ mod tests {
         );
         assert_eq!(baked.particle.sprite, "horizon_cit:item/cit");
         assert_eq!(baked.transforms[5].as_ref().unwrap().scale, [2.0; 3]);
+    }
+    #[test]
+    fn a_sprite_layer_is_extruded_through_its_mask() {
+        let library = library();
+        // The fluid sprite is four opaque pixels: front, back and 8 edges.
+        let fluid = bake_sprite_layer(&library, &Sprites, "mod:item/fluid", None).unwrap();
+        assert_eq!(fluid.quads.len(), 10);
+        assert_eq!(fluid.particle.sprite, "mod:item/fluid");
+        // The mask keeps the bottom-right pixel: front, back and its 4 edges.
+        let clipped =
+            bake_sprite_layer(&library, &Sprites, "mod:item/fluid", Some("mod:item/mask")).unwrap();
+        assert_eq!(clipped.quads.len(), 6);
+        // The mask clips the shape; the sprite is still what is drawn.
+        assert!(
+            clipped
+                .quads
+                .iter()
+                .all(|q| q.material.sprite == "mod:item/fluid")
+        );
+        // A sprite layer takes `item/generated`'s displays, as NeoForge reads its
+        // top transforms.
+        assert_eq!(clipped.transforms[5].as_ref().unwrap().scale, [2.0; 3]);
     }
 }
