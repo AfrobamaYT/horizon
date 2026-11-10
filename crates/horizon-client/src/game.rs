@@ -11563,20 +11563,20 @@ impl Game<'_> {
                     m.needs_sync = true;
                 } else {
                     let level = crate::game::entity::damage_level_of!(self, &attack);
-                    self.mobs[index].knockback_effect(
+                    self.mobs[index].knockback_full(
                         level,
                         f64::from(knockback),
                         xd,
                         zd,
                         &source,
                         amount,
+                        true,
                     );
                 }
                 self.stop_sprint_after_extra_knockback();
             }
             let mob = &self.mobs[index];
-            // Player.damageStatsAndHearts: the damage the hit actually did.
-            let actual = old_health - mob.health;
+            let actual = old_health - mob.health; // Player.damageStatsAndHearts
             // Player.attack: crit emitter and damage indicator hearts.
             let (feet, width, height) = (
                 [mob.position.x, mob.position.y, mob.position.z],

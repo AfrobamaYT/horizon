@@ -2944,13 +2944,13 @@ impl Game<'_> {
                             direct: 0,
                             position: None,
                         };
-                        self.knock_back_player(power, x, z, source, &attack);
+                        self.knock_back_player(power, x, z, source, &attack, 0.0);
                     }
                     Who::Mob(id) => {
                         let attack = self.attack_of_who(source.attacker);
                         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                             let level = crate::game::entity::damage_level_of!(self, &attack);
-                            m.knockback(level, power, x, z, &source);
+                            m.knockback(level, power, x, z, &source, 0.0);
                         }
                     }
                 },
@@ -4778,7 +4778,7 @@ impl Game<'_> {
         // `LivingEntity.dealDefaultKnockback`: after the item's block push, so
         // a half-blocked hit pushes the defender back the way vanilla does.
         if let Some(([xd, zd], source)) = default_push {
-            self.knock_back_player(f64::from(0.4_f32), xd, zd, source, &attack);
+            self.knock_back_player(f64::from(0.4_f32), xd, zd, source, &attack, amount);
             if let Some(p) = self.player.as_mut()
                 && let Some(r) = p.hurt_log.last_mut()
             {
@@ -4786,35 +4786,6 @@ impl Game<'_> {
             }
         }
         outcome.hurt
-    }
-    /// `LivingEntity.knockback` on the player: pushed `power` away from the
-    /// direction (`xd`, `zd`), less its knockback resistance, and up only from
-    /// the ground.
-    /// The native knockback hook runs before resistance is applied, with
-    /// `source`, the hit's.
-    pub(super) fn knock_back_player(
-        &mut self,
-        power: f64,
-        xd: f64,
-        zd: f64,
-        source: HurtSource<'_>,
-        attack: &Attack,
-    ) {
-        // No attacker named: the mob the player was last hurt by.
-        let credited;
-        let attack = if attack.attacker == 0
-            && let Some((Who::Mob(id), _)) = self.player_hurt_by()
-        {
-            credited = self.attack_of(id as i32);
-            &credited
-        } else {
-            attack
-        };
-        let legacy = self.legacy_rules();
-        if let Some(p) = self.player.as_mut() {
-            let level = crate::game::entity::damage_level_of!(self, attack);
-            knock_back(p, level, power, (xd, zd), source, legacy);
-        }
     }
     /// A status effect from a mob, arrow or splash potion (`addEffect`).
     pub(super) fn give_player_effect(&mut self, effect: &'static str, ticks: i32, amplifier: i32) {
@@ -9288,67 +9259,6 @@ impl Game<'_> {
         }
     }
 }
-/// `LivingEntity.knockback` on `p`: [`Game::knock_back_player`]; 1.8.9's
-/// `EntityLivingBase.knockBack` under `legacy` rules.
-fn knock_back(
-    p: &mut horizon_client::motion::PlayerMotion,
-    level: &mut horizon_client::health::DamageLevel<'_>,
-    power: f64,
-    (xd, zd): (f64, f64),
-    source: HurtSource<'_>,
-    legacy: bool,
-) {
-    let resistance = p.attribute("minecraft:knockback_resistance").unwrap_or(0.0);
-    // The native hook runs first, on the raw strength (`LivingKnockBackEvent`), then the
-    // resistance scales what it left.
-    let mut knock = Knock {
-        strength: power,
-        x: xd,
-        z: zd,
-    };
-    if level.knockback_canceled(Hurting::Player(p.entity_id, source), &mut knock) {
-        return;
-    }
-    let Knock {
-        strength: power,
-        x: mut xd,
-        z: mut zd,
-    } = knock;
-    if legacy && horizon_client::legacy_combat::resists(resistance, level.random().next_double()) {
-        return;
-    }
-    let power = if legacy {
-        power
-    } else {
-        power * (1.0 - resistance)
-    };
-    if power <= 0.0 {
-        return;
-    }
-    while xd * xd + zd * zd < f64::from(1.0e-5_f32) {
-        let random = level.random();
-        xd = (random.next_double() - random.next_double()) * 0.01;
-        zd = (random.next_double() - random.next_double()) * 0.01;
-    }
-    if legacy {
-        let v = p.velocity;
-        let [x, y, z] = horizon_client::legacy_combat::knockback([v.x, v.y, v.z], power, (xd, zd));
-        p.velocity = Vec3::new(x, y, z);
-        return;
-    }
-    let l = (xd * xd + zd * zd).sqrt();
-    let v = p.velocity;
-    p.velocity = Vec3::new(
-        v.x / 2.0 - xd / l * power,
-        if p.ground.on_ground {
-            (v.y / 2.0 + power).min(0.4)
-        } else {
-            v.y
-        },
-        v.z / 2.0 - zd / l * power,
-    );
-}
-
 /// The instance a mob effect gives the player; `None` for a creative or
 /// spectator player (`immune`) unless it is ambient (the nautilus's Breath).
 fn mob_effect_instance(
@@ -11786,7 +11696,14 @@ mod knockback_tests {
                 let set = p.set_modifier(attribute, "horizon:test", resistance, "add_value", true);
                 set.unwrap();
             }
-            knock_back(&mut p, &mut test_level.level(), 0.4, (0.0, 3.0), hit, false);
+            knockback::apply_player_knockback(
+                &mut p,
+                &mut test_level.level(),
+                0.4,
+                (0.0, 3.0),
+                hit,
+                false,
+            );
             (p.velocity.x, p.velocity.y, p.velocity.z)
         };
         // No mod in the way: vanilla's push, away from z = 3.
@@ -14051,3 +13968,5 @@ mod leash_without_item_postbaseline_controls;
 #[cfg(test)]
 #[path = "../tests/revenge_home_tests.rs"]
 mod revenge_home_tests;
+
+mod knockback;
