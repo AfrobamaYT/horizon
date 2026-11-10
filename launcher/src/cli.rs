@@ -2264,55 +2264,6 @@ fn servers(action: ServersCmd, as_json: bool) -> Result<(), String> {
 }
 /// Installs the native mods of `found` (a GitHub link, resolved) into the game folder `home`: the
 /// warning and the exact source link first, and nothing downloaded without `trust`.
-fn native_permission(trust: bool) -> Result<(), String> {
-    if trust {
-        backend::Settings::load().allow_native_mods()?;
-    }
-    native_mods::require_consent().map_err(String::from)
-}
-fn github_native(
-    home: &Path,
-    java: bool,
-    found: &github_mods::Resolved,
-    only: Option<&str>,
-    all: bool,
-    trust: bool,
-) -> Result<(), String> {
-    if java {
-        return Err("Native mods from GitHub are for Horizon instances.".into());
-    }
-    println!("{}", found.label());
-    println!("Source, to read: {}", found.source_url());
-    eprintln!("{}", github_mods::WARNING);
-    native_permission(trust)?;
-    let mods = github_mods::fetch(found)?;
-    let chosen = github_mods::choose(&mods, only, all);
-    let done = chosen.and_then(|chosen| {
-        chosen
-            .into_iter()
-            .map(|p| github_mods::install(home, found, p))
-            .collect::<Result<Vec<_>, _>>()
-    });
-    github_mods::discard(found);
-    let done = done?;
-    for o in done {
-        println!(
-            "Installed {} {} from GitHub ({}), sha256 {}.",
-            o.id,
-            o.version,
-            o.label(),
-            o.sha256
-        );
-    }
-    println!("Build it next: horizon-launcher native-build --trust-native-code");
-    println!(
-        "{}",
-        tr(
-            "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance."
-        )
-    );
-    Ok(())
-}
 fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
     use horizon_launcher::browser::{horizon, installed, java_instance, Kind, Query, SourceId};
     use horizon_launcher::modpacks;
@@ -4108,3 +4059,7 @@ mod tests {
 #[cfg(test)]
 #[path = "cli_catalog_tests.rs"]
 mod catalog_tests;
+
+#[path = "cli_native_permission.rs"]
+mod native_permission_impl;
+use native_permission_impl::{github_native, native_permission};
