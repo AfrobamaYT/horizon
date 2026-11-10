@@ -104,6 +104,22 @@ impl ItemEnv for Env<'_, '_> {
         );
         color as i32
     }
+    fn item_model_update(
+        &self,
+        kind: &str,
+        config: &horizon_core::nbt::Tag,
+        stack: &StackView,
+        models: &mut Vec<String>,
+    ) {
+        if !mod_api::__private::listened(mod_api::HookId::ItemModelUpdate) {
+            return;
+        }
+        let Ok(snapshot) = stack.try_into_api() else {
+            return;
+        };
+        self.game
+            .native_item_model_update(kind, config, &snapshot, stack.bundle_selected, models);
+    }
     fn enchantment_in_tag(&self, enchantment: &str, tag: &str) -> bool {
         self.game.stations().enchantments.in_tag(tag, enchantment)
     }
@@ -1079,6 +1095,71 @@ mod tests {
                 };
             }
         }
+    }
+
+    /// A mod's item model type: a cell that draws `full` for a stack of two or more.
+    struct Cell;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Cell {
+        fn register_item_models(
+            &self,
+            _: &mod_api::RegistrationContext,
+            event: &mut mod_api::RegisterItemModelsEvent<'_>,
+        ) {
+            event.models.push("cellmod:cell".into());
+        }
+        fn item_model_update(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut mod_api::ItemModelUpdateEvent<'_>,
+        ) {
+            if event.kind == "cellmod:cell" {
+                let name = if event.stack.count() > 1 {
+                    "full"
+                } else {
+                    "empty"
+                };
+                event.models.push(name.into());
+            }
+        }
+    }
+
+    /// A mod registers its item model type once at start, and the game's resolver reads the
+    /// mod's answer per stack; another type, or no mod, draws nothing.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_mods_item_model_type_answers_per_stack() {
+        use mod_api::__private::game::*;
+        let config =
+            horizon_core::json_nbt::json_to_tag(&serde_json::json!({"type": "cellmod:cell"}))
+                .unwrap();
+        let drawn = |env: &Env<'_, '_>, kind: &str, count: i32| {
+            let mut models = Vec::new();
+            env.item_model_update(
+                kind,
+                &config,
+                &StackView::new("minecraft:stick", count),
+                &mut models,
+            );
+            models
+        };
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new("cellmod", Box::new(Cell))].into();
+        mod_api::testing::with_mods(mods, || {
+            let mut types = Vec::new();
+            Game::native_register_item_models(&mod_api::RegistrationContext::new(), &mut types);
+            assert_eq!(types, ["cellmod:cell"]);
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let env = Env { game };
+                assert_eq!(drawn(&env, "cellmod:cell", 1), ["empty"]);
+                assert_eq!(drawn(&env, "cellmod:cell", 2), ["full"]);
+                assert!(drawn(&env, "othermod:cell", 2).is_empty());
+            });
+        });
+        mod_api::testing::with_mods(Vec::new().into(), || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                assert!(drawn(&Env { game }, "cellmod:cell", 2).is_empty());
+            });
+        });
     }
 
     /// A mod registers its item tint source once at start.
