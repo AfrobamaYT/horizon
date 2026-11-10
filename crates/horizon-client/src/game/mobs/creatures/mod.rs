@@ -8,7 +8,6 @@ mod borrowed_tick;
 mod death_tail;
 #[cfg(test)]
 mod mob_dispatch_panic_tests;
-
 mod projectile_world;
 mod pufferfish_player;
 mod residency;
@@ -3276,6 +3275,7 @@ impl Game<'_> {
                         .or(self.lan_acting);
                     self.set_event_ai_target(mob, Some(target), player);
                 }
+                MobEvent::PiglinAlertTarget(alert) => self.piglin_alert_target(alert),
                 MobEvent::HoglinAttackTarget { mob, target } => {
                     let places: Vec<(u32, horizon_core::geometry::Vec3)> = self
                         .mobs
