@@ -353,9 +353,24 @@ same codec and refuse excess depth with `WireError`. Opaque NBT has its separate
 iterative vanilla limit of 512 container levels; it does not spend one structural
 level per NBT container. Wide, shallow cooking grids do not consume extra depth.
 
-This foundation does not activate ghost rendering or click-to-place requests.
-Those require the authoritative recipe type's placement information and a
-server missing-ingredients response. Displays are pictures, not ingredient
-predicates; declaring a result ghost never grants a real stack. NeoForge 26.3
-public documentation names no registration counterpart for vanilla's internal
-`GhostSlots.setInput` and `setResult`; these declaration names are Horizon's.
+Bound menus use the server's negotiated catalogue, not a reconstruction from
+local client recipe JSON. Each request names the exact published recipe and
+original display alternative, scoped to the connection epoch, open window,
+screen nonce, server menu instance and declaration generation. Left click places
+one increment; Shift requests the maximum. Right click opens the alternatives
+preview, whose left-click selection preserves the original source index even
+after filtering and craftability sorting. Unbound books remain preview-only.
+
+The server tests the recipe type's authoritative predicates against exact
+component-aware stack classes and rechecks its live context after callbacks.
+It commits placement atomically, or refuses without publishing a partial plan.
+Persistent machines retain their real fuel and cooked output; placement does not
+craft their output. Only a current server missing-ingredients response installs
+ghost hints. Every new click, window change, disconnect or declaration reload
+revokes pending hints. Ghosts use the shared vanilla painter and the registered
+screen's native slot geometry, never built-in slot coordinates.
+
+Displays are pictures, not ingredient predicates; declaring a result ghost never
+grants a real stack. NeoForge 26.3 public documentation names no registration
+counterpart for vanilla's internal `GhostSlots.setInput` and `setResult`; these
+declaration names are Horizon's.

@@ -267,3 +267,32 @@ fn a_persistent_six_cell_grid_preserves_cooked_output_and_fuel() {
         );
     });
 }
+
+#[test]
+#[ignore = "requires prepared resources"]
+fn existing_damaged_input_is_usable_but_inventory_damaged_tools_are_not_autofilled() {
+    with_env(|env| {
+        let mut damaged = ItemStack::new("minecraft:iron_pickaxe", 1);
+        damaged.damage = 1;
+        let plan = single("minecraft:iron_pickaxe");
+        for use_max in [false, true] {
+            let mut menu = Menu::new(kind());
+            menu.load_slot(4, Some(damaged.clone()));
+            assert_eq!(
+                menu.place_custom_recipe(env, &plan, use_max, false, || true),
+                Ok(PostPlace::Nothing)
+            );
+            assert_eq!(menu.slot(4), Some(&damaged));
+            assert!(menu.player_item(0).is_none());
+        }
+
+        let mut menu = Menu::new(kind());
+        menu.set_player_item(0, Some(damaged.clone()));
+        assert_eq!(
+            menu.place_custom_recipe(env, &plan, false, false, || true),
+            Ok(PostPlace::Ghost)
+        );
+        assert!(menu.slot(4).is_none());
+        assert_eq!(menu.player_item(0), Some(&damaged));
+    });
+}

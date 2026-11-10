@@ -64,8 +64,8 @@ impl Menu {
         let mut prototypes: Vec<ItemStack> = Vec::new();
         let mut amounts: Vec<i32> = Vec::new();
         {
-            let mut account = |stack: &ItemStack| -> Result<(), Refused> {
-                if !usable_for_crafting(stack) {
+            let mut account = |stack: &ItemStack, simple: bool| -> Result<(), Refused> {
+                if simple && !usable_for_crafting(stack) {
                     return Ok(());
                 }
                 let count = i32::try_from(stack.count.min(Self::max_stack(env, stack)))
@@ -90,14 +90,14 @@ impl Menu {
                 Ok(())
             };
             for stack in self.containers[PLAYER][..36].iter().flatten() {
-                account(stack)?;
+                account(stack, true)?;
             }
             for stack in self.sources.iter().flatten().flatten() {
-                account(stack)?;
+                account(stack, true)?;
             }
             for &slot in &plan.inputs {
                 if let Some(stack) = self.slot(slot) {
-                    account(stack)?;
+                    account(stack, false)?;
                 }
             }
         }
@@ -167,10 +167,9 @@ impl Menu {
             }
         }
         let raw_available =
-            Picker::new(&mut amounts, ingredients.len(), |candidate, ingredient| {
+            super::can_craft_matching(&mut amounts, ingredients.len(), |candidate, ingredient| {
                 compatible[candidate * ingredients.len() + ingredient]
-            })
-            .try_pick(1, None);
+            });
         if !raw_available {
             if plan.virtual_result.is_some() {
                 next.recompute(env);
@@ -206,7 +205,9 @@ impl Menu {
                 .chain(next.sources.iter_mut().flatten())
             {
                 if let Some(have) = stack
-                    && usable_for_crafting(have)
+                    // Only eligible stock contributed to this exact prototype's
+                    // budget. Cleared grid inputs remain usable even when named,
+                    // enchanted or damaged; component equality preserves that budget.
                     && have.same_item_same_components(prototype)
                 {
                     let taken = remaining.min(have.count);

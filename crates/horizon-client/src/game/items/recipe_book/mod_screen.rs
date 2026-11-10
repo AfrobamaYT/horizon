@@ -1,10 +1,14 @@
 //! A mod menu's book uses the shared painter, but never vanilla storage ordinals.
 use super::*;
 use horizon_client::recipe_book::mod_presentation::ModPresentation;
+#[path = "mod_screen/ghost.rs"]
+mod ghost;
 #[path = "mod_screen/layout.rs"]
 mod layout;
 #[path = "mod_screen/placement.rs"]
 mod placement;
+#[path = "mod_screen/predicate.rs"]
+mod predicate;
 #[path = "mod_screen/resolve.rs"]
 mod resolve;
 
@@ -17,7 +21,7 @@ pub(super) struct ModRecipeUi {
     tab_page: usize,
     presentation: Option<ModPresentation>,
     prepared: Option<horizon_client::recipe_book::mod_presentation::PreparedBook>,
-    overlay: Option<OverlayView>,
+    overlay: Option<placement::PlacementOverlay>,
     stocks: Vec<ItemStack>,
     inventory_len: usize,
     query: String,
@@ -99,6 +103,13 @@ impl Game<'_> {
     fn mod_book_panel(&self) -> Option<horizon_client::recipe_book::ModBookPanel<'_>> {
         let key = self.native_screen_book()?;
         let menu = self.native_screen_menu()?;
+        if mod_api::RecipeBookLayout::declaring_mod(menu).is_some() {
+            let view = self.native_net.placement.view.as_ref()?;
+            if !self.native_book_placement_catalog_matches(&view.identity) {
+                return None;
+            }
+            return view.index.panel(menu, key);
+        }
         self.recipe_tables
             .books
             .as_ref()?
@@ -201,6 +212,8 @@ impl Game<'_> {
         {
             return;
         }
+        let placement_stocks = self.mod_book_placement_stocks();
+        let ui = &self.recipe_ui.custom;
         let mut stacked = Stacked::default();
         for (index, stack) in stocks.iter().enumerate() {
             let max = horizon_client::menu::item_max_stack(self.items(), stack);
@@ -210,7 +223,7 @@ impl Game<'_> {
                 stacked.account_stack(stack, max);
             }
         }
-        let resolver = resolve::Resolver::new(self, &stacked);
+        let resolver = resolve::Resolver::new(self, &stacked, &placement_stocks);
         let Some(panel) = self.mod_book_panel() else {
             return;
         };
@@ -265,11 +278,12 @@ impl Game<'_> {
             bx,
             by,
         );
-        if !open {
-            return;
-        }
         if !self.shift_down_or_ctrl() {
             self.recipe_ui.time += self.frame_ticks;
+        }
+        self.draw_mod_book_ghosts(batch);
+        if !open {
+            return;
         }
         let (xo, yo) = self.book_origin(batch);
         let search = match self.recipe_ui.search.as_mut() {
@@ -319,7 +333,7 @@ impl Game<'_> {
             buttons: &buttons,
             page: ui.page,
             pages: presentation.recipes.len().div_ceil(20),
-            overlay: ui.overlay.as_ref(),
+            overlay: ui.overlay.as_ref().map(|overlay| &overlay.view),
             ghost: None,
             translate: &translate,
             text_width: &text_width,
@@ -354,11 +368,14 @@ impl Game<'_> {
             self.draw_tooltip_lines(batch, &lines, self.cursor.0, self.cursor.1);
         }
     }
-    pub(super) fn mod_book_click(&mut self, _right: bool) -> bool {
+    pub(super) fn mod_book_click(&mut self, right: bool) -> bool {
+        self.native_net.placement.client.click();
+        self.recipe_ui.ghost.clear();
         self.refresh_mod_book();
         let Some((open, filtering)) = self.mod_book_flags() else {
             return false;
         };
+        self.native_net.placement.deadline = None;
         let Some(batch) = self.batch_for_size() else {
             return false;
         };
@@ -384,7 +401,7 @@ impl Game<'_> {
             return narrow;
         }
         let (xo, yo) = self.book_origin(&batch);
-        if self.recipe_ui.custom.overlay.take().is_some() {
+        if self.consume_mod_book_overlay(right) {
             return true;
         }
         if inside(cursor, xo + 110.0, yo + 12.0, 26.0, 16.0) {
@@ -414,6 +431,10 @@ impl Game<'_> {
             }
             search.focused = false;
         }
+        let swap_index = self.swap_index();
+        let placeable = self
+            .native_screen_menu()
+            .is_some_and(|menu| mod_api::RecipeBookLayout::declaring_mod(menu).is_some());
         let ui = &mut self.recipe_ui.custom;
         let Some(presentation) = &ui.presentation else {
             return narrow;
@@ -448,8 +469,12 @@ impl Game<'_> {
         {
             let (x, y) = Self::button_pos(xo, yo, n);
             if inside(cursor, x, y, 25.0, 25.0) {
-                // Presentation only: neither click can place a mod recipe through
-                // vanilla RecipeDisplayId packets or manufacture ghost slots.
+                if !right && placeable {
+                    let id = recipe.recipe.clone();
+                    let source = recipe.sources[swap_index % recipe.sources.len()];
+                    self.request_mod_book_recipe(id, source);
+                    return true;
+                }
                 let (x, y) = screen::overlay_origin(
                     x as i32,
                     y as i32,
@@ -457,10 +482,14 @@ impl Game<'_> {
                     xo as i32,
                     yo as i32,
                 );
-                ui.overlay = Some(OverlayView {
-                    x,
-                    y,
-                    recipes: recipe.overlay.clone(),
+                ui.overlay = Some(placement::PlacementOverlay {
+                    view: OverlayView {
+                        x,
+                        y,
+                        recipes: recipe.overlay.clone(),
+                    },
+                    recipe: recipe.recipe.clone(),
+                    sources: recipe.sources.clone(),
                 });
                 return true;
             }
@@ -504,12 +533,16 @@ impl Game<'_> {
         let (xo, yo) = self.book_origin(&batch);
         let ui = &self.recipe_ui.custom;
         if let Some(overlay) = &ui.overlay {
-            let columns = if overlay.recipes.len() <= 16 { 4 } else { 5 };
-            return (0..overlay.recipes.len())
+            let columns = if overlay.view.recipes.len() <= 16 {
+                4
+            } else {
+                5
+            };
+            return (0..overlay.view.recipes.len())
                 .map(|n| {
                     button([
-                        overlay.x as f32 + 4.0 + 25.0 * (n % columns) as f32,
-                        overlay.y as f32 + 5.0 + 25.0 * (n / columns) as f32,
+                        overlay.view.x as f32 + 4.0 + 25.0 * (n % columns) as f32,
+                        overlay.view.y as f32 + 5.0 + 25.0 * (n / columns) as f32,
                         24.0,
                         24.0,
                     ])
@@ -609,10 +642,14 @@ mod tests {
                 })
                 .collect(),
         });
-        ui.overlay = Some(OverlayView {
-            x: 0,
-            y: 0,
-            recipes: Vec::new(),
+        ui.overlay = Some(placement::PlacementOverlay {
+            view: OverlayView {
+                x: 0,
+                y: 0,
+                recipes: Vec::new(),
+            },
+            recipe: "test:recipe".into(),
+            sources: Vec::new(),
         });
         assert!(ui.turn_page(true));
         assert_eq!(ui.page, 1);

@@ -15,6 +15,9 @@ use crate::{
     items::ItemStack,
 };
 use std::{collections::HashMap, sync::Arc};
+#[path = "place/predicate.rs"]
+mod predicate;
+pub use predicate::can_craft_matching;
 
 /// `StackedContents<Holder<Item>>`: item counts in an iteration order.
 #[derive(Clone, Debug, Default)]

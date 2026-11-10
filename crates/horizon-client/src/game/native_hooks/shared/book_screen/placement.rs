@@ -1,19 +1,44 @@
 //! The client nonce is tied to the actual shown mod screen, not just its menu type.
 use super::*;
 impl Game<'_> {
-    pub(in crate::game) fn native_book_placement_window_matches(
+    fn native_book_placement_scope_matches(
         &self,
-        window: &horizon_client::recipe_book::placement_sync::Window,
+        window: i32,
+        nonce: u64,
+        menu: &str,
+        book: &str,
     ) -> bool {
         self.shown_native_screen().is_some_and(|screen| {
-            screen.window == window.window
-                && screen.layout_revision == window.nonce
+            screen.window == window
+                && screen.layout_revision == nonce
                 && screen
                     .screen
                     .recipe_book
                     .as_ref()
-                    .is_some_and(|key| key.as_str() == window.book.as_str())
-        }) && self.native_screen_menu() == Some(window.menu.as_str())
+                    .is_some_and(|key| key.as_str() == book)
+        }) && self.native_screen_menu() == Some(menu)
+    }
+    pub(in crate::game) fn native_book_placement_window_matches(
+        &self,
+        window: &horizon_client::recipe_book::placement_sync::Window,
+    ) -> bool {
+        self.native_book_placement_scope_matches(
+            window.window,
+            window.nonce,
+            window.menu.as_str(),
+            window.book.as_str(),
+        )
+    }
+    pub(in crate::game) fn native_book_placement_catalog_matches(
+        &self,
+        identity: &horizon_client::recipe_book::placement_sync::CatalogIdentity,
+    ) -> bool {
+        self.native_book_placement_scope_matches(
+            identity.window,
+            identity.nonce,
+            identity.menu.as_str(),
+            identity.book.as_str(),
+        )
     }
     pub(in crate::game) fn native_book_placement_window(
         &self,

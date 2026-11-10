@@ -1663,7 +1663,12 @@ impl Game<'_> {
     /// `slot` now, cycling like its draw; only while the open book is visible
     /// (`RecipeBookComponent.extractTooltip`).
     pub(super) fn ghost_stack(&self, slot: usize) -> Option<ItemStack> {
-        if !self.book_open(self.active_book()?) {
+        if self.native_screen_shown() {
+            if !self.mod_book_open() {
+                return None;
+            }
+            self.native_screen_slot(slot.checked_sub(300)?)?;
+        } else if !self.book_open(self.active_book()?) {
             return None;
         }
         let ghost = self
