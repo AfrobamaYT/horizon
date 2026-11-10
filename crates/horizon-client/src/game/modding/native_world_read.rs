@@ -54,6 +54,12 @@ pub(super) fn install_block_tags(
     BLOCK_TAGS.with(|snapshot| *snapshot.borrow_mut() = tags);
 }
 
+#[cfg(test)]
+pub(in crate::game) fn installed_block_tag_snapshot()
+-> std::collections::HashMap<String, std::collections::HashSet<BlockKey>> {
+    BLOCK_TAGS.with(|snapshot| snapshot.borrow().clone())
+}
+
 /// One availability check, one tag-name lookup and one API key membership test.
 /// An unavailable owning-thread mapping is not a missing tag.
 pub(super) fn block_in_tag(block: BlockKey, tag: &str) -> Option<bool> {

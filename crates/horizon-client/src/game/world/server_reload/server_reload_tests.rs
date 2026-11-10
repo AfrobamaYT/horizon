@@ -218,6 +218,7 @@ fn reload_command_uses_applied_listener_state_and_preserves_tables_on_refusal() 
                     game.items().block_tags["reload_order:derived"].contains("minecraft:stone")
                 );
                 assert!(mod_api::Tags::blocks(game, class).unwrap().contains(&fence));
+                let old_bound = crate::game::native_world_read::installed_block_tag_snapshot();
                 let old_order = game.items().block_tag_order.clone();
                 let old_sets = game.items().block_tags.clone();
                 let old = game.world_tables.as_ref().map(|tables| tables as *const _);
@@ -235,11 +236,12 @@ fn reload_command_uses_applied_listener_state_and_preserves_tables_on_refusal() 
                 assert!(
                     game.items().block_tags["reload_order:derived"].contains("minecraft:stone")
                 );
-                let stone = mod_api::__private::block_key("minecraft:stone").unwrap();
-                assert_eq!(game.block_in_tag(stone, "reload_order:derived"), Some(true));
+                assert_eq!(
+                    crate::game::native_world_read::installed_block_tag_snapshot(),
+                    old_bound
+                );
                 assert_eq!(game.items().block_tag_order, old_order);
                 assert_eq!(game.items().block_tags, old_sets);
-                assert!(mod_api::Tags::blocks(game, class).unwrap().contains(&fence));
                 let _ = std::fs::remove_dir_all(root);
             });
         },
