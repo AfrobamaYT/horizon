@@ -1035,6 +1035,7 @@ one of these moments has to move that logic into a client native mod.
 | `gui_layer_draw.rs` | `gui_layer_draw` |
 | `gui_render_post.rs` | `gui_render_post` |
 | `hand_drawn.rs` | `hand_drawn` |
+| `hand_submit.rs` | `hand_submit` |
 | `item_model_property.rs` | `item_model_property` |
 | `item_model_range_property.rs` | `item_model_range_property` |
 | `item_model_select_property.rs` | `item_model_select_property` |

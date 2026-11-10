@@ -1505,6 +1505,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::grindstone_take` | crosses | Wire call |
 | `Hooks::gui_layer_draw` | crosses | Wire call |
 | `Hooks::gui_render_post` | crosses | Wire call |
+| `Hooks::hand_submit` | crosses | Wire call |
 | `Hooks::ingredient_test` | crosses | Wire call |
 | `Hooks::item_attribute_modifier` | crosses | Wire call |
 | `Hooks::item_container` | crosses | Wire call |

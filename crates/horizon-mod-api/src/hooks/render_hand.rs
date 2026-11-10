@@ -5,8 +5,8 @@ pub trait Hooks {
     /// Before one first-person hand, item, map or empty arm is drawn
     /// (`RenderHandEvent`, client). Adjust `render`'s pose or cancel the
     /// default geometry. Equip progress includes the item's swap scale.
-    /// Unlike NeoForge, this does not expose the full pose stack, player
-    /// render state or submission collector, and cannot draw a replacement.
+    /// Unlike NeoForge, this does not expose the full pose stack or player
+    /// render state; `native_hand_submit` draws a replacement, or more.
     #[hook(
         side = "client",
         contract = "cancel",

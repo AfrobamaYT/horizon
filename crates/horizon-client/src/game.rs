@@ -13866,7 +13866,9 @@ impl Game<'_> {
             let attack = attacks[i];
             let inverse_height =
                 horizon_client::first_person::equip_displacement(heights[i], scale);
-            let snapshot = if mod_api::__private::listened(mod_api::HookId::RenderHand) {
+            let snapshot = if mod_api::__private::listened(mod_api::HookId::RenderHand)
+                || mod_api::__private::listened(mod_api::HookId::HandSubmit)
+            {
                 item.as_ref()
                     .filter(|stack| stack.count > 0)
                     .try_into_api()
@@ -13893,19 +13895,14 @@ impl Game<'_> {
             let mut canceled = false;
             if snapshot.is_some() {
                 self.native_render_hand(&mut render, &mut canceled);
+                // The mods' own geometry, whether they kept vanilla's hand or not.
+                self.hand_submit_geometry(&render, canceled, to_world, packed, &mut out, &mut runs);
             }
             if canceled {
                 continue;
             }
             // No mod moved the hand (always so without one): no matrices to build.
-            let [x, y, z] = render.translation;
-            let [pitch, yaw, roll] = render.rotation;
-            let pose = [x, y, z, pitch, yaw, roll, render.scale];
-            let to_world = if pose == [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0] {
-                to_world
-            } else {
-                to_world * native_hooks::hand_pose_matrix(pose)
-            };
+            let to_world = Self::posed_hand(&render, to_world);
             // The main hand on its arm, the off hand on the other one.
             let left = self.settings.main_hand_left != (hand == Hand::Off);
             // A Legacy sword held up hides the off hand's shield.
