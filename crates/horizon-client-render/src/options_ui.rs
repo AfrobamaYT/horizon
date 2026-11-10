@@ -4235,10 +4235,6 @@ impl OptionsUi {
             match action {
                 Do::None => {}
                 Do::OpenFolder => events.push(Event::OpenModFolder),
-                Do::Browse => {
-                    events.push(Event::BrowseMods);
-                    self.push(Page::ModBrowser);
-                }
                 Do::Back => events.extend(self.back(s)),
                 Do::Config(i) => {
                     self.push(Page::NativeMod(i));
@@ -6057,12 +6053,12 @@ mod tests {
         }
     }
 
-    /// The Mods page is NeoForge's list screen: no switches, a footer of folder, browser and
+    /// The Mods page is NeoForge's list screen: no switches, a footer of folder and
     /// Back, and Config on the selected native mod. Positions are the layout at 480x240:
     /// 150 px buttons 4 px apart, centred 27 px above the bottom; the sidebar at x 41 with its
     /// list at y 32 and 28 px rows; the panel at x 188 with its buttons at y 182, 84 px apart.
     #[test]
-    fn the_mods_page_opens_folders_the_browser_and_a_native_mods_settings() {
+    fn the_mods_page_opens_the_folder_and_a_native_mods_settings() {
         let atlas = atlas();
         let mut s = Settings::default();
         let mut ui = OptionsUi::default();
@@ -6098,18 +6094,9 @@ mod tests {
         };
         ui.show(Page::Mods);
         assert_eq!(
-            click(&mut ui, &mut s, 86.0, 223.0),
+            click(&mut ui, &mut s, 160.0, 223.0),
             vec![Event::ButtonClick, Event::OpenModFolder]
         );
-        // Browse Mods opens the registry's list; coming back makes the list again.
-        assert_eq!(
-            click(&mut ui, &mut s, 240.0, 223.0),
-            vec![Event::ButtonClick, Event::BrowseMods]
-        );
-        assert_eq!(ui.page(), Page::ModBrowser);
-        ui.back(&mut s);
-        assert_eq!(ui.page(), Page::Mods);
-        assert!(ui.mods_screen.is_none());
         // Config does nothing until a native mod with settings is picked from the list
         // (Horizon, Minecraft, then Native).
         assert!(click(&mut ui, &mut s, 397.0, 192.0).is_empty());
@@ -6121,7 +6108,7 @@ mod tests {
         ui.back(&mut s);
         assert_eq!(ui.page(), Page::Mods);
         // Back leaves the page.
-        let events = click(&mut ui, &mut s, 394.0, 223.0);
+        let events = click(&mut ui, &mut s, 320.0, 223.0);
         assert_eq!(events.first(), Some(&Event::ButtonClick));
         assert_eq!(ui.page(), Page::Main);
     }
@@ -8308,6 +8295,7 @@ mod tests {
                 Page::SplitSetup,
                 Page::Studio,
                 Page::Agent,
+                Page::ModBrowser,
             ]
         );
         // No AI hides the AI Agent page.
@@ -8762,6 +8750,36 @@ mod tests {
             events.contains(&Event::ButtonClick),
             "Enter on FocusId::Act must emit Event::ButtonClick"
         );
+    }
+
+    /// Browse Mods is on the Horizon settings page (the Mods footer has only Open Mods Folder
+    /// and Back): clicking it lists the registry's mods and opens the browser.
+    #[test]
+    fn browse_mods_opens_the_registry_browser_from_the_horizon_page() {
+        let atlas = atlas();
+        let size = (960.0, 540.0);
+        let mut s = Settings::default();
+        let mut ui = OptionsUi::default();
+        ui.show(Page::Horizon);
+        let (widgets, ..) = ui.layout(&s, size.0, size.1);
+        let browse = widgets
+            .into_iter()
+            .find(|w| {
+                matches!(&w.kind, WKind::Button { act, .. } if *act == Act::Push(Page::ModBrowser))
+            })
+            .expect("Browse Mods... on the Horizon page");
+        let events = ui.click(
+            &mut s,
+            &atlas,
+            browse.x + browse.w / 2.0,
+            browse.y + browse.h / 2.0,
+            size,
+            [854, 480],
+            false,
+            false,
+        );
+        assert_eq!(events, vec![Event::ButtonClick, Event::BrowseMods]);
+        assert_eq!(ui.page(), Page::ModBrowser);
     }
 
     #[test]
