@@ -294,11 +294,14 @@ impl Game<'_> {
         // The container screens' layout is a build input: the frame's own
         // state, and the mods' effects answer, compared here so the panels and
         // the exclusion never disagree by a frame.
-        let container = (shown && self.screen.is_container()).then(|| {
-            let batch =
-                horizon_client::hud::HudBatch::new(framebuffer, self.settings.gui_scale_inputs());
-            self.container_layout(&batch)
-        });
+        let container = (shown && matches!(self.screen, Screen::Inventory | Screen::Creative))
+            .then(|| {
+                let batch = horizon_client::hud::HudBatch::new(
+                    framebuffer,
+                    self.settings.gui_scale_inputs(),
+                );
+                self.container_layout(&batch)
+            });
         self.screen_state
             .build
             .sync(self.screen, shown, identity, gui, container);

@@ -620,11 +620,6 @@ enum Screen {
     Studio,
 }
 impl Screen {
-    /// The screens whose layout is a container panel: the survival and
-    /// creative inventories and every container or station window.
-    fn is_container(self) -> bool {
-        matches!(self, Screen::Inventory | Screen::Creative)
-    }
     /// The id native mods see for this screen (`ScreenView.id`, the
     /// `screen_render_post` hook): one per variant, and a hook's contract, so
     /// it stays the same from release to release. A new variant must add one.

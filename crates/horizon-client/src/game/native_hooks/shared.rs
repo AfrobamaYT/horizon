@@ -2306,7 +2306,7 @@ impl Game<'_> {
     /// The areas the game itself draws beside the open screen's window: the
     /// container build's, or the frame's own arithmetic with no build yet.
     fn screen_own_exclusion(&self, batch: &HudBatch) -> Vec<[f32; 4]> {
-        if !self.screen.is_container() {
+        if !matches!(self.screen, Screen::Inventory | Screen::Creative) {
             return Vec::new();
         }
         match self.built_container(batch) {
