@@ -6,6 +6,8 @@ struct RemovalLevel {
     asks: std::cell::RefCell<Vec<(BlockPos, BlockStateId, bool)>>,
     updates: usize,
 }
+impl BlockEntityNeighbors for RemovalLevel {}
+
 impl LevelAccess for RemovalLevel {
     fn block_state(&self, pos: BlockPos) -> BlockStateId {
         self.inner.block_state(pos)
