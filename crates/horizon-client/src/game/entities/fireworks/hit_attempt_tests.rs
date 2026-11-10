@@ -119,6 +119,86 @@ fn remaining_hit_callers_observe_refusals_and_zero_damage() {
                 );
             }
             fresh_player(game, GameMode::Spectator);
+            let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            let mut corpse = horizon_client::mobs::Mob::new(903, kind, Vec3::ZERO, 0.0);
+            corpse.health = 0.0;
+            game.mobs.push(corpse);
+            let mut rocket = Rocket::remote(902, Vec3::ZERO, Vec3::ZERO);
+            rocket.explosions.push(FireworkExplosion::default());
+            game.explode_rocket(&rocket);
+            check(
+                1,
+                "resident dead mob is included in the rocket splash query",
+            );
+            assert_eq!(game.mobs.iter().find(|m| m.id == 903).unwrap().health, 0.0);
+            game.mobs.clear();
+
+            // A blast's entity query includes resident dead and not-yet-loaded
+            // network players, unlike the combat-target helper formerly used here.
+            use horizon_client::lan::{NetConfig, hub::HubConfig};
+            game.lan_host(
+                crate::game::lan::LanSettings {
+                    port: 0,
+                    guest_commands: false,
+                    force_game_mode: false,
+                },
+                NetConfig {
+                    announce: false,
+                    ..NetConfig::lan(0, "attempts".into(), 2)
+                },
+                HubConfig {
+                    default_game_mode: 0,
+                    guest_commands: false,
+                    force_game_mode: false,
+                    hardcore: false,
+                    view_distance: 10,
+                    simulation_distance: 10,
+                    dimension: "minecraft:overworld".into(),
+                    allow_flight: false,
+                    seed: 0,
+                    max_players: 20,
+                    integrated: false,
+                    levels: Default::default(),
+                },
+            )
+            .unwrap();
+            let (guest, _packets) = crate::game::native_sound_refs::tests::guest(88, 88, [0.0; 3]);
+            game.lan.as_mut().unwrap().hub.guests.push(guest);
+            for dead in [true, false] {
+                fresh_player(game, GameMode::Spectator); // excluded from splash
+                let guest = game
+                    .lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .iter_mut()
+                    .find(|g| g.conn == 88)
+                    .unwrap();
+                guest.motion = Some(Box::new(
+                    PlayerMotion::new(game.motion, Vec3::ZERO).unwrap(),
+                ));
+                guest.dead = dead;
+                guest.loaded = dead;
+                guest.loading = !dead;
+                if dead {
+                    guest
+                        .motion
+                        .as_mut()
+                        .unwrap()
+                        .set_health(0.0, false)
+                        .unwrap();
+                }
+                let mut rocket = Rocket::remote(901, Vec3::ZERO, Vec3::ZERO);
+                rocket.explosions.push(FireworkExplosion::default());
+                game.explode_rocket(&rocket);
+                check(
+                    1,
+                    "resident dead or unloaded guest is still a rocket damage target",
+                );
+            }
+
+            fresh_player(game, GameMode::Spectator);
             assert!(!game.run_command("damage @s 4 minecraft:generic"));
             check(
                 1,
