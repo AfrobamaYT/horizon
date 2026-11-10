@@ -1191,8 +1191,10 @@ impl Game<'_> {
         &mut self,
         kind: &str,
         data: &horizon_core::nbt::Tag,
-    ) {
-        self.fire_consume_effect(kind, data);
+    ) -> bool {
+        crate::game::consume_effect_dispatch::dispatch(kind, || {
+            self.fire_consume_effect(kind, data)
+        })
     }
     /// What clients get of the block entity at `pos` when its `id` is
     /// yours (`BlockEntity.getUpdateTag`): set `tag` to it, read from
