@@ -3,10 +3,11 @@
 
 Run from the repository root. Untracked and ignored files are deliberately outside
 this check. No paths are exempt; literal examples in tests are assembled in pieces.
-Requires the pinned parser in tools/ci/hygiene-requirements.txt.
+Uses the pinned, checksummed offline parser under tools/ci/vendor/.
 """
 
 import argparse
+import hashlib
 import io
 import os
 import re
@@ -38,12 +39,21 @@ def check(revision=None):
               file=sys.stderr)
         sys.stderr.write(matches.stdout.decode("utf-8", errors="replace"))
 
-    # Do not silently skip validation when the parser is missing, including hooks.
+    # The same offline parser serves CI and hooks; never fall back to site packages.
+    archive = Path(__file__).resolve().parent / "vendor/pyyaml-6.0.3.zip"
+    try:
+        parser_bytes = archive.read_bytes()
+    except OSError as error:
+        print(f"repository hygiene: missing vendored YAML parser: {error}", file=sys.stderr)
+        return 1
+    if hashlib.sha256(parser_bytes).hexdigest() != "94ac21b4343e15647b3b5b5bd594aab5b7d3cd8d2ce17db15acb7260d489b6fc":
+        print("repository hygiene: vendored YAML parser checksum mismatch", file=sys.stderr)
+        return 1
+    sys.path.insert(0, str(archive))
     try:
         import yaml
-    except ImportError:
-        print("repository hygiene: install the YAML parser with "
-              "python3 -m pip install -r tools/ci/hygiene-requirements.txt", file=sys.stderr)
+    except ImportError as error:
+        print(f"repository hygiene: cannot load vendored YAML parser: {error}", file=sys.stderr)
         return 1
     command = (["git", "ls-tree", "-r", "--name-only", "-z", revision, "--", ".github/workflows/"]
                if revision else ["git", "ls-files", "-z", "--", ".github/workflows/"])

@@ -2,12 +2,14 @@
 
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "tools/ci/check_repository_hygiene.py"
+VENDOR = SCRIPT.parent / "vendor"
 NOTICES = [
     "Showing " + "lines 1-933 of 1005",
     "Use " + "offset=934 to continue",
@@ -101,13 +103,32 @@ class RepositoryHygieneTests(unittest.TestCase):
         self.assertEqual(self.run_check(pre_push=f"refs/heads/x {'0' * 40} refs/heads/x {clean}\n").returncode, 0)
 
     def test_missing_parser_fails_closed(self):
-        result = subprocess.run([sys.executable, "-S", str(SCRIPT)], cwd=self.root,
-                                env={**os.environ, "PYTHONPATH": ""}, capture_output=True, text=True)
+        isolated = self.root / "checker.py"
+        shutil.copyfile(SCRIPT, isolated)
+        result = self.run_check(script=isolated)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("install the YAML parser", result.stderr)
+        self.assertIn("missing vendored YAML parser", result.stderr)
+        shutil.copytree(VENDOR, self.root / "vendor")
+        with (self.root / "vendor/pyyaml-6.0.3.zip").open("ab") as archive:
+            archive.write(b"corrupt")
+        result = self.run_check(script=isolated)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("checksum mismatch", result.stderr)
+
+    def test_offline_parser_without_site_packages(self):
+        self.write(".github/workflows/ok.yml", "on: push\njobs: {}\n")
+        command = [sys.executable, "-S", str(SCRIPT)]
+        env = {**os.environ, "PYTHONPATH": ""}
+        result = subprocess.run(command, cwd=self.root, env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.write(".github/workflows/ok.yml", "jobs: [unterminated\n")
+        result = subprocess.run(command, cwd=self.root, env=env, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("invalid workflow YAML", result.stderr)
 
     def test_hook_validates_tips_and_preserves_public_tree_ref_input(self):
         self.write("tools/ci/check_repository_hygiene.py", SCRIPT.read_text())
+        shutil.copytree(VENDOR, self.root / "tools/ci/vendor")
         self.write("tools/check_public_tree.py",
                    "import pathlib, sys\npathlib.Path('forwarded.txt').write_text(sys.stdin.read())\n")
         self.git("commit", "-qm", "hook fixture")
@@ -138,6 +159,7 @@ class RepositoryHygieneTests(unittest.TestCase):
         needle = '    r"Use offset=[0-9]+ to continue",\n'
         self.assertEqual(source.count(needle), 1)
         mutant.write_text(source.replace(needle, ""))
+        shutil.copytree(VENDOR, self.root / "vendor")
         self.write("victim.txt", "safe\n" + NOTICES[1] + "\n")
         self.assertNotEqual(self.run_check().returncode, 0)
         self.assertEqual(self.run_check(script=mutant).returncode, 0)
