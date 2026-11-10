@@ -24,7 +24,7 @@ References are against main at `d57e01504e`.
   ten pixels; `hud_layout.rs:674` selects food using zero vehicle capacity;
   `hud_layout.rs:704` offsets the player's air row using vehicle row count.
   Player health hearts themselves need no new vertical displacement.
-- `crates/horizon-mod-vocab/src/client/hud_layout.rs:143`: `PlayerHealthInput.vehicle_hearts`
+- `crates/horizon-mod-vocab/src/client/hud_layout.rs:143`: `HealthInputs.vehicle_hearts`
   is the vocabulary crossing to player layout. The exports live in
   `crates/horizon-mod-vocab/src/exports/hud_layout.rs:1`.
 - `crates/horizon-client/src/game/native_hooks/shared.rs:2202`: `gui_layer` runs
@@ -109,7 +109,7 @@ value, using the runtime's existing fault isolation and diagnostics.
 
 The prepared record contains effective hearts, derived rows, selected vehicle and
 health snapshot. Generate vehicle geometry and the status keep-out from it; pass its
-occupied-container count to `PlayerHealthInput`, whose integer field yields the
+occupied-container count to `HealthInputs`, whose integer field yields the
 same row count. Retain fractional capacity in the prepared record for fill clipping. No consumer rereads max health or calls sizing
 again. Pre and Post may inspect the prepared sizing but cannot mutate it. A Pre
 cancellation leaves the keep-out and player placement unchanged. Custom redraws can
@@ -125,24 +125,24 @@ unchanged. With subscribers, dispatch only to the indexed subscriber list.
 
 ## Acceptance matrix
 
-For air-row examples let GUI height be 240 and the unadjusted air baseline be 201;
-vehicle adjustment is `baseline - (rows - 1) * 10`.
+For air-row examples let GUI height be 240. With a vehicle the food row is skipped,
+so the air baseline is `h - 49` = 191, and the air row is drawn at `191 - (rows - 1) * 10`.
 
 | Case | Prepared hearts | Rows | Observable expectation |
 | --- | ---: | ---: | --- |
-| No listener, maximum health 30, current 8 | 15 | 2 | 15 containers, 4 full; vehicle rows at 201 and 191; air at 191 |
-| Same mount, mod supplies 4 | 4 | 1 | 4 containers, all full; air at 201; one-row reservation |
-| Mod supplies 10 | 10 | 1 | 10 containers at 201; air at 201 |
-| Mod supplies 11 | 11 | 2 | 10 containers at 201, 1 at 191; air at 191 |
-| 11 hearts, Pre cancels drawing | 11 | 2 | No vehicle sprites; reservation and air remain at 191 |
-| Minimum: 1.0 max/current health, capacity 0.5 | 0.5 | 1 | 1 container with half-heart fill; air at 201 |
-| Maximum: 1024.0 health, mod capacity 512 | 512 | 52 | 512 containers: 51 rows of 10 and final row of 2; air at -309 |
-| Mod supplies 0 | 0.5 | 1 | Clamp to minimum; 1 container; air at 201 |
+| No listener, maximum health 30, current 8 | 15 | 2 | 15 containers, 4 full; vehicle rows at 201 and 191; air at 181 |
+| Same mount, mod supplies 4 | 4 | 1 | 4 containers, all full; air at 191; one-row reservation |
+| Mod supplies 10 | 10 | 1 | 10 containers at 201; air at 191 |
+| Mod supplies 11 | 11 | 2 | 10 containers at 201, 1 at 191; air at 181 |
+| 11 hearts, Pre cancels drawing | 11 | 2 | No vehicle sprites; reservation unchanged; air remains at 181 |
+| Minimum: 1.0 max/current health, capacity 0.5 | 0.5 | 1 | 1 container with half-heart fill; air at 191 |
+| Maximum: 1024.0 health, mod capacity 512 | 512 | 52 | 512 containers: 51 rows of 10 and final row of 2; air at -319 |
+| Mod supplies 0 | 0.5 | 1 | Clamp to minimum; 1 container; air at 191 |
 | Mod supplies -1 | 0.5 | 1 | Clamp to minimum, for native and wasm |
 | Mod supplies 2000 | 512 | 52 | Clamp to maximum; same reservation and player air placement as 512 |
 | Mod supplies 512.5 | 512 | 52 | Clamp to maximum |
-| Mod supplies NaN after valid 4 | 4 | 1 | Refuse answer; retain 4; air at 201 |
-| Mod supplies positive or negative infinity after valid 4 | 4 | 1 | Refuse answer; retain 4; air at 201 |
+| Mod supplies NaN after valid 4 | 4 | 1 | Refuse answer; retain 4; air at 191 |
+| Mod supplies positive or negative infinity after valid 4 | 4 | 1 | Refuse answer; retain 4; air at 191 |
 | Two listeners supply 4 then 11 | 11 | 2 | All three consumers use 11, not the intermediate 4 |
 | Listener supplies 4 then another panics/traps | 4 | 1 | Prior validated capacity retained |
 | No mount, spectator, or hidden HUD | 0 | 0 | No sizing dispatch or vehicle reservation |
