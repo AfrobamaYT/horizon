@@ -48,6 +48,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Host::recipe_result` | crosses | Wire call |
 | `Host::known_recipes` | crosses | Wire call |
 | `Host::recipe_book_category` | crosses | Wire call |
+| `Host::resource` | crosses | Wire call |
 | `Host::unresolved_fluid_id` | crosses | Wire call |
 | `Host::block_in_tag` | crosses | Wire call |
 | `Host::state_outline` | crosses | Wire call |
@@ -1416,6 +1417,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::armor_hurt` | crosses | Wire call |
 | `Hooks::arrow_nock` | crosses | Wire call |
 | `Hooks::baby_entity_spawn` | crosses | Wire call |
+| `Hooks::bake_model_loader` | crosses | Wire call |
 | `Hooks::block_drops` | crosses | Wire call |
 | `Hooks::block_entity_type_add_blocks` | crosses | Wire call |
 | `Hooks::block_grow_feature` | crosses | Wire call |
@@ -1526,6 +1528,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::living_damage_post` | crosses | Wire call |
 | `Hooks::living_damage_pre` | crosses | Wire call |
 | `Hooks::living_death` | crosses | Wire call |
+| `Hooks::living_death_post` | crosses | Wire call |
 | `Hooks::living_destroy_block` | crosses | Wire call |
 | `Hooks::living_drops` | crosses | Wire call |
 | `Hooks::get_equipment_drop_chance` | crosses | Wire call |
@@ -1589,6 +1592,8 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::register_gui_layers` | crosses | Wire call |
 | `Hooks::register_item_tint_sources` | crosses | Wire call |
 | `Hooks::register_layer_definitions` | crosses | Wire call |
+| `Hooks::register_model_loaders` | crosses | Wire call |
+| `Hooks::register_particle_groups` | crosses | Wire call |
 | `Hooks::register_particle_providers` | crosses | Wire call |
 | `Hooks::register_preset_editors` | crosses | Wire call |
 | `Hooks::register_range_select_item_model_property` | crosses | Wire call |
