@@ -419,7 +419,7 @@ impl Mob {
     }
     /// `LivingEntity.onClimbable` (`Spider.onClimbable`: the climbing flag):
     /// the block it stands in is `#minecraft:climbable` (vines, ladders,
-    /// scaffolding...), or an open trapdoor over a ladder facing the same way
+    /// scaffolding...) or its mod parts' `is_ladder` says it is, or an open trapdoor over a ladder facing the same way
     /// (`trapdoorUsableAsLadder`). A mob gliding (`isFallFlying`) through a
     /// `#minecraft:can_glide_through` block (vines) is not on it: that test
     /// comes first.
@@ -437,7 +437,16 @@ impl Mob {
         if self.extra.fall_flying && w.has_tag("minecraft:can_glide_through", &facts.name) {
             return false;
         }
-        if w.has_tag("minecraft:climbable", &facts.name) {
+        // `IBlockExtension.isLadder`: the block's parts answer after the tag.
+        let mut ladder = w.has_tag("minecraft:climbable", &facts.name);
+        crate::motion::native_is_ladder(
+            w.loop_context,
+            self.id,
+            BlockPos::new(x, y, z),
+            state,
+            &mut ladder,
+        );
+        if ladder {
             return true;
         }
         facts.has_class("TrapDoorBlock")

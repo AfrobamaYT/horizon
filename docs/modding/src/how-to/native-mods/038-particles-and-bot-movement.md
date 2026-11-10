@@ -17,6 +17,14 @@ sprite set. All option constructors take the resolved key, including `dust`, `it
 `vibration`, `shriek`, `sculk_charge` and `dust_transition`. Use the corresponding vanilla key
 for these parameter families. Sending an option performs no string parsing or registry scan.
 
+For stack-derived breaking or eating particles, call
+`ClientHost::item_particle_options(&stack)` and pass the returned options to
+`add_particle`. This read resolves the ground model with seed 0, preserving all
+layer particle sprites and resource-pack and stack-component overrides. It returns
+`None` for invalid stacks or unavailable resources/provider. It is available in
+Setup, Reloading and World, on native and wasm. Resolve again after resource reloads.
+It allocates a sprite list only when called; it adds no per-tick work.
+
 ### Bot movement and block collisions
 
 `PlayerRef::simulate_move` predicts one server player's movement tick from

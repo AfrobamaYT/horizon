@@ -436,7 +436,7 @@ impl Game<'_> {
     }
     /// `Player.canEat(canAlwaysEat)` for `stack`, food that is eaten only
     /// when hungry, then a mod's answer.
-    pub(super) fn can_eat(&self, stack: &ItemStack, can_always_eat: bool) -> bool {
+    pub(super) fn can_eat(&self, stack: Option<&ItemStack>, can_always_eat: bool) -> bool {
         let vanilla = can_always_eat
             || self.creative
             || self
@@ -1229,6 +1229,110 @@ pub(super) mod interact_vibration_tests {
             return;
         };
         assert!(lines.is_empty(), "{lines:?}");
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources and an isolated process for native mods"]
+    fn cake_context_uses_can_eat_instead_of_raw_hunger() {
+        use mod_api::{CanEatEvent, Hooks};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        struct Reverse(Arc<AtomicUsize>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Reverse {
+            fn can_eat(
+                &self,
+                host: &dyn mod_api::Host,
+                event: &mut CanEatEvent<'_>,
+            ) -> Option<bool> {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                if let Some(stack) = event.stack {
+                    assert_eq!(stack.item().id(host), "minecraft:stick");
+                }
+                Some(!event.vanilla_can_eat)
+            }
+        }
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "cake-refusal",
+            Box::new(Reverse(calls.clone())),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_game("minecraft:stick", |game| {
+                let use_block = |game: &mut Game<'_>, name: &str| {
+                    let player = game.use_context();
+                    game.with_block_use_level(|b, level, ticks| {
+                        let state = b.table.default_state(b.table.block_by_name(name).unwrap());
+                        b.use_without_item(
+                            level,
+                            ticks,
+                            state,
+                            horizon_core::geometry::BlockHit {
+                                block: horizon_core::position::BlockPos::new(0, 64, 0),
+                                direction: horizon_core::geometry::Direction::Up,
+                                location: horizon_core::geometry::Vec3::new(0.5, 65.0, 0.5),
+                                inside: false,
+                            },
+                            player,
+                        )
+                    })
+                };
+                game.creative = true;
+                use_block(game, "minecraft:stone");
+                assert_eq!(calls.load(Ordering::Relaxed), 0);
+                assert_eq!(
+                    use_block(game, "minecraft:cake"),
+                    horizon_world::level::InteractionResult::Pass
+                );
+                assert_eq!(calls.load(Ordering::Relaxed), 1);
+                *game.held_mut() = None;
+                assert_eq!(
+                    use_block(game, "minecraft:candle_cake"),
+                    horizon_world::level::InteractionResult::Pass
+                );
+                assert_eq!(calls.load(Ordering::Relaxed), 2);
+                game.creative = false;
+                game.player.as_mut().unwrap().health.food.food = 20;
+                assert_eq!(
+                    use_block(game, "minecraft:cake"),
+                    horizon_world::level::InteractionResult::Success
+                );
+                assert_eq!(calls.load(Ordering::Relaxed), 3);
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+                game.with_level(|b, level, _| {
+                    let cake = b
+                        .table
+                        .default_state(b.table.block_by_name("minecraft:cake").unwrap());
+                    assert!(
+                        horizon_world::level::LevelAccess::set_raw(
+                            level,
+                            horizon_core::position::BlockPos::new(0, 64, 0),
+                            cake,
+                        )
+                        .is_some()
+                    );
+                });
+                let hit = super::super::Hit {
+                    pos: [0, 64, 0],
+                    face: [0, 1, 0],
+                    point: [0.5, 65.0, 0.5],
+                    inside: false,
+                };
+                let (result, _) = game.remote_block_template(&hit, None, true);
+                assert_eq!(result, horizon_world::level::InteractionResult::Success);
+                assert_eq!(
+                    calls.load(Ordering::Relaxed),
+                    4,
+                    "client dry-level path asks the hook"
+                );
+            })
+            .expect("HORIZON_TEST_RESOURCES must name prepared resources");
+        });
     }
 
     #[test]
