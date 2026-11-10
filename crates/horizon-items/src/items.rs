@@ -2625,7 +2625,9 @@ impl<R: RandomSource> LootContext<'_, R> {
                 k if k.contains(':') && !k.starts_with("minecraft:") => {
                     let ctx = self.native_loot_context(random);
                     mod_function(k, f, &ctx, stack, |kind, data, ctx, stack| {
-                        horizon_world::loot::native_loot_function(kind, data, ctx, stack, self.items);
+                        horizon_world::loot::native_loot_function(
+                            kind, data, ctx, stack, self.items,
+                        );
                     });
                 }
                 _ => {}
