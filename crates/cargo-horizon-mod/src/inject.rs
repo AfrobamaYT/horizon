@@ -82,7 +82,7 @@ fn request(args: &[String]) -> Result<Request<'_>, String> {
 }
 
 #[path = "inject_update.rs"]
-mod update;
+pub(crate) mod update;
 
 pub fn run(args: &[String]) -> Result<(), String> {
     if args.first().is_some_and(|command| command == "update") {
@@ -100,15 +100,17 @@ fn add(dir: &Path, args: &[String]) -> Result<(), String> {
     let original = crate::bounded::read(&path, crate::bounded::MAX_MANIFEST)?;
     // Manifest::parse owns mod id, native pin and existing declaration validation.
     let manifest = Manifest::parse(&original)?;
+    let directory = crate::internals::catalog_directory(dir, &manifest)?;
     let native = manifest
         .native
         .as_ref()
         .ok_or("inject add needs a [native] mod")?;
-    let internals = crate::internals::load(dir, &native.horizon)?;
-    let points = dir
-        .join("target/horizon-mod/prebuilt")
-        .join(&native.horizon)
-        .join("points.json");
+    let internals = if native.module.is_empty() {
+        crate::internals::load(dir, &native.horizon)?
+    } else {
+        horizon_mod_package::internals::read(&directory.join("internals.json"))?
+    };
+    let points = directory.join("points.json");
     let catalog: Catalog =
         serde_json::from_str(&crate::bounded::read(&points, crate::bounded::MAX_CATALOG)?)
             .map_err(|e| format!("{}: {e}", points.display()))?;
@@ -446,7 +448,10 @@ mod tests {
         add(&dir, &args("add game::tick --kind head --with before_tick")).unwrap();
         let result = read(&path);
         assert!(result.starts_with(TEXT));
-        assert_eq!(parse_manifest(&result).inject[0].hash, "signature-fixture");
+        assert_eq!(
+            parse_manifest(&result).inject[0].hash.as_deref(),
+            Some("signature-fixture")
+        );
         for id in ["../escape", "bad/name", "bad\\name"] {
             let invalid = TEXT.replace("id = 'example'", &format!("id = '{id}'"));
             fs::write(&path, &invalid).unwrap();
@@ -482,7 +487,10 @@ mod tests {
         unconditional.hash = "unconditional".into();
         internals.push(unconditional);
         let result = append(TEXT, &manifest, &request, &internals, &catalog).unwrap();
-        assert_eq!(parse_manifest(&result).inject[0].hash, "unconditional");
+        assert_eq!(
+            parse_manifest(&result).inject[0].hash.as_deref(),
+            Some("unconditional")
+        );
         for item in &mut internals {
             item.shape_only = true;
         }
@@ -501,7 +509,7 @@ mod tests {
         )
         .unwrap();
         let inject = &parse_manifest(&result).inject[0];
-        assert_eq!(inject.hash, "signature-fixture");
+        assert_eq!(inject.hash.as_deref(), Some("signature-fixture"));
         assert_eq!(inject.call.as_deref(), Some("game::first"));
         assert_eq!(inject.nth, Some(2));
         assert_eq!(inject.ctx.as_deref(), Some("context-two"));
@@ -615,7 +623,7 @@ mod tests {
         );
         let result = edit(&original, "add game::tick --kind head --with first").unwrap();
         let inject = &parse_manifest(&result).inject[0];
-        assert_eq!(inject.hash, "signature-fixture");
+        assert_eq!(inject.hash.as_deref(), Some("signature-fixture"));
         assert_eq!(inject.with, "first");
         assert_eq!(inject.id, "first");
         assert_eq!(inject.nth, None);

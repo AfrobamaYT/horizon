@@ -54,6 +54,7 @@
 
 - [Making a content mod](how-to/content-mods.md)
 - [Native mods](how-to/native-mods.md)
+- [Maths and network NBT](how-to/maths-and-network-nbt.md)
 - [Caching reload-stable recipe definitions](how-to/reload-recipes.md)
 - [Query attachment holders](how-to/attachments.md)
 - [Game rule categories](how-to/game-rule-categories.md)
