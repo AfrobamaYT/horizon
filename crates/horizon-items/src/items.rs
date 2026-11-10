@@ -353,6 +353,11 @@ impl BlocksAttacks {
             .as_ref()
             .map(std::borrow::Cow::Borrowed)
     }
+    /// `blocks_attacks={}`: the codec's defaults, what a stack that only a mod's item
+    /// ability makes block attacks (`minecraft:shield_block`) blocks with.
+    pub fn bare() -> Self {
+        Self::parse(&Value::Object(Default::default())).expect("an object parses")
+    }
     fn parse(v: &Value) -> Option<Self> {
         if !v.is_object() {
             return None;

@@ -3,8 +3,8 @@
 //! entities for. A behaviour returns what is left in the slot and the level
 //! event it plays (`DefaultDispenseItemBehavior.dispense` then plays that
 //! event and the smoke animation, event 2000).
-use super::Game;
 use super::level_sounds::LevelSound;
+use super::{Game, item_abilities::ability};
 use horizon_client::{
     Result,
     collisions::SceneCollisions,
@@ -611,6 +611,8 @@ impl Game<'_> {
             return Ok(left);
         }
         let item = stack.item.to_string();
+        // A stack able to `shears_harvest` is dispensed as shears are, whatever its item.
+        let shears = self.stack_shears(&stack, ability::SHEARS_HARVEST);
         let (left, event) = match item.as_str() {
             "minecraft:arrow"
             | "minecraft:tipped_arrow"
@@ -645,7 +647,7 @@ impl Game<'_> {
             "minecraft:carved_pumpkin" => self.dispense_carved_pumpkin(pos, facing, stack)?,
             "minecraft:glass_bottle" => self.dispense_glass_bottle(pos, facing, stack)?,
             "minecraft:glowstone" => self.dispense_glowstone(pos, facing, stack)?,
-            "minecraft:shears" => self.dispense_shears(pos, facing, stack)?,
+            _ if shears => self.dispense_shears(pos, facing, stack)?,
             "minecraft:brush" => self.dispense_brush(pos, facing, stack),
             "minecraft:honeycomb" => self.dispense_honeycomb(pos, facing, stack)?,
             "minecraft:potion" => self.dispense_potion(pos, facing, stack)?,
