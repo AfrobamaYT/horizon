@@ -1,8 +1,9 @@
 //! The Rust side of tools/test_screen_build_parity.py: with
 //! `HORIZON_SCREEN_BUILD_FIXTURE=CASES,OUTPUT` the game loads its resources,
-//! opens each case's container screen state, builds its layout and prints the
-//! panel, the origin, the slot boxes and the slot a cursor point hovers, in
-//! the format of `VanillaScreenBuildOracle`.
+//! opens each case's container or pause screen state, builds its layout and
+//! prints the panel, the origin, the slot boxes, the slot a cursor point
+//! hovers and the pause menu's buttons and icons, in the format of
+//! `VanillaScreenBuildOracle`.
 use super::{Game, Screen, screen_build::ScreenLayout};
 use horizon_client::{
     Result,
@@ -10,6 +11,7 @@ use horizon_client::{
     containers::{BlockEntity, Furnace, FurnaceKind},
     hud::{GuiScale, HudBatch},
     recipe_book::BookType,
+    text::Text,
     window::GuiSize,
 };
 use serde_json::Value;
@@ -79,14 +81,15 @@ impl Game<'_> {
             let buttons: Vec<Value> = layout
                 .buttons
                 .iter()
-                .map(|&(x, y, w, key, _, active)| {
-                    serde_json::json!([x as i32, y as i32, w as i32, key, active])
+                .map(|&(x, y, w, key, _, _)| {
+                    let label = Text::translate(key, &[]).plain();
+                    serde_json::json!([x as i32, y as i32, w as i32, label])
                 })
                 .collect();
             let icons: Vec<Value> = layout
                 .icons
                 .iter()
-                .map(|&(x, y, sprite)| serde_json::json!([x as i32, y as i32, sprite]))
+                .map(|&(x, y, _)| serde_json::json!([x as i32, y as i32]))
                 .collect();
             return Ok(serde_json::json!({
                 "gui": [gui.scale, gui.size[0], gui.size[1]],
