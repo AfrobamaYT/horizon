@@ -1,4 +1,4 @@
-# Extinguishing fire
+<!-- chapter: Extinguishing fire -->
 
 `EntityRef::extinguish_fire(host)` exposes vanilla `Entity.extinguishFire` on
 players, guests, mobs, armor stands and dropped items. If the entity is burning,
