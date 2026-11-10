@@ -1164,14 +1164,20 @@ pub(super) mod interact_vibration_tests {
                     horizon_world::level::InteractionResult::Success
                 );
                 assert_eq!(calls.load(Ordering::Relaxed), 3);
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
                 game.with_level(|b, level, _| {
                     let cake = b
                         .table
                         .default_state(b.table.block_by_name("minecraft:cake").unwrap());
-                    horizon_world::level::LevelAccess::set_raw(
-                        level,
-                        horizon_core::position::BlockPos::new(0, 64, 0),
-                        cake,
+                    assert!(
+                        horizon_world::level::LevelAccess::set_raw(
+                            level,
+                            horizon_core::position::BlockPos::new(0, 64, 0),
+                            cake,
+                        )
+                        .is_some()
                     );
                 });
                 let hit = super::super::Hit {
