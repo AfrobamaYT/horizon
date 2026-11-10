@@ -3168,14 +3168,13 @@ pub fn server(tag: &str, folder: &Path, accept_eula: bool) -> Result<Command, St
     Ok(server_command(tag, folder))
 }
 
+mod release_selection;
+
 /// One release's notes: the tag given, or the newest.
 pub fn release_notes(tag: Option<&str>) -> Result<Release, String> {
     let releases = releases()?;
     match tag {
-        Some(tag) => releases
-            .into_iter()
-            .find(|r| r.tag == tag)
-            .ok_or_else(|| format!("No Horizon release is tagged {tag}.")),
+        Some(tag) => release_selection::by_tag(&releases, tag).cloned(),
         None => releases
             .into_iter()
             .next()
@@ -3355,10 +3354,7 @@ pub fn install_tag(tag: &str, as_update: bool, progress: impl Fn(f32)) -> Result
             .find(|r| r.asset.is_some() && !r.prerelease)
             .ok_or("No release has a build for this platform yet.")?
     } else {
-        releases
-            .iter()
-            .find(|r| r.tag == tag)
-            .ok_or_else(|| format!("No Horizon release is tagged {tag}."))?
+        release_selection::by_tag(&releases, tag)?
     };
     if release.asset.is_none() {
         return Err(format!("{} has no build for this platform.", release.tag));
