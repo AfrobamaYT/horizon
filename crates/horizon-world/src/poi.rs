@@ -3,7 +3,10 @@
 use crate::chunk::BlockState;
 use std::{
     collections::BTreeMap,
-    sync::{Mutex, PoisonError, RwLock},
+    sync::{
+        Mutex, PoisonError, RwLock,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 /// A vanilla point-of-interest identity, independent of villager professions.
@@ -139,7 +142,8 @@ pub fn saved_poi(state: &BlockState) -> Option<PoiType> {
 }
 
 /// The POI type vanilla registers a block state under.
-fn vanilla_poi(state: &BlockState) -> Option<PoiType> {
+/// Vanilla classification without the process-wide mod additions.
+pub fn vanilla_poi(state: &BlockState) -> Option<PoiType> {
     use PoiType::*;
     let name = state.name.strip_prefix("minecraft:")?;
     Some(match name {
@@ -189,6 +193,7 @@ pub struct PoiExtension {
 
 /// The states mods added, replaced as a whole each time the hook is collected.
 static EXTENSIONS: RwLock<BTreeMap<BlockState, PoiType>> = RwLock::new(BTreeMap::new());
+static HAS_EXTENSIONS: AtomicBool = AtomicBool::new(false);
 /// Held while the table is replaced, and by [`with_extensions`] for as long as its
 /// table is in use, so one replacement never lands in the middle of another's reads.
 static REPLACING: Mutex<()> = Mutex::new(());
@@ -211,8 +216,9 @@ pub fn with_extensions<R>(additions: Vec<PoiExtension>, f: impl FnOnce(Vec<Strin
     struct Restore(BTreeMap<BlockState, PoiType>);
     impl Drop for Restore {
         fn drop(&mut self) {
-            *EXTENSIONS.write().unwrap_or_else(PoisonError::into_inner) =
-                std::mem::take(&mut self.0);
+            let mut table = EXTENSIONS.write().unwrap_or_else(PoisonError::into_inner);
+            *table = std::mem::take(&mut self.0);
+            HAS_EXTENSIONS.store(!table.is_empty(), Ordering::Release);
         }
     }
     let _replacing = REPLACING.lock().unwrap_or_else(PoisonError::into_inner);
@@ -251,14 +257,17 @@ fn replace(additions: Vec<PoiExtension>) -> Vec<String> {
             }
         }
     }
-    *EXTENSIONS
-        .write()
-        .unwrap_or_else(|poisoned| poisoned.into_inner()) = table;
+    let mut current = EXTENSIONS.write().unwrap_or_else(PoisonError::into_inner);
+    *current = table;
+    HAS_EXTENSIONS.store(!current.is_empty(), Ordering::Release);
     refusals
 }
 
 /// The POI type a mod gave a block state ([`extend`]), if any.
 pub fn extension(state: &BlockState) -> Option<PoiType> {
+    if !HAS_EXTENSIONS.load(Ordering::Acquire) {
+        return None;
+    }
     EXTENSIONS
         .read()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -282,6 +291,22 @@ fn describe(state: &BlockState) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_extensions_do_not_take_the_table_lock() {
+        with_extensions(Vec::new(), |_| {
+            let guard = EXTENSIONS.write().unwrap_or_else(PoisonError::into_inner);
+            let (send, receive) = std::sync::mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                send.send(extension(&state("minecraft:hay_block", &[])))
+                    .unwrap()
+            });
+            let answer = receive.recv_timeout(std::time::Duration::from_secs(2));
+            drop(guard);
+            worker.join().unwrap();
+            assert_eq!(answer.unwrap(), None);
+        });
+    }
 
     fn state(name: &str, properties: &[(&str, &str)]) -> BlockState {
         BlockState {
