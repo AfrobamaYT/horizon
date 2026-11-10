@@ -1,1 +1,2 @@
-pub use world::instance_directory::InstanceDirectory;
+pub mod instance_directory;
+pub use instance_directory::InstanceDirectory;

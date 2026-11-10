@@ -1,3 +1,5 @@
+//! Lossless host directory values available during registration.
+
 /// The game's instance directory, captured before registration begins.
 ///
 /// This is a path value, not filesystem authority. Wasm receives the same data
